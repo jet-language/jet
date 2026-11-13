@@ -8,7 +8,7 @@ use {
 
 #Test("lambda_callable_interface_parses_only_parameters_and_effects") {
     parsed: parser_test_program(`run: fn() {
-    f: (n: Int) -[IO]> { print(n) }
+    f: fn(n: Int) -[IO]> { print(n) }
 }
 `)
     initializer: parser_test_binding(parser_test_function(parsed, "run")).init
@@ -19,32 +19,24 @@ use {
     assert_eq(names, [String]{"IO"})
 }
 
-#Test("lambda_return_annotations_teach_without_rejecting_struct_bodies") {
+#Test("the old parenthesized lambda gets the generic parse error") {
     loop source in [
-        `run: fn() { f: (n: Int) Int -> n }`,
-        `run: fn() { f: (n: Int) Int MyError! -[]> Ok(n) }`,
-        `run: fn() { f: (n: Int) Never! -[]> n }`,
-        `run: fn() { f: (n: Int) -> Point MyError! { n } }`,
-        `run: fn() { f: (n: Int) -> Point !Error { n } }`,
-        `run: fn() { f: (n: Int) -> Point { total := n + 1
- total } }`
-    ] -> _: parser_test_diagnostic(parser_test_errors(source), "E0399")
-    diagnostics: parser_test_errors(`run: fn() {
+        `run: fn() { f: (n: Int) -> n }`,
+        `run: fn() { f: (n: Int) -> Point { n } }`,
+        `run: fn() {
     f: (n: Int) -> Point {
         total := n + 1
         total
     }
 }
-`)
-    assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E0399")
-    loop source in [
-        `run: fn() { f: (x: Int) -> Point{x} }`,
-        `run: fn() { f: (x: Int) -> Point{x: x} }`,
-        `run: fn() { f: x -[]> Point{x} }`,
-        `run: fn() { f: (x: Int) -[]> Point{x: x} }`,
-        `run: fn() { f: (n: Int) -> Point { n + 1 } }`
-    ] -> _: parser_test_program(source)
+`
+    ] {
+        codes := [String]{}
+        loop diagnostic in parser_test_errors(source) {
+            if diagnostic.severity == 1 -> codes.push(diagnostic.code)
+        }
+        assert_eq(codes, [String]{"E0003"})
+    }
 }
 
 #Test("braced_one_expression_bodies_keep_leading_dot_and_todo_values") {

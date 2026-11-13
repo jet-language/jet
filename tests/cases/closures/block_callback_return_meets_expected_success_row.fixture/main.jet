@@ -5,7 +5,7 @@ Tree: struct {
 }
 
 line_starts: fn(tree: Tree) -> [Int] {
-    return tree.line_starts.get_or_set(() -> {
+    return tree.line_starts.get_or_set(fn() {
         if tree.source.len() == 0 {
             return [0]
         }
@@ -26,7 +26,7 @@ retain_flag: fn(value: Bool) -> Bool { value }
 run: fn() {
     tree: Tree{ source: "first\nsecond", line_starts: Cell.new(None) }
     print(line_starts(tree))
-    kept: [1, 2, 3].filter((value: Int) -> {
+    kept: [1, 2, 3].filter(fn(value: Int) {
         if value == 3 {
             return true
         }

@@ -161,10 +161,10 @@ run: fn(args: WorkloadArgs) {
 
     mux: http_server.mux()
     ready_at: time.now() + ready_after_ms
-    mux.get("/health", (_req: HTTPRequest) -> Ok(http_server.json(200, StatusResponse{status: "ok"})))
-    mux.get("/ready", (req: HTTPRequest) -> handle_ready(req, ready_at))
-    mux.post("/sum", (req: HTTPRequest) -> handle_sum(req, body_limit))
-    mux.put("/unknown", (_req: HTTPRequest) -> json_error(404, "not-found"))
+    mux.get("/health", fn(_req: HTTPRequest) { Ok(http_server.json(200, StatusResponse{status: "ok"})) })
+    mux.get("/ready", fn(req: HTTPRequest) { handle_ready(req, ready_at) })
+    mux.post("/sum", fn(req: HTTPRequest) { handle_sum(req, body_limit) })
+    mux.put("/unknown", fn(_req: HTTPRequest) { json_error(404, "not-found") })
 
     server: http_server.bind(bind, mux) ?? panic("bind failed")
     address: server.local_addr() ?? panic("local address failed")

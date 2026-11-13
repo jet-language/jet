@@ -85,7 +85,7 @@ run: fn() {
     source: files.read(ASSET_PATH) ?? process.fail(1, "unicode-name-asset: cannot read {ASSET_PATH}: {err}")
     failures: asset_failures(source)
     if failures.len() > 0 {
-        process.fail(1, failures.map(failure -> "unicode-name-asset: {failure}").join("\n"))
+        process.fail(1, failures.map(fn(failure) { "unicode-name-asset: {failure}" }).join("\n"))
     }
     print("unicode-name-asset: ok ({TREE_ROWS} rows)")
 }

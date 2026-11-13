@@ -19,8 +19,8 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     address: listener.local_addr() ?? panic("address")
     state: Shared{HandlerState{label: "before registration"}}
     mux: server.mux()
-    mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (id: String, req: HTTPRequest) -> {
+    mux.get("/zero", fn() { Ok(server.response(200, "zero")) })
+    mux.get("/items/:id", fn(id: String, req: HTTPRequest) {
         header: req.header("x-state") ?? "missing"
         path: req.path()
         return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))

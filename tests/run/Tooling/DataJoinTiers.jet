@@ -49,15 +49,15 @@ run: fn() {
         Owner{team: "ops", name: "Kay"},
     }
 
-    inner: data.inner_join<Order, Owner>(orders, owners, (o: Order) -> o.team, (w: Owner) -> w.team) ?? panic("inner")
+    inner: data.inner_join<Order, Owner>(orders, owners, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) ?? panic("inner")
     print("inner rows: {inner.len()}")
     loop row in inner -> print("inner: order {row.left.id} {row.left.team} -> {row.right.name}")
 
-    left: data.left_join<Order, Owner>(orders, owners, (o: Order) -> o.team, (w: Owner) -> w.team) ?? panic("left")
+    left: data.left_join<Order, Owner>(orders, owners, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) ?? panic("left")
     print("left rows: {left.len()}")
     loop row in left -> print("left: order {row.left.id} -> {owner_name(row.right)}")
 
-    reversed: data.left_join<Owner, Order>(owners, orders, (w: Owner) -> w.team, (o: Order) -> o.team) ?? panic("reversed")
+    reversed: data.left_join<Owner, Order>(owners, orders, fn(w: Owner) { w.team }, fn(o: Order) { o.team }) ?? panic("reversed")
     print("reversed rows: {reversed.len()}")
     loop row in reversed -> print("reversed: {row.left.name} -> order {order_id(row.right)}")
 
@@ -68,11 +68,11 @@ run: fn() {
     loop index in 0..<1001 -> many_left.push(Order{id: index, team: "k"})
     many_right := [Owner]{}
     loop index in 0..<1000 -> many_right.push(Owner{team: "k", name: "n"})
-    if data.inner_join<Order, Owner>(many_left, many_right, (o: Order) -> o.team, (w: Owner) -> w.team) == {
+    if data.inner_join<Order, Owner>(many_left, many_right, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) == {
         .Ok(rows) -> print("unexpected ok {rows.len()}")
         .Err(error) -> print("limit: {error.operation}: {error.reason}")
     }
-    if data.left_join<Order, Owner>(many_left, many_right, (o: Order) -> o.team, (w: Owner) -> w.team) == {
+    if data.left_join<Order, Owner>(many_left, many_right, fn(o: Order) { o.team }, fn(w: Owner) { w.team }) == {
         .Ok(rows) -> print("unexpected ok {rows.len()}")
         .Err(error) -> print("limit: {error.operation}: {error.reason}")
     }

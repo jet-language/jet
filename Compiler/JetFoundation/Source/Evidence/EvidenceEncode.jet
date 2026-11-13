@@ -38,21 +38,21 @@ evidence_put_optional: fn(out: &[U8], value: String?) EvidenceCodecError! {
 evidence_attachment_indices: fn(values: [EvidenceAttachment]) -> [Int] Never! {
     indices := [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
-    indices.sort_by((left: Int, right: Int) -> evidence_attachment_order(values[left], values[right]))
+    indices.sort_by(fn(left: Int, right: Int) { evidence_attachment_order(values[left], values[right]) })
     indices
 }
 
 evidence_diagnostic_indices: fn(values: [EvidenceDiagnostic]) -> [Int] Never! {
     indices := [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
-    indices.sort_by((left: Int, right: Int) -> evidence_diagnostic_order(values[left], values[right]))
+    indices.sort_by(fn(left: Int, right: Int) { evidence_diagnostic_order(values[left], values[right]) })
     indices
 }
 
 evidence_chain_indices: fn(values: [EvidenceChainLink]) -> [Int] Never! {
     indices := [Int]{}
     loop index in 0..<values.len() -> indices.push(index)
-    indices.sort_by((left: Int, right: Int) -> evidence_chain_order(values[left], values[right]))
+    indices.sort_by(fn(left: Int, right: Int) { evidence_chain_order(values[left], values[right]) })
     indices
 }
 

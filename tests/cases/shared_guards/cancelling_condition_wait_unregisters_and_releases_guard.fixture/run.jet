@@ -13,13 +13,13 @@ wait_until_cancel: fn(
 ) -> Int {
     mark_started(started, began)
     guard: handle.guard_edit()
-    guard.wait(changed, value -> value == 1) ?? panic("wait failed")
+    guard.wait(changed, fn(value) { value == 1 }) ?? panic("wait failed")
     return 1
 }
 
 finish_after_start: fn(started: Shared<Int>, began: Condition) -> Int {
     started_guard: started.guard_edit()
-    started_guard.wait(began, value -> value == 1) ?? panic("start failed")
+    started_guard.wait(began, fn(value) { value == 1 }) ?? panic("start failed")
     return 7
 }
 

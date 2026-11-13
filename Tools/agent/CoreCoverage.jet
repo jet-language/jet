@@ -1106,7 +1106,7 @@ files_under: fn(root: String, path: String, found: &[String]) CoverageError! -[F
         names.push(entry.name.copy())
         directories[entry.name.copy()] = entry.is_dir
     }
-    names.sort_by((left: String, right: String) -> text.collate(left, right))
+    names.sort_by(fn(left: String, right: String) { text.collate(left, right) })
     loop name in names {
         child: "{path}/{name}"
         meta: files.stat("{root}/{child}") ?? next
@@ -1405,7 +1405,7 @@ ratchet_decision: fn(rows: [Untested], previous: Previous) -> Decision Never! {
             signature_key: text.collation_key(row.signature),
         })
     }
-    keyed.sort_by((left: Keyed, right: Keyed) -> {
+    keyed.sort_by(fn(left: Keyed, right: Keyed) {
         by_unit: compare_bytes(left.unit_key, right.unit_key)
         if by_unit != Ordering.Equal -> return by_unit
         by_name: compare_bytes(left.name_key, right.name_key)
@@ -1470,7 +1470,7 @@ ratchet_text: fn(entries: [Entry]) -> String Never! {
     "{{\n  \"version\": 2,\n  \"modules\": {{\n{blocks.join(",\n")}{tail}  }}\n}}\n"
 }
 
-texts: fn(items: [String]) -> Dyn Never! { Dyn.Array(items.map(item -> Dyn.Text(item.copy()))) }
+texts: fn(items: [String]) -> Dyn Never! { Dyn.Array(items.map(fn(item) { Dyn.Text(item.copy()) })) }
 
 report_json: fn(report: Report) -> Dyn Never! {
     modules := [Dyn]{}
@@ -1612,7 +1612,7 @@ ids: fn(source: String, context: String) -> [String] Never! {
     found
 }
 
-function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.copy()) }
+function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(fn(row) { row.id.copy() }) }
 
 #Test("module layout matches Core module keys, including app and nested roots") {
     assert_eq(module_name("Core/Text/Text.jet"), "core.text")
@@ -1627,7 +1627,7 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 #Test("every public function, including same-named methods, is inventoried") {
     found: public_functions("Core/demo/demo.jet", "// fake: fn() {{}}\n    /* nested /* fake2: fn() {{}} */ comment */\n    priv internal: module {{ hidden: fn() {{}} }}\n    A: struct {{ new: fn() -> A Never! {{ {{}} }} }}\n    B: struct<T> {{}}\n    impl B<T> {{ new: fn<T>(f: fn(Int) -> Int) -[FS]> B Never! {{ {{}} }} }}\n    new: fn() -> A Never! {{ A.new() }}\n    generic: fn<T: [Encode, Decode]>(f: fn(T) -> Int) -> B<T> Never! {{ {{}} }}\n    label: \"fake3: fn() {{}}\"\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.A.new", "core.demo.B.new", "core.demo.new", "core.demo.generic"})
-    assert_eq(found.map(row -> row.return_type.copy()), [String]{"core.demo.A", "core.demo.B", "core.demo.A", "B<T>"})
+    assert_eq(found.map(fn(row) { row.return_type.copy() }), [String]{"core.demo.A", "core.demo.B", "core.demo.A", "B<T>"})
 }
 
 #Test("a bare impl inside a type belongs to it, and operator overloads share one row") {
@@ -1638,12 +1638,12 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
 #Test("an impl of a reserved trait is named by that trait, outside the surface") {
     found: public_functions("Core/Demo/Demo.jet", "Reader: struct {{\n      impl __Cursor {{ next: fn(&self) -> Bool Never! {{ true }} }}\n    }}\n    impl Reader {{ open: fn(&self) -> Bool Never! {{ true }} }}\n    impl Reader.__Source {{ skip: fn(&self) {{}} }}\n    impl Reader.Display {{ display: fn(self) -> String Never! {{ \"\" }} }}\n  ")
     assert_eq(function_ids(found), [String]{"core.demo.Reader.__Cursor.next", "core.demo.Reader.open", "core.demo.Reader.__Source.skip", "core.demo.Reader.display"})
-    assert_eq(found.map(row -> outside_surface(row)), [Bool]{true, false, true, false})
+    assert_eq(found.map(fn(row) { outside_surface(row) }), [Bool]{true, false, true, false})
 }
 
 #Test("return types preserve builtin, prelude and compound spellings") {
     found: public_functions("Core/demo/demo.jet", "flag: fn() -> Bool Never! {{ true }}\n    count: fn() -> Int Never! {{ 1 }}\n    text: fn() -> String Never! {{ \"\" }}\n    number: fn() -> Float Never! {{ Float{{1.0}} }}\n    items: fn() -> [String] Never! {{ [] }}\n    lookup: fn() -> [String: Int] Never! {{ {{}} }}\n    maybe: fn() -> Int? Never! {{ None }}\n    limits: fn() -> Duration Never! {{ 1ms }}\n    pair: fn() -> (name: String, n: Int) Never! {{ (\"\", 1) }}\n  ")
-    assert_eq(found.map(row -> row.return_type.copy()), [String]{"Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "(name: String, n: Int)"})
+    assert_eq(found.map(fn(row) { row.return_type.copy() }), [String]{"Bool", "Int", "String", "Float", "[String]", "[String: Int]", "Int?", "Duration", "(name: String, n: Int)"})
 }
 
 #Test("calls resolve fully qualified, alias rows, member imports, use blocks and generics") {
@@ -1731,10 +1731,10 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
     put(root, "tests/none.jet", "run: fn() {{}}")
     report: census(root) ?? panic(err.message)
-    assert_eq(report.functions.map(row -> row.name.copy()), [String]{"plain"})
+    assert_eq(report.functions.map(fn(row) { row.name.copy() }), [String]{"plain"})
     assert_eq(report.total_public, 1)
     assert_eq(report.total_uncovered, 1)
-    excluded := report.excluded.map(row -> "{row.name} {row.foreign} {row.part}")
+    excluded := report.excluded.map(fn(row) { "{row.name} {row.foreign} {row.part}" })
     excluded.sort()
     assert_eq(excluded, [String]{"Shape.__area false false", "__Tape.depth false false", "__hook false false", "helper false true", "owned false true", "symbol true false"})
     assert_eq(excluded_line(report), "excluded: 6 declarations outside the user-callable surface (1 extern, 2 in compiler-private parts, 3 reserved `__` names)")
@@ -1765,8 +1765,8 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     report: census(root) ?? panic(err.message)
     assert_eq(find_function(report, "Shape.check").tests, [String]{"tests/shape.jet:2"})
     assert_eq(find_function(report, "LocalDay.today").tests, [String]{"tests/shape.jet:3"})
-    other: report.functions.filter(row -> row.unit == "core.other")
-    assert_eq(other.map(row -> row.id.copy()), [String]{"core.other.Shape.check"})
+    other: report.functions.filter(fn(row) { row.unit == "core.other" })
+    assert_eq(other.map(fn(row) { row.id.copy() }), [String]{"core.other.Shape.check"})
     assert_eq(other[0].tests, [String]{})
     assert_eq(report.total_uncovered, 1)
     files.remove_all(root) ?? ()
@@ -1774,7 +1774,7 @@ find_function: fn(report: Report, name: String) -> Function Never! {
 
 #Test("signatures keep generics, parameters and the result type, without comments or layout") {
     found: public_functions("Core/Demo/Demo.jet", "plain: fn() {{}}\n    pick: fn<T: [Encode, Decode]>(\n        items: [T], // the source\n        at: Int,\n    ) -> T? Never! {{ None }}\n    Box: struct {{ put: fn(&self, value: fn(Int) -> Int) -[FS]> Bool Never! {{ true }} }}\n  ")
-    assert_eq(found.map(row -> row.signature.copy()), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool"})
+    assert_eq(found.map(fn(row) { row.signature.copy() }), [String]{"()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool"})
 }
 
 untested_row: fn(unit: String, name: String, signature: String) -> Untested Never! {
@@ -1805,7 +1805,7 @@ entry: fn(unit: String, name: String, signature: String) -> Entry Never! { Entry
     // A new untested function, or a changed signature, is unlisted.
     added: ratchet_decision([Untested]{f, untested_row("core.a", "h", "()")}, listed(tested.next))
     assert(!added.passes)
-    assert_eq(added.unlisted.map(row -> row.name.copy()), [String]{"h"})
+    assert_eq(added.unlisted.map(fn(row) { row.name.copy() }), [String]{"h"})
     assert(!ratchet_decision([Untested]{untested_row("core.a", "f", "(x: Int)")}, listed(tested.next)).passes)
     // A move keeps its entry, re-filed under the new module.
     moved: ratchet_decision([Untested]{untested_row("core.b", "f", "()")}, listed(tested.next))

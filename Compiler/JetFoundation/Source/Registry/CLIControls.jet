@@ -77,7 +77,7 @@ jet_cli_control_flag_row: fn(control: JetCLIControlSpec) -> JetCLIFlagSpec Never
         variables.push(control.variable.copy())
         flag: jet_cli_control_flag(control)
         wanted: flag.copy() // copy: the lambda's own name; a capture moves the name it reads.
-        rows: JET_CLI_FLAGS.filter(row -> row.long == wanted)
+        rows: JET_CLI_FLAGS.filter(fn(row) { row.long == wanted })
         assert_eq(rows.len(), 1)
         assert_eq(rows[0].help, "With {control.scope}: {control.help}")
         assert(rows[0].value == control.value, "{flag} is not written as its control is")

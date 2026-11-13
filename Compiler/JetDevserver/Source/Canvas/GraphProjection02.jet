@@ -162,7 +162,7 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             }
             node_id: "{g.graph_id}:stmt:{ordinal}:dispatch"
             add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", span.into(), x, y, ["control"], ["add_pattern_arm", "edit_inline_expr", "source_jump"])
-            pattern_type: if subjectless -> arms.first().and_then((arm) -> pattern_subject_type(g, index, arm.cond)) else -> .Some(expr_type(g, index, subject))
+            pattern_type: if subjectless -> arms.first().and_then(fn(arm) { pattern_subject_type(g, index, arm.cond) }) else -> .Some(expr_type(g, index, subject))
             if pattern_type == .Val(ty) { set_pattern_node_type(g, node_id, ty) }
             if !subjectless {
                 ty: expr_type(g, index, subject)
@@ -216,7 +216,7 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70)
         }
         .Policy(declarations: declarations, body: body, span: span) -> {
-            label: declarations.iter().map((d) -> d.key.name()).collect().join(", ")
+            label: declarations.iter().map(fn(d) { d.key.name() }).collect().join(", ")
             add_region(g, ordinal, "policy", "#Policy({label})", span)
             project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70)
         }
@@ -229,8 +229,8 @@ project_stmt: fn(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, o
             project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70)
         }
         .AuthorityScope(caps: caps, binding: binding, body: body, span: span, ..) -> {
-            title: caps.iter().map(((cap, _)) -> cap.as_str()).collect().join(", ")
-            granted: caps.iter().map(((cap, _)) -> cap.clone()).collect()
+            title: caps.iter().map(fn((cap, _)) { cap.as_str() }).collect().join(", ")
+            granted: caps.iter().map(fn((cap, _)) { cap.clone() }).collect()
             add_authority_region(g, ordinal, "authority: {title}", [], granted, [], binding.as_ref(), span)
             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
         }
@@ -314,7 +314,7 @@ dispatch_arm_pattern_fragment: fn(src: String, expr: &Expr) -> (String, USize) {
     trimmed := source.trim_start() // #4303
     offset := source.len() - trimmed.len()
     fragment := trimmed
-    dispatch_open: fragment.find("==").and_then((pos) -> {
+    dispatch_open: fragment.find("==").and_then(fn(pos) {
         after_cmp: fragment[pos + 2..<fragment.len()]
         after_space := after_cmp.trim_start() // #4303
         if after_space.starts_with('{') { .Some((pos + 2, after_cmp.len() - after_space.len())) } else { .None }
@@ -354,8 +354,8 @@ pattern_arm_edit_span: fn(src: String, expr: &Expr) -> SourceSpan {
 
 balance_closing_parens: fn(s: String) -> String {
     out := s.to_string()
-    opens: s.chars().filter((c) -> c == '(').count()
-    closes: s.chars().filter((c) -> c == ')').count()
+    opens: s.chars().filter(fn(c) { c == '(' }).count()
+    closes: s.chars().filter(fn(c) { c == ')' }).count()
     loop _ in closes..opens { out.push(')') }
     out
 }
@@ -389,7 +389,7 @@ expr_source_end: fn(expr: Expr) -> USize {
 
 binding_source_span: fn(src: String, binding: &AST.Binding) -> SourceSpan {
     init_end := expr_source_end(binding.init)
-    loop src.as_bytes().get(init_end).is_some_and((byte) -> byte.is_ascii_whitespace()) { init_end += 1 }
+    loop src.as_bytes().get(init_end).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { init_end += 1 }
     if src.as_bytes().get(init_end) == .Some(40) { init_end += 1 }
     init_span: span_through_closing_parens(src, Span.new(binding.init.span().start, init_end))
     SourceSpan(start: binding.name_span.start, end: init_span.end)
@@ -397,7 +397,7 @@ binding_source_span: fn(src: String, binding: &AST.Binding) -> SourceSpan {
 
 binding_init_span: fn(src: String, binding: &AST.Binding) -> Span {
     end: expr_source_end(binding.init)
-    start := binding.sigil_span.map((span) -> span.end).unwrap_or_else(() -> binding.init.span().start)
+    start := binding.sigil_span.map(fn(span) { span.end }).unwrap_or_else(fn() { binding.init.span().start })
     loop start < end && src.as_bytes()[start].is_ascii_whitespace() { start += 1 }
     Span.new(start, end)
 }
@@ -434,7 +434,7 @@ project_value_node: fn(g: GraphBuilder, index: SemIndex, src: String, expr: Expr
         if g.getter_pins.get(key).cloned() == .Val(pin) -> return .Some(pin)
         ty: expr_type(g, index, expr)
         base_node_id: "{g.graph_id}:value:get:{canvas_ident_fragment(name)}"
-        node_id: if g.nodes.iter().any((node) -> node.id == base_node_id && node.span != source_span) -> "{base_node_id}:{span.start}-{span.end}" else -> base_node_id
+        node_id: if g.nodes.iter().any(fn(node) { node.id == base_node_id && node.span != source_span }) -> "{base_node_id}:{span.start}-{span.end}" else -> base_node_id
         add_node(g, node_id, "variable_get", name, source_span, x, y, ["read"], ["edit_inline_expr", "source_jump"])
         pin: add_pin(g, node_id, name, "output", ty, "", false)
         g.getter_pins.insert(key, pin.clone())
@@ -451,21 +451,21 @@ project_value_node: fn(g: GraphBuilder, index: SemIndex, src: String, expr: Expr
 }
 
 getter_key: fn(index: SemIndex, name: String, span: SourceSpan) -> String {
-    reference: index.references().iter().find((reference) -> reference.span == span && reference.name == name) ?? return "{name}@{span.start}:{span.end}"
+    reference: index.references().iter().find(fn(reference) { reference.span == span && reference.name == name }) ?? return "{name}@{span.start}:{span.end}"
     target: reference.target.as_ref() ?? return "{name}@{span.start}:{span.end}"
     "{name}@{target.module_path}:{target.def_span.start}:{target.def_span.end}"
 }
 
 method_is_pure: fn(index: SemIndex, span: SourceSpan) -> Bool {
-    reference: index.references().iter().find((reference) -> reference.span == span) ?? return false
+    reference: index.references().iter().find(fn(reference) { reference.span == span }) ?? return false
     target: reference.target.as_ref() ?? return false
-    definition: index.definitions().iter().find((definition) -> definition.module_path == target.module_path && definition.def_span == target.def_span) ?? return false
+    definition: index.definitions().iter().find(fn(definition) { definition.module_path == target.module_path && definition.def_span == target.def_span }) ?? return false
     signature: definition.callable_signature.as_ref() ?? return false
     if signature.effects is { .Checked(effects) -> effects.is_empty(); _ -> false }
 }
 
 canvas_ident_fragment: fn(name: String) -> String {
-    name.chars().map((c) -> if c.is_ascii_alphanumeric() || c == '_' -> c else -> '_').collect()
+    name.chars().map(fn(c) { if c.is_ascii_alphanumeric() || c == '_' -> c else -> '_' }).collect()
 }
 
 project_expr_node: fn(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, x: I32, y: I32, exec_context: Bool) -> String? {

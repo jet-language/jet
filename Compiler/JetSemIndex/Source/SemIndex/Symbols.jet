@@ -105,7 +105,7 @@ SEMINDEX_SYMBOL_BUILTIN_METHODS: [SemSymbolBuiltin]{
     {qualified_name: "List.min", signature: "List.min() -> ?T", summary: "The smallest item, if any.", example: ""},
     {qualified_name: "List.max", signature: "List.max() -> ?T", summary: "The largest item, if any.", example: ""},
     {qualified_name: "List.map", signature: "List.map(f: fn(T) -> R) -> [R]", summary: "Transforms each item with f.", example: ""},
-    {qualified_name: "List.filter", signature: "List.filter(f: fn(T) -> Bool) -> [T]", summary: "Keeps items where f(item) is true.", example: "items.filter(item -> item.active)"},
+    {qualified_name: "List.filter", signature: "List.filter(f: fn(T) -> Bool) -> [T]", summary: "Keeps items where f(item) is true.", example: "items.filter(fn(item) {{ item.active }})"},
     {qualified_name: "List.filter_map", signature: "List.filter_map(f: fn(T) -> ?V) -> [V]", summary: "Maps then drops failures — keeps only successes.", example: ""},
     {qualified_name: "List.each", signature: "List.each(f: fn(T))", summary: "Runs f once per item, for its side effects.", example: ""},
     {qualified_name: "List.find", signature: "List.find(f: fn(T) -> Bool) -> ?T", summary: "The first item where f(item) is true, if any.", example: ""},
@@ -227,7 +227,7 @@ semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
         }
     }
     // `SemanticSymbolIndex::sort`: qualified name, module, identity.
-    unique.sort_by((left: SemSymbol, right: SemSymbol) -> (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity))
+    unique.sort_by(fn(left: SemSymbol, right: SemSymbol) { (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity) })
     unique
 }
 

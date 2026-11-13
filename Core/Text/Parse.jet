@@ -979,7 +979,7 @@ __version_letter: fn(byte: U8) -> Bool Never! { (byte >= (U8{65}) && byte <= (U8
 
 #Test("compare_version is GNU sort -V order") {
     rows := [String]{"6067c10", "file.tar.gz", "a1", "1.10", "", "B", "1.0", "..", "6067c9", "a01", "1.9", ".hidden", "file.tar", "1.0~rc1", "a", ".", "1.2", "x.1", "x-1"}
-    rows.sort_by((left: String, right: String) -> __string_compare_version(left, right))
+    rows.sort_by(fn(left: String, right: String) { __string_compare_version(left, right) })
     assert_eq(rows, [String]{"", ".", "..", ".hidden", "1.0~rc1", "1.0", "1.2", "1.9", "1.10", "6067c9", "6067c10", "B", "a", "a01", "a1", "file.tar", "file.tar.gz", "x-1", "x.1"})
     assert_eq(__string_compare_version("a1", "a1"), Ordering.Equal)
     assert_eq(__string_compare_version("v2", "v010"), Ordering.Less)

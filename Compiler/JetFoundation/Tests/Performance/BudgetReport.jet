@@ -469,6 +469,6 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     valid_absolute: br_set(absolute, "direction", br_s("at_least"))
     absolute_expected: PerfComparison.Absolute{limit: perf_rational_integer(10), direction: PerfLimitDirection.AtLeast}
     assert_eq(perf_report_parse_comparison(valid_absolute) ?? panic(err.message), absolute_expected)
-    br_error(perf_report_nullable(CanonicalJSON.Bool(false), (v: CanonicalJSON) -> perf_validate_history(v)), "history selection is not an object")
-    perf_report_nullable(CanonicalJSON.Null, (v: CanonicalJSON) -> perf_validate_history(v)) ?? panic(err.message)
+    br_error(perf_report_nullable(CanonicalJSON.Bool(false), fn(v: CanonicalJSON) { perf_validate_history(v) }), "history selection is not an object")
+    perf_report_nullable(CanonicalJSON.Null, fn(v: CanonicalJSON) { perf_validate_history(v) }) ?? panic(err.message)
 }

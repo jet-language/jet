@@ -7,8 +7,8 @@ sink: fn(item: Resource) { print(item.handler(1)) }
 later: fn(action: fn()) { action() }
 
 run: fn() {
-    item: Resource{handler: (value: Int) -> value > 0}
-    f: () -> {
+    item: Resource{handler: fn(value: Int) { value > 0 }}
+    f: fn() {
         sink(item)
     }
     later(f)

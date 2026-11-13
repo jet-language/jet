@@ -434,7 +434,7 @@ cli_cmd_dev: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParse
     cli_run_lifecycle_hooks(verification, cache, theme, parsed, roots, project_dir, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     if plan.dev_services.len() > 0 {
         order: cli_services_order_or_report(theme, plan.dev_services, None, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
-        before_start: (svc: DevServicePlan) -> cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc)
+        before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
         _: services_up_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
             cli_report_service_start_error(theme, "couldn't start dev services", err.message)
             return EXIT_USAGE

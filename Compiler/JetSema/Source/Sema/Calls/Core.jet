@@ -556,7 +556,7 @@ sema_call_core_projection_error: fn(module_name: String, member: String, error: 
         .Uncovered(_) -> diagnostics.push(sema_error("E0904", span, "`{module_name}.{member}` has no source semantic call contract", "the registered Core row is not covered by this semantic projection", "use a source-owned callable or a Core row with SEMA coverage"))
         .Arity(expected, actual) -> {
             row: core_call(module_name, member)
-            maximum: row.map((record) -> record.signature.max_arity) ?? expected
+            maximum: row.map(fn(record) { record.signature.max_arity }) ?? expected
             range: if maximum > expected -> "between {expected} and {maximum}" else -> "{expected}"
             diagnostics.push(sema_error("E0104", span, "`{module_name}.{member}` expects {range} argument(s), got {actual}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         }

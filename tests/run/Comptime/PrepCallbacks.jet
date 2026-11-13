@@ -4,7 +4,7 @@
 scaled_sum: fn(values: [Int], factor: Int) -> Int {
     offset: factor * 10
     total := 0
-    loop value in values.map(item -> item * factor + offset) {
+    loop value in values.map(fn(item) { item * factor + offset }) {
         total += value
     }
     total
@@ -12,7 +12,7 @@ scaled_sum: fn(values: [Int], factor: Int) -> Int {
 
 kept_over: fn(values: [Int], floor: Int) -> Int {
     limit: floor + 1
-    values.filter(item -> item > limit).len()
+    values.filter(fn(item) { item > limit }).len()
 }
 
 SUMMED: #run scaled_sum([1, 2, 3], 2)

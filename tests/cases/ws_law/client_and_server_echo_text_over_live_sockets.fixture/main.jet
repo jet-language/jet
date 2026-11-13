@@ -15,7 +15,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
     mux: server.mux()
-    mux.get("/live", (req: HTTPRequest) -> handle(req))
+    mux.get("/live", fn(req: HTTPRequest) { handle(req) })
     serving: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
     client: ws.connect("ws://{addr}/live") ?? panic("connect")
     client.send_text("ping") ?? panic("client send")

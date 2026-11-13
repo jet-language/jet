@@ -77,7 +77,7 @@ sema_units_source_mentions: fn(source: String, wanted: NameTable) -> SemaUnitSou
     }
     sorted := [SemaUnitSuffixMention]{}
     loop (_, row) in suffixes -> sorted.push(row)
-    sorted.sort_by((left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) -> left.text <=> right.text)
+    sorted.sort_by(fn(left: SemaUnitSuffixMention, right: SemaUnitSuffixMention) { left.text <=> right.text })
     SemaUnitSourceMentions{identifiers: identifiers.move(), unqualified: unqualified.move(), suffixes: sorted.move()}
 }
 sema_units_identifier: fn(mentions: SemaUnitSourceMentions, name: String) -> Bool Never! {

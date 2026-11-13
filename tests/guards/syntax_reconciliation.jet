@@ -81,7 +81,7 @@ s2_syntax_data_file: fn(path: String) -> Bool {
 // The broad roots scan source and text files; the curated roots scan all.
 s2_syntax_scanned_text: fn(path: String) -> Bool {
     extensions: [String]{".jet", ".md", ".case", ".stderr", ".warn", ".out", ".txt", ".template", ".expected", ".stdout"}
-    extensions.any(extension -> path.ends_with(extension))
+    extensions.any(fn(extension) { path.ends_with(extension) })
 }
 s2_syntax_trim_start: fn(text: String) -> String {
     bytes: text.bytes()
@@ -138,7 +138,7 @@ s2_syntax_ui_subject_lines: fn(path: String) -> [Int] {
 s2_syntax_ui_excerpt: fn(path: String, line: String) -> Bool {
     if !path.starts_with("tests/ui/") || path.ends_with(".jet") -> return false
     head: s2_syntax_trim_start(line).split(" |").to_list()[0]
-    head != "" && head.bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+    head != "" && head.bytes().all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) })
 }
 
 // The curated surface (agent memory, the spec, Core, examples and UI

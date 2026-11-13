@@ -187,7 +187,7 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
 jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, active: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
     ordered := active
     ordered = loop fresh in ordered -> fresh
-    ordered.sort_by((left: JetDriverBudgetSpec, right: JetDriverBudgetSpec) -> left.spec.name <=> right.spec.name)
+    ordered.sort_by(fn(left: JetDriverBudgetSpec, right: JetDriverBudgetSpec) { left.spec.name <=> right.spec.name })
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     loop row in ordered {
         if sema_budget_provider_kind(row.spec.provider) == "CompilerProbe" {
@@ -375,7 +375,7 @@ jet_cli_budget_accept: fn(root: String, plan: JetCLIBudgetUpdatePlan, built: Jet
 jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String, artifact: CanonicalJSON) -> CanonicalJSON {
     ordered := sources
     ordered = loop fresh in ordered -> fresh
-    ordered.sort_by((left: JetCLIBudgetSource, right: JetCLIBudgetSource) -> if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path)
+    ordered.sort_by(fn(left: JetCLIBudgetSource, right: JetCLIBudgetSource) { if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path })
     members: loop source in ordered -> perf_report_object_new([CanonicalJSONField]{
         CanonicalJSONField{key: "path", value: CanonicalJSON.String(source.path.copy())},
         CanonicalJSONField{key: "sha256", value: CanonicalJSON.String(source.sha256.copy())},

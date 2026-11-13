@@ -53,7 +53,7 @@ read_rules: fn(path: String) -> Rules {
 // caller flags; its setup-hook NIX_HARDENING_DISABLE knob is not consulted by
 // an already-built wrapper.
 child_hardening: fn(enabled: String, removed: [String]) -> String {
-    re.split(Regex{"\s+"}, enabled).filter(word -> word != "" && !removed.contains(word)).join(" ")
+    re.split(Regex{"\s+"}, enabled).filter(fn(word) { word != "" && !removed.contains(word) }).join(" ")
 }
 
 run: fn() {

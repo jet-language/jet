@@ -280,7 +280,7 @@ test_names_by_run: fn(setup: SuiteSetup, sources: [TestSource]) -> [String: [Str
 // Whether the run `run`, whose sources declare the #Tests `names`, holds a
 // row `rows` selects: its own row `<run>`, or a `<run>: <test>` row.
 run_selected: fn(rows: TestRows, run: String, names: [String]) -> Bool {
-    rows.selects(run) || names.any(name -> rows.selects("{run}: {name}"))
+    rows.selects(run) || names.any(fn(name) { rows.selects("{run}: {name}") })
 }
 
 // The `--filter` a selected run's `jet test` gets: the suite's filter when
@@ -307,7 +307,7 @@ engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
     loop source in sources {
         if !source.path.starts_with("Jetpack/") || test_frozen_tree(source.path) != "" -> next
         loop name in source.names {
-            if sections.any(section -> rows.selects("Jetpack/{section}: {name}")) -> return true
+            if sections.any(fn(section) { rows.selects("Jetpack/{section}: {name}") }) -> return true
         }
     }
     false
@@ -353,7 +353,7 @@ jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
         prep.error = err.message.copy()
         return prep
     }
-    if prep.engine != "" || !prep.map.claims.any(claim -> rows.selects(jetpack_claim_id(claim))) -> return prep
+    if prep.engine != "" || !prep.map.claims.any(fn(claim) { rows.selects(jetpack_claim_id(claim)) }) -> return prep
     hosted: jetpack_assemble(setup, scratch, "hosted") ?? {
         prep.error = err.message.copy()
         return prep
@@ -383,10 +383,10 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         return none
     }
     map: prep.map
-    selected: map.claims.filter(claim -> rows.selects(jetpack_claim_id(claim)))
+    selected: map.claims.filter(fn(claim) { rows.selects(jetpack_claim_id(claim)) })
     if selected.len() == 0 -> return none
     args := [String]{"test", "src/jetpack.jet", "--serial"}
-    if rows.filter != "" && selected.all(claim -> claim.name.contains(rows.filter)) {
+    if rows.filter != "" && selected.all(fn(claim) { claim.name.contains(rows.filter) }) {
         args.push("--filter")
         args.push(rows.filter.copy())
     }

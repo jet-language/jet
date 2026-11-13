@@ -19,7 +19,7 @@ status: fn(i: Int) -> Int {
 run: fn() {
     ids := [Int]{}
     loop i in 0..<100 -> ids.push(i)
-    codes: ids.para_map((i: Int) -> status(i), limit: 32)
+    codes: ids.para_map(fn(i: Int) { status(i) }, limit: 32)
     ok := 0
     loop code in codes {
         if code == 200 -> ok += 1

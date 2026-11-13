@@ -5,7 +5,7 @@ use {
 }
 
 inspect: fn(secret: &ExpiringSecret<crypto.SigningKey>) -[]> Bool {
-    return secret.with((borrowed) -> borrowed.public_key()) == .Ok(_)
+    return secret.with(fn(borrowed) { borrowed.public_key() }) == .Ok(_)
 }
 run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")

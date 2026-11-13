@@ -370,7 +370,7 @@ pkg_lock_canonicalize: fn(lock: &LockFile) Never! {
     policy.build_deny = pkg_overlay_sorted_unique(policy.build_deny)
     grants := [BuildGrant]{}
     loop grant in policy.build_grants -> grants.push(BuildGrant{subject: grant.subject, effects: pkg_overlay_sorted_unique(grant.effects)})
-    grants.sort_by(grant -> grant.subject)
+    grants.sort_by(fn(grant) { grant.subject })
     unique := [BuildGrant]{}
     loop grant in grants {
         if unique.len() > 0 && unique[unique.len() - 1].subject == grant.subject -> next
@@ -453,19 +453,19 @@ pkg_lock_sorted_keys: fn(keys: [String]) -> [String] Never! {
 pkg_lock_sorted_contributions: fn(values: [LockedBuildContribution]) -> [LockedBuildContribution] Never! {
     sorted := values
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.reason)
+    sorted.sort_by(fn(record) { record.reason })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.value)
+    sorted.sort_by(fn(record) { record.value })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.source)
+    sorted.sort_by(fn(record) { record.source })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.scope)
+    sorted.sort_by(fn(record) { record.scope })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.layer)
+    sorted.sort_by(fn(record) { record.layer })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.key)
+    sorted.sort_by(fn(record) { record.key })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(record -> record.package)
+    sorted.sort_by(fn(record) { record.package })
     sorted
 }
 
@@ -483,9 +483,9 @@ pkg_lock_dedup_contributions: fn(values: [LockedBuildContribution]) -> [LockedBu
 pkg_lock_sorted_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] Never! {
     sorted := values
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(input -> input.hash)
+    sorted.sort_by(fn(input) { input.hash })
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(input -> input.path)
+    sorted.sort_by(fn(input) { input.path })
     sorted
 }
 

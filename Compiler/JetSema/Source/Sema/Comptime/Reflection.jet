@@ -1074,9 +1074,9 @@ sema_comptime_reflection_layout_info: fn(kind: String, guarantee: String, source
     bytes: facts.bytes
     sema_comptime_reflection_struct("LayoutInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "kind", value: TComptimeValue.String{value: kind}},
-        SemaComptimeReflectionField{name: "size", value: sema_comptime_reflection_layout_optional(bytes.map((value) -> value.size))},
-        SemaComptimeReflectionField{name: "alignment", value: sema_comptime_reflection_layout_optional(bytes.map((value) -> value.alignment))},
-        SemaComptimeReflectionField{name: "stride", value: sema_comptime_reflection_layout_optional(bytes.map((value) -> value.stride))},
+        SemaComptimeReflectionField{name: "size", value: sema_comptime_reflection_layout_optional(bytes.map(fn(value) { value.size }))},
+        SemaComptimeReflectionField{name: "alignment", value: sema_comptime_reflection_layout_optional(bytes.map(fn(value) { value.alignment }))},
+        SemaComptimeReflectionField{name: "stride", value: sema_comptime_reflection_layout_optional(bytes.map(fn(value) { value.stride }))},
         SemaComptimeReflectionField{name: "requested_alignment", value: sema_comptime_reflection_layout_optional(requested_alignment)},
         SemaComptimeReflectionField{name: "effective_alignment", value: sema_comptime_reflection_layout_optional(effective_alignment)},
         SemaComptimeReflectionField{name: "target", value: TComptimeValue.String{value: target.triple}},
@@ -1116,7 +1116,7 @@ sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, 
         .Val(layout) -> if layout == {
             .CAligned(alignment, target_mode) -> {
                 requested = Val(alignment)
-                natural: facts.bytes.map((value) -> value.alignment) ?? 1
+                natural: facts.bytes.map(fn(value) { value.alignment }) ?? 1
                 if jet_target_layout_check_alignment(target, alignment, natural, target_mode) == .Accepted(alignment_fact) -> effective = Val(alignment_fact.effective_alignment)
             }
             .C | .Columnar -> {}

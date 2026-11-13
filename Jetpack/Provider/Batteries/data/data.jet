@@ -57,7 +57,7 @@ use {
     }
 
     pivot_sum: fn(rows: [Observation]) -> [DataPivotCell] DataError! {
-        return core_data.pivot_sum(rows, row -> row.team, row -> row.segment, row -> row.value)
+        return core_data.pivot_sum(rows, fn(row) { row.team }, fn(row) { row.segment }, fn(row) { row.value })
     }
 
     rolling_mean: fn(values: [Float], width: Int) -> [Float] DataError! {
@@ -80,7 +80,7 @@ use {
     // E0956 for this core.data.inner_join path; keep that defect visible for
     // #2919 instead of hiding it behind a handwritten substitute.
     join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
-        pairs: core_data.inner_join(rows, owners, row -> row.team, owner -> owner.team)
+        pairs: core_data.inner_join(rows, owners, fn(row) { row.team }, fn(owner) { owner.team })
             ?? panic("typed inner join")
         out := [Joined]{}
         loop pair in pairs {

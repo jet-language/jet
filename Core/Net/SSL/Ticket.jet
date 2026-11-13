@@ -330,11 +330,11 @@ ssl_ticket_parse_locked: fn(ctx: Shared<SSLTicketContext>, buf: [U8]) -> ssldefs
 /// The configuration's ticket writer over a shared context: C's
 /// mbedtls_ssl_ticket_write with the context as p_ticket.
 ssl_ticket_write_cb: fn(ctx: Shared<SSLTicketContext>) -> ssldefs.SSLTicketWrite Never! {
-    ssldefs.SSLTicketWrite{call: (session: ssldefs.SSLSession) -> ssl_ticket_write_locked(ctx, session)}
+    ssldefs.SSLTicketWrite{call: fn(session: ssldefs.SSLSession) { ssl_ticket_write_locked(ctx, session) }}
 }
 
 /// The configuration's ticket parser over a shared context: C's
 /// mbedtls_ssl_ticket_parse with the context as p_ticket.
 ssl_ticket_parse_cb: fn(ctx: Shared<SSLTicketContext>) -> ssldefs.SSLTicketParse Never! {
-    ssldefs.SSLTicketParse{call: (buf: [U8]) -> ssl_ticket_parse_locked(ctx, buf)}
+    ssldefs.SSLTicketParse{call: fn(buf: [U8]) { ssl_ticket_parse_locked(ctx, buf) }}
 }

@@ -8,10 +8,10 @@ Error [jet.ReadOnlyValueNotOwned]: `value` was not moved here, so it cannot be r
 More: jet-lang.dev/e/E0120
 
 Error [jet.UseWhileWriteActive]: `value` is being changed in this call, so it can't be used again here
-  --> tests/ui/ownership/deferred_lambda_capture_reports_once.jet:9:27
+  --> tests/ui/ownership/deferred_lambda_capture_reports_once.jet:9:28
     |
-  9 |     both(value, () -> see(value))
-    |                           ^^^^^
+  9 |     both(value, fn() { see(value) })
+    |                            ^^^^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `value` only once, or copy first with `value.copy()`
 More: jet-lang.dev/e/E0204

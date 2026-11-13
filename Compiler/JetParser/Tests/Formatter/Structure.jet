@@ -80,7 +80,7 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     statement: jet_format_source("run: fn() {{\n    loop v in values {{ value().drop(\"checked\") }}\n    done()\n}}\n", false)
     assert(statement.ok)
     assert(statement.text.contains("loop v in values -> value().drop(\"checked\")\n"))
-    tail: jet_format_source("run: fn() {{\n    each: () -> {{\n        loop v in values {{ value().drop(\"checked\") }}\n    }}\n    each()\n}}\n", false)
+    tail: jet_format_source("run: fn() {{\n    each: fn() {{\n        loop v in values {{ value().drop(\"checked\") }}\n    }}\n    each()\n}}\n", false)
     assert(tail.ok)
     assert_eq(tail.structure_change ?? "none", "none")
     assert(tail.text.contains("loop v in values {{ value().drop(\"checked\") }}"))
@@ -114,7 +114,7 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
 }
 
 #Test("a braced if that ends a callable body with a value stays a statement") {
-    source: "pick: fn(c: Bool) -> Int {{\n    if c {{\n        make(1)\n    }} else {{\n        make(2)\n    }}\n}}\n\nrun: fn(c: Bool) {{\n    each: (c: Bool) -> {{\n        if c {{\n            print(\"a\")\n        }} else {{\n            print(\"b\")\n        }}\n    }}\n    each(c)\n    if c {{\n        print(\"x\")\n    }} else {{\n        print(\"y\")\n    }}\n}}\n"
+    source: "pick: fn(c: Bool) -> Int {{\n    if c {{\n        make(1)\n    }} else {{\n        make(2)\n    }}\n}}\n\nrun: fn(c: Bool) {{\n    each: fn(c: Bool) {{\n        if c {{\n            print(\"a\")\n        }} else {{\n            print(\"b\")\n        }}\n    }}\n    each(c)\n    if c {{\n        print(\"x\")\n    }} else {{\n        print(\"y\")\n    }}\n}}\n"
     formatted: jet_format_source(source, false)
     assert(formatted.ok)
     assert_eq(formatted.structure_change ?? "none", "none")

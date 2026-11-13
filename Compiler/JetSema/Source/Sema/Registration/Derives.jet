@@ -634,7 +634,7 @@ sema_derive_expand_type: fn(expansion: &SemaDeriveExpansion, ty: Type) -> Type N
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             expanded := [Type]{}
             loop param in params -> expanded.push(sema_derive_expand_type(expansion, param))
-            Type.Fn{params: expanded, ret: ret.map((value) -> sema_derive_expand_type(expansion, value)), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+            Type.Fn{params: expanded, ret: ret.map(fn(value) { sema_derive_expand_type(expansion, value) }), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
             expanded := [Type]{}
@@ -840,7 +840,7 @@ sema_derive_expand_str_match_parts: fn(expansion: &SemaDeriveExpansion, parts: [
     expanded := [StrMatchPart]{}
     loop part in parts {
         if part == {
-            .Hole(name, ty, span) -> expanded.push(StrMatchPart.Hole{name: name, ty: ty.map((value) -> sema_derive_expand_type(expansion, value)), span: span})
+            .Hole(name, ty, span) -> expanded.push(StrMatchPart.Hole{name: name, ty: ty.map(fn(value) { sema_derive_expand_type(expansion, value) }), span: span})
             .Lit(_) -> expanded.push(part.copy())
         }
     }
@@ -973,11 +973,11 @@ sema_derive_expand_lambda: fn(expansion: &SemaDeriveExpansion, lambda: Lambda) -
     params := [LambdaParam]{}
     loop param in lambda.params {
         expanded := param
-        expanded.ty = param.ty.map((value) -> sema_derive_expand_type(expansion, value))
+        expanded.ty = param.ty.map(fn(value) { sema_derive_expand_type(expansion, value) })
         params.push(expanded)
     }
     updated.params = params
-    updated.result = lambda.result.map((value) -> sema_derive_expand_type(expansion, value))
+    updated.result = lambda.result.map(fn(value) { sema_derive_expand_type(expansion, value) })
     updated.body = if lambda.body == {
         .Expr(value) -> LambdaBody.Expr{value: sema_derive_expand_expr(expansion, value)}
         .Block(body) -> LambdaBody.Block{body: sema_derive_expand_stmts(expansion, body)}
@@ -1043,7 +1043,7 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
         .OptMethodCall(receiver, method, method_span, type_args, args, span, node) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(expansion, receiver), method: sema_derive_expand_name(expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(expansion, type_args), args: sema_derive_expand_call_args(expansion, args), span: span, id: node}
         // copy: `import_ns` and `as_trait` are payloads of read parameter `expression`, which keeps the originals; the new Expr.StructLit's fields own `import_ns` and `as_trait`
         .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span, node) -> return Expr.StructLit{type_name: sema_derive_expand_name(expansion, type_name, span), type_args: sema_derive_expand_types(expansion, type_args), import_ns: import_ns.copy(), as_trait: as_trait.copy(), fields: sema_derive_expand_fields(expansion, fields), inferred: inferred, span: span, id: node}
-        .TypedLit(head, body, span, node) -> return Expr.TypedLit{head: head.map((value) -> sema_derive_expand_type(expansion, value)), body: sema_derive_expand_typed_body(expansion, body), span: span, id: node}
+        .TypedLit(head, body, span, node) -> return Expr.TypedLit{head: head.map(fn(value) { sema_derive_expand_type(expansion, value) }), body: sema_derive_expand_typed_body(expansion, body), span: span, id: node}
         .EnumLit(type_name, variant, variant_span, args, leading_dot, span, _) -> return sema_derive_expand_enum_lit(expansion, type_name, variant, variant_span, args, leading_dot, span)
         // copy: `tainted_tag` is a payload of read parameter `expression`, which keeps the original; field `tag` of the new Expr.Tainted owns this one
         .Tainted(value, tainted_tag, span, node) -> return Expr.Tainted{value: sema_derive_expand_expr(expansion, value), tag: tainted_tag.copy(), span: span, id: node}
@@ -1288,7 +1288,7 @@ sema_derive_loop_values: fn(expansion: SemaDeriveExpansion, source: Expr) -> [Ct
 
 sema_derive_expand_binding: fn(expansion: &SemaDeriveExpansion, binding: Binding) -> Binding Never! {
     updated := binding
-    updated.ty = binding.ty.map((value) -> sema_derive_expand_type(expansion, value))
+    updated.ty = binding.ty.map(fn(value) { sema_derive_expand_type(expansion, value) })
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_derive_expand_name(expansion, type_name, type_span), type_span: type_span, fields: fields, rest: rest, span: span}
@@ -1450,8 +1450,8 @@ sema_derive_expand_func: fn(expansion: &SemaDeriveExpansion, function: Func) -> 
     updated := function
     updated.name = sema_derive_expand_name(expansion, function.name, function.name_span)
     updated.params = sema_derive_expand_params(expansion, function.params)
-    updated.return_type = function.return_type.map((value) -> sema_derive_expand_type(expansion, value))
-    updated.head_pattern = function.head_pattern.map((value) -> sema_derive_expand_pattern(expansion, value, None))
+    updated.return_type = function.return_type.map(fn(value) { sema_derive_expand_type(expansion, value) })
+    updated.head_pattern = function.head_pattern.map(fn(value) { sema_derive_expand_pattern(expansion, value, None) })
     updated.markers = sema_derive_expand_markers(expansion, function.markers)
     updated.pre = sema_derive_expand_clauses(expansion, function.pre)
     updated.post = sema_derive_expand_clauses(expansion, function.post)
@@ -2065,7 +2065,7 @@ sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: 
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             replaced := [Type]{}
             loop param in params -> replaced.push(sema_derive_replace_provider_type(param, type_param, owner_type))
-            Type.Fn{params: replaced, ret: ret.map((value) -> sema_derive_replace_provider_type(value, type_param, owner_type)), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+            Type.Fn{params: replaced, ret: ret.map(fn(value) { sema_derive_replace_provider_type(value, type_param, owner_type) }), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
             replaced := [Type]{}

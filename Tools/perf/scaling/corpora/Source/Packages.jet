@@ -14,7 +14,7 @@ M: MODULUS
 write_files: fn(package: [String:String], directory: String) -[FS, Env]> String Err! {
     files.create_dir_all(directory)
     // Refuse to leave stale module files when regenerating a smaller workload.
-    taken: package.keys().map(name -> files.join(directory, name)).find(path -> files.exists(path))
+    taken: package.keys().map(fn(name) { files.join(directory, name) }).find(fn(path) { files.exists(path) })
     if taken == .Val(path) -> return Err("Output already exists: {path}")
     loop (name, text) in package {
         path: files.join(directory, name)
@@ -74,14 +74,14 @@ is_code_line: fn(line: String) -> Bool {
     text.len() > 0 && !text.starts_with("//")
 }
 
-code_of: fn(list: [String]) -> Int { list.filter(line -> is_code_line(line)).len() }
+code_of: fn(list: [String]) -> Int { list.filter(fn(line) { is_code_line(line) }).len() }
 
-code_lines: fn(files: [String:String]) -> Int { files.keys().filter(name -> !name.ends_with("package.jet")).map(name -> code_of(lines(files[name]))).to_list().sum() }
+code_lines: fn(files: [String:String]) -> Int { files.keys().filter(fn(name) { !name.ends_with("package.jet") }).map(fn(name) { code_of(lines(files[name])) }).to_list().sum() }
 
 // One digest over the whole package: each file's name and bytes, by name.
 source_digest: fn(files: [String:String]) -> String {
     // copy: the names are sorted apart from the map
-    names := files.keys().map(name -> name.copy()).to_list()
+    names := files.keys().map(fn(name) { name.copy() }).to_list()
     names.sort()
     data := [U8]{}
     loop name in names {

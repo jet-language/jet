@@ -64,8 +64,8 @@ ordered: fn(entries: [(key: String, value: Dyn)]) -> [(key: String, value: Dyn)]
         }
         if at >= 0 -> named[at] = (key: entry.key, value: entry.value) else -> named.push((key: entry.key, value: entry.value))
     }
-    indexed.sort_by(row -> row.index)
-    out := indexed.map(row -> (key: row.key, value: row.value))
+    indexed.sort_by(fn(row) { row.index })
+    out := indexed.map(fn(row) { (key: row.key, value: row.value) })
     out.extend(named)
     out
 }
@@ -89,12 +89,12 @@ json_write: fn(value: Dyn, step: String, indent: String) -> String Never! {
         .Text(text) -> json_quote(text)
         .Array(list) -> {
             if list.len() == 0 -> return "[]"
-            "[{open}{list.map(item -> json_write(item, step, inner)).join(comma)}{close}]"
+            "[{open}{list.map(fn(item) { json_write(item, step, inner) }).join(comma)}{close}]"
         }
         .Object(entries) -> {
             if entries.len() == 0 -> return "{{}}"
             colon: if step == "" -> ":" else -> ": "
-            "{{{open}{ordered(entries).map(entry -> "{json_quote(entry.key)}{colon}{json_write(entry.value, step, inner)}").join(comma)}{close}}}"
+            "{{{open}{ordered(entries).map(fn(entry) { "{json_quote(entry.key)}{colon}{json_write(entry.value, step, inner)}" }).join(comma)}{close}}}"
         }
         .Bytes(_) | .DateTime(_) -> json_quote(js_string(Val(value)))
     }

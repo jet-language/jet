@@ -135,7 +135,7 @@ jet_cli_gc_parse: fn(raw: String, expected_project: String, now: Int) -> JetCLIG
             if retained -> retained_count += 1
             identities.push(JetCLIGCIdentity{id: id, retained: retained})
         }
-        identities.sort_by((left: JetCLIGCIdentity, right: JetCLIGCIdentity) -> left.id <=> right.id)
+        identities.sort_by(fn(left: JetCLIGCIdentity, right: JetCLIGCIdentity) { left.id <=> right.id })
         if jet_cli_gc_uint(value, "allocations") != identities.len() || jet_cli_gc_uint(value, "retained") != retained_count -> return Err(jet_cli_gc_error("malformed", "GC trace counters do not match identity evidence"))
         sites.push(JetCLIGCSite{source: source, span_start: start, span_end: end, scope: scope, policy: policy, reason: reason, type_name: type_name, identities: identities})
     }

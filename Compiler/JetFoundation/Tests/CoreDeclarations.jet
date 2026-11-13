@@ -159,13 +159,13 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     loop row in CORE_DECLARATIONS.source_rows {
         if row.module_name == "core.time" -> assert(row.owned_types.contains("ExpiringValue"))
     }
-    assert(!(core_declarations_module(CORE_DECLARATIONS.modules, "core.time") ?? panic("no core.time")).types.any(leaf -> leaf.name == "ExpiringValue"))
+    assert(!(core_declarations_module(CORE_DECLARATIONS.modules, "core.time") ?? panic("no core.time")).types.any(fn(leaf) { leaf.name == "ExpiringValue" }))
     hidden_source: source.replace("TimeError, ExpiringValue }}", "TimeError, MissingPrivateType }}")
     assert(hidden_source != source)
     hidden: core_declarations_fixture(hidden_source) ?? panic("the hidden type was refused early: {err.message}")
-    assert(core_declarations_source_problems(hidden, core_declarations_sources(hidden)).any(problem -> problem.contains("does not declare owned type `core.time.MissingPrivateType`")))
+    assert(core_declarations_source_problems(hidden, core_declarations_sources(hidden)).any(fn(problem) { problem.contains("does not declare owned type `core.time.MissingPrivateType`") }))
     dropped: core_declarations_fixture(source.replace("format_row ETF core.encoding.eetf ETF\n", "")) ?? panic("the dropped format row was refused early: {err.message}")
-    assert(core_declarations_source_problems(dropped, core_declarations_sources(dropped)).any(problem -> problem.contains("differ from the format_row lines")))
+    assert(core_declarations_source_problems(dropped, core_declarations_sources(dropped)).any(fn(problem) { problem.contains("differ from the format_row lines") }))
 }
 
 #Test("a type leaf none of its module's sources declares is a problem unless a re-export or a compiler registry owns it") {
@@ -175,7 +175,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     copied_source: source.replace("JetDataPlotAggregate:from(core.data)", "JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max)")
     assert(copied_source != source)
     copied: core_declarations_fixture(copied_source) ?? panic("the copied leaf was refused early: {err.message}")
-    assert(core_declarations_source_problems(copied, core_declarations_sources(copied)).any(problem -> problem.contains("Core type leaf JetDataPlotAggregate of core.data.plot is declared by none of its sources")))
+    assert(core_declarations_source_problems(copied, core_declarations_sources(copied)).any(fn(problem) { problem.contains("Core type leaf JetDataPlotAggregate of core.data.plot is declared by none of its sources") }))
 }
 
 #Test("dispatcher row expressions evaluate to their CoreCallRecord facts") {

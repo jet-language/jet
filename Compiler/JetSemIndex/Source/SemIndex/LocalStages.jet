@@ -121,7 +121,7 @@ semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [St
             }
         }
         if node.kind == .Print(_) -> printed = true
-        body_each_expr_child(function.tree, node, (child: Int) -> pending.push(child))
+        body_each_expr_child(function.tree, node, fn(child: Int) { pending.push(child) })
     }
     if read == .Val(name) -> return Val(SemLocalStage.Run{reason: "it reads `{name}`, which only the running program knows"})
     if printed -> return Val(SemLocalStage.Run{reason: "it prints text"})

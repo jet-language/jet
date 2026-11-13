@@ -74,7 +74,7 @@ jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: 
     // The comparator is a closure, not the named function. A compiler that
     // predates the named-comparator fix in JetIR's sort route frees a named
     // comparator's Ordering carrier twice, and this CLI may be built by one.
-    ordered.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
+    ordered.sort_by(fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) { jet_cli_record_entry_order(left, right) })
     state := [String:Int]{}
     loop entry in ordered {
         if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, state) {
@@ -132,7 +132,7 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
         rows.push(row)
     }
     // A closure comparator, for the reason in jet_cli_record_snapshot_validate.
-    rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
+    rows.sort_by(fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) { jet_cli_record_entry_order(left, right) })
     rows
 }
 

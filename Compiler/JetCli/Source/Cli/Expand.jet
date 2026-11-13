@@ -59,7 +59,7 @@ jet_cli_expand_source: fn(modules: [JetDriverDocModule], path: String) -> String
 
 jet_cli_expand_sort_facts: fn(facts: &[JetCLIExpandFact]) Never! {
     facts = loop fresh_item in facts -> fresh_item
-    facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> (left.source <=> right.source).then(left.offset <=> right.offset).then(left.name <=> right.name))
+    facts.sort_by(fn(left: JetCLIExpandFact, right: JetCLIExpandFact) { (left.source <=> right.source).then(left.offset <=> right.offset).then(left.name <=> right.name) })
 }
 
 jet_cli_expand_inline_function: fn(function: Func, owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
@@ -126,7 +126,7 @@ jet_cli_expand_inline: fn(modules: [JetDriverDocModule], json: Bool) -> [JetCLIE
     loop unit in modules {
         rows := [JetCLIExpandFact]{}
         jet_cli_expand_inline_items(unit.items, None, unit, rows)
-        rows.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.offset <=> right.offset)
+        rows.sort_by(fn(left: JetCLIExpandFact, right: JetCLIExpandFact) { left.offset <=> right.offset })
         loop row in rows -> output.push(row)
     }
     if json -> jet_cli_expand_sort_facts(output)

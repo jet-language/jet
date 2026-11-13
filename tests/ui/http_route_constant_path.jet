@@ -15,7 +15,7 @@ register: fn(path: String) {
 
 run: fn() {
     router: http.router()
-    router.get(CACHE_PATH, (key: String) -> Ok(server.response(200, "hit {key}")))
-    router.delete(ITEM_PATH, (key: String) -> Ok(server.response(200, "gone {key}")))
+    router.get(CACHE_PATH, fn(key: String) { Ok(server.response(200, "hit {key}")) })
+    router.delete(ITEM_PATH, fn(key: String) { Ok(server.response(200, "gone {key}")) })
     register("/dynamic")
 }

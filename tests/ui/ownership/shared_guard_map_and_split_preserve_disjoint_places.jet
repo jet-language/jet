@@ -3,13 +3,13 @@ Pair: struct { left: Int, right: Int }
 
 run: fn() {
     first := Shared{Pair{ left: 1, right: 2 }}
-    mapped: first.guard_edit().map(value -> value.left)
+    mapped: first.guard_edit().map(fn(value) { value.left })
     mapped.value += 1
 
     second := Shared{Pair{ left: 3, right: 4 }}
     { first: left, second: right }: second.guard_edit().split(
-        value -> value.left,
-        value -> value.right
+        fn(value) { value.left },
+        fn(value) { value.right }
     )
     left.value += 1
     right.value += 1

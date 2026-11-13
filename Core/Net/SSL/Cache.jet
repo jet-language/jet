@@ -192,11 +192,11 @@ ssl_cache_set_locked: fn(cache: Shared<SSLCacheContext>, session_id: [U8], sessi
 /// The configuration's cache lookup over a shared cache: C's
 /// mbedtls_ssl_cache_get with the cache as p_cache.
 ssl_cache_get_cb: fn(cache: Shared<SSLCacheContext>) -> ssldefs.SSLCacheGet Never! {
-    ssldefs.SSLCacheGet{call: (session_id: [U8]) -> ssl_cache_get_locked(cache, session_id)}
+    ssldefs.SSLCacheGet{call: fn(session_id: [U8]) { ssl_cache_get_locked(cache, session_id) }}
 }
 
 /// The configuration's cache store over a shared cache: C's
 /// mbedtls_ssl_cache_set with the cache as p_cache; true once stored.
 ssl_cache_set_cb: fn(cache: Shared<SSLCacheContext>) -> ssldefs.SSLCacheSet Never! {
-    ssldefs.SSLCacheSet{call: (session_id: [U8], session: ssldefs.SSLSession) -> ssl_cache_set_locked(cache, session_id, session)}
+    ssldefs.SSLCacheSet{call: fn(session_id: [U8], session: ssldefs.SSLSession) { ssl_cache_set_locked(cache, session_id, session) }}
 }

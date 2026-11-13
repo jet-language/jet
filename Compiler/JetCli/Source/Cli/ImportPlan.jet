@@ -145,7 +145,7 @@ jet_cli_import_io_text: fn(error: IOError) -> String Never! { jet_cli_io_error_t
 // types (links are skipped), recursive walk.
 jet_cli_import_collect_sources: fn(root: String, dir: String, language: String, out: &[String]) JetCLIImportPlanError! -[FS.Read]> {
     entries := import_files.list_dir(dir) ?? return Err(jet_cli_import_plan_error("read {dir}: {jet_cli_import_io_text(err)}"))
-    entries.sort_by((left: DirEntry, right: DirEntry) -> ast_comptime_bytes_compare(left.name.bytes(), right.name.bytes()) <=> 0)
+    entries.sort_by(fn(left: DirEntry, right: DirEntry) { ast_comptime_bytes_compare(left.name.bytes(), right.name.bytes()) <=> 0 })
     loop entry in entries {
         path: import_files.join(dir, entry.name)
         stat: import_files.stat(path) ?? return Err(jet_cli_import_plan_error(jet_cli_import_io_text(err)))
@@ -248,7 +248,7 @@ jet_cli_import_build_plan: fn(source: String, target: String, language: String) 
     files := [String]{}
     jet_cli_import_collect_sources(source, source, language, files) ?? return Err(err)
     if files.len() == 0 -> return Err(jet_cli_import_plan_error("no {jet_cli_import_extensions(language)} files found under {source}"))
-    files.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    files.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     generated := [JetCLIImportGenerated]{}
     todos := [JetCLIImportTodo]{}
     functions := 0

@@ -41,7 +41,7 @@ canvas_request_authorized: fn(request: Request, target: String, bind_host: Strin
     host: request.headers.get("host") ?? return false
     if !host_header_allowed(host, bind_host, port) -> return false
     origin: request.headers.get("origin")
-    same_origin: request.headers.get("sec-fetch-site").is_some_and((site) -> site.eq_ignore_ascii_case("same-origin"))
+    same_origin: request.headers.get("sec-fetch-site").is_some_and(fn(site) { site.eq_ignore_ascii_case("same-origin") })
     if origin == .Val(value) {
         if !origin_allowed(value, bind_host, port) -> return false
     } else if !canvas_bootstrap_path(path, target) && !same_origin -> return false
@@ -51,8 +51,8 @@ canvas_request_authorized: fn(request: Request, target: String, bind_host: Strin
         .Err(_) -> { return false }
     }
     session_valid: if {
-        authorization == .Val(auth) && query_session == .Val(query) -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret)) && constant_time_equal(query, session_secret)
-        authorization == .Val(auth) && query_session == .None -> auth.strip_prefix("Bearer ").is_some_and((token) -> constant_time_equal(token, session_secret))
+        authorization == .Val(auth) && query_session == .Val(query) -> auth.strip_prefix("Bearer ").is_some_and(fn(token) { constant_time_equal(token, session_secret) }) && constant_time_equal(query, session_secret)
+        authorization == .Val(auth) && query_session == .None -> auth.strip_prefix("Bearer ").is_some_and(fn(token) { constant_time_equal(token, session_secret) })
         authorization == .None && query_session == .Val(query) -> constant_time_equal(query, session_secret)
         authorization == .None && query_session == .None -> false
     }
@@ -62,7 +62,7 @@ unique_session_param: fn(target: String) -> String? Unit! {
     (_, query): target.split_once('?') ?? return .None
     found := false
     loop part in query.split('&') {
-        name: part.split_once('=').map(((_0: name, _1: _)) -> name).unwrap_or(part)
+        name: part.split_once('=').map(fn((_0: name, _1: _)) { name }).unwrap_or(part)
         if name == "session" {
             if found -> return .Err(_)
             found = true
@@ -84,14 +84,14 @@ host_header_allowed: fn(value: String, bind_host: String, port: U16) -> Bool {
     value: trimmed.to_ascii_lowercase()
     if value == "{url_host(bind_host)}:{port}".to_ascii_lowercase() -> return true
     if !is_loopback_host(bind_host) -> return false
-    return ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "{alias}:{port}")
+    return ["localhost", "127.0.0.1", "[::1]"].iter().any(fn(alias) { value == "{alias}:{port}" })
 }
 origin_allowed: fn(value: String, bind_host: String, port: U16) -> Bool {
     trimmed := value.trim() // #4303
     value: trimmed.to_ascii_lowercase()
     expected: "http://{url_host(bind_host)}:{port}".to_ascii_lowercase()
     if value == expected -> return true
-    return is_loopback_host(bind_host) && ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "http://{alias}:{port}")
+    return is_loopback_host(bind_host) && ["localhost", "127.0.0.1", "[::1]"].iter().any(fn(alias) { value == "http://{alias}:{port}" })
 }
 constant_time_equal: fn(left: String, right: String) -> Bool {
     left: left.as_bytes()
@@ -137,11 +137,11 @@ web_stream_required_bool: fn(object: [String:Dyn], key: String) -> Result<Bool, 
 }
 web_stream_required_usize: fn(object: [String:Dyn], key: String) -> Result<USize, (String, String)> {
     value: web_stream_required_u64(object, key)
-    return USize.try_from(value).map_err((_) -> web_stream_request_error("web stream `{key}` is too large")) // GATE #4483: selected pointer width.
+    return USize.try_from(value).map_err(fn(_) { web_stream_request_error("web stream `{key}` is too large") }) // GATE #4483: selected pointer width.
 }
 web_stream_object: fn(object: [String:Dyn], key: String) -> Result<[String:Dyn], (String, String)> {
-    value: object.get(key).ok_or_else(() -> web_stream_request_error("web stream request has no `{key}`"))
-    return object_map(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` must be an object"))
+    value: object.get(key).ok_or_else(fn() { web_stream_request_error("web stream request has no `{key}`") })
+    return object_map(value).ok_or_else(fn() { web_stream_request_error("web stream `{key}` must be an object") })
 }
 web_stream_identity: fn(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
     identity: web_stream_object(object, key)
@@ -163,7 +163,7 @@ web_stream_id: fn(object: [String:Dyn], key: String) -> Result<web_stream_bridge
 }
 web_stream_trigger: fn(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
     value: web_stream_required_string(object, key)
-    return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` has an unknown hydration trigger"))
+    return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(fn() { web_stream_request_error("web stream `{key}` has an unknown hydration trigger") })
 }
 web_stream_target: fn(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
     return if web_stream_required_string(object, key)? == {
@@ -196,7 +196,7 @@ handle_web_stream_request: fn(stream: &impl Write, request: &Request) Err! {
         .Err(_) -> { return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request is not bounded JSON").as_bytes()) }
     }
     object: object_map(root) ?? return write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json("invalid_request", "web stream request must be an object").as_bytes())
-    result: Result<String, (String, String)>{(() -> {
+    result: Result<String, (String, String)>{(fn() {
         action: web_stream_required_string(object, "action")?
         return if action == {
             "register" -> {
@@ -287,9 +287,9 @@ handle_release_devtools_request: fn(stream: &impl Write, request: &Request, path
     if !policy.deployment_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "inspect endpoint disabled".bytes())
     host: request.headers.get("host") ?? return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect host rejected".bytes())
     if !host_header_allowed(host, bind_host, port) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect host rejected".bytes())
-    if request.headers.get("origin").is_some_and((origin) -> !origin_allowed(origin, bind_host, port)) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect origin rejected".bytes())
+    if request.headers.get("origin").is_some_and(fn(origin) { !origin_allowed(origin, bind_host, port) }) -> return write_response(stream, "403 Forbidden", "text/plain; charset=utf-8", "inspect origin rejected".bytes())
     expected_token: policy.deployment.token() ?? return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", "{{\"error\":\"JET_INSPECT_TOKEN required\"}}".bytes())
-    token_valid: request.headers.get("authorization").and_then((value) -> value.strip_prefix("Bearer ")).is_some_and((token) -> constant_time_equal(token, expected_token))
+    token_valid: request.headers.get("authorization").and_then(fn(value) { value.strip_prefix("Bearer ") }).is_some_and(fn(token) { constant_time_equal(token, expected_token) })
     if !token_valid -> return write_response(stream, "401 Unauthorized", "application/json; charset=utf-8", "{{\"error\":\"JET_INSPECT_TOKEN required\"}}".bytes())
     if !policy.peer_allowed(peer_addr.ip()) -> return write_response(stream, "403 Forbidden", "application/json; charset=utf-8", "{{\"error\":\"inspect network address not allowed\"}}".bytes())
     if !request.body.is_empty() || request.headers.contains_key("transfer-encoding") -> return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "inspect endpoint accepts GET without a request body".bytes())
@@ -356,7 +356,7 @@ serve_forever: fn(listener: TcpListener, status: Arc<DevStatus>, debug_sessions:
                 paused_evaluate: Arc.clone(paused_evaluate)
                 terminal_style: Arc.clone(terminal_style)
                 active_connections: Arc.clone(active_connections)
-                _: thread.spawn(() -> {
+                _: thread.spawn(fn() {
                     _: handle_connection_with_root_and_policy(stream, status, debug_sessions, session, canvas_file, listener_kind, bind_host, session_secret, static_root, browser_state, paused_evaluate, terminal_style, release_policy, peer_addr)
                     _: active_connections.fetch_sub(1, Ordering.AcqRel)
                 })
@@ -401,7 +401,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
     if listener_kind == .Application && !is_application_control_path(path) {
         if method != "GET" -> return method_not_allowed(stream)
         started: Instant.now()
-        nonce: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+        nonce: status.browser_relay.lock().unwrap().as_ref().map(fn(relay) { relay.nonce().to_string() }).unwrap_or_default()
         code: serve_static_from_root(stream, static_root, path, nonce, session_secret)
         status.log_request(method, path, code, started.elapsed())
         return .Ok(_)
@@ -463,7 +463,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
         }
         if path == "/__jet_devtools/swap" && method == "POST" {
             state := browser_state.lock().unwrap()
-            result: browser_web_adapter.sync_session(state, session).and_then((()) -> browser_web_adapter.record_dom_snapshot(state, session.id(), body))
+            result: browser_web_adapter.sync_session(state, session).and_then(fn(()) { browser_web_adapter.record_dom_snapshot(state, session.id(), body) })
             return if result == {
                 .Ok(_) -> write_response(stream, "204 No Content", "text/plain; charset=utf-8", "".bytes())
                 .Err(error) -> write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", error.as_bytes())
@@ -494,7 +494,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             }
         }
         if path == "/__jet_devtools/recording" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "recording control must be UTF-8 JSON"))? // GATE #4409
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "recording control must be UTF-8 JSON") })? // GATE #4409
             return if session.recording_control(payload) == {
                 .Ok(body) -> write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
                 .Err(error) -> write_response(stream, "409 Conflict", "text/plain; charset=utf-8", error.as_bytes())
@@ -537,11 +537,11 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             }
         }
         if path == "/__jet_devtools" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8"))
-            return if decode_devtools_envelope(payload).and_then((decoded) -> == {
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "devtools event must be UTF-8") })
+            return if decode_devtools_envelope(payload).and_then(fn(decoded) { == {
                 session.ingest_devtools_envelope(decoded)?
-                session.dispatch_pending_database_explain().map((_) -> ())
-            }) {
+                session.dispatch_pending_database_explain().map(fn(_) { () })
+            } }) {
                 .Ok(_) -> {
                     state := browser_state.lock().unwrap()
                     if browser_web_adapter.sync_session(state, session) == {
@@ -566,9 +566,9 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
                     .Ok(panels) -> panels
                     .Err(error) -> { return write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", error.to_string().as_bytes()) }
                 }
-                if !panels.iter().any((panel) -> panel.availability.descriptor.id.as_str() == panel_id) -> return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "browser selection panel_id must match the canonical panel catalog".bytes())
+                if !panels.iter().any(fn(panel) { panel.availability.descriptor.id.as_str() == panel_id }) -> return write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "browser selection panel_id must match the canonical panel catalog".bytes())
             }
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8"))
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "devtools selection must be UTF-8") })
             return if session.set_devtools_selection(payload) == {
                 .Ok(_) -> {
                     state := browser_state.lock().unwrap()
@@ -584,7 +584,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             }
         }
         if path == "/__jet_devtools/cursor" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8"))
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "devtools cursor must be UTF-8") })
             return if session.set_devtools_cursor(payload) == {
                 .Ok(_) -> {
                     state := browser_state.lock().unwrap()
@@ -603,25 +603,25 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             facts: status.web_error_facts()
             devtools_projection: session.devtools_events_since(.None)
             request_id: next_web_error_request_id()
-            source_id: devtools_projection.source_id.filter((value) -> !value.is_empty()).unwrap_or_else(() -> canvas_file.to_string())
-            build_id: devtools_projection.build_id.filter((value) -> !value.is_empty()) ?? return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
-            accept: request.headers.get("accept").map((v) -> v.as_str()).unwrap_or("*/*")
-            identity: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(request_id, session.id(), source_id.clone(), build_id, devtools_projection.revision.clone()).map_err((error) -> Error.new(ErrorKind.InvalidData, error.to_string()))
+            source_id: devtools_projection.source_id.filter(fn(value) { !value.is_empty() }).unwrap_or_else(fn() { canvas_file.to_string() })
+            build_id: devtools_projection.build_id.filter(fn(value) { !value.is_empty() }) ?? return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "error identity unavailable".bytes())
+            accept: request.headers.get("accept").map(fn(v) { v.as_str() }).unwrap_or("*/*")
+            identity: jet_devserver.WebErrorPage.WebErrorPageIdentity.new(request_id, session.id(), source_id.clone(), build_id, devtools_projection.revision.clone()).map_err(fn(error) { Error.new(ErrorKind.InvalidData, error.to_string()) })
             rendered: if !facts.is_error() { .None } else {
-                source_excerpts: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then((source) -> {
+                source_excerpts: Canvas.read_source_without_symlinks(OSPath.new(canvas_file)).ok().and_then(fn(source) {
                     excerpt: source.chars().take(jet_devserver.WebErrorPage.MAX_WEB_ERROR_SOURCE_BYTES).collect<String>()
                     jet_devserver.WebErrorPage.WebErrorSourceExcerpt.without_span(source_id.clone(), "failure source", .Val(excerpt)).ok()
                 }).into_iter().collect<[_]>()
-                action_links: [("Open devtools", "/__jet_devtools"), ("Reconnect", "/__jet_devtools/reconnect"), ("Open recording", "/__jet_devtools/recording")].into_iter().filter_map(((label, href)) -> jet_devserver.WebErrorPage.WebErrorActionLink.new(label, href).ok()).collect<[_]>()
+                action_links: [("Open devtools", "/__jet_devtools"), ("Reconnect", "/__jet_devtools/reconnect"), ("Open recording", "/__jet_devtools/recording")].into_iter().filter_map(fn((label, href)) { jet_devserver.WebErrorPage.WebErrorActionLink.new(label, href).ok() }).collect<[_]>()
                 page: if {
                     facts.is_internal_failure() -> {
-                        jet_devserver.WebErrorPage.WebErrorPage.from_internal(identity, facts.code.clone(), facts.diagnostic.clone(), action_links).and_then((page) -> page.with_source_excerpts(source_excerpts))
+                        jet_devserver.WebErrorPage.WebErrorPage.from_internal(identity, facts.code.clone(), facts.diagnostic.clone(), action_links).and_then(fn(page) { page.with_source_excerpts(source_excerpts) })
                     }
                     else -> {
-                        jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(facts).and_then((diagnostic) -> jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, identity, diagnostic, source_excerpts, .None, action_links))
+                        jet_devserver.WebErrorPage.WebErrorDiagnosticFact.from_dev_status(facts).and_then(fn(diagnostic) { jet_devserver.WebErrorPage.WebErrorPage.new_with_status(500, identity, diagnostic, source_excerpts, .None, action_links) })
                     }
                 }
-                page.and_then((page) -> page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map((p) -> .Val(p))).map_err((error) -> error.to_string())
+                page.and_then(fn(page) { page.project(accept, jet_devserver.WebErrorPage.WebErrorCapabilities.local()).map(fn(p) { .Val(p) }) }).map_err(fn(error) { error.to_string() })
             }
             return if rendered == {
                 .Val(projection) -> {
@@ -641,7 +641,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             }
         }
         if path == "/__jet_devtools/paused/inspect" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8"))
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "paused inspect body must be UTF-8") })
             request: if jet_devserver.PausedEvaluate.InspectRequest.from_json(payload) == {
                 .Ok(request) -> request
                 .Err(error) -> {
@@ -669,7 +669,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             }
         }
         if path == "/__jet_devtools/paused/evaluate" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8"))
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "paused evaluate body must be UTF-8") })
             request: if jet_devserver.PausedEvaluate.EvaluateRequest.from_json(payload) == {
                 .Ok(request) -> request
                 .Err(error) -> {
@@ -702,7 +702,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
             return write_response(stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
         }
         if path == "/__jet_devtools/style" && method == "POST" {
-            payload: std.str.from_utf8(body).map_err((_) -> Error.new(ErrorKind.InvalidData, "style request must be UTF-8"))
+            payload: std.str.from_utf8(body).map_err(fn(_) { Error.new(ErrorKind.InvalidData, "style request must be UTF-8") })
             (_, event): terminal_style.apply_json(payload)
             return write_response(stream, "200 OK", "application/json; charset=utf-8", event.as_bytes())
         }
@@ -721,7 +721,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
     }
     if path == "/__jet_canvas/live" {
         if method != "GET" -> return method_not_allowed(stream)
-        pid: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))
+        pid: query_param(target, "pid").and_then(fn(value) { value.parse<U32>().ok() }).ok_or_else(fn() { Error.new(ErrorKind.InvalidInput, "missing live pid") })
         source_id: query_param(target, "source_id").unwrap_or_default()
         return if live_inspect_read(pid) == {
             .Ok(snapshot) -> {
@@ -766,7 +766,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
         return if graph == {
             .Ok(body) -> {
                 session.select_project_source_from_payload(body)
-                source_id: source_id.clone().unwrap_or_else(() -> source_id_from_payload(body))
+                source_id: source_id.clone().unwrap_or_else(fn() { source_id_from_payload(body) })
                 revision: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
                 session.remember_last_good_view("graph", source_id, revision, body)
                 write_response(stream, "200 OK", "application/json; charset=utf-8", with_session(body, session).as_bytes())
@@ -804,7 +804,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
     if path == "/__jet_canvas/source".bit_or("/canvas/source").bit_or("/panel/source") {
         if method != "GET" -> return method_not_allowed(stream)
         source_id: query_param(target, "source_id")
-        source_path: source_id.as_ref().and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
+        source_path: source_id.as_ref().and_then(fn(id) { Canvas.project_path_for_source_id(OSPath.new(canvas_file), id) }).unwrap_or_else(fn() { OSPath.new(canvas_file) })
         return if read_source_without_symlinks(source_path) == {
             .Ok(source) -> write_response(stream, "200 OK", "text/plain; charset=utf-8", source.as_bytes())
             .Err(e) -> write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "could not read Canvas source: {e}".as_bytes())
@@ -916,7 +916,7 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
     if listener_kind == .Canvas -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "Canvas control host does not serve program assets".bytes())
     // Page/asset GETs alone get a request-log line; polling noise is excluded.
     started: Instant.now()
-    nonce: status.browser_relay.lock().unwrap().as_ref().map((relay) -> relay.nonce().to_string()).unwrap_or_default()
+    nonce: status.browser_relay.lock().unwrap().as_ref().map(fn(relay) { relay.nonce().to_string() }).unwrap_or_default()
     code: serve_static_from_root(stream, static_root, path, nonce, session_secret)
     status.log_request(method, path, code, started.elapsed())
     return .Ok(_)

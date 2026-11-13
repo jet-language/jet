@@ -14,12 +14,12 @@ run: fn() {
     settings := reactive.signal("closed")
     backend := ui.tui_backend()
     render_backend: backend.copy()
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         rows := [UINode]{
             ui.text("JET NOTES"),
             ui.text("Meeting"),
             ui.node_role(body.get(), 30.0, 3.0, ui.aria_role_text_input()),
-            ui.button("Save", on_click: () -> { print("save") }),
+            ui.button("Save", on_click: fn() { print("save") }),
             ui.text("Mode: {mode.get()}"),
             ui.text("Settings: {settings.get()}")
         }

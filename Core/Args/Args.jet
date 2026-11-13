@@ -1029,12 +1029,12 @@ cli_parse: fn(spec: CLISpec, argv: [String], float_ok: fn(String) -> Bool Never!
 }
 
 __cli_parse: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
-    cli_parse(spec, argv, (text: String) -> false)
+    cli_parse(spec, argv, fn(text: String) { false })
 }
 
 // The parse of a spec with a Float input.
 __cli_parse_float: fn(spec: CLISpec, argv: [String]) -> CLIParsed Never! {
-    cli_parse(spec, argv, (text: String) -> __cli_is_float(text))
+    cli_parse(spec, argv, fn(text: String) { __cli_is_float(text) })
 }
 
 __cli_status: fn(parsed: CLIParsed) -> Int Never! { parsed.status }

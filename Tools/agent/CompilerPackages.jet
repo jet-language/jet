@@ -843,7 +843,7 @@ unblock_uses: fn(text: String) -> String Never! {
         if !open {
             trimmed: line.trim_start()
             lead: line.removesuffix(trimmed)
-            if lead.bytes().all(b -> is_space(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+            if lead.bytes().all(fn(b) { is_space(b) }) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
                 indent = lead
                 open = true
                 lines[at] = blank(line)

@@ -55,7 +55,7 @@ name_ledger_from_facts: fn(facts: &&NameFacts) -> NameLedger Never! {
 name_rows_by_key: fn(modules: [Int], names: [String]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<names.len() -> order.push(index)
-    order.sort_by((a: Int, b: Int) -> (modules[a] <=> modules[b]).then(names[a] <=> names[b]).then(a <=> b))
+    order.sort_by(fn(a: Int, b: Int) { (modules[a] <=> modules[b]).then(names[a] <=> names[b]).then(a <=> b) })
     order
 }
 
@@ -63,7 +63,7 @@ name_rows_by_key: fn(modules: [Int], names: [String]) -> [Int] Never! {
 name_leaf_positions: fn(leaves: [String]) -> [String:[Int]] Never! {
     order := [Int]{}
     loop index in 0..<leaves.len() -> order.push(index)
-    order.sort_by((a: Int, b: Int) -> (leaves[a] <=> leaves[b]).then(a <=> b))
+    order.sort_by(fn(a: Int, b: Int) { (leaves[a] <=> leaves[b]).then(a <=> b) })
     positions := [String:[Int]]{}
     start := 0
     loop start < order.len() {

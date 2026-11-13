@@ -183,7 +183,7 @@ decode_jet: fn(identifier: String) -> String Never! {
     out := [U8]{}
     at := 0
     loop found in regex.matches(Regex{"_[udcsbh]|_x[0-9a-fA-F]{{2}}"}, body) {
-        out = out.concat(body.slice(at..<found.start).bytes()).concat(ESCAPES.get(found.text).map(byte -> byte.bytes()) ?? encoding.hex_to_bytes(found.text.remove_prefix("_x")) ?? [U8]{})
+        out = out.concat(body.slice(at..<found.start).bytes()).concat(ESCAPES.get(found.text).map(fn(byte) { byte.bytes() }) ?? encoding.hex_to_bytes(found.text.remove_prefix("_x")) ?? [U8]{})
         at = found.end
     }
     String.from_bytes_lossy(out.concat(body.slice(at..<body.len()).bytes()))
@@ -194,9 +194,9 @@ decode_jet: fn(identifier: String) -> String Never! {
 // declares, which the mangler leaves as written.
 jet_name: fn(symbol: String, index: Index) -> String Never! {
     bare: regex.replace(Regex{"::h[0-9a-f]{{16}}\b"}, symbol, "")
-    moduled: Regex{"\bjetc_(jetfoundation|jetsema|jetcomptime|jetparser|jetlexer|jetdriver|jeteval|jetbackend|jetcli)\b"}.replace_all_with(bare, found -> MODULES[found.groups[0]])
+    moduled: Regex{"\bjetc_(jetfoundation|jetsema|jetcomptime|jetparser|jetlexer|jetdriver|jeteval|jetbackend|jetcli)\b"}.replace_all_with(bare, fn(found) { MODULES[found.groups[0]] })
     declared: index.slots
-    Regex{"__jet_[A-Za-z0-9_]+"}.replace_all_with(moduled, found -> if declared.has_key(found.text.remove_prefix("__jet_")) -> found.text.remove_prefix("__jet_") else -> regex.replace_first(Regex{"^src::[^:]+::"}, decode_jet(found.text), ""))
+    Regex{"__jet_[A-Za-z0-9_]+"}.replace_all_with(moduled, fn(found) { if declared.has_key(found.text.remove_prefix("__jet_")) -> found.text.remove_prefix("__jet_") else -> regex.replace_first(Regex{"^src::[^:]+::"}, decode_jet(found.text), "") })
 }
 
 // Every `name:` declaration in the files the source map lists, read from REPO.
@@ -241,7 +241,7 @@ declaration_location: fn(symbol: String, index: Index) -> String Never! {
     names.reverse()
     loop name in names {
         wanted: Val(found.groups[0].copy())  // copy: the filter keeps its own module
-        hits: index.groups[index.slots.get(name) ?? next].filter(decl -> decl.module == wanted)
+        hits: index.groups[index.slots.get(name) ?? next].filter(fn(decl) { decl.module == wanted })
         if hits.len() == 1 -> return " [decl {hits[0].location}{if hits[0].mapped -> "" else -> " (current source)"}]"
     }
     ""
@@ -255,7 +255,7 @@ classify: fn(stack: [String]) -> String Never! {
     loop rules in [FUNCTION_PHASES, CRATE_PHASES] {
         loop frame in stack {
             head: frame.partition("<").head.lower()
-            rule: rules.find(rule -> regex.is_match(rule.pattern, head)) ?? next
+            rule: rules.find(fn(rule) { regex.is_match(rule.pattern, head) }) ?? next
             return rule.name.copy()  // copy: the phase table keeps its names
         }
     }
@@ -290,7 +290,7 @@ normalize: fn(raw: String, index: Index, names: &[String: String]) -> String Nev
     if regex.match(Regex{"^([$\p{{L}}_][\p{{L}}\p{{N}}_$]*)(?:\.llvm\.[A-Za-z0-9]+)?$"}, name) == .Val(found) {
         plain: found.groups[0]
         decls: index.groups.get(index.slots.get(plain) ?? index.groups.len()) ?? [Decl]{}
-        owner: if decls.len() == 1 -> decls[0].module ?? "undefined" else -> PREFIX_MODULES.find(rule -> regex.is_match(rule.pattern, plain)).map(rule -> rule.name.copy()) ?? ""  // copy: the module table keeps its names
+        owner: if decls.len() == 1 -> decls[0].module ?? "undefined" else -> PREFIX_MODULES.find(fn(rule) { regex.is_match(rule.pattern, plain) }).map(fn(rule) { rule.name.copy() }) ?? ""  // copy: the module table keeps its names
         if owner != "" -> name = "{owner}::{found.groups[0]}"
     }
     shown: "{name}{declaration_location(name, index)}"
@@ -306,7 +306,7 @@ flush: fn(profile: &Profile, stack: &[String]) Never! {
     // The root frame unresolved: [unknown], a bare address or unknown, in any
     // ASCII case.
     if regex.is_match(Regex{"^(?:\[unknown\]|0x[0-9a-f]+|unknown)(?: |$)"}, stack[stack.len() - 1].to_ascii_lower()) -> profile.unresolved_roots += 1
-    if stack.any(frame -> regex.is_match(Regex{"\bJet[A-Za-z]+::"}, frame)) -> profile.jet_stacks += 1
+    if stack.any(fn(frame) { regex.is_match(Regex{"\bJet[A-Za-z]+::"}, frame) }) -> profile.jet_stacks += 1
     add(profile.phases, classify(stack))
     loop frame in stack {
         slot: slot_of(profile.row_slots, profile.rows.len(), frame)
@@ -316,7 +316,7 @@ flush: fn(profile: &Profile, stack: &[String]) Never! {
         profile.rows[slot].inclusive += 1
     }
     profile.rows[profile.row_slots[stack[0]]].own += 1
-    frames := stack.map(frame -> frame.replace(";", ":"))
+    frames := stack.map(fn(frame) { frame.replace(";", ":") })
     frames.reverse()
     add(profile.folded, frames.join(";"))
     stack.clear()
@@ -343,20 +343,20 @@ analyze: fn(script: String, map_file: String, repo: String, out: String, graph: 
     samples: profile.samples
     if samples == 0 -> return Err("No CPU samples captured; check PID activity and perf permissions.")
     ranked := profile.rows
-    ranked.sort_by((a, b) -> if a.inclusive != b.inclusive -> b.inclusive <=> a.inclusive else -> b.own <=> a.own)
-    rows: ranked.take(30).map(row -> TopRow{name: row.name.copy(), inclusive: row.inclusive, own: row.own}).to_list()  // copy: the report owns its names
-    top: rows.map(row -> "{pct(row.inclusive, samples).pad_start(7, " ")}  {pct(row.own, samples).pad_start(7, " ")}  {"{row.inclusive}".pad_start(5, " ")} {"{row.own}".pad_start(5, " ")}  {row.name}")
+    ranked.sort_by(fn(a, b) { if a.inclusive != b.inclusive -> b.inclusive <=> a.inclusive else -> b.own <=> a.own })
+    rows: ranked.take(30).map(fn(row) { TopRow{name: row.name.copy(), inclusive: row.inclusive, own: row.own} }).to_list()  // copy: the report owns its names
+    top: rows.map(fn(row) { "{pct(row.inclusive, samples).pad_start(7, " ")}  {pct(row.own, samples).pad_start(7, " ")}  {"{row.inclusive}".pad_start(5, " ")} {"{row.own}".pad_start(5, " ")}  {row.name}" })
     phases := profile.phases.entries.copy()  // copy: the summary keeps the first-seen order
-    phases.sort_by((a, b) -> b.count <=> a.count)
+    phases.sort_by(fn(a, b) { b.count <=> a.count })
     classified: samples - count_of(profile.phases, UNCLASSIFIED)
-    verdict: phases.find(phase -> phase.key != UNCLASSIFIED).map(winner -> "{winner.key} dominates classified samples: {pct(winner.count, samples)} of all samples, {pct(winner.count, classified)} of classified.") ?? "No compiler phase could be classified."
-    report: PHASES.map(phase -> "{pct(count_of(profile.phases, phase), samples).pad_start(7, " ")}  {"{count_of(profile.phases, phase)}".pad_start(5, " ")}  {phase}")
+    verdict: phases.find(fn(phase) { phase.key != UNCLASSIFIED }).map(fn(winner) { "{winner.key} dominates classified samples: {pct(winner.count, samples)} of all samples, {pct(winner.count, classified)} of classified." }) ?? "No compiler phase could be classified."
+    report: PHASES.map(fn(phase) { "{pct(count_of(profile.phases, phase), samples).pad_start(7, " ")}  {"{count_of(profile.phases, phase)}".pad_start(5, " ")}  {phase}" })
     stacks := profile.folded.entries
-    stacks.sort_by((a, b) -> text.collate(a.key, b.key))
-    folded: "{stacks.map(entry -> "{entry.key} {entry.count}").join("\n")}\n"
+    stacks.sort_by(fn(a, b) { text.collate(a.key, b.key) })
+    folded: "{stacks.map(fn(entry) { "{entry.key} {entry.count}" }).join("\n")}\n"
     files.create_dir_all(out)
-    files.write(files.join(out, "top.txt"), "Top 30 by inclusive samples ({samples} samples, {graph}; recursion counted once per sample)\nINCL %   SELF %   INCL  SELF  Jet module/function [declaration location]\n{top.map(line -> "{line}\n").join("")}")
-    files.write(files.join(out, "phases.txt"), "\nCompiler phases (nearest leaf-side recognizable Jet function; generic type names ignored):\n{report.map(line -> "{line}\n").join("")}Verdict: {verdict}\nStack quality: {pct(profile.short_stacks, samples)} <=2 frames; {pct(profile.unresolved_roots, samples)} unresolved roots; {pct(profile.jet_stacks, samples)} contain Jet symbols.\n")
+    files.write(files.join(out, "top.txt"), "Top 30 by inclusive samples ({samples} samples, {graph}; recursion counted once per sample)\nINCL %   SELF %   INCL  SELF  Jet module/function [declaration location]\n{top.map(fn(line) { "{line}\n" }).join("")}")
+    files.write(files.join(out, "phases.txt"), "\nCompiler phases (nearest leaf-side recognizable Jet function; generic type names ignored):\n{report.map(fn(line) { "{line}\n" }).join("")}Verdict: {verdict}\nStack quality: {pct(profile.short_stacks, samples)} <=2 frames; {pct(profile.unresolved_roots, samples)} unresolved roots; {pct(profile.jet_stacks, samples)} contain Jet symbols.\n")
     files.write(files.join(out, "stacks.folded"), folded)
     files.write(files.join(out, "flamegraph.svg"), render_folded(folded))
     // Each phase's count, in the order the samples first named it (a map
@@ -428,7 +428,7 @@ draw: fn(nodes: [Node], at: Int, x: Float, level: Int, height: Int, svg: &[Strin
     }
     next_x := x
     children := node.children.copy()  // copy: the node keeps its first-seen order
-    children.sort_by((a, b) -> text.collate(a, b))
+    children.sort_by(fn(a, b) { text.collate(a, b) })
     loop name in children {
         child: node.slots[name]
         draw(nodes, child, next_x, level + 1, height, svg)
@@ -439,7 +439,7 @@ draw: fn(nodes: [Node], at: Int, x: Float, level: Int, height: Int, svg: &[Strin
 // The first UTF-16 unit of one scalar: what `charCodeAt(0)` reads from each
 // character a JavaScript string iterates.
 lead_unit: fn(scalar: String) -> Int Never! {
-    b: scalar.bytes().map(byte -> Int.from_u8(byte))
+    b: scalar.bytes().map(fn(byte) { Int.from_u8(byte) })
     if {
         b.len() == 1 -> b[0]
         b.len() == 2 -> (b[0] % 32) * 64 + b[1] % 64

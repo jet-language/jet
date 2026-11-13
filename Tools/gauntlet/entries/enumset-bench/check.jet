@@ -64,7 +64,7 @@ masked: fn(key: String, value: Dyn) -> Dyn {
         .Bool(_) | .Float(_) | .Number(_) -> Dyn.Text("<varies>")
         .Int(_) -> if STABLE.contains(key) -> value.copy() else -> Dyn.Text("<varies>")  // copy: the report keeps its own
         .Text(text) -> if key == "error_tail" -> Dyn.Text(without_runner_note(text)) else -> value.copy()  // copy: the report keeps its own
-        .Array(items) -> Dyn.Array(items.map(item -> masked("", item)))
+        .Array(items) -> Dyn.Array(items.map(fn(item) { masked("", item) }))
         .Object(entries) -> {
             out := [String: Dyn]{}
             loop entry in entries -> out[entry.key.copy()] = masked(entry.key, entry.value)  // copy: the masked report keeps its own
@@ -77,5 +77,5 @@ masked: fn(key: String, value: Dyn) -> Dyn {
 // A build's error tail without the note the Jet runner prints before the
 // JetEnv script, which names the tree it runs from.
 without_runner_note: fn(text: String) -> String {
-    text.split("\n").to_list().filter(line -> !(line.starts_with("note: ") && line.contains("JetEnv.jet"))).join("\n")
+    text.split("\n").to_list().filter(fn(line) { !(line.starts_with("note: ") && line.contains("JetEnv.jet")) }).join("\n")
 }

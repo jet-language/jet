@@ -177,7 +177,7 @@ gate_entry_compare: fn(left: GateEntry, right: GateEntry) -> Ordering Never! {
 
 gate_ledger_sort: fn(ledger: &GateLedger) Never! {
     ledger.rows = loop fresh_item in ledger.rows -> fresh_item
-    ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
+    ledger.rows.sort_by(fn(left: GateEntry, right: GateEntry) { gate_entry_compare(left, right) })
 }
 
 gate_source_entry: fn(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {

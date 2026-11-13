@@ -7,7 +7,7 @@ BadFunction: fn(BadParam: Int) { BadLocal: BadParam }
 MAX_RETRIES: #run 3
 bad_constant: #run MAX_RETRIES
 
-TOP_CALLBACK: #run { ((BadTop: Int) -> BadTop)(0) ?? 0 }
+TOP_CALLBACK: #run { (fn(BadTop: Int) { BadTop })(0) ?? 0 }
 
 Token: trait {
 }
@@ -15,7 +15,7 @@ Token: trait {
 holder: module<bad_type: Token>(BadCount: Int) {
 }
 
-default_names: fn(callback: fn(Int) -> Int{(BadDefault: Int) -> BadDefault}) {
+default_names: fn(callback: fn(Int) -> Int{fn(BadDefault: Int) { BadDefault }}) {
 
 }
 
@@ -28,7 +28,7 @@ Incident: struct {
 }
 
 nested_names: fn(value: Int?, incident: Incident) {
-    callback: (BadLambda: Int) -> BadLambda
+    callback: fn(BadLambda: Int) { BadLambda }
     Incident{severity: BadRename}: incident
     matched: value == .Val(BadBind)
     text: "item-1"

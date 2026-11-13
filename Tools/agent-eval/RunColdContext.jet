@@ -230,7 +230,7 @@ shown: fn(value: Dyn?) -> String {
     found := value ?? return "undefined"
     if found == .Text(written) -> return written
     if found == .Object(_) -> return "[object Object]"
-    if found == .Array(list) -> return list.map(item -> if item == .Null -> "" else -> shown(Val(item))).join(",")
+    if found == .Array(list) -> return list.map(fn(item) { if item == .Null -> "" else -> shown(Val(item)) }).join(",")
     identity(value)
 }
 
@@ -265,7 +265,7 @@ js_numbers: fn(value: Dyn) -> Dyn {
         if Int.parse(identity(Val(value))) == .Ok(whole) -> return Dyn.Int(whole)
         return Dyn.Float(Float.parse(lexeme) ?? return value.copy())
     }
-    if value == .Array(list) -> return Dyn.Array(list.map(item -> js_numbers(item)))
+    if value == .Array(list) -> return Dyn.Array(list.map(fn(item) { js_numbers(item) }))
     if value == .Object(entries) {
         out := Dyn.object()
         loop entry in entries -> out[entry.key] = js_numbers(entry.value)
@@ -368,7 +368,7 @@ numbered: fn(found: [Match], names: [String]) -> Bool {
 validate_capsule: fn(capsule: String) Failure! {
     size: capsule.bytes().len()
     if size > CAPSULE_LIMIT -> usage("capsule is {size} bytes; limit is {CAPSULE_LIMIT}")
-    if SUBJECTS.find(needle -> !capsule.contains(needle)) == .Val(missing) -> usage("capsule is missing required subject: {missing}")
+    if SUBJECTS.find(fn(needle) { !capsule.contains(needle) }) == .Val(missing) -> usage("capsule is missing required subject: {missing}")
     if !numbered(Regex{"(?:\A|\s)(\d+)\.\s+`([^`]+)`"}.matches(capsule), VERBS) -> usage("capsule must contain the canonical numbered verb list")
     headings: Regex{"(?:\A|\n)### (\d+)\. ([^\r\n]+)"}.matches(capsule)
     if !numbered(headings, PROGRAMS) -> usage("capsule must contain the canonical numbered program list")
@@ -420,11 +420,11 @@ load_tasks: fn(config: Dyn) -> [Task] Failure! {
     out := [Task]{}
     loop item in need(items(config, "tasks"), "task fixture has the wrong schema") {
         task: validate_task(item)
-        if out.map((seen: Task) -> seen.id).contains(task.id) -> usage("duplicate task {task.id}")
+        if out.map(fn(seen: Task) { seen.id }).contains(task.id) -> usage("duplicate task {task.id}")
         out.push(task)
     }
-    out.sort_by((task: Task) -> task.id)
-    if out.map((task: Task) -> task.id) != ["cli", "data-transform", "hello", "http"] -> usage("task fixture must contain hello, cli, data-transform, and http")
+    out.sort_by(fn(task: Task) { task.id })
+    if out.map(fn(task: Task) { task.id }) != ["cli", "data-transform", "hello", "http"] -> usage("task fixture must contain hello, cli, data-transform, and http")
     Ok(out)
 }
 
@@ -437,7 +437,7 @@ load_adapters: fn(config: Dyn) -> [Adapter] Failure! {
     loop spec in specs {
         id: need(str(spec, "id"), "each adapter needs id and family")
         family: need(str(spec, "family"), "each adapter needs id and family")
-        if out.map((seen: Adapter) -> seen.id).contains(id) || out.map((seen: Adapter) -> seen.family).contains(family) -> usage("adapter ids and families must be unique")
+        if out.map(fn(seen: Adapter) { seen.id }).contains(id) || out.map(fn(seen: Adapter) { seen.family }).contains(family) -> usage("adapter ids and families must be unique")
         command: member(spec, "command")
         transport_env: need(str(spec, "transport_env"), "{id}: api or command and transport_env are required")
         if !truthy(member(spec, "api")) && !truthy(command) -> usage("{id}: api or command and transport_env are required")
@@ -449,9 +449,9 @@ load_adapters: fn(config: Dyn) -> [Adapter] Failure! {
         }
         out.push(Adapter{id: id, family: family, transport_env: transport_env, spec: spec.copy()})
     }
-    families: out.map((adapter: Adapter) -> adapter.family)
-    if unique.find(family -> !families.contains(family)) == .Val(missing) -> usage("missing required family {missing}")
-    out.sort_by((adapter: Adapter) -> adapter.id)
+    families: out.map(fn(adapter: Adapter) { adapter.family })
+    if unique.find(fn(family) { !families.contains(family) }) == .Val(missing) -> usage("missing required family {missing}")
+    out.sort_by(fn(adapter: Adapter) { adapter.id })
     Ok(out)
 }
 
@@ -792,13 +792,13 @@ rate: fn(passes: Int, cases: Int) -> Dyn {
 score: fn(row: Dyn, key: String) -> Int { integer(row, key) ?? -1 }
 
 // How many `rows` score 1 for `key`.
-ones: fn(rows: [Dyn], key: String) -> Int { rows.filter(row -> score(row, key) == 1).len() }
+ones: fn(rows: [Dyn], key: String) -> Int { rows.filter(fn(row) { score(row, key) == 1 }).len() }
 
 summarize: fn(rows: [Dyn]) -> Dyn {
     out := Dyn.object()
     loop context in ["capsule", "control"] {
         wanted: Val(context.copy())
-        selected: rows.filter(row -> str(row, "context") == wanted)
+        selected: rows.filter(fn(row) { str(row, "context") == wanted })
         entry := Dyn.object()
         entry["cases"] = selected.len()
         entry["passes"] = Dyn.Int(ones(selected, "score"))
@@ -839,12 +839,12 @@ adapter_descriptor: fn(r: Resolved, env: [String: String]) -> Dyn {
 }
 
 make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [String], blocked_reasons: [String], env: [String: String]) -> Dyn {
-    expected: resolved.flat_map(r -> modes.flat_map(context -> inputs.tasks.map(task -> "{r.adapter.id}{NUL}{context}{NUL}{task.id}")))
-    keys: combinatorics.unique(rows.map(row -> row_key(row)))
-    complete: rows.len() == inputs.tasks.len() * resolved.len() * modes.len() && keys.len() == rows.len() && keys.all((key: String) -> expected.contains(key))
+    expected: resolved.flat_map(fn(r) { modes.flat_map(fn(context) { inputs.tasks.map(fn(task) { "{r.adapter.id}{NUL}{context}{NUL}{task.id}" }) }) })
+    keys: combinatorics.unique(rows.map(fn(row) { row_key(row) }))
+    complete: rows.len() == inputs.tasks.len() * resolved.len() * modes.len() && keys.len() == rows.len() && keys.all(fn(key: String) { expected.contains(key) })
     status: if blocked_reasons.len() > 0 || !complete -> "blocked" else -> "recorded"
     sorted := rows.copy()
-    sorted.sort_by((row: Dyn) -> row_key(row))
+    sorted.sort_by(fn(row: Dyn) { row_key(row) })
     reasons := combinatorics.unique(blocked_reasons)
     reasons.sort()
     out := Dyn.object()
@@ -856,15 +856,15 @@ make_report: fn(inputs: Inputs, resolved: [Resolved], rows: [Dyn], modes: [Strin
     out["control"] = inputs.control.copy()
     out["fixtures"] = inputs.fixtures.copy()
     out["harness"] = inputs.harness.copy()
-    out["adapters"] = Dyn.Array(resolved.map(r -> adapter_descriptor(r, env)))
-    out["tasks"] = Dyn.Array(inputs.tasks.map(task -> task_descriptor(task)))
+    out["adapters"] = Dyn.Array(resolved.map(fn(r) { adapter_descriptor(r, env) }))
+    out["tasks"] = Dyn.Array(inputs.tasks.map(fn(task) { task_descriptor(task) }))
     out["rows"] = sorted
     out["summary"] = if status == "recorded" -> summarize(rows) else -> Dyn.Null
     out["blocked_reasons"] = reasons
     out
 }
 
-capsule_rows: fn(report: Dyn) -> [Dyn] { (items(report, "rows") ?? []).filter(row -> str(row, "context") == Val("capsule")) }
+capsule_rows: fn(report: Dyn) -> [Dyn] { (items(report, "rows") ?? []).filter(fn(row) { str(row, "context") == Val("capsule") }) }
 
 baseline_from_report: fn(report: Dyn) -> Dyn Failure! {
     if str(report, "status") != Val("recorded") || !truthy(member(report, "summary")) -> usage("cannot record a baseline from an incomplete or blocked run")
@@ -944,7 +944,7 @@ unique_ids: fn(list: [Dyn]) -> [String]? {
     Val(ids)
 }
 
-binary_scores: fn(row: Dyn) -> Bool { ["compile_score", "run_score", "score"].all((key: String) -> score(row, key) == 0 || score(row, key) == 1) }
+binary_scores: fn(row: Dyn) -> Bool { ["compile_score", "run_score", "score"].all(fn(key: String) { score(row, key) == 0 || score(row, key) == 1 }) }
 
 compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
     validate_baseline(b)
@@ -956,13 +956,13 @@ compare_baseline: fn(r: Dyn, b: Dyn) Failure! {
     // were checked, so identities match as `===` does.
     if identity(member(r, "capsule/sha256")) != identity(member(b, "capsule/sha256")) -> regress("capsule artifact changed; record a new baseline")
     if identity(member(r, "control/context_budget_bytes")) != identity(member(b, "context_budget_bytes")) -> regress("context budget changed; record a new baseline")
-    if ["source_sha256", "source_bytes", "context_sha256"].any(key -> identity(member(r, "control/{key}")) != identity(member(b, "control/{key}"))) -> regress("control context changed; record a new baseline")
+    if ["source_sha256", "source_bytes", "context_sha256"].any(fn(key) { identity(member(r, "control/{key}")) != identity(member(b, "control/{key}")) }) -> regress("control context changed; record a new baseline")
     if identity(member(r, "harness/sha256")) != identity(member(b, "harness/sha256")) -> regress("harness changed; record a new baseline")
     loop field in [(key: "required_families", what: "required model families"), (key: "fixtures", what: "evaluation fixtures"), (key: "adapters", what: "model adapter identity"), (key: "tasks", what: "evaluation task identity")] {
         if identity(member(r, field.key)) != identity(member(b, field.key)) -> regress("{field.what} changed; record a new baseline")
     }
     current: capsule_rows(r)
-    if (integer(r, "summary/capsule/cases") ?? -1) != current.len() || !current.all((row: Dyn) -> binary_scores(row)) -> regress("current capsule summary or rows are invalid")
+    if (integer(r, "summary/capsule/cases") ?? -1) != current.len() || !current.all(fn(row: Dyn) { binary_scores(row) }) -> regress("current capsule summary or rows are invalid")
     // The current rows by adapter and task, as a Map keeps them: a later row
     // replaces an earlier one of the same key.
     by_key := [String: Dyn]{}

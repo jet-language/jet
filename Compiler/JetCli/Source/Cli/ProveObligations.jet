@@ -521,7 +521,7 @@ jet_cli_solver_obligations: fn(functions: [FnBody], callees: JetCLISolverCallees
     }
     keyed := loop item in out -> JetCLISolverKeyedObligation{text: if item.formula == .Val(formula) -> jet_cli_solver_formula_json(formula) else -> "{item.reason}\t{item.detail}", obligation: item}
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    keyed.sort_by((left: JetCLISolverKeyedObligation, right: JetCLISolverKeyedObligation) -> jet_cli_solver_obligation_order(left, right))
+    keyed.sort_by(fn(left: JetCLISolverKeyedObligation, right: JetCLISolverKeyedObligation) { jet_cli_solver_obligation_order(left, right) })
     kept := [JetCLISolverObligation]{}
     loop (index, item) in keyed {
         if index > 0 {

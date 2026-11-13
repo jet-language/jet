@@ -8,14 +8,14 @@ use {
 run: fn() {
     clicks: reactive.signal(0)
     backend: ui.null_backend()
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         current: clicks.get()
         tree: ui.box([
             ui.node("count: {current}", 120.0, 32.0),
-            ui.button("increment", () -> {
+            ui.button("increment", fn() {
                 clicks.set(clicks.get() + 1)
             }),
-            ui.button("reset", () -> {
+            ui.button("reset", fn() {
                 clicks.set(0)
             })
         ])

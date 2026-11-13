@@ -119,7 +119,7 @@ ArtifactStoredEntry: struct {
 store_artifact_sort_entries: fn(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] Never! {
     out := entries
     out = loop fresh_item in out -> fresh_item
-    out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> store_artifact_entry_order(left, right))
+    out.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { store_artifact_entry_order(left, right) })
     out
 }
 
@@ -855,7 +855,7 @@ ArtifactStore: struct {
         // on sort stability across two passes.
         order := entries.copy()
         order = loop fresh_item in order -> fresh_item
-        order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
+        order.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
         after := before
         removed := [ArtifactEntryStatus]{}
         loop entry in order {
@@ -1047,7 +1047,7 @@ ArtifactStore: struct {
         journal: store_artifact_read_journal(journal_path)
         entries := self.annotated_entries(journal, [String: Bool]{})
         entries = loop fresh_item in entries -> fresh_item
-        entries.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
+        entries.sort_by(fn(left: ArtifactStoredEntry, right: ArtifactStoredEntry) { (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)) })
         lines := [String]{}
         loop index in 0..<entries.len() {
             lines.push(store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1))

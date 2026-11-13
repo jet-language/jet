@@ -32,24 +32,24 @@ publication_state: fn(run: Dyn) -> Dyn {
     }
     blockers.extend(items_at(scoreboard, "validation_issues"))
     if !full_scope -> blockers.push(Dyn.Text("run scope is partial; full matrix publication requires no --entry"))
-    if skipped.len() > 0 -> blockers.push(Dyn.Text("skipped entries: {skipped.map(item -> joined(dyn_at(item, "name"))).join(", ")}"))
+    if skipped.len() > 0 -> blockers.push(Dyn.Text("skipped entries: {skipped.map(fn(item) { joined(dyn_at(item, "name")) }).join(", ")}"))
     if {
         !truthy_at(sources, "") -> blockers.push(Dyn.Text("source measurements are missing"))
         truthy_at(manifest, "") && !truthy_at(sources, "coverage/denominator_pass") -> blockers.push(Dyn.Text("source measurement denominator is incomplete"))
         else -> {}
     }
 
-    expected_names: loaded.map(item -> member(item, "directoryName") ?? member(item, "entry/name") ?? Dyn.Null)
-    actual_names: results.map(result -> member(result, "entry/name") ?? Dyn.Null)
+    expected_names: loaded.map(fn(item) { member(item, "directoryName") ?? member(item, "entry/name") ?? Dyn.Null })
+    actual_names: results.map(fn(result) { member(result, "entry/name") ?? Dyn.Null })
     if results.len() != loaded.len() -> blockers.push(Dyn.Text("result denominator is {results.len()}/{loaded.len()}"))
     if !all_distinct(actual_names) -> blockers.push(Dyn.Text("result entry identities are duplicated"))
     if !same_values(expected_names, actual_names) -> blockers.push(Dyn.Text("result entry identities do not match the loaded corpus order"))
-    matrix_ids: matrix_cells.map(cell -> dyn_at(cell, "id"))
+    matrix_ids: matrix_cells.map(fn(cell) { dyn_at(cell, "id") })
     if board_cells.len() != matrix_cells.len() -> blockers.push(Dyn.Text("scoreboard cell denominator is {board_cells.len()}/{matrix_cells.len()}"))
     loop cell in board_cells {
         if !listed(matrix_ids, Val(dyn_at(cell, "id"))) -> blockers.push(Dyn.Text("scoreboard declares unknown matrix cell {template(value_at(cell, "id"))}"))
     }
-    required_axes: members(dyn_at(manifest, "axes")).filter(row -> text_at(row.value, "status") == Val("required")).map(row -> row.key.copy())
+    required_axes: members(dyn_at(manifest, "axes")).filter(fn(row) { text_at(row.value, "status") == Val("required") }).map(fn(row) { row.key.copy() })
     allowed: items_at(manifest, "corpus/allowed_uncovered_cells")
 
     loop cell in matrix_cells {
@@ -64,8 +64,8 @@ publication_state: fn(run: Dyn) -> Dyn {
             loop peer_failure in peer_failures {
                 reasons := [dyn_at(peer_failure, "reason")]
                 reasons.extend(items_at(failure, "reasons"))
-                kept: distinct_values(reasons.filter(reason -> truthy_at(reason, "")))
-                detail: if kept.len() > 0 -> " ({kept.map(reason -> js_text(reason)).join("; ")})" else -> ""
+                kept: distinct_values(reasons.filter(fn(reason) { truthy_at(reason, "") }))
+                detail: if kept.len() > 0 -> " ({kept.map(fn(reason) { js_text(reason) }).join("; ")})" else -> ""
                 verdict: or_text(member(peer_failure, "verdict"), or_text(member(failure, "verdict"), "unmeasured"))
                 blockers.push(Dyn.Text("{shown_id}/{or_text(member(peer_failure, "peer"), "peer")}/{metric}: metric {verdict}{detail}"))
             }
@@ -75,19 +75,19 @@ publication_state: fn(run: Dyn) -> Dyn {
             }
         }
     }
-    covered: results.flat_map(result -> items_at(result, "entry/cells"))
+    covered: results.flat_map(fn(result) { items_at(result, "entry/cells") })
     uncovered := [Dyn]{}
     loop id in matrix_ids {
         if !listed(covered, Val(id)) && !listed(allowed, Val(id)) -> uncovered.push(id)
     }
-    if uncovered.len() > 0 -> blockers.push(Dyn.Text("unexpected uncovered matrix cells: {uncovered.map(id -> joined(id)).join(", ")}"))
+    if uncovered.len() > 0 -> blockers.push(Dyn.Text("unexpected uncovered matrix cells: {uncovered.map(fn(id) { joined(id) }).join(", ")}"))
     expected_count: member(manifest, "corpus/entry_count") ?? Dyn.Int(loaded.len())
     if full_scope && int_at(expected_count, "") != Val(loaded.len()) -> blockers.push(Dyn.Text("entry denominator is {loaded.len()}/{js_text(expected_count)}"))
     if (number_at(scoreboard, "summary/unmeasured_required") ?? 0.0) > 0.0 -> blockers.push(Dyn.Text("{js_text(dyn_at(scoreboard, "summary/unmeasured_required"))} required matrix cells are unmeasured"))
     if (number_at(scoreboard, "summary/metric_unmeasured") ?? 0.0) > 0.0 -> blockers.push(Dyn.Text("{js_text(dyn_at(scoreboard, "summary/metric_unmeasured"))} required metric cells are unmeasured"))
 
     axes: members(dyn_at(run, "axes"))
-    axis_ids: axes.map(row -> row.key.copy())
+    axis_ids: axes.map(fn(row) { row.key.copy() })
     loop id in required_axes {
         if !axis_ids.contains(id) -> blockers.push(Dyn.Text("{id} axis is missing"))
     }
@@ -102,8 +102,8 @@ publication_state: fn(run: Dyn) -> Dyn {
         category: or_text(member(owner, "category"), "unknown category")
         blockers.push(Dyn.Text("{template(value_at(owner, "entry"))}/{or_text(member(owner, "peer"), "peer")}/{or_text(member(owner, "metric"), "metric")} ({category}): loss owner {or_text(member(owner, "card"), "is not declared")} is not live"))
     }
-    cells := combinatorics.unique<String>(allowed.filter_map(cell -> text_at(cell, "")).to_list())
-    cells.sort_by((left: String, right: String) -> text.collate(left, right))
+    cells := combinatorics.unique<String>(allowed.filter_map(fn(cell) { text_at(cell, "") }).to_list())
+    cells.sort_by(fn(left: String, right: String) { text.collate(left, right) })
     state(if full_scope -> "full_matrix" else -> "partial_entry", blockers, cells)
 }
 
@@ -126,13 +126,13 @@ axis_publication: fn(run: Dyn, axis_id: Dyn) -> Dyn {
 // The state with the distinct non-empty string `blockers`, complete when there
 // are none.
 state: fn(scope: String, blockers: [Dyn], allowed: [String]) -> Dyn {
-    kept: combinatorics.unique<String>(blockers.filter_map(blocker -> text_at(blocker, "")).filter(blocker -> blocker != "").to_list())
+    kept: combinatorics.unique<String>(blockers.filter_map(fn(blocker) { text_at(blocker, "") }).filter(fn(blocker) { blocker != "" }).to_list())
     out := Dyn.object()
     out["scope"] = Dyn.Text(scope.copy())
     out["status"] = Dyn.Text(if kept.len() > 0 -> "incomplete" else -> "complete")
     out["complete"] = Dyn.Bool(kept.len() == 0)
-    out["blockers"] = Dyn.Array(kept.map(blocker -> Dyn.Text(blocker.copy())))
-    out["allowed_uncovered_cells"] = Dyn.Array(allowed.map(cell -> Dyn.Text(cell.copy())))
+    out["blockers"] = Dyn.Array(kept.map(fn(blocker) { Dyn.Text(blocker.copy()) }))
+    out["allowed_uncovered_cells"] = Dyn.Array(allowed.map(fn(cell) { Dyn.Text(cell.copy()) }))
     out
 }
 

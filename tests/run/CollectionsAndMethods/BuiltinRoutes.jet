@@ -31,13 +31,13 @@ run: fn() {
     print("set equal: {s.equal(Set.from([20, 10, 30]))} {s.equal(Set.from([10]))}")
 
     words: [String]{"1", "two", "3"}
-    print("filter_map: {words.filter_map((w: String) -> parse_int(w)).to_list()}")
-    print("fold: {[1, 2, 3].fold(100, (acc: Int, n: Int) -> acc - n)}")
+    print("filter_map: {words.filter_map(fn(w: String) { parse_int(w) }).to_list()}")
+    print("fold: {[1, 2, 3].fold(100, fn(acc: Int, n: Int) { acc - n })}")
     print("lazy join: {[1, 2, 3].lazy().join("-")}")
-    print("lazy map join: {[1, 2].lazy().map(i -> "<{i}>").join(",")}")
+    print("lazy map join: {[1, 2].lazy().map(fn(i) { "<{i}>" }).join(",")}")
 
     base: 1
     print("named: {apply(add_one, 41)}")
-    print("lambda: {apply((n: Int) -> n + 1, 41)}")
-    print("capturing: {apply((n: Int) -> n + base, 41)}")
+    print("lambda: {apply(fn(n: Int) { n + 1 }, 41)}")
+    print("capturing: {apply(fn(n: Int) { n + base }, 41)}")
 }

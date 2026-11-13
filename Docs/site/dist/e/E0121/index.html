@@ -42,10 +42,10 @@
     |
   5 |     print(name)
     |           ^^^^
-  --&gt; tests/ui/E0121_lambda_move_outer_use.jet:3:16
+  --&gt; tests/ui/E0121_lambda_move_outer_use.jet:3:15
     |
-  3 |     f: () -&gt; { name.move() }
-    |                ^^^^^^^^^ `name` moved to `name.move()` here
+  3 |     f: fn() { name.move() }
+    |               ^^^^^^^^^ `name` moved to `name.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `name` after the move, or give `name.move()` a copy with `name.copy()` where it moved.
 More: jet-lang.dev/e/E0121

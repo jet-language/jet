@@ -112,7 +112,7 @@ show: fn(value: Dyn, here: String) -> String Never! {
         .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()  // copy: the fallback is the text as is
         .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
         .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
-        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+        .Array(items) -> "[{items.map(fn(item) { show(item, here) }).join(", ")}]"
     }
 }
 

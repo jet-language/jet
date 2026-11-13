@@ -92,7 +92,7 @@ sema_footprint_has_receiver: fn(method: Func) -> Bool Never! {
 
 sema_footprint_body_uses: fn(method: Func, known: [String]) -> SemaFootprintUses {
     uses := SemaFootprintUses{known: known, names: [String]{}, spans: [Span]{}, calls: [NamedSpan]{}, whole: None, settled: [Int:Bool]{}}
-    loop statement in method.body -> ast_visit_statement(statement, (expression: Expr) -> uses.visit(expression), true)
+    loop statement in method.body -> ast_visit_statement(statement, fn(expression: Expr) { uses.visit(expression) }, true)
     uses
 }
 
@@ -129,7 +129,7 @@ sema_footprint_check: fn(items: [Item]) -> [Diagnostic] {
         }
     }
     if !stated -> return diagnostics
-    owners.sort_by((left: SemaFootprintOwner, right: SemaFootprintOwner) -> left.name <=> right.name)
+    owners.sort_by(fn(left: SemaFootprintOwner, right: SemaFootprintOwner) { left.name <=> right.name })
     loop owner in owners {
         known: fields.get(owner.name) ?? next
         sema_footprint_solve_owner(owner, known, diagnostics)
@@ -227,7 +227,7 @@ sema_footprint_solve_owner: fn(owner: SemaFootprintOwner, known: [String], diagn
             // The first field outside the stated set, in field-name order.
             order := (loop position_in in 0..<footprint.names.len() -> position_in)
             sorted_names: footprint.names.copy()
-            order.sort_by((at: Int) -> sorted_names[at])
+            order.sort_by(fn(at: Int) { sorted_names[at] })
             loop at in order {
                 if !stated_names.contains(footprint.names[at]) {
                     outside = (what: "`self.{footprint.names[at]}`", span: footprint.spans[at])

@@ -9,8 +9,8 @@ Row: struct {
 run: fn() {
     rows: data.csv<Row>("team,value\nA,2.0") ?? panic("csv")
     groups: data.query(rows)
-        .group_by(r -> r.team)
-        .mean(r -> r.value)
+        .group_by(fn(r) { r.team })
+        .mean(fn(r) { r.value })
         .collect() ?? panic("groups")
     png: data.bar_png(groups)
     print(png.len())

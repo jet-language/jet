@@ -286,7 +286,7 @@ cli_sorted_map_keys: fn(values: [String: String]) -> [String] Never! {
 
 cli_sorted_contenders: fn(contenders: [PackageCollisionContender]) -> [PackageCollisionContender] Never! {
     sorted := contenders
-    sorted.sort_by((left: PackageCollisionContender, right: PackageCollisionContender) -> (left.provider <=> right.provider).then(left.kind <=> right.kind).then(left.digest <=> right.digest))
+    sorted.sort_by(fn(left: PackageCollisionContender, right: PackageCollisionContender) { (left.provider <=> right.provider).then(left.kind <=> right.kind).then(left.digest <=> right.digest) })
     sorted
 }
 

@@ -31,9 +31,9 @@ audit: fn() {
 withdraw: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("hook: release the hold"))
-        tx.on_rollback(() -> audit())
-        tx.on_rollback(() -> print("hook: notify the owner"))
+        tx.on_rollback(fn() { print("hook: release the hold") })
+        tx.on_rollback(fn() { audit() })
+        tx.on_rollback(fn() { print("hook: notify the owner") })
         panic("the card was declined")
     }
 }

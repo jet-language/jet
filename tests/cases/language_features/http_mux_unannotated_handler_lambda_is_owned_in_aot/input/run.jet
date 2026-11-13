@@ -2,6 +2,6 @@ package: { name: "http-mux-unannotated-handler" authority: { allow: [Net] } }
 use server: core.http.server
 run: fn() {
     mux: server.mux()
-    mux.get("/", (req) -> Ok(server.response(200, req.path())))
+    mux.get("/", fn(req) { Ok(server.response(200, req.path())) })
     print("registered")
 }

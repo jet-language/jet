@@ -561,7 +561,7 @@ jet_driver_build_glob_match: fn(pattern: [String], pi: Int, path: [String], qi: 
 jet_driver_build_walk: fn(host: JetDriverSharedBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
     entries := host.entries(directory) ?? return Val(err.message)
     entries = loop fresh_item in entries -> fresh_item
-    entries.sort_by((left: JetDriverBuildEntry, right: JetDriverBuildEntry) -> left.name <=> right.name)
+    entries.sort_by(fn(left: JetDriverBuildEntry, right: JetDriverBuildEntry) { left.name <=> right.name })
     loop entry in entries {
         path: jet_driver_build_join(logical, entry.name)
         if entry.directory {

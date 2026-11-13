@@ -105,9 +105,9 @@ non_tower_changes: fn(status: String) -> [String] Never! {
 // The milestone whose closeout token opens `head`: the requested one (it must
 // be eligible), else the single eligible one.
 select_closeout: fn(milestones: [Dyn], head: String, requested: String) -> (id: String, problem: String) Never! {
-    eligible: milestones.filter(milestone -> eligible(milestone, head)).map(milestone -> text_field(milestone, "id"))
+    eligible: milestones.filter(fn(milestone) { eligible(milestone, head) }).map(fn(milestone) { text_field(milestone, "id") })
     if requested != "" {
-        if !milestones.any(milestone -> text_field(milestone, "id") == requested) -> return (id: "", problem: "unknown milestone {requested}")
+        if !milestones.any(fn(milestone) { text_field(milestone, "id") == requested }) -> return (id: "", problem: "unknown milestone {requested}")
         if !eligible.contains(requested) -> return (id: "", problem: "milestone {requested} has no valid closeout token for source commit {head}")
         return (id: requested.copy(), problem: "")
     }

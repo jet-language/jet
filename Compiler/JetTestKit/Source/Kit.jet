@@ -784,7 +784,7 @@ kit_execution_refused: fn(row: String) -> KitExecution {
 // order and rows stream as entries finish; reports and failure lists keep this order
 // whatever the pool's size.
 kit_execute_corpus_order: fn(corpus: &[KitSelected]) {
-    corpus.sort_by(item -> "{item.suite}\n{item.entry.path}")
+    corpus.sort_by(fn(item) { "{item.suite}\n{item.entry.path}" })
 }
 
 // Where a run stages its rows without --scratch: in memory, so no row writes
@@ -821,7 +821,7 @@ kit_case_blocks: fn(status: String) -> Bool {
 // options.results; Val(paths) finishes each suite on its own, its rows and summary to
 // paths[suite] ("" prints the summary only), as each gate test reports its suite.
 kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [String], reports: [String: String]?) -> KitExecution {
-    if selected_suites.len() == 0 || selected_suites.any(suite -> !kit_expect_named(kit_suites(), suite)) -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+    if selected_suites.len() == 0 || selected_suites.any(fn(suite) { !kit_expect_named(kit_suites(), suite) }) -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
     timeout: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
     discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
     discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String: String]{}}
@@ -830,9 +830,9 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
         loop entry in kit_suite_discover(suite, discovery_ctx) -> corpus.push(KitSelected{entry: entry, suite: suite})
     }
     kit_execute_corpus_order(corpus)
-    selection: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
+    selection: kit_exec_select_ids(corpus.map(fn(item) { item.entry.path }), options)
     if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
-    entries: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
+    entries: corpus.filter(fn(item) { kit_expect_named(selection.ids, item.entry.path) })
     if entries.len() == 0 && options.others_selected -> return KitExecution{code: 0, failures: []}
     if entries.len() == 0 -> return kit_execution_refused("ERROR\tselection\t\tno matching corpus entries")
     if options.list {
@@ -862,7 +862,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     // Golden C rows build on every tier, each with a fresh Hangar: the run
     // takes the pack once, so no tier unpacks a copy of its own.
     if jetpack != "" && kit_expect_named(selected_suites, "golden") -> env.cc_pack = kit_cc_pack_root(jetpack, state)
-    if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")), options.ui_corpora)
+    if entries.any(fn(item) { item.suite == "ui" && item.entry.mode != "coverage" }) -> kit_ui_stage(root, run_scratch, entries.any(fn(item) { item.suite == "ui" && item.entry.mode.ends_with("project") }), options.ui_corpora)
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
         env.version = kit_steps_version(version_run.stdout) ?? ""
@@ -916,15 +916,15 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
         if kit_case_blocks(result.status) -> failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
     }
     if reports == .Val(paths) {
-        code := if failures.any(failure -> !kit_expect_named(suites, failure.suite)) -> 2 else -> 0
+        code := if failures.any(fn(failure) { !kit_expect_named(suites, failure.suite) }) -> 2 else -> 0
         loop suite in suites {
             path: paths.get(suite) ?? ""
             // Each lambda captures its own copy: a capture moves the name it reads.
             in_suite: suite.copy()
             ran_suite: suite.copy()
             failed_suite: suite.copy()
-            suite_code: kit_report_finish(jet, results.filter(result -> result.suite == in_suite), path, ran_suites.filter(name -> name == ran_suite))
-            if suite_code != 0 && !failures.any(failure -> failure.suite == failed_suite) -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            suite_code: kit_report_finish(jet, results.filter(fn(result) { result.suite == in_suite }), path, ran_suites.filter(fn(name) { name == ran_suite }))
+            if suite_code != 0 && !failures.any(fn(failure) { failure.suite == failed_suite }) -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
             if suite_code > code -> code = suite_code
         }
         return KitExecution{code: code, failures: failures, results: results}
@@ -1042,7 +1042,7 @@ kit_execute_schedule: fn(entries: [KitSelected], history: [String: KitHistory], 
         // descending wall time, ties in corpus order.
         keys.push(if last.wall_ms < 0 -> index - entries.len() else -> (Int{1} << 40) - last.wall_ms * entries.len() + index)
     }
-    schedule.order.sort_by(index -> keys[index])
+    schedule.order.sort_by(fn(index) { keys[index] })
     schedule
 }
 
@@ -1083,7 +1083,7 @@ kit_history_save: fn(dir: String, suites: [String], history: [String: KitHistory
         loop (key, last) in merged {
             if key.starts_with(prefix) -> rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
         }
-        rows.sort_by(row -> row)
+        rows.sort_by(fn(row) { row })
         path: kit_history_file(dir, suite)
         staged: "{path}.{process.current_pid()}.new"
         files.write(staged, "{rows.join("\n")}\n").drop("a lost history only loses scheduling hints")

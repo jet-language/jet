@@ -382,22 +382,22 @@ __app_serve: fn(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
     loop route in state.routes {
         target: app.copy()
         path: route.path.copy()
-        mux.__route("GET", route.path, (request: HTTPRequest) -> Ok(__app_page_response(target, path, request)), "")
+        mux.__route("GET", route.path, fn(request: HTTPRequest) { Ok(__app_page_response(target, path, request)) }, "")
     }
     loop action in state.actions {
         if action.handler == .Val(handler) {
-            mux.__route("POST", "/actions/{action.name}", (request: HTTPRequest) -> Ok(__app_action_response(handler, request)), "")
+            mux.__route("POST", "/actions/{action.name}", fn(request: HTTPRequest) { Ok(__app_action_response(handler, request)) }, "")
         }
     }
     loop mount in state.mounts {
         base: __app_trim_slashes(mount.prefix)
         handler: mount.handler.copy()
-        mux.__route("GET", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
-        mux.__route("POST", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
+        mux.__route("GET", "{base}/*jet_app_mount_path", fn(request: HTTPRequest) { Ok(__app_mount_response(handler, request)) }, "")
+        mux.__route("POST", "{base}/*jet_app_mount_path", fn(request: HTTPRequest) { Ok(__app_mount_response(handler, request)) }, "")
     }
     if state.assets.len() > 0 -> http_server.static_files(mux, "/assets", state.assets[0])
     fallback: app.copy()
-    mux.__route("GET", "/*jet_app_unmatched", (request: HTTPRequest) -> Ok(__app_not_found_response(fallback, request)), "")
+    mux.__route("GET", "/*jet_app_unmatched", fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }, "")
     server: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
     _: server.serve() ?? panic("web app server failed: {err}")
 }
@@ -1048,7 +1048,7 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
         .Bool(flag) -> flag
         .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
     }
-    properties.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
+    properties.sort_by(fn(left: (key: String, value: Dyn), right: (key: String, value: Dyn)) { left.key <=> right.key })
     rendered := [String]{}
     required_names := [String]{}
     loop property in properties {
@@ -1187,11 +1187,11 @@ __openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! 
 
 __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out := route
-    out.parameters.sort_by((left: __OpenAPIParameter, right: __OpenAPIParameter) -> {
+    out.parameters.sort_by(fn(left: __OpenAPIParameter, right: __OpenAPIParameter) {
         if left.location != right.location -> return left.location <=> right.location
         left.name <=> right.name
     })
-    out.responses.sort_by((left: __OpenAPIResponse, right: __OpenAPIResponse) -> {
+    out.responses.sort_by(fn(left: __OpenAPIResponse, right: __OpenAPIResponse) {
         if left.status != right.status -> return left.status <=> right.status
         left.description <=> right.description
     })
@@ -1201,7 +1201,7 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
         scopes.sort()
         security.push(__OpenAPISecurity{scheme: requirement.scheme.copy(), scopes: scopes})
     }
-    security.sort_by((left: __OpenAPISecurity, right: __OpenAPISecurity) -> {
+    security.sort_by(fn(left: __OpenAPISecurity, right: __OpenAPISecurity) {
         if left.scheme != right.scheme -> return left.scheme <=> right.scheme
         __openapi_compare_lists(left.scopes, right.scopes)
     })
@@ -1214,7 +1214,7 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
 __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
     loop input in inputs -> routes.push(__openapi_canonical(input))
-    routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
+    routes.sort_by(fn(left: __OpenAPIRoute, right: __OpenAPIRoute) {
         if left.path != right.path -> return left.path <=> right.path
         if left.method != right.method -> return left.method <=> right.method
         if left.token != right.token -> return left.token <=> right.token

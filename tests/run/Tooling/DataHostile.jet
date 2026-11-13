@@ -48,16 +48,16 @@ run: fn() {
 
     // All-missing series: typed optionals, not a second sentinel.
     missing: [Val(Float{1.0}), no_float(), no_float(), Val(Float{4.0}), no_float()]
-    print("missing_count: {missing.filter(value -> value == None).len()}")
+    print("missing_count: {missing.filter(fn(value) { value == None }).len()}")
 
     // Duplicate-key join keeps SQL multiplicity (2 Core×2 owners + 1 Tools = 5).
     tickets: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? panic("tickets")
     owners: data.csv<Owner>("team,owner\nCore,Ada\nCore,Lin\nTools,Grace") ?? panic("owners")
-    joined: data.inner_join(tickets, owners, t -> t.team, o -> o.team) ?? panic("join")
+    joined: data.inner_join(tickets, owners, fn(t) { t.team }, fn(o) { o.team }) ?? panic("join")
     print("dup_join_count: {joined.len()}")
 
     // Delimiter-like pivot keys stay distinct row/column fields (no "|" collision).
-    pivots: data.pivot_sum(tickets, t -> if t.team == "Core" -> "a|b" else -> "a", t -> if t.team == "Core" -> "c" else -> "b|c", t -> t.minutes) ?? panic("pivot")
+    pivots: data.pivot_sum(tickets, fn(t) { if t.team == "Core" -> "a|b" else -> "a" }, fn(t) { if t.team == "Core" -> "c" else -> "b|c" }, fn(t) { t.minutes }) ?? panic("pivot")
     print("pivot_cells: {pivots.len()}")
     loop cell in pivots -> print("pivot: row={cell.row_key} col={cell.column_key} sum={cell.sum}")
 
@@ -67,7 +67,7 @@ run: fn() {
         {team: "same", minutes: Float{1.0}},
         {team: "same", minutes: Float{2.0}}
     }
-    sorted: data.query(tied).sort_by(t -> t.team).collect() ?? panic("sort")
+    sorted: data.query(tied).sort_by(fn(t) { t.team }).collect() ?? panic("sort")
     print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
 
     // Extreme / non-finite numerics fail closed.
@@ -115,7 +115,7 @@ run: fn() {
         {team: "<script>&\"x", minutes: Float{4.0}}
     }
     hostile_groups: data.query(hostile_rows)
-        .group_by(t -> t.team)
+        .group_by(fn(t) { t.team })
         .count()
         .collect() ?? panic("hostile_groups")
     svg: data.bar_svg(hostile_groups) ?? panic("svg")
@@ -133,8 +133,8 @@ run: fn() {
     limits.max_groups = 1
     reader: data.csv_reader<Event>(input, limits) ?? panic("reader")
     if data.query(reader)
-        .group_by(e -> e.service)
-        .mean(e -> e.latency_ms)
+        .group_by(fn(e) { e.service })
+        .mean(fn(e) { e.latency_ms })
         .collect() == {
         .Ok(_) -> print("large_limit: ok")
         .Err(error) -> print("large_limit: {error}")

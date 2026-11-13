@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()`.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Drop the parameters: `reactive.{kind}(() -&gt; { … })`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Drop the parameters: `reactive.{kind}(fn() { … })`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2911</code>: <code>tests/ui/reactive_effect_takes_params.stderr</code>.</p>
 <pre class="diag">Error [jet.ReactiveLambdaParameters]: `reactive.autorun` needs a zero-parameter lambda, got 1 parameter
   --&gt; tests/ui/reactive_effect_takes_params.jet:5:22
     |
-  5 |     reactive.autorun((n: Int) -&gt; {
-    |                      ^^^^^^^^^^^^^
+  5 |     reactive.autorun(fn(n: Int) {
+    |                      ^^^^^^^^^^^^
  Why: The body takes no arguments — it reads the signals it depends on via `.get()`
- Fix: Write `reactive.autorun(() -&gt; { … })` with no parameters
+ Fix: Write `reactive.autorun(fn() { … })` with no parameters
 More: jet-lang.dev/e/E2911
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

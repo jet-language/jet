@@ -33,15 +33,15 @@ SemaFrameCallScan: struct {
 sema_frame_lambda_schedule: fn(lambda: Lambda, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameScheduleFacts {
     scan := SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
     if lambda.body == {
-        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_frame_note_call(scan, expression, environment, program, scopes))
+        .Expr(value) -> ast_visit_expr(value, fn(expression: Expr) { sema_frame_note_call(scan, expression, environment, program, scopes) })
         .Block(body) -> {
             sema_frame_collect_dma_starts(scan, body, environment, program, scopes)
-            ast_visit_body(body, (expression: Expr) -> sema_frame_note_call(scan, expression, environment, program, scopes), true)
+            ast_visit_body(body, fn(expression: Expr) { sema_frame_note_call(scan, expression, environment, program, scopes) }, true)
         }
     }
     if scan.refusal != None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: scan.refusal}
     operations := scan.operations.move()
-    operations.sort_by((left: FrameOperation, right: FrameOperation) -> left.source_index <=> right.source_index)
+    operations.sort_by(fn(left: FrameOperation, right: FrameOperation) { left.source_index <=> right.source_index })
     source: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, lambda.span)
     sema_frame_schedule_produce(operations, environment, program, source, lambda.span.start)
 }

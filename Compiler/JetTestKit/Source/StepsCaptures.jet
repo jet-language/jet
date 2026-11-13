@@ -301,7 +301,7 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
         }
         if kind == "concat-files" {
             entries := files.list_dir(directory) ?? return kit_steps_capture_failure("ERROR", "concat-files directory: {err}")
-            entries.sort_by(entry -> entry.name)
+            entries.sort_by(fn(entry) { entry.name })
             combined := ""
             loop entry in entries {
                 bytes: files.read_bytes(entry.path) ?? return kit_steps_capture_failure("ERROR", "concat-files read: {err}")
@@ -372,7 +372,7 @@ kit_steps_tree_contents: fn(directory: String, root: String, recursive: Bool) ->
             loop item in nested -> result.push(item)
         }
     }
-    result.sort_by(item -> item.path)
+    result.sort_by(fn(item) { item.path })
     Ok(result)
 }
 

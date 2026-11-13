@@ -2352,7 +2352,7 @@ InvalidGuardMap: struct {
         detail: true
         what: fn(self) -> String { "`` `SharedGuard.map` needs a stored field projection ``." }
         why: fn(self) -> String { "A mapped guard must keep a stable stored place inside the value protected by the original lock. A computed field is a value, not a place." }
-        fix: fn(self) -> String { "Use a direct stored-field projection such as `guard.map(value -> value.field)`." }
+        fix: fn(self) -> String { "Use a direct stored-field projection such as `guard.map(fn(value) {{ value.field }})`." }
     }
 }
 
@@ -3080,11 +3080,11 @@ BlockAfterCall: struct {
     impl Diagnostic {
         code: "E0335"
         stage: [.Parse]
-        meaning: "A bare `{{ }}` after a call — pass code with `() -> {{ … }}` inside the parentheses"
+        meaning: "A bare `{{ }}` after a call — pass code with `fn() {{ … }}` inside the parentheses"
         detail: true
         what: fn(self) -> String { "A bare `{{ }}` follows a call." }
-        why: fn(self) -> String { "Code arguments are ordinary `() -> {{ … }}` lambdas inside the call's parentheses. Trailing `{{ }}` sugar after a call is gone." }
-        fix: fn(self) -> String { "Write `callee(() -> {{ … }})`. Put each statement on its own line inside the block." }
+        why: fn(self) -> String { "Code arguments are ordinary `fn() {{ … }}` lambdas inside the call's parentheses. Trailing `{{ }}` sugar after a call is gone." }
+        fix: fn(self) -> String { "Write `callee(fn() {{ … }})`. Put each statement on its own line inside the block." }
     }
 }
 
@@ -3307,7 +3307,7 @@ MemberShorthandAsValue: struct {
         fix_next: "Write an ordinary value of the expected type, or use a full subject lambda."
         what: fn(self) -> String { "A bare member chain cannot be used as a value of type {self.expected} here" }
         why: fn(self) -> String { "Lower-case `.member` is shorthand only for a one-parameter callable; this argument expects an ordinary value" }
-        fix: fn(self) -> String { "Write a value of type {self.expected}, or use `(subject: {self.expected}) -> subject{self.chain}`" }
+        fix: fn(self) -> String { "Write a value of type {self.expected}, or use `fn(subject: {self.expected}) {{ subject{self.chain} }}`" }
     }
 }
 
@@ -4524,7 +4524,7 @@ SubjectShorthandNesting: struct {
         no_fix: .Behavior
         what: fn(self) -> String { "Nested subject shorthand needs an explicit binding" }
         why: fn(self) -> String { "Implicit subjects become hard to track when shorthand scopes nest" }
-        fix: fn(self) -> String { "Rewrite the inner shorthand with a named binding such as `(item) -> item.member`" }
+        fix: fn(self) -> String { "Rewrite the inner shorthand with a named binding such as `fn(item) {{ item.member }}`" }
     }
 }
 
@@ -5793,7 +5793,7 @@ IrreversibleEffectInTransaction: struct {
         detail: true
         what: fn(self) -> String { "`{self.api}` has the `{self.effect_name}` effect, which can't be rolled back inside a `#Transact` block." }
         why: fn(self) -> String { "A `#Transact` block undoes its work on a `?`-failure; network, file, subprocess, and foreign effects leave external state a rollback can't take back unless the foreign binding declares a compensating undo." }
-        fix: fn(self) -> String { "Move the call after the block, register it with `<handle>.on_commit(() -> {{ … }})`, or declare `#Undo(inverse)` on the foreign binding." }
+        fix: fn(self) -> String { "Move the call after the block, register it with `<handle>.on_commit(fn() {{ … }})`, or declare `#Undo(inverse)` on the foreign binding." }
     }
 }
 
@@ -6266,7 +6266,7 @@ LiveQueryNotTrackable: struct {
         fix_next: "Use a tracked source and a replay-safe query plan."
         what: fn(self) -> String { "Live query watch refused for `{self.query}`" }
         why: fn(self) -> String { "The live-query contract requires a `data.track` source and rejects callbacks or plans whose effects or numeric laws cannot be replayed safely." }
-        fix: fn(self) -> String { "Use `data.track(rows, row -> key)` before `query(...).watch()`, and avoid effectful callbacks or unsafe Float reassociation." }
+        fix: fn(self) -> String { "Use `data.track(rows, fn(row) {{ key }})` before `query(...).watch()`, and avoid effectful callbacks or unsafe Float reassociation." }
     }
 }
 
@@ -7495,15 +7495,14 @@ UnknownLambdaParameterType: struct {
     }
 }
 
-LambdaReturnType: struct {
+RetiredLambdaReturnType: struct {
     impl Diagnostic {
         code: "E0399"
-        stage: [.Parse]
-        meaning: "Lambda writes a return or error type"
-        detail: true
-        what: fn(self) -> String { "A lambda cannot write a return or error type" }
-        why: fn(self) -> String { "A lambda's arrow introduces its body; return and error types come from the expected callable type" }
-        fix: fn(self) -> String { "Remove the type; pass the lambda to a typed parameter or slot, or use a named `fn` for a full interface" }
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: an arrow lambda writes a return or error type)" }
+        why: fn(self) -> String { "Jet no longer reports this code; its row stays so an older reference to it still explains" }
+        fix: fn(self) -> String { "Follow the guidance for E0399" }
     }
 }
 
@@ -11655,8 +11654,8 @@ ReactiveArgumentNotLambda: struct {
         meaning: "`reactive.derived`/`effect` argument isn't a lambda"
         detail: true
         what: fn(self) -> String { "`reactive.{self.kind}` needs a lambda, not {self.type}." }
-        why: fn(self) -> String { "`reactive.derived`/`reactive.autorun` build a reactive value from a `() -> …` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run." }
-        fix: fn(self) -> String { "Write `reactive.derived(() -> … )` or `reactive.autorun(() -> {{ … }})`." }
+        why: fn(self) -> String { "`reactive.derived`/`reactive.autorun` build a reactive value from a `fn() {{ … }}` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run." }
+        fix: fn(self) -> String { "Write `reactive.derived(fn() {{ … }} )` or `reactive.autorun(fn() {{ … }})`." }
     }
 }
 
@@ -11671,7 +11670,7 @@ ReactiveLambdaParameters: struct {
         fix_next: "Drop the lambda parameters and read signals from the zero-parameter body."
         what: fn(self) -> String { "`reactive.{self.kind}` needs a zero-parameter lambda, got {self.n} parameter(s)." }
         why: fn(self) -> String { "The body of a derived/effect takes no arguments — it reads the signals it depends on via `.get()`." }
-        fix: fn(self) -> String { "Drop the parameters: `reactive.{self.kind}(() -> {{ … }})`." }
+        fix: fn(self) -> String { "Drop the parameters: `reactive.{self.kind}(fn() {{ … }})`." }
     }
 }
 
@@ -11682,7 +11681,7 @@ DerivedReturnsNothing: struct {
         detail: true
         what: fn(self) -> String { "`reactive.derived` must compute and return a value." }
         why: fn(self) -> String { "A derived value is recomputed from its signals, so its lambda has to return the new value. A body that returns nothing is a side effect, not a value." }
-        fix: fn(self) -> String { "Return a value from the body, or use `reactive.autorun(() -> {{ … }})` for a side effect." }
+        fix: fn(self) -> String { "Return a value from the body, or use `reactive.autorun(fn() {{ … }})` for a side effect." }
     }
 }
 
@@ -13486,7 +13485,7 @@ MemberShorthandArity: struct {
         fix_next: "Write a full lambda with every parameter named."
         what: fn(self) -> String { "A bare member chain cannot supply a {self.arity}-parameter callable here" }
         why: fn(self) -> String { "Lower-case `.member` shorthand supplies exactly one subject; a callable with {self.arity} parameters needs all parameters named" }
-        fix: fn(self) -> String { "Write the full lambda, for example `(first, second) -> first{self.chain}`" }
+        fix: fn(self) -> String { "Write the full lambda, for example `fn(first, second) {{ first{self.chain} }}`" }
     }
 }
 

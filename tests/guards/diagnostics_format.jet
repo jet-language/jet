@@ -48,7 +48,7 @@ df_body_violations: fn(text: String) -> [String] {
             in_table = true
             next
         }
-        if !in_table || cells.all(cell -> cell.bytes().all(byte -> byte == (U8{45}))) -> next
+        if !in_table || cells.all(fn(cell) { cell.bytes().all(fn(byte) { byte == (U8{45}) }) }) -> next
         if cells.len() < 2 -> next
         code: df_diagnostic_code(cells[1])
         if code == "" -> next

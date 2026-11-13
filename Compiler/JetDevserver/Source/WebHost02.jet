@@ -23,7 +23,7 @@ use {
 // GATE #4409: IO errors retain their source kinds.
 impl WebHost {
     bind_application_only_with_listener: fn(file: String, verbose: Bool, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>) -> Self Err! {
-        application_port: application_listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        application_port: application_listener.local_addr().map(fn(a) { a.port() }).unwrap_or(0)
         status: Arc.new(DevStatus.new_with_root(file, verbose, static_root))
         status.set_port(application_port)
         status.set_canvas_port(0)
@@ -53,8 +53,8 @@ impl WebHost {
                 (_0: listener, _1: application_listener)
             }
         }
-        canvas_port: listener.local_addr().map((a) -> a.port()).unwrap_or(0)
-        application_port: application_listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        canvas_port: listener.local_addr().map(fn(a) { a.port() }).unwrap_or(0)
+        application_port: application_listener.local_addr().map(fn(a) { a.port() }).unwrap_or(0)
         status: Arc.new(DevStatus.new_with_root(file, verbose || options.audit, static_root))
         status.set_port(application_port)
         status.set_canvas_port(canvas_port)
@@ -74,7 +74,7 @@ impl WebHost {
     bind_canvas_with_options_and_policy: fn(file: String, static_root: &OSPath, verbose: Bool, options: &CanvasHostOptions, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         host: validate_canvas_options(options)
         listener: bind_canvas_server(host, options.port)
-        bound_port: listener.local_addr().map((a) -> a.port()).unwrap_or(0)
+        bound_port: listener.local_addr().map(fn(a) { a.port() }).unwrap_or(0)
         status: Arc.new(DevStatus.new_with_root(file, verbose || options.audit, static_root))
         status.set_port(bound_port)
         status.set_canvas_port(bound_port)
@@ -116,7 +116,7 @@ impl WebHost {
             browser_state: Arc.clone(self.browser_state)
             paused_evaluate: Arc.clone(self.paused_evaluate)
             terminal_style: Arc.clone(self.terminal_style)
-            handle: thread.spawn(() -> serve_forever(listener, status, debug_sessions, session, canvas_file, .Canvas, bind_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style))
+            handle: thread.spawn(fn() { serve_forever(listener, status, debug_sessions, session, canvas_file, .Canvas, bind_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style) })
             self.server_threads.lock().unwrap().push(handle)
         }
         if self.application_listener.lock().unwrap().take() == .Val(application_listener) {
@@ -132,13 +132,13 @@ impl WebHost {
             paused_evaluate: Arc.clone(self.paused_evaluate)
             terminal_style: Arc.clone(self.terminal_style)
             shutdown: Arc.clone(self.shutdown)
-            handle: thread.spawn(() -> serve_forever(application_listener, status, debug_sessions, session, canvas_file, .Application, application_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style))
+            handle: thread.spawn(fn() { serve_forever(application_listener, status, debug_sessions, session, canvas_file, .Application, application_host, session_secret, shutdown, static_root, release_policy, browser_state, paused_evaluate, terminal_style) })
             self.server_threads.lock().unwrap().push(handle)
         }
-        _: (() -> {
+        _: (fn() {
             status: Arc.clone(self.status)
             shutdown: Arc.clone(self.shutdown)
-            handle: thread.spawn(() -> {
+            handle: thread.spawn(fn() {
                 loop !wait_for_shutdown(shutdown, Duration.from_millis(LIVE_RELOAD_POLL_MS)) {
                     status.activate_requested_browser_trace()
                     status.expire_clients()
@@ -201,7 +201,7 @@ start_terminal_controls: fn(status: Arc<DevStatus>, shutdown: Arc<AtomicBool>) -
     if !status.pin -> return .None
     raw: RawGuard.enable() ?? return .None
     status.controls_ready.store(true, .SeqCst)
-    return .Val(thread.spawn(() -> {
+    return .Val(thread.spawn(fn() {
         keys := KeyReader.new(std.io.stdin())
         loop {
             if shutdown.load(.SeqCst) { status.disable_terminal_controls(); drop(raw); return }
@@ -240,7 +240,7 @@ format_line_colored: fn(word: String, rest: String) -> String {
 format_line_plain: fn(word: String, rest: String) -> String { return "jet dev  [{word}] {rest}" }
 frame_lines: fn(code: String, diagnostic: String) -> [String] {
     lines: diagnostic.lines().collect[[String]]()
-    content_width: lines.iter().map((l) -> l.chars().count()).max().unwrap_or(0)
+    content_width: lines.iter().map(fn(l) { l.chars().count() }).max().unwrap_or(0)
     width: content_width.max(code.len() + 2).clamp(20, 96)
     dash_count: width.saturating_sub(code.len() + 3).max(1)
     out := [String].with_capacity(lines.len() + 2)
@@ -277,7 +277,7 @@ bind_application_server: fn(port: U16?) -> TcpListener Err! {
             .Err(e) -> { return .Err("error: couldn't start the application preview: {e}") }
         }
     }
-    detail: last_err.map((e) -> " ({e})").unwrap_or_default()
+    detail: last_err.map(fn(e) { " ({e})" }).unwrap_or_default()
     return .Err("error: every application preview port from {APPLICATION_PORT_RANGE.start()} to {APPLICATION_PORT_RANGE.end()} is already in use{detail}\n fix: free one of those ports, stop the other process using it, or pick one explicitly with --port=<N>")
 }
 bind_canvas_server: fn(host: String, port: U16?) -> TcpListener Err! {
@@ -301,16 +301,16 @@ mint_session_secret: fn() -> String Err! {
     bytes := [U8; CANVAS_SESSION_BYTES]{[0; CANVAS_SESSION_BYTES]}
     source := File.open(OSPath.from("/dev/urandom")) ?? return .Err("could not open the system random source: {err}")
     source.read_exact(bytes) ?? return .Err("could not read the system random source: {err}")
-    return bytes.iter().map((byte) -> "{byte:02x}").collect()
+    return bytes.iter().map(fn(byte) { "{byte:02x}" }).collect()
 }
 normalize_bind_host: fn(host: String) -> String Err! {
     host := host.trim() // #4303
-    host: host.strip_prefix('[').and_then((h) -> h.strip_suffix(']')).unwrap_or(host)
-    if host.is_empty() || host.chars().any((c) -> c.is_whitespace()) || host.contains('/') -> return .Err("error: Canvas host `{host}` is invalid")
+    host: host.strip_prefix('[').and_then(fn(h) { h.strip_suffix(']') }).unwrap_or(host)
+    if host.is_empty() || host.chars().any(fn(c) { c.is_whitespace() }) || host.contains('/') -> return .Err("error: Canvas host `{host}` is invalid")
     return host.to_string()
 }
 is_loopback_host: fn(host: String) -> Bool {
-    return host.eq_ignore_ascii_case("localhost") || host.parse[IpAddr]().map((address) -> address.is_loopback()).unwrap_or(false)
+    return host.eq_ignore_ascii_case("localhost") || host.parse[IpAddr]().map(fn(address) { address.is_loopback() }).unwrap_or(false)
 }
 url_host: fn(host: String) -> String { return if host.parse[IpAddr]() == {
     .Ok(.V6(_)) -> "[{host}]"

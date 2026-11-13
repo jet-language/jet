@@ -43,7 +43,7 @@ case_law_is_space: fn(byte: U8) -> Bool { byte == (U8{32}) || byte == (U8{9}) ||
 case_law_keeps_case: fn(token: String) -> Bool {
     if JET_KEYWORD_LIST.contains(token) || CASE_LAW_COMMAND_WORDS.contains(token) -> return true
     if token.starts_with("-") || token.starts_with("#") || token.starts_with("@") -> return true
-    token.bytes().any(byte -> (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{95}) || byte == (U8{47}) || byte == (U8{92}) || byte == (U8{64}) || byte == (U8{35}) || byte == (U8{46}))
+    token.bytes().any(fn(byte) { (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{95}) || byte == (U8{47}) || byte == (U8{92}) || byte == (U8{64}) || byte == (U8{35}) || byte == (U8{46}) })
 }
 
 // case_law.rs:620-651: the FIRST thing on the line opens in sentence case. A
@@ -138,10 +138,10 @@ case_law_violations: fn(sources: [CaseLawSource]) -> [String] {
     sources: case_law_sources()
     loop prefix in ["Diagnostics.jet ", "CLI command ", "CLI usage greeting", "CLI usage header Usage:", "CLI usage header Flags:", "CLI usage group header ", "CLI palette category "] {
         wanted: prefix.copy()
-        assert(sources.any(source -> source.name.starts_with(wanted)), "case-law sources lost `{prefix}`")
+        assert(sources.any(fn(source) { source.name.starts_with(wanted) }), "case-law sources lost `{prefix}`")
     }
-    assert(sources.any(source -> source.name.ends_with(" group label")), "case-law sources lost the CLI group labels")
-    assert(sources.any(source -> source.name.starts_with("CLI --")), "case-law sources lost the CLI flag help")
+    assert(sources.any(fn(source) { source.name.ends_with(" group label") }), "case-law sources lost the CLI group labels")
+    assert(sources.any(fn(source) { source.name.starts_with("CLI --") }), "case-law sources lost the CLI flag help")
     assert_eq("ratified UI case-law violations:\n{case_law_violations(sources).join("\n")}", "ratified UI case-law violations:\n")
 }
 
@@ -150,7 +150,7 @@ case_law_violations: fn(sources: [CaseLawSource]) -> [String] {
     assert_eq(case_law_violations(sources).len(), 0)
     case_law_push(sources, "temporary violating label", "Ready And Safe", "title")
     violations: case_law_violations(sources)
-    assert(violations.any(violation -> violation.contains("temporary violating label") && violation.contains("And")), "adding a new violating string must fail the case check: {violations.join("; ")}")
+    assert(violations.any(fn(violation) { violation.contains("temporary violating label") && violation.contains("And") }), "adding a new violating string must fail the case check: {violations.join("; ")}")
 }
 
 #Test("title_case_minor_words_follow_ratified_per_word_rule") {

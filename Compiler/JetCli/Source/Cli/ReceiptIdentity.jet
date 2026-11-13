@@ -221,7 +221,7 @@ jet_cli_receipt_claim: fn(verb: String, paths: [String], argv: [String], termina
 jet_cli_receipt_claim_of: fn(verb: String, identity: [U8], inputs: [JetDriverRunReceiptInput]) -> JetDriverRunReceiptClaim Never! {
     framed := identity
     sorted := inputs
-    sorted.sort_by((left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) -> left.path <=> right.path)
+    sorted.sort_by(fn(left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) { left.path <=> right.path })
     previous := ""
     unique := [JetDriverRunReceiptInput]{}
     loop input in sorted {
@@ -254,7 +254,7 @@ jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
             values.push(argv[index + 1])
         }
     }
-    values.sort_by((left: String, right: String) -> right.bytes().len() <=> left.bytes().len())
+    values.sort_by(fn(left: String, right: String) { right.bytes().len() <=> left.bytes().len() })
     unique := [String]{}
     loop value in values {
         if !unique.contains(value) -> unique.push(value)
@@ -327,7 +327,7 @@ jet_cli_receipt_target_identity: fn(cache: &WorkspaceDeclarationCache, target: S
             jet_cli_receipt_canonical_member(observed, cwd, members)
         }
     }
-    members.sort_by((left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) -> left.path <=> right.path)
+    members.sort_by(fn(left: JetDriverRunReceiptInput, right: JetDriverRunReceiptInput) { left.path <=> right.path })
     text := ""
     loop member in members -> text = "{text}{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}\n"
     Ok(JetCLICanonicalTargetIdentity{input_sha256: receipt_crypto.sha256(text.bytes()).hex(), authority_root: authority_root, members: members})

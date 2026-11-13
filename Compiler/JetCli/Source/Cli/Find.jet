@@ -412,7 +412,7 @@ jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCL
         if why == "" -> next
         matches.push(JetCLIFindMatch{name: symbol.qualified_name, signature: symbol.signature, why: why})
     }
-    matches.sort_by((left: JetCLIFindMatch, right: JetCLIFindMatch) -> (left.name <=> right.name).then(left.signature <=> right.signature))
+    matches.sort_by(fn(left: JetCLIFindMatch, right: JetCLIFindMatch) { (left.name <=> right.name).then(left.signature <=> right.signature) })
     matches
 }
 

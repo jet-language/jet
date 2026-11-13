@@ -68,7 +68,7 @@ jet_cli_gate_append_package_writers: fn(ledger: &GateLedger, snapshot: JetDriver
         }
     }
     grants := lock.workspace_overlay_policy.build_grants.copy()
-    grants.sort_by((left: BuildGrant, right: BuildGrant) -> left.subject <=> right.subject)
+    grants.sort_by(fn(left: BuildGrant, right: BuildGrant) { left.subject <=> right.subject })
     loop grant in grants {
         detail: "required effects: not evaluated; granted effects: {grant.effects.join(",")}; denied effects: none; authority: .jet/lock workspace authority"
         gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", UNIFIED_LOCK_FILE, "build:{grant.subject}", detail, [String]{"{UNIFIED_LOCK_FILE}:workspace.build-grants"}))
@@ -103,7 +103,7 @@ jet_cli_gate_append_authority: fn(ledger: &GateLedger, authority: PackageAuthori
         gate_ledger_push(ledger, jet_cli_gate_external(GateKind.BuildFlag, "package", source, "authority.deny", detail, [String]{"{source}:authority.deny"}))
     }
     grants := authority.grants.copy()
-    grants.sort_by((left: PackageGrant, right: PackageGrant) -> left.package <=> right.package)
+    grants.sort_by(fn(left: PackageGrant, right: PackageGrant) { left.package <=> right.package })
     loop grant in grants {
         detail: "required effects: not evaluated; granted effects: {grant.rights.join(",")}; denied effects: none; authority: {granted}"
         gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "package", source, grant.package, detail, [String]{"{source}:authority.grants"}))
@@ -116,7 +116,7 @@ jet_cli_gate_append_authority: fn(ledger: &GateLedger, authority: PackageAuthori
             gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.ci", "prompt: {jet_cli_gate_trust_label(decision)}", [String]{"{source}:authority.trust.ci"}))
         }
         services := trust.services.copy()
-        services.sort_by((left: ServiceTrust, right: ServiceTrust) -> left.service <=> right.service)
+        services.sort_by(fn(left: ServiceTrust, right: ServiceTrust) { left.service <=> right.service })
         loop service in services {
             gate_ledger_push(ledger, jet_cli_gate_external(GateKind.TrustGrant, "package", source, "authority.trust.services.{service.service}", jet_cli_gate_trust_label(service.decision), [String]{"{source}:authority.trust.services"}))
         }

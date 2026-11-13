@@ -52,7 +52,7 @@ run: fn() {
     }
     print("scanning {paths.len()} files...")
     print("")
-    parallel := paths.para_map((path: String) -> scan_one(path) ?? "{path}: unreadable")
+    parallel := paths.para_map(fn(path: String) { scan_one(path) ?? "{path}: unreadable" })
     parallel.sort()
     loop line in parallel -> print(line)
     print("")

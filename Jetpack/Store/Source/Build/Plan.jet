@@ -188,7 +188,7 @@ HermeticBuildPlan: struct {
                 if !known -> custom.push(BuildResourcePoolSpec{pool: pool, slots: 1})
             }
         }
-        custom.sort_by((left: BuildResourcePoolSpec, right: BuildResourcePoolSpec) -> left.pool.as_str() <=> right.pool.as_str())
+        custom.sort_by(fn(left: BuildResourcePoolSpec, right: BuildResourcePoolSpec) { left.pool.as_str() <=> right.pool.as_str() })
         loop spec in custom -> pools.push(spec)
         pools
     }

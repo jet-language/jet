@@ -323,7 +323,7 @@ cli_nix_index_trim_trailing_slashes: fn(value: String) -> String Never! {
 // of each system: newest release first, ties by system then revision bytes.
 cli_nix_index_newest_discoverable_targets: fn(targets: [(released: Int, system: String, revision: String)]) -> [(system: String, revision: String)] Never! {
     ordered := targets
-    ordered.sort_by((left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) -> (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision))
+    ordered.sort_by(fn(left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) { (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision) })
     counts := [String: Int]{}
     discoverable := [(system: String, revision: String)]{}
     loop entry in ordered {

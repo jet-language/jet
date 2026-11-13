@@ -423,7 +423,7 @@ ForeignBoundaryContract: struct {
         }
         if !replaced -> self.obligations.push(obligation.copy())
         self.obligations = loop fresh_item in self.obligations -> fresh_item
-        self.obligations.sort_by(row -> row.obligation)
+        self.obligations.sort_by(fn(row) { row.obligation })
     }
 
     // Record one basis/checker/assumption row against this contract's exact
@@ -503,7 +503,7 @@ ForeignBoundaryContract: struct {
             // Rust derived EvidenceIdentity Ord: field tuple, not the joined
             // "a/b/c" key (which misorders e.g. `a` vs `a-b` at the `/`).
             out.evidence = loop fresh_item in out.evidence -> fresh_item
-            out.evidence.sort_by((left: EvidenceIdentity, right: EvidenceIdentity) -> (left.report_id <=> right.report_id).then(left.claim_id <=> right.claim_id).then(left.evidence_id <=> right.evidence_id))
+            out.evidence.sort_by(fn(left: EvidenceIdentity, right: EvidenceIdentity) { (left.report_id <=> right.report_id).then(left.claim_id <=> right.claim_id).then(left.evidence_id <=> right.evidence_id) })
         }
         Ok(out)
     }

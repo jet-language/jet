@@ -1297,14 +1297,14 @@ ir_map_take_captured: fn(p: IRProgram, b: IRBuilder, name: String) -> Bool Never
     found := false
     if b.row >= 0 {
         loop node in p.functions[b.row].tree.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
         }
         loop node in b.made.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+            if node.kind == .Lambda(_) -> body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
         }
     } else {
         loop node in b.made.nodes {
-            if node.kind == .Lambda(_) -> body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+            if node.kind == .Lambda(_) -> body_each_expr_child(b.made, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
         }
     }
     found
@@ -1321,9 +1321,9 @@ ir_map_take_note: fn(p: IRProgram, b: IRBuilder, id: Int, name: String, found: &
         }
     }
     if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
     } else {
-        body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_note(p, b, child, name, found))
+        body_each_expr_child(b.made, node, fn(child: Int) { ir_map_take_note(p, b, child, name, found) })
     }
 }
 
@@ -1338,9 +1338,9 @@ ir_map_take_stmts_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, body: [I
         bad := false
         kind: ir_body_stmt(p, b, statement)
         if b.row >= 0 {
-            body_each_stmt_child(p.functions[b.row].tree, kind, (expression: Int) -> ir_map_take_node_ok(p, b, update, expression, between, bad))
+            body_each_stmt_child(p.functions[b.row].tree, kind, fn(expression: Int) { ir_map_take_node_ok(p, b, update, expression, between, bad) })
         } else {
-            body_each_stmt_child(b.made, kind, (expression: Int) -> ir_map_take_node_ok(p, b, update, expression, between, bad))
+            body_each_stmt_child(b.made, kind, fn(expression: Int) { ir_map_take_node_ok(p, b, update, expression, between, bad) })
         }
         if bad -> return false
     }
@@ -1451,9 +1451,9 @@ ir_map_take_node_ok: fn(p: IRProgram, b: IRBuilder, update: IRMapTake, id: Int, 
     }
     if bad -> return
     if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_map_take_node_ok(p, b, update, child, between, bad))
+        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_map_take_node_ok(p, b, update, child, between, bad) })
     } else {
-        body_each_expr_child(b.made, node, (child: Int) -> ir_map_take_node_ok(p, b, update, child, between, bad))
+        body_each_expr_child(b.made, node, fn(child: Int) { ir_map_take_node_ok(p, b, update, child, between, bad) })
     }
 }
 

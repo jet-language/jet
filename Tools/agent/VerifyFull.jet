@@ -224,7 +224,7 @@ blocked_row: fn(scope: String, reason: String, log: String) -> Row Never! {
 }
 
 all_pass: fn(rows: [Row]) -> Bool Never! {
-    rows.len() > 0 && rows.all(row -> row.status == "PASS")
+    rows.len() > 0 && rows.all(fn(row) { row.status == "PASS" })
 }
 
 record: fn(state: &Verify, row: Row) -[FS, Exec, IO]> () {
@@ -381,7 +381,7 @@ fail_row: fn(row: &Row, reason: String) Never! {
 testkit_verdict: fn(row: &Row, report: String, binary: String, suite: String) -[FS]> () {
     tree: read_document(report) ?? return fail_row(row, "testkit report `{report}` is missing or not JSON")
     results: array_field(tree, "results")
-    if text_field(tree, "jet") != binary || results.len() == 0 || results.any(result -> text_field(result, "status") != "PASS" || text_field(result, "suite") != suite) {
+    if text_field(tree, "jet") != binary || results.len() == 0 || results.any(fn(result) { text_field(result, "status") != "PASS" || text_field(result, "suite") != suite }) {
         return fail_row(row, "missing, skipped, refused, wrong-suite or non-PASS testkit case verdict")
     }
     row.total = Val(results.len())
@@ -394,7 +394,7 @@ registry_verdict: fn(row: &Row, manifest_path: String, receipt_path: String?, he
     manifest: read_document(manifest_path) ?? return fail_row(row, "registry manifest `{manifest_path}` is missing or not JSON")
     entries: array_field(manifest, "entries")
     complete: if field(manifest, "completeCompilerRegistries") == .Bool(flag) -> flag else -> false
-    if text_field(manifest, "head") != head || text_field(manifest, "repo") != root || !complete || entries.len() == 0 || entries.any(entry -> text_field(entry, "status") == "BLOCKED") {
+    if text_field(manifest, "head") != head || text_field(manifest, "repo") != root || !complete || entries.len() == 0 || entries.any(fn(entry) { text_field(entry, "status") == "BLOCKED" }) {
         return fail_row(row, "registry manifest is missing, unpinned, incomplete or BLOCKED")
     }
     ids := [String]{}
@@ -420,7 +420,7 @@ registry_verdict: fn(row: &Row, manifest_path: String, receipt_path: String?, he
     }
     if text_field(receipt, "status") != "PASS" || text_field(receipt, "head") != head || text_field(receipt, "jet") != binary
         || int_field(receipt, "total") != Val(count) || int_field(receipt, "passed") != Val(count) || int_field(receipt, "blocked") != Val(0) || int_field(receipt, "failed") != Val(0)
-        || ran.len() != count || ran.any(entry -> text_field(entry, "status") != "PASS") || !same_ids {
+        || ran.len() != count || ran.any(fn(entry) { text_field(entry, "status") != "PASS" }) || !same_ids {
         return fail_row(row, "registry receipt has missing, unpinned, blocked, failed or non-PASS entries")
     }
     row.total = Val(count)
@@ -586,9 +586,9 @@ fixture_checkout: fn() -[FS, Env]> String {
         if ran.code != expected -> panic("{mode}: exit {ran.code}, expected {expected}\n{ran.output}{ran.errors}")
         report: read_document("{evidence}/verify-full.json") ?? panic("{mode}: verify-full.json is missing or not JSON")
         rows: array_field(report, "rows")
-        status: (scope: String) -> text_field(fixture_row(rows, scope), "status")
+        status: fn(scope: String) { text_field(fixture_row(rows, scope), "status") }
         if mode == {
-            "pass" -> assert(rows.all(row -> text_field(row, "status") == "PASS"))
+            "pass" -> assert(rows.all(fn(row) { text_field(row, "status") == "PASS" }))
             "ordinary" -> {
                 assert_eq(int_field(fixture_row(rows, "golden"), "code"), Val(17))
                 loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "PASS")

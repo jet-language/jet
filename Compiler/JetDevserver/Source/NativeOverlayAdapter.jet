@@ -176,7 +176,7 @@ NativeOverlayAdapter: struct {
             if !retain_typed_panels -> self.typed_panels = [String: NativeOverlayPanelFact]{}
         }
         events := projection.panels
-        events.sort_by((left, right) -> (left.sequence() <=> right.sequence()).then(left.timestamp_ms <=> right.timestamp_ms).then(left.source() <=> right.source()).then(left.kind() <=> right.kind()).then(left.entity() <=> right.entity()))
+        events.sort_by(fn(left, right) { (left.sequence() <=> right.sequence()).then(left.timestamp_ms <=> right.timestamp_ms).then(left.source() <=> right.source()).then(left.kind() <=> right.kind()).then(left.entity() <=> right.entity()) })
         previous_sequence := Int?{None}
         loop event in events {
             validate_event(event, projection)

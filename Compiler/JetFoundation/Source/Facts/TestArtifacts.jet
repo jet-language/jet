@@ -193,7 +193,7 @@ checked_test_law: fn(test: TestDef, source: String) -> TTestLawFact Never! {
     partitions := [String]{}
     loop parameter in test.params -> partitions.push("{parameter.name}: {type_name(parameter.ty)}")
     visitor := TTestLawVisitor{source: bytes, relation: [String]{}, surfaces: [String]{}}
-    loop statement in test.body -> ast_visit_statement(statement, (expression: Expr) -> visitor.visit(expression), false)
+    loop statement in test.body -> ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
     visitor.surfaces.sort()
     TTestLawFact{precondition: precondition, partitions: partitions, relation: visitor.relation, surfaces: visitor.surfaces}
 }
@@ -210,7 +210,7 @@ checked_test_artifact_fact: fn(module_identity: String, test: TestDef, source: S
             span: parameter.name_span,
             ty: parameter.ty,
             convention: parameter.convention,
-            label: parameter.public_label.map((label) -> label.name) ?? parameter.name,
+            label: parameter.public_label.map(fn(label) { label.name }) ?? parameter.name,
             zone: parameter.zone,
             variadic: parameter.variadic,
             default_present: parameter.default != None,

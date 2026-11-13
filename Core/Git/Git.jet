@@ -66,7 +66,7 @@ Repo: struct {
     land: fn(self, patch: String, message: String) -[Exec, Time.Wait]> Landed GitError! {
         if !git_ran(self.spec(Sh{"git apply --index {patch}"})) -> return Err(.NoApply)
         listed: self.spec(Sh{"git diff --cached --name-only --no-renames -z"}).run() ?? return Err(.NoCommit)
-        paths: git_fields(listed.output).filter(path -> path != "")
+        paths: git_fields(listed.output).filter(fn(path) { path != "" })
         sha: git_commit_staged(self, paths.copy(), message)
         Landed{sha: sha, paths: paths}
     }
@@ -95,7 +95,7 @@ Repo: struct {
     drift: fn(self, dir: String, skip: [String]{[String]{}}) -[Exec, Time.Wait, FS.Read]> [Drift] IOError! {
         listed: self.spec(Sh{"git ls-files -z"}).run()
         core.process.check(listed)
-        tracked: git_fields(listed.output).filter(path -> path != "")
+        tracked: git_fields(listed.output).filter(fn(path) { path != "" })
         found := [Drift]{}
         loop path in tracked.copy() {
             mine: core.files.join(self.dir, path)
@@ -206,7 +206,7 @@ priv internal: module {
     core.files.write(core.files.join(tested, "build/out"), "") ?? panic("out")
     core.files.write(core.files.join(tested, "extra.txt"), "") ?? panic("extra")
     drift: w.drift(tested, skip: [String]{"build"}) ?? panic("drift")
-    assert_eq(drift.map(change -> "{change.path} {change.tracked} {change.tested}"), [String]{"a.txt true true", "new.txt true false", "extra.txt false true"})
+    assert_eq(drift.map(fn(change) { "{change.path} {change.tracked} {change.tested}" }), [String]{"a.txt true true", "new.txt true false", "extra.txt false true"})
     core.files.write(core.files.join(work, "a.txt"), "four\n") ?? panic("four")
     assert(!w.clean())
     third: w.commit([String]{"a.txt"}, "third\n") ?? panic("third commit")

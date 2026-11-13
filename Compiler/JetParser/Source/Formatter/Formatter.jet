@@ -1682,7 +1682,7 @@ jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     ordered := edits
     // Rust sorts by descending start; apply from the end of the source.
     ordered = loop fresh_item in ordered -> fresh_item
-    ordered.sort_by((left: TextEdit, right: TextEdit) -> right.span.start <=> left.span.start)
+    ordered.sort_by(fn(left: TextEdit, right: TextEdit) { right.span.start <=> left.span.start })
     replaced_start := JFMT_NO_LIMIT
     loop edit in ordered {
         if edit.span.end > source.len() || edit.span.start > edit.span.end || edit.span.end > replaced_start -> return None

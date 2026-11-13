@@ -10,7 +10,7 @@
 // line. The code spans (`…`) of Markdown prose and of string literals are
 // read the same way, so a fix text teaches the `fn` form too.
 use {
-    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_PIPE_GT, TOKEN_QUESTION_DOT, TOKEN_QUESTION_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_AND_AND, TOKEN_OR_OR, lexer_without_comments]
+    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_PIPE_GT, TOKEN_QUESTION, TOKEN_QUESTION_DOT, TOKEN_QUESTION_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_AND_AND, TOKEN_OR_OR, lexer_without_comments]
     jet_parser.[parse_generated_source]
 }
 
@@ -142,6 +142,8 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
     tokens: lexer_without_comments(raw)
     rewritten := 0
     stack := [Int]{}
+    // Whether each open `{` on `stack` is a statement block.
+    blocks := [Bool]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]
         if token.literal >= 0 {
@@ -150,8 +152,9 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
             }
         }
         enclosing: if stack.len() > 0 -> stack[stack.len() - 1] else -> outer
+        block: blocks.len() > 0 && blocks[blocks.len() - 1]
         params_end := -1
-        if lambda_shape1_leads(bytes, tokens, index, enclosing, outer == LAMBDA_SHAPE_SPAN || outer == LAMBDA_SHAPE_TEXT) {
+        if lambda_shape1_leads(bytes, tokens, index, enclosing, block, outer == LAMBDA_SHAPE_SPAN || outer == LAMBDA_SHAPE_TEXT) {
             if token.kind == TOKEN_LPAREN -> params_end = lambda_shape1_match(tokens, index)
             if token.kind == TOKEN_IDENT -> params_end = index
         }
@@ -166,6 +169,7 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
                 }
             }
         }
+        opened: stack.len()
         if {
             // A marker's arguments: enclosing `#` keeps them from leading.
             token.kind == TOKEN_LPAREN && index >= 2 && tokens[index - 1].kind == TOKEN_IDENT && tokens[index - 2].kind == TOKEN_HASH -> stack.push(TOKEN_HASH)
@@ -173,7 +177,11 @@ lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Tok
             token.kind == TOKEN_LBRACE && lambda_shape1_collection(tokens, index) -> stack.push(TOKEN_LBRACKET)
             token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE -> stack.push(token.kind)
         }
-        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RBRACE) && stack.len() > 0 -> _: stack.pop()
+        if stack.len() > opened -> blocks.push(token.kind == TOKEN_LBRACE && lambda_shape1_block(tokens, index))
+        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RBRACE) && stack.len() > 0 {
+            _: stack.pop()
+            _: blocks.pop()
+        }
     }
     rewritten
 }
@@ -193,15 +201,18 @@ LAMBDA_SHAPE_TEXT: -2
 // Whether the token at `index` stands where a value starts, so a `(…)` group or
 // a lowercase name there followed by an arrow is a lambda head. A capitalized
 // name before an arrow, or first in the group, is a type
-// (`change note: String -> Label`, `(Int) -> Int`). A migration's `via { … }`
-// converter body is a value, and so is a `(…)` group set apart from the name
-// before it (`task (x: Int) -> x`), which a call never is.
-lambda_shape1_leads: fn(bytes: [U8], tokens: [Token], index: Int, enclosing: Int, span: Bool) -> Bool {
+// (`change note: String -> Label`, `(Int) -> Int`), unless a `:` follows it in
+// the group, which makes it a parameter's name (`(Count: Int) -> Count`). A
+// migration's `via { … }` converter body is a value, and so is a `(…)` group
+// set apart from the name before it (`task (x: Int) -> x`), which a call never
+// is, or one that starts a statement of a statement block (`block`:
+// lambda_shape1_block), such as a function body that ends in a lambda.
+lambda_shape1_leads: fn(bytes: [U8], tokens: [Token], index: Int, enclosing: Int, block: Bool, span: Bool) -> Bool {
     kind: tokens[index].kind
     if kind != TOKEN_LPAREN && kind != TOKEN_IDENT -> return false
     if enclosing == TOKEN_HASH -> return false
     if kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index]) -> return false
-    if kind == TOKEN_LPAREN && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index + 1]) -> return false
+    if kind == TOKEN_LPAREN && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && lambda_shape1_capital(bytes, tokens[index + 1]) && !(index + 2 < tokens.len() && tokens[index + 2].kind == TOKEN_COLON) -> return false
     if index == 0 -> return enclosing == TOKEN_LPAREN || (enclosing == LAMBDA_SHAPE_SPAN && kind == TOKEN_LPAREN)
     before: tokens[index - 1].kind
     if before == TOKEN_COMMA -> return enclosing == TOKEN_LPAREN || enclosing == TOKEN_LBRACKET
@@ -209,9 +220,22 @@ lambda_shape1_leads: fn(bytes: [U8], tokens: [Token], index: Int, enclosing: Int
         if index + 1 >= tokens.len() || tokens[index].span.end == tokens[index + 1].span.start -> return false
         return before == TOKEN_LPAREN || before == TOKEN_LBRACKET
     }
-    if before == TOKEN_LBRACE -> return enclosing == TOKEN_LBRACKET || (index >= 2 && tokens[index - 2].kind == TOKEN_IDENT && lambda_shape1_text(bytes, tokens[index - 2].span.start, tokens[index - 2].span.end) == "via")
+    if before == TOKEN_LBRACE -> return enclosing == TOKEN_LBRACKET || (block && kind == TOKEN_LPAREN) || (index >= 2 && tokens[index - 2].kind == TOKEN_IDENT && lambda_shape1_text(bytes, tokens[index - 2].span.start, tokens[index - 2].span.end) == "via")
+    if before == TOKEN_SEMI -> return block && kind == TOKEN_LPAREN
     if before == TOKEN_IDENT -> return !span && kind == TOKEN_LPAREN && tokens[index - 1].span.end < tokens[index].span.start && !lambda_shape1_capital(bytes, tokens[index - 1])
     before == TOKEN_LPAREN || before == TOKEN_LBRACKET || before == TOKEN_COLON || before == TOKEN_EQ || before == TOKEN_COLON_EQ || before == TOKEN_UNIFIED_ARROW || before == TOKEN_RETURN || before == TOKEN_QUESTION_QUESTION || before == TOKEN_PIPE_GT
+}
+
+// Whether the `{` at `index` opens a statement block: a function's or a
+// lambda's body (after its `)`, or its return type: `-> Int {`,
+// `-> [Int] {`, `-> List<Int> {`, `-> Int? {`), a branch's block (after
+// `->` or `else`), or a default value after a parameter's type. An arm list
+// (`== {`, `if {`) never is: a `(…)` group starting an arm is a pattern.
+lambda_shape1_block: fn(tokens: [Token], index: Int) -> Bool {
+    if index == 0 -> return false
+    before: tokens[index - 1].kind
+    if before == TOKEN_IDENT -> return index >= 2 && tokens[index - 2].kind == TOKEN_UNIFIED_ARROW
+    before == TOKEN_RPAREN || before == TOKEN_RBRACKET || before == TOKEN_GT || before == TOKEN_QUESTION || before == TOKEN_UNIFIED_ARROW || before == TOKEN_KW_ELSE
 }
 
 // Whether the `{` at `index` opens a collection literal (`[T]{…}`,

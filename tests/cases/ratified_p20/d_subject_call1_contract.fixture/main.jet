@@ -9,7 +9,7 @@ User: struct {
 run: fn() {
     users: [User{name: "ann", active: true, tags: ["a", "bb"]}, User{name: "bo", active: false, tags: []}, User{name: "cy", active: true, tags: ["ccc"]}]
     short: users.filter(.active).map(.name.to_upper())
-    long: users.filter((user) -> user.active).map((user) -> user.name.to_upper())
+    long: users.filter(fn(user) { user.active }).map(fn(user) { user.name.to_upper() })
     print(short)
     print(short == long)
     counts: users.map(.tags.len())

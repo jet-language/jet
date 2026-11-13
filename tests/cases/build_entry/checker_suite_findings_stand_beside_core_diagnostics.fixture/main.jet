@@ -17,7 +17,7 @@ build: fn(b: Build) {
     }
     meta.events(
         watch: .Calls{to: print},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Call(c)) {
                 b.error(c.span, "ORG02", "`{c.caller}` prints directly", "project policy routes output through the logger", "call the logger instead")
                 b.error(c.span, "E0101", "a checker speaking as the compiler", "none", "none")

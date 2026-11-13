@@ -351,12 +351,12 @@ sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, keys: &[Strin
         if parameter.default == .Val(value) -> pending.push(value)
     }
     loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], (child: Int) -> pending.push(child))
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(child: Int) { pending.push(child) })
     }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
         sema_core_demand_expr_keys(function.tree, expression, decls, keys)
-        body_each_expr_child(function.tree, body_node(function.tree, expression), (child: Int) -> pending.push(child))
+        body_each_expr_child(function.tree, body_node(function.tree, expression), fn(child: Int) { pending.push(child) })
     }
 }
 

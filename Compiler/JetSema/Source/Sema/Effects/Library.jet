@@ -403,7 +403,7 @@ sema_library_effect_check_kinds: fn(node: SemaEffectNode, reach: SemaLibraryEffe
         ancestors: reach.ancestry.get(token) ?? next
         if ancestors.len() == 0 -> next
         root: ancestors[ancestors.len() - 1]
-        if root.contains("/") || !roots.contains(root) || ancestors.any(ancestor -> named.contains(ancestor)) -> next
+        if root.contains("/") || !roots.contains(root) || ancestors.any(fn(ancestor) { named.contains(ancestor) }) -> next
         written_root: loop bound in node.written_declared {
             if sema_effect_covers(bound, root) -> break true
         } ?? false

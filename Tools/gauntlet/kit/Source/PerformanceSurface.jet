@@ -280,7 +280,7 @@ precision17: fn(value: Float) -> String {
 
 // The SHA-256 of `values` as toPrecision(17) texts joined by newlines.
 digest_numbers: fn(values: [Float]) -> String {
-    sha_hex(values.map(value -> precision17(value)).join("\n"))
+    sha_hex(values.map(fn(value) { precision17(value) }).join("\n"))
 }
 
 // The value of rank `rank` (1-based) of `ordered`; null when it has none.
@@ -344,7 +344,7 @@ paired_bootstrap: fn(surface: [Float], plain: [Float], options: BootstrapOptions
 
 compute_statistics: fn(surface: [Float], plain: [Float], options: BootstrapOptions) -> SurfaceStatistics Err! {
     if surface.len() != plain.len() || surface.len() == 0 -> return Err("statistics require equal non-empty vectors")
-    if !surface.concat(plain).all(value -> math.is_finite(value) && value > 0.0) -> return Err("statistics require positive finite vectors")
+    if !surface.concat(plain).all(fn(value) { math.is_finite(value) && value > 0.0 }) -> return Err("statistics require positive finite vectors")
     surface_median: stats.median_high(surface) ?? 0.0
     plain_median: stats.median_high(plain) ?? 0.0
     ratios := [Float]{}
@@ -357,7 +357,7 @@ compute_statistics: fn(surface: [Float], plain: [Float], options: BootstrapOptio
     Ok(SurfaceStatistics{surface_median: surface_median, plain_median: plain_median, ratio: surface_median / plain_median, ratios: ratios, differences: differences, bootstrap: bootstrap})
 }
 
-floats: fn(values: [Float]) -> Dyn { Dyn.Array(values.map(value -> Dyn.Float(value))) }
+floats: fn(values: [Float]) -> Dyn { Dyn.Array(values.map(fn(value) { Dyn.Float(value) })) }
 
 // The statistics as a pair row holds them, without the bootstrap.
 statistics_tree: fn(found: SurfaceStatistics) -> Dyn {
@@ -397,7 +397,7 @@ verdict_reason: fn(verdict: String, confidence: Dyn) -> String {
 
 // A sample's time: its first finite wall, duration or elapsed reading.
 sample_time: fn(sample: Dyn) -> Float? {
-    ["wall_time_ms", "duration_ms", "elapsed_ms"].filter_map(field -> number_at(sample, field)).first()
+    ["wall_time_ms", "duration_ms", "elapsed_ms"].filter_map(fn(field) { number_at(sample, field) }).first()
 }
 
 // Whether the sample exited 0 with no signal, timeout or error.
@@ -422,7 +422,7 @@ first_array: fn(candidates: [Dyn]) -> [Dyn] {
 
 // The first of `candidates` that is not null.
 first_present: fn(candidates: [Dyn]) -> Dyn {
-    candidates.find(candidate -> candidate != Dyn.Null) ?? Dyn.Null
+    candidates.find(fn(candidate) { candidate != Dyn.Null }) ?? Dyn.Null
 }
 
 // The sample of `arm` a pair row holds: its object, else (in a row with no
@@ -443,8 +443,8 @@ texts_differ: fn(tree: Dyn, path: String, expected: String) -> Bool { text_at(tr
 
 pair_identity_issues: fn(receipt: Dyn, row: Dyn, spec: Dyn, out: &[SurfaceIssue]) {
     pair: pair_definition(spec)
-    differs: (path: String, other: String) -> dyn_at(row, path) != dyn_at(pair, other)
-    relabeled: (path: String) -> truthy_at(spec, path) && dyn_at(spec, path) != dyn_at(pair, path)
+    differs: fn(path: String, other: String) { dyn_at(row, path) != dyn_at(pair, other) }
+    relabeled: fn(path: String) { truthy_at(spec, path) && dyn_at(spec, path) != dyn_at(pair, path) }
     inputs: dyn_at(receipt, "input")
     flag(out, texts_differ(receipt, "schema", PS_SCHEMA) || number_at(receipt, "version") != Val(1.0), "stale-identity", "receipt schema/version is not the current performance-surface contract")
     flag(out, differs("id", "id"), "stale-identity", "pair id must be {js_text(dyn_at(pair, "id"))}")
@@ -461,7 +461,7 @@ pair_identity_issues: fn(receipt: Dyn, row: Dyn, spec: Dyn, out: &[SurfaceIssue]
 
 // Whether `text` is 64 hexadecimal digits.
 is_hex64: fn(text: String) -> Bool {
-    text.len() == 64 && text.bytes().all(byte -> (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{70})) || (byte >= (U8{97}) && byte <= (U8{102})))
+    text.len() == 64 && text.bytes().all(fn(byte) { (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{70})) || (byte >= (U8{97}) && byte <= (U8{102})) })
 }
 
 identity_issues: fn(receipt: Dyn, row: Dyn, out: &[SurfaceIssue]) {
@@ -500,7 +500,7 @@ context_issues: fn(receipt: Dyn, row: Dyn, pair: Dyn, out: &[SurfaceIssue]) {
         out.push(SurfaceIssue{kind: "missing-identity", cause: "shared pair measurement context is missing"})
         return
     }
-    differs: (path: String) -> dyn_at(row, path) != dyn_at(context, path)
+    differs: fn(path: String) { dyn_at(row, path) != dyn_at(context, path) }
     flag(out, dyn_at(context, "context_sha256") != context_digest(context), "stale-identity", "shared pair measurement context digest is stale")
     flag(out, json.canonical(dyn_at(context, "inputs")) != json.canonical(dyn_at(pair, "inputs")) || texts_differ(context, "tier", PS_TIER) || texts_differ(context, "target", PS_TARGET) || texts_differ(context, "metric", PS_METRIC) || dyn_at(context, "artifact_sha256") != dyn_at(receipt, "artifact_sha256") || texts_differ(context, "environment_sha256", environment_digest(receipt)), "identity-mismatch", "plain and surface arms do not share the declared input, tier, artifact, or environment identity")
     sampling: dyn_at(context, "sampling")
@@ -525,7 +525,7 @@ binding_issues: fn(sample: Dyn, source: String, context: Dyn, location: String, 
         out.push(SurfaceIssue{kind: "unpaired-row", cause: "{location} arm is missing"})
         return
     }
-    differs: (path: String, other: String) -> dyn_at(sample, path) != dyn_at(context, other)
+    differs: fn(path: String, other: String) { dyn_at(sample, path) != dyn_at(context, other) }
     flag(out, texts_differ(sample, "source_file", "main.jet") || texts_differ(sample, "source_sha256", sha_hex(source)), "identity-mismatch", "{location} source file or digest is not bound to its declared program")
     shared: differs("pair_context_sha256", "context_sha256") || differs("artifact_sha256", "artifact_sha256") || differs("environment_sha256", "environment_sha256") || differs("tier", "tier") || differs("target", "target")
     flag(out, shared || dyn_at(sample, "input_range") != dyn_at(pair, "input_range") || dyn_at(sample, "output_oracle") != dyn_at(pair, "expected_output"), "identity-mismatch", "{location} does not share the pair input, tier, artifact, environment, or output identity")
@@ -549,7 +549,7 @@ count_label: fn(orders: [Dyn], label: String) -> Int {
 }
 
 balanced: fn(orders: [Dyn], count: Int) -> Bool {
-    orders.len() == count && orders.all(order -> PS_ORDERS.contains(text_at(order, "") ?? "")) && count_label(orders, "surface_first") == count /% 2
+    orders.len() == count && orders.all(fn(order) { PS_ORDERS.contains(text_at(order, "") ?? "") }) && count_label(orders, "surface_first") == count /% 2
 }
 
 // The issues of each entry of `vector` that is not the computed value.
@@ -561,7 +561,7 @@ stale_entries: fn(vector: [Dyn], computed: [Float], what: String, out: &[Surface
 // The issues of a row's declared statistics against those `found` from its
 // raw samples.
 statistics_issues: fn(row: Dyn, found: SurfaceStatistics, out: &[SurfaceIssue]) {
-    declared: (field: String, inner: String) -> number_at(first_present([dyn_at(row, field), dyn_at(row, "statistics/{inner}")]), "")
+    declared: fn(field: String, inner: String) { number_at(first_present([dyn_at(row, field), dyn_at(row, "statistics/{inner}")]), "") }
     flag(out, !close_enough(declared("surface_wall_time_ms", "surface_median_ms"), Val(found.surface_median)), "wrong-ratio", "reported surface median differs from all raw samples")
     flag(out, !close_enough(declared("plain_wall_time_ms", "plain_median_ms"), Val(found.plain_median)), "wrong-ratio", "reported plain median differs from all raw samples")
     flag(out, !close_enough(declared("ratio", "ratio"), Val(found.ratio)), "wrong-ratio", "reported ratio is not median(surface)/median(plain)")
@@ -748,7 +748,7 @@ differs_at: fn(tree: Dyn, path: String, expected: Dyn) -> Bool { dyn_at(tree, pa
 // and its pair measurement contract.
 validate_manifest_pair: fn(spec: Dyn, evidence: Dyn, measurement: Dyn) -> [String] {
     pair: compound_pair()
-    from_pair: (path: String) -> differs_at(spec, path, dyn_at(pair, path))
+    from_pair: fn(path: String) { differs_at(spec, path, dyn_at(pair, path))
     contract: pair_measurement()
     issues := [String]{}
     if !(spec == .Object(_)) || from_pair("id") -> issues.push("manifest pair id is stale")
@@ -766,7 +766,7 @@ validate_manifest_pair: fn(spec: Dyn, evidence: Dyn, measurement: Dyn) -> [Strin
     if !(measurement == .Object(_)) || json.canonical(dyn_at(measurement, "inputs")) != json.canonical(compound_inputs()) || !bound {
         issues.push("manifest pair measurement contract does not bind shared inputs, tier, artifact, environment, sampling, and exact output validation")
     }
-    issues
+    issues }
 }
 
 // The trimmed stdout of `command` run in `cwd`; null when it fails.
@@ -1310,7 +1310,7 @@ performance_surface_main: fn(repo_dir: String, argv: [String]) -> Int Err! {
     asked: args.pair ?? ""
     spec: if asked != "" && asked != PS_PAIR_ID -> manifest_row(manifest, asked) else -> Dyn.Null
     if asked != "" && asked != PS_PAIR_ID && !nonempty_at(spec, "evidence_file") -> return Err("manifest pair {asked} is missing or names no evidence_file")
-    resolve: (path: String) -> files.resolve(path) ?? path
+    resolve: fn(path: String) { files.resolve(path) ?? path }
     canonical_path: resolve(args.canonical ?? files.join(repo_dir, text_at(spec, "evidence_file") ?? "Tools/gauntlet/performance-surface-evidence.json"))
     generated_at: time.now_utc().format("yyyy-MM-ddTHH:mm:ss.SSSZ")
     history: prepare_history(canonical_path, generated_at, repo_dir, if spec == Dyn.Null -> PS_HISTORY else -> [])
@@ -1370,12 +1370,12 @@ command_line: fn() -> String {
     sum: Float{0.1} + Float{0.2}
     third: Float{1.0} / Float{3.0}
     values: [Float]{10.0, sum, 1e21, 1.5e-7, 0.000001, 0.0, 4999950000.0, third, -12.5}
-    assert_eq(values.map(value -> precision17(value)), ["10.000000000000000", "0.30000000000000004", "1.0000000000000000e+21", "1.4999999999999999e-7", "9.9999999999999995e-7", "0.0000000000000000", "4999950000.0000000", "0.33333333333333331", "-12.500000000000000"])
+    assert_eq(values.map(fn(value) { precision17(value) }), ["10.000000000000000", "0.30000000000000004", "1.0000000000000000e+21", "1.4999999999999999e-7", "9.9999999999999995e-7", "0.0000000000000000", "4999950000.0000000", "0.33333333333333331", "-12.500000000000000"])
 }
 
 #Test("the balanced order is the harness's seeded Fisher-Yates shuffle, half each label") {
     order: balanced_order(PS_WARMUPS, PS_SEED)
-    assert_eq(order.filter(label -> label == "surface_first").len(), 5)
+    assert_eq(order.filter(fn(label) { label == "surface_first" }).len(), 5)
     assert_eq(order.len(), 10)
 }
 

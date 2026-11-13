@@ -23,7 +23,7 @@ Reverse: struct<Value, Alpha> {
 
 keep_result: fn(value: &&(Int CellResultError!)) {
     cell: Cell.new(value)
-    print(cell.read(result -> result ?? 0))
+    print(cell.read(fn(result) { result ?? 0 }))
 }
 
 ok_result: fn() -> Int CellResultError! {
@@ -34,16 +34,16 @@ run: fn() {
     counts := [String:Int]{}
     counts["jet"] = 3
     map_cell: Cell.new(counts)
-    print(map_cell.read(values -> values.get("jet") ?? 0))
+    print(map_cell.read(fn(values) { values.get("jet") ?? 0 }))
 
     keep_result(ok_result())
 
     handle: Shared{9}
     shared_cell: Cell.new(handle)
-    print(shared_cell.read(inner -> inner.guard_read().value))
+    print(shared_cell.read(fn(inner) { inner.guard_read().value }))
 
     nested: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
-    projected: nested.guard_read().map(value -> value.value.value)
+    projected: nested.guard_read().map(fn(value) { value.value.value })
     print(projected.get())
 
     reverse: Cell.new(Reverse<Float, Number>{

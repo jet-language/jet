@@ -17,7 +17,7 @@ run: fn(check: Check) {
     if printed != "" -> print(printed.remove_suffix("\n"))
     if !files.is_dir("build-work") -> return
     print("== build-work")
-    names := (files.list_dir("build-work") ?? process.fail(1, "{err}")).map(entry -> entry.name)
+    names := (files.list_dir("build-work") ?? process.fail(1, "{err}")).map(fn(entry) { entry.name })
     names.sort()
     loop name in names -> print(name)
 }

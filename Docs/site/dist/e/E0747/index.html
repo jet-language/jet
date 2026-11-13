@@ -50,8 +50,8 @@ More: jet-lang.dev/e/E0747
 Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `Panic`, which the parameter doesn&#39;t allow
   --&gt; tests/ui/callback_value_reaches_denied_panic.jet:8:22
     |
-  8 |     b: stop_apply(3, (m: Int) -&gt; if m &lt; 0 -&gt; panic(&quot;negative&quot;) else -&gt; m)
-    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  8 |     b: stop_apply(3, fn(m: Int) { if m &lt; 0 -&gt; panic(&quot;negative&quot;) else -&gt; m })
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: The parameter is `fn(…) -[!Panic]&gt;`, which denies `Panic`
  Fix: Pass a callback that can&#39;t reach `Panic`, or remove the denial from the parameter&#39;s row
  Denial: invocation

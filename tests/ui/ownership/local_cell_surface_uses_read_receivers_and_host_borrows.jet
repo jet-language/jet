@@ -3,8 +3,8 @@ Pair: struct { left: Int, right: Int }
 update: fn(cell: Cell<Pair>) -> Int {
     cell.set(Pair{ left: 2, right: 3 })
     old: cell.replace(Pair{ left: 4, right: 5 })
-    cell.edit(pair -> pair.left += old.left)
-    return cell.read(pair -> pair.left + pair.right)
+    cell.edit(fn(pair) { pair.left += old.left })
+    return cell.read(fn(pair) { pair.left + pair.right })
 }
 run: fn() {
     cell: Cell.new(Pair{ left: 0, right: 1 })

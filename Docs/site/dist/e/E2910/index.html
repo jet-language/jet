@@ -32,9 +32,9 @@
 <h2>What</h2>
 <p class="diag-copy what" data-registry-field="what">`reactive.{kind}` needs a lambda, not {type}.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`reactive.derived`/`reactive.autorun` build a reactive value from a `() -&gt; …` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run.</p>
+<p class="diag-copy why" data-registry-field="why">`reactive.derived`/`reactive.autorun` build a reactive value from a `fn() { … }` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `reactive.derived(() -&gt; … )` or `reactive.autorun(() -&gt; { … })`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `reactive.derived(fn() { … } )` or `reactive.autorun(fn() { … })`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2910</code>: <code>tests/ui/button_metadata_needs_click.stderr</code>.</p>
 <pre class="diag">Error [jet.ReactiveArgumentNotLambda]: `button` with a shortcut or label needs its click lambda
@@ -42,8 +42,8 @@
     |
   6 |     node: ui.button(&quot;Save&quot;, label: &quot;Save the file&quot;)
     |              ^^^^^^
- Why: The shortcut and accessible label belong to the click form, whose handler is the `() -&gt; { … }` argument after them
- Fix: Write `ui.button(&quot;Save&quot;, shortcut: …, () -&gt; { save() })`
+ Why: The shortcut and accessible label belong to the click form, whose handler is the `fn() { … }` argument after them
+ Fix: Write `ui.button(&quot;Save&quot;, shortcut: …, fn() { save() })`
 More: jet-lang.dev/e/E2910
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

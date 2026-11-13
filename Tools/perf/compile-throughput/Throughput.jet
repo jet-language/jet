@@ -245,7 +245,7 @@ parse_cpus: fn(text: String) -> [Int] {
 }
 
 // A comma list, trimmed.
-parse_list: fn(text: String) -> [String] { text.split(",").map(m -> m.trim()).to_list() }
+parse_list: fn(text: String) -> [String] { text.split(",").map(fn(m) { m.trim() }).to_list() }
 
 parse_options: fn(args: [String]) -> Options {
     options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf"}
@@ -425,7 +425,7 @@ packages: fn(options: Options, verb: String) -> [String] {
         term.eprint("Throughput.jet: CompilerPackages.jet {verb} exited {receipt.code}:\n{receipt.errors}")
         process.exit(1)
     }
-    receipt.output.split("\n").filter(row -> row != "").to_list()
+    receipt.output.split("\n").filter(fn(row) { row != "" }).to_list()
 }
 
 // Where a program's sources come from and their shape. A count that does not
@@ -615,8 +615,8 @@ mode_cell: fn(run: Run) -> String {
 // ns per line, parallelism, peak MiB, parsed lines, traced and outside
 // seconds, budget.
 run_cells: fn(run: Run) -> [String] {
-    parsed: run.trace.map(t -> "{t.user_lines + t.core_lines}") ?? "-"
-    traced: run.trace.map(t -> traced_ns(t)) ?? 0
+    parsed: run.trace.map(fn(t) { "{t.user_lines + t.core_lines}" }) ?? "-"
+    traced: run.trace.map(fn(t) { traced_ns(t) }) ?? 0
     cpu_per_line: if run.lines > 0 -> "{run.cpu_ns /% run.lines}" else -> "-"
     instructions: if run.instructions < 0 -> "-" else -> "{run.instructions}"
     budget: if run.budget == "" -> "-" else -> run.budget
@@ -628,17 +628,17 @@ RUN_HEADER: [String]{"mode", "run", "rc", "lines", "lines/s", "wall s", "cpu s",
 // The mode's median compile by wall among those that compiled (the lower
 // middle of an even count); None when none compiled.
 median_run: fn(runs: [Run], mode: String) -> Run? {
-    compiled := runs.filter(r -> r.mode == mode && r.rc == 0)
+    compiled := runs.filter(fn(r) { r.mode == mode && r.rc == 0 })
     if compiled.len() == 0 -> return None
-    compiled.sort_by(r -> r.wall_ns)
+    compiled.sort_by(fn(r) { r.wall_ns })
     Val(compiled[(compiled.len() - 1) /% 2].copy())
 }
 
 // The run rows, with each failed compile's note.
 run_table: fn(runs: [Run]) -> [String] {
-    out := [String]{RUN_HEADER.map(h -> h.pad_start(11, " ")).join(" ")}
+    out := [String]{RUN_HEADER.map(fn(h) { h.pad_start(11, " ") }).join(" ")}
     loop run in runs {
-        out.push(run_cells(run).map(c -> c.pad_start(11, " ")).join(" "))
+        out.push(run_cells(run).map(fn(c) { c.pad_start(11, " ") }).join(" "))
         if run.note != "" -> out.push("  {mode_cell(run)}.{run.repeat}: {run.note}")
     }
     out
@@ -651,7 +651,7 @@ report: fn(runs: [Run], modes: [String]) -> [String] {
     medians := [Run]{}
     loop mode in modes {
         median: median_run(runs, mode) ?? next
-        out.push(run_cells(median).map(c -> c.pad_start(11, " ")).join(" "))
+        out.push(run_cells(median).map(fn(c) { c.pad_start(11, " ") }).join(" "))
         medians.push(median)
     }
     loop run in medians {
@@ -659,7 +659,7 @@ report: fn(runs: [Run], modes: [String]) -> [String] {
         out.push("")
         out.push("{run.mode}.{run.repeat} (median): phase, wall s, process cpu s")
         phases := trace.phases.copy()
-        phases.sort_by(p -> -p.wall_ns)
+        phases.sort_by(fn(p) { -p.wall_ns })
         loop phase in phases {
             if phase.wall_ns < 10000000 && phase.cpu_ns < 10000000 -> next
             out.push("  {phase.kind.pad_end(28, " ")} {seconds(phase.wall_ns):PadLeft(8)} {seconds(phase.cpu_ns):PadLeft(8)}")
@@ -714,7 +714,7 @@ run_modes: fn(options: Options, jet: String, identity: String) -> Int {
     }
     loop line in report(runs, options.modes) -> print(line)
     print("traces: {options.work}/<mode>.<run>/trace.jsonl")
-    failed: runs.filter(r -> r.rc != 0 || r.trace == None || (r.budget != "" && r.budget != "ok"))
+    failed: runs.filter(fn(r) { r.rc != 0 || r.trace == None || (r.budget != "" && r.budget != "ok") })
     if failed.len() > 0 -> 1 else -> 0
 }
 
@@ -749,8 +749,8 @@ middle_int: fn(values: [Int]) -> Int {
 // spread. Work the seed never did (0 in every seed round) at or above the
 // floor in every new round fails.
 gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> GateRow {
-    row := GateRow{mode: mode.copy(), metric: metric.copy(), seed: middle_int(rounds.map(r -> r.seed)), new: middle_int(rounds.map(r -> r.new)), ratio: 0.0, spread: 0.0, status: "pass"}
-    if rounds.len() == 0 || rounds.any(r -> r.seed < 0 || r.new < 0) {
+    row := GateRow{mode: mode.copy(), metric: metric.copy(), seed: middle_int(rounds.map(fn(r) { r.seed })), new: middle_int(rounds.map(fn(r) { r.new })), ratio: 0.0, spread: 0.0, status: "pass"}
+    if rounds.len() == 0 || rounds.any(fn(r) { r.seed < 0 || r.new < 0 }) {
         row.status = "INCONCLUSIVE (not measured)"
         return row
     }
@@ -762,11 +762,11 @@ gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> Gate
         row.status = "INCONCLUSIVE (one round)"
         return row
     }
-    if rounds.any(r -> r.seed == 0) {
-        row.status = if rounds.any(r -> r.seed != 0 || r.new < floor) -> "INCONCLUSIVE (absent in a seed round)" else -> "FAIL (new work)"
+    if rounds.any(fn(r) { r.seed == 0 }) {
+        row.status = if rounds.any(fn(r) { r.seed != 0 || r.new < floor }) -> "INCONCLUSIVE (absent in a seed round)" else -> "FAIL (new work)"
         return row
     }
-    ratios := rounds.map(r -> Float.from_int(r.new) / Float.from_int(r.seed))
+    ratios := rounds.map(fn(r) { Float.from_int(r.new) / Float.from_int(r.seed) })
     ratios.sort()
     row.ratio = ratios[(ratios.len() - 1) /% 2]
     row.spread = ratios[ratios.len() - 1] - ratios[0]
@@ -782,7 +782,7 @@ gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> Gate
 // A top-level phase's process CPU in a compile; 0 when it has none.
 phase_cpu: fn(run: Run, kind: String) -> Int {
     trace: run.trace ?? return 0
-    (trace.phases.find(p -> p.kind == kind) ?? return 0).cpu_ns
+    (trace.phases.find(fn(p) { p.kind == kind }) ?? return 0).cpu_ns
 }
 
 // The phase kinds of `runs`' traces not yet in `kinds`, in order.
@@ -806,7 +806,7 @@ gate_rows: fn(runs: [Run], modes: [String]) -> [GateRow] {
             if run.mode != mode || run.compiler != "seed" || run.rc != 0 || run.trace == None -> next
             wanted: mode.copy()
             repeat: run.repeat
-            other: runs.find(r -> r.mode == wanted && r.compiler == "new" && r.repeat == repeat && r.rc == 0 && r.trace != None) ?? next
+            other: runs.find(fn(r) { r.mode == wanted && r.compiler == "new" && r.repeat == repeat && r.rc == 0 && r.trace != None }) ?? next
             seeds.push(run.copy())
             news.push(other.copy())
         }
@@ -833,8 +833,8 @@ gate_rows: fn(runs: [Run], modes: [String]) -> [GateRow] {
 // FAIL when a compile failed or a quantity fails; else INCONCLUSIVE when one
 // is; else PASS.
 gate_verdict: fn(rows: [GateRow], runs: [Run]) -> String {
-    if runs.any(r -> r.rc != 0 || r.trace == None) || rows.any(r -> r.status.starts_with("FAIL")) -> return "FAIL"
-    if rows.len() == 0 || rows.any(r -> r.status.starts_with("INCONCLUSIVE")) -> return "INCONCLUSIVE"
+    if runs.any(fn(r) { r.rc != 0 || r.trace == None }) || rows.any(fn(r) { r.status.starts_with("FAIL") }) -> return "FAIL"
+    if rows.len() == 0 || rows.any(fn(r) { r.status.starts_with("INCONCLUSIVE") }) -> return "INCONCLUSIVE"
     "PASS"
 }
 
@@ -885,8 +885,8 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
     loop line in run_table(runs) -> print(line)
     rows: gate_rows(runs, options.modes)
     print("")
-    print(GATE_HEADER.map(h -> h.pad_start(12, " ")).join(" "))
-    loop row in rows -> print(gate_cells(row).map(c -> c.pad_start(12, " ")).join(" "))
+    print(GATE_HEADER.map(fn(h) { h.pad_start(12, " ") }).join(" "))
+    loop row in rows -> print(gate_cells(row).map(fn(c) { c.pad_start(12, " ") }).join(" "))
     verdict: gate_verdict(rows, runs)
     print("traces: {options.work}/<seed|new>-<mode>.<run>/trace.jsonl")
     print("speed gate: {verdict}")
@@ -1110,7 +1110,7 @@ read_cell_trace: fn(text: String) -> CellTrace {
 // One kind's spans as its PhaseRow.
 phase_row: fn(kind: String, spans: [SpanTime]) -> PhaseRow {
     sorted := spans.copy()
-    sorted.sort_by(s -> s.start_us)
+    sorted.sort_by(fn(s) { s.start_us })
     row := PhaseRow{kind: kind.copy(), wall_ns: 0, span_ns: 0, cpu_ns: 0, count: sorted.len(), items: -1}
     union_start := 0
     union_end := -1
@@ -1171,12 +1171,12 @@ summarize: fn(samples: [Sample]) -> Summary {
         phases.push(PhaseSummary{kind: kind.copy(), wall_ns: stat_of(walls).median, cpu_ns: stat_of(cpus).median, samples: walls.len()})
     }
     Summary{
-        wall_ns: stat_of(samples.map(s -> s.wall_ns)),
-        cpu_user_ns: stat_of(samples.map(s -> s.cpu_user_ns)),
-        cpu_sys_ns: stat_of(samples.map(s -> s.cpu_sys_ns)),
-        peak_rss_bytes: stat_of(samples.map(s -> s.peak_rss_bytes)),
-        parallelism_pct: stat_of(samples.map(s -> s.parallelism_pct)),
-        startup_ns: stat_of(samples.map(s -> s.startup_ns)).median,
+        wall_ns: stat_of(samples.map(fn(s) { s.wall_ns })),
+        cpu_user_ns: stat_of(samples.map(fn(s) { s.cpu_user_ns })),
+        cpu_sys_ns: stat_of(samples.map(fn(s) { s.cpu_sys_ns })),
+        peak_rss_bytes: stat_of(samples.map(fn(s) { s.peak_rss_bytes })),
+        parallelism_pct: stat_of(samples.map(fn(s) { s.parallelism_pct })),
+        startup_ns: stat_of(samples.map(fn(s) { s.startup_ns })).median,
         phases,
     }
 }
@@ -1254,14 +1254,14 @@ cell_gate: fn(cell: AxisCell, budgets: BudgetFile, program: Program, failures: &
         gate.determinism = "fail"
         failures.push("{program.id}: artifacts or diagnostics differ across samples and arms ({distinct} distinct)")
     }
-    arm: program.arms.find(a -> a.id == "default") ?? return gate
+    arm: program.arms.find(fn(a) { a.id == "default" }) ?? return gate
     summary: arm.summary ?? return gate
     if cell.gates.memory.get("{program.id}_peak_rss_bytes_max") == .Val(limit) {
         peak: summary.peak_rss_bytes.max
         gate.memory = if peak <= limit -> "pass" else -> "fail"
         if peak > limit -> failures.push("{program.id}: peak RSS {peak} B > {limit} B")
     }
-    contract: cell.programs.find(p -> p.id == program.id) ?? return gate
+    contract: cell.programs.find(fn(p) { p.id == program.id }) ?? return gate
     wall: summary.wall_ns
     if contract.threshold.wall_ns_lt == .Val(limit) {
         passed: wall.median < limit && wall.max < limit
@@ -1314,7 +1314,7 @@ quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], bu
     if base.machine.memory_bytes != machine.memory_bytes -> failures.push("baseline machine memory_bytes {base.machine.memory_bytes} differs from {machine.memory_bytes}")
     loop program in programs {
         id: program.id.copy()
-        recorded: base.programs.find(p -> p.program == id) ?? {
+        recorded: base.programs.find(fn(p) { p.program == id }) ?? {
             failures.push("baseline has no {program.id}")
             next
         }
@@ -1325,7 +1325,7 @@ quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], bu
         loop arm in program.arms {
             summary: arm.summary ?? next
             arm_id: arm.id.copy()
-            previous: recorded.arms.find(a -> a.arm == arm_id) ?? {
+            previous: recorded.arms.find(fn(a) { a.arm == arm_id }) ?? {
                 failures.push("baseline has no {program.id}/{arm.id}")
                 next
             }
@@ -1333,7 +1333,7 @@ quick_compare: fn(baseline: Baseline?, machine: Machine, programs: [Program], bu
             compare(comparisons, failures, program.id, arm.id, "peak_rss_bytes", previous.peak_rss_bytes, summary.peak_rss_bytes.median, budgets.memory_regression_pct, QUICK_MEMORY_FLOOR_BYTES)
             loop phase in previous.phases {
                 kind: phase.kind.copy()
-                current: summary.phases.find(p -> p.kind == kind).map(p -> p.wall_ns) ?? -1
+                current: summary.phases.find(fn(p) { p.kind == kind }).map(fn(p) { p.wall_ns }) ?? -1
                 compare(comparisons, failures, program.id, arm.id, "phase {phase.kind}", phase.wall_ns, current, budgets.latency_regression_pct, QUICK_TIME_FLOOR_NS)
             }
         }
@@ -1347,7 +1347,7 @@ quick_baseline: fn(receipt: Receipt) -> Baseline {
         arms := [BaselineArm]{}
         loop arm in program.arms {
             summary: arm.summary ?? next
-            arms.push(BaselineArm{arm: arm.id.copy(), wall_ns: summary.wall_ns.median, peak_rss_bytes: summary.peak_rss_bytes.median, phases: summary.phases.map(p -> PhaseWall{kind: p.kind.copy(), wall_ns: p.wall_ns})})
+            arms.push(BaselineArm{arm: arm.id.copy(), wall_ns: summary.wall_ns.median, peak_rss_bytes: summary.peak_rss_bytes.median, phases: summary.phases.map(fn(p) { PhaseWall{kind: p.kind.copy(), wall_ns: p.wall_ns} })})
         }
         programs.push(BaselineProgram{program: program.id.copy(), source_sha256: program.source.sha256.copy(), arms})
     }
@@ -1634,14 +1634,14 @@ run_lane: fn(options: Options, jet: String, identity: String) -> Int {
                 if index >= options.warmups -> arm.samples.push(sample)
             }
             files.remove_all(project) ?? ()
-            good: arm.samples.filter(s -> s.problems.len() == 0).len()
+            good: arm.samples.filter(fn(s) { s.problems.len() == 0 }).len()
             arm.summary = if good == options.samples -> Val(summarize(arm.samples)) else -> None
             if good != options.samples -> receipt.failures.push("{id}/{arm_id}: {options.samples - good} of {options.samples} samples missing or failed")
             prepared.program.arms.push(arm)
         }
         receipt.programs.push(prepared.program.copy())
     }
-    complete: receipt.programs.filter(p -> p.arms.len() > 0 && p.arms.all(a -> a.summary != None))
+    complete: receipt.programs.filter(fn(p) { p.arms.len() > 0 && p.arms.all(fn(a) { a.summary != None }) })
     if options.lane == "full" -> loop program in complete -> receipt.gates.push(cell_gate(cell, budgets, program, receipt.failures))
     if options.lane == "quick" -> quick_checks(options, pin_dir, complete, receipt)
     receipt.contention_end = contention()
@@ -1748,7 +1748,7 @@ test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
     median: median_run(runs, "O0") ?? panic("a median")
     assert_eq(median.repeat, 3)
     assert_eq(parallelism(median), "4.0")
-    assert_eq((median_run(runs.filter(r -> r.repeat != 3), "O0") ?? panic("even")).repeat, 2)
+    assert_eq((median_run(runs.filter(fn(r) { r.repeat != 3 }), "O0") ?? panic("even")).repeat, 2)
     assert(median_run(runs, "check") == None)
 }
 
@@ -1832,8 +1832,8 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
     assert_eq(gate.determinism, "fail")
     assert_eq(gate.memory, "pass")
     assert_eq(gate.threshold, "pass")
-    assert(failures.any(f -> f.contains("phase over budget: P1+P2 read, lex, parse") && f.contains("(root: B)")))
-    assert(failures.any(f -> f.contains("differ across samples and arms (2 distinct)")))
+    assert(failures.any(fn(f) { f.contains("phase over budget: P1+P2 read, lex, parse") && f.contains("(root: B)") }))
+    assert(failures.any(fn(f) { f.contains("differ across samples and arms (2 distinct)") }))
     checked: phase_budget_check(budget_file, (test_program("bench30k", 1000000000, "a").arms[0].summary ?? panic("summary")), 30000)
     assert_eq(checked.column, "30M-wall")
     assert_eq(checked.rows[0].budget_ns, 84000)
@@ -1857,8 +1857,8 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
     budgets: PerfBudgets{latency_regression_pct: 15, memory_regression_pct: 15}
     compared: quick_compare(Val(baseline.copy()), machine, [Program]{program.copy()}, budgets)
     assert_eq(compared.failures.join("|"), "bench30k/default phase load: 1000000000 vs baseline 800000000 (budget +15%)|bench30k/default phase gone: -1 vs baseline 900000000 (budget +15%)|baseline has no bench30k/single")
-    assert_eq((compared.comparisons.find(c -> c.metric == "peak_rss_bytes") ?? panic("rss")).status, "below-floor")
-    assert_eq((compared.comparisons.find(c -> c.metric == "phase tiny") ?? panic("tiny")).status, "below-floor")
+    assert_eq((compared.comparisons.find(fn(c) { c.metric == "peak_rss_bytes" }) ?? panic("rss")).status, "below-floor")
+    assert_eq((compared.comparisons.find(fn(c) { c.metric == "phase tiny" }) ?? panic("tiny")).status, "below-floor")
     assert(quick_compare(None, machine, [Program]{program.copy()}, budgets).failures[0].contains("missing"))
     other := baseline.copy()
     other.programs[0].source_sha256 = "other"
@@ -1887,7 +1887,7 @@ gate_rounds: fn(new_cpu: [Float], new_instructions: Int, new_bodies_ms: Int) -> 
     modes: [String]{"O0"}
     steady: gate_rounds([Float]{101.0, 102.0, 103.0}, 1010000000000, 10100)
     steady_rows: gate_rows(steady, modes)
-    assert_eq(steady_rows.map(r -> "{r.metric}={r.status}").join(","), "cpu=pass,instructions=pass,phase sema.bodies=pass,phase load=below floor")
+    assert_eq(steady_rows.map(fn(r) { "{r.metric}={r.status}" }).join(","), "cpu=pass,instructions=pass,phase sema.bodies=pass,phase load=below floor")
     assert_eq(gate_verdict(steady_rows, steady), "PASS")
     risen: gate_rounds([Float]{108.0, 112.0, 114.0}, 1020000000000, 10200)
     risen_rows: gate_rows(risen, modes)

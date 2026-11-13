@@ -9,7 +9,7 @@ State: struct {
 wait_for_ready: fn(state: Shared<State>, changed: Condition, armed: Sender<Int>, woke: Sender<Int>) {
     guard: state.guard_edit()
     armed.send(1)
-    guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+    guard.wait(changed, fn(value) { value.ready }) ?? panic("wait failed")
     woke.send(1)
 }
 

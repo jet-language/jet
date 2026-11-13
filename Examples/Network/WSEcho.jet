@@ -23,7 +23,7 @@ handle_ws: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 
 run: fn() (HTTPError | RangeError | TaskFailure | WsError)! {
     mux: http_server.mux()
-    mux.get("/live", (req: HTTPRequest) -> handle_ws(req))
+    mux.get("/live", fn(req: HTTPRequest) { handle_ws(req) })
     server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     serving: task {

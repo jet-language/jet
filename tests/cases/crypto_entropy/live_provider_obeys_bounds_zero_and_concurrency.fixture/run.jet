@@ -8,7 +8,7 @@ s1_entropy_barrier_wait: fn(state: Shared<EntropyBarrier>, changed: Condition) {
     guard: state.guard_edit()
     guard.value.arrived += 1
     changed.notify_all()
-    guard.wait(changed, value -> value.arrived == 8) ?? panic("barrier wait")
+    guard.wait(changed, fn(value) { value.arrived == 8 }) ?? panic("barrier wait")
 }
 s1_entropy_worker: fn(state: Shared<EntropyBarrier>, changed: Condition) -> [U8] {
     s1_entropy_barrier_wait(state, changed)

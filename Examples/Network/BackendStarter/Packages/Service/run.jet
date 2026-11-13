@@ -86,9 +86,9 @@ run: fn() {
     http_server.request_id(mux)
     // Liveness and readiness: the service answers only once it is migrated
     // and listening.
-    mux.get("/health", (req: HTTPRequest) -> http_server.json(200, contract.Health{status: "ok", api: contract.API_VERSION}))
-    mux.post("/login", (req: HTTPRequest) -> login(req, operator.copy(), stored.copy()))
-    mux.post("/orders", (req: HTTPRequest) -> create_order(req, orders.copy()))
+    mux.get("/health", fn(req: HTTPRequest) { http_server.json(200, contract.Health{status: "ok", api: contract.API_VERSION}) })
+    mux.post("/login", fn(req: HTTPRequest) { login(req, operator.copy(), stored.copy()) })
+    mux.post("/orders", fn(req: HTTPRequest) { create_order(req, orders.copy()) })
 
     bound: http_server.bind(config.address, mux, deadline: 5s) ?? process.fail(CONFIG_ERROR, "listen on {config.address}: {err}")
     address: bound.local_addr() ?? process.fail(CONFIG_ERROR, "listener address: {err}")

@@ -4,7 +4,7 @@
 // marker-list grouping; `Type<T>.method()`; external-method sugar; canonical
 // anonymous union member order; optional declaration and trailing commas;
 // redundant default file aliases; typed-literal constructor dot removal;
-// formatter-added arm blocks, bare-lambda parens, leading-dot variant patterns,
+// formatter-added arm blocks, leading-dot variant patterns,
 // struct shorthand labels and separators; and a required default alias on a
 // dotted module import. Later ratified spellings add: the redundant default
 // alias in the `name: path` and `name: "file"` use forms; a one-member import
@@ -1073,7 +1073,6 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
     original_i := 0
     formatted_i := 0
     inserted_arm_braces := 0
-    inserted_lambda_parens := 0
     loop original_i < original.len() || formatted_i < formatted.len() {
         if original_i < original.len() && formatted_i < formatted.len() && fl_tokens_equal(original[original_i], formatted[formatted_i]) {
             original_i += 1
@@ -1101,17 +1100,7 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
             formatted_i += 1
             next
         }
-        if fl_formatted_lambda_params_open(formatted, formatted_i) && fl_kind(original, original_i) != TOKEN_LPAREN {
-            inserted_lambda_parens += 1
-            formatted_i += 1
-            next
-        }
         if fl_formatted_variant_pattern_dot(original, original_i, formatted, formatted_i) {
-            formatted_i += 1
-            next
-        }
-        if inserted_lambda_parens > 0 && fl_kind(formatted, formatted_i) == TOKEN_RPAREN && fl_is_arrow(fl_kind(formatted, formatted_i + 1)) && fl_is_arrow(fl_kind(original, original_i)) {
-            inserted_lambda_parens -= 1
             formatted_i += 1
             next
         }
@@ -1144,7 +1133,6 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
         return "fmt changed ordered token {original_i} on {path}:\n  before: {fl_describe(original, original_i)}\n  after: {fl_describe(formatted, formatted_i)}"
     }
     if inserted_arm_braces != 0 -> return "fmt left an unmatched canonical arm block on {path}"
-    if inserted_lambda_parens != 0 -> return "fmt left unmatched canonical lambda parens on {path}"
     ""
 }
 
@@ -1370,12 +1358,6 @@ fl_pattern_reaches_arrow: fn(tokens: [FmtTok], index: Int) -> Bool {
 
 fl_formatted_arm_block_opens: fn(tokens: [FmtTok], index: Int) -> Bool {
     fl_kind(tokens, index) == TOKEN_LBRACE && fl_is_arrow(fl_kind(tokens, index - 1))
-}
-
-fl_formatted_lambda_params_open: fn(tokens: [FmtTok], index: Int) -> Bool {
-    if fl_kind(tokens, index) != TOKEN_LPAREN -> return false
-    close: fl_matching(tokens, index, TOKEN_LPAREN, TOKEN_RPAREN)
-    close >= 0 && fl_is_arrow(fl_kind(tokens, close + 1))
 }
 
 fl_next_token_matches: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> Bool {
@@ -1671,7 +1653,6 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"default file alias", "use \"./foo\" as foo\nrun: fn() {{}}\n", "use \"./foo\"\nrun: fn() {{}}\n"},
         {"typed-literal dot removal", "run: fn() {{ p: Point.{{x: 1}} }}\n", "run: fn() {{ p: Point{{x: 1}} }}\n"},
         {"dispatch arm block", "run: fn() {{ if x == {{ .A -> print(1) }} }}\n", "run: fn() {{ if x == {{ .A -> {{ print(1) }} }} }}\n"},
-        {"bare lambda params", "run: fn() {{ f: x -> x }}\n", "run: fn() {{ f: (x) -> x }}\n"},
         {"bare enum variant pattern", "run: fn() {{ if x == {{ A(v) -> print(v) }} }}\n", "run: fn() {{ if x == {{ .A(v) -> print(v) }} }}\n"},
         {"bare None variant pattern", "run: fn() {{ if x == {{ None -> print(0) }} }}\n", "run: fn() {{ if x == {{ .None -> print(0) }} }}\n"},
         {"struct shorthand label", "run: fn() {{ p: Point{{x}} }}\n", "run: fn() {{ p: Point{{x: x}} }}\n"},
@@ -1723,7 +1704,6 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"trailing-comma rule does not remove argument separators", "run: fn() {{ call(a, b) }}\n", "run: fn() {{ call(a b) }}\n"},
         {"file-alias rule requires the default alias", "use \"./foo\" as bar\nrun: fn() {{}}\n", "use \"./foo\"\nrun: fn() {{}}\n"},
         {"arm-block rule does not remove explicit braces", "run: fn() {{ if x == {{ .A -> {{ print(1) }} }} }}\n", "run: fn() {{ if x == {{ .A -> print(1) }} }}\n"},
-        {"lambda rule does not remove explicit parens", "run: fn() {{ f: (x) -> x }}\n", "run: fn() {{ f: x -> x }}\n"},
         {"variant-dot rule requires a PascalCase pattern", "run: fn() {{ if x == {{ value -> print(value) }} }}\n", "run: fn() {{ if x == {{ .value -> print(value) }} }}\n"},
         {"variant-dot rule requires a dispatch arm context", "run: fn() {{ Foo work -> print(1) }}\n", "run: fn() {{ .Foo work -> print(1) }}\n"},
         {"shorthand expansion preserves field value", "run: fn() {{ p: Point{{x}} }}\n", "run: fn() {{ p: Point{{x: y}} }}\n"},
@@ -1858,9 +1838,6 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/interp_debug_label_empty.jet",
         "tests/ui/interp_empty.jet",
         "tests/ui/interp_unclosed.jet",
-        "tests/ui/lambda_after_arrow_interface.jet",
-        "tests/ui/lambda_error_type_written.jet",
-        "tests/ui/lambda_return_type_written.jet",
         "tests/ui/layout_align_not_bytes.jet",
         "tests/ui/layout_align_not_bytes_grouped.jet",
         "tests/ui/layout_c_packed_reserved.jet",

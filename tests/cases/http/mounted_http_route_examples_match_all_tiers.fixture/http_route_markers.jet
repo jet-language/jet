@@ -47,10 +47,10 @@ Jokes: struct {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     mux: server.mux()
     state: Shared{JokeState{added: 0}}
-    mux.get("/before/:name", (name: String) -> Ok(server.response(200, "before:{name}")))
+    mux.get("/before/:name", fn(name: String) { Ok(server.response(200, "before:{name}")) })
     mux.mount(Jokes{prefix: "joke", state: state})
-    mux.get("/order/after", () -> Ok(server.response(200, "after")))
-    mux.get("/before/fixed", () -> Ok(server.response(200, "late")))
+    mux.get("/order/after", fn() { Ok(server.response(200, "after")) })
+    mux.get("/before/fixed", fn() { Ok(server.response(200, "late")) })
     schema: web.openapi(mux)
     print("openapi-get:{schema.contains("/jokes/") && schema.contains("\"get\"") && schema.contains("\"id\"")}")
     print("openapi-post:{schema.contains("\"/jokes\"") && schema.contains("\"post\"") && schema.contains("\"201\"") && schema.contains("\"text\"")}")

@@ -212,7 +212,7 @@ pkg_test_extension_too_deep: fn() -> String {
     assert_eq(accepted.findings[0].rule, "r")
     assert(session.is_committed())
     assert(session.staged() == None)
-    assert(session.close(handle -> handle == 7))
+    assert(session.close(fn(handle) { handle == 7 }))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
     if session.stage_response(snapshot, raw) == {
         .Ok(_) -> panic("a closed session cannot stage")
@@ -240,9 +240,9 @@ pkg_test_extension_too_deep: fn() -> String {
 #Test("close invokes the guest closer with the live handle") {
     session := ExtensionSession.new()
     session.on_loaded(42) ?? panic("load")
-    assert(session.close(handle -> handle == 42))
+    assert(session.close(fn(handle) { handle == 42 }))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
-    assert(!session.close(_ -> {
+    assert(!session.close(fn(_) {
         assert(false, "the closer must not run without a handle")
         false
     }))

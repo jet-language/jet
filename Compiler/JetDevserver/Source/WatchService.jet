@@ -36,7 +36,7 @@ PathStamp: struct {
     capture: fn(path: OSPath) -> PathStamp {
         if fs.metadata(path) == {
             .Ok(meta) -> {
-                digest: if meta.is_file() -> SHA256.sha256_file_hex(path).ok().map((d) -> "sha256-{d}") else -> None
+                digest: if meta.is_file() -> SHA256.sha256_file_hex(path).ok().map(fn(d) { "sha256-{d}" }) else -> None
                 PathStamp{exists: true, mtime: meta.modified().ok(), len: .Val(meta.len()), digest}
             }
             .Err(_) -> PathStamp{exists: false, mtime: None, len: None, digest: None}
@@ -66,7 +66,7 @@ EventWaiter: struct {
     }
     refresh: fn(self, paths: [OSPath]) -> () { self.watches = watch_set(paths) }
     wait: fn(self, timeout: Duration?) -> Bool {
-        deadline: timeout.map((limit) -> Instant.now() + limit)
+        deadline: timeout.map(fn(limit) { Instant.now() + limit })
         loop {
             if self.watches.poll().len() > 0 -> return true
             interval := Duration.from_millis(WATCH_POLL_INTERVAL_MS)
@@ -98,7 +98,7 @@ existing_directory: fn(path: OSPath) -> OSPath? {
 // One file watch per existing directory that holds a watched path; a
 // directory that cannot be watched is left out, as a failed watch add was.
 watch_set: fn(paths: [OSPath]) -> WatchSet {
-    directories := paths.iter().filter_map((path) -> existing_directory(path)).collect()
+    directories := paths.iter().filter_map(fn(path) { existing_directory(path) }).collect()
     directories.sort(); directories.dedup()
     set: watcher.set()
     loop directory in directories {
@@ -111,7 +111,7 @@ InvalidationReceipt: struct {
     generation: U64; changed: [OSPath]; closure: [OSPath]; kinds: [String]; change_kinds: [String]
     content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U64?
     render: fn(self) -> String {
-        elapsed: self.edit_to_visible_ms.map((ms) -> "{ms}").unwrap_or("null")
+        elapsed: self.edit_to_visible_ms.map(fn(ms) { "{ms}" }).unwrap_or("null")
         "{{\"generation\":{self.generation},\"changed\":[{join_paths(self.changed)}],\"closure\":[{join_paths(self.closure)}],\"kinds\":[{join_quoted(self.kinds)}],\"change_kinds\":[{join_quoted(self.change_kinds)}],\"content_digests\":[{join_optional_quoted(self.content_digests)}],\"dev_entries\":[{join_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
     }
     game_dev_entries: fn(self) -> [DevWatchEntry] { &self.dev_entries }
@@ -122,16 +122,16 @@ DevWatchEntry: struct {
 }
 WatchNode: struct { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
 join_optional_quoted: fn(items: [String?]) -> String {
-    items.iter().map((item) -> item.as_ref().map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")).collect().join(",")
+    items.iter().map(fn(item) { item.as_ref().map(fn(value) { "\"{foundation_json_escape(value)}\"" }).unwrap_or("null") }).collect().join(",")
 }
-join_quoted: fn(items: [String]) -> String { items.iter().map((item) -> "\"{foundation_json_escape(item)}\"").collect().join(",") }
+join_quoted: fn(items: [String]) -> String { items.iter().map(fn(item) { "\"{foundation_json_escape(item)}\"" }).collect().join(",") }
 join_dev_entries: fn(entries: [DevWatchEntry]) -> String {
-    entries.iter().map((entry) -> {
-        optional: (value: String?) -> value.map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")
+    entries.iter().map(fn(entry) {
+        optional: fn(value: String?) { value.map(fn(value) { "\"{foundation_json_escape(value)}\"" }).unwrap_or("null") }
         "{{\"path\":\"{foundation_json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
     }).collect().join(",")
 }
-join_paths: fn(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{foundation_json_escape(p.display().to_string())}\"").collect().join(",") }
+join_paths: fn(paths: [OSPath]) -> String { paths.iter().map(fn(p) { "\"{foundation_json_escape(p.display().to_string())}\"" }).collect().join(",") }
 WatchGraph: struct {
     nodes: [OSPath:WatchNode]; asset_roots: [OSPath:Bool]; runtime_input_roots: [OSPath:Bool]
     game_paths: [OSPath:JetGameChangeKind]; game_schema_ids: [OSPath:(String?, String?)]
@@ -142,7 +142,7 @@ WatchGraph: struct {
     node_count: fn(self) -> USize { self.nodes.len() }
     nodes: fn(self) -> Iterator<WatchNode> {
         paths := self.nodes.keys().cloned().collect(); paths.sort()
-        paths.into_iter().map((path) -> &self.nodes[path])
+        paths.into_iter().map(fn(path) { &self.nodes[path] })
     }
     reverse_edges: fn(self) -> [OSPath:[OSPath:Bool]] { &self.reverse }
     upsert: fn(self: WatchGraph, path: OSPath, kind: RootKind) -> () { self.upsert_with_dir_hint(path, kind, false) }
@@ -169,11 +169,11 @@ WatchGraph: struct {
         self.game_schema_ids.insert(path, (_0: old_schema_id, _1: new_schema_id))
     }
     game_kind_for: fn(self, path: OSPath) -> JetGameChangeKind? {
-        self.game_paths.get(path).copied().or_else(() -> self.nodes.get(path).and_then((node) -> if node.kind == {
+        self.game_paths.get(path).copied().or_else(fn() { self.nodes.get(path).and_then(fn(node) { if node.kind == {
             .Import -> .Val(.Script)
             .Asset -> .Val(.Asset)
             else -> None
-        }))
+        } }) })
     }
     game_schema_ids_for: fn(self, path: OSPath) -> (String?, String?) { self.game_schema_ids.get(path).cloned().unwrap_or((_0: None, _1: None)) }
     discover_runtime_input_trees: fn(self: WatchGraph) -> () {
@@ -185,7 +185,7 @@ WatchGraph: struct {
         if visited.contains_key(path) -> return
         visited.insert(path.clone(), true)
         exists: fs.metadata(path).is_ok()
-        expected_dir: !exists && self.nodes.get(path).is_some_and((node) -> node.is_dir && !node.stamp.exists)
+        expected_dir: !exists && self.nodes.get(path).is_some_and(fn(node) { node.is_dir && !node.stamp.exists })
         is_dir: path.is_dir() || expected_dir
         if self.nodes.get_mut(path) == .Val(node) {
             if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset }
@@ -195,7 +195,7 @@ WatchGraph: struct {
         }
         if self.entry == .Val(entry) -> self.link(entry.clone(), path.clone())
         if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
+        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
         children.sort()
         loop child in children { self.add_new_runtime_tree(child, visited) }
     }
@@ -212,7 +212,7 @@ WatchGraph: struct {
                 stamp: PathStamp{exists: false, mtime: None, len: None, digest: None}, is_dir})
         }
         if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
+        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
         children.sort(); loop child in children { self.add_new_asset_tree(child, visited) }
     }
     add_asset_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
@@ -220,7 +220,7 @@ WatchGraph: struct {
         if visited.contains_key(path) -> return
         visited.insert(path.clone(), true); self.upsert(path.clone(), .Asset)
         if !path.is_dir() -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
+        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
         children.sort(); loop child in children { self.add_asset_tree(child, visited) }
     }
     closure_of: fn(self, seeds: [OSPath]) -> [OSPath] {
@@ -243,13 +243,13 @@ WatchGraph: struct {
     watched_paths: fn(self) -> [OSPath] { paths := self.nodes.keys().cloned().collect(); paths.sort(); paths.move() }
     refresh_stamps: fn(self: WatchGraph) -> () { loop node in self.nodes.values_mut() { node.stamp = PathStamp.capture(node.path) } }
     classify: fn(path: OSPath) -> RootKind {
-        name: path.file_name().and_then((n) -> n.to_str()).unwrap_or("").to_ascii_lowercase()
+        name: path.file_name().and_then(fn(n) { n.to_str() }).unwrap_or("").to_ascii_lowercase()
         if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
         if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return .Lock
         if path.parent() == .Val(parent) {
-            if parent.components().any((c) -> c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen") -> return .Generated
+            if parent.components().any(fn(c) { c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen" }) -> return .Generated
         }
-        extension: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
+        extension: path.extension().and_then(fn(e) { e.to_str() }).map(fn(e) { e.to_ascii_lowercase() })
         if extension == {
             .Val(lit0) && lit0 == "jet" -> .Import
             .Val("html") | .Val("htm") -> .HTML
@@ -262,9 +262,9 @@ WatchGraph: struct {
     from_entry: fn(entry: OSPath, deps: [OSPath]) -> WatchGraph Diagnostic! {
         graph := WatchGraph.new(); entry: canonicalize_loose(entry); graph.set_entry(entry.clone()); html_paths := [OSPath]{}
         entry_dir: entry.parent().unwrap_or(OSPath("."))
-        project: Loader.find_manifest_root_checked(entry_dir).unwrap_or_else(() -> entry_dir.to_path_buf())
+        project: Loader.find_manifest_root_checked(entry_dir).unwrap_or_else(fn() { entry_dir.to_path_buf() })
         manifest: Loader.manifest_path_checked(project)
-        stem: entry.file_stem().and_then((s) -> s.to_str()).unwrap_or("app")
+        stem: entry.file_stem().and_then(fn(s) { s.to_str() }).unwrap_or("app")
         extras: [(_0: manifest, _1: RootKind.Manifest), (_0: .Val(project.join(".jet/lock")), _1: RootKind.Lock),
             (_0: .Val(entry_dir.join("{stem}.html")), _1: RootKind.HTML), (_0: .Val(project.join("{stem}.css")), _1: RootKind.Style),
             (_0: .Val(project.join("target.fact")), _1: RootKind.TargetFact)]
@@ -286,14 +286,14 @@ WatchGraph: struct {
         Ok(graph)
     }
     scan_runtime_inputs: fn(self: WatchGraph) -> () {
-        sources: self.nodes().filter((node) -> node.kind == RootKind.Import || node.path.extension().and_then((e) -> e.to_str()).is_some_and((e) -> e.eq_ignore_ascii_case("jet"))).map((node) -> node.path.clone()).collect()
-        base: self.entry.as_ref().and_then((path) -> path.parent()).unwrap_or(OSPath("."))
+        sources: self.nodes().filter(fn(node) { node.kind == RootKind.Import || node.path.extension().and_then(fn(e) { e.to_str() }).is_some_and(fn(e) { e.eq_ignore_ascii_case("jet") }) }).map(fn(node) { node.path.clone() }).collect()
+        base: self.entry.as_ref().and_then(fn(path) { path.parent() }).unwrap_or(OSPath("."))
         inputs := [OSPath:Bool]{}
         loop source in sources {
             if fs.read_to_string(source).ok() == .Val(text) {
                 loop input in runtime_file_inputs(text) {
                     path: OSPath(input.path); path: if path.is_absolute() -> canonicalize_loose(path) else -> canonicalize_loose(base.join(path))
-                    inputs.entry(path).and_modify((is_dir) -> is_dir |= input.is_dir).or_insert(input.is_dir)
+                    inputs.entry(path).and_modify(fn(is_dir) { is_dir |= input.is_dir }).or_insert(input.is_dir)
                 }
             }
         }
@@ -310,7 +310,7 @@ WatchGraph: struct {
         if register_root && dir_hint -> self.runtime_input_roots.insert(path.clone(), true)
         if self.entry == .Val(entry) -> self.link(entry.clone(), path.clone())
         if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
+        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
         children.sort(); loop child in children { self.add_runtime_input_node(child, visited, false, false) }
     }
     scan_html_references: fn(self: WatchGraph, roots: [OSPath]) -> () {
@@ -350,7 +350,7 @@ WatchGraph: struct {
 }
 
 canonicalize_loose: fn(path: OSPath) -> OSPath {
-    fs.canonicalize(path).unwrap_or_else((_) -> if path.is_absolute() -> path.to_path_buf() else -> env.current_dir().unwrap_or(OSPath(".")).join(path))
+    fs.canonicalize(path).unwrap_or_else(fn(_) { if path.is_absolute() -> path.to_path_buf() else -> env.current_dir().unwrap_or(OSPath(".")).join(path) })
 }
 RuntimeFileInput: struct { path: String; is_dir: Bool }
 RUNTIME_FILE_INPUT_METHODS: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
@@ -363,16 +363,16 @@ runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] {
         loop {
             if source[offset..<source.len()].find(marker) == .Val(relative) {
                 start: offset + relative; cursor := start + marker.len()
-                if bytes.get(cursor).is_some_and((b) -> b.is_ascii_alphanumeric() || b == 95) { offset = cursor; next }
-                loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
+                if bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_alphanumeric() || b == 95 }) { offset = cursor; next }
+                loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
                 if bytes.get(cursor) != .Val(U8{40}) { offset = cursor; next }
                 cursor += 1
-                loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
+                loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
                 if quoted_literal(source, cursor) == .Val(tuple_9) {
                     value: tuple_9._0
                     end: tuple_9._1
                     if !value.is_empty() && !value.contains('{') && !value.contains('}') && !value.contains("://") {
-                        inputs.entry(value.to_string()).and_modify((seen_dir) -> seen_dir |= is_dir).or_insert(is_dir)
+                        inputs.entry(value.to_string()).and_modify(fn(seen_dir) { seen_dir |= is_dir }).or_insert(is_dir)
                     }
                     offset = end.saturating_add(1)
                 } else { offset = cursor.saturating_add(1) }
@@ -380,7 +380,7 @@ runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] {
         }
     }
     paths := inputs.keys().cloned().collect(); paths.sort()
-    paths.into_iter().map((path) -> {is_dir: inputs[path], path}).collect()
+    paths.into_iter().map(fn(path) {is_dir: inputs[path], path}).collect()
 }
 quoted_literal: fn(source: String, start: USize) -> (String, USize)? {
     bytes: source.as_bytes()
@@ -399,7 +399,7 @@ quoted_literal: fn(source: String, start: USize) -> (String, USize)? {
 }
 local_reference_path: fn(base: OSPath, raw: String) -> OSPath? {
     raw := raw.trim() // #4303
-    if raw.split((ch) -> ch == '?' || ch == '#').next() == .Val(first) {
+    if raw.split(fn(ch) { ch == '?' || ch == '#' }).next() == .Val(first) {
         reference := first.trim() // #4303
         if reference.is_empty() || reference.starts_with("//") || reference.starts_with("data:") || reference.starts_with("blob:")
             || reference.starts_with("http:") || reference.starts_with("https:") || reference.starts_with("mailto:")
@@ -412,7 +412,7 @@ local_reference_path: fn(base: OSPath, raw: String) -> OSPath? {
     None
 }
 referenced_paths: fn(path: OSPath, source: String) -> [String] {
-    references := [String]{}; extension: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
+    references := [String]{}; extension: path.extension().and_then(fn(e) { e.to_str() }).map(fn(e) { e.to_ascii_lowercase() })
     if extension == "html" || extension == "htm" {
         loop attribute in ["src", "href", "poster", "srcset"] { extract_values_after(source, attribute, .Val(U8{61}), false, attribute == "srcset", references) }
     }
@@ -427,33 +427,33 @@ extract_values_after: fn(source: String, keyword: String, delimiter: U8?, option
     lower: source.to_ascii_lowercase(); bytes: lower.as_bytes(); offset := USize{0}
     loop {
         if lower[offset..<lower.len()].find(keyword) == .Val(relative) {
-            start: offset + relative; before: start.checked_sub(1).and_then((i) -> bytes.get(i)); after: bytes.get(start + keyword.len())
-            if before.is_some_and((b) -> is_attribute_name_byte(b)) || after.is_some_and((b) -> is_attribute_name_byte(b)) {
+            start: offset + relative; before: start.checked_sub(1).and_then(fn(i) { bytes.get(i) }); after: bytes.get(start + keyword.len())
+            if before.is_some_and(fn(b) { is_attribute_name_byte(b) }) || after.is_some_and(fn(b) { is_attribute_name_byte(b) }) {
                 offset = start + keyword.len(); next
             }
             cursor := start + keyword.len()
-            loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
+            loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
             if delimiter == {
                 .Val(U8{61}) | .Val(U8{40}) -> {
                     if bytes.get(cursor) != delimiter { offset = start + keyword.len(); next }
                     cursor += 1
-                    loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
+                    loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
                 }
                 .None -> {
                     if optional_parentheses && bytes.get(cursor) == .Val(U8{40}) {
                         cursor += 1
-                        loop { if !bytes.get(cursor).is_some_and((b) -> b.is_ascii_whitespace()) -> break; cursor += 1 }
+                        loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
                     }
                 }
                 else -> { panic("unreachable delimiter") }
             }
-            quote: bytes.get(cursor).copied().filter((b) -> b == 39 || b == 34)
+            quote: bytes.get(cursor).copied().filter(fn(b) { b == 39 || b == 34 })
             if quote.is_some() -> cursor += 1
             if quote.is_none() && delimiter.is_none() { offset = start + keyword.len(); next }
             value_start: cursor
             value_end: if quote == {
-                .Val(quote) -> source[cursor..<source.len()].find(Char(quote)).map((i) -> cursor + i).unwrap_or(source.len())
-                .None -> source[cursor..<source.len()].find((ch) -> ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')')).map((i) -> cursor + i).unwrap_or(source.len())
+                .Val(quote) -> source[cursor..<source.len()].find(Char(quote)).map(fn(i) { cursor + i }).unwrap_or(source.len())
+                .None -> source[cursor..<source.len()].find(fn(ch) { ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')') }).map(fn(i) { cursor + i }).unwrap_or(source.len())
             }
             if value_start < value_end {
                 value := source[value_start..value_end] // #4303
@@ -512,9 +512,9 @@ WatchSession: struct {
         settled := [OSPath]{}; settled_kinds := [ChangeKind]{}; settled_root_kinds := [RootKind]{}
         settled_old_digests := [String?]{}; settled_digests := [String?]{}
         loop (path, change_kind) in changed.into_iter().zip(change_kinds.into_iter()) {
-            (root_kind, is_dir): self.graph.nodes.get(path).map((node) -> (_0: node.kind, _1: node.is_dir)).unwrap_or_else(() -> (_0: WatchGraph.classify(path), _1: path.is_dir()))
+            (root_kind, is_dir): self.graph.nodes.get(path).map(fn(node) { (_0: node.kind, _1: node.is_dir) }).unwrap_or_else(fn() { (_0: WatchGraph.classify(path), _1: path.is_dir()) })
             now: PathStamp.capture(path)
-            previous: self.graph.nodes.get(path).map((node) -> node.stamp.clone()).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
+            previous: self.graph.nodes.get(path).map(fn(node) { node.stamp.clone() }).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
             if !previous.changed_since(now) && change_kind != ChangeKind.Renamed -> next
             if root_kind == RootKind.Asset && is_dir {
                 runtime_root: self.graph.runtime_input_roots.contains_key(path)
@@ -534,44 +534,44 @@ WatchSession: struct {
             stale_count: settled.len(); stale_digests: [String?].repeat(None, stale_count)
             dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, stale_digests, stale_digests)
             return .Val(InvalidationReceipt{generation, changed: settled, closure: [],
-                kinds: settled_root_kinds.iter().map((kind) -> kind.as_str()).collect(), change_kinds: [String].repeat("stale", stale_count),
+                kinds: settled_root_kinds.iter().map(fn(kind) { kind.as_str() }).collect(), change_kinds: [String].repeat("stale", stale_count),
                 content_digests: stale_digests, dev_entries, edit_to_visible_ms: None})
         }
         loop path in settled {
             if self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = PathStamp.capture(path) else -> self.graph.upsert(path.clone(), WatchGraph.classify(path))
         }
-        closure: self.graph.closure_of(settled); edit_to_visible_ms: self.edit_started.map((started) -> started.elapsed().as_millis())
+        closure: self.graph.closure_of(settled); edit_to_visible_ms: self.edit_started.map(fn(started) { started.elapsed().as_millis() })
         self.edit_started = None
         dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, settled_old_digests, settled_digests)
         .Val(InvalidationReceipt{generation, changed: settled, closure,
-            kinds: settled_root_kinds.iter().map((kind) -> kind.as_str()).collect(),
-            change_kinds: settled_kinds.iter().map((kind) -> change_kind_name(kind)).collect(),
+            kinds: settled_root_kinds.iter().map(fn(kind) { kind.as_str() }).collect(),
+            change_kinds: settled_kinds.iter().map(fn(kind) { change_kind_name(kind) }).collect(),
             content_digests: settled_digests, dev_entries, edit_to_visible_ms})
     }
     settle: fn(self, paths: [OSPath]) -> () {
         deadline: Instant.now() + Duration.from_millis(WATCH_SETTLE_MAX_MS)
-        previous := paths.iter().map((path) -> PathStamp.capture(path)).collect()
+        previous := paths.iter().map(fn(path) { PathStamp.capture(path) }).collect()
         loop {
             if Instant.now() >= deadline -> break
-            truncated: paths.iter().zip(previous).any((pair) -> {
+            truncated: paths.iter().zip(previous).any(fn(pair) {
                 (path, now): pair
-                now.len == 0 && self.graph.nodes.get(path).and_then((node) -> node.stamp.len).is_some_and((len) -> len > 0)
+                now.len == 0 && self.graph.nodes.get(path).and_then(fn(node) { node.stamp.len }).is_some_and(fn(len) { len > 0 })
             })
             self.events.coalesce(self.coalesce)
-            current: paths.iter().map((path) -> PathStamp.capture(path)).collect()
+            current: paths.iter().map(fn(path) { PathStamp.capture(path) }).collect()
             if current == previous && !truncated -> return
             previous = current.move()
         }
     }
     acknowledge_with_dependencies: fn(self: &WatchSession, receipt: InvalidationReceipt, dependencies: [OSPath]) Diagnostic! {
-        if self.graph.entry().map((path) -> path.to_path_buf()) == .Val(entry) {
+        if self.graph.entry().map(fn(path) { path.to_path_buf() }) == .Val(entry) {
             desired_imports := [OSPath:Bool]{}
-            loop path in [entry.clone()].into_iter().chain(dependencies.iter().map((path) -> canonicalize_loose(path))) {
+            loop path in [entry.clone()].into_iter().chain(dependencies.iter().map(fn(path) { canonicalize_loose(path) })) {
                 if WatchGraph.classify(path) == RootKind.Import -> desired_imports.insert(path, true)
             }
-            current_imports: self.graph.nodes().filter((node) -> node.kind == RootKind.Import).map((node) -> (_0: node.path.clone(), _1: true)).collect()
-            topology_changed: desired_imports.keys().any((path) -> !current_imports.contains_key(path))
-                || current_imports.keys().any((path) -> !desired_imports.contains_key(path))
+            current_imports: self.graph.nodes().filter(fn(node) { node.kind == RootKind.Import }).map(fn(node) { (_0: node.path.clone(), _1: true) }).collect()
+            topology_changed: desired_imports.keys().any(fn(path) { !current_imports.contains_key(path) })
+                || current_imports.keys().any(fn(path) { !desired_imports.contains_key(path) })
             if topology_changed -> return self.acknowledge(receipt)
             if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
             loop dependency in dependencies {
@@ -584,7 +584,7 @@ WatchSession: struct {
     }
     acknowledge: fn(self: &WatchSession, receipt: InvalidationReceipt) Diagnostic! {
         if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
-        if self.graph.entry().map((p) -> p.to_path_buf()) == .Val(entry) {
+        if self.graph.entry().map(fn(p) { p.to_path_buf() }) == .Val(entry) {
             discovered: WatchGraph.discover(entry)
             loop node in discovered.nodes() {
                 if !self.graph.nodes.contains_key(node.path) -> self.graph.upsert(node.path.clone(), node.kind)
@@ -600,22 +600,22 @@ WatchSession: struct {
     recover: fn(self: WatchSession) -> () { self.graph.refresh_stamps(); self.edit_started = None }
 }
 detect_renames: fn(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGraph) -> () {
-    deleted: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Deleted).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
-    created: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Created).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
+    deleted: changed.iter().enumerate().filter(fn(pair) { change_kinds[pair._0] == ChangeKind.Deleted }).map(fn(pair) { (_0: pair._0, _1: pair._1.clone()) }).collect()
+    created: changed.iter().enumerate().filter(fn(pair) { change_kinds[pair._0] == ChangeKind.Created }).map(fn(pair) { (_0: pair._0, _1: pair._1.clone()) }).collect()
     loop (di, dpath) in deleted {
-        dparent: dpath.parent(); dkind: graph.nodes.get(dpath).map((n) -> n.kind)
+        dparent: dpath.parent(); dkind: graph.nodes.get(dpath).map(fn(n) { n.kind })
         loop (_, cpath) in created {
-            if cpath.parent() == dparent && graph.nodes.get(cpath).map((n) -> n.kind) == dkind && dpath != cpath -> change_kinds[di] = .Renamed
+            if cpath.parent() == dparent && graph.nodes.get(cpath).map(fn(n) { n.kind }) == dkind && dpath != cpath -> change_kinds[di] = .Renamed
         }
     }
 }
 make_dev_entries: fn(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
-    paths.iter().enumerate().filter_map((pair) -> {
+    paths.iter().enumerate().filter_map(fn(pair) {
         (index, path): pair
-        game_kind: graph.game_kind_for(path).or_else(() -> if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None)
+        game_kind: graph.game_kind_for(path).or_else(fn() { if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None })
         if game_kind == .Val(game_kind) {
             (old_schema_id, new_schema_id): graph.game_schema_ids_for(path)
-            .Val(DevWatchEntry{path: path.clone(), change_kind: change_kinds.get(index).copied().map((kind) -> change_kind_name(kind)).unwrap_or("modified"),
+            .Val(DevWatchEntry{path: path.clone(), change_kind: change_kinds.get(index).copied().map(fn(kind) { change_kind_name(kind) }).unwrap_or("modified"),
                 game_kind, old_digest: old_digests.get(index).cloned().flatten(), new_digest: new_digests.get(index).cloned().flatten(), old_schema_id, new_schema_id})
         } else { None }
     }).collect()
@@ -645,7 +645,7 @@ SessionSnapshot: struct {
         self := self.move(); self.source_id = source_id.move(); self.build_id = build_id.move(); self.revision = revision.move(); self.world_id = world_id.move(); self.move()
     }
     with_persist: fn(self: SessionSnapshot, persist: PersistStore) -> SessionSnapshot { self := self.move(); self.persist = persist.move(); self.move() }
-    lineage_valid: fn(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all((value) -> !value.is_empty() && !value.chars().any((c) -> c.is_control())) }
+    lineage_valid: fn(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all(fn(value) { !value.is_empty() && !value.chars().any(fn(c) { c.is_control() }) }) }
 }
 HotReplacePolicy: enum { Swap; Restart; Pin
     default: fn() -> HotReplacePolicy { .Swap }
@@ -717,7 +717,7 @@ WATCH_POLL_INTERVAL_MS: U64{5}
 WATCH_COALESCE_MS: U64{4}
 WATCH_SETTLE_MAX_MS: U64{250}
 EDIT_TO_VISIBLE_BUDGET_MS: U64{2000}
-within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
+within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map(fn(ms) { ms <= EDIT_TO_VISIBLE_BUDGET_MS }).unwrap_or(true) }
 SessionBroker: struct {
     source_transactions: Mutex<()>
     default: fn() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }

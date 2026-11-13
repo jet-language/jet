@@ -1182,7 +1182,7 @@ sema_registration_inline_foreign_effect_root: fn(language: String) -> String Nev
 }
 
 sema_registration_callable_abi_for_func: fn(func: Func) -> SemaRegistrationCallableABI Never! {
-    foreign_effect_root: func.inline_foreign.map((foreign) -> sema_registration_inline_foreign_effect_root(foreign.lang))
+    foreign_effect_root: func.inline_foreign.map(fn(foreign) { sema_registration_inline_foreign_effect_root(foreign.lang) })
     SemaRegistrationCallableABI{
         is_extern: func.inline_foreign != None,
         is_c_abi: false,
@@ -1195,7 +1195,7 @@ sema_registration_callable_abi_for_func: fn(func: Func) -> SemaRegistrationCalla
 }
 
 sema_registration_callable_abi_for_extern: fn(function: ExternFn, owner: SemaRegistrationForeignOwner) -> SemaRegistrationCallableABI Never! {
-    c_abi_name: function.abi.map((abi) -> abi.name)
+    c_abi_name: function.abi.map(fn(abi) { abi.name })
     SemaRegistrationCallableABI{
         is_extern: true,
         is_c_abi: owner == SemaRegistrationForeignOwner.CModule,
@@ -1214,7 +1214,7 @@ sema_registration_extern_contract: fn(params: [Param]) -> [CallContractRow]? {
         implicit_local_label: parameter.zone == ParamZone.Either && parameter.public_label == None
         label: if {
             parameter.zone == ParamZone.PositionalOnly || implicit_local_label -> ""
-            else -> parameter.public_label.map((public_label) -> public_label.name) ?? parameter.name
+            else -> parameter.public_label.map(fn(public_label) { public_label.name }) ?? parameter.name
         }
         contract.push(CallContractRow{label: label, zone: parameter.zone})
         if label != "" || parameter.zone != ParamZone.Either -> has_contract = true
@@ -1305,7 +1305,7 @@ sema_registration_signature_metadata: fn(signature: Type) -> FunctionCallMetadat
 }
 
 sema_registration_function_parameters: fn(func: Func, module_identity: String, owner: SymbolID, signature: Type) -> [SemaRegistrationParameter] Never! {
-    defaults: sema_registration_signature_metadata(signature).map((row) -> row.defaults) ?? [FunctionDefaultRef?]{}
+    defaults: sema_registration_signature_metadata(signature).map(fn(row) { row.defaults }) ?? [FunctionDefaultRef?]{}
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in func.params {
         ty: type_with_effective_parameter_fn_return(parameter.ty)
@@ -1336,7 +1336,7 @@ sema_registration_function_parameters: fn(func: Func, module_identity: String, o
 }
 
 sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_identity: String, owner: SymbolID?, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationFunction {
-    owner_key: owner.map((value) -> value.key) ?? ""
+    owner_key: owner.map(fn(value) { value.key }) ?? ""
     id_owner: owner_key
     symbol_kind: SymbolKind.Function
     symbol_id_value: symbol_id(symbol_kind, module_identity, id_owner, func.name)
@@ -1347,7 +1347,7 @@ sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_ide
         kind: symbol_kind,
         name: func.name,
         module_name: module_identity,
-        owner: owner.map((value) -> value.key),
+        owner: owner.map(fn(value) { value.key }),
         span: func.name_span,
         ty: Val(signature),
         visibility: visibility,
@@ -1503,7 +1503,7 @@ sema_registration_keyed_row_push: fn(rows: &[SemaRegistrationKeyedRow], key: Str
 
 sema_registration_keyed_rows_sort: fn(rows: &[SemaRegistrationKeyedRow]) Never! {
     rows = loop fresh_item in rows -> fresh_item
-    rows.sort_by((left: SemaRegistrationKeyedRow, right: SemaRegistrationKeyedRow) -> (left.key <=> right.key).then(left.order <=> right.order))
+    rows.sort_by(fn(left: SemaRegistrationKeyedRow, right: SemaRegistrationKeyedRow) { (left.key <=> right.key).then(left.order <=> right.order) })
 }
 
 SemaRegistrationBuckets: struct {
@@ -1770,7 +1770,7 @@ sema_registration_enum_variants: fn(definition: EnumDef, owner: Symbol, diagnost
             ty: payload_ty,
             visibility: owner.visibility,
         }
-        payload_key: payload_ty.map((value) -> type_identity_key(value)) ?? "Unit"
+        payload_key: payload_ty.map(fn(value) { type_identity_key(value) }) ?? "Unit"
         variants.push(SemaRegistrationVariant{
             symbol: variant_symbol,
             payload: definition.variants[variant_index].payload,
@@ -1798,7 +1798,7 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
         label: if {
             parameter.zone == ParamZone.PositionalOnly -> ""
             parameter.zone == ParamZone.Either && parameter.public_label == None -> ""
-            else -> parameter.public_label.map((public_label) -> public_label.name) ?? parameter.name
+            else -> parameter.public_label.map(fn(public_label) { public_label.name }) ?? parameter.name
         }
         contract.push(CallContractRow{label: label, zone: parameter.zone})
         if label != "" || parameter.zone != ParamZone.Either -> has_contract = true
@@ -1861,8 +1861,8 @@ sema_registration_operator_owner: fn(owner: SymbolID, module_identity: String, l
 // in its body; the blocks are read in place, not copied.
 sema_registration_item_has_trait_block: fn(item: Item, trait_name: String) -> Bool Never! {
     if item == {
-        .Struct(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
-        .Enum(definition) -> return definition.trait_impls.any(block -> block.trait_name == trait_name)
+        .Struct(definition) -> return definition.trait_impls.any(fn(block) { block.trait_name == trait_name })
+        .Enum(definition) -> return definition.trait_impls.any(fn(block) { block.trait_name == trait_name })
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
     }
     false
@@ -4909,7 +4909,7 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
             graph.namespace_entry_names.push(name.copy())
         }
     }
-    rows.sort_by((left: SemaRegistrationNamespaceName, right: SemaRegistrationNamespaceName) -> (left.slot <=> right.slot).then(left.name <=> right.name).then(left.entry <=> right.entry))
+    rows.sort_by(fn(left: SemaRegistrationNamespaceName, right: SemaRegistrationNamespaceName) { (left.slot <=> right.slot).then(left.name <=> right.name).then(left.entry <=> right.entry) })
     loop at in 0..<rows.len() -> name_rows_set(graph.namespace_tables[rows[at].slot], rows[at].name, rows[at].entry)
 }
 

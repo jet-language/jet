@@ -174,7 +174,7 @@ load_corpus: fn(repo: String) -[FS]> [CoverageProgram] CoverageError! {
         peers := [Twin]{}
         loop peer in texts_at(workload, "peers") {
             wanted: peer.copy()
-            file: peer_files.find(known -> text_at(known, "name") == Val((wanted))).map(known -> text_at(known, "file"))
+            file: peer_files.find(fn(known) { text_at(known, "name") == Val((wanted)) }).map(fn(known) { text_at(known, "file") })
             peers.push(Twin{peer: peer, path: if file == .Val(name) -> Val(files.join(dir, name)) else -> None})
         }
         programs.push(CoverageProgram{source: "scriptbench", name: text_at(workload, "dir") ?? "", key: text_at(workload, "id") ?? "", cells: [], peers: peers, owner_cards: [], cards: texts_at(workload, "cards")})
@@ -203,7 +203,7 @@ corpus_issues: fn(programs: [CoverageProgram]) -[FS]> [String] {
 
 // ScriptBench's cells.tsv, each row read by its header.
 parse_cells: fn(text: String) -> [ScriptBenchCell] {
-    lines: text.split("\n").filter(line -> line != "").to_list()
+    lines: text.split("\n").filter(fn(line) { line != "" }).to_list()
     rows := [ScriptBenchCell]{}
     if lines.len() == 0 -> return rows
     columns: lines[0].split("\t").to_list()
@@ -277,7 +277,7 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
     loop program in programs {
         if program.source == "gauntlet" -> gauntlet += 1
         name: program.name.copy()
-        result: results.find(result -> text_at(result, "entry/name") == Val((name)))
+        result: results.find(fn(result) { text_at(result, "entry/name") == Val((name)) })
         loop twin in program.peers {
             peer: twin.peer
             time: if program.source == "gauntlet" && result == .Val(found) -> text_at(found, "comparisons/{peer}/primary_metric") ?? WALL_METRIC else -> WALL_METRIC
@@ -305,7 +305,7 @@ build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCe
         measured: measured,
         losses: losses,
         uncovered: uncovered,
-        roots: owners.map(owner -> LossRoot{losses: grouped.get(owner) ?? [], owner: owner})
+        roots: owners.map(fn(owner) { LossRoot{losses: grouped.get(owner) ?? [], owner: owner} })
     }
 }
 
@@ -320,7 +320,7 @@ test_scriptbench_program: fn(name: String, twin: String) -> CoverageProgram {
 // A gauntlet report holding `name`'s aot comparison with peer `c`, one
 // reading per metric at `ratio` (Jet ratio * 10 against 10).
 test_report: fn(name: String, ratios: [(metric: String, ratio: Float)]) -> Dyn {
-    metrics: ratios.map(row -> "\"{row.metric}\": {{\"jet\": {row.ratio * 10.0}, \"peer\": 10, \"ratio\": {row.ratio}}}").join(", ")
+    metrics: ratios.map(fn(row) { "\"{row.metric}\": {{\"jet\": {row.ratio * 10.0}, \"peer\": 10, \"ratio\": {row.ratio}}}" }).join(", ")
     json.parse("{{\"entries\": [{{\"entry\": {{\"name\": \"{name}\"}}, \"comparisons\": {{\"c\": {{\"primary_metric\": \"runtime_wall_seconds\", \"tiers\": {{\"aot\": {{\"metrics\": {{{metrics}}}}}}}}}}}}}]}}") ?? panic("report: {err}")
 }
 
@@ -334,8 +334,8 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
     census: build_census(programs, report, cells)
     assert_eq(census.measured, 4)
     assert_eq(census.uncovered.len(), 0)
-    assert_eq(census.losses.map(loss -> "{loss.source}/{loss.program}/{loss.peer}/{loss.metric}/{loss.ratio}/{loss.owner}"), ["gauntlet/kernel/c/runtime_peak_rss_kb/1.25/#1112", "scriptbench/words/python/runtime_wall_seconds/1.5/#2222"])
-    assert_eq(census.roots.map(root -> "{root.owner}:{root.losses.map(loss -> loss.program).join(",")}"), ["#1112:kernel", "#2222:words"])
+    assert_eq(census.losses.map(fn(loss) { "{loss.source}/{loss.program}/{loss.peer}/{loss.metric}/{loss.ratio}/{loss.owner}" }), ["gauntlet/kernel/c/runtime_peak_rss_kb/1.25/#1112", "scriptbench/words/python/runtime_wall_seconds/1.5/#2222"])
+    assert_eq(census.roots.map(fn(root) { "{root.owner}:{root.losses.map(fn(loss) { loss.program }).join(",")}" }), ["#1112:kernel", "#2222:words"])
 }
 
 #Test("a ratio of exactly 1.00 is a loss, and a peer that overran the timeout is a win without a ratio") {
@@ -344,7 +344,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
     report: test_report("tie", [(metric: "runtime_wall_seconds", ratio: 1.0), (metric: "runtime_peak_rss_kb", ratio: 0.9)])
     cells: parse_cells([TEST_HEADER, "w-slow\tjet-bin\tpython\twall\t30\t>60s\t<1\twin\t#2222", "w-slow\tjet-bin\tpython\trss\t1000\t9000\t0.11\twin\t#2222"].join("\n"))
     census: build_census(programs, report, cells)
-    assert_eq(census.losses.map(loss -> "{loss.program} {loss.metric} {loss.owner}"), ["tie runtime_wall_seconds #1111"])
+    assert_eq(census.losses.map(fn(loss) { "{loss.program} {loss.metric} {loss.owner}" }), ["tie runtime_wall_seconds #1111"])
     assert_eq(census.uncovered.len(), 0)
 }
 
@@ -355,7 +355,7 @@ TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcar
     cells: parse_cells([TEST_HEADER, "w-halfway\tjet-bin\tpython\twall\t30\t40\t0.75\twin\t#2222"].join("\n"))
     census: build_census(programs, report, cells)
     assert_eq(census.losses.len(), 0)
-    assert_eq(census.uncovered.map(row -> "{row.source}/{row.program}/{row.peer}/{row.metric}"), ["gauntlet/absent/c/runtime_wall_seconds", "gauntlet/absent/c/runtime_peak_rss_kb", "gauntlet/partial/c/runtime_peak_rss_kb", "scriptbench/halfway/python/runtime_peak_rss_kb"])
+    assert_eq(census.uncovered.map(fn(row) { "{row.source}/{row.program}/{row.peer}/{row.metric}" }), ["gauntlet/absent/c/runtime_wall_seconds", "gauntlet/absent/c/runtime_peak_rss_kb", "gauntlet/partial/c/runtime_peak_rss_kb", "scriptbench/halfway/python/runtime_peak_rss_kb"])
 }
 
 #Test("a corpus under 30 programs, a repeated program and a missing twin are corpus issues") {

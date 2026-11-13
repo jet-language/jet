@@ -316,7 +316,7 @@ sema_function_memory_plan_rows: fn(plan: &SemaFunctionMemoryPlan, sources: [Sema
 // out-of-order insert shifts.
 sema_function_memory_fill_positions: fn(plan: &SemaFunctionMemoryPlan, planned: &SemaFunctionMemoryPlanned, keys: [String]) Never! {
     order := loop (row, key) in keys -> (key: key, row: row)
-    order.sort_by((left: (key: String, row: Int), right: (key: String, row: Int)) -> (left.key <=> right.key).then(left.row <=> right.row))
+    order.sort_by(fn(left: (key: String, row: Int), right: (key: String, row: Int)) { (left.key <=> right.key).then(left.row <=> right.row) })
     first := -1
     loop (position, entry) in order {
         if position > 0 && order[position - 1].key == entry.key {

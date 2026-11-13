@@ -79,7 +79,7 @@ jet_driver_rust_foreign_type_key: fn(ty: Type) -> String Never! {
         .Result(ok, err) -> "Result<{jet_driver_rust_foreign_type_key(ok)},{jet_driver_rust_foreign_type_key(err)}>"
         .Fn(params, ret, _, _, _, _) -> {
             keys: (loop parameter in params -> jet_driver_rust_foreign_type_key(parameter))
-            result: ret.map(value -> jet_driver_rust_foreign_type_key(value)) ?? ""
+            result: ret.map(fn(value) { jet_driver_rust_foreign_type_key(value) }) ?? ""
             return "fn({keys.join(",")})->{result}"
         }
         .Named(name) -> name

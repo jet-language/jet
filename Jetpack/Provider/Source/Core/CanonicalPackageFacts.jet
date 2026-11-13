@@ -123,7 +123,7 @@ provider_core_tree_fingerprint: fn(root: String) -[FS, Env]> String ProviderReas
     provider_validate_core_source_tree(root)
     found := [(relative: String, path: String)]{}
     provider_collect_core_files(root, "", found)
-    found.sort_by(file -> file.relative)
+    found.sort_by(fn(file) { file.relative })
     input := [U8]{}
     loop byte in PROVIDER_CORE_TREE_SCHEMA.bytes() -> input.push(byte)
     loop file in found {
@@ -225,12 +225,12 @@ provider_target_debug_name: fn(target: PackageTarget) -> String Never! {
 // declaration order never changes the identity.
 provider_normalized_manifest_semantics: fn(manifest: PackageFacts?) -> String Never! {
     facts := manifest ?? return "manifest=absent"
-    facts.packages.sort_by(entry -> entry.name)
+    facts.packages.sort_by(fn(entry) { entry.name })
     loop index in 0..<facts.packages.len() {
-        facts.packages[index].targets.sort_by(target -> provider_target_debug_name(target))
+        facts.packages[index].targets.sort_by(fn(target) { provider_target_debug_name(target) })
     }
-    facts.build_profiles.sort_by(profile -> profile.name)
-    facts.authority.grants.sort_by(grant -> grant.package)
+    facts.build_profiles.sort_by(fn(profile) { profile.name })
+    facts.authority.grants.sort_by(fn(grant) { grant.package })
     loop index in 0..<facts.authority.grants.len() -> facts.authority.grants[index].rights.sort()
     if facts.authority.allow == {
         .Val(effects) -> {
@@ -254,12 +254,12 @@ provider_normalized_manifest_semantics: fn(manifest: PackageFacts?) -> String Ne
     if facts.authority.trust == {
         .Val(policy) -> {
             sorted := policy
-            sorted.services.sort_by(entry -> entry.service)
+            sorted.services.sort_by(fn(entry) { entry.service })
             facts.authority.trust = Val(sorted)
         }
         .None -> {}
     }
-    facts.authority.providers.sort_by(provider -> provider.provider)
+    facts.authority.providers.sort_by(fn(provider) { provider.provider })
     loop index in 0..<facts.authority.providers.len() {
         facts.authority.providers[index].allow.sort()
         facts.authority.providers[index].deny.sort()

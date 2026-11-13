@@ -173,7 +173,7 @@ cli_coverage_unique: fn(packages: [CoveragePackage], bucket: CoverageBucket?) ->
         unique.push(package.copy())
     }
     // Identity order: name, then version, then reference.
-    unique.sort_by((left: CoveragePackage, right: CoveragePackage) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference))
+    unique.sort_by(fn(left: CoveragePackage, right: CoveragePackage) { (left.name <=> right.name).then(left.version <=> right.version).then(left.reference <=> right.reference) })
     Ok(unique)
 }
 

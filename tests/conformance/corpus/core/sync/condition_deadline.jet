@@ -8,7 +8,7 @@ State: struct {
 
 wait_for_deadline: fn(state: Shared<State>, changed: Condition) {
     guard: state.guard_edit()
-    guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+    guard.wait(changed, fn(value) { value.ready }) ?? panic("wait failed")
     panic("deadline wait completed")
 }
 

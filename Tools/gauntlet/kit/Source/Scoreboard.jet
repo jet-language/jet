@@ -49,13 +49,13 @@ tower_state: fn(store: Dyn) -> TowerState {
 // measured them (`measurements`, null when none did).
 scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, ceiling: Dyn) -> Dyn {
     inputs: items_at(results, "")
-    issues: combinatorics.unique<String>(inputs.flat_map(result -> result_shape_issues(result, matrix)).concat(strict_performance_policy_issues(matrix)))
+    issues: combinatorics.unique<String>(inputs.flat_map(fn(result) { result_shape_issues(result, matrix) }).concat(strict_performance_policy_issues(matrix)))
     allowed: items_at(manifest, "corpus/allowed_uncovered_cells")
-    canonical: inputs.filter(result -> value_at(result, "entry") == .Val(.Object(_)) || value_at(result, "entry") == .Val(.Array(_)))
+    canonical: inputs.filter(fn(result) { value_at(result, "entry") == .Val(.Object(_)) || value_at(result, "entry") == .Val(.Array(_)) })
     owners: member(manifest, "loss_owners") ?? Dyn.object()
     state: tower ?? TowerState.Unavailable("Tower state is missing")
     matrix_cells: items_at(matrix, "cells")
-    required: required_policy_cells(member(matrix, "strict_performance_policy") ?? Dyn.Null, matrix_cells.map(cell -> value_at(cell, "id") ?? Dyn.Null))
+    required: required_policy_cells(member(matrix, "strict_performance_policy") ?? Dyn.Null, matrix_cells.map(fn(cell) { value_at(cell, "id") ?? Dyn.Null }))
     references: value_at(ceiling, "references") ?? Dyn.Null
     measurements: member(ceiling, "measurements") ?? Dyn.Null
     cells := [Dyn]{}
@@ -72,9 +72,9 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
         }
         cells.push(record)
     }
-    verdicts: cells.map(cell -> text_at(cell, "verdict") ?? "")
-    metric_verdicts: cells.flat_map(cell -> members(member(cell, "metric_verdicts") ?? Dyn.Null).map(row -> text_at(row.value, "") ?? ""))
-    ceiling_verdicts: cells.map(cell -> text_at(cell, "ceiling_verdict") ?? "")
+    verdicts: cells.map(fn(cell) { text_at(cell, "verdict") ?? "" })
+    metric_verdicts: cells.flat_map(fn(cell) { members(member(cell, "metric_verdicts") ?? Dyn.Null).map(fn(row) { text_at(row.value, "") ?? "" }) })
+    ceiling_verdicts: cells.map(fn(cell) { text_at(cell, "ceiling_verdict") ?? "" })
     summary := Dyn.object()
     summary["cells"] = Dyn.Int(cells.len())
     summary["win"] = count_of(verdicts, "win")
@@ -89,7 +89,7 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
     summary["ceiling_meet"] = count_of(ceiling_verdicts, "meet")
     summary["ceiling_miss"] = count_of(ceiling_verdicts, "miss")
     summary["ceiling_uncovered"] = count_of(ceiling_verdicts, "uncovered")
-    summary["ceiling_unmeasured"] = Dyn.Int(ceiling_verdicts.filter(verdict -> verdict != "meet" && verdict != "miss" && verdict != "uncovered").len())
+    summary["ceiling_unmeasured"] = Dyn.Int(ceiling_verdicts.filter(fn(verdict) { verdict != "meet" && verdict != "miss" && verdict != "uncovered" }).len())
     covered := [Dyn]{}
     uncovered := [Dyn]{}
     unresolved := [Dyn]{}
@@ -129,7 +129,7 @@ scoreboard: fn(matrix: Dyn, results: Dyn, manifest: Dyn, tower: TowerState?, cei
     board["contract"] = "gauntlet-scoreboard-v1"
     board["primary_metric_by_mode"] = by_mode
     board["verdict_policy"] = verdict_policy
-    board["validation_issues"] = Dyn.Array(issues.map(issue -> Dyn.Text(issue.copy())))
+    board["validation_issues"] = Dyn.Array(issues.map(fn(issue) { Dyn.Text(issue.copy()) }))
     board["cells"] = Dyn.Array(cells)
     board["summary"] = summary
     board["ceiling_coverage"] = coverage
@@ -154,7 +154,7 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
     mode: matrix_cell_mode(cell)
     structural_metrics: comparison_metrics(mode)
     count: records.len()
-    failures := records.flat_map(record -> items_at(record, "metric_failures"))
+    failures := records.flat_map(fn(record) { items_at(record, "metric_failures") })
     if count != 1 && !uncovered_ok {
         if {
             count == 0 -> failures = failures.concat(missing_cell_failures(matrix, cell))
@@ -191,7 +191,7 @@ cell_record: fn(cell: Dyn, matrix: Dyn, canonical: [Dyn], allowed: [Dyn], requir
     record["ceiling"] = ceiling
     record["ceiling_verdict"] = ceiling_verdict
     record["verdict"] = peer_verdict
-    record["loss_owners"] = Dyn.Array(records.flat_map(entry -> items_at(entry, "loss_owners")))
+    record["loss_owners"] = Dyn.Array(records.flat_map(fn(entry) { items_at(entry, "loss_owners") }))
     record
 }
 
@@ -230,9 +230,9 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     metric: primary_metric(mode)
     metrics: comparison_metrics(mode)
     rules: tier_policy(mode)
-    declared: texts_at(entry, "languages").filter(language -> language != "jet" && language != "jet-expert")
+    declared: texts_at(entry, "languages").filter(fn(language) { language != "jet" && language != "jet-expert" })
     known: declared.copy()
-    missing_run_peers: if rules.any(rule -> rule.tier == "run") -> texts_at(matrix, "rails/run").filter(language -> !known.contains(language)) else -> [String]{}
+    missing_run_peers: if rules.any(fn(rule) { rule.tier == "run" }) -> texts_at(matrix, "rails/run").filter(fn(language) { !known.contains(language) }) else -> [String]{}
     compared: peer_comparisons(entry, value_at(entry, "languages") ?? Dyn.Null, rows, jet_tiers)
     entry_owners: (if text_at(entry, "name") == .Val(name) -> owners.get(name) else -> None) ?? Dyn.Null
     peers := [Dyn]{}
@@ -240,13 +240,13 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     shown_tiers := Dyn.object()
     loop rule in rules -> shown_tiers[rule.tier] = member(jet_tiers, "{rule.tier}/status") ?? Dyn.Text("unavailable")
     shown: shown_tiers.copy()
-    tiers_ready: rules.filter(rule -> rule.required).all(rule -> text_at(shown, rule.tier) == Val("ok"))
-    applicable: peers.filter(peer -> is_true(peer, "applicable"))
+    tiers_ready: rules.filter(fn(rule) { rule.required }).all(fn(rule) { text_at(shown, rule.tier) == Val("ok") })
+    applicable: peers.filter(fn(peer) { is_true(peer, "applicable") })
     run_reference: run_reference_verdict(entry, rows, jet_tiers)
     metric_verdicts := Dyn.object()
     loop item in metrics {
         path: "metric_verdicts/{item}"
-        verdicts := applicable.map(peer -> text_at(peer, path))
+        verdicts := applicable.map(fn(peer) { text_at(peer, path) })
         if item == "runtime_wall_seconds" && run_reference == .Val(reference) -> verdicts.push(text_at(reference, "verdict"))
         metric_verdicts[item] = Dyn.Text(cell_verdict(verdicts))
     }
@@ -255,7 +255,7 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
         verdict: text_at(metric_verdicts, item) ?? ""
         if verdict == "win" || verdict == "not_applicable" -> next
         wanted: item.copy()
-        peer_failures := applicable.flat_map(peer -> items_at(peer, "metric_failures").filter(failure -> text_at(failure, "metric") == Val(wanted.copy())))
+        peer_failures := applicable.flat_map(fn(peer) { items_at(peer, "metric_failures").filter(fn(failure) { text_at(failure, "metric") == Val(wanted.copy()) }) })
         if item == "runtime_wall_seconds" && run_reference == .Val(reference) && text_at(reference, "verdict") != Val("win") {
             failure := Dyn.object()
             failure["metric"] = item
@@ -266,11 +266,11 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
             failure["owner"] = if text_at(reference, "verdict") == Val("loss") -> live_loss_owner(entry_owners, item, tower) else -> Dyn.Null
             peer_failures.push(failure)
         }
-        reasons: combinatorics.unique<String>(peer_failures.filter_map(failure -> text_at(failure, "reason")).filter(reason -> reason != "").to_list())
+        reasons: combinatorics.unique<String>(peer_failures.filter_map(fn(failure) { text_at(failure, "reason") }).filter(fn(reason) { reason != "" }).to_list())
         failure := Dyn.object()
         failure["metric"] = item
         failure["verdict"] = verdict
-        failure["reasons"] = Dyn.Array(reasons.map(reason -> Dyn.Text(reason.copy())))
+        failure["reasons"] = Dyn.Array(reasons.map(fn(reason) { Dyn.Text(reason.copy()) }))
         failure["peers"] = Dyn.Array(peer_failures)
         failures.push(failure)
     }
@@ -288,7 +288,7 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     judged: metric_verdicts.copy()
     verdict: if {
         text_at(rows, "jet/status") != Val("ok") || !tiers_ready || applicable.len() == 0 -> "unmeasured"
-        else -> cell_verdict(metrics.map(item -> text_at(judged, item)))
+        else -> cell_verdict(metrics.map(fn(item) { text_at(judged, item) }))
     }
     record := Dyn.object()
     put_present(record, "entry", value_at(entry, "name"))
@@ -314,7 +314,7 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
 // primary metric.
 peer_record: fn(entry: Dyn, language: String, comparison: Dyn, rows: Dyn, metric: String, metrics: [String], owners: Dyn, tower: TowerState) -> Dyn {
     rules: peer_tier_policy(entry, language)
-    tiers: rules.map(rule -> rule.tier)
+    tiers: rules.map(fn(rule) { rule.tier })
     comparisons := Dyn.object()
     loop item in metrics -> comparisons[item] = scoreboard_metric_comparison(entry, language, comparison, item, tiers)
     verdicts := Dyn.object()
@@ -337,18 +337,18 @@ peer_record: fn(entry: Dyn, language: String, comparison: Dyn, rows: Dyn, metric
         failures.push(failure)
     }
     listed_tiers: tiers.copy()
-    ratio_tiers: RATIO_TIERS.filter(tier -> listed_tiers.contains(tier))
+    ratio_tiers: RATIO_TIERS.filter(fn(tier) { listed_tiers.contains(tier) })
     by_tier: tier_verdicts.copy()
-    primary_verdict: cell_verdict(ratio_tiers.map(tier -> text_at(by_tier, tier)))
+    primary_verdict: cell_verdict(ratio_tiers.map(fn(tier) { text_at(by_tier, tier) }))
     record := Dyn.object()
     record["language"] = language
     record["applicable"] = Dyn.Bool(!is_value(value_at(comparison, "applicable"), Dyn.Bool(false)))
     record["status"] = member(comparison, "status") ?? member(rows, "{language}/status") ?? Dyn.Text("unavailable")
     record["jet"] = member(primary_aot, "jet") ?? Dyn.Null
     record["peer"] = member(primary_aot, "peer") ?? Dyn.Null
-    record["trace_only_tiers"] = Dyn.Array(TRACE_ONLY_TIERS.filter(tier -> tiers.contains(tier)).map(tier -> Dyn.Text(tier.copy())))
+    record["trace_only_tiers"] = Dyn.Array(TRACE_ONLY_TIERS.filter(fn(tier) { tiers.contains(tier) }).map(fn(tier) { Dyn.Text(tier.copy()) }))
     record["jet_configuration"] = member(comparison, "jet_configuration") ?? Dyn.Text("jet")
-    record["required_tiers"] = member(comparison, "required_tiers") ?? Dyn.Array(rules.filter(rule -> rule.required).map(rule -> Dyn.Text(rule.tier.copy())))
+    record["required_tiers"] = member(comparison, "required_tiers") ?? Dyn.Array(rules.filter(fn(rule) { rule.required }).map(fn(rule) { Dyn.Text(rule.tier.copy()) }))
     record["tier_policy"] = member(comparison, "tier_policy") ?? tier_policy_object(rules)
     record["peer_sample"] = member(comparison, "peer_sample") ?? Dyn.Null
     record["ratio"] = member(primary_aot, "ratio") ?? Dyn.Null
@@ -381,7 +381,7 @@ scoreboard_metric_comparison: fn(entry: Dyn, language: String, comparison: Dyn, 
     }
     cells := Dyn.object()
     loop tier in tiers -> cells[tier] = rejudged_cell(member(comparison, "tiers/{tier}/metrics/{metric}") ?? Dyn.object(), language, metric, tier)
-    ratio_tiers: tiers.filter(tier -> RATIO_TIERS.contains(tier) && comparable_at_tier(metric, tier))
+    ratio_tiers: tiers.filter(fn(tier) { RATIO_TIERS.contains(tier) && comparable_at_tier(metric, tier) })
     verdicts := [String?]{}
     reasons := [String]{}
     loop tier in ratio_tiers {
@@ -461,11 +461,11 @@ unmeasured_metric_comparison: fn(tiers: [String], applicability: Dyn, reason: St
 // unmeasured when one is neither a win nor a loss, else a loss when one
 // loses, else a win.
 cell_verdict: fn(verdicts: [String?]) -> String {
-    comparable: verdicts.filter(verdict -> verdict != Val("not_applicable"))
+    comparable: verdicts.filter(fn(verdict) { verdict != Val("not_applicable") })
     if {
         comparable.len() == 0 -> "not_applicable"
-        comparable.any(verdict -> verdict != Val("win") && verdict != Val("loss")) -> "unmeasured"
-        comparable.any(verdict -> verdict == Val("loss")) -> "loss"
+        comparable.any(fn(verdict) { verdict != Val("win") && verdict != Val("loss") }) -> "unmeasured"
+        comparable.any(fn(verdict) { verdict == Val("loss") }) -> "loss"
         else -> "win"
     }
 }
@@ -580,9 +580,9 @@ ceiling_cell: fn(cell: Dyn, references: Dyn, measurements: Dyn, required: [Dyn])
         judged := [Dyn]{}
         loop name in names {
             wanted: name.copy()
-            own: rows.filter(row -> strictly_equal(value_at(row, "cell"), wanted))
-            asm: own.find(row -> text_at(row, "variant") == Val("asm"))
-            jet: own.filter(row -> text_at(row, "variant") != Val("asm"))
+            own: rows.filter(fn(row) { strictly_equal(value_at(row, "cell"), wanted) })
+            asm: own.find(fn(row) { text_at(row, "variant") == Val("asm") })
+            jet: own.filter(fn(row) { text_at(row, "variant") != Val("asm") })
             asm_row: asm ?? Dyn.Null
             if asm == None || jet.len() == 0 {
                 row := Dyn.object()
@@ -603,7 +603,7 @@ ceiling_cell: fn(cell: Dyn, references: Dyn, measurements: Dyn, required: [Dyn])
                 judged.push(row)
             }
         }
-        verdict: if names.len() == 0 -> "uncovered" else -> ceiling_reduce(judged.map(row -> text_at(row, "verdict") ?? ""))
+        verdict: if names.len() == 0 -> "uncovered" else -> ceiling_reduce(judged.map(fn(row) { text_at(row, "verdict") ?? "" }))
         verdicts.push(verdict.copy())
         metrics[metric] = Dyn{[String: Dyn]{
             "measure": measure,
@@ -621,7 +621,7 @@ ceiling_cell: fn(cell: Dyn, references: Dyn, measurements: Dyn, required: [Dyn])
     Dyn{[String: Dyn]{
         "required": Dyn.Bool(listed(required, id)),
         "status": if names.len() > 0 -> "covered" else -> "uncovered",
-        "references": Dyn.Array(names.map(name -> name ?? Dyn.Null)),
+        "references": Dyn.Array(names.map(fn(name) { name ?? Dyn.Null })),
         "metrics": metrics,
         "verdict": Dyn.Text(ceiling_reduce(verdicts)),
     }}
@@ -689,7 +689,7 @@ same_number: fn(left: Dyn, right: Dyn) -> Bool {
 
 // How many of `values` are `wanted`.
 count_of: fn(values: [String], wanted: String) -> Dyn {
-    Dyn.Int(values.filter(value -> value == wanted).len())
+    Dyn.Int(values.filter(fn(value) { value == wanted }).len())
 }
 
 // A number as JSON shows it.
@@ -715,7 +715,7 @@ json_number: fn(value: Float) -> String { json.stringify(Dyn.Float(value)) }
 }
 
 #Test("a ceiling row meets at most 1 and misses above it, and a wrong row fails every reduction") {
-    assert_eq([Float?]{Val(0.8), Val(1.0), Val(1.2), Val(0.0), None}.map(ratio -> ceiling_ratio_verdict(ratio)), [String?]{Val("meet"), Val("meet"), Val("miss"), None, None})
+    assert_eq([Float?]{Val(0.8), Val(1.0), Val(1.2), Val(0.0), None}.map(fn(ratio) { ceiling_ratio_verdict(ratio) }), [String?]{Val("meet"), Val("meet"), Val("miss"), None, None})
     assert_eq(ceiling_reduce(["meet", "miss", "wrong"]), "wrong")
     assert_eq(ceiling_reduce(["meet", "miss"]), "miss")
     assert_eq(ceiling_reduce(["meet"]), "meet")

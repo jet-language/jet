@@ -283,7 +283,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             verdicts[position].diagnostic = sema_diagnostic_with_source_location(verdicts[position].diagnostic, module_row.source_segments)
         }
     }
-    verdicts.sort_by((left: SemaLivenessVerdict, right: SemaLivenessVerdict) -> {
+    verdicts.sort_by(fn(left: SemaLivenessVerdict, right: SemaLivenessVerdict) {
         source: left.fact.source <=> right.fact.source
         if source != Ordering.Equal -> source else -> {
             start: left.fact.span.start <=> right.fact.span.start

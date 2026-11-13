@@ -13,6 +13,6 @@ finish: fn(n: Int) -[]> Int LambdaError! { Ok(n) }
 apply: fn(f: fn(Int) -[]> Int LambdaError!, n: Int) -> Int LambdaError! { f(n) }
 
 run: fn() {
-    points: [41].map(x -> LambdaPoint{x: x})
-    print(apply((n: Int) -[]> finish(n + 1), points[0].x) ?? 0)
+    points: [41].map(fn(x) { LambdaPoint{x: x} })
+    print(apply(fn(n: Int) -[]> { finish(n + 1) }, points[0].x) ?? 0)
 }

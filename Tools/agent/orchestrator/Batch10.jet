@@ -30,14 +30,14 @@ fail: fn(message: String, code: Int) -> Never {
 
 // The text of the files in `dir` that `matching` names, in name order.
 read_all: fn(dir: String, matching: String) -> String {
-    names := files.list_dir_or(dir, [], matching: matching).map(entry -> entry.name)
+    names := files.list_dir_or(dir, [], matching: matching).map(fn(entry) { entry.name })
     names.sort()
-    names.map(name -> files.read("{dir}/{name}")).join("")
+    names.map(fn(name) { files.read("{dir}/{name}") }).join("")
 }
 
 // The lines a patch adds, trimmed.
 added: fn(patch: String) -> [String] {
-    loop line in patch.lines().filter(line -> line.starts_with("+") && !line.starts_with("++")) -> line.removeprefix("+").trim()
+    loop line in patch.lines().filter(fn(line) { line.starts_with("+") && !line.starts_with("++") }) -> line.removeprefix("+").trim()
 }
 
 // A SUB's lead: its name up to the last `-`.
@@ -48,7 +48,7 @@ lead: fn(name: String) -> String {
 
 // Whether a line `patch` adds holds a word `word` matches.
 adds_word: fn(patch: String, word: Regex) -> Bool {
-    added(patch).any(line -> word.is_match(line))
+    added(patch).any(fn(line) { word.is_match(line) })
 }
 
 // The SUBs of `run` that `hits` names, each with every later SUB of its
@@ -60,7 +60,7 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
         name: files.basename(run[at])
         if files.read_or("{integ}/{name}.status", "").trim() == "NOAPPLY" -> next
         his: lead(name)
-        if hits[at] || blamed.any(other -> lead(other) == his) -> blamed.push(name) else -> keep.push(run[at])
+        if hits[at] || blamed.any(fn(other) { lead(other) == his }) -> blamed.push(name) else -> keep.push(run[at])
     }
     (blamed: blamed, keep: keep)
 }
@@ -69,7 +69,7 @@ quarantine: fn(integ: String, run: [String], hits: [Bool]) -> (blamed: [String],
 census_rows: fn(integ: String) -> [String] {
     text: "{read_all("{integ}/census", "*keep-going.tsv")}{files.read_or("{integ}/census.out", "")}"
     place: regex.compile(":[0-9.]*$")
-    loop cells in text.tsv_records().filter(cells -> cells.len() > 1) -> place.replace(cells[1].replace("<corelib>/", ""), "").removesuffix(".jet")
+    loop cells in text.tsv_records().filter(fn(cells) { cells.len() > 1 }) -> place.replace(cells[1].replace("<corelib>/", ""), "").removesuffix(".jet")
 }
 
 // The source lines quoted under Error headers (not warnings or notes) in census/*.err, trimmed, longer than 8.
@@ -98,7 +98,7 @@ run: fn() {
     run := [String]{}
     loop given in args.slice(1, args.len()) {
         sub: given.removesuffix("/")
-        seeds: files.read_or("{sub}/meta", "").lines().filter(line -> line.starts_with("seed:"))
+        seeds: files.read_or("{sub}/meta", "").lines().filter(fn(line) { line.starts_with("seed:") })
         seed: if seeds.len() > 0 -> seeds[0].removeprefix("seed:").trim() else -> ""
         if seed != "" && seed != "none" -> print("HELD {files.basename(sub)} (seed: {seed})") else -> run.push(sub)
     }
@@ -108,7 +108,7 @@ run: fn() {
     if files.is_file("{integ}/REGENFAIL") {
         // Blame the SUBs whose added lines carry a name the failing generator quotes (`core.math.__from_bits_f32` gives
         // __from_bits_f32), with every later SUB of the same lead.
-        names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.*.out")) -> m.groups[0].rpartition(".").tail).filter(name -> name.len() > 3)
+        names: (loop m in regex.compile("`([^`]+)`").matches(read_all(integ, "regen.*.out")) -> m.groups[0].rpartition(".").tail).filter(fn(name) { name.len() > 3 })
         word: regex.compile("\\b({(loop name in names -> regex.escape(name)).join("|")})\\b")
         split: quarantine(integ, run, loop sub in run -> names.len() > 0 && adds_word(files.read_or("{sub}/patch", ""), word))
         if split.blamed.len() == 0 -> fail("batch: a generator failed but no submission adds a name it quotes; see {integ}/REPORT.md", 1)
@@ -121,9 +121,9 @@ run: fn() {
     hits := [Bool]{}
     loop sub in run {
         name: files.basename(sub)
-        paths: files.read_or("{integ}/{name}.files", "").lines().filter(path -> path != "")
+        paths: files.read_or("{integ}/{name}.files", "").lines().filter(fn(path) { path != "" })
         rebased: files.read_or("{integ}/{name}.rebased", "")
-        hits.push(paths.concat(loop path in paths -> path.removesuffix(".jet")).any(line -> rows.contains(line)) || added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")).any(line -> errors.contains(line)))
+        hits.push(paths.concat(loop path in paths -> path.removesuffix(".jet")).any(fn(line) { rows.contains(line) }) || added(if rebased != "" -> rebased else -> files.read_or("{sub}/patch", "")).any(fn(line) { errors.contains(line) }))
     }
     split: quarantine(integ, run, hits)
     if split.blamed.len() == 0 -> fail("batch: the census failed but no row or error line names a submission; see {integ}/REPORT.md", 1)

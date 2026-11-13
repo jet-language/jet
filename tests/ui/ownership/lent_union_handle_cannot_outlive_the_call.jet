@@ -9,10 +9,10 @@ keep: fn(handle: Directory | FileReader) -> Directory | FileReader { handle }
 hold: fn(handle: Directory | FileReader) -> Holder { Holder{handle: handle} }
 
 later: fn(handle: Directory | FileReader) -> fn() -> String {
-    () -> if handle == {
+    fn() { if handle == {
         .Directory(_) -> "directory"
         .FileReader(_) -> "reader"
-    }
+    } }
 }
 
 run: fn() {

@@ -9,7 +9,7 @@ use {
     addr: listener.local_addr() ?? panic("address")
     mux: server.mux()
     { sender: first_tx, receiver: first_rx }: channel<Int>()
-    mux.post("/slow", (req: HTTPRequest) -> {
+    mux.post("/slow", fn(req: HTTPRequest) {
         chunks: req.body().chunks(4096)
         total := 0
         first := true

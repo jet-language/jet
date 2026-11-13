@@ -262,7 +262,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
     assert((pkg_list_xattr_names(files.join(ingested.entry.out, "payload")) ?? panic("list")).contains("user.jet.test"))
     assert((pkg_list_xattr_names(ingested.entry.out) ?? panic("list")).contains("user.jet.directory"))
     files.set_extended_attribute(source, "user.jet.directory", "changed".bytes()) ?? panic("change xattr")
-    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: (path: String, stage: EnvelopeWalkStage) -> {}}
+    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
     changed_hash: pkg_try_output_hash_of_with_policy(source, true, hook) ?? panic("rehash")
     assert(first_hash != changed_hash)
     store_test_drop_roots(roots)
@@ -299,7 +299,7 @@ store_test_validate_hit: fn(verification: &StoreVerification, roots: HangarRoots
     assert((pkg_list_xattr_names(files.join(ingested.entry.out, "link")) ?? panic("list")).contains("user.jet.symlink"))
     first: ingested.entry.envelope.output_hash
     files.set_extended_attribute(files.join(source, "link"), "user.jet.symlink", "second".bytes()) ?? panic("change xattr")
-    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: (path: String, stage: EnvelopeWalkStage) -> {}}
+    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
     second: pkg_try_output_hash_of_with_policy(source, true, hook) ?? panic("rehash")
     assert(first != second)
     store_test_drop_roots(roots)

@@ -159,7 +159,7 @@ sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body
     if receiver == .Ident(name, span, _) {
         if sema_stmt_refutable_loop_body_can_break(body) -> return
         drain := SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
-        loop statement in body -> ast_visit_statement(statement, (expression: Expr) -> drain.visit(expression), true)
+        loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { drain.visit(expression) }, true)
         if drain.pops == 0 || drain.mentions != drain.reads -> return
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return
         row: sema_ownership_last_row(state, scopes.bindings[index].symbol.id.key)

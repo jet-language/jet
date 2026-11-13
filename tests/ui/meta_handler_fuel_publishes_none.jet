@@ -22,7 +22,7 @@ spin: fn() -> Int {
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 steps: spin()
                 if steps > 0 -> meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra")

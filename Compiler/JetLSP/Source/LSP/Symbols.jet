@@ -20,7 +20,7 @@ lsp_document_symbol_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
     loop definition in index.definitions {
         if definition.def.module_path == module_path && lsp_symbol_kind(definition.def.kind) != None -> defs.push(definition.def)
     }
-    defs.sort_by((left: SemDef, right: SemDef) -> left.def_span.start <=> right.def_span.start)
+    defs.sort_by(fn(left: SemDef, right: SemDef) { left.def_span.start <=> right.def_span.start })
     rows := [String]{}
     loop def in defs {
         kind: lsp_symbol_kind(def.kind) ?? next
@@ -89,7 +89,7 @@ lsp_selection_spans: fn(view: LSPView, offset: Int) -> [Span] Never! {
         }
     }
     spans.push(Span{start: 0, end: view.doc.text.count_bytes()})
-    spans.sort_by((left: Span, right: Span) -> (left.end - left.start <=> right.end - right.start).then(right.start <=> left.start))
+    spans.sort_by(fn(left: Span, right: Span) { (left.end - left.start <=> right.end - right.start).then(right.start <=> left.start) })
     unique := [Span]{}
     loop span in spans {
         if unique.len() > 0 {

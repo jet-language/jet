@@ -23,7 +23,7 @@ bad: fn(name: String) -> IOError Never! {
 generic_case: fn(flag: Bool) -> Bool IOError! {
     with_lock<Bool>(
         "x",
-        () -> {
+        fn() {
             if flag -> return Err(bad("a"))
             Ok(true)
         },
@@ -33,7 +33,7 @@ generic_case: fn(flag: Bool) -> Bool IOError! {
 unit_case: fn(flag: Bool) IOError! {
     with_unit(
         "x",
-        () -> {
+        fn() {
             if flag -> return Err(bad("b"))
         },
     )
@@ -44,7 +44,7 @@ run: fn() {
     unit_case(false) ?? print("unit failed")
     unit_case(true) ?? print("unit failed")
     matched: Loader{
-        load: n -> {
+        load: fn(n) {
             if fetch(n) == {
                 .Ok(b) -> Ok(b + 1)
                 .Err(e) -> Err(e)
@@ -52,18 +52,18 @@ run: fn() {
         },
     }
     returned: Loader{
-        load: n -> {
+        load: fn(n) {
             if n > 0 -> return Ok(n)
             Err(LoadError{message: "x"})
         },
     }
     branched: Loader{
-        load: n -> {
+        load: fn(n) {
             if n > 0 { Ok(n) } else { Err(LoadError{message: "x"}) }
         },
     }
     plain: Loader{
-        load: n -> {
+        load: fn(n) {
             if n > 5 -> return n
             n + 1
         },

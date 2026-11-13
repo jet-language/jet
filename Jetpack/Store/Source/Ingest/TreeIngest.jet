@@ -285,7 +285,7 @@ StoreHashLaneResult: struct {
 store_hash_tree_and_files: fn(root: String, paths: [String], sizes: [Int]) -[FS, Env]> StoreTreeHashes StoreError! {
     order := [Int]{}
     loop index in 0..<paths.len() -> order.push(index)
-    order.sort_by((index: Int) -> 0 - sizes[index])
+    order.sort_by(fn(index: Int) { 0 - sizes[index] })
     total := 0
     loop size in sizes -> total += size
     lanes := [StoreHashLane]{}
@@ -868,7 +868,7 @@ store_directory_snapshot: fn(source: String) -[FS]> [DirectorySnapshotEntry] Ing
         pkg_validate_path_component(name) ?? return Err(IngestError.PathLaw(err))
     }
     pkg_reject_casefold_collisions(path_names) ?? return Err(IngestError.PathLaw(err))
-    snapshot.sort_by((entry: DirectorySnapshotEntry) -> entry.name)
+    snapshot.sort_by(fn(entry: DirectorySnapshotEntry) { entry.name })
     Ok(snapshot)
 }
 

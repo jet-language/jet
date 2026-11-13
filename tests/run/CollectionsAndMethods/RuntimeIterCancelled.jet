@@ -5,7 +5,7 @@ package: {
 }
 mapped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
     [1, 2, 3].lazy().map(
-    n -> {
+    fn(n) {
         if n == 2 {
             started.send(1)
             blocked.receive() ?? panic("blocking channel closed")
@@ -18,7 +18,7 @@ mapped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
 
 looped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
     values: [1, 2, 3].lazy().map(
-    n -> {
+    fn(n) {
         if n == 2 {
             started.send(1)
             blocked.receive() ?? panic("blocking channel closed")
@@ -34,7 +34,7 @@ looped_worker: fn(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
 family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
     if family == 7 {
         return [1, 2, 3, 5].lazy().chunk_while(
-        (a: Int, b: Int) -> {
+        fn(a: Int, b: Int) {
             if b == 3 {
                 started.send(1)
                 blocked.receive() ?? panic("blocking channel closed")
@@ -44,7 +44,7 @@ family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> 
         )
             .to_list().len() > 0
     }
-    stop: (n: Int) -> {
+    stop: fn(n: Int) {
         if n == (if family == 0 -> 1 else -> 2) {
             started.send(1)
             blocked.receive() ?? panic("blocking channel closed")
@@ -65,9 +65,9 @@ family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> 
         5 -> return values.to_list().len() > 0
         8 -> return values.join("|").len() > 0
         9 -> return values.average() > 0.0
-        10 -> return values.map(n -> Float.from_int(n)).average() > 0.0
-        11 -> return values.dedup_by(n -> n).to_list().len() > 0
-        12 -> return values.chunk_while((a: Int, b: Int) -> b == a + 1).to_list().len() > 0
+        10 -> return values.map(fn(n) { Float.from_int(n) }).average() > 0.0
+        11 -> return values.dedup_by(fn(n) { n }).to_list().len() > 0
+        12 -> return values.chunk_while(fn(a: Int, b: Int) { b == a + 1 }).to_list().len() > 0
         13 -> return values.zip([10, 20, 30]).to_list().len() > 0
         else -> panic("unknown cancellation family")
     }

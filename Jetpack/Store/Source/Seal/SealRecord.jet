@@ -96,7 +96,7 @@ store_seal_census_report: fn(verification: &StoreVerification) -> String? Never!
     loop count in counts.values() -> total += count
     rows := [(path: String, count: Int)]{}
     loop path in store_sorted_keys_int(counts) -> rows.push((path: path, count: counts[path]))
-    rows.sort_by((left: (path: String, count: Int), right: (path: String, count: Int)) -> right.count <=> left.count)
+    rows.sort_by(fn(left: (path: String, count: Int), right: (path: String, count: Int)) { right.count <=> left.count })
     out := "seal census: {total} checks across {counts.len()} objects\n"
     shown := 0
     loop row in rows {

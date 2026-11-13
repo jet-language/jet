@@ -102,10 +102,10 @@ cli_cmd_update: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
             cli_render_project_update_plan(theme, plan)
         }
         has_project_plan: project_plan != None
-        return cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, has_project_plan, () -> if project_plan == {
+        return cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, has_project_plan, fn() { if project_plan == {
             .Val(plan) -> cli_apply_project_update(theme, plan)
             .None -> EXIT_OK
-        })
+        } })
     }
     if scopes.tools -> return cli_update_user_tools(verification, theme, parsed, confirmation)
     cli_cmd_update_project(cache, theme, parsed, confirmation)

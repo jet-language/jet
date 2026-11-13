@@ -336,13 +336,13 @@ pack: fn(args: [String]) {
     sources: runtime_sources(manifest)
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
     source_paths.extend(sources.copy())
-    in_package: (path: String) -> at(root, path)
+    in_package: fn(path: String) { at(root, path) }
     source: inventory(source_paths, in_package)
     backend_paths := [String]{}
     loop tree in flags.trees {
         if tree == RUNTIME_TREE -> next
         directory: "{PACKAGE}/{tree}"
-        loop path in tree_files(at(root, directory), (name: String) -> name.ends_with(".jet")) -> backend_paths.push("{directory}/{path}")
+        loop path in tree_files(at(root, directory), fn(name: String) { name.ends_with(".jet") }) -> backend_paths.push("{directory}/{path}")
     }
     backend: inventory(backend_paths, in_package)
     lifecycle: inventory([String]{RUNTIME_LIFECYCLE}, in_package)
@@ -437,7 +437,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
     thread_rows: threads.split("\n").to_list()
     thread_names: loop name in thread_rows if name != "" -> name.copy()
-    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(name -> !exports.contains(name)) -> fail("runtime thread receipt names a symbol the checked exports lack")
+    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) -> fail("runtime thread receipt names a symbol the checked exports lack")
     // The jet.runtime interface the runtime source renders (Request.jet
     // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
     // the pack with the rendered file beside the outputs.

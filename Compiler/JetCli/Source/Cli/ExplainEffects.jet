@@ -657,7 +657,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         scopes := [JetCLIEffectsScope]{}
         if offset >= 0 {
             jet_cli_effects_body_scopes(function.body, offset, scopes)
-            ast_visit_body(function.body, (inner: Expr) -> jet_cli_effects_note_expr(scopes, inner, offset), true)
+            ast_visit_body(function.body, fn(inner: Expr) { jet_cli_effects_note_expr(scopes, inner, offset) }, true)
         }
         ordered: jet_cli_effects_scopes_sorted(scopes)
         loop scope in ordered -> rungs.push(JetCLIEffectsRung{rung: scope.rung, text: scope.text, written: true, site: jet_cli_effects_site(doc_module, scope.span.start)})

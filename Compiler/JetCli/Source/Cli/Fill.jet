@@ -64,7 +64,7 @@ jet_cli_fill_expr: fn(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals
     if node.kind == .Never(reason, _) && reason == "todo" {
         goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
     }
-    body_each_expr_child(tree, node, (child: Int) -> jet_cli_fill_expr(tree, child, rows, goals))
+    body_each_expr_child(tree, node, fn(child: Int) { jet_cli_fill_expr(tree, child, rows, goals) })
 }
 
 jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
@@ -157,7 +157,7 @@ jet_cli_fill_report: fn(result: JetDriverCompileResult, file: String?, line: Int
             if function.synthetic -> next
             goals := [JetCLIFillGoal]{}
             loop statement in function.body {
-                body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> jet_cli_fill_expr(function.tree, expression, function.typed_goals, goals))
+                body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { jet_cli_fill_expr(function.tree, expression, function.typed_goals, goals) })
             }
             loop goal in goals {
                 goal_line: diagnostic_line_at(unit.source, goal.span.start)

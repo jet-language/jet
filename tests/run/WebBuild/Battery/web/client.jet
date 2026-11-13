@@ -9,12 +9,12 @@ run: fn() {
     props: battery.island_props(1, "alice")
     backend: ui.null_backend()
     count: reactive.signal(0)
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         n: count.get()
         tree: ui.box([
             ui.text("Orders island count: {n}"),
             ui.text("Serializable props: {props}"),
-            ui.button("Refresh", on_click: () -> {
+            ui.button("Refresh", on_click: fn() {
                 count.set(count.get() + 1)
             })
         ])

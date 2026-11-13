@@ -126,7 +126,7 @@ cli_registry_flag_scopes: fn() Never! {
     cli_registry_require(jet_cli_flag_takes(verbose, "check") && jet_cli_flag_takes(verbose, "explain"), "every `with` clause of --verbose scopes it")
     topic: jet_cli_flag_spec("--topic") ?? panic("--topic is registered")
     cli_registry_require(jet_cli_flag_takes(topic, "inspect") && !jet_cli_flag_takes(topic, "build"), "`inspect digest` scopes --topic to inspect")
-    cli_registry_require(jet_cli_flags_for_command("doc").any(row -> row.long == "--check"), "jet help doc lists --check")
+    cli_registry_require(jet_cli_flags_for_command("doc").any(fn(row) { row.long == "--check" }), "jet help doc lists --check")
 }
 
 // Prelude/Markers.jet marker types through the one rule explanation. A

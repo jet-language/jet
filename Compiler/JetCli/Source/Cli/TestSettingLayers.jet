@@ -125,7 +125,7 @@ jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: 
 // The settings line a run prints when a profile or `test: fn` wrote any of
 // them: each setting and the layer it came from. "" otherwise.
 jet_cli_test_settings_notice: fn(settings: [TestSetting]) -> String Never! {
-    if !settings.any(setting -> setting.source != JET_CLI_TEST_FLAG_LAYER) -> return ""
+    if !settings.any(fn(setting) { setting.source != JET_CLI_TEST_FLAG_LAYER }) -> return ""
     shown: (loop setting in settings -> "{setting.name} {setting.value} ({setting.source})").join(", ")
     "jet test: settings {shown}\n"
 }

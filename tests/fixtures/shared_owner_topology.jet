@@ -17,7 +17,7 @@ append_then_fail: fn(values: &[Int], value: Int) -> Int? Err! {
 
 make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
     bucket := Bucket{values: [Int]{}, by_name: [String:Int]{}}
-    return (value: Int) -> {
+    return fn(value: Int) {
         failure: append_then_fail(bucket.values, value) ?? -value
         bucket.by_name["last"] = value
         return bucket.values.len() * 100 + bucket.by_name["last"] + owner.strong_count() + failure
@@ -25,7 +25,7 @@ make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
 }
 
 take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
-    callback: () -> {
+    callback: fn() {
         owner
     }
     return callback()
@@ -33,7 +33,7 @@ take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
 
 replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
     current := owner.move()
-    callback: () -> {
+    callback: fn() {
         current = Shared{13}
         current
     }
@@ -41,7 +41,7 @@ replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
 }
 
 take_captured_first: fn(pair: &&SharedPair) -> Shared<Int> {
-    callback: () -> {
+    callback: fn() {
         pair.first
     }
     return callback()
@@ -86,7 +86,7 @@ run: fn() {
     copy_scope(escaped)
     print(escaped.strong_count())
     snapshot_scope(escaped)
-    projection: escaped.capture((value: Int) -> value + 1)
+    projection: escaped.capture(fn(value: Int) { value + 1 })
     print(projection.value())
     replace_snapshot: escaped.capture()
     replaced: escaped.try_replace(replace_snapshot, 8) ?? false

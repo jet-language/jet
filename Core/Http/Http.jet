@@ -633,7 +633,7 @@ HTTPRouter: struct {
     __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
         state: self.__state
         index: __router_handler_count(self.__state)
-        self.__mux.__route(method, pattern, (request: HTTPRequest) -> __router_call(state, index, request), contract, at)
+        self.__mux.__route(method, pattern, fn(request: HTTPRequest) { __router_call(state, index, request) }, contract, at)
         guard := self.__state.guard_edit()
         guard.value.handlers.push(__HTTPRouterHandler{call: handler.move()})
     }

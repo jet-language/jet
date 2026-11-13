@@ -316,7 +316,7 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
         diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a pure Tensor function", "autodiff records only pure Tensor operations and cannot carry an effectful callable", "remove the effect row from the differentiated function or differentiate a pure Tensor function"))
         valid = false
     }
-    output := ret.map((value) -> value) ?? Type.Named{name: "Unit"}
+    output := ret.map(fn(value) { value }) ?? Type.Named{name: "Unit"}
     output = if output == {
         .Result(ok, _) -> ok
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> output

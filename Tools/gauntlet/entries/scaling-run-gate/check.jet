@@ -27,10 +27,10 @@ run: fn() {
     progress.sort()
     loop shown in progress -> print(shown)
     if !files.is_dir("work") -> return
-    reports := files.list_dir("work", matching: "run-*").map(entry -> "work/{entry.name}/report.md").filter(file -> files.exists(file))
+    reports := files.list_dir("work", matching: "run-*").map(fn(entry) { "work/{entry.name}/report.md" }).filter(fn(file) { files.exists(file) })
     reports.sort()
     reports.push("work/report.md")
-    loop file in reports.filter(file -> files.exists(file)) {
+    loop file in reports.filter(fn(file) { files.exists(file) }) {
         print("== {file}")
         text: files.read(file) ?? process.fail(1, "{err}")
         loop line in text.lines() {

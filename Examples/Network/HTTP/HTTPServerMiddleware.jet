@@ -12,7 +12,7 @@ use {
 
 outer: fn(next: HTTPHandler) -> HTTPHandler {
     owned: next.copy()
-    return (req: HTTPRequest) -> {
+    return fn(req: HTTPRequest) {
         if owned.handle(req) == {
             .Ok(response) -> {
                 return Ok(http_server.response(response.status(), "outer>{response.text() ?? "invalid body"}<outer"))
@@ -24,7 +24,7 @@ outer: fn(next: HTTPHandler) -> HTTPHandler {
 
 inner: fn(next: HTTPHandler) -> HTTPHandler {
     owned: next.copy()
-    return (req: HTTPRequest) -> {
+    return fn(req: HTTPRequest) {
         if req.path() == "/blocked" -> return Ok(http_server.response(403, "blocked"))
         if owned.handle(req) == {
             .Ok(response) -> {
@@ -40,8 +40,8 @@ run: fn() (HTTPError | RangeError | TaskFailure)! {
     http_server.request_id(mux)
     mux.middleware(outer)
     mux.middleware(inner)
-    mux.get("/ok", () -> Ok(http_server.response(200, "handler")))
-    mux.get("/blocked", () -> Ok(http_server.response(200, "must not run")))
+    mux.get("/ok", fn() { Ok(http_server.response(200, "handler")) })
+    mux.get("/blocked", fn() { Ok(http_server.response(200, "must not run")) })
     server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     serving: task { server.serve() ?? panic("serve") }

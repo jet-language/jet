@@ -37,7 +37,7 @@ gate_test_callback_borrow: fn(rows: [SemaGateModule], projected: GateLedger) Nev
     loop item in rows[0].program.items {
         if item == .Func(function) {
             loop statement in function.body {
-                ast_visit_statement(statement, (expression: Expr) -> wrapped.visit(expression), false)
+                ast_visit_statement(statement, fn(expression: Expr) { wrapped.visit(expression) }, false)
                 if statement == .Val(binding) -> reference.visit(binding.init)
             }
         }

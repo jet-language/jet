@@ -35,16 +35,16 @@ s6_head_assert: fn(response: String, status: String, length: Int) {
 #Test("HEAD preserves representation length without a wire body") {
     calls: Shared{S6HeadCalls{value: 0}}
     mux: server.mux()
-    mux.get("/implicit", (_req: HTTPRequest) -> {
+    mux.get("/implicit", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(200, "hello").header("x-origin", "get"))
     })
-    mux.head("/explicit", (_req: HTTPRequest) -> {
+    mux.head("/explicit", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(200, "explicit"))
     })
-    mux.post("/post", (_req: HTTPRequest) -> Ok(server.response(200, "posted")))
-    mux.get("/empty", (_req: HTTPRequest) -> {
+    mux.post("/post", fn(_req: HTTPRequest) { Ok(server.response(200, "posted")) })
+    mux.get("/empty", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(204, "forbidden"))
     })

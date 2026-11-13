@@ -15,8 +15,8 @@ Sale: struct {
 run: fn() {
     rows: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0\nMar,5.0") ?? panic("csv")
     groups: data.query(rows)
-        .group_by(sale -> sale.month)
-        .mean(sale -> sale.value)
+        .group_by(fn(sale) { sale.month })
+        .mean(fn(sale) { sale.value })
         .collect() ?? panic("groups")
     options: DataLineOptions{
         title: "Sales",

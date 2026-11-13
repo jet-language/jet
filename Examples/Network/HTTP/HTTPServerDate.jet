@@ -29,8 +29,8 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
     mux: server.mux()
-    mux.get("/", (req: HTTPRequest) -> handle_root(req))
-    mux.get("/dated", (req: HTTPRequest) -> handle_dated(req))
+    mux.get("/", fn(req: HTTPRequest) { handle_root(req) })
+    mux.get("/dated", fn(req: HTTPRequest) { handle_dated(req) })
     t: task {
         server.serve_once_listener(listener, mux) ?? panic("serve failed")
         server.serve_once_listener(listener, mux) ?? panic("serve failed")

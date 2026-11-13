@@ -107,7 +107,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
         pkg_test_reference_header(out, U8{68}, rel.bytes(), mode)
         pkg_test_reference_xattrs(path, out, allow)
         entries := files.list_dir(path) ?? panic("list fixture directory")
-        entries.sort_by(entry -> entry.name)
+        entries.sort_by(fn(entry) { entry.name })
         loop entry in entries {
             child: if rel == "" -> entry.name else -> "{rel}/{entry.name}"
             pkg_test_reference_encode_node(entry.path, child, out, links, allow)
@@ -364,7 +364,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
             if files.exists(marker) || path != dir || stage != EnvelopeWalkStage.DirectorySnapshotted -> return
             files.write(marker, "") ?? panic("marker")
             transient: files.join(dir, "transient")
@@ -414,7 +414,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     files.write(payload, "bytes") ?? panic("write")
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
             if path != payload || stage != EnvelopeWalkStage.FileOpened || !files.exists(payload) -> return
             files.remove(payload) ?? panic("remove payload")
         }
@@ -442,7 +442,7 @@ pkg_test_reference_encode_node: fn(path: String, rel: String, out: &[U8], links:
     pkg_test_run([String]{"touch", "-r", stamp, replacement})
     hook := EnvelopeWalkHook{
         events: [EnvelopeWalkEvent]{},
-        react: (path: String, stage: EnvelopeWalkStage) -[FS]> {
+        react: fn(path: String, stage: EnvelopeWalkStage) -[FS]> {
             if files.exists(marker) || path != file || stage != EnvelopeWalkStage.FileOpened -> return
             files.write(marker, "") ?? panic("marker")
             files.rename(replacement, file) ?? panic("rewrite")

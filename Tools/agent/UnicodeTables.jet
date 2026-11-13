@@ -249,7 +249,7 @@ tagged_rows: fn(rows: [PropRow], at: Int, tags: [String]) -> [Span] {
 sorted_spans: fn(spans: [Span]) -> [Span] {
     order := [Int]{}
     loop at in 0..<spans.len() -> order.push(at)
-    order.sort_by((at: Int) -> spans[at].a * SCALAR_LANE + at)
+    order.sort_by(fn(at: Int) { spans[at].a * SCALAR_LANE + at })
     out := [Span]{}
     loop at in order -> out.push(spans[at].copy())
     out
@@ -468,7 +468,7 @@ compose_pairs: fn(ucd: Ucd) -> [Int] {
         order.push(at)
         keys.push((found[at * 3] * SCALAR_LANE + found[at * 3 + 1]) * 65536 + at)
     }
-    order.sort_by((at: Int) -> keys[at])
+    order.sort_by(fn(at: Int) { keys[at] })
     out := [Int]{}
     loop at in order {
         loop field in 0..<3 -> out.push(found[at * 3 + field])
@@ -847,7 +847,7 @@ core_assets: fn(ucd: Ucd) -> [Asset] TableError! {
     // Names: [scalar, pool offset, length] rows over one UTF-8 pool; every
     // row decodes back to its UnicodeData name.
     names := ucd.names.copy()
-    names.sort_by((row: NameRow) -> row.cp)
+    names.sort_by(fn(row: NameRow) { row.cp })
     name_rows := [Int]{}
     name_pool := [U8]{}
     loop row in names {

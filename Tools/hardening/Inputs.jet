@@ -36,7 +36,7 @@ jet_files: fn(root: String, relative: String, out: &[String]) Err! -[FS]> {
     entries: files.list_dir(files.join(root, relative)) ?? return Err("cannot list {relative}: {err}")
     names := [String]{}
     loop entry in entries -> names.push(entry.name.copy())
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     loop name in names {
         child: "{relative}/{name}"
         path: files.join(root, child)
@@ -98,6 +98,6 @@ snapshot_files: fn(inputs: Inputs) -> [SourceFile] Never! {
             out.push(file.copy())
         }
     }
-    out.sort_by((left: SourceFile, right: SourceFile) -> left.path <=> right.path)
+    out.sort_by(fn(left: SourceFile, right: SourceFile) { left.path <=> right.path })
     out
 }

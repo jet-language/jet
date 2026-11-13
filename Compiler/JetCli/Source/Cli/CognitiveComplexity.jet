@@ -12,7 +12,7 @@ jet_cli_complexity_reports: fn(program: Program) -> [JetCLIComplexityReport] Nev
     reports := [JetCLIComplexityReport]{}
     jet_cli_complexity_items(program.items, reports)
     // Descending score, then source position, then name: Rust's stable order.
-    reports.sort_by((left: JetCLIComplexityReport, right: JetCLIComplexityReport) -> (right.score <=> left.score).then(left.span.start <=> right.span.start).then(left.name <=> right.name))
+    reports.sort_by(fn(left: JetCLIComplexityReport, right: JetCLIComplexityReport) { (right.score <=> left.score).then(left.span.start <=> right.span.start).then(left.name <=> right.name) })
     reports
 }
 
@@ -79,13 +79,13 @@ JetCLIComplexityVisitor: struct {
 // scope runs to the end of the furthest expression under it, at least `end`.
 jet_cli_complexity_extent: fn(expression: Expr, end: Int) -> Int Never! {
     ends := [Int]{end}
-    ast_visit_expr(expression, (inner: Expr) -> ends.push(expr_span(inner).end))
+    ast_visit_expr(expression, fn(inner: Expr) { ends.push(expr_span(inner).end) })
     jet_cli_complexity_furthest(ends)
 }
 
 jet_cli_complexity_body_extent: fn(bodies: [[Stmt]], end: Int) -> Int Never! {
     ends := [Int]{end}
-    loop body in bodies -> ast_visit_body(body, (inner: Expr) -> ends.push(expr_span(inner).end), true)
+    loop body in bodies -> ast_visit_body(body, fn(inner: Expr) { ends.push(expr_span(inner).end) }, true)
     jet_cli_complexity_furthest(ends)
 }
 
@@ -101,7 +101,7 @@ jet_cli_complexity_function: fn(function: Func, reports: &[JetCLIComplexityRepor
     visitor := JetCLIComplexityVisitor{function_name: function.name, controls: [Span]{}, nesting: [Span]{}, mixed: 0, recursive: false}
     loop statement in function.body {
         jet_cli_complexity_statement(statement, visitor.controls, visitor.nesting)
-        ast_visit_statement(statement, (expression: Expr) -> visitor.visit(expression), false)
+        ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
     }
     score := visitor.mixed + if visitor.recursive -> 1 else -> 0
     loop inner in visitor.controls {

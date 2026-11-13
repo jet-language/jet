@@ -21,7 +21,7 @@ use {
 inject_live_reload: fn(html: String, nonce: String) -> String {
     script := live_reload_script(nonce, "")
     script.shrink_to_fit()
-    return inject_live_reload_with_script(html, script).unwrap_or_else(() -> { out := html.to_string(); out.push_str(script); out.move() })
+    return inject_live_reload_with_script(html, script).unwrap_or_else(fn() { out := html.to_string(); out.push_str(script); out.move() })
 }
 bind_canvas_for_test: fn(file: String, verbose: Bool, port: U16?) -> WebHost {
     options := CanvasHostOptions.default()
@@ -39,7 +39,7 @@ bind_web_canvas_options_for_test: fn(file: String, verbose: Bool, fallback_port:
     assert(!try_acquire_connection(active), "the connection cap must reject the next slow client")
     listener: TcpListener.bind((_0: "127.0.0.1", _1: 0)).unwrap()
     address: listener.local_addr().unwrap()
-    client: thread.spawn(() -> { stream := TcpStream.connect(address).unwrap(); _: stream.write_all("G".bytes()); thread.sleep(Duration.from_millis(100)) })
+    client: thread.spawn(fn() { stream := TcpStream.connect(address).unwrap(); _: stream.write_all("G".bytes()); thread.sleep(Duration.from_millis(100)) })
     (stream, _): listener.accept().unwrap()
     started: Instant.now()
     reader := BufReader.new(DeadlineStream.new(stream, started + Duration.from_millis(40)))
@@ -59,7 +59,7 @@ bind_web_canvas_options_for_test: fn(file: String, verbose: Bool, fallback_port:
     browser_state: Arc.new(Mutex.new(.None))
     paused_evaluate: Arc.new(Mutex.new(PausedEvaluateHost.new()))
     terminal_style: Arc.new(TerminalStyleHostAdapter.new())
-    server: thread.spawn(() -> serve_forever(listener, status, debug_sessions, session, "admission.jet", .Application, "127.0.0.1", "test-session", server_shutdown, OSPath.new("."), ReleaseDevtoolsPolicy.development(), browser_state, paused_evaluate, terminal_style))
+    server: thread.spawn(fn() { serve_forever(listener, status, debug_sessions, session, "admission.jet", .Application, "127.0.0.1", "test-session", server_shutdown, OSPath.new("."), ReleaseDevtoolsPolicy.development(), browser_state, paused_evaluate, terminal_style) })
     clients := [TcpStream].with_capacity(MAX_CONNECTION_THREADS)
     loop _ in 0..MAX_CONNECTION_THREADS { client := TcpStream.connect(address).unwrap(); client.write_all("G".bytes()).unwrap(); clients.push(client) }
     rejected := false
@@ -271,7 +271,7 @@ bind_web_canvas_options_for_test: fn(file: String, verbose: Bool, fallback_port:
     terminal_guard: status.term_lock.lock().unwrap()
     waiter: Arc.clone(status)
     (started_tx, started_rx): std.sync.mpsc.channel()
-    handle: thread.spawn(() -> { started_tx.send(_).unwrap(); waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client") })
+    handle: thread.spawn(fn() { started_tx.send(_).unwrap(); waiter.write_header_verbose("jet dev  [ready] localhost:8123 · 1 client") })
     started_rx.recv().unwrap()
     status.controls_ready.store(false, Ordering.SeqCst)
     *status.header_started.lock().unwrap() = false
@@ -312,7 +312,7 @@ bind_web_canvas_options_for_test: fn(file: String, verbose: Bool, fallback_port:
 #Test("frame_lines_keeps_diagnostic_words_verbatim") {
     diagnostic: "Error [jet.UnknownFunction]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
     framed: frame_lines("E0102", diagnostic)
-    loop line in diagnostic.lines() -> assert(framed.iter().any((f) -> f == "│ {line}"), "missing verbatim line {line} in {framed}")
+    loop line in diagnostic.lines() -> assert(framed.iter().any(fn(f) { f == "│ {line}" }), "missing verbatim line {line} in {framed}")
     assert(framed.first().unwrap().starts_with("┌ E0102 ")); assert(framed.last().unwrap().starts_with('└'))
 }
 #Test("frame_lines_top_border_names_the_diagnostic_code") { framed: frame_lines("E0204", "one line"); assert(framed[0].contains("E0204")) }
@@ -365,15 +365,15 @@ bind_web_canvas_options_for_test: fn(file: String, verbose: Bool, fallback_port:
     before: fs.read_to_string(path).unwrap(); revision: Canvas.source_revision(before)
     host: bind_canvas_for_test(path.to_str().unwrap(), false, .None); port: host.status.port(); secret: host.session_secret.clone(); host.start_canvas()
     barrier: Arc.new(Barrier.new(3))
-    responses: [(_0: "client-a", _1: "first"), (_0: "client-b", _1: "second")].into_iter().map(((_0: client, _1: name)) -> {
+    responses: [(_0: "client-a", _1: "first"), (_0: "client-b", _1: "second")].into_iter().map(fn((_0: client, _1: name)) {
         barrier: Arc.clone(barrier); secret: secret.clone()
         body: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"{revision}\",\"from\":\"total\",\"to\":\"{name}\",\"client_id\":\"{client}\"}}"
-        thread.spawn(() -> { barrier.wait(); post_canvas_transaction(port, secret, client, body) })
+        thread.spawn(fn() { barrier.wait(); post_canvas_transaction(port, secret, client, body) })
     }).collect<[_]>()
     barrier.wait()
-    responses: responses.into_iter().map((thread) -> thread.join().unwrap()).collect<[_]>()
-    assert_eq(responses.iter().filter((response) -> response.starts_with("HTTP/1.1 200 OK")).count(), 1, "exactly one client must publish the shared revision")
-    loser: responses.iter().find((response) -> response.starts_with("HTTP/1.1 409 Conflict")).expect("one client must receive a conflict")
+    responses: responses.into_iter().map(fn(thread) { thread.join().unwrap() }).collect<[_]>()
+    assert_eq(responses.iter().filter(fn(response) { response.starts_with("HTTP/1.1 200 OK") }).count(), 1, "exactly one client must publish the shared revision")
+    loser: responses.iter().find(fn(response) { response.starts_with("HTTP/1.1 409 Conflict") }).expect("one client must receive a conflict")
     current: fs.read_to_string(path).unwrap(); current_revision: Canvas.source_revision(current)
     assert(loser.contains("\"kind\":\"conflict\""), loser); assert(loser.contains("\"current_revision\":\"{current_revision}\""), loser)
     session: host.session.json()
@@ -410,9 +410,9 @@ post_canvas_transaction: fn(port: U16, secret: String, client: String, body: Str
     status: Arc.new(DevStatus.new_with_terminal("app.jet", false, false, false)); status.set_port(port)
     debug_sessions: Canvas.DebugSessions.default(); session: Arc.new(ResidentDevSession.new("app.jet", port, 0))
     session.select_output_values(.Val("cli-output"), .Val("cli-target")); secret: mint_session_secret().unwrap()
-    server: (() -> {
+    server: (fn() {
         session: Arc.clone(session); secret: secret.clone()
-        thread.spawn(() -> {
+        thread.spawn(fn() {
             (stream, _): listener.accept().unwrap()
             handle_connection(stream, status, debug_sessions, session, "app.jet", .Canvas, "127.0.0.1", secret).unwrap()
         })

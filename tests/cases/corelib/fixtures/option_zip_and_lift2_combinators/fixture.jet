@@ -10,8 +10,8 @@ choose_multiplier: fn() -> fn(Float, Float) -> Float {
 run: fn() {
     both_a: Val(Float{2.0})
     both_b: Val(Float{5.0})
-    print(both_a.zip(both_b).map((pair) -> pair.a * pair.b))
-    print(Option.lift2((x, y) -> x * y, both_a, both_b))
+    print(both_a.zip(both_b).map(fn(pair) { pair.a * pair.b }))
+    print(Option.lift2(fn(x, y) { x * y }, both_a, both_b))
     print(Option.lift2(multiply_options, both_a, both_b))
     multiplier: multiply_options
     print(Option.lift2(multiplier, both_a, both_b))
@@ -19,12 +19,12 @@ run: fn() {
 
     a_only: Val(Float{2.0})
     b_missing: missing_float()
-    print(a_only.zip(b_missing).map((pair) -> pair.a * pair.b))
-    print(Option.lift2((x, y) -> x * y, a_only, b_missing))
+    print(a_only.zip(b_missing).map(fn(pair) { pair.a * pair.b }))
+    print(Option.lift2(fn(x, y) { x * y }, a_only, b_missing))
     print(Option.lift2(choose_multiplier(), a_only, b_missing))
 
     both_missing_a: missing_float()
     both_missing_b: missing_float()
-    print(both_missing_a.zip(both_missing_b).map((pair) -> pair.a * pair.b))
-    print(Option.lift2((x, y) -> x * y, both_missing_a, both_missing_b))
+    print(both_missing_a.zip(both_missing_b).map(fn(pair) { pair.a * pair.b }))
+    print(Option.lift2(fn(x, y) { x * y }, both_missing_a, both_missing_b))
 }

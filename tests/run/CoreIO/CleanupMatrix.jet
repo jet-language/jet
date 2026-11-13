@@ -40,10 +40,10 @@ stop_process: fn(code: Int) {
 body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int CaseFail! {
     first := Resource{name: "first"}
     defer close(first)
-    _guard_1: scope.guard(() -> print("guard 1"))
+    _guard_1: scope.guard(fn() { print("guard 1") })
     second := Resource{name: "second"}
     defer close(second)
-    _guard_2: scope.guard(() -> print("guard 2"))
+    _guard_2: scope.guard(fn() { print("guard 2") })
     print("body {path}")
     if path == {
         "error" -> return Err(CaseFail.Bad)
@@ -63,7 +63,7 @@ body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int Case
     print("after {path}")
     late := Resource{name: "late"}
     defer close(late)
-    _late_guard: scope.guard(() -> print("guard late"))
+    _late_guard: scope.guard(fn() { print("guard late") })
     Ok(1)
 }
 
@@ -78,8 +78,8 @@ quick: fn(ready: Receiver<Int>) -> Int {
 
 child: fn(path: String) CaseFail! {
     #Unsafe("the exit callbacks have no captured state") {
-        os.atexit(() -> print("atexit 1"))
-        os.atexit(() -> print("atexit 2"))
+        os.atexit(fn() { print("atexit 1") })
+        os.atexit(fn() { print("atexit 2") })
     }
     if path == "cancel" {
         { sender: ready_tx, receiver: ready_rx }: channel<Int>()

@@ -135,7 +135,7 @@ key_rank: fn(scalars: [Int]) -> Int {
 sorted_rows: fn(rows: [KeyRow]) -> [KeyRow] Never! {
     out := [KeyRow]{}
     loop row in rows -> out.push(row.copy())
-    out.sort_by((row: KeyRow) -> row.rank)
+    out.sort_by(fn(row: KeyRow) { row.rank })
     out
 }
 
@@ -228,7 +228,7 @@ jucd: fn(kind: Int, count: Int, stride: Int, records: [U8], pool: [U8]) -> [U8] 
 ideograph_rows: fn(ranges: [Int]) -> [U8] {
     starts := [Int]{}
     loop at in 0..<ranges.len() /% 2 -> starts.push(at)
-    starts.sort_by((at: Int) -> ranges[at * 2])
+    starts.sort_by(fn(at: Int) { ranges[at * 2] })
     out := [U8]{}
     loop at in starts {
         push_le(out, ranges[at * 2], 3)

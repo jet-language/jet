@@ -4,7 +4,7 @@ use event: core.event
 run: fn() {
     scope: event.scope()
     queued: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("async event")
-    sub: queued.on(scope, (value: Int) -> print(value))
+    sub: queued.on(scope, fn(value: Int) { print(value) })
     report: queued.emit_async(7).join() ?? panic("dispatch")
     print(queued.listener_count())
     print(report.state() == .Delivered)

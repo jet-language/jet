@@ -1626,7 +1626,7 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, structu
         records.push(record)
     }
     // Stable, as the insertion sort this replaces: equal (subject, claim) keep record order.
-    records.sort_by((left: DerivationRecord, right: DerivationRecord) -> (left.subject <=> right.subject).then(left.claim <=> right.claim))
+    records.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { (left.subject <=> right.subject).then(left.claim <=> right.claim) })
     values := [TComptimeValue]{}
     loop record in records -> values.push(sema_compiler_index_derivation_value(record))
     SemaCompilerIndexDerivationFacts{value: TComptimeValue.List{values: values}, missing: missing}

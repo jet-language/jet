@@ -236,7 +236,7 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: (manifest: Dyn, h
     }
     if text_at(record, "rule_record/owner_card") != Val((owner)) -> return Err("{id}: rule record owner mismatch")
     variants: items_at(record, "variants")
-    if variants.len() != VARIANT_IDS.len() || !all_distinct(variants.map(variant -> dyn_at(variant, "id"))) -> return Err("{id}: all five variants are required")
+    if variants.len() != VARIANT_IDS.len() || !all_distinct(variants.map(fn(variant) { dyn_at(variant, "id") })) -> return Err("{id}: all five variants are required")
     checked := [Variant]{}
     loop variant in variants -> checked.push(load_variant(root, record, id, variant))
     input_path: fixture_path(root, record, dyn_at(record, "input"), "{id}.input")
@@ -251,7 +251,7 @@ load_family: fn(root: String, record: Dyn, id: String, hashes: (manifest: Dyn, h
     peers: texts_at(record, "required_peers")
     peer_paths := [(language: String, path: String)]{}
     loop language in peers -> peer_paths.push((language: language.copy(), path: fixture_path(root, record, sources.get(language) ?? Dyn.Null, "{id}.peer_sources.{language}")))
-    if !files.exists(input_path) || !files.exists(expected_path) || peer_paths.any(peer -> !files.exists(peer.path)) -> return Err("{id}: input, expected, and all required peer fixtures are required")
+    if !files.exists(input_path) || !files.exists(expected_path) || peer_paths.any(fn(peer) { !files.exists(peer.path) }) -> return Err("{id}: input, expected, and all required peer fixtures are required")
     input: files.read(input_path) ?? return Err("{id}: input is not JSON: {err}")
     _ := parse_json(input) ?? return Err("{id}: input is not JSON: {err}")
 
@@ -349,7 +349,7 @@ toolchain_identity: fn(root: String) -[Env, Exec, Time.Wait]> Dyn {
 // its status (ok, failed or timeout), exit code, signal, error and output.
 run_process: fn(command: String, args: [String], cwd: String, timeout_ms: Int) -[Exec, Time, Time.Wait]> Dyn {
     argv: [command.copy()].concat(args)
-    out := Dyn{[String: Dyn]{"command": Dyn.Array(argv.map(item -> Dyn.Text(item.copy()))), "cwd": Dyn.Text(cwd.copy())}}
+    out := Dyn{[String: Dyn]{"command": Dyn.Array(argv.map(fn(item) { Dyn.Text(item.copy()) })), "cwd": Dyn.Text(cwd.copy())}}
     found: process.cmd(argv).cwd(cwd).timeout(time.duration_ms(timeout_ms)).run() ?? {
         out["status"] = "failed"
         out["exit_code"] = Dyn.Null
@@ -420,7 +420,7 @@ harness_entry: fn(family: Family, variant: Variant, entry_dir: String) -> Dyn {
     spec := Dyn{[String: Dyn]{"behavior": Dyn.Text("{text_at(family.record, "title") ?? "undefined"}: {text_at(variant.record, "role") ?? "undefined"}"), "args": Dyn.Array([]), "fixtureGen": Dyn.Null, "expected": "expected.out"}}
     experiment := Dyn{[String: Dyn]{"card": "#2951", "family": Dyn.Text(family.id.copy()), "variant": Dyn.Text(variant.id.copy()), "owner_card": Dyn.Text(family.owner_card.copy()), "source_identity": variant.identity.copy(), "required_peers": dyn_at(family.record, "required_peers"), "staging_root": Dyn.Text(entry_dir.copy())}}
     out := Dyn{[String: Dyn]{"name": Dyn.Text("{family.id}--{variant.id}"), "tier": "micro", "cells": Dyn.Array([dyn_at(family.record, "matrix_cell")]), "mode": member(family.record, "mode") ?? Dyn.Text("batch"), "perf": true}}
-    out["languages"] = Dyn.Array(languages.map(language -> Dyn.Text(language.copy())))
+    out["languages"] = Dyn.Array(languages.map(fn(language) { Dyn.Text(language.copy()) }))
     out["spec"] = spec
     out["metric_applicability"] = applicability
     out["authoring"] = authoring
@@ -441,7 +441,7 @@ stage_entries: fn(context: Context, scratch: String) -[FS]> String Err! {
             files.copy(variant.source_path, files.join(entry_dir, "jet/run.jet")) ?? return Err("{err}")
             loop peer in family.peer_paths {
                 language: peer.language.copy()
-                staged: PEER_FILES.find(row -> row.language == language) ?? return Err("{family.id}: no staged file name for peer {peer.language}")
+                staged: PEER_FILES.find(fn(row) { row.language == language }) ?? return Err("{family.id}: no staged file name for peer {peer.language}")
                 files.create_dir_all(files.join(entry_dir, peer.language)) ?? return Err("{err}")
                 files.copy(peer.path, files.join_all([entry_dir, peer.language, staged.file])) ?? return Err("{err}")
             }
@@ -524,7 +524,7 @@ inspect_status: fn(record: Dyn) -> String {
 // The entry `name` of the gauntlet `report`, with its row and comparison
 // for `language`.
 row_for: fn(report: Dyn, name: String, language: String) -> HarnessRow {
-    entry: items_at(report, "entries").find(item -> text_at(item, "entry/name") == Val((name))) ?? return HarnessRow{entry: Dyn.Null, row: Dyn.Null, comparison: Dyn.Null}
+    entry: items_at(report, "entries").find(fn(item) { text_at(item, "entry/name") == Val((name)) }) ?? return HarnessRow{entry: Dyn.Null, row: Dyn.Null, comparison: Dyn.Null}
     HarnessRow{row: dyn_at(entry, "rows/{language}"), comparison: dyn_at(entry, "comparisons/{language}"), entry: entry}
 }
 
@@ -533,7 +533,7 @@ row_for: fn(report: Dyn, name: String, language: String) -> HarnessRow {
 harness_ready: fn(report: Dyn, name: String, peers: [String]) -> Bool {
     jet: row_for(report, name, "jet")
     if jet.entry == Dyn.Null || text_at(jet.row, "status") != Val("ok") -> return false
-    if peers.any(language -> text_at(row_for(report, name, language).row, "status") != Val("ok")) -> return false
+    if peers.any(fn(language) { text_at(row_for(report, name, language).row, "status") != Val("ok") }) -> return false
     text_at(jet.entry, "jet_tiers/aot/status") == Val("ok") && text_at(jet.entry, "jet_tiers/run/status") == Val("ok")
 }
 
@@ -542,7 +542,7 @@ harness_ready: fn(report: Dyn, name: String, peers: [String]) -> Bool {
 // by its runtime against the control's in the same job.
 classify_variant: fn(family: Family, variant: Variant, raw: Dyn) -> Dyn {
     wanted: (family: family.id.copy(), variant: variant.id.copy())
-    found: items_at(raw, "variants").find(item -> text_at(item, "family") == Val((wanted.family)) && text_at(item, "variant") == Val((wanted.variant)))
+    found: items_at(raw, "variants").find(fn(item) { text_at(item, "family") == Val((wanted.family)) && text_at(item, "variant") == Val((wanted.variant)) })
     raw_variant: found ?? Dyn.Null
     direct: dyn_at(raw_variant, "direct_run")
     inspected: inspect_status(dyn_at(raw_variant, "inspect/record"))
@@ -626,7 +626,7 @@ report: fn(context: Context, raw: Dyn) -> Dyn Err! {
             if observed == "invalid_fast" || observed == "legal_slow" -> rejected.push(dyn_at(variant, "variant"))
             if observed == "unverified" -> unverified.push(Dyn.Text("{family.id}/{text_or_empty(variant, "variant")}"))
         }
-        selected: variants.find(variant -> text_at(variant, "observed_classification") == Val("legal_measured_improvement"))
+        selected: variants.find(fn(variant) { text_at(variant, "observed_classification") == Val("legal_measured_improvement") })
         rule := dyn_at(family.record, "rule_record")
         rule["observed_selected"] = if selected == .Val(variant) -> dyn_at(variant, "variant") else -> Dyn.Null
         rule["selected"] = false

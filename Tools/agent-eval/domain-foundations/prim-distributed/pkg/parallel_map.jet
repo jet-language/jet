@@ -11,6 +11,6 @@ cpu_work: fn(n: Int) -> Int {
 run: fn() {
     values := [Int]{}
     loop n in 0..255 -> values.push(n)
-    parallel: values.para_map((n: Int) -> cpu_work(n), limit: 16)
+    parallel: values.para_map(fn(n: Int) { cpu_work(n) }, limit: 16)
     print("parallel_map workers=16 items={values.len()} results={parallel.len()}")
 }

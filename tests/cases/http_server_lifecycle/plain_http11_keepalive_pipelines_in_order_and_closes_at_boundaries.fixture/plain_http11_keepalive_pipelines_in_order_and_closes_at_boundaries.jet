@@ -26,9 +26,9 @@ s6_pipeline_exchange: fn(addr: String, request: String) -> String {
 
 #Test("HTTP keepalive pipelines in order and closes at boundaries") {
     mux: server.mux()
-    mux.post("/one", (req: HTTPRequest) -> Ok(server.response(200, req.body().text(1024 * 1024) ?? panic("body"))))
-    mux.get("/two", (_req: HTTPRequest) -> Ok(server.response(200, "two")))
-    mux.get("/empty", (_req: HTTPRequest) -> Ok(server.response(204, "forbidden")))
+    mux.post("/one", fn(req: HTTPRequest) { Ok(server.response(200, req.body().text(1024 * 1024) ?? panic("body"))) })
+    mux.get("/two", fn(_req: HTTPRequest) { Ok(server.response(200, "two")) })
+    mux.get("/empty", fn(_req: HTTPRequest) { Ok(server.response(204, "forbidden")) })
     bound: server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr: bound.local_addr() ?? panic("address")
     serving: task { bound.serve() ?? panic("server") }

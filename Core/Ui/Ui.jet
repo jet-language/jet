@@ -1780,18 +1780,18 @@ priv internal: module {
 #Test("UI previews keep their viewport and registries reject unusable names") {
     viewport: phone()
     assert(viewport.device == .Phone && viewport.width == 390 && viewport.height == 844 && viewport.scale == 2)
-    assert(preview("card", () -> text("card")).viewport == desktop())
-    lab: playground("lab", () -> text("lab"), viewport: tablet())
+    assert(preview("card", fn() { text("card") }).viewport == desktop())
+    lab: playground("lab", fn() { text("lab") }, viewport: tablet())
     assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())
-    if previews([preview("card", () -> text("a")), preview("card", () -> text("b"))]) == {
+    if previews([preview("card", fn() { text("a") }), preview("card", fn() { text("b") })]) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.DuplicatePreview("card"))
     }
-    if previews([playground("", () -> text("blank"))]) == {
+    if previews([playground("", fn() { text("blank") })]) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.EmptyName)
     }
-    if previews([preview("card", () -> text("card"))]) == {
+    if previews([preview("card", fn() { text("card") })]) == {
         .Ok(registry) -> {
             if registry.render("missing") == {
                 .Ok(_) -> assert(false)

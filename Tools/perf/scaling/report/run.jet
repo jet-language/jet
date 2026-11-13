@@ -42,8 +42,8 @@ read_receipts: fn(args: [String]) -> [(file: String, receipt: Dyn)] {
         if dir == "" -> return Err("--runs-dir requires a directory")
         i += 2
         if !files.exists(dir) -> next
-        runs: files.list_dir(dir, matching: "run-*").filter(entry -> entry.is_dir)
-        paths.extend(runs.map(entry -> files.normpath("{dir}/{entry.name}/receipt.json")).filter(file -> files.exists(file)))
+        runs: files.list_dir(dir, matching: "run-*").filter(fn(entry) { entry.is_dir })
+        paths.extend(runs.map(fn(entry) { files.normpath("{dir}/{entry.name}/receipt.json") }).filter(fn(file) { files.exists(file) }))
     }
     receipts := [(file: String, receipt: Dyn)]{}
     loop path in combinatorics.unique(paths) -> receipts.push((file: path, receipt: json.parse(files.read(path))?(path)))
@@ -74,7 +74,7 @@ command: fn(argv: [String]) -> (text: String, output: String, summary: String, m
         // for each planned job's `<name>.rc`.
         rcs := [String]{}
         loop job in plan -> rcs.push("{done}/{job.field("name").text()}.rc")
-        loop !rcs.all(rc -> files.exists(rc)) -> time.sleep(time.duration_ms(100))
+        loop !rcs.all(fn(rc) { files.exists(rc) }) -> time.sleep(time.duration_ms(100))
     }
     loop job in plan -> inputs.extend(["--runs-dir", job.field("config").field("workDir").text()?("workDir")])
     receipts: read_receipts(inputs)
@@ -91,7 +91,7 @@ command: fn(argv: [String]) -> (text: String, output: String, summary: String, m
     loop job in plan {
         mode: job.field("config").field("mode").text()
         shapes: job.field("config").field("shapes").decode<[String]>()
-        missing.extend(shapes.map(shape -> "{mode}/{shape}").filter(cell -> !finished.contains(cell)))
+        missing.extend(shapes.map(fn(shape) { "{mode}/{shape}" }).filter(fn(cell) { !finished.contains(cell) }))
     }
     if missing.len() > 0 -> text += "\n## Missing or unfinished receipts\n\nThe proofq jobs ended without complete receipts for: {missing.join(", ")}. These cells are not covered.\n"
     findings: flags.get("--findings") ?? ""

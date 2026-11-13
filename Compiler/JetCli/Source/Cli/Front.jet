@@ -2086,7 +2086,7 @@ jet_cli_test_workspace_plan: fn(jet_argv: [String], target_at: Int, names: [Stri
         if (index == 0 && argument == "test") || index == target_at -> next
         rest.push(argument.copy())
     }
-    if color && !rest.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> rest.push("--color=always")
+    if color && !rest.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) -> rest.push("--color=always")
     member_args := [[String]]{}
     loop directory in directories {
         args := [String]{"test", directory}

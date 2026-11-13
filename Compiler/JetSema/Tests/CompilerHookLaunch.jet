@@ -30,6 +30,6 @@ compiler_hook_errors: fn(file: String) -> [String] {
     handler: compiler_hook_errors("tests/ui/meta_ladder_build_launches_a_process/run.jet")
     assert_eq(handler, [String]{"E3410: The `meta.events` handler hears the root's `Compiler` value and launches a process through meta.events handler → start → core.process.call [meta.events handler → start → core.process.call]"})
     assert_eq(compiler_hook_errors("tests/cases/build_entry/only_the_roots_compiler_value_runs_the_hook.fixture/steps/main.jet"), [String]{})
-    gate: compiler_hook_errors("Tools/perf/scaling/gate/Source/Gate.jet").filter(line -> line.contains("E3410"))
+    gate: compiler_hook_errors("Tools/perf/scaling/gate/Source/Gate.jet").filter(fn(line) { line.contains("E3410") })
     assert_eq(gate, [String]{})
 }

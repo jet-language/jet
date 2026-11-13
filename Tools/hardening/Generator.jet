@@ -524,7 +524,7 @@ validate_program: fn(program: Generated) -> [String] Never! {
         if item == .Func(function) {
             if function.name == "run" -> run_found = true
             calls := [String]{}
-            ast_visit_body(function.body, (expression: Expr) -> note_call(calls, expression), true)
+            ast_visit_body(function.body, fn(expression: Expr) { note_call(calls, expression) }, true)
             if calls.contains(function.name) -> problems.push("{id}: `{function.name}` calls itself, so it may not end")
         }
     }

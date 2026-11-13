@@ -310,7 +310,7 @@ publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String N
     out := [String]{"{PUBLICATION_ADVISORY_FEED_MAGIC}\nfeed|{feed.sequence}|{feed.issued_at}|{feed.expires_at}|{feed.maturity_seconds}|{feed.key_id}|{feed.public_key}\n"}
     releases := [Int]{}
     loop index in 0..<feed.releases.len() -> releases.push(index)
-    releases.sort_by((a: Int, b: Int) -> {
+    releases.sort_by(fn(a: Int, b: Int) {
         order: feed.releases[a].package <=> feed.releases[b].package
         if order != Ordering.Equal -> order else -> feed.releases[a].version <=> feed.releases[b].version
     })
@@ -320,7 +320,7 @@ publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String N
     }
     advisories := [Int]{}
     loop index in 0..<feed.advisories.len() -> advisories.push(index)
-    advisories.sort_by((a: Int, b: Int) -> feed.advisories[a].id <=> feed.advisories[b].id)
+    advisories.sort_by(fn(a: Int, b: Int) { feed.advisories[a].id <=> feed.advisories[b].id })
     loop index in advisories {
         advisory: feed.advisories[index]
         fixed: if advisory.fixed == .Val(version) -> publication_semver_display(version) else -> ""
@@ -328,7 +328,7 @@ publication_advisory_feed_payload: fn(feed: PublicationAdvisoryFeed) -> String N
     }
     exceptions := [Int]{}
     loop index in 0..<feed.exceptions.len() -> exceptions.push(index)
-    exceptions.sort_by((a: Int, b: Int) -> {
+    exceptions.sort_by(fn(a: Int, b: Int) {
         order: feed.exceptions[a].package <=> feed.exceptions[b].package
         if order != Ordering.Equal -> order else -> feed.exceptions[a].version <=> feed.exceptions[b].version
     })

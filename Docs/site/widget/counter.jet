@@ -8,14 +8,14 @@ use {
 
 run: fn() {
     count: reactive.signal(0)
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         n := count.get()
         color := "#2E2E33"
         if n % 2 == 1 -> color = "#E8232A"
         backend: ui.null_backend()
         tree: ui.box([
             ui.node_color("count: {n}", 160.0, 40.0, color),
-            ui.button("Add one", on_click: () -> {
+            ui.button("Add one", on_click: fn() {
                 count.set(count.get() + 1)
             })
         ])

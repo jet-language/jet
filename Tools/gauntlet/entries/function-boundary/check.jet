@@ -17,9 +17,9 @@ Check: struct {
 run: fn(check: Check) {
     printed: files.read(check.stdout) ?? process.fail(1, "{err}")
     loop line in printed.lines() {
-        print(line.split("\t").map(column -> regex.replace(Regex{"^[0-9]+\.[0-9]+$"}, column, "N")).join("\t"))
+        print(line.split("\t").map(fn(column) { regex.replace(Regex{"^[0-9]+\.[0-9]+$"}, column, "N") }).join("\t"))
     }
-    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(entry -> files.normalize(entry.path))
+    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(fn(entry) { files.normalize(entry.path) })
     paths.sort()
     print("== files")
     loop path in paths -> print(path)

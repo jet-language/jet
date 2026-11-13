@@ -39,8 +39,8 @@ output_query_request: fn(source: String, triple: String) -> JetDriverCompileRequ
     }
     choices: "APP: Output.Executable{{name: \"one\", entry: first}}\nALT: Output.Service{{name: \"two\", entry: second}}\nfirst: fn() {{}}\nsecond: fn() {{}}"
     explicit: jet_driver_output_query(output_query_request(choices, "x86_64-unknown-linux-gnu"), Val("ALT"))
-    output_query_require(explicit.compile.complete && explicit.outputs.filter(output -> output.selected).map(output -> output.address) == ["ALT"], "explicit service address selects exact checked callable")
+    output_query_require(explicit.compile.complete && explicit.outputs.filter(fn(output) { output.selected }).map(fn(output) { output.address }) == ["ALT"], "explicit service address selects exact checked callable")
     malformed: jet_driver_output_query(output_query_request("APP: Output.Executable{{name: \"demo\", entry: \"start\"}}\nrun: fn() {{}}", "x86_64-unknown-linux-gnu"), None)
     output_query_require(!malformed.compile.complete && malformed.outputs.len() == 0 && malformed.layouts.len() == 0, "invalid output cannot publish usable facts")
-    output_query_require(malformed.compile.diagnostics.filter(diagnostic -> diagnostic.code == "E1321").len() == 1, "canonical output diagnostic")
+    output_query_require(malformed.compile.diagnostics.filter(fn(diagnostic) { diagnostic.code == "E1321" }).len() == 1, "canonical output diagnostic")
 }

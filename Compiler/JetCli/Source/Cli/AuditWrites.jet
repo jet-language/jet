@@ -34,7 +34,7 @@ jet_cli_audit_writes: fn(file: String, source: String, color: Bool, json: Bool) 
     entry: jet_cli_audit_entry_modules(file, source, color, json)
     if entry.refusal == .Val(refusal) -> return refusal
     sites := jet_cli_audit_write_sites(file, entry.modules, color)
-    sites.sort_by((left: JetCLIWriteSite, right: JetCLIWriteSite) -> (left.path <=> right.path).then(left.start <=> right.start))
+    sites.sort_by(fn(left: JetCLIWriteSite, right: JetCLIWriteSite) { (left.path <=> right.path).then(left.start <=> right.start) })
     if json {
         rows: loop site in sites -> jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("path", jet_cli_status_text(site.path)),

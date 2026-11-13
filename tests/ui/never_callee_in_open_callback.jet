@@ -15,10 +15,10 @@ describe: fn(shape: Shape) -> String Never! {
         .Leaf(name) -> name
         .Fn(ret) -> {
             marker: if {
-                ret.map(value -> !is_unit(value)) ?? false -> "fn*"
+                ret.map(fn(value) { !is_unit(value) }) ?? false -> "fn*"
                 else -> "fn"
             }
-            result: ret.map(value -> " => {describe(value)}") ?? ""
+            result: ret.map(fn(value) { " => {describe(value)}" }) ?? ""
             "{marker}{result}"
         }
     }

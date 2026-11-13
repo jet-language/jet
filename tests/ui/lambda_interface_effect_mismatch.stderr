@@ -1,8 +1,8 @@
 Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `IO`, which the parameter doesn't allow
   --> lambda_interface_effect_mismatch.jet:4:17
     |
-  4 |     print(apply((n: Int) -[IO]> n))
-    |                 ^^^^^^^^^^^^^^^^^
+  4 |     print(apply(fn(n: Int) -[IO]> { n }))
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^
  Why: The parameter is `fn(…) -[]>`, so the callback must be pure; `IO` is outside that bound
  Fix: Pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound
  Denial: invocation

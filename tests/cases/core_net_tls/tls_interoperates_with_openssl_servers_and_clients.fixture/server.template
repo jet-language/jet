@@ -12,7 +12,7 @@ listen: fn(addr: String, cert_file: String, key_file: String) -> HTTPServer {
     cert: files.read(cert_file) ?? panic("certificate fixture {cert_file}")
     key: files.read(key_file) ?? panic("key fixture {key_file}")
     mux: server.mux()
-    mux.get("/", (_request: HTTPRequest) -> Ok(server.response(200, "pong")))
+    mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "pong")) })
     server.bind(addr, mux, tls: server.tls(cert, key)) ?? panic("bind TLS server {addr}")
 }
 

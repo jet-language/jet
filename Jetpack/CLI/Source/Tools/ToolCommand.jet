@@ -291,7 +291,7 @@ cli_report_tool_profile_error: fn(theme: Theme, error: CLIError) -[IO, Time.Wait
 // declaration. `#latest` reaches this path only through an explicit update;
 // `#auto` is also refreshed by profile realization.
 cli_update_user_tools: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, false, () -> EXIT_OK)
+    cli_update_user_tools_with_plan(verification, theme, parsed, confirmation, false, fn() { EXIT_OK })
 }
 
 cli_update_user_tools_with_plan: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never!) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
@@ -539,7 +539,7 @@ cli_collect_receipt_bins: fn(receipt: ProfileInstallReceipt, as_name: String?) -
     }
     if as_name != None && bins.len() > 1 -> bins = [ToolBinPair]{bins[0]}
     loop pair in bins -> cli_validate_bin_name(pair.bin)
-    bins.sort_by((left: ToolBinPair, right: ToolBinPair) -> (left.bin <=> right.bin).then(left.member <=> right.member))
+    bins.sort_by(fn(left: ToolBinPair, right: ToolBinPair) { (left.bin <=> right.bin).then(left.member <=> right.member) })
     Ok(bins)
 }
 
@@ -795,7 +795,7 @@ cli_realize_tool_manifest: fn(verification: &StoreVerification, theme: Theme, pa
         }
         tools.push(InstalledUserTool{name: entry.name, version: receipt.version, source: spec.source.label(), reference: spec.raw, bins: bin_names, members: members, member_digests: [String]{}, output_hash: receipt.output_hash, store_root: receipt.store_root})
     }
-    tools.sort_by((left: InstalledUserTool, right: InstalledUserTool) -> (left.name <=> right.name).then(left.reference <=> right.reference))
+    tools.sort_by(fn(left: InstalledUserTool, right: InstalledUserTool) { (left.name <=> right.name).then(left.reference <=> right.reference) })
     Ok(tools)
 }
 
@@ -830,7 +830,7 @@ cli_tool_project_install: fn(verification: &StoreVerification, cache: &Workspace
     members := [String]{}
     loop pair in bins -> members.push(pair.member)
     tools.push(InstalledUserTool{name: short, version: version, source: spec.source.label(), reference: spec.raw, bins: new_bins, members: members, member_digests: [String]{}, output_hash: receipt.output_hash, store_root: receipt.store_root})
-    tools.sort_by((left: InstalledUserTool, right: InstalledUserTool) -> (left.name <=> right.name).then(left.reference <=> right.reference))
+    tools.sort_by(fn(left: InstalledUserTool, right: InstalledUserTool) { (left.name <=> right.name).then(left.reference <=> right.reference) })
     lease.validate()
     generation: cli_write_tool_generation_locked(verification, tools, Val(ToolLiveInstall{receipt: receipt, lease: lease}))
     cli_record_tool_manifest_locked(tools, declared_sources, Val(spec.raw), channel_policy)

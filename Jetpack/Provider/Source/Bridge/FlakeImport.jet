@@ -262,7 +262,7 @@ provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> 
 // Gaps ordered by item; the first of equal items is kept.
 provider_sorted_unique_gaps: fn(gaps: [ImportGap]) -> [ImportGap] Never! {
     sorted := gaps
-    sorted.sort_by(gap -> gap.item)
+    sorted.sort_by(fn(gap) { gap.item })
     unique := [ImportGap]{}
     loop gap in sorted {
         if unique.len() == 0 || unique[unique.len() - 1].item != gap.item -> unique.push(gap)

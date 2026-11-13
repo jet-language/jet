@@ -325,7 +325,7 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
         }
         out.push(LuaRocksDependency{name, requirements})
     }
-    out.sort_by(dependency -> dependency.name)
+    out.sort_by(fn(dependency) { dependency.name })
     Ok(out)
 }
 
@@ -695,7 +695,7 @@ provider_luarocks_manifest_versions: fn(raw: String, name: String) -> [String] R
         cursor = provider_registry_tail(cursor, quoted.used)
         if provider_luarocks_valid_component(quoted.value) -> versions.push(quoted.value)
     }
-    versions.sort_by((left: String, right: String) -> provider_luarocks_compare_versions(left, right))
+    versions.sort_by(fn(left: String, right: String) { provider_luarocks_compare_versions(left, right) })
     distinct := [String]{}
     loop version in versions {
         if distinct.len() == 0 || distinct[distinct.len() - 1] != version -> distinct.push(version)

@@ -4,8 +4,8 @@ named_zero: fn() -> HTTPResponse HTTPError! { Ok(server.response(200, "named")) 
 
 run: fn() {
     mux: server.mux()
-    mux.get("/zero", () -> Ok(server.response(200, "zero")))
+    mux.get("/zero", fn() { Ok(server.response(200, "zero")) })
     mux.get("/named", named_zero)
-    mux.get("/one", (req: HTTPRequest) -> Ok(server.response(200, req.path())))
-    mux.get("/bad", (first: HTTPRequest, second: HTTPRequest) -> Ok(server.response(200, first.path())))
+    mux.get("/one", fn(req: HTTPRequest) { Ok(server.response(200, req.path())) })
+    mux.get("/bad", fn(first: HTTPRequest, second: HTTPRequest) { Ok(server.response(200, first.path())) })
 }

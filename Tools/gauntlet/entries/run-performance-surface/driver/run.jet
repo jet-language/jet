@@ -120,7 +120,7 @@ stub_sample: fn(scenario: Dyn, request: ArmRun) -> Dyn {
 // Each scenario of `dir` measured, and its receipt shown and validated.
 measure: fn(dir: String) {
     listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
-    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names := listed.filter(fn(item) { item.name.ends_with(".json") }).map(fn(item) { item.name.copy() })
     names.sort()
     here: files.cwd() ?? process.fail(1, "{err}")
     scratch: files.join(here, "scratch")
@@ -142,7 +142,7 @@ measure: fn(dir: String) {
         }
         building: scenario.copy()  // copy: each stand-in keeps its own scenario
         running: scenario.copy()  // copy: each stand-in keeps its own scenario
-        measured: measure_pair(options, (request: ArmBuild) -> stub_build(building, request), (request: ArmRun) -> stub_sample(running, request))
+        measured: measure_pair(options, fn(request: ArmBuild) { stub_build(building, request) }, fn(request: ArmRun) { stub_sample(running, request) })
         files.remove_all(scratch) ?? ()
         receipt: measured.receipt
         head: "{name}\t{text_or_empty(receipt, "status")} {text_or_empty(receipt, "verdict")}\t{json.stringify(dyn_at(receipt, "preflight_issues"))}\t{sha_hex(json.stringify(receipt))}"

@@ -28,8 +28,8 @@ run: fn() {
     }
     rows := [Count]{}
     loop (word, n) in counts -> rows.push(Count{word: word, n: n})
-    rows.sort_by((r: Count) -> r.word)
-    rows.sort_by_desc((r: Count) -> r.n)
+    rows.sort_by(fn(r: Count) { r.word })
+    rows.sort_by_desc(fn(r: Count) { r.n })
     print("total {total}")
     print("distinct {counts.len()}")
     loop r in rows.take(10) -> print("{r.n} {r.word}")

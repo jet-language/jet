@@ -958,7 +958,7 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
 sema_call_option_lift2: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 3 {
-        diagnostics.push(sema_error("E0104", span, "`Option.lift2` takes 3 arguments (f, a, b), got {args.len()}", "`Option.lift2(f, a, b)` applies a two-argument function only when both optionals are present", "call `Option.lift2((x, y) -> ..., a, b)`"))
+        diagnostics.push(sema_error("E0104", span, "`Option.lift2` takes 3 arguments (f, a, b), got {args.len()}", "`Option.lift2(f, a, b)` applies a two-argument function only when both optionals are present", "call `Option.lift2(fn(x, y) {{ ... }}, a, b)`"))
         sema_call_builtin_static_discard(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return failed
     }

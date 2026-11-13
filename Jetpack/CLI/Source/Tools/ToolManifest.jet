@@ -70,14 +70,14 @@ ToolManifest: struct {
         sources := [ToolManifestSource]{}
         source_names := [String]{}
         loop value in source_values -> sources.push(cli_tool_parse_manifest_source(value, source_names))
-        sources.sort_by((left: ToolManifestSource, right: ToolManifestSource) -> left.name <=> right.name)
+        sources.sort_by(fn(left: ToolManifestSource, right: ToolManifestSource) { left.name <=> right.name })
         tool_values: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CLIError.Other("user-tools manifest tools field is not an array"))
         if tool_values.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("user-tools tool count exceeds bound"))
         tools := [ToolManifestEntry]{}
         tool_names := [String]{}
         bins := [String]{}
         loop value in tool_values -> tools.push(cli_tool_parse_manifest_entry(value, tool_names, bins))
-        tools.sort_by((left: ToolManifestEntry, right: ToolManifestEntry) -> (left.name <=> right.name).then(left.resolved <=> right.resolved))
+        tools.sort_by(fn(left: ToolManifestEntry, right: ToolManifestEntry) { (left.name <=> right.name).then(left.resolved <=> right.resolved) })
         Ok(ToolManifest{sources: sources, tools: tools})
     }
 
@@ -85,9 +85,9 @@ ToolManifest: struct {
     // resolved), every ref in its migrated spelling.
     format: fn(self) -> String Never! {
         sources := self.sources
-        sources.sort_by((left: ToolManifestSource, right: ToolManifestSource) -> left.name <=> right.name)
+        sources.sort_by(fn(left: ToolManifestSource, right: ToolManifestSource) { left.name <=> right.name })
         tools := self.tools
-        tools.sort_by((left: ToolManifestEntry, right: ToolManifestEntry) -> (left.name <=> right.name).then(left.resolved <=> right.resolved))
+        tools.sort_by(fn(left: ToolManifestEntry, right: ToolManifestEntry) { (left.name <=> right.name).then(left.resolved <=> right.resolved) })
         source_rows := [Dyn]{}
         loop source in sources {
             source_rows.push(Dyn.Object([

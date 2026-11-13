@@ -23,9 +23,9 @@ describe: fn(entry: UIPreview) -> String Never! {
 }
 
 run: fn() {
-    phone: ui.preview("card-phone", () -> card(), viewport: ui.phone())
-    fallback: ui.preview("card-default", () -> card())
-    lab: ui.playground("card-lab", () -> card(), viewport: ui.tablet())
+    phone: ui.preview("card-phone", fn() { card() }, viewport: ui.phone())
+    fallback: ui.preview("card-default", fn() { card() })
+    lab: ui.playground("card-lab", fn() { card() }, viewport: ui.tablet())
     print(describe(phone))
     print(describe(fallback))
     print(describe(lab))
@@ -42,7 +42,7 @@ run: fn() {
         }
         .Err(error) -> print("registry failed: {error}")
     }
-    if ui.previews([lab, ui.playground("card-lab", () -> card())]) == {
+    if ui.previews([lab, ui.playground("card-lab", fn() { card() })]) == {
         .Ok(_) -> { print("registry accepted a duplicate name") }
         .Err(error) -> print("registry rejects duplicates: {error}")
     }

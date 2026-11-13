@@ -61,7 +61,7 @@ SCRIPT_LINES: [String]{
     "}}",
     "",
     "kind: fn(line: String) -> Kind Never! {{",
-    "    words: line.split(\" \").filter(w -> w != \"\").to_list()",
+    "    words: line.split(\" \").filter(fn(w) {{ w != \"\" }}).to_list()",
     "    if words.len() == 0 -> return Kind.Empty",
     "    Kind.Words{{count: words.len()}}",
     "}}",
@@ -81,7 +81,7 @@ SCRIPT_LINES: [String]{
     "    }}",
     "    total := 0",
     "    loop row in rows -> total += row.count",
-    "    longest: rows.filter(r -> r.count > 2).map(r -> r.name)",
+    "    longest: rows.filter(fn(r) {{ r.count > 2 }}).map(fn(r) {{ r.name }})",
     "    print(\"{{rows.len()}} rows, {{total}} words, {{seen.len()}} distinct, {{longest.len()}} long\")",
     "}}",
 }
@@ -118,13 +118,13 @@ run: fn() -> Never Err! {
     if jet == "" -> return Err("--jet is required")
     jet_bytes: files.read_bytes(jet)
     pack_path: files.join(files.dirname(jet), "jet-runtime/jet_runtime.pack.o")
-    pack: function_symbols(files.read_bytes(pack_path), pack_path).map(symbol -> symbol.name).to_set()
+    pack: function_symbols(files.read_bytes(pack_path), pack_path).map(fn(symbol) { symbol.name }).to_set()
     symbols: function_symbols(jet_bytes, jet)
-    boundary: symbols.filter(symbol -> pack.has(symbol.name)).map(symbol -> symbol.value).min() ?? return Err("{jet} defines none of the runtime pack's functions")
+    boundary: symbols.filter(fn(symbol) { pack.has(symbol.name) }).map(fn(symbol) { symbol.value }).min() ?? return Err("{jet} defines none of the runtime pack's functions")
     // `main` is the object's first function whatever the list says.
     addresses := [Int]{}
     by_address := [Int: String]{}
-    loop symbol in symbols.filter(symbol -> symbol.value < boundary && symbol.name != "main") {
+    loop symbol in symbols.filter(fn(symbol) { symbol.value < boundary && symbol.name != "main" }) {
         if by_address.has_key(symbol.value) -> next
         addresses.push(symbol.value)
         by_address[symbol.value] = symbol.name.copy()  // copy: the map owns its names
@@ -133,7 +133,7 @@ run: fn() -> Never Err! {
     tracer: files.join(work.path, "fntrace")
     process.cmd([process.env_nonempty("CC") ?? "cc", "-O2", "-o", tracer, files.join(root, "Tools/perf/fntrace.c")]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run_checked()
     address_file: files.join(work.path, "addresses")
-    files.write(address_file, "{addresses.map(value -> fmt.hex(value, 1)).join("\n")}\n")
+    files.write(address_file, "{addresses.map(fn(value) { fmt.hex(value, 1) }).join("\n")}\n")
     traces: [Trace]{
         {file: "script.jet", source: "{SCRIPT_LINES.join("\n")}\n", argv: [String]{"script.jet", "script.jet"}},
         {file: "hello.jet", source: HELLO, argv: [String]{"run", "hello.jet"}},
@@ -150,7 +150,7 @@ run: fn() -> Never Err! {
         files.write(files.join(project, trace.file), trace.source)
         entered: files.join(work.path, "{index}.entered")
         process.cmd([tracer, address_file, entered, "--", jet].concat(trace.argv)).cwd(project).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}")).stdin(.Capture).stdout(.Capture).stderr(.Inherit).run_checked()
-        loop line in files.read(entered).split("\n").filter(line -> line != "") {
+        loop line in files.read(entered).split("\n").filter(fn(line) { line != "" }) {
             name: by_address.get(Int.from_radix(line, 16) ?? return Err("Cannot convert 0x{line} to a BigInt")) ?? next
             if listed.add(name.copy()) -> names.push(name.copy())  // copy: the set and the list each keep the name
         }
@@ -169,8 +169,8 @@ run: fn() -> Never Err! {
 // the failure, else how many rows were read.
 check: fn(root: String) -> String Err! {
     declared: hot_text_declared(root)
-    rows: files.read(files.join(root, LIST)).lines().filter(line -> line != "" && !line.starts_with("#"))
-    stale: rows.filter(row -> !hot_text_row_declared(declared, row))
+    rows: files.read(files.join(root, LIST)).lines().filter(fn(line) { line != "" && !line.starts_with("#") })
+    stale: rows.filter(fn(row) { !hot_text_row_declared(declared, row) })
     if stale.len() > 0 -> return Err("{LIST}: {stale.len()} of {rows.len()} rows name no function the sources declare; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet <jet>):\n{stale.join("\n")}")
     Ok("{LIST}: all {rows.len()} rows name a function the sources declare")
 }
@@ -209,7 +209,7 @@ hot_text_modules: fn(dir: String, relative: String) -> [String] Never! {
     stem: files.stem(relative)
     if dir != "Core" -> return [String]{stem}
     parts: relative.split("/").to_list()
-    path: ["core"].concat(parts[0..<parts.len() - 1].map(part -> hot_text_snake(part))).join("_")
+    path: ["core"].concat(parts[0..<parts.len() - 1].map(fn(part) { hot_text_snake(part) })).join("_")
     [String]{path, "{path}_{hot_text_snake(stem)}"}
 }
 

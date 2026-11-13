@@ -37,7 +37,7 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     // built, so that mistake never reaches a running server.
     policy: http_server.cors_policy(["https://app.example"]) ?? panic("cors policy")
     http_server.cors(mux, policy)
-    mux.post("/readings", (req: HTTPRequest) -> store_reading(req))
+    mux.post("/readings", fn(req: HTTPRequest) { store_reading(req) })
     // Serve a whole folder under /assets. Dot-files stay hidden, and a
     // directory request serves its index.html.
     http_server.static_files(mux, "/assets", "/tmp/jet_http_public")

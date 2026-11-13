@@ -228,10 +228,10 @@ summarize: fn(spans: [Span]) -> Summary {
             add(by_item, item_at, "{file} {name}", step, Float.from_int(span.wall) / share, Float.from_int(span.cpu) / share, counted)
         }
     }
-    kinds.sort_by_desc(kind -> kind.wall)
-    by_file.sort_by((a, b) -> b.wall.compare(a.wall))
-    by_item.sort_by((a, b) -> b.wall.compare(a.wall))
-    Summary{phase: spans.find(span -> span.kind == "comptime" && span.label == Val("comptime")), kinds: kinds, files: by_file, items: by_item}
+    kinds.sort_by_desc(fn(kind) { kind.wall })
+    by_file.sort_by(fn(a, b) { b.wall.compare(a.wall) })
+    by_item.sort_by(fn(a, b) { b.wall.compare(a.wall) })
+    Summary{phase: spans.find(fn(span) { span.kind == "comptime" && span.label == Val("comptime") }), kinds: kinds, files: by_file, items: by_item}
 }
 
 // ---- Output --------------------------------------------------------------------
@@ -242,9 +242,9 @@ cpu_seconds: fn(ns: Float) -> String { "{ns / 1e9:Fixed(2)}" }
 
 print_table: fn(title: String, rows: [Row], top: Int) {
     print("\n{title}")
-    print("{"count":PadLeft(6)} {"wall s":PadLeft(7)} {"cpu s":PadLeft(7)} {STEPS.map(step -> step.pad_start(7, " ")).join(" ")}  name")
+    print("{"count":PadLeft(6)} {"wall s":PadLeft(7)} {"cpu s":PadLeft(7)} {STEPS.map(fn(step) { step.pad_start(7, " ") }).join(" ")}  name")
     loop entry in rows.take(top) {
-        print("{"{entry.count}":PadLeft(6)} {seconds(entry.wall):PadLeft(7)} {cpu_seconds(entry.cpu):PadLeft(7)} {entry.steps.map(wall -> seconds(wall).pad_start(7, " ")).join(" ")}  {entry.key}")
+        print("{"{entry.count}":PadLeft(6)} {seconds(entry.wall):PadLeft(7)} {cpu_seconds(entry.cpu):PadLeft(7)} {entry.steps.map(fn(wall) { seconds(wall).pad_start(7, " ") }).join(" ")}  {entry.key}")
     }
     if rows.len() > top -> print("  ... {rows.len() - top} more")
 }
@@ -257,7 +257,7 @@ row_json: fn(row: Row) -> Dyn {
 
 report: fn(summary: Summary) -> Report {
     phase: if summary.phase == .Val(span) -> Dyn.Object([(key: "wall", value: Dyn.Int(span.wall)), (key: "cpu", value: Dyn.Int(span.cpu))]) else -> Dyn.Null
-    Report{phase: phase, kinds: summary.kinds.copy(), files: summary.files.map(row -> row_json(row)), items: summary.items.map(row -> row_json(row))}
+    Report{phase: phase, kinds: summary.kinds.copy(), files: summary.files.map(fn(row) { row_json(row) }), items: summary.items.map(fn(row) { row_json(row) })}
 }
 
 run: fn() {

@@ -280,9 +280,9 @@ trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
 // Rust `SemanticLock::write`.
 trust_write_semantic_lock: fn(lock: SemanticLockFile) -> String Never! {
     records := lock.records
-    records.sort_by(record -> record.identity.semantic_key())
+    records.sort_by(fn(record) { record.identity.semantic_key() })
     inputs := lock.inputs
-    inputs.sort_by((left: LockInput, right: LockInput) -> (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows))
+    inputs.sort_by(fn(left: LockInput, right: LockInput) { (left.name <=> right.name).then(left.url <=> right.url).then(left.follows <=> right.follows) })
     source_maps: trust_lock_sorted_source_maps(lock.source_maps)
     out := [String]{"{SEMANTIC_LOCK_VERSION_KEY} = 1\n"}
     loop input in inputs {

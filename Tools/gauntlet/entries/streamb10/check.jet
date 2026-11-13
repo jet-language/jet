@@ -10,7 +10,7 @@ use {
 run: fn() {
     printed: files.read(process.args()[0])
     print((files.read("integrate10.facts") ?? "integrate10 did not run").trim())
-    seeds := (loop entry in files.list_dir("lanes/Main/integ") -> entry.name).filter(name -> name.starts_with("seed-"))
+    seeds := (loop entry in files.list_dir("lanes/Main/integ") -> entry.name).filter(fn(name) { name.starts_with("seed-") })
     seeds.sort()
     print("seeds: {seeds.join(" ")}".trim_end())
     print("names subs/Lane-9: {printed.contains("subs/Lane-9")}")

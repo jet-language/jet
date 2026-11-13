@@ -58,7 +58,7 @@ rows: fn(tsv: String) -> Int { files.read_or(tsv, "").lines().skip(1).len() }
 
 // Prints the first `limit` lines census-errors.mjs gives for a keep-going report.
 census_errors: fn(g: String, tsv: String, limit: Int) {
-    Sh{"node {"{g}/census-errors.mjs"} {tsv} ."}.spec().stderr(.Stdout).run().output.first_lines(limit).each(line -> print(line))
+    Sh{"node {"{g}/census-errors.mjs"} {tsv} ."}.spec().stderr(.Stdout).run().output.first_lines(limit).each(fn(line) { print(line) })
 }
 
 // A build row's kind, code and message, from its fields.
@@ -72,9 +72,9 @@ row_key: fn(cells: [String]) -> String {
 build_rows: fn(tsv: String) {
     records: files.read_or(tsv, "").tsv_records()
     // Ranked by a fixed-width count first, so byte order is count order.
-    ranked := loop (key, count) in records.slice(1, records.len()).map(cells -> row_key(cells)).counts() -> "{1000000000 + count} {count} {key}"
+    ranked := loop (key, count) in records.slice(1, records.len()).map(fn(cells) { row_key(cells) }).counts() -> "{1000000000 + count} {count} {key}"
     ranked.sort_desc()
-    ranked.take(10).each(row -> print(row.partition(" ").tail))
+    ranked.take(10).each(fn(row) { print(row.partition(" ").tail) })
 }
 
 // The runtime pass: the pack the build wrote beside the compiler just built,
@@ -92,7 +92,7 @@ runtime: fn(g: String, self_jet: String, out: String, id: String) {
         return print("runtime rc=0 (jet build Compiler)")
     }
     packed: Sh{"bash {"{g}/runtime-pack-check.sh"} {self_jet} . {"{out}/runtime"} {id}"}.spec().stderr(.Stdout).run()
-    packed.output.lines().each(line -> print(line))
+    packed.output.lines().each(fn(line) { print(line) })
     if process.exit_status(packed) != 0 -> process.exit(1)
     files.symlink(files.canonicalize("{out}/runtime/out"), beside, replace: true)
 }
@@ -110,7 +110,7 @@ jetpack: fn(g: String, self_jet: String, out: String, id: String) {
     text: files.read_or(log, "")
     if text.contains("JETPACK HOSTED OK") -> return print("jetpack rc=0")
     print("jetpack rc=1 (see {log})")
-    text.lines().filter(line -> JETPACK_ERROR.is_match(line)).slice(0, 20).each(line -> print(line))
+    text.lines().filter(fn(line) { JETPACK_ERROR.is_match(line) }).slice(0, 20).each(fn(line) { print(line) })
     process.exit(1)
 }
 
@@ -189,7 +189,7 @@ run: fn() {
         guards: jetenv(g, seed, Sh{"test tests/guards"}, stack: false).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", ".")
         files.write("{at}/guards.out", (if limit > 0 -> guards.timeout(time.duration_seconds(limit)) else -> guards).stderr(.Stdout).run().output)
         gate: Sh{"node {"{g}/guards-gate.mjs"} {"{at}/guards.out"} {"{g}/guards-known.txt"}"}.spec().stderr(.Stdout).run()
-        gate.output.lines().each(line -> print(line))
+        gate.output.lines().each(fn(line) { print(line) })
         print("guards rc={process.exit_status(gate)}")
         if process.exit_status(gate) != 0 -> process.exit(1)
     }
@@ -209,7 +209,7 @@ run: fn() {
         }
     }
     // Hosted Jetpack pass, when a named file is under Jetpack/: the compiler census alone never compiles Jetpack.
-    if named.any(path -> path.starts_with("Jetpack/")) && ["", "1"].contains(process.env_get_or("CENSUS_JETPACK", "")) {
+    if named.any(fn(path) { path.starts_with("Jetpack/") }) && ["", "1"].contains(process.env_get_or("CENSUS_JETPACK", "")) {
         jetpack(g, self_jet, at, id)
     }
 }

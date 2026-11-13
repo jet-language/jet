@@ -7,7 +7,7 @@ use {
 run: fn() {
     scope: event.scope()
     concurrent: event.async_result<Int, Err>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
-    concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
+    concurrent.on(scope, fn(n: Int) { time.sleep(1ms) })
     loop i in 0..<400 { concurrent.emit_async(i) }
     time.sleep(1500ms)
     print("READY")

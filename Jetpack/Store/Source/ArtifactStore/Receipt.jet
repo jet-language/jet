@@ -122,7 +122,7 @@ ReceiptRecord: struct {
 // Rust `Vec::sort` then `dedup` over `(path, digest)`.
 store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
     sorted := inputs
-    sorted.sort_by((left: ReceiptInput, right: ReceiptInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+    sorted.sort_by(fn(left: ReceiptInput, right: ReceiptInput) { (left.path <=> right.path).then(left.digest <=> right.digest) })
     unique := [ReceiptInput]{}
     loop input in sorted {
         if unique.len() == 0 || unique[unique.len() - 1] != input -> unique.push(input)

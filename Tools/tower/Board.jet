@@ -485,7 +485,7 @@ read_board: fn(path: String, label: String) -[FS]> BoardFile Failure! {
     if tree == .Null -> return Ok(empty)
     if !(tree == .Object(_)) -> return Err(fail("E_INVALID", "{label} must be an object"))
     reasons := [String]{}
-    if json.decode<BoardFile>(source) == .Err(refused) -> reasons = refused.map(error -> "{error.path}: {error.reason}")
+    if json.decode<BoardFile>(source) == .Err(refused) -> reasons = refused.map(fn(error) { "{error.path}: {error.reason}" })
     Err(fail("E_INVALID", "{label} is not in Tower's format: {path}: {reasons.join("; ")}"))
 }
 
@@ -502,7 +502,7 @@ load_live: fn(place: Place) -[FS]> Live Failure! {
     milestones := [Dyn]{}
     listed: board.milestones ?? [Dyn]{}
     loop milestone in listed -> milestones.push(normalize_milestone(milestone) ?? return Err(err))
-    tier1: decisions.any(decision -> decision.id == "D-ONCE-TIER1")
+    tier1: decisions.any(fn(decision) { decision.id == "D-ONCE-TIER1" })
     Ok(Live{cards: cards, decisions: decisions, questions: board.questions ?? [QuestionRow]{}, milestones: milestones, events: board.events ?? [EventRow]{}, tier1: tier1})
 }
 
@@ -810,7 +810,7 @@ link_cards: fn(index: &[String: [Linked]], cards: [CardRow]) Never! {
 
 // store.mjs syncMilestone: linked cards all done open the review.
 sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
-    if linked.len() == 0 || !linked.all(card -> card.phase == "done") {
+    if linked.len() == 0 || !linked.all(fn(card) { card.phase == "done" }) {
         cleared: without(without(without(milestone, "verification"), "metAt"), "closeout")
         return with(cleared, "status", Dyn.Text("open"))
     }
@@ -819,7 +819,7 @@ sync_milestone: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
 }
 
 milestone_progress: fn(milestone: Dyn, linked: [Linked]) -> Dyn Never! {
-    done: linked.filter(card -> card.phase == "done").len()
+    done: linked.filter(fn(card) { card.phase == "done" }).len()
     ready: linked.len() > 0 && done == linked.len()
     met: ready && is_text(field(milestone, "status"), "met") && truthy(field(milestone, "verification"))
     object([(key: String, value: Dyn)]{
@@ -1112,13 +1112,13 @@ docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
     }
     found := [Dyn]{}
     card_order := cards.order.copy()
-    card_order.sort_by((left: String, right: String) -> numeric_order(left, right))
+    card_order.sort_by(fn(left: String, right: String) { numeric_order(left, right) })
     loop ref in card_order {
         slot: cards.slots.get(ref) ?? next
         found.push(finding("spec-card-ref-missing", ref, "{cards.locations[slot].join(", ")} cites {ref}, but Tower has no card record"))
     }
     decision_order := decisions.order.copy()
-    decision_order.sort_by((left: String, right: String) -> unicode.collate(left, right))
+    decision_order.sort_by(fn(left: String, right: String) { unicode.collate(left, right) })
     loop id in decision_order {
         slot: decisions.slots.get(id) ?? next
         found.push(finding("spec-decision-ref-missing", id, "{decisions.locations[slot].join(", ")} cites {id}, but Tower has no decision record"))
@@ -1151,7 +1151,7 @@ finding: fn(rule: String, ref: String, msg: String) -> Dyn Never! {
 // localeCompare order, dot names skipped, symlinked directories not entered.
 spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
     listed := files.list_dir(dir) ?? return Err(fail("E_IO", "cannot list {dir}: {err}"))
-    listed.sort_by((left: DirEntry, right: DirEntry) -> unicode.collate(left.name, right.name))
+    listed.sort_by(fn(left: DirEntry, right: DirEntry) { unicode.collate(left.name, right.name) })
     loop entry in listed {
         if entry.name.starts_with(".") -> next
         path: "{dir}/{entry.name}"
@@ -1159,7 +1159,7 @@ spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
             spec_files(path, out) ?? return Err(err)
         } else {
             folded: entry.name.lower()
-            if SPEC_EXTENSIONS.any(extension -> folded.ends_with(extension)) -> out.push(path)
+            if SPEC_EXTENSIONS.any(fn(extension) { folded.ends_with(extension) }) -> out.push(path)
         }
     }
     Ok()
@@ -1337,7 +1337,7 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(field(old, "archived") == .Bool(true), true)
     assert_eq(refusal(place, [String]{"card", "show", "#99", "--json"}), "E_NOT_FOUND: no card #99")
     listed: items(ask(place, [String]{"card", "list", "--json"}))
-    assert_eq(listed.map(card -> integer(field(card, "num")) ?? 0), [Int]{7, 8})
+    assert_eq(listed.map(fn(card) { integer(field(card, "num")) ?? 0 }), [Int]{7, 8})
     assert_eq(refusal(place, [String]{"card", "list"}).starts_with("E_USAGE"), true)
     assert_eq(refusal(place, [String]{"card", "show", "7", "--bogus"}), "E_USAGE")
     files.remove_all(place.dir) ?? ()
@@ -1370,12 +1370,12 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
 #Test("board lists decisions and milestones as Tower normalizes them") {
     place: fixture_place("decisions", fixture_history())
     plain: items(ask(place, [String]{"decision", "list", "--json"}))
-    assert_eq(plain.map(decision -> text(field(decision, "id"))), [String]{"D-OPEN", "D-DONE"})
+    assert_eq(plain.map(fn(decision) { text(field(decision, "id")) }), [String]{"D-OPEN", "D-DONE"})
     assert_eq(field(plain[0], "draft") == .Bool(false), true)
     drafts: items(ask(place, [String]{"decision", "list", "--json", "--drafts", "--open"}))
-    assert_eq(drafts.map(decision -> text(field(decision, "id"))), [String]{"D-OPEN", "D-SCRATCH"})
+    assert_eq(drafts.map(fn(decision) { text(field(decision, "id")) }), [String]{"D-OPEN", "D-SCRATCH"})
     by_card: items(ask(place, [String]{"decision", "list", "--json", "--card=#7"}))
-    assert_eq(by_card.map(decision -> text(field(decision, "id"))), [String]{"D-DONE"})
+    assert_eq(by_card.map(fn(decision) { text(field(decision, "id")) }), [String]{"D-DONE"})
     old: ask(place, [String]{"decision", "show", "D-OLD", "--json"})
     loss: items(field(field(old, "recommendation"), "losses"))[0]
     assert_eq(json.to_string(loss) ?? "", "{{\"mitigation\":\"cache it\"}}")

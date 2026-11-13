@@ -33,7 +33,7 @@ run: fn() {
     cert: files.read("server.cert.pem") ?? panic("server certificate fixture")
     key: files.read("server.key.pem") ?? panic("server key fixture")
     mux: server.mux()
-    mux.get("/", (_request: HTTPRequest) -> Ok(server.response(200, "ok")))
+    mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "ok")) })
     listener: server.bind("127.0.0.1:0", mux, tls: server.tls(cert, key)) ?? panic("bind TLS server")
     addr: listener.local_addr() ?? panic("server address")
     serving: task { listener.serve() ?? panic("serve TLS") }

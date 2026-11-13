@@ -591,7 +591,7 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             mapped := [Type]{}
             loop param in params -> mapped.push(sema_inline_rewrite_type(rewrite, param))
-            Type.Fn{params: mapped, ret: ret.map((value) -> sema_inline_rewrite_type(rewrite, value)), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+            Type.Fn{params: mapped, ret: ret.map(fn(value) { sema_inline_rewrite_type(rewrite, value) }), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         // A generic member's head renames like a plain member
         // (`Holder<Int>` -> `M5PlainHolder<Int>`).

@@ -299,7 +299,7 @@ jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIR
     if !result.complete -> return JetCLIReviewLoaded.Refused{output: jet_cli_ice("the Jet compiler stopped before finishing `{path}`")}
     inputs := [JetCLIReviewInput]{}
     loop doc_module in result.doc_modules -> inputs.push(JetCLIReviewInput{path: doc_module.physical_path.copy(), digest: sha256_hex(doc_module.source)})
-    inputs.sort_by((left: JetCLIReviewInput, right: JetCLIReviewInput) -> left.path <=> right.path)
+    inputs.sort_by(fn(left: JetCLIReviewInput, right: JetCLIReviewInput) { left.path <=> right.path })
     unique := [JetCLIReviewInput]{}
     loop input in inputs {
         if unique.len() > 0 && unique[unique.len() - 1].path == input.path -> next
@@ -567,7 +567,7 @@ jet_cli_review_optional_order: fn(left: String?, right: String?) -> Ordering Nev
 
 // `sort_review_operations` (and the plain sort without alignment).
 jet_cli_review_sort: fn(operations: &[JetCLIReviewOp], include_alignment: Bool) Never! {
-    operations.sort_by((left: JetCLIReviewOp, right: JetCLIReviewOp) -> (left.stable_id <=> right.stable_id).then(left.identity <=> right.identity).then(jet_cli_review_kind_rank(left.kind) <=> jet_cli_review_kind_rank(right.kind)).then(jet_cli_review_optional_order(left.before, right.before)).then(jet_cli_review_optional_order(left.after, right.after)).then(if include_alignment -> jet_cli_review_alignment_rank(left.alignment) <=> jet_cli_review_alignment_rank(right.alignment) else -> 0 <=> 0))
+    operations.sort_by(fn(left: JetCLIReviewOp, right: JetCLIReviewOp) { (left.stable_id <=> right.stable_id).then(left.identity <=> right.identity).then(jet_cli_review_kind_rank(left.kind) <=> jet_cli_review_kind_rank(right.kind)).then(jet_cli_review_optional_order(left.before, right.before)).then(jet_cli_review_optional_order(left.after, right.after)).then(if include_alignment -> jet_cli_review_alignment_rank(left.alignment) <=> jet_cli_review_alignment_rank(right.alignment) else -> 0 <=> 0) })
 }
 
 // `rename_candidates`: a nonempty target identity selects by identity; only
@@ -756,7 +756,7 @@ jet_cli_review_authority: fn(ledger: GateLedger, index: SemIndex) -> [JetCLIRevi
     loop fact in facts {
         sets.push(JetCLIReviewFact{key: fact.key.copy(), display: jet_cli_review_set(fact.display), granted: jet_cli_review_set(fact.granted), denied: jet_cli_review_set(fact.denied), terms: jet_cli_review_set(fact.terms)})
     }
-    sets.sort_by((left: JetCLIReviewFact, right: JetCLIReviewFact) -> left.key <=> right.key)
+    sets.sort_by(fn(left: JetCLIReviewFact, right: JetCLIReviewFact) { left.key <=> right.key })
     sets
 }
 
@@ -1079,7 +1079,7 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
             order: order,
         })
     }
-    claims.sort_by((left: JetCLIReviewClaim, right: JetCLIReviewClaim) -> left.key <=> right.key)
+    claims.sort_by(fn(left: JetCLIReviewClaim, right: JetCLIReviewClaim) { left.key <=> right.key })
     Ok(JetCLIReviewReceipt{recorded: true, claims: claims, claim_key: claim_key.move(), proof: Val(proof)})
 }
 
@@ -1287,9 +1287,9 @@ jet_cli_review_receipt_diff: fn(before: JetCLIReviewReceipt, after: JetCLIReview
             }
         }
     }
-    diff.sampled_agreements.sort_by((left: JetCLIReviewComparison, right: JetCLIReviewComparison) -> jet_cli_review_order(left) <=> jet_cli_review_order(right))
-    diff.unknown.sort_by((left: JetCLIReviewComparison, right: JetCLIReviewComparison) -> jet_cli_review_order(left) <=> jet_cli_review_order(right))
-    diff.unproved.sort_by((left: JetCLIReviewComparison, right: JetCLIReviewComparison) -> jet_cli_review_order(left) <=> jet_cli_review_order(right))
+    diff.sampled_agreements.sort_by(fn(left: JetCLIReviewComparison, right: JetCLIReviewComparison) { jet_cli_review_order(left) <=> jet_cli_review_order(right) })
+    diff.unknown.sort_by(fn(left: JetCLIReviewComparison, right: JetCLIReviewComparison) { jet_cli_review_order(left) <=> jet_cli_review_order(right) })
+    diff.unproved.sort_by(fn(left: JetCLIReviewComparison, right: JetCLIReviewComparison) { jet_cli_review_order(left) <=> jet_cli_review_order(right) })
     diff
 }
 

@@ -117,7 +117,7 @@ census_add: fn(values: &[String], value: String) Never! {
 }
 
 census_digits: fn(bytes: [U8], from: Int) -> Bool Never! {
-    bytes.len() > from && bytes.slice(from, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+    bytes.len() > from && bytes.slice(from, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) })
 }
 
 // A letter code (`E0001`, `L0516`, `W0410`, `R0801`, `JT0001`) or a
@@ -128,7 +128,7 @@ census_is_code: fn(code: String) -> Bool Never! {
     if bytes.len() == 6 && code.starts_with("JT") -> return census_digits(bytes, 2)
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false
     words: census_slice(code, 2, bytes.len()).split("-").to_list()
-    words.len() >= 2 && words.all(word -> word != "" && word.bytes().all(byte -> (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))))
+    words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) }) })
 }
 
 census_code_byte: fn(byte: U8) -> Bool Never! {
@@ -252,7 +252,7 @@ CensusEmitters: struct {
 }
 
 census_tool_source: fn(path: String) -> Bool Never! {
-    TOOL_ROOTS.any(root -> path.starts_with(root))
+    TOOL_ROOTS.any(fn(root) { path.starts_with(root) })
 }
 
 census_rustc_code: fn(code: String) -> Bool Never! {
@@ -277,8 +277,8 @@ census_emitted: fn() -[FS]> CensusEmitters DiagnosticCensusError! {
             }
         }
     }
-    emitters.compiler.codes = emitters.compiler.codes.filter(code -> !census_rustc_code(code))
-    emitters.tool.codes = emitters.tool.codes.filter(code -> !census_rustc_code(code))
+    emitters.compiler.codes = emitters.compiler.codes.filter(fn(code) { !census_rustc_code(code) })
+    emitters.tool.codes = emitters.tool.codes.filter(fn(code) { !census_rustc_code(code) })
     Ok(emitters)
 }
 
@@ -362,7 +362,7 @@ census_rows: fn(registry: String, emitters: CensusEmitters, carriers: CensusCarr
         rows[at].emitter = emitter
         rows[at].carriage = carriage
     }
-    rows.sort_by((left: CensusRow, right: CensusRow) -> {
+    rows.sort_by(fn(left: CensusRow, right: CensusRow) {
         if left.code != right.code -> return if left.code < right.code -> Ordering.Less else -> Ordering.Greater
         if left.name < right.name -> return Ordering.Less
         if left.name > right.name -> return Ordering.Greater
@@ -391,7 +391,7 @@ census_columns: fn(path: String, text: String, width: Int) -> [[String]] Diagnos
         columns: line.split("\t").to_list()
         if columns.len() != width -> return Err(census_fail("{path}:{index + 1} has {columns.len()} columns, not {width}"))
         // copy: the rows outlive the split of `text`.
-        rows.push(columns.map(column -> column.copy()))
+        rows.push(columns.map(fn(column) { column.copy() }))
     }
     Ok(rows)
 }
@@ -432,7 +432,7 @@ baseline_render: fn(rows: [BaselineRow]) -> String Never! {
 }
 
 baseline_admits: fn(baseline: [BaselineRow], code: String, name: String, gap: String) -> Bool Never! {
-    baseline.any(row -> row.code == code && row.name == name && row.gap == gap)
+    baseline.any(fn(row) { row.code == code && row.name == name && row.gap == gap })
 }
 
 // Whether `rows` still shows `entry`'s code with `entry`'s gap.

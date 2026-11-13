@@ -36,8 +36,8 @@ run: fn() {
     first: stream.next(reader) ?? panic("next")
     print("first:{first.service}:{first.latency_ms}")
     if data.query(reader)
-        .group_by((e) -> e.service)
-        .mean((e) -> e.latency_ms)
+        .group_by(fn(e) { e.service })
+        .mean(fn(e) { e.latency_ms })
         .collect() == {
         .Ok(_) -> print("groups:ok")
         .Err(error) -> print("groups:{error.operation}:{error.reason}")

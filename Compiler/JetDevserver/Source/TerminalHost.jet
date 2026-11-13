@@ -316,7 +316,7 @@ TerminalFrame: struct {
         loop id in before.keys().to_list() -> ids[id] = true
         loop id in after.keys().to_list() -> ids[id] = true
         ordered_ids := ids.keys().to_list()
-        ordered_ids.sort_by((left, right) -> left <=> right)
+        ordered_ids.sort_by(fn(left, right) { left <=> right })
         operations := [TerminalDiffOperation]{}
         loop id in ordered_ids {
             old: before.get(id)
@@ -354,7 +354,7 @@ TerminalDiff: struct {
     initial: fn(frame: TerminalFrame) -> TerminalDiff {
         nodes: frame.tree.nodes()
         ids := nodes.keys().to_list()
-        ids.sort_by((left, right) -> left <=> right)
+        ids.sort_by(fn(left, right) { left <=> right })
         operations := [TerminalDiffOperation]{}
         loop id in ids {
             if nodes.get(id) == .Val(node) -> operations.push(TerminalDiffOperation.Insert(id: id, node: node))
@@ -847,8 +847,8 @@ terminal_unavailable_panel_detail: fn(reasons: [JetDevtoolsPanelUnavailableReaso
 // Events by sequence, then observation time, revision, kind, entity and source.
 terminal_ordered_events: fn(events: [TerminalHostEvent]) -> [TerminalHostEvent] {
     ordered := events
-    ordered.sort_by((left, right) -> (left.sequence <=> right.sequence).then(left.observed_at <=> right.observed_at)
-        .then(left.revision <=> right.revision).then(left.kind <=> right.kind).then(left.entity <=> right.entity).then(left.source <=> right.source))
+    ordered.sort_by(fn(left, right) { (left.sequence <=> right.sequence).then(left.observed_at <=> right.observed_at)
+        .then(left.revision <=> right.revision).then(left.kind <=> right.kind).then(left.entity <=> right.entity).then(left.source <=> right.source) })
     ordered
 }
 terminal_event_summary: fn(event: TerminalHostEvent, capabilities: TerminalHostCapabilities) -> String {

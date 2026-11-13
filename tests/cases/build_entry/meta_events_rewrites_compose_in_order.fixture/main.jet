@@ -20,7 +20,7 @@ plain: fn() -> Int { 2 }
 trace_install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.rewrite_body(f, #code {
                     print("enter")
@@ -35,7 +35,7 @@ trace_install: fn(meta: Compiler) {
 timer_install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Timed{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.rewrite_body(f, #code {
                     print("time start")

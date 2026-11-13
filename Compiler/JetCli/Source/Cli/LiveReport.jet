@@ -64,7 +64,7 @@ jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String
     shapes := [JetCLIStatusValue]{}
     loop name in names {
         ids: grouped.get(name) ?? [String]{}
-        shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
+        shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(fn(id) { jet_cli_status_text(id) })))]))
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
     fields.extend(jet_cli_live_identity_fields(snapshot))

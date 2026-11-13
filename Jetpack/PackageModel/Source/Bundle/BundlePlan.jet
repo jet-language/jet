@@ -209,7 +209,7 @@ BundlePlan: struct {
         spec.version = if spec.target == BundleTarget.WindowsMsix -> pkg_bundle_windows_version(spec.version) else -> spec.version.trim()
         spec.validate()
         icons := spec.icons
-        icons.sort_by((left: BundleIcon, right: BundleIcon) -> (left.name <=> right.name).then(left.format.rank() <=> right.format.rank()).then(left.size <=> right.size).then(left.digest() <=> right.digest()))
+        icons.sort_by(fn(left: BundleIcon, right: BundleIcon) { (left.name <=> right.name).then(left.format.rank() <=> right.format.rank()).then(left.size <=> right.size).then(left.digest() <=> right.digest()) })
         hooks: pkg_bundle_sorted_hooks(spec.signing_hooks)
         metadata := spec.metadata
         metadata.categories.sort()
@@ -218,7 +218,7 @@ BundlePlan: struct {
         if game == {
             .Val(declared) -> {
                 sorted := declared
-                sorted.assets.sort_by((left: GameBundleAsset, right: GameBundleAsset) -> (left.path <=> right.path).then(left.digest() <=> right.digest()))
+                sorted.assets.sort_by(fn(left: GameBundleAsset, right: GameBundleAsset) { (left.path <=> right.path).then(left.digest() <=> right.digest()) })
                 game = Val(sorted)
             }
             .None -> {}
@@ -240,7 +240,7 @@ BundlePlan: struct {
             }
             .None -> {}
         }
-        inputs.sort_by((left: BundleInputFact, right: BundleInputFact) -> (left.role <=> right.role).then(left.path <=> right.path))
+        inputs.sort_by(fn(left: BundleInputFact, right: BundleInputFact) { (left.role <=> right.role).then(left.path <=> right.path) })
         identifier: spec.metadata.identifier
         artifact_name: [identifier, spec.target.artifact_suffix()].join("")
         layout_files := [BundleFile]{}
@@ -317,7 +317,7 @@ BundlePlan: struct {
             if paths.contains(file.path) -> return Err(BundleError.DuplicatePath(file.path))
             paths.push(file.path)
         }
-        layout_files.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
+        layout_files.sort_by(fn(left: BundleFile, right: BundleFile) { left.path <=> right.path })
         updater_manifest: if spec.updater == {
             .Val(updater) -> Val(UpdaterManifest.for_spec(spec, updater, executable_digest))
             .None -> None
@@ -647,7 +647,7 @@ BundleReceipt: struct {
         loop file in plan.files {
             file_facts.push(BundleFileFact{path: file.path, kind: file.kind, mode: file.mode, bytes: file.bytes.len(), sha256: file.digest()})
         }
-        file_facts.sort_by((left: BundleFileFact, right: BundleFileFact) -> left.path <=> right.path)
+        file_facts.sort_by(fn(left: BundleFileFact, right: BundleFileFact) { left.path <=> right.path })
         BundleReceipt{
             schema: PACKAGE_BUNDLE_RECEIPT_SCHEMA,
             plan_identity: plan.identity,
@@ -783,7 +783,7 @@ pkg_emit_package_bundle: fn(spec: BundleSpec) -> BundleArtifact BundleError! {
 // then inputs.
 pkg_bundle_sorted_hooks: fn(hooks: [SigningHook]) -> [SigningHook] Never! {
     sorted := hooks
-    sorted.sort_by((left: SigningHook, right: SigningHook) -> (left.name <=> right.name).then(left.phase.rank() <=> right.phase.rank()).then(left.program <=> right.program).then(left.args.join(pkg_bundle_nul()) <=> right.args.join(pkg_bundle_nul())).then(pkg_bundle_hook_inputs_key(left.inputs) <=> pkg_bundle_hook_inputs_key(right.inputs)))
+    sorted.sort_by(fn(left: SigningHook, right: SigningHook) { (left.name <=> right.name).then(left.phase.rank() <=> right.phase.rank()).then(left.program <=> right.program).then(left.args.join(pkg_bundle_nul()) <=> right.args.join(pkg_bundle_nul())).then(pkg_bundle_hook_inputs_key(left.inputs) <=> pkg_bundle_hook_inputs_key(right.inputs)) })
     sorted
 }
 
@@ -1036,7 +1036,7 @@ pkg_bundle_contains_sensitive_marker: fn(value: String) -> Bool Never! {
 // and payload.
 pkg_bundle_artifact_digest: fn(bundle_files: [BundleFile]) -> String Never! {
     ordered := bundle_files
-    ordered.sort_by((left: BundleFile, right: BundleFile) -> left.path <=> right.path)
+    ordered.sort_by(fn(left: BundleFile, right: BundleFile) { left.path <=> right.path })
     bytes := "jet-package-artifact-v1".bytes()
     bytes.push(U8{0})
     loop file in ordered {

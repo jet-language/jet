@@ -71,7 +71,7 @@ pkg_parse_test_profiles: fn(body: String) -> [TestProfileDef] PackageParseError!
     profiles := [TestProfileDef]{}
     loop entry in pkg_key_value_entries(body) {
         repeated: entry.key.copy()
-        if profiles.any(profile -> profile.name == repeated) -> return Err(PackageParseError.Composition("test profile `{entry.key}` is declared more than once"))
+        if profiles.any(fn(profile) { profile.name == repeated }) -> return Err(PackageParseError.Composition("test profile `{entry.key}` is declared more than once"))
         profiles.push(pkg_parse_test_profile(entry.key, entry.value))
     }
     Ok(profiles)
@@ -134,7 +134,7 @@ pkg_parse_test_suites: fn(body: String) -> [TestSuiteDef] PackageParseError! {
         site: "test suite `{entry.key}`"
         if entry.key == TEST_SUITE_TESTS -> return Err(PackageParseError.Composition("{site} is built in: it is every #Test of the package, so `suites:` can't declare it"))
         repeated: entry.key.copy()
-        if suites.any(suite -> suite.name == repeated) -> return Err(PackageParseError.Composition("{site} is declared more than once"))
+        if suites.any(fn(suite) { suite.name == repeated }) -> return Err(PackageParseError.Composition("{site} is declared more than once"))
         found := TestSuiteDef?{None}
         loop field in pkg_key_value_entries(pkg_test_record(entry.value, TEST_SUITE_CTOR, site)) {
             kind: pkg_test_suite_kind(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: golden_corpus, ui_corpus, cases_corpus)"))
@@ -165,7 +165,7 @@ impl PackageFacts {
     validate_test_profiles: fn(self) PackageParseError! {
         loop profile in self.test_profiles {
             clash: profile.name.copy()
-            if TEST_STOCK_BUILD_PROFILES.contains(profile.name) || self.build_profiles.any(build -> build.name == clash) {
+            if TEST_STOCK_BUILD_PROFILES.contains(profile.name) || self.build_profiles.any(fn(build) { build.name == clash }) {
                 return Err(PackageParseError.Composition("test profile `{profile.name}` has the name of a build profile; test and build profiles share one namespace, so rename one"))
             }
         }
@@ -338,7 +338,7 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 }
 
 #Test("code suites are the literal names of `.suite(` calls") {
-    source: "test: fn(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", rows -> rows.pass(\"x\"))\n    suite(\"no\")\n    t.run()\n}}\n"
+    source: "test: fn(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", fn(rows) {{ rows.pass(\"x\") }})\n    suite(\"no\")\n    t.run()\n}}\n"
     assert_eq(pkg_test_code_suites(source), [String]{"perf", "selfhost"})
     assert_eq(pkg_test_code_suites(""), [String]{})
 }
@@ -346,6 +346,6 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 #Test("test.jet sets settings only through calls on its Test parameter") {
     assert(pkg_test_sets_settings("test: fn(t: Test) -> Int {{\n    t.shard(3, 8)\n    t.run()\n}}\n"))
     assert(pkg_test_sets_settings("test: fn(suite: Test) -> Int {{\n    suite.results(\"r.json\")\n    suite.run()\n}}\n"))
-    assert(!pkg_test_sets_settings("test: fn(t: Test) -> Int {{\n    xs.filter(x -> x > 1)\n    t.suite(\"perf\", rows)\n    t.run()\n}}\n"))
+    assert(!pkg_test_sets_settings("test: fn(t: Test) -> Int {{\n    xs.filter(fn(x) {{ x > 1 }})\n    t.suite(\"perf\", rows)\n    t.run()\n}}\n"))
     assert(!pkg_test_sets_settings(""))
 }

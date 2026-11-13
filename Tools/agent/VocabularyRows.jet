@@ -110,7 +110,7 @@ vocabulary_files: fn() -[FS]> [VocabularyFile] VocabularyRowsError! {
     found := [VocabularyFile]{}
     loop root in PACKAGE_ROOTS {
         listed := files.list_dir(root) ?? return Err(rows_fail("cannot list {root}: {err}"))
-        listed.sort_by((left: DirEntry, right: DirEntry) -> left.name <=> right.name)
+        listed.sort_by(fn(left: DirEntry, right: DirEntry) { left.name <=> right.name })
         loop entry in listed {
             if !entry.is_dir -> next
             rows_path: "{root}/{entry.name}/{ROWS_NAME}"

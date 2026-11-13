@@ -10,7 +10,7 @@ owner_teardown_task: fn() -> Task<DispatchReport<String>> {
     ev: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
-    ev.on(owner_scope, (n: Int) -> {
+    ev.on(owner_scope, fn(n: Int) {
         started_tx.send(n.copy())
         held_sender: release_tx.copy()
         released: release_rx.receive() ?? panic("release")
@@ -26,7 +26,7 @@ run: fn() {
     cancelled: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: cancel_started_tx, receiver: cancel_started_rx }: channel<Int>()
     { sender: cancel_release_tx, receiver: cancel_release_rx }: channel<Int>()
-    cancelled.on(cancel_scope, (n: Int) -> {
+    cancelled.on(cancel_scope, fn(n: Int) {
         cancel_started_tx.send(n.copy())
         released: cancel_release_rx.receive() ?? panic("release")
     })
@@ -48,7 +48,7 @@ run: fn() {
     queued_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: queued_started_tx, receiver: queued_started_rx }: channel<Int>()
     { sender: queued_release_tx, receiver: queued_release_rx }: channel<Int>()
-    queued_deadline.on(queued_scope, (n: Int) -> {
+    queued_deadline.on(queued_scope, fn(n: Int) {
         queued_started_tx.send(n.copy())
         released: queued_release_rx.receive() ?? panic("release")
     })
@@ -66,7 +66,7 @@ run: fn() {
     pending_deadline: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: pending_started_tx, receiver: pending_started_rx }: channel<Int>()
     { sender: pending_release_tx, receiver: pending_release_rx }: channel<Int>()
-    pending_deadline.on(pending_scope, (n: Int) -> {
+    pending_deadline.on(pending_scope, fn(n: Int) {
         pending_started_tx.send(n.copy())
         released: pending_release_rx.receive() ?? panic("release")
     })

@@ -937,9 +937,9 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
             flag: test_setting_flag(setting.name)
             // The lambdas take their own names: a capture moves the name it reads.
             fixed_flag: flag.copy() // copy: the fixed-row lambda's own name.
-            if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
+            if JET_CLI_FIXED_FLAGS.any(fn(fixed) { fixed.long == fixed_flag }) -> next
             option_flag: flag.copy() // copy: the build-option lambda's own name.
-            if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
+            if JET_BUILD_OPTIONS.any(fn(option) { build_option_flag(option.name) == option_flag }) -> next
             rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting), value: jet_cli_test_setting_value(setting), typed: setting.typed})
         }
     }
@@ -971,13 +971,13 @@ jet_cli_test_setting_of_flag: fn(flag: String) -> TestSettingRow? Never! {
 }
 
 #Test("--optimize is one flag row that says what it does for a build and for jet test") {
-    rows: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
+    rows: JET_CLI_FLAGS.filter(fn(row) { row.long == "--optimize" })
     assert_eq(rows.len(), 1)
     assert(rows[0].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
 }
 
 #Test("-O0, -O1 and -O2 are the short forms of the three optimize levels") {
-    rows: JET_CLI_FLAGS.filter(row -> row.long.starts_with("-O"))
+    rows: JET_CLI_FLAGS.filter(fn(row) { row.long.starts_with("-O") })
     assert_eq(rows.len(), 3)
     assert_eq(rows[0].help, "Short form of --optimize=none")
     assert_eq(rows[1].help, "Short form of --optimize=basic")

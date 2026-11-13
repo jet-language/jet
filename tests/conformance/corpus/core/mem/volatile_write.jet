@@ -6,7 +6,7 @@ run: fn() {
     #Unsafe("value is live on this stack frame and the pointer never escapes") {
         addr: mem.address_of(value)
         pointer: mem.Ptr<Int>.from_addr(addr)
-        print((() -> {
+        print((fn() {
             mem.volatile_write(pointer, 8)
             true
         })())

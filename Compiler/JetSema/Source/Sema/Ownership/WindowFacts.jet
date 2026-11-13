@@ -113,7 +113,7 @@ sema_window_collect_candidates: fn(items: [Item], rows: [SemaWindowFunctionRow],
 // list that every out-of-order insert shifts.
 sema_window_positions: fn(rows: [SemaWindowFunctionRow]) -> [String:[Int]] Never! {
     order := loop (index, row) in rows -> (name: row.name, index: index)
-    order.sort_by((left: (name: String, index: Int), right: (name: String, index: Int)) -> (left.name <=> right.name).then(left.index <=> right.index))
+    order.sort_by(fn(left: (name: String, index: Int), right: (name: String, index: Int)) { (left.name <=> right.name).then(left.index <=> right.index) })
     positions := [String:[Int]]{}
     start := 0
     loop start < order.len() {

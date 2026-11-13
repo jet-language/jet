@@ -373,17 +373,17 @@ sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> B
     inner := (loop parameter in lambda.params -> parameter.name)
     names := [String]{}
     if lambda.body == {
-        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(names, expression))
+        .Expr(value) -> ast_visit_expr(value, fn(expression: Expr) { sema_call_note_ident(names, expression) })
         .Block(body) -> {
             loop statement in body {
                 if statement == {
                     .Val(binding) -> {
                         inner.push(binding.name)
-                        ast_visit_expr(binding.init, (expression: Expr) -> sema_call_note_ident(names, expression))
+                        ast_visit_expr(binding.init, fn(expression: Expr) { sema_call_note_ident(names, expression) })
                     }
-                    .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_call_note_ident(names, expression))
+                    .Expr(value) -> ast_visit_expr(value, fn(expression: Expr) { sema_call_note_ident(names, expression) })
                     .Return(value, _) -> {
-                        if value == .Val(returned) -> ast_visit_expr(returned, (expression: Expr) -> sema_call_note_ident(names, expression))
+                        if value == .Val(returned) -> ast_visit_expr(returned, fn(expression: Expr) { sema_call_note_ident(names, expression) })
                     }
                     .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
                 }
@@ -1253,7 +1253,7 @@ sema_call_lower_bound_arguments: fn(typed: SemaCallTypedArguments, params: [Sema
             widen_to_vec: widen_to_vec,
             widen_to_union: widen_to_union,
             box_as_trait: sema_call_box_as_trait(required, value.ty, environment, program),
-            label: arg.label.map((label) -> label.name),
+            label: arg.label.map(fn(label) { label.name }),
             spread: arg.spread,
         })
     }

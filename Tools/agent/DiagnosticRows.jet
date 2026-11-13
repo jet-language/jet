@@ -470,7 +470,7 @@ plane_counts: fn(facts: [RowFacts]) -> [PlaneCount] DiagnosticRowsError! {
         if row.edit -> counts[slot].edits += 1
         if row.reason -> counts[slot].reasons += 1
     }
-    counts.sort_by(count -> count.plane)
+    counts.sort_by(fn(count) { count.plane })
     Ok(counts)
 }
 
@@ -541,7 +541,7 @@ ui_snapshots: fn(root: String, directory: String, lint: Bool) -[FS]> [TextFile] 
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
     children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(child -> child.name)
+    children.sort_by(fn(child) { child.name })
     loop child in children {
         if child.name.starts_with(".") -> next
         shown: "{directory}/{child.name}"
@@ -576,7 +576,7 @@ case_snapshots: fn(root: String, directory: String) -[FS]> [TextFile] Diagnostic
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
     children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(child -> child.name)
+    children.sort_by(fn(child) { child.name })
     loop child in children {
         if child.is_dir || !child.name.ends_with(".warn") -> next
         loop snapshot in (owned_snapshot(root, "{directory}/{child.name}") ?? return Err(err)) -> found.push(snapshot)
@@ -839,7 +839,7 @@ ReportSites: struct {
 // by name.
 report_sources: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
     children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(child -> child.name)
+    children.sort_by(fn(child) { child.name })
     found := [String]{}
     loop child in children {
         if child.is_dir {
@@ -990,7 +990,7 @@ cited_codes: fn(line: String) -> [String] Never! {
 // The `.md` files under `directory`, each directory's entries sorted by name.
 spec_pages: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
     children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(child -> child.name)
+    children.sort_by(fn(child) { child.name })
     found := [String]{}
     loop child in children {
         if child.name.starts_with(".") -> next
@@ -1299,15 +1299,15 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     }
     loop path in written -> files.write("{root}/{path}", "Error [jet.Foo]: {path}\n") ?? panic("{path}: {err}")
     files.write("{root}/tests/ui/mod.jet", "// @fixture_module\nhelper: fn() {{}}\n") ?? panic("mod.jet: {err}")
-    ui: (ui_snapshots(root, "tests/ui", false) ?? panic(err.message)).map(file -> file.path)
+    ui: (ui_snapshots(root, "tests/ui", false) ?? panic(err.message)).map(fn(file) { file.path })
     assert_eq(ui, [String]{"tests/ui/a.stderr", "tests/ui/g/nested.stderr", "tests/ui/p/stderr", "tests/ui/w.stderr"})
-    lint: (ui_snapshots(root, "tests/ui_lint", true) ?? panic(err.message)).map(file -> file.path)
+    lint: (ui_snapshots(root, "tests/ui_lint", true) ?? panic(err.message)).map(fn(file) { file.path })
     assert_eq(lint, [String]{"tests/ui_lint/l.warn"})
     assert_eq((ui_snapshots(root, "tests/absent", false) ?? panic(err.message)).len(), 0)
     files.create_dir_all("{root}/tests/cases/s/c.fixture") ?? panic("case dir: {err}")
     planted: [String]{"tests/cases/s/c.case", "tests/cases/s/c.warn", "tests/cases/s/c.fixture/c.warn"}
     loop path in planted -> files.write("{root}/{path}", "Warning [jet.Foo]: {path}\n") ?? panic("{path}: {err}")
-    cases: (case_snapshots(root, "tests/cases/s") ?? panic(err.message)).map(file -> file.path)
+    cases: (case_snapshots(root, "tests/cases/s") ?? panic(err.message)).map(fn(file) { file.path })
     assert_eq(cases, [String]{"tests/cases/s/c.warn"})
     files.remove_all(root) ?? panic("remove scratch: {err}")
 }

@@ -97,9 +97,9 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
         .Float -> return Val(ComponentTypeDescriptor.Float)
         .Bool -> return Val(ComponentTypeDescriptor.Bool)
         .String -> return Val(ComponentTypeDescriptor.String)
-        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.List{inner: value})
-        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.Option{inner: value})
-        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.List{inner: value})
+        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
+        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.Option{inner: value} })
+        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(fn(value) { ComponentTypeDescriptor.List{inner: value} })
         .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen)
         .Result(ok, err) -> {
             ok_descriptor: sema_plugin_component_descriptor(graph, environment, program, ok, seen) ?? return None

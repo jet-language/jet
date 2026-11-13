@@ -201,7 +201,7 @@ WebModuleSwapSnapshot: struct {
         if self.source_revision.len() == 0 || self.build_revision.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot(detail: "source and build revisions must be non-empty"))
         if self.page.identity.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot(detail: "page identity must be non-empty"))
         if self.page.identity != self.identity.page -> return Err(WebModuleSwapError.InvalidSnapshot(detail: "page fact identity does not match swap identity"))
-        self.modules.sort_by((left, right) -> left.identity <=> right.identity)
+        self.modules.sort_by(fn(left, right) { left.identity <=> right.identity })
         loop item in self.modules {
             if item.identity.len() == 0 || item.interface_fingerprint.len() == 0 || item.body_fingerprint.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot(detail: "module identity and fingerprints must be non-empty"))
         }
@@ -357,7 +357,7 @@ WebModuleSwapPlan: struct {
             reset.push(WebModuleSwapResetFact{state: old_fact, prior_identity: Val(old_fact.identity()), prior_type_fingerprint: Val(old_fact.type_fingerprint()), reason: WebModuleSwapReasonCode.StateRemoved})
         }
         web_swap_sort_state(preserved)
-        reset.sort_by((left, right) -> (left.state.kind().rank() <=> right.state.kind().rank()).then(left.state.key() <=> right.state.key()))
+        reset.sort_by(fn(left, right) { (left.state.kind().rank() <=> right.state.kind().rank()).then(left.state.key() <=> right.state.key()) })
         // Reason codes are reported once each, in declaration order.
         reason_codes := [WebModuleSwapReasonCode]{}
         if checked_base.source_revision != checked_candidate.source_revision -> reason_codes.push(WebModuleSwapReasonCode.SourceRevisionChanged)
@@ -576,7 +576,7 @@ WebModuleSwapState: struct {
     }
 }
 web_swap_sort_state: fn(facts: &[WebModuleSwapStateFact]) {
-    facts.sort_by((left, right) -> (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()))
+    facts.sort_by(fn(left, right) { (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()) })
 }
 web_swap_state_by_key: fn(facts: [WebModuleSwapStateFact]) -> [String:WebModuleSwapStateFact] WebModuleSwapError! {
     by_key := [String:WebModuleSwapStateFact]{}

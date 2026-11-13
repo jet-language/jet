@@ -186,7 +186,7 @@ collection_sort_by_key: fn<T, K: Comparable, E>(rows: &[T], &&key: fn(T) -> K E!
         keys.push(value)
     }
     window: collection_sort_view<K>(keys)
-    order := collection_sort_order<K, Never>(window, (a: K, b: K) -> a <=> b, descending)
+    order := collection_sort_order<K, Never>(window, fn(a: K, b: K) { a <=> b }, descending)
     // Normal key Close observes sorted order, whereas an earlier Err/Stop
     // closes only the initialized input prefix. The receiver is still intact
     // throughout key evaluation and every comparison.

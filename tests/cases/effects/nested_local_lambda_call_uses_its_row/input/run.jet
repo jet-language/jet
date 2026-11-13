@@ -3,18 +3,18 @@
 apply: fn(f: fn() -[IO]> Unit) -[IO]> Unit { f() }
 
 pass: fn() -[IO]> Int {
-    say: () -> { print("pass") }
-    apply(() -> { say() })
+    say: fn() { print("pass") }
+    apply(fn() { say() })
     1
 }
 
 deep: fn() -[IO]> Int {
-    say: () -> { print("deep") }
-    twice: () -> {
+    say: fn() { print("deep") }
+    twice: fn() {
         say()
         say()
     }
-    outer: () -> { twice() }
+    outer: fn() { twice() }
     outer()
     2
 }

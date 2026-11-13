@@ -160,7 +160,7 @@ run: fn() -> Never Err! {
     args: process.args()
     if args.len() < 5 || !regex.full_match(Regex{"[0-9]+(?:[-,][0-9]+)*"}, args[4]) -> return Err(USAGE)
     cpu: args[4]
-    unset: ["PQ_JOB", "FINAL_E2_SHA", "COMPOSED_SHA"].filter(key -> process.env_get_or(key, "") == "")
+    unset: ["PQ_JOB", "FINAL_E2_SHA", "COMPOSED_SHA"].filter(fn(key) { process.env_get_or(key, "") == "" })
     if unset.len() > 0 -> return Err("missing {unset[0]}; run in the held O1 runtime epoch measure job")
     source: files.dirname(files.dirname(sys.executable()))
     tree: files.normalize(files.join(source, "../../.."))
@@ -192,13 +192,13 @@ run: fn() -> Never Err! {
         step(steps, out, tree, "rust", [JET_ENV, "rustc", "--edition=2024", "-C", "opt-level=3", "--crate-type=staticlib", files.join(source, "allocator.rs"), "-o", rust]),
     }
     linked := [Bool]{}
-    if built.all(ok -> ok) {
+    if built.all(fn(ok) { ok }) {
         loop link in [(arm: "O0", libraries: [o0, remaining]), (arm: "O1", libraries: [o1, remaining]), (arm: "Rust", libraries: [rust])] -> linked.push(step(steps, out, tree, "link-{link.arm}", ["cc", "-fno-lto", driver].concat(link.libraries).concat(["-lpthread", "-ldl", "-lm", "-o", files.join(out, link.arm)])))
     }
     files.write(files.join(out, "build.json"), "{json.stringify(Build{pins: pins.copy(), steps: steps}, 2)}\n")  // copy: result.json repeats the pins
-    if !built.concat(linked).all(ok -> ok) -> process.exit(1)
+    if !built.concat(linked).all(fn(ok) { ok }) -> process.exit(1)
     within: out.copy()  // copy: the arms' lambda takes its own
-    arms := ARMS.map(name -> Arm{name: name, binary: files.join(within, name), sha256: hash(files.join(within, name)), verdict: "PASS", samples: [Float]{}})
+    arms := ARMS.map(fn(name) { Arm{name: name, binary: files.join(within, name), sha256: hash(files.join(within, name)), verdict: "PASS", samples: [Float]{}} })
     samples: files.join(out, "samples.jsonl")
     loop round in 0..<ROUNDS {
         // Rotate the arm order so no one arm owns the startup and cache position.
@@ -220,7 +220,7 @@ run: fn() -> Never Err! {
         bounds: if arm.verdict == "PASS" && sorted.len() == ROUNDS -> [Float?]{Val(sorted[3]), Val(sorted[0]), Val(sorted[6])} else -> [Float?]{None, None, None}
         measured.push(Measured{binary: arm.binary, sha256: arm.sha256, verdict: arm.verdict, samples: sorted, median_ms: bounds[0], min_ms: bounds[1], max_ms: bounds[2]})
     }
-    correct: measured.all(arm -> arm.median_ms != None)
+    correct: measured.all(fn(arm) { arm.median_ms != None })
     result: Result{
         pins: pins,
         expected: EXPECTED,

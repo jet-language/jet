@@ -116,9 +116,9 @@ run: fn() {
     print("{flags.get(1)} {flags.get(2)} {flags.get(3)}")
     // Lazy iteration.
     bytes: "jet".bytes()
-    picked: bytes.lazy().filter_map((b) -> if b > (U8{100}) -> Val(b) else -> None).collect()
+    picked: bytes.lazy().filter_map(fn(b) { if b > (U8{100}) -> Val(b) else -> None }).collect()
     print("{picked.len()} {picked[0]} {picked[1]}")
-    print("{bytes.lazy().first()} {bytes.lazy().skip(3).first()} {bytes.find((b) -> b == U8{101})}")
+    print("{bytes.lazy().first()} {bytes.lazy().skip(3).first()} {bytes.find(fn(b) { b == U8{101} })}")
     // Records.
     a: Sample{name: "a", code: byte(65), on: flag(2), mark: Val('é'), light: light(1)}
     b: Sample{name: "b", code: None, on: None, mark: None, light: None}

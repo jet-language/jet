@@ -82,13 +82,13 @@ ScriptCacheIdentity: struct {
     new: fn(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
         sorted := dependencies
         sorted = loop fresh_item in sorted -> fresh_item
-        sorted.sort_by(identity -> identity.content_hash)
+        sorted.sort_by(fn(identity) { identity.content_hash })
         sorted = loop fresh_item in sorted -> fresh_item
-        sorted.sort_by(identity -> identity.resolved_version)
+        sorted.sort_by(fn(identity) { identity.resolved_version })
         sorted = loop fresh_item in sorted -> fresh_item
-        sorted.sort_by(identity -> identity.selector)
+        sorted.sort_by(fn(identity) { identity.selector })
         sorted = loop fresh_item in sorted -> fresh_item
-        sorted.sort_by(identity -> identity.name)
+        sorted.sort_by(fn(identity) { identity.name })
         ScriptCacheIdentity{source_hash: source_hash, dependencies: sorted, toolchain: toolchain, target: target}
     }
 
@@ -239,9 +239,9 @@ pkg_inline_deps_best_match: fn(selector: String, candidates: [(version: String, 
     }
     if matches.len() == 0 -> return None
     // Stable passes order by (major, minor, patch); ties keep input order.
-    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 2))
-    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 1))
-    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 0))
+    matches.sort_by(fn(candidate) { pkg_inline_deps_version_part(candidate.version, 2) })
+    matches.sort_by(fn(candidate) { pkg_inline_deps_version_part(candidate.version, 1) })
+    matches.sort_by(fn(candidate) { pkg_inline_deps_version_part(candidate.version, 0) })
     Val(matches[matches.len() - 1])
 }
 

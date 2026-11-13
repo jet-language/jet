@@ -26,17 +26,17 @@ CacheRoutes: struct {
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
     mux: server.mux()
-    mux.get("/cache/:key", (key: String) -> Ok(server.response(200, "cached {key}")))
-    mux.custom("PURGE", "/cache/:key", (key: String) -> Ok(server.response(200, "purged {key}")))
+    mux.get("/cache/:key", fn(key: String) { Ok(server.response(200, "cached {key}")) })
+    mux.custom("PURGE", "/cache/:key", fn(key: String) { Ok(server.response(200, "purged {key}")) })
     // `get` is a custom method of its own, not GET.
-    mux.custom("get", "/cache/:key", (key: String) -> Ok(server.response(200, "lowercase get {key}")))
+    mux.custom("get", "/cache/:key", fn(key: String) { Ok(server.response(200, "lowercase get {key}")) })
     // A method known only when the program runs is checked as it registers.
     methods: ["BAN"]
-    mux.custom(methods[0], "/cache/:key", (key: String) -> Ok(server.response(200, "banned {key}")))
+    mux.custom(methods[0], "/cache/:key", fn(key: String) { Ok(server.response(200, "banned {key}")) })
     // A Path literal: without holes it is a static pattern; a hole is one segment.
-    mux.custom("PURGE", Path{"/files/:name"}, (name: String) -> Ok(server.response(200, "purged file {name}")))
+    mux.custom("PURGE", Path{"/files/:name"}, fn(name: String) { Ok(server.response(200, "purged file {name}")) })
     region: "eu"
-    mux.custom("PURGE", Path{"/region/{region}/:key"}, (key: String) -> Ok(server.response(200, "purged {key} in {region}")))
+    mux.custom("PURGE", Path{"/region/{region}/:key"}, fn(key: String) { Ok(server.response(200, "purged {key} in {region}")) })
     mux.mount(CacheRoutes{})
     print(web.openapi(mux))
     listener: net.tcp_listen("127.0.0.1:0")

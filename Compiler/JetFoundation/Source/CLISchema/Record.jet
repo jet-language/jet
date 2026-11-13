@@ -345,7 +345,7 @@ cli_schema_encode_job: fn(out: &[U8], job: JobFact) Never! {
     })
     cli_schema_put_u32(out, job.limits.len())
     order := (loop index in 0..<job.limits.len() -> index)
-    order.sort_by((a: Int, b: Int) -> job.limits[a].key <=> job.limits[b].key)
+    order.sort_by(fn(a: Int, b: Int) { job.limits[a].key <=> job.limits[b].key })
     loop index in order {
         cli_schema_put_string(out, job.limits[index].key)
         cli_schema_put_string(out, job.limits[index].value)

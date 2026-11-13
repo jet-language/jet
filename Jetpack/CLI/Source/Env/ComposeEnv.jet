@@ -53,13 +53,13 @@ EnvReadyStats: struct {
             pair: (name: selection.name, version: version)
             if !pairs.contains(pair) -> pairs.push(pair)
         }
-        pairs.sort_by((left: (name: String, version: String), right: (name: String, version: String)) -> (left.name <=> right.name).then(left.version <=> right.version))
+        pairs.sort_by(fn(left: (name: String, version: String), right: (name: String, version: String)) { (left.name <=> right.name).then(left.version <=> right.version) })
         pairs
     }
 
     realized_entries: fn(self) -> [EnvironmentSelection] Never! {
         entries := self.realized
-        entries.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> left.key() <=> right.key())
+        entries.sort_by(fn(left: EnvironmentSelection, right: EnvironmentSelection) { left.key() <=> right.key() })
         entries
     }
 }

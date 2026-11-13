@@ -1854,7 +1854,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         parameter_ty := parameter.ty
         if parameter_ty == None && expected_params != None && index < (expected_params ?? [Type]{}).len() -> parameter_ty = Val((expected_params ?? [Type]{})[index])
         written_type: parameter_ty ?? {
-            diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
+            diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `fn({parameter.name}: Int) {{ … }}` (or whatever type fits)"))
             return None
         }
         // A written type names its declaration the way a fn parameter's does

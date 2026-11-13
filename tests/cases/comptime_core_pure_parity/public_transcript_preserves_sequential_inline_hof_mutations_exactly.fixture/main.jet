@@ -2,14 +2,14 @@ inline_hof_view: fn() -> String {
     values := [1, 2, 3, 4]
     each_seen := [Int]{}
     shadow := 99
-    values.each((item: Int) -> { each_seen.push(item) })
+    values.each(fn(item: Int) { each_seen.push(item) })
     predicate_seen := Set.from([0])
-    has_three: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
+    has_three: values.any(fn(n: Int) { predicate_seen.add(n) && n == 3 })
     fold_seen := [Int:Int]{ 0: 0 }
-    total: values.fold(0, (acc: Int, n: Int) -> fold_seen.add(n, n) ?? (acc + n))
+    total: values.fold(0, fn(acc: Int, n: Int) { fold_seen.add(n, n) ?? (acc + n) })
     partition_seen := Set.from([0])
     partition_shadow := 88
-    split: values.partition((part: Int) -> partition_seen.add(part) && part % 2 == 0)
+    split: values.partition(fn(part: Int) { partition_seen.add(part) && part % 2 == 0 })
     return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values().to_list()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
 }
 

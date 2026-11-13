@@ -11,7 +11,7 @@ greet: fn() -> Int { 1 }
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.rewrite_body(f, #code {
                     #Unsafe("generated") {

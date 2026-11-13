@@ -236,7 +236,7 @@ CorpusEntry: struct {
 corpus_entries: fn(root: String, suffix: String) -[FS]> [CorpusEntry] Never! {
     entries := [CorpusEntry]{}
     testing_corpus_walk(root, "", suffix, entries)
-    entries.sort_by((left: CorpusEntry, right: CorpusEntry) -> left.id <=> right.id)
+    entries.sort_by(fn(left: CorpusEntry, right: CorpusEntry) { left.id <=> right.id })
     entries
 }
 
@@ -1253,9 +1253,9 @@ testing_history_derived: fn<T>(&&command_type: String, variants: [String], &&mak
         distributions.push(HistoryDistribution{operation: parts[0].copy(), weight: 1})
     }
     HistoryStrategy<T>{
-        generate: (rng: HistoryRNG, case_index: Int, max_steps: Int) -> { testing_history_derived_generate<T>(rng, case_index, max_steps, command_type, names, kinds, make) },
-        rebuild: (case: HistoryCase) -> { testing_history_derived_rebuild<T>(case, names, kinds, make) },
-        valid: (typed: TypedHistoryCase<T>) -> { testing_history_case_error(typed.case) == "" },
+        generate: fn(rng: HistoryRNG, case_index: Int, max_steps: Int) { testing_history_derived_generate<T>(rng, case_index, max_steps, command_type, names, kinds, make) },
+        rebuild: fn(case: HistoryCase) { testing_history_derived_rebuild<T>(case, names, kinds, make) },
+        valid: fn(typed: TypedHistoryCase<T>) { testing_history_case_error(typed.case) == "" },
         bounds: HistoryBounds{max_steps: 64, max_resources: 64, max_shrink_attempts: 10000, max_discarded_cases: 100},
         distributions: distributions,
     }

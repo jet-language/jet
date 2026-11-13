@@ -1,8 +1,8 @@
 Error [jet.CellGuardEscapes]: Cell guard `guard` cannot be captured by a lambda
   --> tests/ui/cell_guard_capture.jet:3:12
     |
-  3 |     return () -> guard.get()
-    |            ^^^^^^^^^^^^^^^^^
+  3 |     return fn() { guard.get() }
+    |            ^^^^^^^^^^^^^^^^^^^^
  Why: A Cell guard is a temporary loan handle; storing it inside another value could keep the loan after its local scope ends
  Fix: Keep the guard in a local name or a tuple, and use `.map(...)` or `.split(...)` for projections
 More: jet-lang.dev/e/E0217

@@ -143,7 +143,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
             }
         }
     }
-    body_each_expr_child(tree, node, (child: Int) -> sema_http_collect_mounted(tree, child, graph, module_identity, mounted))
+    body_each_expr_child(tree, node, fn(child: Int) { sema_http_collect_mounted(tree, child, graph, module_identity, mounted) })
 }
 
 // One function body's mounts. Its own function so the visitor closure lends
@@ -151,7 +151,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 // closure instead of copying the whole registration graph per function.
 sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: String, mounted: &[String]) Never! {
     loop statement in function.body {
-        body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> sema_http_collect_mounted(function.tree, expression, graph, identity, mounted))
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })
     }
 }
 

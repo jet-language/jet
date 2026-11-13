@@ -147,7 +147,7 @@ is_observer: fn(name: String) -> Bool Never! {
 
 observes: fn(body: [Stmt]) -> Bool Never! {
     names := [String]{}
-    ast_visit_body(body, (expression: Expr) -> note_call_name(names, expression), true)
+    ast_visit_body(body, fn(expression: Expr) { note_call_name(names, expression) }, true)
     loop name in names {
         if is_observer(name) -> return true
     }
@@ -533,7 +533,7 @@ inspect_witness: fn(key: String, text: String, module_name: String, member: Stri
             if function.name == "run" {
                 run_found = true
                 run_unit = function.return_type == None
-                ast_visit_body(function.body, (expression: Expr) -> note_call_name(run_calls, expression), true)
+                ast_visit_body(function.body, fn(expression: Expr) { note_call_name(run_calls, expression) }, true)
             }
         }
     }

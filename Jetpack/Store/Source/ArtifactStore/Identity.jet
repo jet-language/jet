@@ -270,7 +270,7 @@ ArtifactEntryKey: enum {
 store_artifact_sort_keys: fn(keys: [ArtifactEntryKey]) -> [ArtifactEntryKey] Never! {
     out := keys
     out = loop fresh_item in out -> fresh_item
-    out.sort_by((left: ArtifactEntryKey, right: ArtifactEntryKey) -> (left.kind().rank() <=> right.kind().rank()).then(left.primary() <=> right.primary()).then(left.secondary() <=> right.secondary()))
+    out.sort_by(fn(left: ArtifactEntryKey, right: ArtifactEntryKey) { (left.kind().rank() <=> right.kind().rank()).then(left.primary() <=> right.primary()).then(left.secondary() <=> right.secondary()) })
     out
 }
 

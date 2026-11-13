@@ -2115,7 +2115,7 @@ semindex_definition_facts: fn(definitions: [SemDefinition], nodes: [SemNode], mo
         }
         candidates.push(SemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
     }
-    candidates.sort_by((left: SemDefinitionAt, right: SemDefinitionAt) -> (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index))
+    candidates.sort_by(fn(left: SemDefinitionAt, right: SemDefinitionAt) { (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index) })
     loop node in nodes {
         if node.parent != None || node.class != "item" -> next
         slot: source_slot.get(node.module_path) ?? next
@@ -2150,7 +2150,7 @@ semindex_definition_facts: fn(definitions: [SemDefinition], nodes: [SemNode], mo
         })
     }
     // Stable: equal (stable_id, human_identity) rows keep their item order.
-    output.sort_by((left: SemDefinitionFact, right: SemDefinitionFact) -> (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity))
+    output.sort_by(fn(left: SemDefinitionFact, right: SemDefinitionFact) { (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity) })
     output
 }
 
@@ -2454,7 +2454,7 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
     derivations: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := db.arithmetic.move()
     arithmetic = loop fresh_item in arithmetic -> fresh_item
-    arithmetic.sort_by((left: SemArithmetic, right: SemArithmetic) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))
+    arithmetic.sort_by(fn(left: SemArithmetic, right: SemArithmetic) { (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end) })
     SemIndex{
         definitions: definitions,
         definition_facts: definition_facts,

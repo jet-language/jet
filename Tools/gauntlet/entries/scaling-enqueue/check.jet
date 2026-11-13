@@ -25,7 +25,7 @@ run: fn() {
     queue: files.join(process.env_get("JET_STATE_ROOT") ?? "", "proofq/queue")
     if files.is_dir(queue) {
         stamp: files.getmtime(process.env_get("JET_SCALING_QUEUE_STAMP") ?? "") ?? process.fail(1, "{err}")
-        names := files.list_dir(queue).map(entry -> entry.name.copy())
+        names := files.list_dir(queue).map(fn(entry) { entry.name.copy() })
         names.sort()
         loop name in names {
             file: files.join(queue, name)
@@ -67,7 +67,7 @@ show: fn(value: Dyn, here: String) -> String Never! {
         .Text(text) -> json.to_string(text.replace(here, "<case>")) ?? text.copy()
         .Int(_) | .Float(_) | .Number(_) -> number(value.float() ?? math.NAN)
         .Bytes(_) | .DateTime(_) | .Object(_) -> value.to_text() ?? "?"
-        .Array(items) -> "[{items.map(item -> show(item, here)).join(", ")}]"
+        .Array(items) -> "[{items.map(fn(item) { show(item, here) }).join(", ")}]"
     }
 }
 

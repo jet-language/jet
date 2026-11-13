@@ -31,8 +31,8 @@ run: fn() {
     // The query reads the rest of the stream under the reader's limits, so
     // grouping two services past `max_groups 1` refuses.
     if data.query(reader)
-        .group_by(e -> e.service)
-        .mean(e -> e.latency_ms)
+        .group_by(fn(e) { e.service })
+        .mean(fn(e) { e.latency_ms })
         .collect() == {
         .Ok(grouped_rows) -> { print("unexpected ok {grouped_rows.len()}") }
         .Err(error) -> { print("{error}") }

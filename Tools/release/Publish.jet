@@ -429,7 +429,7 @@ stored_receipts: fn(dir: String, release: Release) -[FS]> [Receipt] Never! {
     names := [String]{}
     entries: files.list_dir(files.join(dir, RECEIPTS_DIR)) ?? return [Receipt]{}
     loop entry in entries -> names.push(entry.name.copy())
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     receipts := [Receipt]{}
     loop name in names -> receipts.push(read_receipt(dir, "{RECEIPTS_DIR}/{name}", "verify-full"))
     receipts

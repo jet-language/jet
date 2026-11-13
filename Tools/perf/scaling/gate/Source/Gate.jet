@@ -488,12 +488,12 @@ growth: fn(sizes: [Int], values: [Float?], bounds: Family, exact: Bool) -> Growt
     }
     low: usable[at]
     if low.x == top.x {
-        zero: exact && !usable.slice(0, usable.len() - 1).any(point -> point.v != ZERO)
+        zero: exact && !usable.slice(0, usable.len() - 1).any(fn(point) { point.v != ZERO })
         if zero -> return Growth{verdict: "appears", reason: Val("zero until N={top.x}"), ratio: Val(math.INFINITY), first: None, last: None, exponent: None, bound: bounds.bound, values: values.copy()}
         return unmeasured("below resolution until N={top.x}", bounds, values)
     }
     ratio: (top.v / low.v) / (nlogn(Float{top.x}) / nlogn(Float{low.x}))
-    fit: exponent(usable.map(point -> point.x), usable.map(point -> if point.v > ZERO -> point.v else -> ZERO))
+    fit: exponent(usable.map(fn(point) { point.x }), usable.map(fn(point) { if point.v > ZERO -> point.v else -> ZERO }))
     Growth{verdict: "fitted", reason: None, ratio: Val(ratio), first: Val(low.x), last: Val(top.x), exponent: fit, bound: bounds.bound, values: values.copy()}
 }
 
@@ -537,8 +537,8 @@ dominating: fn(metrics: [String: Growth], phase: String) -> String? Never! {
 // One series' growth per metric and its failures, each naming the phase and
 // its dominating counter.
 judge: fn(series: Series) -> Judged Never! {
-    points: series.points.filter(point -> point.ok)
-    sizes: points.map(point -> point.x)
+    points: series.points.filter(fn(point) { point.ok })
+    sizes: points.map(fn(point) { point.x })
     keys := [String: Bool]{}
     loop point in points {
         loop key in point.metrics.keys() {
@@ -551,7 +551,7 @@ judge: fn(series: Series) -> Judged Never! {
         if series.baseline == .Val(baseline) {
             if baseline.ok -> base = baseline.metrics.get(key) ?? Float{0.0}
         }
-        values: points.map(point -> point.metrics.get(key).map(value -> value - base))
+        values: points.map(fn(point) { point.metrics.get(key).map(fn(value) { value - base }) })
         metrics[key.copy()] = growth(sizes, values, family(key), counter_key(key))
     }
     failures := [Failure]{}
@@ -603,7 +603,7 @@ check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [
     failures := [Failure]{}
     if total < limits.total_lines_per_second -> failures.push(floor_failure("end to end", "end to end {whole(total)} lines/s < floor {js(limits.total_lines_per_second)}"))
     loop rule in limits.rows {
-        if rule.kinds.filter(kind -> point.metrics.has_key("phase.{kind}")).len() == 0 -> next
+        if rule.kinds.filter(fn(kind) { point.metrics.has_key("phase.{kind}") }).len() == 0 -> next
         seconds := Float{0.0}
         loop kind in rule.kinds -> seconds += point.metrics.get("phase.{kind}") ?? Float{0.0}
         loop kind in rule.exclude -> seconds -= point.metrics.get("phase.{kind}") ?? Float{0.0}
@@ -617,7 +617,7 @@ check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [
 // Every phase's wall at TARGET_LINES from the largest passing rung and the
 // fitted exponent (never below 1): a projection, not a measurement.
 project: fn(series: Series, judged: Judged) -> Projection? Never! {
-    points: series.points.filter(point -> point.ok)
+    points: series.points.filter(fn(point) { point.ok })
     if points.len() == 0 -> return None
     top: points[points.len() - 1]
     scale: Float{TARGET_LINES} / Float{top.code_lines}
@@ -658,7 +658,7 @@ expand: fn(template: String, values: [(key: String, value: String)]) -> String E
         }
         missing: "Unknown command placeholder: {{{key}}}"
         rest: piece.removeprefix("{key}}}")
-        found: values.find(pair -> pair.key == key) ?? return Err(missing)
+        found: values.find(fn(pair) { pair.key == key }) ?? return Err(missing)
         out = "{out}{quote(found.value)}{rest}"
     }
     Ok(out)
@@ -750,7 +750,7 @@ phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
         event: json.parse(line) ?? next
         events.push(event)
     }
-    offset_ns: if events.find(event -> shown(event, "name") == "trace.start") == .Val(origin) -> (number(origin.get("args") ?? Dyn.Null, "unix_ms") - Float{spawn_unix_ms}) * Float{1000000.0} else -> Float{0.0}
+    offset_ns: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(origin) -> (number(origin.get("args") ?? Dyn.Null, "unix_ms") - Float{spawn_unix_ms}) * Float{1000000.0} else -> Float{0.0}
     slots := [String: Int]{}
     open := [(kind: String, starts: [Float])]{}
     kinds := [String: Int]{}
@@ -784,11 +784,11 @@ phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
         }
         spans[kinds[kind]].push(Span{start: begun, end: t, items: items})
     }
-    unclosed: open.filter(entry -> entry.starts.len() > 0).map(entry -> entry.kind.copy())
+    unclosed: open.filter(fn(entry) { entry.starts.len() > 0 }).map(fn(entry) { entry.kind.copy() })
     phases := [String: PhaseRow]{}
     loop (kind, at) in kinds {
         list := spans[at].copy()
-        list.sort_by((a, b) -> a.start <=> b.start)
+        list.sort_by(fn(a, b) { a.start <=> b.start })
         wall := Float{0.0}
         items := Float?{None}
         low := list[0].start
@@ -882,7 +882,7 @@ measure: fn(config: Config, compiler: Compiler, built: Corpus, n: Int, dir: Stri
 
 // No declared contract: jet_scaling_corpora's `shapes` declares none either,
 // so its callers (all of them return Err) carry whatever it may fail with.
-shape_named: fn(name: String) -> Shape? { shapes().find(shape -> shape.name == name) }
+shape_named: fn(name: String) -> Shape? { shapes().find(fn(shape) { shape.name == name }) }
 
 ladder_for: fn(config: Config, shape: Shape) -> [Int] Never! {
     if config.ladders.get(shape.name) == .Val(ladder) -> return ladder.copy()
@@ -952,8 +952,8 @@ summary: fn(point: Point) -> String Never! {
     loop (key, value) in point.metrics {
         if key.starts_with("phase.") -> phases.push((name: key.removeprefix("phase."), seconds: value))
     }
-    phases.sort_by((a, b) -> b.seconds <=> a.seconds)
-    top: phases.take(3).map(phase -> "{phase.name} {fmt.decimal(phase.seconds, 2)}s").join(", ")
+    phases.sort_by(fn(a, b) { b.seconds <=> a.seconds })
+    top: phases.take(3).map(fn(phase) { "{phase.name} {fmt.decimal(phase.seconds, 2)}s" }).join(", ")
     wall: point.metrics.get("wall_seconds") ?? Float{0.0}
     rss: (point.metrics.get("peak_rss_kb") ?? Float{0.0}) / Float{1048576.0}
     state: if point.ok -> "ok" else -> "FAILED"
@@ -975,12 +975,12 @@ measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: S
     pending := [Int]{}
     if receipt.series[at].baseline == None -> pending.push(1)
     loop n in ladder {
-        if receipt.series[at].points.find(point -> point.n == n) == None -> pending.push(n)
+        if receipt.series[at].points.find(fn(point) { point.n == n }) == None -> pending.push(n)
     }
     running := [Started]{}
     finished := [Bool]{}
     loop running.len() < pending.len() || finished.contains(false) {
-        if running.len() < pending.len() && finished.filter(flag -> !flag).len() < config.jobs {
+        if running.len() < pending.len() && finished.filter(fn(flag) { !flag }).len() < config.jobs {
             n: pending[running.len()]
             running.push(start(prepare(config, compiler, corpus(shape, n, config.seed, layout), n, where(config, compiler, shape.name, layout, "{n}"), false)))
             finished.push(false)
@@ -1004,7 +1004,7 @@ measure_counters: fn(config: Config, compiler: Compiler, shape: Shape, layout: S
             receipt.series[at].baseline = Val(point)
         } else {
             receipt.series[at].points.push(point)
-            receipt.series[at].points.sort_by((a, b) -> (ladder.index_of(a.n) ?? -1) <=> (ladder.index_of(b.n) ?? -1))
+            receipt.series[at].points.sort_by(fn(a, b) { (ladder.index_of(a.n) ?? -1) <=> (ladder.index_of(b.n) ?? -1) })
         }
         save(config, receipt)
         log(config, text)
@@ -1025,7 +1025,7 @@ measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: Str
     ladder: receipt.series[at].ladder.copy()
     loop n in ladder {
         wall := Float{0.0}
-        if receipt.series[at].points.find(point -> point.n == n) == .Val(point) {
+        if receipt.series[at].points.find(fn(point) { point.n == n }) == .Val(point) {
             wall = point.metrics.get("wall_seconds") ?? Float{0.0}
         } else {
             built: corpus(shape, n, config.seed, layout)
@@ -1051,7 +1051,7 @@ measure_timing: fn(config: Config, compiler: Compiler, shape: Shape, layout: Str
 // source.
 profile_top: fn(config: Config, compiler: Compiler, shape: Shape, layout: String, n: Int, receipt: &Receipt, at: Int) -> ProfileResult Err! {
     dir: where(config, compiler, shape.name, layout, "{n}-profile")
-    phases: combinatorics.unique(receipt.series[at].failures.filter(failure -> failure.kind == "growth").map(failure -> (failure.phase ?? "").copy()))
+    phases: combinatorics.unique(receipt.series[at].failures.filter(fn(failure) { failure.kind == "growth" }).map(fn(failure) { (failure.phase ?? "").copy() }))
     if receipt.series[at].profile_point == None {
         receipt.series[at].profile_point = Val(measure(config, compiler, corpus(shape, n, config.seed, layout), n, dir, true))
         save(config, receipt)
@@ -1099,20 +1099,20 @@ run_gate: fn(config: Config) -> Receipt Err! {
                 if config.mode == "counters" -> measure_counters(config, compiler, shape, layout, label, receipt, at) else -> measure_timing(config, compiler, shape, layout, label, receipt, at)
                 judged: judge(receipt.series[at])
                 failures := judged.failures.copy()
-                failures.extend(receipt.series[at].baseline.map(point -> if point.ok -> [Failure]{} else -> [Failure]{point_failure(point, "baseline")}) ?? [Failure]{})
-                passing: receipt.series[at].points.filter(point -> point.ok)
+                failures.extend(receipt.series[at].baseline.map(fn(point) { if point.ok -> [Failure]{} else -> [Failure]{point_failure(point, "baseline")} }) ?? [Failure]{})
+                passing: receipt.series[at].points.filter(fn(point) { point.ok })
                 if config.mode != "counters" && passing.len() > 0 {
                     checked: check_floors(passing[passing.len() - 1], limits)
                     receipt.series[at].floors = Val(checked.rows.copy())
                     failures.extend(checked.failures.copy())
                 }
                 if receipt.series[at].truncated == .Val(truncated) -> failures.push(Failure{kind: "truncated", metric: None, phase: None, counter: None, ratio: None, exponent: None, text: truncated.copy()})
-                failures.extend(receipt.series[at].points.filter(point -> !point.ok).map(point -> point_failure(point, "N={point.n}")))
+                failures.extend(receipt.series[at].points.filter(fn(point) { !point.ok }).map(fn(point) { point_failure(point, "N={point.n}") }))
                 if config.mode != "counters" && shape.kind == .Domain -> receipt.series[at].projection = project(receipt.series[at], judged)
                 receipt.series[at].metrics = judged.metrics.copy()
                 receipt.series[at].failures = failures
                 save(config, receipt)
-                growing: receipt.series[at].failures.filter(failure -> failure.kind == "growth").len() > 0
+                growing: receipt.series[at].failures.filter(fn(failure) { failure.kind == "growth" }).len() > 0
                 if config.mode != "counters" && config.profile_top && growing && passing.len() > 0 && receipt.series[at].profile == None {
                     receipt.series[at].profile = Val(profile_top(config, compiler, shape, layout, passing[passing.len() - 1].n, receipt, at))
                 }
@@ -1162,7 +1162,7 @@ options: fn(args: [String], repo: String) -> Config Err! {
         }
         if flag == "--stress" || flag == "--domains" {
             wanted: if flag == "--stress" -> ShapeKind.Stress else -> ShapeKind.Domain
-            config.shapes.extend(known.filter(shape -> shape.kind == wanted).map(shape -> shape.name.copy()))
+            config.shapes.extend(known.filter(fn(shape) { shape.kind == wanted }).map(fn(shape) { shape.name.copy() }))
             next
         }
         if flag == "--profile" {
@@ -1227,8 +1227,8 @@ options: fn(args: [String], repo: String) -> Config Err! {
         }
     }
     if config.compilers.len() == 0 -> return Err("At least one --compiler is required")
-    if combinatorics.unique(config.compilers.map(compiler -> compiler.label.copy())).len() < config.compilers.len() -> return Err("Compiler labels must be unique")
-    if config.shapes.len() == 0 -> config.shapes = known.map(shape -> shape.name.copy())
+    if combinatorics.unique(config.compilers.map(fn(compiler) { compiler.label.copy() })).len() < config.compilers.len() -> return Err("Compiler labels must be unique")
+    if config.shapes.len() == 0 -> config.shapes = known.map(fn(shape) { shape.name.copy() })
     config.shapes = combinatorics.unique(config.shapes)
     if config.layouts.len() == 0 -> config.layouts = layouts()
     config.layouts = combinatorics.unique(config.layouts)

@@ -16,12 +16,12 @@ map_list: fn<T, U>(xs: [T], f: fn(T) -> U) -> [U] {
 
 run: fn() {
     readings: [Reading]{{celsius: 10}, {celsius: 25}}
-    doubled: map_list(readings, (r: Reading) -> r.celsius * 2)
+    doubled: map_list(readings, fn(r: Reading) { r.celsius * 2 })
     print(doubled.len())
     print(doubled[1])
-    labels: map_list([1, 2, 3], (n: Int) -> "n{n}")
+    labels: map_list([1, 2, 3], fn(n: Int) { "n{n}" })
     print(labels[2])
-    warm: map_list(readings, (r: Reading) -> r.celsius > 20)
+    warm: map_list(readings, fn(r: Reading) { r.celsius > 20 })
     print(warm[0])
     print(warm[1])
 }

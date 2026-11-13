@@ -875,7 +875,6 @@ parser_shared_cell: fn(state: &JetParserState, operand: Expr, operand_span: Span
 }
 
 parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
-    if parser_expression_form_ahead(state, allow_struct_lit) -> return parser_parse_expression_form(state, depth + 1)
     token: parser_current(state)
     kind: token.kind
     word: if kind == TOKEN_IDENT -> parser_value(state, token) else -> ""
@@ -1353,7 +1352,6 @@ parser_parse_selector_fill: fn(state: &JetParserState, head: String) -> String {
 }
 
 parser_parse_parenthesized: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
-    if parser_looks_like_lambda(state) -> return parser_parse_lambda(state, depth + 1, [NamedSpan]{})
     open: parser_bump(state)
     if parser_current_kind(state) == TOKEN_RPAREN {
         close: parser_bump(state)
@@ -1393,104 +1391,6 @@ parser_parse_parenthesized: fn(state: &JetParserState, depth: Int) -> ParsedExpr
     ParsedExpr{expr: Expr.TupleLit{fields: fields, span: span, ty: None, id: parser_node_id(state)}, span: span}
 }
 
-// S46: `(` … `)` opens a lambda only when the contents have parameter shape
-// and a lambda interface or arrow follows; `(a > b) ->` stays a condition.
-parser_looks_like_lambda: fn(state: &JetParserState) -> Bool {
-    if parser_current_kind(state) != TOKEN_LPAREN -> return false
-    index := parser_next_code_index(state, state.position + 1)
-    if index < 0 -> return false
-    if state.tokens[index].kind == TOKEN_RPAREN -> return parser_lambda_tail_starts_at(state, index + 1)
-    loop {
-        if index < 0 || state.tokens[index].kind != TOKEN_IDENT -> return false
-        index = parser_next_code_index(state, index + 1)
-        if index < 0 -> return false
-        if state.tokens[index].kind == TOKEN_COLON {
-            index += 1
-            type_start: index
-            parens := 0
-            brackets := 0
-            braces := 0
-            angles := 0
-            loop index < state.tokens.len() {
-                kind: state.tokens[index].kind
-                if parens == 0 && brackets == 0 && braces == 0 && angles == 0 && (kind == TOKEN_COMMA || kind == TOKEN_RPAREN) -> break
-                if {
-                    kind == TOKEN_LPAREN -> parens += 1
-                    kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
-                    kind == TOKEN_LBRACKET -> brackets += 1
-                    kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
-                    kind == TOKEN_LBRACE -> braces += 1
-                    kind == TOKEN_RBRACE && braces > 0 -> braces -= 1
-                    kind == TOKEN_LT -> angles += 1
-                    kind == TOKEN_GT && angles > 0 -> angles -= 1
-                    kind == TOKEN_SHR && angles > 0 -> angles = if angles > 2 -> angles - 2 else -> 0
-                    else -> {}
-                }
-                index += 1
-            }
-            if index == type_start || index >= state.tokens.len() -> return false
-        }
-        kind: state.tokens[index].kind
-        if kind == TOKEN_RPAREN -> return parser_lambda_tail_starts_at(state, index + 1)
-        if kind != TOKEN_COMMA -> return false
-        index = parser_next_code_index(state, index + 1)
-    }
-    false
-}
-
-// Probe retired types only to select a teaching diagnostic;
-// they never become part of the lambda's interface.
-parser_lambda_tail_starts_at: fn(state: &JetParserState, index: Int) -> Bool {
-    saved_position: state.position
-    saved_diagnostics: state.diagnostics.len()
-    saved_blocks: state.block_spans.len()
-    saved_else_arms: state.else_arms.len()
-    saved_type_gt: state.pending_type_gt
-    saved_type_gt_span: Span{start: state.pending_type_gt_span.start, end: state.pending_type_gt_span.end}
-    saved_semicolon: state.explicit_semicolon_reported
-    state.position = index
-    state.pending_type_gt = false
-    if !parser_func_effect_starts_here(state) && !parser_at_unified_arrow(state) && (parser_type_starts_here(state) || parser_current_kind(state) == TOKEN_BANG) -> _ := parser_parse_type(state, 0)
-    effects: parser_parse_opt_func_effects(state)
-    failed: parser_aborting(state) && state.abort_mark > saved_diagnostics
-    starts: !failed && (effects.effects != None || effects.via != None || parser_at_unified_arrow(state))
-    parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
-    state.pending_type_gt = saved_type_gt
-    state.pending_type_gt_span = saved_type_gt_span
-    state.explicit_semicolon_reported = saved_semicolon
-    starts
-}
-
-parser_lambda_interface_error: fn(state: &JetParserState, span: Span) {
-    parser_add_fatal_code(state, "E0399", span, "a lambda cannot write a return or error type", "a lambda's arrow introduces its body; return and error types come from the expected callable type", "remove the type; pass the lambda to a typed parameter or slot, or use a named `fn` for a full interface")
-}
-
-parser_parse_lambda: fn(state: &JetParserState, depth: Int, take_names: [NamedSpan]) -> ParsedExpr {
-    open: parser_expect(state, TOKEN_LPAREN, "`(` before lambda parameters")
-    params: parser_parse_lambda_params(state, depth)
-    close: parser_expect(state, TOKEN_RPAREN, "`)` after lambda parameters")
-    if !parser_func_effect_starts_here(state) && !parser_at_unified_arrow(state) {
-        interface_span: parser_current(state).span
-        parser_lambda_interface_error(state, interface_span)
-    }
-    effects: parser_parse_opt_func_effects(state)
-    if effects.via == .Val(via) {
-        parser_add_fatal_code(state, "E0119", via.span, "a lambda effect row cannot publish `via`", "a lambda stores a concrete effect row as part of its callable interface", "write the effects directly, for example `-[Net]>`")
-    }
-    if effects.effects == None -> parser_expect_unified_arrow(state, "after the lambda interface")
-    body: parser_parse_lambda_arrow_body(state, depth, close.span.end)
-    span := Span{start: open.span.start, end: body.end}
-    lambda := Lambda{
-        take_names: take_names,
-        params: params,
-        effects: effects.effects,
-        body: body.body,
-        span: span,
-        meta: ast_empty_lambda_meta(),
-    }
-    ParsedExpr{expr: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}, span: span}
-}
-
 // The parameters after a lambda's `(`, up to (not including) its `)`: each a
 // name with an optional `: Type`.
 parser_parse_lambda_params: fn(state: &JetParserState, depth: Int) -> [LambdaParam] {
@@ -1504,7 +1404,7 @@ parser_parse_lambda_params: fn(state: &JetParserState, depth: Int) -> [LambdaPar
         if parser_current_kind(state) == TOKEN_COLON {
             parser_bump(state)
             // A written type may mark a written `&` or taken `&&` input, as a
-            // function type's parameter does: `(buf: &[Int]) -> …`.
+            // function type's parameter does: `fn(buf: &[Int]) { … }`.
             mark_kind: parser_current_kind(state)
             if mark_kind == TOKEN_AMP || mark_kind == TOKEN_AND_AND {
                 parser_bump(state)
@@ -1561,50 +1461,6 @@ parser_parse_fn_lambda: fn(state: &JetParserState, depth: Int) -> ParsedExpr {
         result: signature.return_type,
     }
     ParsedExpr{expr: Expr.Lambda{lambda: lambda, id: parser_node_id(state)}, span: span}
-}
-
-ParsedLambdaBody: struct {
-    body: LambdaBody
-    end: Int
-}
-
-// S46: the body after a lambda's arrow, `-> expr` or `-> {{ … }}`. A single
-// assignment needs no braces: `a -> a.balance -= n` is the one-statement form
-// of `a -> {{ a.balance -= n }}`. `fallback_end` bounds the lambda's span.
-parser_parse_lambda_arrow_body: fn(state: &JetParserState, depth: Int, fallback_end: Int) -> ParsedLambdaBody {
-    if parser_current_kind(state) == TOKEN_LBRACE {
-        // A block lambda keeps one unadorned final value.
-        block: parser_parse_callable_body(state, true)
-        return ParsedLambdaBody{body: LambdaBody.Block{body: block.statements}, end: block.span.end}
-    }
-    body_start: parser_current(state)
-    typed_body: body_start.kind == TOKEN_IDENT && parser_pascal_name(parser_value(state, body_start))
-    struct_body: typed_body && parser_kind_at(state, 1) == TOKEN_LBRACE
-    error_suffix: parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_BANG
-    if typed_body && (parser_kind_at(state, 1) == TOKEN_BANG || error_suffix) -> parser_lambda_interface_error(state, body_start.span)
-    saved_diagnostics: state.diagnostics.len()
-    body_start_position: state.position
-    // An arrow body owns its own pipe: `line -> line |> f(<>)`.
-    state.pipe_owner_depths.push(-1)
-    value: parser_parse_expression(state, 1, depth + 1)
-    _ := state.pipe_owner_depths.pop()
-    if struct_body && parser_aborting(state) && state.abort_mark > saved_diagnostics {
-        loop state.diagnostics.len() > saved_diagnostics -> _ := state.diagnostics.pop()
-        state.abort_mark = 0
-        // `Type { statements }` is a return type before a block body: resume
-        // statement recovery at the type so it skips the whole braced body.
-        state.position = body_start_position
-        parser_lambda_interface_error(state, body_start.span)
-    }
-    if parser_is_assignment_operator(parser_current_kind(state)) {
-        operator: parser_bump(state)
-        right: parser_parse_expression(state, 1, depth + 1)
-        target: parser_expression_lvalue(state, value.expr, value.span, operator)
-        end: if right.span.end > fallback_end -> right.span.end else -> fallback_end
-        return ParsedLambdaBody{body: LambdaBody.Block{body: [Stmt]{Stmt.Assign{target: target.move(), op: parser_assignment_binop(operator.kind), op_span: operator.span, value: right.expr}}}, end: end}
-    }
-    end: if value.span.end > fallback_end -> value.span.end else -> fallback_end
-    ParsedLambdaBody{body: LambdaBody.Expr{value: value.expr}, end: end}
 }
 
 // After `.`, `[a, b, c]` lists member names that hang off the
@@ -1970,7 +1826,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 }
             }
             generated_block: parser_parse_generate_template_arg(state, method_name, args)
-            // Code arguments are `() -> { … }` lambdas inside
+            // Code arguments are `fn() { … }` lambdas inside
             // the parentheses; a bare `{ }` after a direct call is E0335.
             optional_call: if expression.expr == {
                 .OptField(_, _, _, _, _, _) -> true
@@ -1984,7 +1840,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                     callee_text = parser_source_slice(state, expression.span.start, paren_start)
                 }
                 brace_span: parser_current(state).span
-                parser_add_fatal_code(state, "E0335", brace_span, "trailing blocks are gone — pass code with `() ->`", "a bare `{{ }}` after a call used to fill one last zero-parameter function argument; that sugar is retired", "write `{callee_text}(…, () -> {{ … }})` — put the block inside the parentheses as `() -> {{ … }}`")
+                parser_add_fatal_code(state, "E0335", brace_span, "trailing blocks are gone — pass code with `fn() {{ … }}`", "a bare `{{ }}` after a call used to fill one last zero-parameter function argument; that sugar is retired", "write `{callee_text}(…, fn() {{ … }})` — put the block inside the parentheses as `fn() {{ … }}`")
                 break
             }
             close_span: parser_current(state)
@@ -2040,7 +1896,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             }
             if bad_block {
                 bad_span: parser_current(state).span
-                parser_add_fatal_code(state, "E0335", bad_span, "trailing blocks are only valid on direct calls", "a bare `{{ }}` here is not a call argument; code arguments use `() -> {{ … }}` inside a call's parentheses", "write `callee(() -> {{ … }})` on a call")
+                parser_add_fatal_code(state, "E0335", bad_span, "trailing blocks are only valid on direct calls", "a bare `{{ }}` here is not a call argument; code arguments use `fn() {{ … }}` inside a call's parentheses", "write `callee(fn() {{ … }})` on a call")
                 break
             }
             if alias.len() == 0 -> break

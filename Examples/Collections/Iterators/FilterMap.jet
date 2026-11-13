@@ -9,7 +9,7 @@ parse_int: fn(s: String) -> Int Err! {
 run: fn() {
     // filter_map: keeps ok, drops err. Returns lazy Iter; materialize to print.
     words: [String]{"1", "two", "3", "four", "5"}
-    nums: words.filter_map((w: String) -> parse_int(w))
+    nums: words.filter_map(fn(w: String) { parse_int(w) })
     print(nums.to_list())
     // map projects callback failures around the whole collection. An explicit
     // result list is the input shape consumed by try_collect.
@@ -32,8 +32,8 @@ parse_default: fn(s: String) -> Int { return Int.parse(s) ?? panic("bad integer"
 keep_default: fn(s: String) -> Bool { return parse_default(s) > 1 }
 
 implicit_failure_collections_lesson: fn() {
-    nums: ["1", "2", "3"].map(s -> parse_default(s))
-    selected: ["1", "2", "3"].filter(s -> keep_default(s))
+    nums: ["1", "2", "3"].map(fn(s) { parse_default(s) })
+    selected: ["1", "2", "3"].filter(fn(s) { keep_default(s) })
     print(nums)
     print(selected)
 }

@@ -84,7 +84,7 @@ ShardPlan: struct {
 
 assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := rows
-    ordered.sort_by((left: WeightedRow, right: WeightedRow) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    ordered.sort_by(fn(left: WeightedRow, right: WeightedRow) { (right.weight <=> left.weight).then(left.item <=> right.item) })
     loads := [Int]{}
     loop _ in 0..<shard_count -> loads.push(0)
     selected := [String]{}

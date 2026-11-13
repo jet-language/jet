@@ -398,7 +398,7 @@ CcProjectInputWalk: struct {
 
     visit: fn(&self, directory: String) CcProjectInputError! -[FS]> {
         entries := files.list_dir(directory) ?? return Err(CcProjectInputError.unreadable("read project inputs in `{directory}`: {err}"))
-        entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
+        entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
         loop entry in entries {
             path: entry.path
             relative_parts: cli_cc_path_strip_prefix(path, self.root) ?? return Err(CcProjectInputError.unreadable("project input `{path}` escaped the project root"))

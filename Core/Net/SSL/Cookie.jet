@@ -124,11 +124,11 @@ ssl_cookie_check_locked: fn(ctx: Shared<SSLCookieContext>, cookie: [U8], cli_id:
 /// The configuration's cookie writer over a shared context: C's
 /// mbedtls_ssl_cookie_write with the context as p_cookie.
 ssl_cookie_write_cb: fn(ctx: Shared<SSLCookieContext>) -> ssldefs.SSLCookieWrite Never! {
-    ssldefs.SSLCookieWrite{call: (cli_id: [U8]) -> ssl_cookie_write_locked(ctx, cli_id)}
+    ssldefs.SSLCookieWrite{call: fn(cli_id: [U8]) { ssl_cookie_write_locked(ctx, cli_id) }}
 }
 
 /// The configuration's cookie check over a shared context: C's
 /// mbedtls_ssl_cookie_check with the context as p_cookie.
 ssl_cookie_check_cb: fn(ctx: Shared<SSLCookieContext>) -> ssldefs.SSLCookieCheck Never! {
-    ssldefs.SSLCookieCheck{call: (cookie: [U8], cli_id: [U8]) -> ssl_cookie_check_locked(ctx, cookie, cli_id)}
+    ssldefs.SSLCookieCheck{call: fn(cookie: [U8], cli_id: [U8]) { ssl_cookie_check_locked(ctx, cookie, cli_id) }}
 }

@@ -82,7 +82,7 @@ two_digits: fn(value: Int) -> String Never! { if value < 10 -> "0{value}" else -
 // (which names the shard as its arguments spelled it).
 weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := items
-    ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    ordered.sort_by(fn(left: WeightedItem, right: WeightedItem) { (right.weight <=> left.weight).then(left.item <=> right.item) })
     loads := [Int]{}
     loop _ in 0..<shard_count -> loads.push(0)
     selected := [String]{}

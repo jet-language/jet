@@ -9,7 +9,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: listener.local_addr() ?? panic("address")
     mux: server.mux()
-    mux.get("/", (req: HTTPRequest) -> Ok(server.response(200, "served")))
+    mux.get("/", fn(req: HTTPRequest) { Ok(server.response(200, "served")) })
     t: task {
         server.serve_once_listener(listener, mux)
     }

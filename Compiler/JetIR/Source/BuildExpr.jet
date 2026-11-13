@@ -136,9 +136,9 @@ ir_mutable_captures: fn(p: IRProgram, b: IRBuilder, body: [Int]) -> [String] Nev
     loop statement in body {
         kind: ir_body_stmt(p, b, statement)
         if b.row >= 0 {
-            body_each_stmt_child(p.functions[b.row].tree, kind, (expression: Int) -> ir_collect_mutable_captures(p, b, expression, names))
+            body_each_stmt_child(p.functions[b.row].tree, kind, fn(expression: Int) { ir_collect_mutable_captures(p, b, expression, names) })
         } else {
-            body_each_stmt_child(b.made, kind, (expression: Int) -> ir_collect_mutable_captures(p, b, expression, names))
+            body_each_stmt_child(b.made, kind, fn(expression: Int) { ir_collect_mutable_captures(p, b, expression, names) })
         }
     }
     names
@@ -164,9 +164,9 @@ ir_collect_mutable_captures: fn(p: IRProgram, b: IRBuilder, expression: Int, nam
         }
     }
     if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_collect_mutable_captures(p, b, child, names))
+        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_collect_mutable_captures(p, b, child, names) })
     } else {
-        body_each_expr_child(b.made, node, (child: Int) -> ir_collect_mutable_captures(p, b, child, names))
+        body_each_expr_child(b.made, node, fn(child: Int) { ir_collect_mutable_captures(p, b, child, names) })
     }
 }
 
@@ -3417,9 +3417,9 @@ ir_note_slot_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, slot: Int,
         }
     }
     if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_note_slot_mention(p, b, child, slot, found))
+        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_note_slot_mention(p, b, child, slot, found) })
     } else {
-        body_each_expr_child(b.made, node, (child: Int) -> ir_note_slot_mention(p, b, child, slot, found))
+        body_each_expr_child(b.made, node, fn(child: Int) { ir_note_slot_mention(p, b, child, slot, found) })
     }
 }
 
@@ -3430,9 +3430,9 @@ ir_stmts_name: fn(p: IRProgram, b: IRBuilder, body: [Int], id: SymbolID) -> Bool
     loop statement in body {
         kind: ir_body_stmt(p, b, statement)
         if b.row >= 0 {
-            body_each_stmt_child(p.functions[b.row].tree, kind, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
+            body_each_stmt_child(p.functions[b.row].tree, kind, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
         } else {
-            body_each_stmt_child(b.made, kind, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
+            body_each_stmt_child(b.made, kind, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
         }
         if found -> return true
     }
@@ -3449,9 +3449,9 @@ ir_note_binder_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, id: Symb
         }
     }
     if b.row >= 0 {
-        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
+        body_each_expr_child(p.functions[b.row].tree, node, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
     } else {
-        body_each_expr_child(b.made, node, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
+        body_each_expr_child(b.made, node, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
     }
 }
 
@@ -6049,8 +6049,8 @@ ir_fallback_reads_error: fn(p: IRProgram, b: IRBuilder, fallback: BodyOrFallback
         if local.symbol_id == .Val(id) {
             found := false
             if {
-                b.row >= 0 -> body_each_or_fallback_child(p.functions[b.row].tree, fallback, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
-                else -> body_each_or_fallback_child(b.made, fallback, (child: Int) -> ir_note_binder_mention(p, b, child, id, found))
+                b.row >= 0 -> body_each_or_fallback_child(p.functions[b.row].tree, fallback, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
+                else -> body_each_or_fallback_child(b.made, fallback, fn(child: Int) { ir_note_binder_mention(p, b, child, id, found) })
             }
             return found
         }

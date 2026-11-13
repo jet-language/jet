@@ -50,7 +50,7 @@ use {
     order_router: fn() -> WebRouter? {
         fields: [WebRouterField]{WebRouterField{name: "id", value: "Int"}}
         search: [WebRouterField]{WebRouterField{name: "limit", value: "Int"}}
-        built: router.route(router.new(), "/orders/:id", fields, search, (navigation: WebNavigation) -> "order {navigation.path}") ?? return None
+        built: router.route(router.new(), "/orders/:id", fields, search, fn(navigation: WebNavigation) { "order {navigation.path}" }) ?? return None
         return Val(built)
     }
 
@@ -70,7 +70,7 @@ use {
     route_report: fn(url: String) -> String {
         routes := order_router() ?? return "router unavailable"
         navigation: router.preload(routes, url) ?? return "navigation failed"
-        params: navigation.params.map(field -> "{field.name}={field.value}").join(",")
+        params: navigation.params.map(fn(field) { "{field.name}={field.value}" }).join(",")
         return "route={navigation.name} params={params} status={router.current(routes).status} cache={router.cache_show(routes)}"
     }
 

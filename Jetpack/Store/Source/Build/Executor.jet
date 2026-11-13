@@ -133,7 +133,7 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
                     .Err(error) -> return Err(error)
                 }
             }
-            completed.sort_by((left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) -> left.action.id <=> right.action.id)
+            completed.sort_by(fn(left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) { left.action.id <=> right.action.id })
             loop row in completed -> outcomes.push(row)
         }
     }

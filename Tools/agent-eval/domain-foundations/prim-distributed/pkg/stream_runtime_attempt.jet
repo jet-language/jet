@@ -4,7 +4,7 @@ source: fn() -> Stream<Int> {
 }
 
 run: fn() {
-    timed: source().with_event_time((value: Int) -> value)
+    timed: source().with_event_time(fn(value: Int) { value })
     advanced: timed.watermark(5)
     recovered: advanced.checkpoint("state")
     print(recovered)

@@ -65,7 +65,7 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         unit_inputs.push({name: subject.copy(), digest: digest})
         checks.push(build_session_compiler_node("check", subject, unit_inputs))
     }
-    checks.sort_by((left: BuildGraphNode, right: BuildGraphNode) -> (left.subject <=> right.subject).then(left.key <=> right.key))
+    checks.sort_by(fn(left: BuildGraphNode, right: BuildGraphNode) { (left.subject <=> right.subject).then(left.key <=> right.key) })
     outputs := [String]{}
     loop name in request.build_output_names -> build_session_append_unique(outputs, name)
     if outputs.len() == 0 {

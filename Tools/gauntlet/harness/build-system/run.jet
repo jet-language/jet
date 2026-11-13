@@ -174,10 +174,10 @@ last_line: fn(step: Step) -> String {
 }
 
 machine: fn() -> Machine {
-    model: (files.read("/proc/cpuinfo") ?? "").split("\n").to_list().find(line -> line.starts_with("model name"))
-    total: (files.read("/proc/meminfo") ?? "").split("\n").to_list().find(line -> line.starts_with("MemTotal:"))
-    kilobytes: Int.parse(total.map(line -> line.remove_prefix("MemTotal:").remove_suffix("kB").trim()) ?? "") ?? 0
-    Machine{cpu_model: model.map(line -> line.partition(":").tail.trim()) ?? "unknown", threads: sys.cpu_count(), memory_bytes: kilobytes * 1024, kernel: sys.release(), nix: run_step(process.cmd(["nix", "--version"])).output.trim()}
+    model: (files.read("/proc/cpuinfo") ?? "").split("\n").to_list().find(fn(line) { line.starts_with("model name") })
+    total: (files.read("/proc/meminfo") ?? "").split("\n").to_list().find(fn(line) { line.starts_with("MemTotal:") })
+    kilobytes: Int.parse(total.map(fn(line) { line.remove_prefix("MemTotal:").remove_suffix("kB").trim() }) ?? "") ?? 0
+    Machine{cpu_model: model.map(fn(line) { line.partition(":").tail.trim() }) ?? "unknown", threads: sys.cpu_count(), memory_bytes: kilobytes * 1024, kernel: sys.release(), nix: run_step(process.cmd(["nix", "--version"])).output.trim()}
 }
 
 // The samples `values` summarized; the median of an even count is the mean
@@ -347,7 +347,7 @@ open_workspace: fn(work_dir: String, jet: String, repo: String, cells: [Dyn]) ->
         repo: repo,
         nix_out: "",
         edits: 0,
-        rows: cells.map(cell -> Row{id: text_or_empty(cell, "id"), target: dyn_at(cell, "target"), jet: [], nix: []})
+        rows: cells.map(fn(cell) { Row{id: text_or_empty(cell, "id"), target: dyn_at(cell, "target"), jet: [], nix: []} })
     })
 }
 
@@ -375,7 +375,7 @@ measure_build_system: fn(axis: Dyn, options: Options, work_dir: String, repo: St
         verdict: if ratio == .Val(value) -> verdict_of(row.target, value) else -> "unmeasured"
         measured.push(CellReceipt{id: row.id, target: row.target, status: if complete -> "measured" else -> "unmeasured", jet: jet, nix: nix, ratio: ratio, verdict: verdict})
     }
-    passed: failures.len() == 0 && measured.all(cell -> cell.verdict == "win")
+    passed: failures.len() == 0 && measured.all(fn(cell) { cell.verdict == "win" })
     Ok(Receipt{
         schema: BUILD_SYSTEM_RECEIPT_SCHEMA,
         started_at: started_at,

@@ -96,7 +96,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 }
                 units.push(JetCLIStructUnit{fact: fact, source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
-            units.sort_by((left: JetCLIStructUnit, right: JetCLIStructUnit) -> left.fact.span.start <=> right.fact.span.start)
+            units.sort_by(fn(left: JetCLIStructUnit, right: JetCLIStructUnit) { left.fact.span.start <=> right.fact.span.start })
             cursor := 0
             loop row in 0..<units.len() {
                 units[row].leading = if cursor <= units[row].fact.span.start -> semindex_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
@@ -219,7 +219,7 @@ jet_cli_struct_diff: fn(before: JetCLIStructDocument, after: JetCLIStructDocumen
     loop (row, unit) in after.units {
         if !used[row] -> changes.push(jet_cli_struct_change(0, "added", unit, Val(unit), None))
     }
-    changes.sort_by((left: JetCLIStructChange, right: JetCLIStructChange) -> (left.stable_id <=> right.stable_id).then(left.rank <=> right.rank))
+    changes.sort_by(fn(left: JetCLIStructChange, right: JetCLIStructChange) { (left.stable_id <=> right.stable_id).then(left.rank <=> right.rank) })
     changes
 }
 

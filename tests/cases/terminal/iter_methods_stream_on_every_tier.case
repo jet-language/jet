@@ -24,137 +24,137 @@ limit: time=300
 exit: 0
 stdout: ~ "10 passed, 0 failed, 0 skipped" # the summary line; the per-test lines and timings vary
 stdout: ~ "find stops pulling at the first match: pass" # the pull-count test is among the passes
-step count_where_o0: jet run --optimize=none -e 'input.count_where((l) -> l.contains("error"))' log.txt
+step count_where_o0: jet run --optimize=none -e 'input.count_where(fn(l) { l.contains("error") })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "2\n"
-step count_where_o1: jet run --optimize=basic -e 'input.count_where((l) -> l.contains("error"))' log.txt
+step count_where_o1: jet run --optimize=basic -e 'input.count_where(fn(l) { l.contains("error") })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "2\n"
-step count_where_o2: jet run --optimize=full -e 'input.count_where((l) -> l.contains("error"))' log.txt
+step count_where_o2: jet run --optimize=full -e 'input.count_where(fn(l) { l.contains("error") })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "2\n"
-step find_o0: jet run --optimize=none -e 'input.find((l) -> l.contains("ok")) ?? ""' log.txt
+step find_o0: jet run --optimize=none -e 'input.find(fn(l) { l.contains("ok") }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step find_o1: jet run --optimize=basic -e 'input.find((l) -> l.contains("ok")) ?? ""' log.txt
+step find_o1: jet run --optimize=basic -e 'input.find(fn(l) { l.contains("ok") }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step find_o2: jet run --optimize=full -e 'input.find((l) -> l.contains("ok")) ?? ""' log.txt
+step find_o2: jet run --optimize=full -e 'input.find(fn(l) { l.contains("ok") }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step each_o0: jet run --optimize=none -e 'input.each((l) -> print(l.len()))' log.txt
+step each_o0: jet run --optimize=none -e 'input.each(fn(l) { print(l.len()) })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "9\n6\n9\n8\n"
-step each_o1: jet run --optimize=basic -e 'input.each((l) -> print(l.len()))' log.txt
+step each_o1: jet run --optimize=basic -e 'input.each(fn(l) { print(l.len()) })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "9\n6\n9\n8\n"
-step each_o2: jet run --optimize=full -e 'input.each((l) -> print(l.len()))' log.txt
+step each_o2: jet run --optimize=full -e 'input.each(fn(l) { print(l.len()) })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "9\n6\n9\n8\n"
-step fold_o0: jet run --optimize=none -e 'input.fold(0, (acc, l) -> acc + l.len())' log.txt
+step fold_o0: jet run --optimize=none -e 'input.fold(0, fn(acc, l) { acc + l.len() })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "32\n"
-step fold_o1: jet run --optimize=basic -e 'input.fold(0, (acc, l) -> acc + l.len())' log.txt
+step fold_o1: jet run --optimize=basic -e 'input.fold(0, fn(acc, l) { acc + l.len() })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "32\n"
-step fold_o2: jet run --optimize=full -e 'input.fold(0, (acc, l) -> acc + l.len())' log.txt
+step fold_o2: jet run --optimize=full -e 'input.fold(0, fn(acc, l) { acc + l.len() })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "32\n"
-step max_by_o0: jet run --optimize=none -e 'input.max_by((l) -> l.len()) ?? ""' log.txt
+step max_by_o0: jet run --optimize=none -e 'input.max_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "a 3 error\n"
-step max_by_o1: jet run --optimize=basic -e 'input.max_by((l) -> l.len()) ?? ""' log.txt
+step max_by_o1: jet run --optimize=basic -e 'input.max_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "a 3 error\n"
-step max_by_o2: jet run --optimize=full -e 'input.max_by((l) -> l.len()) ?? ""' log.txt
+step max_by_o2: jet run --optimize=full -e 'input.max_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "a 3 error\n"
-step min_by_o0: jet run --optimize=none -e 'input.min_by((l) -> l.len()) ?? ""' log.txt
+step min_by_o0: jet run --optimize=none -e 'input.min_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step min_by_o1: jet run --optimize=basic -e 'input.min_by((l) -> l.len()) ?? ""' log.txt
+step min_by_o1: jet run --optimize=basic -e 'input.min_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step min_by_o2: jet run --optimize=full -e 'input.min_by((l) -> l.len()) ?? ""' log.txt
+step min_by_o2: jet run --optimize=full -e 'input.min_by(fn(l) { l.len() }) ?? ""' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "b 2 ok\n"
-step count_by_o0: jet run --optimize=none -e 'input.count_by((l) -> l.words()[0])' log.txt
+step count_by_o0: jet run --optimize=none -e 'input.count_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: 2, b: 1, ccc: 1]\n"
-step count_by_o1: jet run --optimize=basic -e 'input.count_by((l) -> l.words()[0])' log.txt
+step count_by_o1: jet run --optimize=basic -e 'input.count_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: 2, b: 1, ccc: 1]\n"
-step count_by_o2: jet run --optimize=full -e 'input.count_by((l) -> l.words()[0])' log.txt
+step count_by_o2: jet run --optimize=full -e 'input.count_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: 2, b: 1, ccc: 1]\n"
-step group_by_o0: jet run --optimize=none -e 'input.group_by((l) -> l.words()[0])' log.txt
+step group_by_o0: jet run --optimize=none -e 'input.group_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: [a 1 error, a 3 error], b: [b 2 ok], ccc: [ccc 4 ok]]\n"
-step group_by_o1: jet run --optimize=basic -e 'input.group_by((l) -> l.words()[0])' log.txt
+step group_by_o1: jet run --optimize=basic -e 'input.group_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: [a 1 error, a 3 error], b: [b 2 ok], ccc: [ccc 4 ok]]\n"
-step group_by_o2: jet run --optimize=full -e 'input.group_by((l) -> l.words()[0])' log.txt
+step group_by_o2: jet run --optimize=full -e 'input.group_by(fn(l) { l.words()[0] })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "[a: [a 1 error, a 3 error], b: [b 2 ok], ccc: [ccc 4 ok]]\n"
-step indexed_o0: jet run --optimize=none -e 'input.indexed().map((p) -> "{p.idx + 1} {p.item}")' log.txt
+step indexed_o0: jet run --optimize=none -e 'input.indexed().map(fn(p) { "{p.idx + 1} {p.item}" })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "1 a 1 error\n2 b 2 ok\n3 a 3 error\n4 ccc 4 ok\n"
-step indexed_o1: jet run --optimize=basic -e 'input.indexed().map((p) -> "{p.idx + 1} {p.item}")' log.txt
+step indexed_o1: jet run --optimize=basic -e 'input.indexed().map(fn(p) { "{p.idx + 1} {p.item}" })' log.txt
 cwd: main
 limit: time=120
 exit: 0
 stdout: = "1 a 1 error\n2 b 2 ok\n3 a 3 error\n4 ccc 4 ok\n"
-step indexed_o2: jet run --optimize=full -e 'input.indexed().map((p) -> "{p.idx + 1} {p.item}")' log.txt
+step indexed_o2: jet run --optimize=full -e 'input.indexed().map(fn(p) { "{p.idx + 1} {p.item}" })' log.txt
 cwd: main
 limit: time=120
 exit: 0

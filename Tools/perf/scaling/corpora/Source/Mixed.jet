@@ -235,7 +235,7 @@ records_worker: fn(unit_name: String, m: Int, rec: String, trait_name: String, s
         "}}",
     }
     p: RecordsModel{count: count, a: a, b: b, c: c, threshold: threshold, index: index, score_a: score_a, score_b: score_b}
-    Worker{name: name, text: text, value: s -> records_value(p, s)}
+    Worker{name: name, text: text, value: fn(s) { records_value(p, s) }}
 }
 
 // 2. Enum values built by a value match, consumed by a variant match.
@@ -273,7 +273,7 @@ shapes_worker: fn(unit_name: String, shape: String, r: &Seeded) -> Worker {
         "}}",
     }
     p: ShapesModel{count: count, a: a, b: b, c: c, d: d, e: e}
-    Worker{name: name, text: text, value: s -> shapes_value(p, s)}
+    Worker{name: name, text: text, value: fn(s) { shapes_value(p, s) }}
 }
 
 // 3. String keys, interpolation, and a map read through `??`.
@@ -284,7 +284,7 @@ words_worker: fn(unit_name: String, r: &Seeded) -> Worker {
     rounds: r.int(3, 6)
     a: r.int(3, 9)
     limit: r.int(20, 32)
-    quoted: words.map(word -> "\"{word}\"").join(", ")
+    quoted: words.map(fn(word) { "\"{word}\"" }).join(", ")
     text: [String]{
         "{name}: fn(seed: Int) -> Int {{",
         "    counts := [String:Int]{{}}",
@@ -310,7 +310,7 @@ words_worker: fn(unit_name: String, r: &Seeded) -> Worker {
     }
     // copy: the model keeps the name the label starts from
     p: WordsModel{words: words, buckets: buckets, rounds: rounds, a: a, limit: limit, start_label: unit_name.copy()}
-    Worker{name: name, text: text, value: s -> words_value(p, s)}
+    Worker{name: name, text: text, value: fn(s) { words_value(p, s) }}
 }
 
 // 4. Optional values mapped through closures, and a local closure.
@@ -345,7 +345,7 @@ options_worker: fn(unit_name: String, constant_value: Int, r: &Seeded) -> Worker
         "}}",
     }
     model: OptionsModel{keys: [Int]{k0, k1, k2}, values: [Int]{v0, v1, v2}, rounds: rounds, spread: spread, fallback: fallback, factor: factor, offset: offset, constant_value: constant_value}
-    Worker{name: name, text: text, value: s -> options_value(model, s)}
+    Worker{name: name, text: text, value: fn(s) { options_value(model, s) }}
 }
 
 // 5. Integer loops and ordered arm tables.
@@ -377,7 +377,7 @@ numbers_worker: fn(unit_name: String, r: &Seeded) -> Worker {
         "}}",
     }
     p: NumbersModel{limit: limit, a: a, b: b}
-    Worker{name: name, text: text, value: s -> numbers_value(p, s)}
+    Worker{name: name, text: text, value: fn(s) { numbers_value(p, s) }}
 }
 
 // One unit: a record struct, a shape enum, the section trait's impl, five
@@ -438,7 +438,7 @@ mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
             "}}",
         ])
         if index % 2 == 0 -> lines.push("// Worker {index} of {unit_name}.")
-        loop line in text -> lines.push(words.replace_all_with(line, found -> RENAMES.get(found.text) ?? found.text))
+        loop line in text -> lines.push(words.replace_all_with(line, fn(found) { RENAMES.get(found.text) ?? found.text }))
         lines.push("")
         total.push("    accumulator = (accumulator * 7 + {worker.name}(accumulator + {index + 1})) % {M}")
         seed: accumulator + index + 1

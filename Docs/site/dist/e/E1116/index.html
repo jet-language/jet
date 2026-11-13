@@ -40,7 +40,7 @@
 <pre class="diag">Error [jet.UnknownSharedMethod]: A shared value has no `.read(…)` method
   --&gt; tests/ui/shared_retired_closure_access.jet:7:18
     |
-  7 |     print(config.read(value -&gt; value.hits))
+  7 |     print(config.read(fn(value) { value.hits }))
     |                  ^^^^
  Why: A shared value reads and writes like a value: a field read is one locked read, a field write is one locked write, and each statement is one atomic step
  Fix: Read the field directly (`config.name`) and write it directly (`config.hits += 1`); group several steps under `#Transact { … }`, or take an expert guard with `.guard_edit()`

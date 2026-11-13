@@ -6,7 +6,7 @@ Args: struct {
 }
 
 run: fn(args: Args) Err! {
-    meetings := files.read(args.path).lines().filter(line -> line != "").map(line -> {
+    meetings := files.read(args.path).lines().filter(fn(line) { line != "" }).map(fn(line) {
         fields: line.split_once("|") ?? panic("bad meeting")
         (name: fields.before, when: time.parse_rfc3339(fields.after) ?? panic("bad timestamp"))
     })

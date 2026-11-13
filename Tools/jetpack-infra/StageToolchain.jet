@@ -118,7 +118,7 @@ stage: fn(args: [String]) -[Env, FS, Time]> String StageError! {
 // The manifest as compact JSON and a newline. Every string in it is a
 // validated version or component (`[A-Za-z0-9._+-]`), so none needs escaping.
 manifest_bytes: fn(options: Options, staged: [Staged]) -> [U8] Never! {
-    entries: staged.map((artifact: Staged) -> "{{\"target\":\"{artifact.target}\",\"path\":\"{artifact.path}\",\"sha256\":\"{artifact.sha256}\",\"size\":{artifact.bytes.len()},\"signature\":\"{artifact.path}.sig.json\"}}")
+    entries: staged.map(fn(artifact: Staged) { "{{\"target\":\"{artifact.target}\",\"path\":\"{artifact.path}\",\"sha256\":\"{artifact.sha256}\",\"size\":{artifact.bytes.len()},\"signature\":\"{artifact.path}.sig.json\"}}" })
     "{{\"schema\":1,\"channel\":\"{options.channel}\",\"version\":\"{options.version}\",\"sequence\":{options.sequence},\"published_at\":{options.published_at},\"expires_at\":{options.expires_at},\"min_version\":\"{options.min_version}\",\"artifacts\":[{entries.join(",")}]}}\n".bytes()
 }
 

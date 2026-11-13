@@ -38,7 +38,7 @@ even_tens: fn(x: Int) -> Int Err! {
 }
 
 mapped_tens: fn(value: Int?) -> Int Err! {
-    mapped: value.map(x -> even_tens(x))
+    mapped: value.map(fn(x) { even_tens(x) })
     Ok(mapped ?? -1)
 }
 
@@ -80,7 +80,7 @@ run: fn() {
     missing: find(false).or_err("none") ?? triple
     print("option or_err: {found(10)} {missing(10)}")
     print("option ??: {(find(true) ?? triple)(5)} {(find(false) ?? triple)(5)}")
-    print("option map: {find(true).map(f -> f(4)) ?? -1} {find(false).map(f -> f(4)) ?? -1}")
+    print("option map: {find(true).map(fn(f) { f(4) }) ?? -1} {find(false).map(fn(f) { f(4) }) ?? -1}")
     if find(true) == .Val(f) -> print("if-let: {f(6)}")
     if find(false) == {
         .Val(f) -> print("match: {f(1)}")
@@ -98,10 +98,10 @@ run: fn() {
     pair: find_pair(true).or_err("none") ?? Pair{count: 0, label: "zero"}
     no_pair: find_pair(false).or_err("none") ?? Pair{count: 0, label: "zero"}
     print("struct: {pair.count} {pair.label} {no_pair.count} {no_pair.label}")
-    print("struct map: {find_pair(true).map(p -> p.label) ?? "none"}")
+    print("struct map: {find_pair(true).map(fn(p) { p.label }) ?? "none"}")
     generic_pair: pick(find_pair(true)) ?? Pair{count: 0, label: "zero"}
     print("struct generic: {generic_pair.label}")
-    print("enum map: {find_shape(true).map(s -> area(s)) ?? -1} {find_shape(false).map(s -> area(s)) ?? -1}")
-    print("named map: {Int?{Val(41)}.map(x -> triple(x)) ?? -1}")
+    print("enum map: {find_shape(true).map(fn(s) { area(s) }) ?? -1} {find_shape(false).map(fn(s) { area(s) }) ?? -1}")
+    print("named map: {Int?{Val(41)}.map(fn(x) { triple(x) }) ?? -1}")
     print("fallible map: {mapped_tens(Val(8)) ?? -9} {mapped_tens(Int?{None}) ?? -9} {mapped_tens(Val(3)) ?? -9}")
 }

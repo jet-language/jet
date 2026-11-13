@@ -582,7 +582,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
 // `sort()` would order by `at` first.
 ir_first_rows: fn(entries: &&[(key: String, at: Int, row: Int)]) -> [String:Int] Never! {
     order := entries.move()
-    order.sort_by((left: (key: String, at: Int, row: Int), right: (key: String, at: Int, row: Int)) -> (left.key <=> right.key).then(left.at <=> right.at))
+    order.sort_by(fn(left: (key: String, at: Int, row: Int), right: (key: String, at: Int, row: Int)) { (left.key <=> right.key).then(left.at <=> right.at) })
     rows := [String:Int]{}
     loop (index, entry) in order {
         if index == 0 || order[index - 1].key != entry.key -> rows[entry.key] = entry.row

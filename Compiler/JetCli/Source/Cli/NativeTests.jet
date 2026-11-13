@@ -170,7 +170,7 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
         rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults}, module_name: module_name, start: test.span.start})
     }
     if faults.len() > 0 -> return Err(faults.join("\n"))
-    rows.sort_by((left: JetNativeTestRow, right: JetNativeTestRow) -> {
+    rows.sort_by(fn(left: JetNativeTestRow, right: JetNativeTestRow) {
         module_order: left.module_name <=> right.module_name
         if module_order != Ordering.Equal -> module_order else -> {
             source_order: left.start <=> right.start

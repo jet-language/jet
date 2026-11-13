@@ -366,7 +366,7 @@ sema_place_borrow_census_stmt: fn(statement: TStmt, arena: BodyTree, census: &Se
         .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_list(body, arena, census)
         .Contract(_) | .Let(_, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
     }
-    tree_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
+    tree_each_stmt_child(statement, fn(child: TExpr) { sema_place_borrow_census_expr(child, arena, census) })
 }
 
 sema_place_borrow_census_cond: fn(condition: TIfCond, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -384,7 +384,7 @@ sema_place_borrow_census_cond: fn(condition: TIfCond, arena: BodyTree, census: &
 }
 
 sema_place_borrow_census_pattern: fn(pattern: TPattern, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
-    tree_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
+    tree_each_pattern_child(pattern, fn(child: TExpr) { sema_place_borrow_census_expr(child, arena, census) })
 }
 
 sema_place_borrow_census_expr: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -415,7 +415,7 @@ sema_place_borrow_census_expr: fn(value: TExpr, arena: BodyTree, census: &SemaPl
         .Binary(_, _, _, lhs, rhs) -> return sema_place_borrow_census_binary(lhs, rhs, arena, census)
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) -> {}
     }
-    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
+    tree_each_expr_child(value, fn(child: TExpr) { sema_place_borrow_census_expr(child, arena, census) })
 }
 
 // A Binary node's operands, in tree_each_expr_child's order. A left-leaning
@@ -446,7 +446,7 @@ sema_place_borrow_census_lambda: fn(lambda: TLambda, arena: BodyTree, census: &S
         _ := census.names.add(capture.source, true)
         _ := census.names.add(capture.local.name, true)
     }
-    tree_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, census))
+    tree_each_lambda_child(lambda, fn(child: TExpr) { sema_place_borrow_census_names(child, arena, census) })
 }
 
 sema_place_borrow_census_names: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -461,7 +461,7 @@ sema_place_borrow_census_names: fn(value: TExpr, arena: BodyTree, census: &SemaP
         }
         .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
-    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_names(child, arena, census))
+    tree_each_expr_child(value, fn(child: TExpr) { sema_place_borrow_census_names(child, arena, census) })
 }
 
 // The census rows of a flat node: sema_place_borrow_census_list,
@@ -561,7 +561,7 @@ sema_place_borrow_census_row_stmt: fn(tree: BodyTree, item: Int, census: &SemaPl
         .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_row_list(tree, body, census)
         .Contract(_) | .Let(_, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
     }
-    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> sema_place_borrow_census_row(tree, child, census))
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) { sema_place_borrow_census_row(tree, child, census) })
 }
 
 sema_place_borrow_census_row_cond: fn(tree: BodyTree, condition: BodyIfCond, census: &SemaPlaceBorrowCensus) Never! {
@@ -579,7 +579,7 @@ sema_place_borrow_census_row_cond: fn(tree: BodyTree, condition: BodyIfCond, cen
 }
 
 sema_place_borrow_census_row_pattern: fn(tree: BodyTree, pattern: BodyPattern, census: &SemaPlaceBorrowCensus) Never! {
-    body_each_pattern_child(tree, pattern, (child: Int) -> sema_place_borrow_census_row(tree, child, census))
+    body_each_pattern_child(tree, pattern, fn(child: Int) { sema_place_borrow_census_row(tree, child, census) })
 }
 
 sema_place_borrow_census_row: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
@@ -608,7 +608,7 @@ sema_place_borrow_census_row: fn(tree: BodyTree, index: Int, census: &SemaPlaceB
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row(tree, child, census))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) { sema_place_borrow_census_row(tree, child, census) })
 }
 
 // A closure captures what it names.
@@ -617,7 +617,7 @@ sema_place_borrow_census_row_lambda: fn(tree: BodyTree, lambda: BodyLambda, cens
         _ := census.names.add(capture.source, true)
         _ := census.names.add(capture.local.name, true)
     }
-    body_each_lambda_child(tree, lambda, (child: Int) -> sema_place_borrow_census_row_names(tree, child, census))
+    body_each_lambda_child(tree, lambda, fn(child: Int) { sema_place_borrow_census_row_names(tree, child, census) })
 }
 
 sema_place_borrow_census_row_names: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
@@ -631,7 +631,7 @@ sema_place_borrow_census_row_names: fn(tree: BodyTree, index: Int, census: &Sema
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row_names(tree, child, census))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) { sema_place_borrow_census_row_names(tree, child, census) })
 }
 
 // The statement bodies of `statement` that hold Lets of their own block.

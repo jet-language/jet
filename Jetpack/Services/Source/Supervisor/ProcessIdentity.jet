@@ -91,7 +91,7 @@ services_process_matches_start_with: fn(expected: String, identity: fn() -> Stri
 }
 
 services_process_matches_start: fn(state: ServiceProcessState) -[FS, Env]> Bool ServicesError! {
-    services_process_matches_start_with(state.start_identity, () -> services_process_start_identity(state.pid), () -> services_process_alive(state))
+    services_process_matches_start_with(state.start_identity, fn() { services_process_start_identity(state.pid) }, fn() { services_process_alive(state) })
 }
 
 // Run `action` only while `expected` is still the process's start identity.
@@ -103,7 +103,7 @@ services_run_if_start_identity_matches: fn(expected: String, identity: fn() -> S
 }
 
 services_run_verified_stop_action: fn(state: ServiceProcessState, action: StopAction, authority: ServiceAuthority?) ServicesError! -[FS, Env, Exec, Time.Wait]> {
-    _: services_run_if_start_identity_matches(state.start_identity, () -> services_process_start_identity(state.pid), () -> services_run_authority_stop_action(state, action, authority))
+    _: services_run_if_start_identity_matches(state.start_identity, fn() { services_process_start_identity(state.pid) }, fn() { services_run_authority_stop_action(state, action, authority) })
 }
 
 // Stop the process group behind `pid`: a graceful request (or the shutdown
@@ -141,7 +141,7 @@ services_stop_process_with: fn(pid: Int, shutdown: ShutdownPolicy?, grace_ms: In
 }
 
 services_stop_process_with_authority: fn(state: ServiceProcessState, shutdown: ShutdownPolicy?, authority: ServiceAuthority?) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
-    services_stop_process_with(state.pid, shutdown, SERVICES_DEFAULT_GRACE_MS, (action) -> services_run_verified_stop_action(state, action, authority), () -> services_process_matches_start(state))
+    services_stop_process_with(state.pid, shutdown, SERVICES_DEFAULT_GRACE_MS, fn(action) { services_run_verified_stop_action(state, action, authority) }, fn() { services_process_matches_start(state) })
 }
 
 // Signal the process group led by `pid` through the `kill`/`taskkill`

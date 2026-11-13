@@ -16,7 +16,7 @@ run: fn() {
     batches := loop entry in files.list_dir("lanes/Main/integ") -> entry.name
     batches.sort()
     loop batch in batches {
-        made := (loop entry in files.list_dir("lanes/Main/integ/{batch}") -> entry.name).filter(name -> name.ends_with(".landfiles") || name.ends_with(".commitmsg"))
+        made := (loop entry in files.list_dir("lanes/Main/integ/{batch}") -> entry.name).filter(fn(name) { name.ends_with(".landfiles") || name.ends_with(".commitmsg") })
         made.sort()
         loop name in made -> print("{batch}/{name}: {files.read("lanes/Main/integ/{batch}/{name}").trim_end().replace("\n", " | ")}".trim_end())
     }

@@ -133,13 +133,13 @@ ExpiryCloseOwner: struct {
     clock := time.Clock.new(100)
     wrapped: ExpiringSecret.new(Secret.from_text("credential"), time.Duration{ns: 0}, clock)
     assert_eq(wrapped.expires_at_ms(), 100)
-    assert_eq(wrapped.with(secret -> 7) ?? panic("equality must remain live"), 7)
+    assert_eq(wrapped.with(fn(secret) { 7 }) ?? panic("equality must remain live"), 7)
     clock.tick(1)
-    if wrapped.with(secret -> 7) == {
+    if wrapped.with(fn(secret) { 7 }) == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)
     }
-    if wrapped.with(secret -> 7) == {
+    if wrapped.with(fn(secret) { 7 }) == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)
     }

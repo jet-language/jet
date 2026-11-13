@@ -151,9 +151,9 @@ trust_nix_input_assignments: fn(text: String) -> [FlakeAssignment] Never! {
     loop assignment in trust_nix_input_record_assignments(text) {
         if assignment.field == "url" || assignment.field == "follows" -> found.push(assignment)
     }
-    found.sort_by(assignment -> assignment.value)
-    found.sort_by(assignment -> assignment.field)
-    found.sort_by(assignment -> assignment.path)
+    found.sort_by(fn(assignment) { assignment.value })
+    found.sort_by(fn(assignment) { assignment.field })
+    found.sort_by(fn(assignment) { assignment.path })
     unique := [FlakeAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next
@@ -267,9 +267,9 @@ trust_nix_output_assignments: fn(text: String) -> [FlakeOutputAssignment] Never!
             }
         }
     }
-    found.sort_by(assignment -> assignment.attribute)
-    found.sort_by(assignment -> assignment.system)
-    found.sort_by(assignment -> assignment.prefix)
+    found.sort_by(fn(assignment) { assignment.attribute })
+    found.sort_by(fn(assignment) { assignment.system })
+    found.sort_by(fn(assignment) { assignment.prefix })
     unique := [FlakeOutputAssignment]{}
     loop assignment in found {
         if unique.len() > 0 && unique[unique.len() - 1] == assignment -> next

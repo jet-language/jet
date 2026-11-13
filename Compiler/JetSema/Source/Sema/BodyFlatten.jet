@@ -127,8 +127,8 @@ body_flat_function: fn(value: TFunc, arena: BodyTree) -> FnBody Never! {
 
 // Sorts the rows by node id. A node a desugaring placed twice keeps one row.
 body_tree_finish: fn(tree: &BodyTree) Never! {
-    tree.nodes.sort_by((left: BodyNode, right: BodyNode) -> left.id <=> right.id)
-    tree.expr_types.sort_by((left: TExprType, right: TExprType) -> left.id <=> right.id)
+    tree.nodes.sort_by(fn(left: BodyNode, right: BodyNode) { left.id <=> right.id })
+    tree.expr_types.sort_by(fn(left: TExprType, right: TExprType) { left.id <=> right.id })
     nodes := [BodyNode]{}
     types := [TExprType]{}
     loop index in 0..<tree.nodes.len() {

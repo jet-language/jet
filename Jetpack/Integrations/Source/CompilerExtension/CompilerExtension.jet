@@ -334,13 +334,13 @@ TypedSnapshot: struct {
     new_with_imports: fn(abilities: [ExtensionAbility], types: [TypeFact], symbols: [SymbolFact], spans: [SpanFact], host_imports: [HostImportFact]) -> TypedSnapshot ExtensionProtocolError! {
         granted: pkg_extension_negotiate_abilities(EXTENSION_PROTOCOL_VERSION, abilities)
         sorted_types := types
-        sorted_types.sort_by(fact -> fact.id)
+        sorted_types.sort_by(fn(fact) { fact.id })
         sorted_symbols := symbols
-        sorted_symbols.sort_by(fact -> fact.id)
+        sorted_symbols.sort_by(fn(fact) { fact.id })
         sorted_spans := spans
-        sorted_spans.sort_by(fact -> fact.id)
+        sorted_spans.sort_by(fn(fact) { fact.id })
         sorted_imports := host_imports
-        sorted_imports.sort_by(fact -> fact.id)
+        sorted_imports.sort_by(fn(fact) { fact.id })
         pkg_extension_validate_interface_facts(sorted_types, sorted_symbols, sorted_spans, sorted_imports)
         Ok(TypedSnapshot{
             protocol: EXTENSION_PROTOCOL_VERSION,
@@ -618,7 +618,7 @@ pkg_extension_negotiate_abilities: fn(protocol: Int, requested: [ExtensionAbilit
         if !allowed.contains(ability) -> return Err(ExtensionProtocolError.new("ability `{ability.as_str()}` is not in the v1 allowlist"))
         if !granted.contains(ability) -> granted.push(ability.copy())
     }
-    granted.sort_by(ability -> ability.rank())
+    granted.sort_by(fn(ability) { ability.rank() })
     Ok(granted)
 }
 

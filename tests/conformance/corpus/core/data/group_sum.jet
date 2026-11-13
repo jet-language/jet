@@ -12,8 +12,8 @@ run: fn() {
         Ticket{team: "Core", minutes: 8.0}
     }
     groups: data.query(rows)
-        .group_by(ticket -> ticket.team)
-        .sum(ticket -> ticket.minutes)
+        .group_by(fn(ticket) { ticket.team })
+        .sum(fn(ticket) { ticket.minutes })
         .collect() ?? panic("group sum")
     print(groups[0].value)
 }

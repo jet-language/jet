@@ -17,7 +17,7 @@ run: fn() {
     ev: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     { sender: started_tx, receiver: started_rx }: channel<Int>()
     { sender: release_tx, receiver: release_rx }: channel<Int>()
-    ev.on(scope, (n: Int) -> {
+    ev.on(scope, fn(n: Int) {
         started_tx.send(n.copy())
         released: release_rx.receive() ?? panic("release")
     })

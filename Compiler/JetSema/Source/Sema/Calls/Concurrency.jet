@@ -209,7 +209,7 @@ sema_call_concurrency_written_params_differ: fn(source: Expr, required: Type, en
 sema_call_concurrency_failed_callback_writes: fn(source: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if source == .Lambda(lambda, _) {
         written := [String]{}
-        ast_visit_expr(source, (expression: Expr) -> sema_call_concurrency_note_marked_write(written, expression))
+        ast_visit_expr(source, fn(expression: Expr) { sema_call_concurrency_note_marked_write(written, expression) })
         loop name in written {
             parameter := false
             loop param in lambda.params { if param.name == name -> parameter = true }

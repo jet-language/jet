@@ -226,13 +226,18 @@ parser_fence_expand: fn(tokens: [Token], tables: &TokenTables) -> ParserFenceExp
     nested_brace_depth := 0
     paren_depth := 0
     bracket_depth := 0
+    // A `fn` lambda's head in a body: the `{` after it opens the lambda's
+    // body, which stays in its statement as any lambda body does.
+    lambda_head := false
     loop (index, token) in tokens {
         kind: token.kind
         previous_kind: if index > 0 -> tokens[index - 1].kind else -> TOKEN_EOF
-        nested_expression_brace: kind == TOKEN_LBRACE && (nested_brace_depth > 0 || paren_depth > 0 || bracket_depth > 0 || previous_kind == TOKEN_UNIFIED_ARROW || previous_kind == TOKEN_DOT)
+        nested_expression_brace: kind == TOKEN_LBRACE && (nested_brace_depth > 0 || paren_depth > 0 || bracket_depth > 0 || previous_kind == TOKEN_UNIFIED_ARROW || previous_kind == TOKEN_DOT || lambda_head)
         top_level: nested_brace_depth == 0 && paren_depth == 0 && bracket_depth == 0
         boundary: kind == TOKEN_EOF || (kind == TOKEN_SEMI && top_level) || (kind == TOKEN_LBRACE && !nested_expression_brace) || (kind == TOKEN_RBRACE && top_level)
+        if kind == TOKEN_LBRACE && top_level -> lambda_head = false
         if boundary {
+            lambda_head = false
             parser_fence_flush_segment(expansion, segment, brace_depth, tables)
             segment = [Token]{}
             expansion.tokens.push(token.copy())
@@ -241,6 +246,7 @@ parser_fence_expand: fn(tokens: [Token], tables: &TokenTables) -> ParserFenceExp
             next
         }
         segment.push(token.copy())
+        if kind == TOKEN_KW_FN && top_level && brace_depth > 0 -> lambda_head = true
         if {
             kind == TOKEN_LPAREN -> paren_depth += 1
             kind == TOKEN_RPAREN && paren_depth > 0 -> paren_depth -= 1

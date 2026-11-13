@@ -686,8 +686,8 @@ pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
     scored := [(distance: Int, label: String)]{}
     loop label in labels -> scored.push((distance: pkg_edit_distance(query, label), label: label))
     // Two stable passes order by (distance, label).
-    scored.sort_by(entry -> entry.label)
-    scored.sort_by(entry -> entry.distance)
+    scored.sort_by(fn(entry) { entry.label })
+    scored.sort_by(fn(entry) { entry.distance })
     out := [String]{}
     query_len: query.bytes().len()
     loop entry in scored {

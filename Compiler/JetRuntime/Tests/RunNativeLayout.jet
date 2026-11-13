@@ -182,7 +182,7 @@ run: fn() {
     if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP -> fail("ownership witness did not complete")
     _: actual.pop()
     rows: frozen.trim().split("\n").to_list()
-    expected: rows.filter(row -> !row.starts_with("p "))
+    expected: rows.filter(fn(row) { !row.starts_with("p ") })
     if expected.len() != actual.len() -> fail("native observation count mismatch: {actual.len()} != {expected.len()}")
     loop index in 0..<expected.len() {
         if observation_differs(actual[index], expected[index]) -> fail("observation mismatch {index}: {actual[index]} != {expected[index]}")

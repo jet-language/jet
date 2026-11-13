@@ -62,7 +62,7 @@ load_entries: fn(entries_dir: String, selected: String?) -[FS, IO]> EntryCatalog
     catalog := EntryCatalog{loaded: [LoadedEntry]{}, tools: [ToolEntry]{}, skipped: [SkippedEntry]{}}
     if !files.exists(entries_dir) -> return catalog
     listed: files.list_dir(entries_dir) ?? return catalog
-    names := listed.filter(item -> item.is_dir).map(item -> item.name.copy())
+    names := listed.filter(fn(item) { item.is_dir }).map(fn(item) { item.name.copy() })
     names.sort()
     loop name in names {
         if selected == .Val(only) {
@@ -143,7 +143,7 @@ entry_shape_issues: fn(item: LoadedEntry, matrix: Dyn) -> [String] {
     if {
         cells.len() == 0 -> issues.push("{name}: cells must be a non-empty array")
         else -> {
-            known_cells: items_at(matrix, "cells").filter_map(cell -> value_at(cell, "id")).collect()
+            known_cells: items_at(matrix, "cells").filter_map(fn(cell) { value_at(cell, "id") }).collect()
             loop cell in cells {
                 if !known_cells.contains(cell) -> issues.push("{name}: unknown matrix cell {js_text(cell)}")
             }
@@ -166,7 +166,7 @@ language_issues: fn(name: String, languages: Dyn) -> [String] {
     declared: items_at(languages, "")
     if declared.len() == 0 -> return ["{name}: languages must be a non-empty array"]
     issues := [String]{}
-    if combinatorics.unique<String>(declared.map(language -> json.stringify(language))).len() != declared.len() -> issues.push("{name}: duplicate language declaration")
+    if combinatorics.unique<String>(declared.map(fn(language) { json.stringify(language) })).len() != declared.len() -> issues.push("{name}: duplicate language declaration")
     if !declared.contains(Dyn.Text("jet")) -> issues.push("{name}: missing default Jet rail")
     loop language in declared {
         known: if language == .Text(text) -> RAIL_LANGUAGES.contains(base_language(text)) else -> false
@@ -242,7 +242,7 @@ http_service_probe_issues: fn(entry: Dyn) -> [String] {
 // to a string.
 is_header_map: fn(value: Dyn) -> Bool {
     if value == .Object(rows) {
-        return rows.len() > 0 && rows.all(row -> row.key != "" && row.key == row.key.trim() && row.value == .Text(_))
+        return rows.len() > 0 && rows.all(fn(row) { row.key != "" && row.key == row.key.trim() && row.value == .Text(_) })
     }
     false
 }
@@ -298,7 +298,7 @@ js_text: fn(value: Dyn) -> String {
     if value == {
         .Text(text) -> text
         .Null -> "null"
-        .Array(list) -> list.map(item -> if item == .Null -> "" else -> js_text(item)).join(",")
+        .Array(list) -> list.map(fn(item) { if item == .Null -> "" else -> js_text(item) }).join(",")
         .Object(_) -> "[object Object]"
         .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) -> json.stringify(value)
     }

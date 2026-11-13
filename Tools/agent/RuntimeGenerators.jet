@@ -1568,7 +1568,7 @@ numeric_ranges: fn(data: String) -> [TextRange] GeneratorError! {
 // serialization checked against the frozen hash.
 merged_ranges: fn(name: String, input: [TextRange], frozen: String) -> [TextRange] GeneratorError! {
     sorted := input
-    sorted.sort_by((left: TextRange, right: TextRange) -> left.lo <=> right.lo)
+    sorted.sort_by(fn(left: TextRange, right: TextRange) { left.lo <=> right.lo })
     rows := [TextRange]{}
     loop range in sorted {
         if range.lo > range.hi || range.hi > MAX_SCALAR -> return Err(generator_fail("invalid UCD range {name}"))

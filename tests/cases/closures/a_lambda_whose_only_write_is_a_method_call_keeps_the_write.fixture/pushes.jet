@@ -11,7 +11,7 @@ Counter: struct {
 
 expression_body: fn() -> Int {
     items := [Int]{}
-    push_it: (n: Int) -> items.push(n)
+    push_it: fn(n: Int) { items.push(n) }
     push_it(1)
     push_it(2)
     items.len()
@@ -19,7 +19,7 @@ expression_body: fn() -> Int {
 
 block_body: fn() -> Int {
     items := [Int]{}
-    push_it: (n: Int) -> {
+    push_it: fn(n: Int) {
         items.push(n)
     }
     push_it(1)
@@ -30,7 +30,7 @@ block_body: fn() -> Int {
 block_body_with_an_assignment: fn() -> String {
     items := [Int]{}
     seen := 0
-    push_it: (n: Int) -> {
+    push_it: fn(n: Int) {
         seen += 1
         items.push(n)
     }
@@ -41,7 +41,7 @@ block_body_with_an_assignment: fn() -> String {
 
 struct_method: fn() -> Int {
     counter := Counter{count: 0}
-    bump_it: () -> counter.bump()
+    bump_it: fn() { counter.bump() }
     bump_it()
     bump_it()
     counter.count

@@ -44,7 +44,7 @@ stop_with: fn(s: Shared<Context>) {
         total += k.peek() + make(s, i).finish()
     }
     held: make(s, 9)
-    _guard: scope.guard(() -> print("guard sees {held.peek()}"))
+    _guard: scope.guard(fn() { print("guard sees {held.peek()}") })
     print("before the stop {total}")
     panic("stop with {s.strong_count()} live")
 }

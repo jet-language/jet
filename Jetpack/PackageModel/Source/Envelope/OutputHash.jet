@@ -216,8 +216,8 @@ pkg_try_output_hash_of_with_hook: fn(out: String, allow_semantic_xattrs: Bool, h
     hardlinks := [EnvelopeHardlink]{}
     pkg_envelope_encode_node(root, root, "", envelope_archive, hardlinks, allow_semantic_xattrs, hangar_root != None, hook)
     // Admission checks below never alter archive bytes of a tree that hashes.
-    hardlinks.sort_by(link -> link.key.inode)
-    hardlinks.sort_by(link -> link.key.device)
+    hardlinks.sort_by(fn(link) { link.key.inode })
+    hardlinks.sort_by(fn(link) { link.key.device })
     loop link in hardlinks {
         if link.seen == link.total -> next
         hangar: hangar_root ?? return Err(EnvelopeError.Hardlink{first: link.first, total: link.total, seen: link.seen})
@@ -347,7 +347,7 @@ pkg_envelope_encode_node: fn(root: String, path: String, rel: String, envelope_a
         pkg_encode_semantic_xattrs(path, envelope_archive, allow_semantic_xattrs)
         hook.observe(path, EnvelopeWalkStage.DirectorySnapshotted)
         entries := files.list_dir(path) ?? return Err(EnvelopeError.ReadEntries{path: path, detail: "{err}"})
-        entries.sort_by(entry -> entry.name)
+        entries.sort_by(fn(entry) { entry.name })
         loop entry in entries {
             child_rel: if rel == "" -> entry.name else -> "{rel}/{entry.name}"
             pkg_envelope_encode_node(root, entry.path, child_rel, envelope_archive, hardlinks, allow_semantic_xattrs, allow_nix_store_symlinks, hook)
@@ -526,7 +526,7 @@ pkg_envelope_directory_snapshot: fn(path: String) -[FS]> [EnvelopeEntrySnapshot]
         }
         entries.push(EnvelopeEntrySnapshot{name: entry.name, kind: kind, identity: EnvelopeStableIdentity.of(info)})
     }
-    entries.sort_by(entry -> entry.name)
+    entries.sort_by(fn(entry) { entry.name })
     Ok(entries)
 }
 

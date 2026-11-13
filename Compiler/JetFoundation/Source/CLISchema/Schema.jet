@@ -406,7 +406,7 @@ cli_schema_input_words: fn(inputs: [CLIInputSchema]) -> [String] Never! {
         if inputs[index].positional != None -> positionals.push(index)
     }
     // Rust's positional sort is stable: equal positions retain written order.
-    positionals.sort_by((a: Int, b: Int) -> (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}))
+    positionals.sort_by(fn(a: Int, b: Int) { (inputs[a].positional ?? U16{0}) <=> (inputs[b].positional ?? U16{0}) })
     words := [String]{}
     loop index in positionals -> words.push(inputs[index].flag)
     loop input in inputs -> words.push("--{input.flag}")

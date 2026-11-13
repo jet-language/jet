@@ -220,7 +220,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
     facts.direct_links = direct
     order := [Int]{}
     loop position in 0..<ids.len() -> order.push(position)
-    order.sort_by((left: Int, right: Int) -> if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right])
+    order.sort_by(fn(left: Int, right: Int) { if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right] })
     loop (index, position) in order {
         row: modules[modules_of[position]].foreign_functions[rows[position]]
         facts.declarations.push(JetDriverForeignDeclaration{

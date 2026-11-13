@@ -3,10 +3,10 @@ Error [jet.UseAfterMove]: `pair` was consumed by a lambda that captures it, so i
     |
   7 |     pair.left = "again"
     |     ^^^^
-  --> moved_places_can_be_reinitialized_without_clearing_relatives_4.jet:6:24
+  --> moved_places_can_be_reinitialized_without_clearing_relatives_4.jet:6:23
     |
-  6 |     call(() -> { print(pair) })
-    |                        ^^^^ `pair` moved to a lambda that captures it here
+  6 |     call(fn() { print(pair) })
+    |                       ^^^^ `pair` moved to a lambda that captures it here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `pair` after the move, or give a lambda that captures it a copy with `pair.copy()` where it moved.
 More: jet-lang.dev/e/E0121

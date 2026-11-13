@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A derived value is recomputed from its signals, so its lambda has to return the new value. A body that returns nothing is a side effect, not a value.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Return a value from the body, or use `reactive.autorun(() -&gt; { … })` for a side effect.</p>
+<p class="diag-copy fix" data-registry-field="fix">Return a value from the body, or use `reactive.autorun(fn() { … })` for a side effect.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2912</code>: <code>tests/ui/reactive_derived_returns_nothing.stderr</code>.</p>
 <pre class="diag">Error [jet.DerivedReturnsNothing]: `reactive.derived` must compute and return a value
   --&gt; tests/ui/reactive_derived_returns_nothing.jet:5:27
     |
-  5 |     d := reactive.derived(() -&gt; {
-    |                           ^^^^^^^
+  5 |     d := reactive.derived(fn() {
+    |                           ^^^^^^
  Why: A derived value is recomputed from its signals; its lambda has to return the value
- Fix: Return a value from the body, or use `reactive.autorun(() -&gt; { … })` for a side effect
+ Fix: Return a value from the body, or use `reactive.autorun(fn() { … })` for a side effect
 More: jet-lang.dev/e/E2912
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

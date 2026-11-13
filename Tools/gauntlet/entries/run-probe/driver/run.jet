@@ -88,7 +88,7 @@ shown: fn(result: Dyn, port: Int) -> Dyn {
 
 // The member `key` of `result`, when it has one.
 value_of: fn(result: Dyn, key: String) -> Dyn? {
-    members(result).find(row -> row.key == key).map(row -> row.value)
+    members(result).find(fn(row) { row.key == key }).map(fn(row) { row.value })
 }
 
 // Serves `routes` on `listener`, one connection at a time, for
@@ -98,7 +98,7 @@ serve: fn(listener: TCPListener, routes: Dyn, connections: Int) {
         stream: listener.accept() ?? return
         asked: read_request(stream)
         target: asked.target.copy()
-        route: members(routes).find(row -> row.key == target).map(row -> row.value)
+        route: members(routes).find(fn(row) { row.key == target }).map(fn(row) { row.value })
         if route == .Val(found) && truthy_at(found, "drop") {
             stream.close() ?? ()
             next
@@ -127,7 +127,7 @@ complete: fn(text: String) -> Asked? {
     if parts.len() < 2 -> return None
     head: parts[0].split("\r\n").to_list()
     body: parts.slice(1, parts.len()).join("\r\n\r\n")
-    length: head.slice(1, head.len()).map(line -> line.split(":").to_list()).find(pieces -> pieces[0].trim().lower() == "content-length")
+    length: head.slice(1, head.len()).map(fn(line) { line.split(":").to_list() }).find(fn(pieces) { pieces[0].trim().lower() == "content-length" })
     want: if length == .Val(pieces) -> Int.parse(pieces.slice(1, pieces.len()).join(":").trim()) ?? 0 else -> 0
     if body.bytes().len() < want -> return None
     request_line: head[0].split(" ").to_list()

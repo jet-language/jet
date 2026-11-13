@@ -212,7 +212,7 @@ table_surface: fn() WebTableError! {
     source: rows()
     plain := table.new("Rows", source)
     configured := table.new_keyed("KeyedRows", source, row_key)
-    table.with_column(configured, table.column("id", "Int", r -> row_key(r)))
+    table.with_column(configured, table.column("id", "Int", fn(r) { row_key(r) }))
     table.with_column(configured, table.column("name", "String", row_name))
     table.with_column(configured, table.column("active", "Bool", row_active))
     _state: table.state(configured)
@@ -243,7 +243,7 @@ table_surface: fn() WebTableError! {
     _server_page: table.page_state(configured)
 
     // Receiver syntax is intentionally shown next to the module calls.
-    plain.with_column(table.column("id", "Int", r -> row_key(r)))
+    plain.with_column(table.column("id", "Int", fn(r) { row_key(r) }))
     plain.paginate(0, 2)
     _receiver_page: plain.page()
 }
@@ -279,28 +279,28 @@ store_surface: fn() {
     _state_signal: web_store.state_signal(state_store)
     // Each write hands its callback the current value to change in place;
     // the store then holds the changed value and records the transaction.
-    added: web_store.transaction(state_store, "transaction", ["value"], (n: &Int) -> n += 1)
+    added: web_store.transaction(state_store, "transaction", ["value"], fn(n: &Int) { n += 1 })
     print("transaction: {added.before} -> {added.after}, store {web_store.value(state_store)}")
-    _update: web_store.update(state_store, "update", ["value"], (n: &Int) -> n += 10)
+    _update: web_store.update(state_store, "update", ["value"], fn(n: &Int) { n += 10 })
     print("update: {state_store.get()}")
-    _batch: web_store.batch(state_store, "batch", ["value"], (n: &Int) -> n *= 2)
+    _batch: web_store.batch(state_store, "batch", ["value"], fn(n: &Int) { n *= 2 })
     print("batch: {state_store.get()}")
     _set_state: web_store.set_state(state_store, 1)
     _set: web_store.set(state_store, 2)
     _receiver_set: state_store.set(3)
-    _receiver_transact: state_store.transact("transact", (n: &Int) -> n += 4)
+    _receiver_transact: state_store.transact("transact", fn(n: &Int) { n += 4 })
     print("transact: {state_store.get()}")
 
-    patch0: web_store.optimistic(state_store, "optimistic", ["value"], (n: &Int) -> n += 100)
+    patch0: web_store.optimistic(state_store, "optimistic", ["value"], fn(n: &Int) { n += 100 })
     print("optimistic: {state_store.get()}")
     _patch0_generation: web_store.patch_generation(patch0)
     _patch0_transaction: web_store.patch_transaction(patch0)
     _patch0_active: web_store.patch_active(patch0)
-    patch1 := web_store.patch(state_store, "patch", ["value"], (n: &Int) -> n += 1000)
+    patch1 := web_store.patch(state_store, "patch", ["value"], fn(n: &Int) { n += 1000 })
     _patch1_transaction: web_store.patch_transaction(patch1)
     _committed: web_store.patch_commit(patch1)
     print("patch: {state_store.get()}")
-    patch2 := web_store.patch(state_store, "rollback", ["value"], (n: &Int) -> n = -1)
+    patch2 := web_store.patch(state_store, "rollback", ["value"], fn(n: &Int) { n = -1 })
     print("rollback patch: {state_store.get()}")
     _rolled_back: web_store.patch_rollback(patch2)
 

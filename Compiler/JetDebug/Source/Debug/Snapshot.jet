@@ -230,7 +230,7 @@ debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     order := [Int]{}
     loop index in 0..<values.len() -> order.push(index)
     // Rust's stable sort_by on name: equal names keep their published order.
-    order.sort_by((left: Int, right: Int) -> {
+    order.sort_by(fn(left: Int, right: Int) {
         if values[left].name != values[right].name -> values[left].name <=> values[right].name else -> left <=> right
     })
     parts := [String]{}

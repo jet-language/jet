@@ -197,7 +197,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
         // one canonical Nix index identity the provider selector accepts.
         lock.source_channels.push(LockedSourceChannel{name: source_name, channel: nix_closure.channel, exact: "github:NixOS/nixpkgs#{nix_closure.revision}"})
     }
-    existing_provenance: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && package.is_nix()) == {
+    existing_provenance: if pkg_lock_find_package_where(lock, fn(package) { package.name == name && package.version == version && package.is_nix() }) == {
         .Val(package) -> package.provenance
         .None -> None
     }
@@ -216,7 +216,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
         }
     }
     entry: LockedPackage{name: name, version: version, source: LockSource.Nix{reference: reference, output: output}, nix_closure: Val(nix_closure), envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
-    pkg_lock_upsert_package(lock, entry, package -> package.name == name && package.is_nix())
+    pkg_lock_upsert_package(lock, entry, fn(package) { package.name == name && package.is_nix() })
     pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
@@ -246,7 +246,7 @@ pkg_lock_record_foreign_realization: fn(project_root: String, name: String, vers
         }
     }
     entry: LockedPackage{name: name, version: version, source: source, fingerprint: envelope.output_hash, envelope: Val(envelope), receipt: existing_receipt}
-    pkg_lock_upsert_package(lock, entry, package -> package.name == name && package.is_foreign())
+    pkg_lock_upsert_package(lock, entry, fn(package) { package.name == name && package.is_foreign() })
     pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
@@ -333,16 +333,16 @@ pkg_lock_locked_nix_package_strict: fn(project_root: String, reference_input: St
 pkg_lock_record_source_realization: fn(project_root: String, name: String, version: String, source: LockSource, source_hash: String, dependencies: [String], envelope: LockEnvelope, same_provider: fn(LockedPackage) -> Bool Never!) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load_or_empty(project_root)
     lock.version = PKG_LOCK_VERSION
-    existing_provenance: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && same_provider(package)) == {
+    existing_provenance: if pkg_lock_find_package_where(lock, fn(package) { package.name == name && package.version == version && same_provider(package) }) == {
         .Val(package) -> package.provenance
         .None -> None
     }
-    existing_receipt: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && pkg_lock_same_realized_source(package.source, source) && pkg_lock_envelope_output_is(package, envelope.output_hash)) == {
+    existing_receipt: if pkg_lock_find_package_where(lock, fn(package) { package.name == name && package.version == version && pkg_lock_same_realized_source(package.source, source) && pkg_lock_envelope_output_is(package, envelope.output_hash) }) == {
         .Val(package) -> package.receipt
         .None -> None
     }
     entry: LockedPackage{name: name, version: version, source: source, fingerprint: source_hash, dependencies: dependencies, envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
-    pkg_lock_upsert_package(lock, entry, package -> package.name == name && same_provider(package))
+    pkg_lock_upsert_package(lock, entry, fn(package) { package.name == name && same_provider(package) })
     pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }
@@ -363,7 +363,7 @@ pkg_lock_same_realized_source: fn(locked: LockSource, recorded: LockSource) -> B
 // replay.
 pkg_lock_record_cran_realization: fn(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source: LockSource.Cran{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
-    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_cran())
+    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, fn(package) { package.is_cran() })
 }
 
 // Exact CRAN realization trust root for online integrity and offline replay.
@@ -386,7 +386,7 @@ pkg_lock_cran_realization: fn(project_root: String, reference: String) -[FS]> (o
 // Record an exact LuaRocks source closure and realized module tree.
 pkg_lock_record_luarocks_realization: fn(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source: LockSource.LuaRocks{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
-    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_luarocks())
+    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, fn(package) { package.is_luarocks() })
 }
 
 // Exact LuaRocks realization trust root for online integrity and offline
@@ -411,7 +411,7 @@ pkg_lock_luarocks_realization: fn(project_root: String, reference: String) -[FS]
 // law.
 pkg_lock_record_registry_realization: fn(project_root: String, registry: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source: LockSource.Registry{registry: registry, reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority, tier: "not-applicable", gate_status: "not-applicable"}
-    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_registry(registry))
+    pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, fn(package) { package.is_registry(registry) })
 }
 
 // Exact scripting-registry trust root for online drift checks and offline

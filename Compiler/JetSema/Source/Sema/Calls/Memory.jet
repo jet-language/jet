@@ -479,9 +479,9 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
     wanted := if method == "split" || method == "wait" -> 2 else -> 1
     if args.len() != wanted {
         guidance := if {
-            method == "map" -> "write `guard.map(value -> value.field)`"
-            method == "split" -> "write `guard.split(value -> value.left, value -> value.right)`"
-            else -> "write `guard.wait(condition, value -> predicate)`"
+            method == "map" -> "write `guard.map(fn(value) {{ value.field }})`"
+            method == "split" -> "write `guard.split(fn(value) {{ value.left }}, fn(value) {{ value.right }})`"
+            else -> "write `guard.wait(condition, fn(value) {{ predicate }})`"
         }
         diagnostics.push(sema_error("E0104", span, "`{method}` expects {wanted} argument{if wanted == 1 -> "" else -> "s"}, got {args.len()}", if method == "wait" -> "waiting needs one Condition and one predicate" else -> "projecting a guard needs the expected number of field closures", guidance))
         sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -530,7 +530,7 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
         path_valid := path != None
         if path_valid -> path_valid = sema_call_memory_guard_projection_stored(path ?? [TFieldRef]{}, environment, program)
         if !path_valid {
-            diagnostics.push(sema_error("E0215", expr_span(args[index].expr), "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(value -> value.field)`"))
+            diagnostics.push(sema_error("E0215", expr_span(args[index].expr), "`SharedGuard.{method}` needs a stored field projection", "a projected guard must keep a stable stored place inside the value protected by the original lock; computed fields are values, not places", "write a direct projection such as `guard.map(fn(value) {{ value.field }})`"))
         }
         paths.push(if path_valid -> path else -> None)
         values.push(Val(callback))

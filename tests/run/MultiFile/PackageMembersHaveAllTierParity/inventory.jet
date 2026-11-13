@@ -6,7 +6,7 @@ inventory_total: fn() -> Int {
     slot: Slot<Item>{value: picked}
     copied: pool_copy(Pool<Item>{items: items})
     shape: Shape{mass: slot.get().weight}
-    matched: count_where(items, (item: Item) -> item.weight > 2)
+    matched: count_where(items, fn(item: Item) { item.weight > 2 })
     shape.weight() + matched + pool_len(copied) + stage_weight(Stage.Ready(4))
 }
 

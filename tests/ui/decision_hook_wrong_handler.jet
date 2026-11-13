@@ -3,5 +3,5 @@ use event: core.event
 run: fn() {
     scope: event.scope()
     hook: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    hook.on(scope, (value: Int) -> HookDecision.Fail(value))
+    hook.on(scope, fn(value: Int) { HookDecision.Fail(value) })
 }

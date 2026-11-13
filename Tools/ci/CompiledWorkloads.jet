@@ -478,7 +478,7 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
         if kind == "" -> return Err(problem("`{sidecar}` names a missing entry"))
         if kind != "file" && kind != "dir" -> return Err(problem("`{sidecar}` names a link"))
     }
-    entries.sort_by((left: TreeEntry, right: TreeEntry) -> left.relative <=> right.relative)
+    entries.sort_by(fn(left: TreeEntry, right: TreeEntry) { left.relative <=> right.relative })
     buffer := [U8]{}
     loop entry in entries {
         link: if entry.kind == "symlink" -> files.read_link(entry.path) ?? return Err(problem("`{entry.path}` cannot be read: {err}")) else -> ""
@@ -1375,7 +1375,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
             if row[11] != row[10] || row[13] != expected_hostile_hash -> return Err(problem("peer coverage output drifted: {key}"))
             if !(command.starts_with("build=") && command.contains(";run=") && command.contains(";hostile=")) -> return Err(problem("peer coverage execution receipt is incomplete: {key}"))
             evidence_parts: [String]{";source-sha256=", ";input-sha256=", ";expected-sha256=", ";output-sha256=", ";hostile-input-sha256=", ";hostile-output-sha256=", ";diagnostic="}
-            if !evidence.starts_with("toolchain=") || evidence_parts.any(part -> !evidence.contains(part)) -> return Err(problem("peer coverage evidence is incomplete: {key}"))
+            if !evidence.starts_with("toolchain=") || evidence_parts.any(fn(part) { !evidence.contains(part) }) -> return Err(problem("peer coverage evidence is incomplete: {key}"))
         } else if !(row[14] == "not-applicable" && row[11] == "-" && row[13] == "-" && command == "not-run:host-platform" && evidence.starts_with("peer-targets=") && evidence.ends_with(";reason=host-platform")) {
             return Err(problem("non-applicable peer coverage is not explicit: {key}"))
         }
@@ -1635,7 +1635,7 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
         if row[5] != at(identity_seen, "source_closure_sha256") -> return Err(problem("external review source identity disagrees"))
         digest: hash_report_files(dir) ?? return Err(problem("report digest could not be recomputed"))
         if row[6] != digest -> return Err(problem("external review report digest disagrees"))
-        if row[7..<14].any(verdict -> verdict != "pass") -> return Err(problem("external review fairness or status is not pass"))
+        if row[7..<14].any(fn(verdict) { verdict != "pass" }) -> return Err(problem("external review fairness or status is not pass"))
     }
     if review_rows != 1 -> return Err(problem("external review must contain exactly one row"))
     if loss_tasks.len() > 0 || tier_loss_tasks.len() > 0 {
@@ -1648,11 +1648,11 @@ check_report: fn(contract: Contract, given: String, candidate: String, board: St
 }
 
 contract_paths: fn() -> [String] Never! {
-    [String]{"manifest.tsv", "domain_contract.tsv", "peer_ledger.tsv", "peer_adapter_ledger.tsv", "metric_contract.tsv", "tier_matrix.tsv", "canaries.tsv", "adapter_ledger.tsv", "measurement_policy.tsv", "toolchain_contract.tsv"}.map(name -> "{CORPUS}/{name}")
+    [String]{"manifest.tsv", "domain_contract.tsv", "peer_ledger.tsv", "peer_adapter_ledger.tsv", "metric_contract.tsv", "tier_matrix.tsv", "canaries.tsv", "adapter_ledger.tsv", "measurement_policy.tsv", "toolchain_contract.tsv"}.map(fn(name) { "{CORPUS}/{name}" })
 }
 
 source_paths: fn() -> [String] Never! {
-    [String]{"adapters", "fixtures", "expected", "task-definitions"}.map(name -> "{CORPUS}/{name}")
+    [String]{"adapters", "fixtures", "expected", "task-definitions"}.map(fn(name) { "{CORPUS}/{name}" })
 }
 
 // --- the external review -----------------------------------------------------
@@ -2144,7 +2144,7 @@ canaries: fn(state: SelfCheck) -[FS]> [Canary] Never! {
     loop row in tiers {
         if row[0] == "1" && row[2] == "jet" && row[6] == "pass" && loss_task == "" -> loss_task = row[1].copy()
     }
-    peer_key: (selection: String, language: String) -> {
+    peer_key: fn(selection: String, language: String) {
         found := ""
         loop row in ledger {
             if found == "" && row[0] == "1" && row[2] == selection && row[3] == language -> found = "{row[1]}|{row[2]}|{row[3]}|{row[4]}"
@@ -2316,8 +2316,8 @@ write_synthetic_report: fn(state: SelfCheck) Problem! -[Env, Exec, FS, IO, Time,
     }
     write_lines("{report}/identity.tsv", identity) ?? return Err(err)
 
-    metric_rows: read_rows(read_contract_file(state.root, "metric_contract.tsv"), 5).filter(row -> row[0] == "1")
-    policy_rows: read_rows(read_contract_file(state.root, "measurement_policy.tsv"), 9).filter(row -> row[0] == "1")
+    metric_rows: read_rows(read_contract_file(state.root, "metric_contract.tsv"), 5).filter(fn(row) { row[0] == "1" })
+    policy_rows: read_rows(read_contract_file(state.root, "measurement_policy.tsv"), 9).filter(fn(row) { row[0] == "1" })
     sample_count := [String: Int]{}
     tolerance := [String: String]{}
     loop row in policy_rows {
@@ -3871,15 +3871,15 @@ produce: fn(setup: Setup, work: String) -[Env, Exec, FS, IO, Time, Time.Wait]> S
     peer_adapter_by_key: ledger_index(peer_adapters, "peer_key")
     task_by_id: ledger_index(manifest, "task_id")
     policies: ledger_index(policy_rows, "metric")
-    adapter_ids: adapters.map(row -> at(row, "task_id"))
-    peer_adapter_keys: peer_adapters.map(row -> at(row, "peer_key"))
+    adapter_ids: adapters.map(fn(row) { at(row, "task_id") })
+    peer_adapter_keys: peer_adapters.map(fn(row) { at(row, "peer_key") })
     if manifest.len() != 7 || distinct_count(selected_ids) != 7 || distinct_count(adapter_ids) != 7 {
         return Err(problem("frozen task/peer/adapter count is incomplete"))
     }
     if peers.len() < manifest.len() || distinct_count(peer_adapter_keys) != peers.len() {
         return Err(problem("all peer candidates must have one adapter row"))
     }
-    if distinct_count(peers.map(row -> peer_key(row))) != peers.len() -> return Err(problem("peer ledger keys must be unique"))
+    if distinct_count(peers.map(fn(row) { peer_key(row) })) != peers.len() -> return Err(problem("peer ledger keys must be unique"))
     loop policy in policy_rows {
         if at(policy, "tolerance_ratio") != "1.00" -> return Err(problem("peer ratio law drifted for metric: {at(policy, "metric")}"))
     }

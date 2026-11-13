@@ -44,7 +44,7 @@ datetime_refusal: fn(text: String) -> String {
     assert_eq(bound(SQL.encode_hole([U8]{1, 2, 3})), "blob:3")
     query: SQL.build([String]{"select * from users where id = ", " and name = ", ""}, [DBValue]{DBValue.Int(7), DBValue.Text("o'hara")})
     assert_eq(query.template(), "select * from users where id = ? and name = ?")
-    assert_eq(query.params().map(value -> bound(value)), [String]{"int:7", "text:o'hara"})
+    assert_eq(query.params().map(fn(value) { bound(value) }), [String]{"int:7", "text:o'hara"})
 }
 
 #Test("Path refuses NUL and encodes each hole as one component") {

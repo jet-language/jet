@@ -129,7 +129,7 @@ envmodel_files_from_value: fn(value: CtValue) -> [ManagedFile] ManagedFileError!
     }
     managed := [ManagedFile]{}
     loop entry in entries -> managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
-    managed.sort_by(file -> file.destination)
+    managed.sort_by(fn(file) { file.destination })
     loop index in 1..<managed.len() {
         if managed[index - 1].destination == managed[index].destination {
             return Err(ManagedFileError.InvalidDestination(managed[index - 1].destination))

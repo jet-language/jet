@@ -44,7 +44,7 @@ walk: fn(dir: String) {
 }
 
 run: fn() {
-    loop line in files.read(process.args()[0]).lines().filter(line -> line.trim() != "") -> print(line.words().join(" "))
+    loop line in files.read(process.args()[0]).lines().filter(fn(line) { line.trim() != "" }) -> print(line.words().join(" "))
     loop name in names_in(".") {
         if !files.is_file(name) || !integ_file(name) -> next
         if {

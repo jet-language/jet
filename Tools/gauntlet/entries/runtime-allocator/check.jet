@@ -21,7 +21,7 @@ run: fn(check: Check) {
     if printed != "" -> print(printed.replace(here, "<case>").remove_suffix("\n"))
     loop dir in ["out", "done"] {
         if !files.is_dir(dir) -> next
-        names := (files.list_dir(dir) ?? process.fail(1, "{err}")).map(entry -> entry.name.copy())  // copy: the list outlives the entries
+        names := (files.list_dir(dir) ?? process.fail(1, "{err}")).map(fn(entry) { entry.name.copy() })  // copy: the list outlives the entries
         names.sort()
         print(if names.len() == 0 -> "{dir}/:" else -> "{dir}/: {names.join(" ")}")
         build: files.join(dir, "build.json")

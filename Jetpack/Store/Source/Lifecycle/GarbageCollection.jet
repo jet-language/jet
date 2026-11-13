@@ -342,7 +342,7 @@ store_collect_orphaned_canonical_objects_with_graph: fn(roots: HangarRoots, live
             else -> {}
         }
     }
-    orphaned.sort_by(object -> object.path)
+    orphaned.sort_by(fn(object) { object.path })
     Ok(orphaned)
 }
 
@@ -596,7 +596,7 @@ store_object_dirs: fn(hangar: String) -[FS]> [DirEntry] StoreError! {
         if metadata.is_symlink -> return Err(StoreError.InvalidData("Hangar object entry is a symlink: {entry.path}"))
         if metadata.is_dir -> out.push(entry)
     }
-    out.sort_by(entry -> entry.name)
+    out.sort_by(fn(entry) { entry.name })
     Ok(out)
 }
 

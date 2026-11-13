@@ -33,7 +33,7 @@ failed: fn(reason: String) -> [String: [String]] {
 // A guard reads the Map as the panic unwinds the frame.
 guarded: fn(rows: [Row]) {
     groups := [String: [String]]{}
-    _guard: scope.guard(() -> print("guarded sees {groups}"))
+    _guard: scope.guard(fn() { print("guarded sees {groups}") })
     loop r in rows {
         group := groups.get(r.dept) ?? ["head"]
         group.push(r.name.copy())
@@ -45,7 +45,7 @@ guarded: fn(rows: [Row]) {
 // The same with the copy written out.
 guarded_copied: fn(rows: [Row]) {
     groups := [String: [String]]{}
-    _guard: scope.guard(() -> print("guarded_copied sees {groups}"))
+    _guard: scope.guard(fn() { print("guarded_copied sees {groups}") })
     loop r in rows {
         held: groups.get(r.dept) ?? ["head"]
         group := held.copy()

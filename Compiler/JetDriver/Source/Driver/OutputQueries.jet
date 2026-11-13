@@ -36,7 +36,7 @@ jet_driver_output_query: fn(request: &&JetDriverCompileRequest, address: String?
             loop item in projection.items { if item == .Const(binding) && binding.resolved_output == .Val(output) -> outputs.push(output) }
             loop fact in projection.layout_facts -> layouts.push(JetDriverOutputLayoutRow{module_identity: projection.module_identity, source_path: projection.physical_path, fact: fact})
         }
-        outputs.sort_by((a, b) -> (a.address <=> b.address).then(a.source_path <=> b.source_path))
+        outputs.sort_by(fn(a, b) { (a.address <=> b.address).then(a.source_path <=> b.source_path) })
     }
     JetDriverOutputQueryResult{compile: compile.move(), outputs: outputs, layouts: layouts, target_triple: target_triple, target_layout: target_layout}
 }

@@ -847,7 +847,7 @@ jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult
     // Sorted once, so every insert appends (JetDriverModuleKeyRow).
     rows := [JetDriverCheckedKeyRow]{}
     loop (row, checked) in checked_functions -> rows.push(JetDriverCheckedKeyRow{key: "{checked.module_identity}\n{checked.function_key}", row: row})
-    rows.sort_by((left: JetDriverCheckedKeyRow, right: JetDriverCheckedKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
+    rows.sort_by(fn(left: JetDriverCheckedKeyRow, right: JetDriverCheckedKeyRow) { (left.key <=> right.key).then(left.row <=> right.row) })
     loop at in 0..<rows.len() {
         if at == 0 || rows[at - 1].key != rows[at].key -> index.checked_rows[rows[at].key] = rows[at].row
     }
@@ -863,7 +863,7 @@ jet_driver_comptime_owners_build: fn(graph: SemaRegistrationGraph, index: &JetDr
     index.owners_built = true
     rows := jet_driver_registration_function_rows(graph)
     rows = loop fresh_item in rows -> fresh_item
-    rows.sort_by((left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) -> (left.key <=> right.key).then(left.row <=> right.row))
+    rows.sort_by(fn(left: JetDriverModuleKeyRow, right: JetDriverModuleKeyRow) { (left.key <=> right.key).then(left.row <=> right.row) })
     loop at in 0..<rows.len() {
         if at > 0 && rows[at - 1].key == rows[at].key {
             if index.owners.get(rows[at].key) != .Val(rows[at].module_identity) -> index.ambiguous_owners[rows[at].key] = true
@@ -3419,7 +3419,7 @@ jet_driver_unresolved_direct_call: fn(function: FnBody, targets: [Bool]) -> Decl
 // `missing` write parameter: the stage-0 Rust tier then lends `targets` to the
 // closure instead of copying it per statement.
 jet_driver_unresolved_call_statement: fn(tree: BodyTree, statement: Int, targets: [Bool], missing: &DeclID?) Never! {
-    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> jet_driver_unresolved_call_in(tree, child, targets, missing))
+    body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { jet_driver_unresolved_call_in(tree, child, targets, missing) })
 }
 
 // Records in `missing` (once) the first direct-call callee in `expression` or
@@ -3433,7 +3433,7 @@ jet_driver_unresolved_call_in: fn(tree: BodyTree, expression: Int, targets: [Boo
             return
         }
     }
-    body_each_expr_child(tree, node, (child: Int) -> jet_driver_unresolved_call_in(tree, child, targets, missing))
+    body_each_expr_child(tree, node, fn(child: Int) { jet_driver_unresolved_call_in(tree, child, targets, missing) })
 }
 
 // This retained input is not a RootMemo cache-eligibility proof. All checked
@@ -3899,7 +3899,7 @@ jet_driver_checked_repeated_rows: fn(modules: [SemaGraphModuleResult]) -> [Bool]
 // How many loaded modules carry each module identity.
 jet_driver_loaded_identity_counts: fn(modules: [JetDriverLoadedModule]) -> [String:Int] Never! {
     identities := (loop loaded_module in modules -> loaded_module.module_identity)
-    identities.sort_by((left: String, right: String) -> left <=> right)
+    identities.sort_by(fn(left: String, right: String) { left <=> right })
     counts := [String:Int]{}
     start := 0
     loop index in 0..<identities.len() {

@@ -75,7 +75,7 @@ run: fn() -> Never Err! {
 
 // The first runnable perf in the Nix store; "" when there is none.
 store_perf: fn() -[FS]> String Err! {
-    files.glob("/nix/store/*-perf-linux-*/bin/perf").find(candidate -> files.can_execute(candidate)) ?? ""
+    files.glob("/nix/store/*-perf-linux-*/bin/perf").find(fn(candidate) { files.can_execute(candidate) }) ?? ""
 }
 
 // Samples the process for the session's seconds with call graph `graph`,

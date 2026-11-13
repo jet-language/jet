@@ -10,5 +10,5 @@ run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(key, ttl, clock)
-    _ := secret.with((borrowed) -> crypto.sign(borrowed, [1, 2]))
+    _ := secret.with(fn(borrowed) { crypto.sign(borrowed, [1, 2]) })
 }

@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E1101
 Error [jet.ConcurrentCaptureNotOwned]: `count` cannot cross the `parallel worker` boundary: the value writes shared state
   --> tests/ui/crossing_shared_write_voice.jet:11:24
     |
- 11 |     _: values.para_map((n: Int) -> {
-    |                        ^^^^^^^^^^^^^
+ 11 |     _: values.para_map(fn(n: Int) {
+    |                        ^^^^^^^^^^^^
  Why: The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
  Fix: Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{…}`
 More: jet-lang.dev/e/E1101

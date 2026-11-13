@@ -108,7 +108,7 @@ s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repa
                 if edit.file == file.path -> edits.push(edit.copy())
             }
         }
-        edits.sort_by((left: S1RepairEdit, right: S1RepairEdit) -> {
+        edits.sort_by(fn(left: S1RepairEdit, right: S1RepairEdit) {
             order: right.start <=> left.start
             if order != Ordering.Equal -> return order
             right.end <=> left.end

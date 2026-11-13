@@ -14,19 +14,19 @@ run: fn() {
     print(mid.join(","))
     nested: [[1, 2], [3], [4, 5]]
     print(nested.flatten())
-    print(nested.flat_map((xs: [Int]) -> xs))
+    print(nested.flat_map(fn(xs: [Int]) { xs }))
 
     descending := [Int]{3, 1, 2}
     descending.sort_desc()
     print(descending)
     words := ["a", "abcd", "bb"]
-    words.sort_by_desc((w: String) -> w.len())
+    words.sort_by_desc(fn(w: String) { w.len() })
     print(words)
     meetings := [(name: "late", hour: 9), (name: "early", hour: 1)]
-    meetings.sort_by(meeting -> meeting.hour)
+    meetings.sort_by(fn(meeting) { meeting.hour })
     print("{meetings[0].name},{meetings[1].name}")
     records := [Meeting]{{name: "late", hour: 9}, {name: "early", hour: 1}}
-    records.sort_by(record -> record.hour)
+    records.sort_by(fn(record) { record.hour })
     print("{records[0].name},{records[1].name}")
     fractions := [Fraction]{1 / 3, 3 / 4, 1 / 2}
     fractions.sort()

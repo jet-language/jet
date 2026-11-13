@@ -28,12 +28,12 @@ at: fn(tree: Dyn, key: String) -> Dyn {
 // Whether a corpus issue is the corpus's size or about a watched program.
 concerns_watched: fn(issue: String, watched: [String]) -> Bool {
     if issue.starts_with("the corpus has ") -> return true
-    watched.any(id -> issue.starts_with("{id}:") || issue.starts_with("{id} "))
+    watched.any(fn(id) { issue.starts_with("{id}:") || issue.starts_with("{id} ") })
 }
 
 run: fn() {
     printed: files.read(process.args()[0]) ?? panic("no program output: {err}")
-    watched: (files.read("watched.txt") ?? panic("no watched.txt: {err}")).lines().filter(line -> line != "")
+    watched: (files.read("watched.txt") ?? panic("no watched.txt: {err}")).lines().filter(fn(line) { line != "" })
     loop line in printed.lines() {
         fields: line.split("\t").to_list()
         kind: fields[0]

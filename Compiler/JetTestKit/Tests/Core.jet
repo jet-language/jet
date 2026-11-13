@@ -81,10 +81,10 @@ kit_test_core_scratch: fn(label: String) -> String {
     older: "Error [jet.StrayCharacter]: first\nError [jet.UnterminatedText]: second\n"
     newer: "Error [jet.StrayCharacter]: first\n"
     kit_exec_write(first, older)
-    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, (text: String) -[]> kit_expect_diagnostics(text)).status, "REFUSED")
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, fn(text: String) -[]> { kit_expect_diagnostics(text) }).status, "REFUSED")
     assert_eq(files.read(first) ?? panic("first"), older)
     allowed: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
-    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, (text: String) -[]> kit_expect_diagnostics(text)).status, "PASS")
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, fn(text: String) -[]> { kit_expect_diagnostics(text) }).status, "PASS")
     assert_eq(files.read(first) ?? panic("first"), newer)
     files.remove_all(root) ?? panic("remove bless scratch")
 }
@@ -430,7 +430,7 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
     assert_eq(kit_execute_budget(0, 16 * gib), 16 * gib)
     assert_eq(kit_execute_budget(3 * gib, 16 * gib), 3 * gib)
     assert_eq(kit_execute_budget(0, 0), 0)
-    entries: ["a", "b", "c", "d"].map(name -> KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"})
+    entries: ["a", "b", "c", "d"].map(fn(name) { KitSelected{entry: KitEntry{path: name, expected: name, project: "", suite: "cases", mode: ""}, suite: "cases"} })
     history := [String: KitHistory]{}
     history[kit_history_key("cases", "b")] = KitHistory{wall_ms: 100, peak_kib: 10240}
     history[kit_history_key("cases", "c")] = KitHistory{wall_ms: 9000, peak_kib: 8 * 1048576}
@@ -475,12 +475,12 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
 #Test("pool rows keep corpus order, suite then path, whatever the pool's size") {
     mixed := [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
     kit_execute_corpus_order(mixed)
-    assert_eq(mixed.map(item -> "{item.suite} {item.entry.path}"), ["cases a", "cases z", "golden a", "ui b"])
+    assert_eq(mixed.map(fn(item) { "{item.suite} {item.entry.path}" }), ["cases a", "cases z", "golden a", "ui b"])
     root: cases_test_root("pool-order")
     names: ["a", "b", "c", "d", "e"]
     // Earlier entries sleep longer, so a wider pool finishes them out of order.
     loop (index, name) in names -> cases_test_source(root, name, "step: jet -c 'sleep 0.{names.len() - 1 - index}'\nstdout: empty\nstderr: empty\n")
-    corpus: names.map(name -> KitSelected{entry: cases_test_entry(name), suite: "cases"})
+    corpus: names.map(fn(name) { KitSelected{entry: cases_test_entry(name), suite: "cases"} })
     context: cases_test_context(root, files.join(root, "scratch"))
     loop jobs in [1, 2, 5] {
         run_scratch: files.join(root, "run-{jobs}")
@@ -490,7 +490,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
         loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
             loop result in run.results -> rows.push("{result.case} {result.status}")
         }
-        assert_eq(rows, corpus.map(item -> "{item.entry.path} PASS"))
+        assert_eq(rows, corpus.map(fn(item) { "{item.entry.path} PASS" }))
     }
     files.remove_all(root) ?? panic("remove pool order scratch")
 }

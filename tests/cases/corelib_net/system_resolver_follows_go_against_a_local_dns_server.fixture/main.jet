@@ -423,7 +423,7 @@ parked: fn() {
     before: threads()
     origin: time.instant()
     ticker: task ticks(origin)
-    lookups: names.para_map((name: String) -> timed_lookup(name, origin), limit: PARKED)
+    lookups: names.para_map(fn(name: String) { timed_lookup(name, origin) }, limit: PARKED)
     record: ticker.join() ?? panic("ticker")
     answered := true
     first := lookups[0].start

@@ -13,21 +13,21 @@ pass: fn<T>(value: &&T) -> T { value.move() }
 ordered: fn(early: Bool) {
     _before: pass(
     (
-        first: scope.guard(() -> print("before first")),
-        second: scope.guard(() -> print("before second")),
+        first: scope.guard(fn() { print("before first") }),
+        second: scope.guard(fn() { print("before second") }),
     ),
     )
     Bundle{retained: _retained, ..}: pass(
     Bundle<ScopeGuard>{
-        retained: scope.guard(() -> print("retained")),
-        omitted_first: scope.guard(() -> print("omitted first")),
-        omitted_second: scope.guard(() -> print("omitted second")),
+        retained: scope.guard(fn() { print("retained") }),
+        omitted_first: scope.guard(fn() { print("omitted first") }),
+        omitted_second: scope.guard(fn() { print("omitted second") }),
     },
     )
     _after: pass(
     (
-        first: scope.guard(() -> print("after first")),
-        second: scope.guard(() -> print("after second")),
+        first: scope.guard(fn() { print("after first") }),
+        second: scope.guard(fn() { print("after second") }),
     ),
     )
     print("body")

@@ -73,10 +73,10 @@ impl ByteProgress {
     handle: fn(self) -> ProgressHandle Never! {
         progress: ByteProgress{state: self.state}
         ProgressHandle{
-            discovered_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.discovered_bytes(bytes) },
-            transferred_bytes: (bytes: Int) -[IO, Env, Time.Wait]> { progress.transferred_bytes(bytes) },
-            phase: (phase: String) -[IO, Env, Time.Wait]> { progress.phase(phase) },
-            object_progress: (done: Int, total: Int) -[IO, Env, Time.Wait]> { progress.object_progress(done, total) },
+            discovered_bytes: fn(bytes: Int) -[IO, Env, Time.Wait]> { progress.discovered_bytes(bytes) },
+            transferred_bytes: fn(bytes: Int) -[IO, Env, Time.Wait]> { progress.transferred_bytes(bytes) },
+            phase: fn(phase: String) -[IO, Env, Time.Wait]> { progress.phase(phase) },
+            object_progress: fn(done: Int, total: Int) -[IO, Env, Time.Wait]> { progress.object_progress(done, total) },
         }
     }
 }

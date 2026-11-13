@@ -73,7 +73,7 @@ pkg_api_snapshot_render: fn(package: String, published_version: String, signatur
 }
 pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> String Never! {
     ordered := snapshots
-    ordered.sort_by((left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) -> left.package <=> right.package)
+    ordered.sort_by(fn(left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) { left.package <=> right.package })
     parts := [String]{}
     loop snapshot in ordered -> parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
     parts.join("\n--\n")
@@ -81,7 +81,7 @@ pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> Stri
 pkg_project_capability_digest: fn(project_root: String) -[FS, Env]> String Never! {
     directory: sys.get("JET_API_CACHE_DIR") ?? files.join(project_root, ".jet/cache/api")
     entries := files.list_dir(directory) ?? return ""
-    entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
+    entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
     snapshots := [PackageCapabilitySnapshot]{}
     loop entry in entries {
         if !entry.name.ends_with(".api") -> next

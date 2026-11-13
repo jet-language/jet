@@ -460,14 +460,14 @@ ir_static_map_order: fn(kind: String, entries: [TComptimeMapEntry]) -> [Int]? Ne
     kept := [Int]{}
     if kind == "string" {
         if texts.len() != entries.len() -> return None
-        texts.sort_by((left, right) -> (left.key <=> right.key).then(left.at <=> right.at))
+        texts.sort_by(fn(left, right) { (left.key <=> right.key).then(left.at <=> right.at) })
         loop (index, pair) in texts {
             if index + 1 < texts.len() && texts[index + 1].key == pair.key -> next
             kept.push(pair.at)
         }
     } else {
         if words.len() != entries.len() -> return None
-        words.sort_by((left, right) -> (left.key <=> right.key).then(left.at <=> right.at))
+        words.sort_by(fn(left, right) { (left.key <=> right.key).then(left.at <=> right.at) })
         loop (index, pair) in words {
             if index + 1 < words.len() && words[index + 1].key == pair.key -> next
             kept.push(pair.at)

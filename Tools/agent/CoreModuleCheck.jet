@@ -179,11 +179,11 @@ lowered_ceilings: fn(committed: [Ceiling]?, results: [Summary]) -> Lowered Never
             next
         }
         dropped: result.name.copy()
-        kept := out.filter(row -> row.name != dropped)
+        kept := out.filter(fn(row) { row.name != dropped })
         if result.errors != 0 -> kept.push(Ceiling{name: result.name.copy(), errors: result.errors})
         out = kept
     }
-    out.sort_by((a: Ceiling, b: Ceiling) -> a.name <=> b.name)
+    out.sort_by(fn(a: Ceiling, b: Ceiling) { a.name <=> b.name })
     Lowered{kept: out, rises: rises}
 }
 
@@ -208,7 +208,7 @@ read_ceilings: fn(path: String) -[FS]> [Ceiling] CheckError! {
 
 ceilings_text: fn(ceilings: [Ceiling]) -> String Never! {
     if ceilings.len() == 0 -> return "{{}}\n"
-    rows: ceilings.map(row -> "  {json.dumps(Dyn.Text(row.name.copy())) ?? "\"\""}: {row.errors}")
+    rows: ceilings.map(fn(row) { "  {json.dumps(Dyn.Text(row.name.copy())) ?? "\"\""}: {row.errors}" })
     "{{\n{rows.join(",\n")}\n}}\n"
 }
 
@@ -257,8 +257,8 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     asked: process.cmd([String]{jet, "inspect", "structure", "--core", "--json"}).cwd("{root}/Compiler").env("NO_COLOR", "1").output_limit(4194304).run() ?? return Err(problem("`{jet} inspect structure --core --json` could not start: {err}"))
     if asked.code != 0 || asked.signal != None -> return Err(problem("`{jet} inspect structure --core --json` failed: {process.combined_output(asked).trim()}"))
     known: core_modules(asked.output) ?? return Err(err)
-    modules: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(name -> name != "") else -> known.copy()
-    unknown: modules.filter(name -> !known.contains(name))
+    modules: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(fn(name) { name != "" }) else -> known.copy()
+    unknown: modules.filter(fn(name) { !known.contains(name) })
     if unknown.len() > 0 -> return Err(problem("not a Core module: {unknown.join(", ")}"))
     ratchet_path: "{root}/{RATCHET}"
     committed: if files.exists(ratchet_path) -> Val(read_ceilings(ratchet_path) ?? return Err(err)) else -> None
@@ -274,7 +274,7 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     }
     files.remove_all(scratch) ?? return Err(problem("`{scratch}` cannot be removed: {err}"))
     if failure != "" -> return Err(problem(failure))
-    failing: results.filter(result -> result.errors > 0)
+    failing: results.filter(fn(result) { result.errors > 0 })
     loop result in failing -> print("{result.name}: {result.errors} errors; {result.first}")
     print("core modules: {results.len()} checked, {results.len() - failing.len()} clean, {failing.len()} failing{if option(args, "--only") == None -> " (with {EVERY_BODY})" else -> ""}")
     if write {

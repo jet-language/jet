@@ -39,7 +39,7 @@ report: fn(receipts: [(file: String, receipt: Dyn)]) -> String [FieldError]! {
     series := [Dyn]{}
     loop loaded in receipts {
         r: loaded.receipt
-        compilers: r.field("compilers").decode<[Dyn]>().map(c -> "{c.get("label") ?? "undefined"}={if (c.get("path") ?? Dyn.Null) == Dyn.Null -> "{c.get("template") ?? "undefined"}" else -> "{c.field("path")}"}")
+        compilers: r.field("compilers").decode<[Dyn]>().map(fn(c) { "{c.get("label") ?? "undefined"}={if (c.get("path") ?? Dyn.Null) == Dyn.Null -> "{c.get("template") ?? "undefined"}" else -> "{c.field("path")}"}" })
         out.extend(["Receipt `{loaded.file}`: {r.field("startedAt").text()} to {(r.get("finishedAt") ?? "(running)").text()}, mode {(r.get("mode") ?? "timing").text()}, compilers {compilers.join(", ")}, {r.field("failures").decode<[String]>().len()} failures.", ""])
         series.extend(r.field("series").decode<[Dyn]>()?("series"))
     }
@@ -87,7 +87,7 @@ report: fn(receipts: [(file: String, receipt: Dyn)]) -> String [FieldError]! {
             rows.push((key: key, p: p, projected: p.field("projected_s").float()?("projected_s")))
         }
         // The keys keep their JSON order, so the stable sort keeps equal phases in it.
-        rows.sort_by((a, b) -> b.projected <=> a.projected)
+        rows.sort_by(fn(a, b) { b.projected <=> a.projected })
         loop row in rows -> projected.push("{cell} {row.p.field("at_lines").int()} | {if row.key == "wall_seconds" -> "**total**" else -> row.key.slice(6..<row.key.len())} | {fixed(row.p.field("measured_s").float()?("measured_s"))} | {fixed(row.p.field("exponent").float()?("exponent"))} | {fixed(row.projected, 1)} |")
     }
     Ok("{out.join("\n")}\n{growth.join("\n")}\n{floors.join("\n")}\n{broken.join("\n")}\n{projected.join("\n")}\n{uncovered.join("\n")}\n")

@@ -33,9 +33,9 @@ fill: fn() -> [U8] {
 
 run: fn() {
     #Unsafe("the exit callback has no captured state") {
-        os.atexit(() -> print("atexit"))
+        os.atexit(fn() { print("atexit") })
     }
-    guard: scope.guard(() -> print("guard"))
+    guard: scope.guard(fn() { print("guard") })
     key := Key{secret: crypto.Secret.from_text("hunter2")}
     defer close(key)
     // `drop`: a first buffer dies inside the run, so its free is seen.

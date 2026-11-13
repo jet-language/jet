@@ -342,7 +342,7 @@ evidence_report_intern_derivation: fn(report: &EvidenceReport, derivation: &&Der
     reference: derivation_record_reference(derivation)
     report.derivations.push(derivation)
     report.derivations = loop fresh_item in report.derivations -> fresh_item
-    report.derivations.sort_by((left: DerivationRecord, right: DerivationRecord) -> left.id <=> right.id)
+    report.derivations.sort_by(fn(left: DerivationRecord, right: DerivationRecord) { left.id <=> right.id })
     reference
 }
 
@@ -383,7 +383,7 @@ evidence_report_add_record: fn(report: &EvidenceReport, record: &&EvidenceRecord
     evidence_completeness_merge(report.completeness, record.completeness)
     report.records.push(record)
     report.records = loop fresh_item in report.records -> fresh_item
-    report.records.sort_by((left: EvidenceRecord, right: EvidenceRecord) -> evidence_record_order(left, right))
+    report.records.sort_by(fn(left: EvidenceRecord, right: EvidenceRecord) { evidence_record_order(left, right) })
     return
 }
 
@@ -435,14 +435,14 @@ evidence_report_query: fn(report: EvidenceReport, claim_id: String?) -> [Evidenc
         }
         rows.push(evidence_projection_from_record(record))
     }
-    rows.sort_by((left: EvidenceProjection, right: EvidenceProjection) -> evidence_projection_order(left, right))
+    rows.sort_by(fn(left: EvidenceProjection, right: EvidenceProjection) { evidence_projection_order(left, right) })
     rows
 }
 
 evidence_projection_from_record: fn(record: EvidenceRecord) -> EvidenceProjection Never! {
     chain := record.chain.copy()
     chain = loop fresh_item in chain -> fresh_item
-    chain.sort_by((left: EvidenceChainLink, right: EvidenceChainLink) -> evidence_chain_order(left, right))
+    chain.sort_by(fn(left: EvidenceChainLink, right: EvidenceChainLink) { evidence_chain_order(left, right) })
     EvidenceProjection{evidence_id: record.identity.evidence_id, claim_id: record.identity.claim_id, kind: record.kind, facet: record.facet, producer: record.producer, expectation: record.expectation, outcome: record.outcome, source: record.source, completeness: record.completeness, chain: chain, derivation: record.derivation}
 }
 
@@ -507,7 +507,7 @@ evidence_diagnostic_order: fn(left: EvidenceDiagnostic, right: EvidenceDiagnosti
 evidence_sorted_record_indices: fn(report: EvidenceReport) -> [Int] Never! {
     indices := [Int]{}
     loop index in 0..<report.records.len() -> indices.push(index)
-    indices.sort_by((left: Int, right: Int) -> evidence_record_order(report.records[left], report.records[right]))
+    indices.sort_by(fn(left: Int, right: Int) { evidence_record_order(report.records[left], report.records[right]) })
     indices
 }
 

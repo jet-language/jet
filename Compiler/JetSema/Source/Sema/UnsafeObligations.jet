@@ -57,7 +57,7 @@ sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInsp
     }
     sema_unsafe_package_surface(modules, result)
     result.gates = loop fresh_item in result.gates -> fresh_item
-    result.gates.sort_by((a: UnsafeGateInspection, b: UnsafeGateInspection) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end))
+    result.gates.sort_by(fn(a: UnsafeGateInspection, b: UnsafeGateInspection) { (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end) })
     result
 }
 
@@ -269,7 +269,7 @@ sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: 
             None
         }
     }
-    value := effective.map((policy) -> policy.value) ?? policy_default_gate_value(PolicyKey.Unsafe)
+    value := effective.map(fn(policy) { policy.value }) ?? policy_default_gate_value(PolicyKey.Unsafe)
     if value == PolicyValue.PerSite {
         sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate must choose an obligation mode", "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`", "add `obligations: .Track` (or `.Skip` when organization policy permits it)")
         value = PolicyValue.Track
@@ -278,7 +278,7 @@ sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: 
     loop declaration in site {
         if declaration.value == PolicyValue.Skip -> skip = true
     }
-    if skip && outer_policy.map((policy) -> policy.value) != Val(PolicyValue.PerSite) {
+    if skip && outer_policy.map(fn(policy) { policy.value }) != Val(PolicyValue.PerSite) {
         sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate cannot skip obligations", "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization", "set package policy to `.PerSite`, or remove `.Skip`")
         value = PolicyValue.Track
     }

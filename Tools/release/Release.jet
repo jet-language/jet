@@ -159,7 +159,7 @@ tree_artifacts: fn(root: String, prefix: String, out: &[Artifact]) Never! -[FS]>
     entries: files.list_dir(root) ?? return
     names := [String]{}
     loop entry in entries -> names.push(entry.name.copy())
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     loop name in names {
         path: files.join(root, name)
         shown: "{prefix}/{name}"

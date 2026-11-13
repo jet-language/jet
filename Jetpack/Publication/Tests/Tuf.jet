@@ -271,12 +271,12 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
     root: publication_tuf_test_root("checkpoint-lock")
     state: files.join(root, "accepted.state")
     accepted_state: state.copy()
-    publication_tuf_with_checkpoint_lock(state, () -> {
+    publication_tuf_with_checkpoint_lock(state, fn() {
         files.write(accepted_state, "accepted")
     }) ?? panic("checkpoint lock")
     assert_eq(files.read(state) ?? panic("read accepted"), "accepted")
     assert(!files.exists(files.join(root, "accepted.lock")))
-    if publication_tuf_with_checkpoint_lock(state, () -> {
+    if publication_tuf_with_checkpoint_lock(state, fn() {
         return Err(publication_tuf_invalid("deliberate checkpoint action refusal"))
     }) == {
         .Ok(_) -> panic("checkpoint action refusal suppressed")

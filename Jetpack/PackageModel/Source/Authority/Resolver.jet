@@ -282,7 +282,7 @@ AuthorityResolver: struct {
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
         self.discover_source_files_from(".", found, budget, 0)
-        found.sort_by(file -> file.relative)
+        found.sort_by(fn(file) { file.relative })
         self.revalidate_root()
         Ok(found)
     }
@@ -294,7 +294,7 @@ AuthorityResolver: struct {
         found := [CheckedFile]{}
         budget := AuthorityWalkBudget.new()
         self.discover_source_files_from(directory.relative, found, budget, 0)
-        found.sort_by(file -> file.relative)
+        found.sort_by(fn(file) { file.relative })
         hasher := crypto.Hasher.new()
         loop file in found {
             relative: if directory.relative == "" -> file.relative else -> {

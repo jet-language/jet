@@ -225,8 +225,8 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     }
     if cursor.at != bytes.len() -> return Err(jet_live_error("live runtime snapshot has trailing bytes"))
     // The registries are id-ordered views; at most 4096 channels are shown.
-    tasks.sort_by((left: JetLiveTask, right: JetLiveTask) -> left.id <=> right.id)
-    channels.sort_by((left: JetLiveChannel, right: JetLiveChannel) -> left.id <=> right.id)
+    tasks.sort_by(fn(left: JetLiveTask, right: JetLiveTask) { left.id <=> right.id })
+    channels.sort_by(fn(left: JetLiveChannel, right: JetLiveChannel) { left.id <=> right.id })
     if channels.len() > 4096 -> channels = channels[0..<4096].copy()
     effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
     resources["running"] = running

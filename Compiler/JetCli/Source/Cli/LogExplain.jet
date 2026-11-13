@@ -36,7 +36,7 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
             ladder.push(JetCLILogSource{rung: "package", filter: found.filter, site: "{manifest}:{found.site}"})
         }
         entries := cli_files.walk(home, None).list() ?? [cli_files.WalkEntry]{}
-        entries.sort_by((left: cli_files.WalkEntry, right: cli_files.WalkEntry) -> left.relative <=> right.relative)
+        entries.sort_by(fn(left: cli_files.WalkEntry, right: cli_files.WalkEntry) { left.relative <=> right.relative })
         loop entry in entries {
             if entry.is_dir || !entry.relative.ends_with(".jet") || entry.relative.starts_with(".jet/") -> next
             source: cli_files.read(entry.path) ?? next

@@ -27,7 +27,7 @@ process_rows: fn() -> [ProcessRow]? {
     listed: files.list_dir("/proc") ?? return None
     rows := [ProcessRow]{}
     loop item in listed {
-        if !item.is_dir || !item.name.bytes().all(b -> b >= 48 && b <= 57) -> next
+        if !item.is_dir || !item.name.bytes().all(fn(b) { b >= 48 && b <= 57 }) -> next
         pid: Int.parse(item.name) ?? next
         status: files.read("/proc/{item.name}/status") ?? next
         row := ProcessRow{pid: pid, parent: None, rss_kb: None}
@@ -110,7 +110,7 @@ process_ended: fn(pid: Int) -> Bool {
 processes_ended: fn(pids: [Int], timeout_ms: Int) -[FS, Time, Time.Wait]> Bool {
     started: time.instant()
     loop {
-        if pids.all(pid -> process_ended(pid)) -> return true
+        if pids.all(fn(pid) { process_ended(pid) }) -> return true
         if started.elapsed_millis() >= timeout_ms -> return false
         time.sleep(time.duration_ms(PROCESS_POLL_MS))
     }

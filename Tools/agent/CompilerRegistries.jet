@@ -280,7 +280,7 @@ manifest_head: fn(path: String) -[Env, Exec, FS, IO]> String Never! {
 }
 
 is_full_sha: fn(text: String) -> Bool Never! {
-    text.len() == 40 && text.bytes().all(byte -> (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}))
+    text.len() == 40 && text.bytes().all(fn(byte) { (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}) })
 }
 
 proof_path: fn(repo: String) -> String Never! { "{files.dirname(repo)}/source.manifest.json" }
@@ -347,7 +347,7 @@ collate: fn(left: String, right: String) -> Ordering Never! {
 // in collation order; package.jet is a manifest, never a member.
 files_under: fn(repo: String, directory: String, extension: String) -[Env, Exec, FS, IO]> [String] Never! {
     listed := files.list_dir("{repo}/{directory}") ?? return fail("`{directory}` cannot be listed: {err}")
-    listed.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    listed.sort_by(fn(left: DirEntry, right: DirEntry) { collate(left.name, right.name) })
     out := [String]{}
     loop entry in listed {
         path: "{directory}/{entry.name}"
@@ -502,7 +502,7 @@ inventory: fn(repo: String) -[Env, Exec, FS, IO]> [Census] Never! {
     found := [Census]{}
     shapes: patterns()
     packages := files.list_dir("{repo}/Compiler") ?? return fail("Compiler cannot be listed: {err}")
-    packages.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    packages.sort_by(fn(left: DirEntry, right: DirEntry) { collate(left.name, right.name) })
     loop item in packages {
         if !item.is_dir || !files.is_dir("{repo}/Compiler/{item.name}/Tests") -> next
         loop source in files_under(repo, "Compiler/{item.name}/Tests", ".jet") {
@@ -520,17 +520,17 @@ inventory: fn(repo: String) -[Env, Exec, FS, IO]> [Census] Never! {
 }
 
 census_dyn: fn(rows: [Census]) -> Dyn Never! {
-    Dyn.Array(rows.map(row -> Dyn.Object([String: Dyn]{
+    Dyn.Array(rows.map(fn(row) { Dyn.Object([String: Dyn]{
         "package": Dyn.Text(row.package.copy()),
         "source": Dyn.Text(row.source.copy()),
         "sha256": Dyn.Text(row.sha256.copy()),
         "names": texts(row.names),
         "entry": Dyn.Bool(row.entry),
         "role": Dyn.Text(row.role.copy()),
-    })))
+    }) }))
 }
 
-texts: fn(items: [String]) -> Dyn Never! { Dyn.Array(items.map(item -> Dyn.Text(item.copy()))) }
+texts: fn(items: [String]) -> Dyn Never! { Dyn.Array(items.map(fn(item) { Dyn.Text(item.copy()) })) }
 
 retirements: fn(repo: String) -[Env, Exec, FS, IO]> [Retirement] Never! {
     text: files.read("{repo}/{RETIRED}") ?? return fail("`{RETIRED}` cannot be read: {err}")
@@ -554,7 +554,7 @@ retirement_dyn: fn(row: Retirement, status: String) -> Dyn Never! {
 }
 
 registry_rows: fn(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registry] Never! {
-    retired: retirements(repo).map(row -> row.path.copy())
+    retired: retirements(repo).map(fn(row) { row.path.copy() })
     rows := [Registry]{}
     loop row in census {
         if row.role != "registry" || retired.contains(row.source) -> next
@@ -583,7 +583,7 @@ testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
         }
         if row.reason.starts_with("PRODUCT INTEROP RED:") -> pending.push(retirement_dyn(row, "RED"))
     }
-    cases: files_under(repo, "tests/cases", ".case").filter(path -> !retired_ids.contains(path))
+    cases: files_under(repo, "tests/cases", ".case").filter(fn(path) { !retired_ids.contains(path) })
     requirement: regex.compile("^(?:requires: tool:|when tool |step(?: [^:]+)?: )") ?? return fail("requirement pattern: {err}")
     rust: regex.compile("\\b(?:cargo|rustc|rustup)\\b") ?? return fail("Rust tool pattern: {err}")
     requirements := [Dyn]{}
@@ -600,7 +600,7 @@ testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
             }
         }
     }
-    source_rows: sources.map(path -> Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(sha256_file(repo, path))}))
+    source_rows: sources.map(fn(path) { Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(sha256_file(repo, path))}) })
     tree: Dyn.Object([String: Dyn]{
         "sources": Dyn.Array(source_rows),
         "cases": Dyn.Array(case_rows.copy()),
@@ -626,7 +626,7 @@ unblock_uses: fn(text: String) -> String Never! {
         if !open {
             trimmed: line.trim_start()
             lead: line.removesuffix(trimmed)
-            if lead.bytes().all(b -> is_space(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+            if lead.bytes().all(fn(b) { is_space(b) }) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
                 indent = lead.copy()
                 open = true
                 lines[at] = " ".repeat(line.len())
@@ -912,7 +912,7 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
         if found.expected_file != "" -> entries["expectedFile"] = Dyn.Text(found.expected_file.copy())
         if found.kind == "runner" {
-            entries["calls"] = Dyn.Array(found.calls.map(call -> Dyn.Object([String: Dyn]{"mode": Dyn.Text(call.mode.copy()), "witness": Dyn.Text(call.witness.copy()), "expected": Dyn.Text(call.expected.copy())})))
+            entries["calls"] = Dyn.Array(found.calls.map(fn(call) { Dyn.Object([String: Dyn]{"mode": Dyn.Text(call.mode.copy()), "witness": Dyn.Text(call.witness.copy()), "expected": Dyn.Text(call.expected.copy())}) }))
         }
     }
     entries["runnerSha256"] = Dyn.Text(runner_sha256.copy())
@@ -1931,7 +1931,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
     if options.head != after -> return fail("pinned source changed during assembly")
     proof: proof_path(repo)
     proof_tree: read_json(proof) ?? return fail(err.message)
-    compiler_retired: retirements(repo).filter(row -> row.path.starts_with("Compiler/")).map(row -> retirement_dyn(row, ""))
+    compiler_retired: retirements(repo).filter(fn(row) { row.path.starts_with("Compiler/") }).map(fn(row) { retirement_dyn(row, "") })
     manifest: Dyn.Object([String: Dyn]{
         "head": Dyn.Text(options.head.copy()),
         "completeCompilerRegistries": Dyn.Bool(true),
@@ -1959,7 +1959,7 @@ partition: fn(entries: [Dyn], shard: String) -> [Dyn] Problem! {
     count: Int.parse(parts.tail) ?? -1
     if index < 1 || count < 1 || index > 9007199254740991 || count > 9007199254740991 || index > count -> return Err(problem("invalid registry shard I/N"))
     sorted := entries.copy()
-    sorted.sort_by((left: Dyn, right: Dyn) -> text_field(left, "id") <=> text_field(right, "id"))
+    sorted.sort_by(fn(left: Dyn, right: Dyn) { text_field(left, "id") <=> text_field(right, "id") })
     picked := [Dyn]{}
     loop offset in 0..<sorted.len() {
         if offset % count == index - 1 -> picked.push(sorted[offset].copy())
@@ -2033,9 +2033,9 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
     }
     // Re-census: a forged or truncated entries array cannot turn omissions into PASS.
     current: inventory(repo)
-    required := registry_rows(repo, current).map(row -> row.id.copy())
+    required := registry_rows(repo, current).map(fn(row) { row.id.copy() })
     required.push("testkit/cases")
-    ids: entries.map(entry -> text_field(entry, "id"))
+    ids: entries.map(fn(entry) { text_field(entry, "id") })
     distinct := [String]{}
     loop id in ids {
         if !distinct.contains(id) -> distinct.push(id.copy())
@@ -2062,7 +2062,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
     }
     tally := RunTally{total: selected.len(), passed: 0, blocked: 0, failed: 0, entries: [Dyn]{}, runtime: None, reason: None}
     loaded := Loaded{runtime: None, error: ""}
-    if selected.any(entry -> text_field(entry, "kind") == "transport" && text_field(entry, "status") != "BLOCKED") -> loaded = load_runtime(jet, options.runtime)
+    if selected.any(fn(entry) { text_field(entry, "kind") == "transport" && text_field(entry, "status") != "BLOCKED" }) -> loaded = load_runtime(jet, options.runtime)
     if loaded.runtime == .Val(found) {
         tally.runtime = Val(Dyn.Object([String: Dyn]{"runtimeDir": Dyn.Text(found.dir.copy()), "runtimePack": Dyn.Text(found.pack.copy()), "runtimeObject": Dyn.Text(found.object.copy()), "packSha256": Dyn.Text(found.pack_sha256.copy()), "objectSha256": Dyn.Text(found.object_sha256.copy())}))
     }
@@ -2168,10 +2168,10 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
         if failure == "" {
             report: read_json("{evidence}/cases.json") ?? return Err(err)
             rows: array_field(report, "results")
-            names: rows.map(row -> text_field(row, "case"))
-            expected: array_field(entry, "caseNames").map(name -> if name == .Text(text) -> text.copy() else -> "")
+            names: rows.map(fn(row) { text_field(row, "case") })
+            expected: array_field(entry, "caseNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" })
             ran_by: files.realpath(text_field(report, "jet")) ?? ""
-            if ran_by != (files.realpath(jet) ?? jet) || rows.len() != count || rows.any(row -> text_field(row, "status") != "PASS") || sorted_texts(names) != sorted_texts(expected) {
+            if ran_by != (files.realpath(jet) ?? jet) || rows.len() != count || rows.any(fn(row) { text_field(row, "status") != "PASS" }) || sorted_texts(names) != sorted_texts(expected) {
                 return Err(problem("testkit cases contain missing, non-PASS, skipped, or unexpected outcomes"))
             }
             result["report"] = report
@@ -2192,7 +2192,7 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
             command.push("--color=never")
         }
         command.push(path)
-        sources: array_field(entry, "sources").map(source -> if source == .Text(text) -> text.copy() else -> "")
+        sources: array_field(entry, "sources").map(fn(source) { if source == .Text(text) -> text.copy() else -> "" })
         environment: field(entry, "environment")
         if canonical(environment) != canonical(registry_environment(repo, cwd, sources)) -> return Err(problem("registry environment changed since manifest"))
         scratch: text_field(environment, "TMPDIR")
@@ -2238,8 +2238,8 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
         passed: int_field(report, "passed") ?? -1
         expected_failures: int_field(report, "expectedFailures") ?? -1
         if items.len() != count || passed < 0 || expected_failures < 0 || passed + expected_failures != count -> return Err(problem("executed test count does not match registry"))
-        ran_names: items.map(test -> text_field(test, "name"))
-        names: array_field(entry, "testNames").map(name -> if name == .Text(text) -> text.copy() else -> "")
+        ran_names: items.map(fn(test) { text_field(test, "name") })
+        names: array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" })
         if sorted_texts(ran_names) != sorted_texts(names) -> return Err(problem("executed test names do not match complete registry"))
         result["report"] = report
     }
@@ -2287,12 +2287,12 @@ test_repo: fn() -[Env, Exec, FS, IO]> String Never! {
 }
 
 shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
-    (partition(entries, shard) ?? panic("shard {shard}: {err}")).map(entry -> text_field(entry, "id"))
+    (partition(entries, shard) ?? panic("shard {shard}: {err}")).map(fn(entry) { text_field(entry, "id") })
 }
 
 #Test("registry shards are deterministic, disjoint and cover the complete manifest") {
     ids: [String]{"Z", "A", "T", "B", "Q", "C", "P"}
-    manifest: ids.map(id -> Dyn.Object([String: Dyn]{"id": Dyn.Text(id.copy())}))
+    manifest: ids.map(fn(id) { Dyn.Object([String: Dyn]{"id": Dyn.Text(id.copy())}) })
     assert_eq(shard_ids(manifest, ""), ids)
     reversed := manifest.copy()
     reversed.reverse()
@@ -2506,7 +2506,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
     loop name in ([String]{"RunDuration", "RunIntWiden", "RunExecutionFixtures", "StopWitness"}) {
         found: specification("JetRuntime/Tests/{name}") ?? panic("{name}: no specification")
         assert_eq(found.kind, "runner")
-        assert(found.calls.all(call -> call.expected.ends_with("\n")))
+        assert(found.calls.all(fn(call) { call.expected.ends_with("\n") }))
     }
 }
 

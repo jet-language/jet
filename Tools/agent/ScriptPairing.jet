@@ -182,13 +182,13 @@ shebang_interpreter: fn(first_line: String) -> String Never! {
 }
 
 // Whether the rule holds `path` to being paired.
-in_scope: fn(path: String) -> Bool Never! { SCOPE.any(root -> path.starts_with(root)) }
+in_scope: fn(path: String) -> Bool Never! { SCOPE.any(fn(root) { path.starts_with(root) }) }
 
 // The class of `path`; `first_line` is its first line, read only for an
 // extensionless file.
 file_class: fn(path: String, first_line: String) -> FileClass Never! {
     if path.ends_with(".jet") -> return .Jet
-    if !SCRIPT_EXTENSIONS.any(extension -> path.ends_with(extension)) {
+    if !SCRIPT_EXTENSIONS.any(fn(extension) { path.ends_with(extension) }) {
         if !extensionless(path) -> return .Other
         interpreter: shebang_interpreter(first_line)
         if interpreter == "" || interpreter == "jet" || NIX_INTERPRETERS.contains(interpreter) -> return .Other
@@ -331,7 +331,7 @@ pair_of: fn(entries: Entries, path: String) -> Pair? Never! {
 covered: fn(coverage: Coverage) -> Bool Never! { coverage.entries.len() > 0 && coverage.missing.len() == 0 }
 
 // Whether `path` names a test script.
-test_script: fn(path: String) -> Bool Never! { TEST_SUFFIXES.any(suffix -> path.ends_with(suffix)) }
+test_script: fn(path: String) -> Bool Never! { TEST_SUFFIXES.any(fn(suffix) { path.ends_with(suffix) }) }
 
 // How the entries cover the script `path` without pairing it: a test
 // script by what it imports, any other by its importers.
@@ -490,7 +490,7 @@ switched_entries: fn(entries: Entries, changed: [String]) -> [String] Never! {
     loop known in entries.pairings {
         dir: "{ENTRIES_ROOT}/{known.pair.entry}/"
         if !known.path.starts_with(dir) || out.contains(known.pair.entry) -> next
-        if changed.any(path -> path.starts_with(dir) || path == known.pair.twin) -> out.push(known.pair.entry.copy())
+        if changed.any(fn(path) { path.starts_with(dir) || path == known.pair.twin }) -> out.push(known.pair.entry.copy())
     }
     out
 }
@@ -601,7 +601,7 @@ run: fn() {
         print("script pairing: ok ({added.len()} added file(s))")
         return
     }
-    process.fail(65, refused.map(line -> "script-pairing: {line}").join("\n"))
+    process.fail(65, refused.map(fn(line) { "script-pairing: {line}" }).join("\n"))
 }
 
 #Test("a script is named by its extension or a non-Jet `#!` line; Nix is no script; only SCOPE is held to the rule") {
@@ -755,7 +755,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(decoy, "Tools/decoy/fetch.py", "print(0)\n")
     bare: files.mkdtemp("script-pairing-tree") ?? panic("a temporary directory cannot be made: {err}")
     names: ["GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"]
-    saved: names.map(name -> sys.get(name))
+    saved: names.map(fn(name) { sys.get(name) })
     sys.set("GIT_DIR", "{decoy}/.git")
     sys.set("GIT_INDEX_FILE", "{decoy}/.git/index")
     sys.set("GIT_WORK_TREE", decoy)

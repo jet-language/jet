@@ -18,7 +18,7 @@ any_origins: fn() -> HTTPCorsOrigins {
 run: fn() {
     print(text.casefold("Straße"))
     mux: http_server.mux()
-    mux.get("/health", () -> Ok(http_server.response(204, "")))
+    mux.get("/health", fn() { Ok(http_server.response(204, "")) })
     policy: http_server.cors_policy(["https://app.example"]) ?? panic("cors")
     http_server.cors(mux, policy)
     http_server.static_files(mux, "/assets", "/tmp")

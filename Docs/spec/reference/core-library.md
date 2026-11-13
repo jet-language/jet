@@ -622,7 +622,7 @@ absent-propagating value type (D-HOLE1):
 ```jet
 price: lookup_price(id)
 qty: lookup_qty(id)
-total: price.zip(qty).map((pair) -> pair.a * pair.b)
+total: price.zip(qty).map(fn(pair) { pair.a * pair.b })
 ```
 
 ## Collections and iterators
@@ -652,9 +652,9 @@ records the shipped surface without adding aliases:
 | `[T]` | `[a, b]` | Eager closure methods, sequence adapters, reducers, `lazy`, `to_set`, `join`, `compare`, `split`, `starts_with`, `ends_with`, `slice`, `fill`, `fill_repeat`, `copy`, and `equal`. |
 | `[K:V]` | `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | Ordered `keys`, `values`, `get`, `has_key`, `add`, `add_new`, `remove`, `pop`, `merge`, `copy`, `equal`, `map`, `filter`, `flat_map`, `fold`, `intersection`, `slice`, `top_n`, and reducers. |
 | `Set<T>` | `Set.new()`, `Set.from(xs)`, `Set<E>.from_bits(n)` | Hash-set `add`, `remove`, `pop`, `has`, set algebra, subset/disjoint checks, `copy`, `first`, `values`, closure methods, `to_list`, and size/clear operations. A Set of a fieldless enum of up to 64 cases is one bit word with `bits()`. |
-| `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`(w: String) -> w.len()`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
+| `Rank<T>` | `Rank.new()`, `Rank.from(xs)`, `Rank.by(key)`, `Rank.by_desc(key)`, `Rank.from_by(xs, key)`, `Rank.from_by_desc(xs, key)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. `new` and `from` keep items in their own ascending order. The `by` forms order by a pure key function (`fn(w: String) { w.len() }`, an `Int`, `Float`, `String` or other natively ordered key): `by` keeps the smallest key first and `by_desc` the largest, and items with equal keys stay in the order they went in. Membership is still the item's own equality, so two items with equal keys are both kept. Set algebra results keep the receiver's order. A key function with effects is rejected (E0747). |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | Double-ended push/pop and peek, capacity, lookup/delete, list conversion, join, reverse, split, and size/clear operations. |
-| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)`, `PriorityQueue.by(key)`, `PriorityQueue.by_desc(key)`, `PriorityQueue.from_by(xs, key)`, `PriorityQueue.from_by_desc(xs, key)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. `new` and `from` pop the smallest item first by its own order, the same as `by(key)`, and `to_sorted_list` and `remove(i, .Slot)` see the items smallest first; a queue that pops the largest first is `by_desc(key)` or `from_by_desc(xs, key)`. The `by` forms order by a pure key function (`(s: Score) -> s.points`, an `Int`, `Float`, `String` or other natively ordered key): `by` pops the smallest key first and `by_desc` the largest; items with equal keys pop in the order they went in, and `to_sorted_list` lists them in pop order. A key function with effects is rejected (E0747). |
+| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)`, `PriorityQueue.by(key)`, `PriorityQueue.by_desc(key)`, `PriorityQueue.from_by(xs, key)`, `PriorityQueue.from_by_desc(xs, key)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. `new` and `from` pop the smallest item first by its own order, the same as `by(key)`, and `to_sorted_list` and `remove(i, .Slot)` see the items smallest first; a queue that pops the largest first is `by_desc(key)` or `from_by_desc(xs, key)`. The `by` forms order by a pure key function (`fn(s: Score) { s.points }`, an `Int`, `Float`, `String` or other natively ordered key): `by` pops the smallest key first and `by_desc` the largest; items with equal keys pop in the order they went in, and `to_sorted_list` lists them in pop order. A key function with effects is rejected (E0747). |
 | `Cache<K,V>` | `Cache<K,V>.new(capacity)` | Bounded least-recently-used `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, and size/clear operations. The constructor names its key and value types (`Cache<String, Int>.new(2)`): no argument carries them, and a later line never settles them (D-INFER-LEVEL1). `add` and `get` make a key the most recent; `add` returns a held key's old value, and a new key into a full cache evicts the least recent entry. `add_new` on a held key and `has_key` leave the order alone. `keys` lists the most recent first. A negative capacity is 0, which keeps nothing. |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | Counting `add`, `remove`, `has`, `count`, list conversion, and size/clear operations. |
 | `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, `Bits.copy()` (an independent set: changing the copy leaves the original as it was), and size/clear operations. |
@@ -807,12 +807,12 @@ runs each of these cases.
 
 | Receiver | Operation | Receiver ownership | Law | Empty result | Status |
 | --- | --- | --- | --- | --- | --- |
-| `Set<T>` | `map((item) -> T)` | borrows | Visit | empty list | current |
-| `Set<T>` | `filter((item) -> Bool)` | borrows | Visit | empty list | current |
-| `Set<T>` | `each((item) -> T)` | borrows | Each | Unit | current |
-| `Set<T>` | `all((item) -> Bool)` | borrows | Decide | true | current |
-| `Set<T>` | `flat_map((item) -> T)` | borrows | Visit | empty iterator | current |
-| `Set<T>` | `fold(seed, (acc, item) -> acc)` | borrows | Fold | the seed | current |
+| `Set<T>` | `map(fn(item) { T })` | borrows | Visit | empty list | current |
+| `Set<T>` | `filter(fn(item) { Bool })` | borrows | Visit | empty list | current |
+| `Set<T>` | `each(fn(item) { T })` | borrows | Each | Unit | current |
+| `Set<T>` | `all(fn(item) { Bool })` | borrows | Decide | true | current |
+| `Set<T>` | `flat_map(fn(item) { T })` | borrows | Visit | empty iterator | current |
+| `Set<T>` | `fold(seed, fn(acc, item) { acc })` | borrows | Fold | the seed | current |
 | `Set<T>` | `min()` | borrows | Lookup | None | current |
 | `Set<T>` | `max()` | borrows | Lookup | None | current |
 | `Set<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
@@ -872,7 +872,7 @@ runs each of these cases.
 | `Tally<T>` | `remove(item)` | exclusive, in place | Mutate | Unit | current |
 | `Tally<T>` | `has(item)` | borrows | Measure | false | current |
 | `Tally<T>` | `count(item)` | borrows | Measure | 0 | current |
-| `Tally<T>` | `any((item) -> Bool)` | borrows | Decide | false | current |
+| `Tally<T>` | `any(fn(item) { Bool })` | borrows | Decide | false | current |
 | `Tally<T>` | `len()` | borrows | Measure | 0 | current |
 | `Tally<T>` | `is_empty()` | borrows | Measure | true | current |
 | `Tally<T>` | `clear()` | exclusive, in place | Mutate | Unit | current |
@@ -922,21 +922,21 @@ runs each of these cases.
 | `[K:V]` | `contains_value(value)` | borrows | Measure | false | current |
 | `[K:V]` | `pop_first()` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `update(map)` | exclusive, in place | Mutate | Unit | current |
-| `[K:V]` | `merge(map, [(key, old, new) -> value])` | borrows | MergeEntries | the argument | current |
+| `[K:V]` | `merge(map, [fn(key, old, new) { value }])` | borrows | MergeEntries | the argument | current |
 | `[K:V]` | `equal(map)` | borrows | Measure | true when both are empty | current |
 | `[K:V]` | `intersection(map)` | borrows | Build | empty map | current |
 | `[K:V]` | `slice([key])` | borrows | Build | empty map | current |
 | `[K:V]` | `top_n(Int)` | borrows | Reorder | empty list | current |
-| `[K:V]` | `map((key, value) -> T)` | borrows | Visit | empty map | current |
-| `[K:V]` | `filter((key, value) -> Bool)` | borrows | Visit | empty map | current |
-| `[K:V]` | `flat_map((key, value) -> map)` | borrows | Visit | empty map | current |
-| `[K:V]` | `each((key, value) -> T)` | borrows | Each | Unit | current |
-| `[K:V]` | `any((key, value) -> Bool)` | borrows | Decide | false | current |
-| `[K:V]` | `all((key, value) -> Bool)` | borrows | Decide | true | current |
-| `[K:V]` | `fold(seed, (acc, key, value) -> acc)` | borrows | Fold | the seed | current |
+| `[K:V]` | `map(fn(key, value) { T })` | borrows | Visit | empty map | current |
+| `[K:V]` | `filter(fn(key, value) { Bool })` | borrows | Visit | empty map | current |
+| `[K:V]` | `flat_map(fn(key, value) { map })` | borrows | Visit | empty map | current |
+| `[K:V]` | `each(fn(key, value) { T })` | borrows | Each | Unit | current |
+| `[K:V]` | `any(fn(key, value) { Bool })` | borrows | Decide | false | current |
+| `[K:V]` | `all(fn(key, value) { Bool })` | borrows | Decide | true | current |
+| `[K:V]` | `fold(seed, fn(acc, key, value) { acc })` | borrows | Fold | the seed | current |
 | `[K:V]` | `clear()` | exclusive, in place | Mutate | Unit | current |
-| `View<T>` | `map((item) -> T)` | borrows | Visit | empty list | current |
-| `View<T>` | `fold(seed, (acc, item) -> acc)` | borrows | Fold | the seed | current |
+| `View<T>` | `map(fn(item) { T })` | borrows | Visit | empty list | current |
+| `View<T>` | `fold(seed, fn(acc, item) { acc })` | borrows | Fold | the seed | current |
 | `[T]` | `push(item)` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `append(item)` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `try_push(item)` | exclusive, in place | TryMutate | Ok(Unit) | current |
@@ -953,18 +953,18 @@ runs each of these cases.
 | `[T]` | `index(item)` | borrows | Lookup | None | current |
 | `[T]` | `contains(item)` | borrows | Measure | false | current |
 | `[T]` | `count(item)` | borrows | Measure | 0 | current |
-| `[T]` | `update_first((item) -> Bool, item)` | exclusive, in place | Decide | false | current |
+| `[T]` | `update_first(fn(item) { Bool }, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `split_write(Int)` | exclusive, in place | Disjoint | Ok(two empty write views) at zero | current |
 | `[T]` | `get_disjoint_write([Int])` | exclusive, in place | Disjoint | Ok(empty view list) for no indexes | current |
 | `[T]` | `edit_disjoint([Int], (ViewMut<item>, ViewMut<item>) -> T)` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
 | `[T]` | `replace(item, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
-| `[T]` | `binary_search_by((item) -> T)` | borrows | Search | None | current |
+| `[T]` | `binary_search_by(fn(item) { T })` | borrows | Search | None | current |
 | `[T]` | `random()` | borrows | Lookup | None | current |
 | `[T]` | `min_max()` | borrows | Lookup | None | current |
-| `[T]` | `min_max_by((item) -> T)` | borrows | Fold | None | current |
-| `[T]` | `sort_by((item) -> key or (a, b) -> Ordering)` | exclusive, in place | SortBy | Unit | current |
-| `[T]` | `sort_by_desc((item) -> key)` | exclusive, in place | SortBy | Unit | current |
+| `[T]` | `min_max_by(fn(item) { T })` | borrows | Fold | None | current |
+| `[T]` | `sort_by(fn(item) { key or (a, b) -> Ordering })` | exclusive, in place | SortBy | Unit | current |
+| `[T]` | `sort_by_desc(fn(item) { key })` | exclusive, in place | SortBy | Unit | current |
 | `[T]` | `sort()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `sort_desc()` | exclusive, in place | Mutate | Unit | current |
 | `[T]` | `lazy()` | borrows | Adapt | empty iterator | current |
@@ -983,29 +983,29 @@ runs each of these cases.
 | `Iter<T>` | `to_list()` | consumes | Drain | empty list | current |
 | `Iter<T>` | `collect()` | consumes | Drain | empty list | current |
 | `Iter<T>` | `next()` | exclusive, in place | Pull | None | current |
-| `[T]`, `Iter<T>` | `map((item) -> T)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
-| `[T]`, `Iter<T>` | `filter((item) -> Bool)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
-| `[T]`, `Iter<T>` | `each((item) -> T)` | borrows a list; consumes an iterator | Each | Unit | current |
-| `[T]`, `Iter<T>` | `find((item) -> Bool)` | borrows a list; consumes an iterator | Decide | None | current |
-| `[T]`, `Iter<T>` | `any((item) -> Bool)` | borrows a list; consumes an iterator | Decide | false | current |
-| `[T]`, `Iter<T>` | `all((item) -> Bool)` | borrows a list; consumes an iterator | Decide | true | current |
-| `[T]`, `Iter<T>` | `position((item) -> Bool)` | borrows a list; consumes an iterator | Decide | None | current |
-| `[T]`, `Iter<T>` | `is_sorted_by((item) -> T)` | borrows a list; consumes an iterator | Decide | true | current |
-| `[T]`, `Iter<T>` | `filter_map((item) -> T)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `flat_map((item) -> T)` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
-| `[T]`, `Iter<T>` | `take_while((item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `skip_while((item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `dedup_by((item) -> T)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `chunk_while((item, item) -> Bool)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `scan(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Stream | empty iterator | current |
-| `[T]`, `Iter<T>` | `min_by((item) -> T)` | borrows a list; consumes an iterator | Fold | None | current |
-| `[T]`, `Iter<T>` | `max_by((item) -> T)` | borrows a list; consumes an iterator | Fold | None | current |
-| `[T]`, `Iter<T>` | `count_where((item) -> Bool)` | borrows a list; consumes an iterator | Fold | 0 | current |
-| `[T]`, `Iter<T>` | `reduce(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Fold | the seed | current |
-| `[T]`, `Iter<T>` | `fold(seed, (acc, item) -> acc)` | borrows a list; consumes an iterator | Fold | the seed | current |
-| `[T]`, `Iter<T>` | `group_by((item) -> T)` | borrows a list; consumes an iterator | Group | empty map | current |
-| `[T]`, `Iter<T>` | `count_by((item) -> T)` | borrows a list; consumes an iterator | Group | empty map | current |
-| `[T]`, `Iter<T>` | `partition((item) -> Bool)` | borrows a list; consumes an iterator | Group | two empty lists | current |
+| `[T]`, `Iter<T>` | `map(fn(item) { T })` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `filter(fn(item) { Bool })` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `each(fn(item) { T })` | borrows a list; consumes an iterator | Each | Unit | current |
+| `[T]`, `Iter<T>` | `find(fn(item) { Bool })` | borrows a list; consumes an iterator | Decide | None | current |
+| `[T]`, `Iter<T>` | `any(fn(item) { Bool })` | borrows a list; consumes an iterator | Decide | false | current |
+| `[T]`, `Iter<T>` | `all(fn(item) { Bool })` | borrows a list; consumes an iterator | Decide | true | current |
+| `[T]`, `Iter<T>` | `position(fn(item) { Bool })` | borrows a list; consumes an iterator | Decide | None | current |
+| `[T]`, `Iter<T>` | `is_sorted_by(fn(item) { T })` | borrows a list; consumes an iterator | Decide | true | current |
+| `[T]`, `Iter<T>` | `filter_map(fn(item) { T })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `flat_map(fn(item) { T })` | borrows a list; consumes an iterator | Visit | empty list or iterator | current |
+| `[T]`, `Iter<T>` | `take_while(fn(item) { Bool })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `skip_while(fn(item) { Bool })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `dedup_by(fn(item) { T })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `chunk_while(fn(item, item) { Bool })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `scan(seed, fn(acc, item) { acc })` | borrows a list; consumes an iterator | Stream | empty iterator | current |
+| `[T]`, `Iter<T>` | `min_by(fn(item) { T })` | borrows a list; consumes an iterator | Fold | None | current |
+| `[T]`, `Iter<T>` | `max_by(fn(item) { T })` | borrows a list; consumes an iterator | Fold | None | current |
+| `[T]`, `Iter<T>` | `count_where(fn(item) { Bool })` | borrows a list; consumes an iterator | Fold | 0 | current |
+| `[T]`, `Iter<T>` | `reduce(seed, fn(acc, item) { acc })` | borrows a list; consumes an iterator | Fold | the seed | current |
+| `[T]`, `Iter<T>` | `fold(seed, fn(acc, item) { acc })` | borrows a list; consumes an iterator | Fold | the seed | current |
+| `[T]`, `Iter<T>` | `group_by(fn(item) { T })` | borrows a list; consumes an iterator | Group | empty map | current |
+| `[T]`, `Iter<T>` | `count_by(fn(item) { T })` | borrows a list; consumes an iterator | Group | empty map | current |
+| `[T]`, `Iter<T>` | `partition(fn(item) { Bool })` | borrows a list; consumes an iterator | Group | two empty lists | current |
 | `[T]`, `Iter<T>` | `counts()` | borrows a list; consumes an iterator | Group | empty map | current |
 | `[T]`, `Iter<T>` | `unzip()` | borrows a list; consumes an iterator | Group | one empty list per field | current |
 | `[T]`, `Iter<T>` | `take(Int)` | borrows a list; consumes an iterator | Adapt | empty iterator | current |
@@ -2217,7 +2217,7 @@ Sale: struct {
 }
 
 run: fn() {
-    print(input.csv<Sale>().map((s) -> s.amount).sum())
+    print(input.csv<Sale>().map(fn(s) { s.amount }).sum())
 }
 ```
 
@@ -3312,7 +3312,7 @@ use game: core.game
 run: fn() {
     scene := game.Scene.new("counter")
     scene.max_frames = 3
-    scene.on_frame((frame) -> {
+    scene.on_frame(fn(frame) {
         print("frame=" + frame.to_string())
     })
     backend: game.Backend.headless()
@@ -3446,7 +3446,7 @@ the call. A `Regex` value built at run time is passed as is.
 
 `compare_version` is the order `sort -V` gives (gnulib `filevercmp`, then
 sort's byte-order last resort), so
-`lines.sort_by((a, b) -> a.compare_version(b))` sorts as `sort -V` does.
+`lines.sort_by(fn(a, b) { a.compare_version(b) })` sorts as `sort -V` does.
 Digit runs compare as numbers,
 leading zeros aside (`6067c9` before `6067c10`). Outside them a letter sorts
 by itself, `~` before everything, the end included (`1.0~rc1` before `1.0`),
@@ -4031,7 +4031,7 @@ Ticket: struct {
 run: fn() {
     rows: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? return
     counts: data.query(rows)
-        .group_by(t -> t.team)
+        .group_by(fn(t) { t.team })
         .count()
         .collect() ?? return
     chart: data.bar_text(counts) ?? return
@@ -4052,7 +4052,7 @@ run: fn() {
 | `DataStream<T>` | type | One-shot bounded cursor over typed rows. |
 | `DataJoin<L, R>` / `Group<K, V>` | types | Join rows and grouped reduction rows; a left join uses `?R`. |
 | `Query<T>` / `DataTracked<T, K>` / `DataWatch<T>` | types | Query operation carrier, maintained keyed state, and update watcher. |
-| `track<T, K>(rows, row -> key)` | `DataTracked<T, K> !DataError` | Attach maintained keyed state to owned rows. |
+| `track<T, K>(rows, fn(row) { key })` | `DataTracked<T, K> !DataError` | Attach maintained keyed state to owned rows. |
 | `file<T>(path, format, limits)` / `file_member<T>(path, member, format, limits)` | `DataLoader<T> !DataError` | Build a typed file or archive-member loader. |
 | `url<T>(url, format, authority, limits)` / `database<T>(query, parameters, authority, limits)` | `DataLoader<T> !DataError` | Build an authority-bound remote or SQL loader. |
 | `value<T>(value, limits)` / `load_default<T>(locator)` / `load<T>(locator, limits)` | `DataLoader<T> !DataError` | Load an owned value or source locator with explicit limits. |
@@ -4069,9 +4069,9 @@ run: fn() {
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
 | `query(rows)` | `Query<T>` | Start a deterministic query plan under `DataLimits.safe()`. |
 | `query(stream)` | `Query<T>` | Start a one-shot query over a stream's remaining rows, under the `DataLimits` of the reader that made the stream. |
-| `inner_join(left, right, left -> key, right -> key)` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |
-| `left_join(left, right, left -> key, right -> key)` | `[DataJoin<T, ?U>] !DataError` | Retain unmatched left rows as `?U`. |
-| `pivot_sum(rows, row -> key, row -> column, row -> value)` | `[DataPivotCell] !DataError` | Group and sum by a row and column key. |
+| `inner_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |
+| `left_join(left, right, fn(left) { key }, fn(right) { key })` | `[DataJoin<T, ?U>] !DataError` | Retain unmatched left rows as `?U`. |
+| `pivot_sum(rows, fn(row) { key }, fn(row) { column }, fn(row) { value })` | `[DataPivotCell] !DataError` | Group and sum by a row and column key. |
 | `plot<T>(rows)` | `JetDataPlot<T> !DataError` | Build a bounded plot plan from encodable rows. |
 | `inspect(plot)` / `inspect_json(plot)` | inspection / `String !DataError` | Inspect a plot plan as text or JSON. |
 | `text(plot)` / `svg(plot)` | `String !DataError` | Render plot text or SVG. |
@@ -4162,8 +4162,8 @@ it is pulled. The callbacks take one element and carry no effects.
 
 | Stage | Returns | Description |
 | --- | --- | --- |
-| `stream.with_event_time(event -> time)` | `StreamEventTime<T>` | Stamp each element with its event time: `Int` Unix seconds or a `DateTime`. |
-| `stamped.key_by(event -> key)` | `KeyedStream<K, T>` | Key each stamped element. `K` must be `Equatable`. |
+| `stream.with_event_time(fn(event) { time })` | `StreamEventTime<T>` | Stamp each element with its event time: `Int` Unix seconds or a `DateTime`. |
+| `stamped.key_by(fn(event) { key })` | `KeyedStream<K, T>` | Key each stamped element. `K` must be `Equatable`. |
 | `keyed.window(width, watermark: lateness, late: .Drop)` | `Stream<Window<K, T>>` | Group elements into tumbling windows of `width`. `late:` defaults to `.Drop`. |
 
 `Window<K, T>` has `key`, `start` and `end` (`DateTime`), and `events`, a list
@@ -4943,7 +4943,7 @@ hidden global dataflow graph.
 Reactivity is an opt-in library rather than ambient language semantics (`D-REACT1`); `computed` is the canonical alias for the derived-value constructor (`D-SIGNAL1`).
 Setting a synchronized signal updates the provider state, not the Jet carrier
 binding, so its receiver call uses `count.set(value)` without an `&` mark. UI
-button handlers are ordinary code arguments, `ui.button("Click", () -> { … })`
+button handlers are ordinary code arguments, `ui.button("Click", fn() { … })`
 (D-TRAILBLOCK2); a bare `{ }` after the call is E0335.
 
 ### `core.reactive.loadable` — asynchronous value state
@@ -5079,7 +5079,7 @@ the generic state payload.
 `transaction`, `update`, `batch`, `optimistic` and `patch` (and the `transact`
 receiver) take `apply: fn(&T)`: the callback receives the current value as a
 written parameter and changes it in place, as in
-`store.transact("add item", (cart: &Cart) -> cart.items.push(item))`. The
+`store.transact("add item", fn(cart: &Cart) { cart.items.push(item) })`. The
 store then holds the changed value and records one transaction from the value
 before it. A store is built on one `core.reactive` signal (D-DX-STORE1):
 `signal` and `state_signal` return that typed `Signal<T>`, not a textual

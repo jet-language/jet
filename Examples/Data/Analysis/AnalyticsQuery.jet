@@ -26,7 +26,7 @@ run: fn() {
     query: SQL{"SELECT * FROM sales WHERE qty > 1 ORDER BY qty DESC LIMIT 2"}
     sales_query: csv.query<Sale>(path, query) ?? panic("query")
     sales: sales_query.collect() ?? panic("collect")
-    total: sales.map(s -> s.qty).sum()
+    total: sales.map(fn(s) { s.qty }).sum()
     print("rows: {sales.len()}")
     loop sale in sales -> print("  {sale.item}: {sale.qty}")
     print("total qty: {total}")

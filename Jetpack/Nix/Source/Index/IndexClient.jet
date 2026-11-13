@@ -99,7 +99,7 @@ NixIndexClient: struct {
     from_local_catalog: fn(catalog: String, offline: Bool) -[FS]> NixIndexClient NixIndexError! {
         if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
         nix_index_ensure_real_directory(catalog)
-        transport: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
+        transport: NixIndexTransport{get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
             nix_index_unconfigured_get(url, max_bytes)
         }}
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
@@ -450,7 +450,7 @@ NixIndexCachedManifest: struct {
 nix_index_native_transport: fn(endpoint: String) -> NixIndexTransport NixIndexError! {
     configured: nix_index_parse_network_url(endpoint)
     scheme: configured.scheme
-    Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
+    Ok(NixIndexTransport{get_bounded: fn(url: String, max_bytes: Int) -[Net, Time.Wait]> {
         nix_index_native_get(scheme, url, max_bytes)
     }})
 }

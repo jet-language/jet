@@ -192,7 +192,7 @@ nested: fn() {
 }
 
 lambda: fn() {
-    step: () -> {
+    step: fn() {
         print("x")
         // end of the lambda
     }
@@ -203,7 +203,8 @@ lambda: fn() {
 }
 
 // A multiline argument or parameter list puts each entry one level in and its
-// closer back at the list's own indent, a text-block argument included.
+// closer back at the list's own indent, a text-block argument included. A
+// final `fn` lambda written on the call's line hugs the parentheses instead.
 #Test("multiline_lists_indent_their_entries_one_level") {
     source: `show: fn(
     text: String,
@@ -218,7 +219,7 @@ run: fn() {
         2,
     )
     twice(
-        () -> {
+        fn() {
             print("HI")
             print("Hello")
         },
@@ -226,13 +227,14 @@ run: fn() {
 }
 `
     assert_eq(fmt_core_stable(source), source)
-    assert_eq(fmt_core_stable("run: fn() {{\n    twice(() -> {{\n        print(\"HI\")\n        print(\"Hello\")\n    }})\n}}\n"), "run: fn() {{\n    twice(\n        () -> {{\n            print(\"HI\")\n            print(\"Hello\")\n        }},\n    )\n}}\n")
+    hugged: "run: fn() {{\n    twice(fn() {{\n        print(\"HI\")\n        print(\"Hello\")\n    }})\n}}\n"
+    assert_eq(fmt_core_stable(hugged), hugged)
 }
 
-// A lambda whose body is one statement written after `->` keeps its line,
-// so the call around it stays on one line too.
+// A lambda whose body is one statement on its line keeps that line, so the
+// call around it stays on one line too.
 #Test("written_lambda_statement_keeps_its_line") {
-    source: "run: fn() {{\n    store.transaction(\"x\", (n: &Int) -> n += 1)\n    store.each((n) -> total += n)\n}}\n"
+    source: "run: fn() {{\n    store.transaction(\"x\", fn(n: &Int) {{ n += 1 }})\n    store.each(fn(n) {{ total += n }})\n}}\n"
     assert_eq(fmt_core_stable(source), source)
 }
 

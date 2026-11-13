@@ -4126,7 +4126,7 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
             }
             .EffectDecl(_) -> next
             .Struct(definition) -> {
-                if definition.marker == .Val(_) || definition.effect_impl == .Val(_) || definition.trait_impls.any(block -> block.trait_name == "Diagnostic") -> next
+                if definition.marker == .Val(_) || definition.effect_impl == .Val(_) || definition.trait_impls.any(fn(block) { block.trait_name == "Diagnostic" }) -> next
                 if prefix == "" && definition.name == "Err" -> next
             }
             .ErrorConv(definition) -> {
@@ -5765,9 +5765,9 @@ jet_driver_attach_app_route_roots: fn(modules: &[JetDriverLoadedModule], source_
 jet_driver_app_route_names: fn(program: Program) -> [String] {
     names := [String]{}
     loop item in program.items {
-        if item == .Func(function) -> ast_visit_body(function.body, (expression: Expr) -> jet_driver_note_app_route_name(names, expression), false)
+        if item == .Func(function) -> ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_app_route_name(names, expression) }, false)
     }
-    ast_visit_body(program.script_body, (expression: Expr) -> jet_driver_note_app_route_name(names, expression), false)
+    ast_visit_body(program.script_body, fn(expression: Expr) { jet_driver_note_app_route_name(names, expression) }, false)
     names
 }
 
@@ -5791,7 +5791,7 @@ jet_driver_app_route_root: fn(root: JetDriverAuthorizedSourceRoot, directory: St
     target: if relative.starts_with("/") -> relative else -> if directory == "/" -> "/{relative}" else -> "{directory}/{relative}"
     files := [AppRouteFile]{}
     found: jet_driver_app_route_walk(root, target, "", files)
-    files.sort_by((left: AppRouteFile, right: AppRouteFile) -> left.path <=> right.path)
+    files.sort_by(fn(left: AppRouteFile, right: AppRouteFile) { left.path <=> right.path })
     AppRouteRoot{root: name, found: found, files: files}
 }
 

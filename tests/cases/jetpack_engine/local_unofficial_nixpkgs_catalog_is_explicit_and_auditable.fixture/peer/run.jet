@@ -57,7 +57,7 @@ peer_nar_node: fn(out: &[U8], path: String) {
     if info.is_dir {
         peer_nar_token(out, "directory".bytes())
         entries := files.list_dir(path) ?? panic("fixture NAR directory")
-        entries.sort_by(entry -> entry.name)
+        entries.sort_by(fn(entry) { entry.name })
         loop entry in entries {
             peer_nar_token(out, "entry".bytes())
             peer_nar_token(out, "(".bytes())

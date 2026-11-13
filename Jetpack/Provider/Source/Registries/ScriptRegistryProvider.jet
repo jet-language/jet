@@ -300,7 +300,7 @@ ScriptRegistrySolver: struct {
 // Candidate releases in solver order: newest version first, then by URL.
 provider_script_sorted_candidates: fn(packages: [RegistryPackage]) -> [RegistryPackage] Never! {
     sorted := packages
-    sorted.sort_by((left: RegistryPackage, right: RegistryPackage) -> provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url))
+    sorted.sort_by(fn(left: RegistryPackage, right: RegistryPackage) { provider_script_compare_versions(right.version, left.version).then(left.url <=> right.url) })
     sorted
 }
 

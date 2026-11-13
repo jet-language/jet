@@ -75,11 +75,11 @@ run: fn() {
     if session_id == "" -> panic("auth login")
 
     router := http.router()
-    router.get("/health", (req: HTTPRequest) -> Ok(http_server.json(200, backend.HealthResponse{
+    router.get("/health", fn(req: HTTPRequest) { Ok(http_server.json(200, backend.HealthResponse{
         status: "ok",
         request_id: req.header("x-request-id") ?? "unassigned",
-    })))
-    router.post("/orders", (req: HTTPRequest) -> {
+    })) })
+    router.post("/orders", fn(req: HTTPRequest) {
         body: req.json<backend.OrderRequest>() ?? panic("openapi request")
         return Ok(http_server.json(202, backend.OrderResponse{
             order_id: 1,
@@ -107,8 +107,8 @@ run: fn() {
     metrics: Shared{Metrics{requests: 0, errors: 0}}
     mux: http_server.mux()
     http_server.request_id(mux)
-    mux.get("/health", (req: HTTPRequest) -> health(req, metrics))
-    mux.post("/orders", (req: HTTPRequest) -> create_order(req, session_id, queue_path, metrics))
+    mux.get("/health", fn(req: HTTPRequest) { health(req, metrics) })
+    mux.post("/orders", fn(req: HTTPRequest) { create_order(req, session_id, queue_path, metrics) })
     bound: http_server.bind("127.0.0.1:0", mux, deadline: 2s) ?? panic("server bind")
     address: bound.local_addr() ?? panic("server address")
     serving: task { bound.serve() }

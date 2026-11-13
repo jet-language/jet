@@ -62,7 +62,7 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
     // The magic and EI_CLASS ELFCLASS64.
     if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
     // The little-endian fields `format` reads from the `size` bytes at `at`.
-    fields: (at: Int, format: String, size: Int) -> binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}")
+    fields: fn(at: Int, format: String, size: Int) { binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}") }
     // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
     header: fields(0x28, "<QIHHHHH", 22)
     symbols := Symbols{name: name.copy(), defines: [], references: []}
@@ -132,14 +132,14 @@ archive_members: fn(bytes: [U8], label: String) -> [Symbols] {
 
 // The names the `flag=a,b` options list.
 listed: fn(options: [String], flag: String) -> [String] {
-    options.filter(option -> option.starts_with("{flag}=")).map(option -> option.removeprefix("{flag}=")).join(",").split(",").filter(name -> name != "").to_list()
+    options.filter(fn(option) { option.starts_with("{flag}=") }).map(fn(option) { option.removeprefix("{flag}=") }).join(",").split(",").filter(fn(name) { name != "" }).to_list()
 }
 
 run: fn() {
     args: process.args()
     split: args.index_of("--") ?? process.fail(1, "usage: RuntimeCCensus.jet [--start] [--root=a,b] [--provided=a,b] [--expect-none] <object>... -- <archive>...")
-    options: args.slice(0, split).filter(arg -> arg.starts_with("--"))
-    objects: args.slice(0, split).filter(arg -> !arg.starts_with("--"))
+    options: args.slice(0, split).filter(fn(arg) { arg.starts_with("--") })
+    objects: args.slice(0, split).filter(fn(arg) { !arg.starts_with("--") })
     loop option in options {
         if !["--start", "--expect-none"].contains(option) && !option.starts_with("--root=") && !option.starts_with("--provided=") -> process.fail(1, "unknown option {option}")
     }
@@ -155,7 +155,7 @@ run: fn() {
     }
     if options.contains("--start") -> want(census, "__libc_start_main", "<startup>")
     loop name in listed(options, "--root") -> want(census, name, "<root>")
-    outside := census.wants.map(item -> item.name)
+    outside := census.wants.map(fn(item) { item.name })
     outside.sort()
 
     members := [Symbols]{}
@@ -180,10 +180,10 @@ run: fn() {
         loop name in member.defines -> census.defined.add(name.copy())
         loop name in member.references -> want(census, name, member.name)
     }
-    unresolved := census.wants.filter(item -> !census.defined.has(item.name)).map(item -> item.name)
+    unresolved := census.wants.filter(fn(item) { !census.defined.has(item.name) }).map(fn(item) { item.name })
     unresolved.sort()
 
-    print("objects: {objects.map(path -> files.basename(path)).join(" ")}")
+    print("objects: {objects.map(fn(path) { files.basename(path) }).join(" ")}")
     print("references outside the objects ({outside.len()}): {outside.join(" ")}")
     print("archive members pulled in ({pulled.len()}):")
     loop row in pulled -> print(row)

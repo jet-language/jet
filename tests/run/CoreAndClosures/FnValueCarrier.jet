@@ -1,11 +1,11 @@
 // A returned closure and a bound lambda both fill a `fn(Int) -> Int`
 // parameter; every tier calls them through the same callable ABI.
-make_adder: fn(k: Int) -> fn(Int) -> Int { (n: Int) -> n + k }
+make_adder: fn(k: Int) -> fn(Int) -> Int { fn(n: Int) { n + k } }
 
 apply: fn(f: fn(Int) -> Int, n: Int) -> Int { f(n) }
 
 run: fn() {
     print("returned {apply(make_adder(1), 41)}")
-    double: (n: Int) -> n * 2
+    double: fn(n: Int) { n * 2 }
     print("bound {apply(double, 21)}")
 }

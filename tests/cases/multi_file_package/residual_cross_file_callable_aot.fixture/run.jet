@@ -9,8 +9,8 @@ use {
     OFFSET: values.BASE
 }
 run: fn() {
-    first: transform(Weight{weight: OFFSET}, (item: Weight) -> Weight{weight: item.weight + 1})
-    second: calls.apply(first, (item: Weight) -> Weight{weight: item.weight + 2})
+    first: transform(Weight{weight: OFFSET}, fn(item: Weight) { Weight{weight: item.weight + 1} })
+    second: calls.apply(first, fn(item: Weight) { Weight{weight: item.weight + 2} })
     copied: duplicate(second)
     pool: Store<Weight>{items: [copied]}
     print(total(pool_copy(pool)))

@@ -1,13 +1,13 @@
 
 Pair: struct { left: Int, right: Int }
 inspect: fn(cell: Cell<Pair>) {
-    mapped: cell.guard_read().map(pair -> pair.left)
+    mapped: cell.guard_read().map(fn(pair) { pair.left })
     print(mapped.get())
 }
 edit_pair: fn(cell: Cell<Pair>) {
     { first: left, second: right }: cell.guard_edit().split(
-        pair -> pair.left,
-        pair -> pair.right
+        fn(pair) { pair.left },
+        fn(pair) { pair.right }
     )
     left.set(7)
     right.set(8)

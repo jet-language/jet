@@ -21,7 +21,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
     mux: http_server.mux()
-    mux.post("/", (req: HTTPRequest) -> handle_trailers(req))
+    mux.post("/", fn(req: HTTPRequest) { handle_trailers(req) })
     wire_stream: net.tcp_connect(addr) ?? panic("connect")
     raw_request := "".bytes()
     loop line in

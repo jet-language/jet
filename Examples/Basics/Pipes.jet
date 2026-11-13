@@ -8,13 +8,13 @@ app_port: fn(raw: [U8], fallback: Int) -> Int {
 }
 
 // A pipe inside a lambda has its own steps, so there `<>` is that pipe's value.
-total: fn(lines: [String]) -> Int { lines.map(line -> line |> Int.parse(<>.trim()) ?? 0).sum() }
+total: fn(lines: [String]) -> Int { lines.map(fn(line) { line |> Int.parse(<>.trim()) ?? 0 }).sum() }
 
 // A lambda inside a step captures that step's `<>`, as it captures any local.
 scaled: fn(values: [Int], factor_text: String) -> [Int] {
     factor_text
         |> Int.parse(<>.trim()) ?? return values
-        |> values.map(v -> v * <>)
+        |> values.map(fn(v) { v * <> })
 }
 
 clamp: fn(n: Int, low: Int, high: Int) -> Int {

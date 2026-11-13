@@ -224,7 +224,7 @@ C_BINDING_METADATA_SCHEMA: "jet-c-binding-metadata-v1"
 // Facts sorted by their stable key, exact duplicates removed.
 pkg_cffi_sorted_facts: fn(facts: [FFIHandleFact]) -> [FFIHandleFact] Never! {
     sorted := facts
-    sorted.sort_by(fact -> fact.stable_key())
+    sorted.sort_by(fn(fact) { fact.stable_key() })
     unique := [FFIHandleFact]{}
     loop fact in sorted {
         if unique.len() > 0 && unique[unique.len() - 1] == fact -> next

@@ -74,7 +74,7 @@ DriverHost: struct {
             Ok(probes)
         }
         command: fn(self, declared: Dyn, jet_bin: String) -> [String] Err! {
-            Ok(texts_at(declared, "").map(part -> part.replace("{{jet_bin}}", jet_bin)))
+            Ok(texts_at(declared, "").map(fn(part) { part.replace("{{jet_bin}}", jet_bin) }))
         }
         run_command: fn(self, dir: String, command: [String], _budget: Dyn) -> CommandRun Err! {
             done: process.cmd(command).cwd(dir).run()

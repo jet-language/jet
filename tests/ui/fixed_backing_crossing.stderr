@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E1102
 Error [jet.ValueNotSendable]: `parallel_fixed` cannot cross a parallel worker boundary — it is a view that does not live long enough
   --> tests/ui/fixed_backing_crossing.jet:13:24
     |
- 13 |     _: values.para_map((n: Int) -> {
-    |                        ^^^^^^^^^^^^^
+ 13 |     _: values.para_map(fn(n: Int) {
+    |                        ^^^^^^^^^^^^
  Why: A view is a borrow, not an owned value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102

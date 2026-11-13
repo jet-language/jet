@@ -2063,52 +2063,6 @@ jfmt_fmt_limited_block: fn(f: &JetFmt, statements: [Stmt], limit: Int) {
     f.trailing_comment_limit = previous
 }
 
-jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
-    if jfmt_lambda_fn_form(f, lambda) -> return jfmt_fmt_fn_lambda(f, lambda)
-    // Preserve the bare one-parameter spelling.
-    bare_param: lambda.take_names.len() == 0 && lambda.params.len() == 1 && lambda.params[0].ty == None && lambda.span.start == lambda.params[0].name_span.start
-    if !bare_param -> jfmt_write(f, "(")
-    loop (index, param) in lambda.params {
-        if index > 0 -> jfmt_write(f, ", ")
-        jfmt_write(f, param.name)
-        if param.ty == .Val(ty) {
-            jfmt_write(f, ": {access_sigil(param.convention)}")
-            jfmt_fmt_type(f, ty)
-        }
-    }
-    if !bare_param -> jfmt_write(f, ")")
-    if lambda.effects == .Val(effects) {
-        jfmt_write(f, " -[")
-        row_source: jfmt_source_effect_row_span_after(f, lambda.span.start)
-        jfmt_fmt_effect_row(f, effects, row_source)
-        jfmt_write(f, "]> ")
-    } else {
-        jfmt_write(f, " -> ")
-    }
-    if lambda.body == {
-        .Expr(value) -> jfmt_fmt_expr(f, value, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
-        .Block(statements) -> {
-            saved_tail: jfmt_value_tail_begin(f, statements)
-            // A lone statement written after `->` keeps its line, as an arm's
-            // does: `(n: &Int) -> n += 1`.
-            if jfmt_arm_body_was_braceless(f, statements) {
-                mark: jfmt_mark(f)
-                jfmt_fmt_stmt_inline(f, statements[0])
-                if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) {
-                    f.value_tail_at = saved_tail
-                    return
-                }
-                jfmt_rollback(f, mark)
-            }
-            jfmt_write(f, "{{")
-            jfmt_newline(f)
-            jfmt_fmt_limited_block(f, statements, lambda.span.end)
-            jfmt_end_block(f)
-            f.value_tail_at = saved_tail
-        }
-    }
-}
-
 // Whether `lambda` is written `fn(…) {…}`.
 jfmt_lambda_fn_form: fn(f: JetFmt, lambda: Lambda) -> Bool Never! {
     first: jfmt_first_token_at(f, lambda.span.start)
@@ -2117,13 +2071,13 @@ jfmt_lambda_fn_form: fn(f: JetFmt, lambda: Lambda) -> Bool Never! {
 
 // `fn(params) interface {{ body }}`: the interface is written as a named
 // function's, the unit failure contract before the effect row.
-jfmt_fmt_fn_lambda: fn(f: &JetFmt, lambda: Lambda) {
+jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
     jfmt_write(f, "fn(")
     loop (index, param) in lambda.params {
         if index > 0 -> jfmt_write(f, ", ")
         jfmt_write(f, param.name)
         if param.ty == .Val(ty) {
-            jfmt_write(f, ": ")
+            jfmt_write(f, ": {access_sigil(param.convention)}")
             jfmt_fmt_type(f, ty)
         }
     }
@@ -2141,12 +2095,23 @@ jfmt_fmt_fn_lambda: fn(f: &JetFmt, lambda: Lambda) {
         jfmt_fmt_type(f, ret)
     }
     statements: if lambda.body == .Block(body) -> body else -> [Stmt]{}
-    // A one-line lambda of one value keeps its line: `fn(n) {{ n > 2 }}`.
-    if statements.len() == 1 && !jfmt_source_span_multiline(f, lambda.span) && statements[0] == .Expr(value) {
-        jfmt_write(f, " {{ ")
-        jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        jfmt_write(f, " }}")
-        return
+    // A one-line lambda of one value or one assignment keeps its line:
+    // `fn(n) {{ n > 2 }}`, `fn(a) {{ a.balance -= n }}`.
+    if statements.len() == 1 && !jfmt_source_span_multiline(f, lambda.span) {
+        if statements[0] == .Expr(value) {
+            jfmt_write(f, " {{ ")
+            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+            jfmt_write(f, " }}")
+            return
+        }
+        if statements[0] == .Assign(_, _, _, _) {
+            mark: jfmt_mark(f)
+            jfmt_write(f, " {{ ")
+            jfmt_fmt_stmt_inline(f, statements[0])
+            jfmt_write(f, " }}")
+            if f.col <= JFMT_MAX_WIDTH && !jfmt_out_since_has_newline(f, mark.out_len) -> return
+            jfmt_rollback(f, mark)
+        }
     }
     jfmt_write(f, " {{")
     jfmt_newline(f)

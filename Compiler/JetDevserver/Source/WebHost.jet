@@ -341,7 +341,7 @@ object_map: fn(value: Dyn) -> [String:Dyn]? {
 }
 object_map_entries: fn(fields: &[(String, Dyn)]) -> [String:Dyn] { return fields.iter().cloned().collect() }
 devtools_has_exact_fields: fn(object: [String:Dyn], expected: [String]) -> Bool {
-    return object.len() == expected.len() && object.keys().all((key) -> expected.iter().any((name) -> name == key))
+    return object.len() == expected.len() && object.keys().all(fn(key) { expected.iter().any(fn(name) { name == key }) })
 }
 devtools_exact_fields: fn(object: &[String:Dyn], expected: &[String]) Err! {
     if !devtools_has_exact_fields(object, expected) -> return .Err("devtools event fields do not match the typed body")
@@ -632,7 +632,7 @@ DevStatus: struct {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
             _: browser_relay.take()
-            *browser_relay = read_web_manifest(self.web_root).and_then((manifest) -> BrowserTrace.Relay.new(manifest).ok())
+            *browser_relay = read_web_manifest(self.web_root).and_then(fn(manifest) { BrowserTrace.Relay.new(manifest).ok() })
         }
         drop(browser_relay)
         state := self.state.lock().unwrap()
@@ -647,7 +647,7 @@ DevStatus: struct {
         diagnostic_for_log: diagnostic.clone()
         state := self.state.lock().unwrap()
         last_build_ms: state.last_build_ms
-        candidate: state.candidate.unwrap_or_else(() -> self.next_candidate())
+        candidate: state.candidate.unwrap_or_else(fn() { self.next_candidate() })
         *state = DevStatusSnapshot { state: "error", code: code.clone(), diagnostic: diagnostic, last_build_ms, candidate: .Val(candidate) }
         drop(state)
         self.refresh()
@@ -673,7 +673,7 @@ DevStatus: struct {
         revisions: self.revision_facts_for(snap)
         (word, rest): self.header_text_for(snap)
         message: "{word} · {rest}"
-        number: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
+        number: fn(value: U64?) { value.map_or_else(fn() { "null" }, fn(n) { n.to_string() }) }
         return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + foundation_json_escape(word) + "\",\"message\":\"" + foundation_json_escape(message) + "\",\"file\":\"" + foundation_json_escape(self.watched_file) + "\",\"code\":\"" + foundation_json_escape(snap.code) + "\",\"diagnostic\":\"" + foundation_json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
     }
     activate: fn(self: Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
@@ -695,7 +695,7 @@ DevStatus: struct {
         now: Instant.now()
         clients := self.clients.lock().unwrap()
         before: clients.len()
-        clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= cutoff)
+        clients.retain(fn(_, seen) { now.saturating_duration_since(*seen) <= cutoff })
         changed: clients.len() != before
         disconnected: before > 0 && clients.is_empty()
         drop(clients)
@@ -749,14 +749,14 @@ WebHost: struct {
     }
     bind_static_with_policy: fn(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         static_root: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
-        application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+        application_port: application_listener.local_addr().map(fn(address) { address.port() }).unwrap_or(0)
         if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
         return Self.bind_application_only_with_listener(file, verbose, static_root, release_policy, false, application_listener, session)
     }
     bind_application_preview_listener: fn(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
     bind_application_only_with_policy: fn(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
         application_listener: bind_application_server(port)
-        application_port: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
+        application_port: application_listener.local_addr().map(fn(address) { address.port() }).unwrap_or(0)
         session: Arc.new(ResidentDevSession.new(file, 0, application_port))
         return Self.bind_application_only_with_listener(file, verbose, static_root, release_policy, web_swap_enabled, application_listener, session)
     }

@@ -22,7 +22,7 @@ tree: fn(key: Int, slot: Int, output: &[String]) -[FS]> Bool {
         if entry.directory -> files.walk_inherit(key, entry.child, slot)
         kept.push((path: entry.path, child: entry.child, directory: entry.directory))
     }
-    kept.sort_by((left: (path: String, child: Int, directory: Bool), right: (path: String, child: Int, directory: Bool)) -> left.path <=> right.path)
+    kept.sort_by(fn(left: (path: String, child: Int, directory: Bool), right: (path: String, child: Int, directory: Bool)) { left.path <=> right.path })
     loop entry in kept {
         output.push(entry.path)
         if entry.directory {

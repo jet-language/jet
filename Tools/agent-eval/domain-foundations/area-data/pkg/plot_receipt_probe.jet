@@ -26,8 +26,8 @@ run: fn() {
     raw: "team,value\nA,2.0\nB,4.0\nA,6.0\n"
     rows: data.csv<Row>(raw) ?? panic("csv")
     groups: data.query(rows)
-        .group_by(row -> row.team)
-        .mean(row -> row.value)
+        .group_by(fn(row) { row.team })
+        .mean(fn(row) { row.value })
         .collect() ?? panic("group")
     svg: data.bar_svg(groups) ?? panic("plot")
     svg_path: "$JET_STATE_ROOT/dx3/area-data/output.svg"

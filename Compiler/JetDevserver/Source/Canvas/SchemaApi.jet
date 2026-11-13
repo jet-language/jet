@@ -36,70 +36,70 @@ CANVAS_PAYLOAD_LIMIT: Usize{16 * 1024 * 1024}
 
 canvas_machine_output: fn(action: String, ok: Bool, payload: String) -> String {
     payload := payload.trim() // #4303
-    value: parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT).ok().and_then((tree) -> StatusValue.from_dyn(tree).ok()).unwrap_or_else(() -> StatusValue.String(payload.to_string()))
+    value: parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT).ok().and_then(fn(tree) { StatusValue.from_dyn(tree).ok() }).unwrap_or_else(fn() { StatusValue.String(payload.to_string()) })
     StatusEnvelope.new(action, ok).with_field("canvas", value).json()
 }
 canvas_machine_success: fn(action: String, payload: String) -> String { canvas_machine_output(action, true, payload) }
 canvas_machine_error: fn(action: String, payload: String) -> String { canvas_machine_output(action, false, payload) }
 graph_json_for_file: fn(path: OSPath) -> String [Diagnostic]! {
-    project_file(path).map((p) -> canvas_machine_success("canvas.graph", p.json))
+    project_file(path).map(fn(p) { canvas_machine_success("canvas.graph", p.json) })
 }
 graph_json_error_for_file: fn(path: OSPath, diags: [Diagnostic]) -> String {
     src: read_source_without_symlinks(path).unwrap_or_default()
     canvas_machine_error("canvas.graph", query_error("diagnostic", render_all(path.display().to_string(), src, diags)))
 }
 graph_json_for_entry_source: fn(entry: OSPath, source_id: String?) -> String Err! {
-    path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.graph", error))?
-    graph_json_for_file(path).map_err((diags) -> graph_json_error_for_file(path, diags))
+    path: resolve_entry_source_path(entry, source_id).map_err(fn(error) { canvas_machine_error("canvas.graph", error) })?
+    graph_json_for_file(path).map_err(fn(diags) { graph_json_error_for_file(path, diags) })
 }
 graph_json_for_entry_source_with_live_pid: fn(entry: OSPath, source_id: String?, pid: U32) -> String Err! {
-    snapshot: live_inspect_read(pid).map_err((error) -> canvas_machine_error("canvas.graph", query_error("live", error.message)))?
-    runtime_events: runtime_events_json(snapshot).map_err((error) -> canvas_machine_error("canvas.graph", error))?
-    path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.graph", error))?
-    project_file_with_runtime(path, .Some(runtime_events)).map((projection) -> canvas_machine_success("canvas.graph", projection.json)).map_err((diags) -> graph_json_error_for_file(path, diags))
+    snapshot: live_inspect_read(pid).map_err(fn(error) { canvas_machine_error("canvas.graph", query_error("live", error.message)) })?
+    runtime_events: runtime_events_json(snapshot).map_err(fn(error) { canvas_machine_error("canvas.graph", error) })?
+    path: resolve_entry_source_path(entry, source_id).map_err(fn(error) { canvas_machine_error("canvas.graph", error) })?
+    project_file_with_runtime(path, .Some(runtime_events)).map(fn(projection) { canvas_machine_success("canvas.graph", projection.json) }).map_err(fn(diags) { graph_json_error_for_file(path, diags) })
 }
 runtime_events_json: fn(snapshot: String) -> String Err! {
-    rendered: render_event_observations(snapshot).map_err((message) -> query_error("live", message))?
+    rendered: render_event_observations(snapshot).map_err(fn(message) { query_error("live", message) })?
     events := [String]{}
     loop line in rendered.lines() {
-        fields: [String:String]{line.split_whitespace().filter_map((field) -> field.split_once('=')).collect()}
-        number: (key) -> fields.get(key).copied().ok_or_else(() -> query_error("live", "runtime event observation is incomplete"))
-        text: (key) -> number(key).map(json_str)
+        fields: [String:String]{line.split_whitespace().filter_map(fn(field) { field.split_once('=') }).collect()}
+        number: fn(key) { fields.get(key).copied().ok_or_else(fn() { query_error("live", "runtime event observation is incomplete") }) }
+        text: fn(key) { number(key).map(json_str) }
         events.push("{{\"sequence\":{number("sequence")?},\"source\":{text("source")?},\"event_id\":{number("event")?},\"owner_id\":{number("owner")?},\"subscription_id\":{number("subscription")?},\"dispatch_id\":{number("dispatch")?},\"lifecycle\":{text("lifecycle")?},\"queued\":{number("queued")?},\"blocked\":{number("blocked")?},\"running\":{number("running")?},\"capacity\":{number("capacity")?},\"overflow\":{text("overflow")?},\"priority\":{number("priority")?},\"failure\":{text("failure")?},\"terminal\":{text("terminal")?}}}")
     }
     .Ok("{{\"source_truth\":\"executed_runtime_observations\",\"events\":[{events.join(",")}]}}")
 }
 project_path_for_source_id: fn(entry: OSPath, source_id: String) -> OSPath? {
-    run_compiler_work(() -> project_path_for_source_id_on_compiler_stack(entry, source_id))
+    run_compiler_work(fn() { project_path_for_source_id_on_compiler_stack(entry, source_id) })
 }
 project_path_for_source_id_on_compiler_stack: fn(entry: OSPath, source_id: String) -> OSPath? {
     wanted: clean_project_rel_path(source_id).ok()?
-    if OSPath.new(wanted).extension().and_then((e) -> e.to_str()) != .Some(Syntax.FILE_EXT) -> return .None
+    if OSPath.new(wanted).extension().and_then(fn(e) { e.to_str() }) != .Some(Syntax.FILE_EXT) -> return .None
     ctx: project_context_for_entry(entry)
     if ctx.files.iter().find((f) == .Val(file) -> f.kind == "source" && f.path.trim_start_matches("./") == wanted) {
         path: ctx.project_root.join(file.path)
         return ctx.parts.should_index(path).then_some(path)
     }
     candidate: ctx.project_root.join(wanted)
-    if candidate.is_file() && candidate.extension().and_then((e) -> e.to_str()) == .Some(.FILE_EXT) && validate_project_path(ctx.project_root, candidate, wanted).is_ok() && project_source_roots(ctx).iter().any((root) -> canonical_path(candidate).starts_with(canonical_path(root))) && ctx.parts.should_index(candidate) -> return .Some(candidate)
+    if candidate.is_file() && candidate.extension().and_then(fn(e) { e.to_str() }) == .Some(.FILE_EXT) && validate_project_path(ctx.project_root, candidate, wanted).is_ok() && project_source_roots(ctx).iter().any(fn(root) { canonical_path(candidate).starts_with(canonical_path(root)) }) && ctx.parts.should_index(candidate) -> return .Some(candidate)
     .None
 }
 resolve_entry_source_path: fn(entry: OSPath, source_id: String?) -> OSPath Err! {
     id: source_id ?? return .Ok(entry.to_path_buf())
-    project_path_for_source_id(entry, id).ok_or_else(() -> query_error("not_found", "Canvas source_id must name a projected Jet source file"))
+    project_path_for_source_id(entry, id).ok_or_else(fn() { query_error("not_found", "Canvas source_id must name a projected Jet source file") })
 }
 project_source_roots: fn(ctx: ProjectContext) -> [OSPath] {
     if ctx.workspace_root == .Val(workspace_root) {
-        if WorkspaceFile.load_checked(workspace_root) == .Some(.Ok(snapshot)) -> return snapshot.plan.members.into_iter().map((member) -> workspace_root.join(member.path)).collect()
+        if WorkspaceFile.load_checked(workspace_root) == .Some(.Ok(snapshot)) -> return snapshot.plan.members.into_iter().map(fn(member) { workspace_root.join(member.path) }).collect()
     }
     if ctx.manifest_root == .Val(root) -> return [root]
     if ctx.ecosystem_root == .Val(root) -> return [root]
-    [ctx.entry_path.parent().unwrap_or_else(() -> OSPath.new(".")).to_path_buf()]
+    [ctx.entry_path.parent().unwrap_or_else(fn() { OSPath.new(".") }).to_path_buf()]
 }
 project_capabilities_json: fn(packages: String, targets: String, environment: &EnvProjectJson) -> String {
     target_text: "{packages}{targets}".to_ascii_lowercase()
     service: !environment.services.is_empty() || target_text.contains("\"kind\":\"service\"") || target_text.contains("\"target\":\"service\"")
-    has_checked_output: ["\"kind\":\"library\"", "\"kind\":\"executable\"", "\"kind\":\"service\"", "\"kind\":\"check\"", "\"kind\":\"environment\"", "\"kind\":\"image\"", "\"kind\":\"bundle\"", "\"kind\":\"system\"", "\"kind\":\"fleet\""].iter().any((kind) -> target_text.contains(kind))
+    has_checked_output: ["\"kind\":\"library\"", "\"kind\":\"executable\"", "\"kind\":\"service\"", "\"kind\":\"check\"", "\"kind\":\"environment\"", "\"kind\":\"image\"", "\"kind\":\"bundle\"", "\"kind\":\"system\"", "\"kind\":\"fleet\""].iter().any(fn(kind) { target_text.contains(kind) })
     runtime_output: !has_checked_output || target_text.contains("\"kind\":\"executable\"") || target_text.contains("\"kind\":\"service\"") || service
     preview: target_text.contains("\"target\":\"web\"") || target_text.contains("\"kind\":\"ui\"") || target_text.contains("\"kind\":\"game\"") || target_text.contains("\"target\":\"ui\"") || target_text.contains("\"target\":\"game\"")
     designer: target_text.contains("\"kind\":\"ui\"") || target_text.contains("\"kind\":\"game\"") || target_text.contains("\"target\":\"ui\"") || target_text.contains("\"target\":\"game\"")
@@ -112,7 +112,7 @@ project_capabilities_json: fn(packages: String, targets: String, environment: &E
     "{{{capabilities.join(",")}}}"
 }
 project_json_for_entry: fn(path: OSPath) -> String {
-    payload: run_compiler_work(() -> project_json_for_entry_inner(path))
+    payload: run_compiler_work(fn() { project_json_for_entry_inner(path) })
     canvas_machine_success("canvas.project", payload)
 }
 project_json_for_entry_inner: fn(path: OSPath) -> String {
@@ -121,21 +121,21 @@ project_json_for_entry_inner: fn(path: OSPath) -> String {
     workspace_json: workspace_project_json(ctx.project_root, ctx.workspace_root)
     packages_json: packages_project_json(ctx.project_root, ctx.entry_path, ctx.manifest_root, ctx.ecosystem_root, ctx.workspace_root)
     targets_json: targets_project_json(ctx.project_root, ctx.entry_path, ctx.manifest_root, ctx.ecosystem_root, ctx.workspace_root)
-    files_json: ctx.files.iter().map((f) -> "{{\"path\":{json_str(f.path)},\"revision\":{json_str(f.revision)},\"kind\":{json_str(f.kind)}}}").collect().join(",")
-    parts_json: ctx.parts.parts.iter().map((part) -> "{{\"name\":{json_str(part.canonical_name())},\"path\":{json_str(rel_path(ctx.project_root, part.path))},\"state\":{json_str(part.state.name())}}}").collect().join(",")
-    part_conflicts_json: ctx.parts.conflicts.iter().map((conflict) -> {
-        paths: conflict.paths.iter().map((path) -> json_str(rel_path(ctx.project_root, path))).collect().join(",")
+    files_json: ctx.files.iter().map(fn(f) { "{{\"path\":{json_str(f.path)},\"revision\":{json_str(f.revision)},\"kind\":{json_str(f.kind)}}}" }).collect().join(",")
+    parts_json: ctx.parts.parts.iter().map(fn(part) { "{{\"name\":{json_str(part.canonical_name())},\"path\":{json_str(rel_path(ctx.project_root, part.path))},\"state\":{json_str(part.state.name())}}}" }).collect().join(",")
+    part_conflicts_json: ctx.parts.conflicts.iter().map(fn(conflict) {
+        paths: conflict.paths.iter().map(fn(path) { json_str(rel_path(ctx.project_root, path)) }).collect().join(",")
         "{{\"name\":{json_str(conflict.canonical_name())},\"paths\":[{paths}]}}"
     }).collect().join(",")
     locks_json: lock_project_json(ctx.project_root)
     env_projection: env_project_json(ctx.project_root)
     capabilities_json: project_capabilities_json(packages_json, targets_json, env_projection)
-    diagnostics: [ctx.authority_diagnostic.map(diagnostic_json).unwrap_or_default(), env_projection.diagnostics].into_iter().filter((diagnostic) -> !diagnostic.is_empty()).collect().join(",")
+    diagnostics: [ctx.authority_diagnostic.map(diagnostic_json).unwrap_or_default(), env_projection.diagnostics].into_iter().filter(fn(diagnostic) { !diagnostic.is_empty() }).collect().join(",")
     mode: if ctx.workspace_root.is_some() { "workspace" } else if ctx.manifest_root.is_some() || ctx.ecosystem_root.is_some() { "package" } else { "single_file" }
     "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{PROJECT_SCHEMA_VERSION},\"project_root\":{json_str(ctx.project_root.display().to_string())},\"project_revision\":{json_str(ctx.project_revision)},\"entry\":{json_str(entry_rel)},\"mode\":{json_str(mode)},\"capabilities\":{capabilities_json},\"workspace\":{workspace_json},\"packages\":[{packages_json}],\"targets\":[{targets_json}],\"outputs\":[{targets_json}],\"envs\":[{env_projection.envs}],\"services\":[{env_projection.services}],\"files\":[{files_json}],\"parts\":[{parts_json}],\"part_conflicts\":[{part_conflicts_json}],\"locks\":[{locks_json}],\"diagnostics\":[{diagnostics}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}"
 }
 apply_project_transaction_json: fn(path: OSPath, request: String) -> String Err! {
-    run_compiler_work(() -> apply_project_transaction_json_inner(path, request)).map((payload) -> canvas_machine_success("canvas.project.edit", payload)).map_err((error) -> canvas_machine_error("canvas.project.edit", error))
+    run_compiler_work(fn() { apply_project_transaction_json_inner(path, request) }).map(fn(payload) { canvas_machine_success("canvas.project.edit", payload) }).map_err(fn(error) { canvas_machine_error("canvas.project.edit", error) })
 }
 apply_project_transaction_json_inner: fn(path: OSPath, request: String) -> String Err! {
     ctx: project_context_for_entry(path)
@@ -161,7 +161,7 @@ apply_project_transaction_json_inner: fn(path: OSPath, request: String) -> Strin
     }
 }
 query_json_for_file_inner: fn(path: OSPath, request: String) -> String Err! {
-    src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+    src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
     revision: required_query_string(request, "revision")?
     if revision != source_revision(src) -> return .Err(query_error("conflict", "source changed since this Canvas graph was drawn"))
     schema: json_usize_field(request, "schema_version").unwrap_or(0)
@@ -187,7 +187,7 @@ query_json_for_file_inner: fn(path: OSPath, request: String) -> String Err! {
     }
 }
 query_json_for_entry: fn(entry: OSPath, request: String) -> String Err! {
-    run_compiler_work(() -> query_json_for_entry_inner(entry, request)).map((payload) -> canvas_machine_success("canvas.query", payload)).map_err((error) -> canvas_machine_error("canvas.query", error))
+    run_compiler_work(fn() { query_json_for_entry_inner(entry, request) }).map(fn(payload) { canvas_machine_success("canvas.query", payload) }).map_err(fn(error) { canvas_machine_error("canvas.query", error) })
 }
 query_json_for_entry_inner: fn(entry: OSPath, request: String) -> String Err! {
     source_id: json_string_field(request, "source_id")
@@ -197,19 +197,19 @@ query_json_for_entry_inner: fn(entry: OSPath, request: String) -> String Err! {
     op: json_string_field(request, "op")
     expected_project_revision: json_string_field(request, "project_revision")
     if op == .Some("project_search") {
-        src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+        src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
         revision: required_query_string(request, "revision")?
         if revision != source_revision(src) -> return .Err(query_error("conflict", "source changed since this Canvas graph was drawn"))
         return canvas_project_find(entry, path, src, required_query_string(request, "query")?, expected_project_revision)
     }
     if op == .Some("references") {
-        src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+        src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
         revision: required_query_string(request, "revision")?
         if revision != source_revision(src) -> return .Err(query_error("conflict", "source changed since this Canvas graph was drawn"))
         return canvas_project_references(entry, path, src, required_query_string(request, "symbol")?, expected_project_revision)
     }
     if op == .Some("preview_rename") && expected_project_revision.is_some() {
-        src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+        src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
         revision: required_query_string(request, "revision")?
         if revision != source_revision(src) -> return .Err(query_error("conflict", "source changed since this Canvas graph was drawn"))
         symbol: required_query_string(request, "symbol")?
@@ -220,24 +220,24 @@ query_json_for_entry_inner: fn(entry: OSPath, request: String) -> String Err! {
     query_json_for_file_inner(path, request)
 }
 core_catalog_json_for_entry: fn(entry: OSPath, query: String) -> String Err! {
-    result: (() -> {
+    result: (fn() {
         path: resolve_entry_source_path(entry, .None)?
-        src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+        src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
         canvas_core_catalog(path, src, query)
     })()
-    result.map((payload) -> canvas_machine_success("canvas.core_catalog", payload)).map_err((error) -> canvas_machine_error("canvas.core_catalog", error))
+    result.map(fn(payload) { canvas_machine_success("canvas.core_catalog", payload) }).map_err(fn(error) { canvas_machine_error("canvas.core_catalog", error) })
 }
 semantic_ops_json: fn(path: OSPath, source: String) -> String {
     source_hash: SHA256.sha256_hex(source.as_bytes())
     semantic_ops_for_file(path, source_hash).iter().map(semantic_op_json).collect().join(",")
 }
 semantic_op_json: fn(op: SemanticOp) -> String {
-    optional: (value: String?) -> value.map(json_str).unwrap_or("null")
-    targets: op.targets.iter().map((target) -> "{{\"stable_id\":{json_str(target.stable_id)},\"before\":{json_str(target.before)},\"after\":{json_str(target.after)},\"kind\":{json_str(target.kind)},\"module_path\":{json_str(target.module_path)}}}").collect().join(",")
+    optional: fn(value: String?) { value.map(json_str).unwrap_or("null") }
+    targets: op.targets.iter().map(fn(target) { "{{\"stable_id\":{json_str(target.stable_id)},\"before\":{json_str(target.before)},\"after\":{json_str(target.after)},\"kind\":{json_str(target.kind)},\"module_path\":{json_str(target.module_path)}}}" }).collect().join(",")
     "{{\"kind\":{json_str(op.kind)},\"rule_id\":{optional(op.rule_id)},\"from\":{optional(op.from)},\"to\":{optional(op.to)},\"node\":{optional(op.node)},\"match\":{optional(op.match_template)},\"replace\":{optional(op.replace_template)},\"targets\":[{targets}]}}"
 }
 source_control_json_for_entry: fn(path: OSPath) -> String {
-    payload: run_compiler_work(() -> source_control_json_for_entry_inner(path))
+    payload: run_compiler_work(fn() { source_control_json_for_entry_inner(path) })
     canvas_machine_success("canvas.source_control", payload)
 }
 source_control_json_for_entry_inner: fn(path: OSPath) -> String {
@@ -245,7 +245,7 @@ source_control_json_for_entry_inner: fn(path: OSPath) -> String {
     root: git_root(path)
     dirty_files := 0
     statuses := [String]{}
-    files: ctx.files.iter().map((file) -> {
+    files: ctx.files.iter().map(fn(file) {
         abs: ctx.project_root.join(file.path)
         src: read_source_without_symlinks(abs).unwrap_or_default()
         status := ""
@@ -267,18 +267,18 @@ source_control_json_for_entry_inner: fn(path: OSPath) -> String {
         "{{\"path\":{json_str(file.path)},\"revision\":{json_str(file.revision)},\"kind\":{json_str(file.kind)},\"available\":{if root.is_some() { "true" } else { "false" }},\"dirty\":{if dirty { "true" } else { "false" }},\"status\":{json_str(status.trim())},\"diff\":{json_str(diff)},\"semantic_ops\":[{semantic_ops}]}}"
     }).collect().join(",")
     entry_src: read_source_without_symlinks(path).unwrap_or_default()
-    history: root.and_then((root) -> {
+    history: root.and_then(fn(root) {
         rel: git_relative_path(root, path)
         git_output(root, ["log", "--oneline", "-5", "--", rel])
     }).unwrap_or_default().lines().map(json_str).collect().join(",")
     "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(entry_src))},\"project_revision\":{json_str(ctx.project_revision)},\"project_root\":{json_str(ctx.project_root.display().to_string())},\"available\":{if root.is_some() { "true" } else { "false" }},\"dirty\":{if dirty_files > 0 { "true" } else { "false" }},\"dirty_files\":{dirty_files},\"status\":{json_str(statuses.join("\n"))},\"diff\":{json_str("")},\"history\":[{history}],\"files\":[{files}]}}"
 }
 proof_json_for_entry_with_receipt: fn(entry: OSPath, source_id: String?, command_receipt: String?) -> String Err! {
-    proof_json_for_entry_with_receipt_inner(entry, source_id, command_receipt).map((payload) -> canvas_machine_success("canvas.proof", payload)).map_err((error) -> canvas_machine_error("canvas.proof", error))
+    proof_json_for_entry_with_receipt_inner(entry, source_id, command_receipt).map(fn(payload) { canvas_machine_success("canvas.proof", payload) }).map_err(fn(error) { canvas_machine_error("canvas.proof", error) })
 }
 proof_json_for_entry_with_receipt_inner: fn(entry: OSPath, source_id: String?, command_receipt: String?) -> String Err! {
     path: resolve_entry_source_path(entry, source_id)?
-    src: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
+    src: read_source_without_symlinks(path).map_err(fn(e) { query_error("io", e.to_string()) })?
     revision: source_revision(src)
     check: if project_file(path) is {
         .Ok(_) -> "{{\"state\":\"ok\",\"diagnostics_count\":0,\"message\":\"front end check passed\"}}"
@@ -298,31 +298,31 @@ proof_json_for_entry_with_receipt_inner: fn(entry: OSPath, source_id: String?, c
         }
         else -> { ("false", "false", "not a Git worktree") }
     }
-    source_label: source_id.unwrap_or_else(() -> path.display().to_string())
-    receipt_current: command_receipt.map((receipt) -> receipt.contains("\"revision\":\"{revision}\"")).unwrap_or(false)
+    source_label: source_id.unwrap_or_else(fn() { path.display().to_string() })
+    receipt_current: command_receipt.map(fn(receipt) { receipt.contains("\"revision\":\"{revision}\"") }).unwrap_or(false)
     command_receipts: if receipt_current -> "{{\"state\":\"current\",\"receipt\":{command_receipt.unwrap_or("{}")}}}" else -> "{{\"state\":\"missing\",\"reason\":\"no Canvas command authority receipt has run for this source revision\"}}"
     proof: if receipt_current -> "{{\"state\":\"current\",\"stale\":false,\"reasons\":[]}}" else -> "{{\"state\":\"missing\",\"stale\":true,\"reasons\":[\"no check/build/run receipt for this source revision\"]}}"
-    budget_root: Loader.find_manifest_root(path.parent().unwrap_or(OSPath.new("."))).unwrap_or_else(() -> path.parent().unwrap_or(OSPath.new(".")).to_path_buf())
+    budget_root: Loader.find_manifest_root(path.parent().unwrap_or(OSPath.new("."))).unwrap_or_else(fn() { path.parent().unwrap_or(OSPath.new(".")).to_path_buf() })
     budget_path: path.strip_prefix(budget_root).unwrap_or(path).to_string_lossy().replace('\\', "/")
     budget_digest: SHA256.sha256_hex(src.as_bytes())
     budgets: BudgetView.read_compatible(budget_root, [(budget_path, budget_digest)])
-    budget_reports: budgets.facts.iter().map((fact) -> "{{\"budget_id\":{json_str(fact.budget_id)},\"enforcement\":{json_str(fact.enforcement)},\"evidence\":{json_str(fact.evidence)},\"evidence_id\":{json_str(fact.evidence_id)},\"outcome\":{json_str(fact.outcome)},\"report_id\":{json_str(fact.report_id)},\"statistical\":{fact.statistical}}}").collect().join(",")
+    budget_reports: budgets.facts.iter().map(fn(fact) { "{{\"budget_id\":{json_str(fact.budget_id)},\"enforcement\":{json_str(fact.enforcement)},\"evidence\":{json_str(fact.evidence)},\"evidence_id\":{json_str(fact.evidence_id)},\"outcome\":{json_str(fact.outcome)},\"report_id\":{json_str(fact.report_id)},\"statistical\":{fact.statistical}}}" }).collect().join(",")
     budget_rejected: budgets.rejected.iter().map(json_str).collect().join(",")
     .Ok("{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{PROOF_SCHEMA_VERSION},\"ok\":true,\"source_id\":{json_str(source_label)},\"source_path\":{json_str(path.display().to_string())},\"revision\":{json_str(revision)},\"check\":{check},\"source_control\":{{\"truth\":\"git-text\",\"available\":{git_available},\"dirty\":{git_dirty},\"status\":{json_str(git_status)}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{command_receipts},\"budget_reports\":{{\"mode\":\"read_only\",\"reports\":[{budget_reports}],\"rejected\":[{budget_rejected}]}},\"proof\":{proof}}}")
 }
 command_receipt_json_for_entry: fn(entry: OSPath, request: String) -> String Err! {
-    command_receipt_json_for_entry_inner(entry, request).map((payload) -> canvas_machine_success("canvas.command_receipt", payload)).map_err((error) -> canvas_machine_error("canvas.command_receipt", error))
+    command_receipt_json_for_entry_inner(entry, request).map(fn(payload) { canvas_machine_success("canvas.command_receipt", payload) }).map_err(fn(error) { canvas_machine_error("canvas.command_receipt", error) })
 }
 command_receipt_json_for_entry_inner: fn(entry: OSPath, request: String) -> String Err! {
     source_id: json_string_field(request, "source_id")
     source_path: resolve_entry_source_path(entry, source_id)?
-    src: read_source_without_symlinks(source_path).map_err((e) -> query_error("io", e.to_string()))?
+    src: read_source_without_symlinks(source_path).map_err(fn(e) { query_error("io", e.to_string()) })?
     revision: required_string(request, "revision")?
     if revision != source_revision(src) -> return .Err(query_error("conflict", "source changed since this Canvas command was approved"))
     action_id: required_string(request, "action_id")?
     authority: canvas_authority_context(source_path)
     source: authority.touched_file
-    source_label: source_id.unwrap_or_else(() -> {
+    source_label: source_id.unwrap_or_else(fn() {
         ctx: project_context_for_entry(entry)
         rel_path(ctx.project_root, source_path)
     })
@@ -347,9 +347,9 @@ command_receipt_json_for_entry_inner: fn(entry: OSPath, request: String) -> Stri
     (success, exit_code, stdout, stderr, diagnostics): if {
         action_id == "canvas.command:check" -> {
             abs: canonical_path(source_path)
-            overlay: source_override.map((text) -> (abs, text))
+            overlay: source_override.map(fn(text) { (abs, text) })
             (diags, _bundle, _facts): Driver.check_file_with_effect_facts(source_path.display().to_string(), overlay, true)
-            errors: diags.iter().filter((d) -> d.severity == Severity.Error).cloned().collect()
+            errors: diags.iter().filter(fn(d) { d.severity == Severity.Error }).cloned().collect()
             if errors.is_empty() { (true, .Some(0), "", "", "") } else { (false, .Some(1), "", render_all(source_path.display().to_string(), check_src, errors), diagnostics_json(source_path, check_src, errors)) }
         }
         else -> {
@@ -361,9 +361,9 @@ command_receipt_json_for_entry_inner: fn(entry: OSPath, request: String) -> Stri
     }
     elapsed_ms: started.elapsed().as_millis()
     display := ["jet"]
-    display.extend(args.iter().map((arg) -> arg.to_string()))
+    display.extend(args.iter().map(fn(arg) { arg.to_string() }))
     command: display.iter().map(json_str).collect().join(",")
-    .Ok("{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{json_str(action_id)},\"title\":{json_str(label)},\"source_id\":{json_str(source_label)},\"revision\":{json_str(revision)},\"checked_revision\":{json_str(check_revision)},\"command\":[{command}],\"writes\":{json_str(writes)},\"success\":{if success { "true" } else { "false" }},\"exit_code\":{exit_code.map((c) -> c.to_string()).unwrap_or("null")},\"elapsed_ms\":{elapsed_ms},\"stdout\":{json_str(stdout)},\"stderr\":{json_str(stderr)},\"diagnostics\":[{diagnostics}]}}")
+    .Ok("{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{json_str(action_id)},\"title\":{json_str(label)},\"source_id\":{json_str(source_label)},\"revision\":{json_str(revision)},\"checked_revision\":{json_str(check_revision)},\"command\":[{command}],\"writes\":{json_str(writes)},\"success\":{if success { "true" } else { "false" }},\"exit_code\":{exit_code.map(fn(c) { c.to_string() }).unwrap_or("null")},\"elapsed_ms\":{elapsed_ms},\"stdout\":{json_str(stdout)},\"stderr\":{json_str(stderr)},\"diagnostics\":[{diagnostics}]}}")
 }
 run_jet_command: fn(cwd: OSPath, args: [String]) -> Output Err! {
     if current_exe() == .Ok(exe) {
@@ -377,15 +377,15 @@ run_jet_command: fn(cwd: OSPath, args: [String]) -> Output Err! {
     }
     command := Command.new("jet") // GATE #4494
     command.args(args).current_dir(cwd)
-    command_output_bounded(command, MAX_CHILD_OUTPUT_BYTES).map_err((error) -> query_error("resource_limit", error.to_string()))
+    command_output_bounded(command, MAX_CHILD_OUTPUT_BYTES).map_err(fn(error) { query_error("resource_limit", error.to_string()) })
 }
 apply_transaction_json: fn(path: OSPath, request: String) -> String Err! {
-    apply_transaction_json_inner(path, request).map((payload) -> canvas_machine_success("canvas.edit", payload)).map_err((error) -> canvas_machine_error("canvas.edit", error))
+    apply_transaction_json_inner(path, request).map(fn(payload) { canvas_machine_success("canvas.edit", payload) }).map_err(fn(error) { canvas_machine_error("canvas.edit", error) })
 }
 apply_transaction_json_inner: fn(path: OSPath, request: String) -> String Err! {
     path: if {
         json_string_field(request, "source_id") == .Val(source_id) -> {
-            project_path_for_source_id(path, source_id).ok_or_else(() -> edit_error("not_found", "Canvas source_id must name a projected Jet source file"))?
+            project_path_for_source_id(path, source_id).ok_or_else(fn() { edit_error("not_found", "Canvas source_id must name a projected Jet source file") })?
         }
         else -> { path.to_path_buf() }
     }
@@ -393,8 +393,8 @@ apply_transaction_json_inner: fn(path: OSPath, request: String) -> String Err! {
 }
 debug_session_json_for_entry_with_sessions_and_host: fn(entry: OSPath, request: String, sessions: &DebugSessions, host: &PausedEvaluateHost) -> String Err! {
     source_id: json_string_field(request, "source_id")
-    path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.debug", error))?
-    debug_session_json_for_file_with_sessions_inner(path, request, sessions, .Some(host)).map((payload) -> canvas_machine_success("canvas.debug", payload)).map_err((error) -> canvas_machine_error("canvas.debug", error))
+    path: resolve_entry_source_path(entry, source_id).map_err(fn(error) { canvas_machine_error("canvas.debug", error) })?
+    debug_session_json_for_file_with_sessions_inner(path, request, sessions, .Some(host)).map(fn(payload) { canvas_machine_success("canvas.debug", payload) }).map_err(fn(error) { canvas_machine_error("canvas.debug", error) })
 }
 debug_session_json_for_file_with_sessions_inner: fn(path: OSPath, request: String, sessions: &DebugSessions, paused_evaluate: (&PausedEvaluateHost)?) -> String Err! {
     paused_evaluate := paused_evaluate
@@ -443,7 +443,7 @@ debug_session_json_for_file_with_sessions_inner: fn(path: OSPath, request: Strin
     loop anchor in breakpoint_anchors {
         if line_from_anchor(src, anchor) == .Val(line) -> breakpoint_lines.push(line) else -> stale_breakpoints.push(anchor)
     }
-    breakpoint_lines.retain((line) -> {
+    breakpoint_lines.retain(fn(line) {
         if line > 0 && line <= src.lines().count() -> true else -> stale_breakpoints.push("line:{line}"); false
     })
     breakpoint_lines.sort_unstable()

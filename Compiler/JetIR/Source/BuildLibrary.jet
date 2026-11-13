@@ -291,7 +291,7 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
         abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
-    abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
+    abis.sort_by(fn(left: IRExportABI, right: IRExportABI) { left.symbol <=> right.symbol })
     // The process-ending flag the inline block release reads (X64Select.jet
     // ir_x64_block_release), when this library holds it.
     data := [X64DataExport]{}

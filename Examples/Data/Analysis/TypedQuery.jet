@@ -47,8 +47,8 @@ run: fn() {
         Sale{item: "medium", cents: 80},
     }
     list_rows: data.query(rows)
-        .filter(s -> s.cents > 50)
-        .sort_by(s -> s.item)
+        .filter(fn(s) { s.cents > 50 })
+        .sort_by(fn(s) { s.item })
         .collect() ?? panic("list query")
     sql_query: rows.query(SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"}) ?? panic("SQL query")
     sql_rows: sql_query.collect() ?? panic("SQL collect")
@@ -66,8 +66,8 @@ run: fn() {
     show_sales("sql", sql_rows)
     show_sales("file", file_rows)
 
-    mapped: list_rows.map(s -> s.cents * 2)
-    selected: mapped.filter(cents -> cents >= 160)
+    mapped: list_rows.map(fn(s) { s.cents * 2 })
+    selected: mapped.filter(fn(cents) { cents >= 160 })
     print("mapped: {mapped}")
     print("selected: {selected}")
 
@@ -77,8 +77,8 @@ run: fn() {
         RegionalSale{region: .North, cents: 75},
     }
     totals: data.query(regional)
-        .group_by(s -> s.region)
-        .sum(s -> s.cents)
+        .group_by(fn(s) { s.region })
+        .sum(fn(s) { s.cents })
         .collect() ?? panic("group sum")
     loop total in totals -> print("{region_name(total.key)} total={total.value}")
 }

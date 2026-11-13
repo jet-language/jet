@@ -1,5 +1,5 @@
 // Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on).
-ints: fn(xs: [Int]) -> String { xs.map(n -> "{n}").join(",") }
+ints: fn(xs: [Int]) -> String { xs.map(fn(n) { "{n}" }).join(",") }
 
 maps: fn() {
     m := [String:Int]{"a": 1, "b": 2}
@@ -15,17 +15,17 @@ maps: fn() {
     m.update([String:Int]{"b": 20, "g": 7})
     print("update: b={m.get("b") ?? 0} g={m.get("g") ?? 0} len={m.len()} is_empty={m.is_empty()}")
     other: [String:Int]{"a": 100, "z": 26}
-    print("merge: {m.merge(other).get("a") ?? 0}, with conflict: {m.merge(other, conflict: (key: String, a: Int, b: Int) -> a + b).get("a") ?? 0}")
+    print("merge: {m.merge(other).get("a") ?? 0}, with conflict: {m.merge(other, conflict: fn(key: String, a: Int, b: Int) { a + b }).get("a") ?? 0}")
     print("equal: {m.equal(other)}, intersection: {m.intersection(other).len()}, slice: {m.slice([String]{"a", "b", "q"}).len()}")
     print("top_n: {m.top_n(2).len()}")
-    print("map: {m.map((key: String, value: Int) -> value * 2).get("b") ?? 0}")
-    print("filter: {m.filter((key: String, value: Int) -> value > 4).len()}")
-    print("flat_map: {m.flat_map((key: String, value: Int) -> [String:Int]{"{key}{key}": value}).len()}")
+    print("map: {m.map(fn(key: String, value: Int) { value * 2 }).get("b") ?? 0}")
+    print("filter: {m.filter(fn(key: String, value: Int) { value > 4 }).len()}")
+    print("flat_map: {m.flat_map(fn(key: String, value: Int) { [String:Int]{"{key}{key}": value} }).len()}")
     seen := [String]{}
-    m.each((key: String, value: Int) -> seen.push(key.copy()))
+    m.each(fn(key: String, value: Int) { seen.push(key.copy()) })
     print("each: {seen.join(",")}")
-    print("any: {m.any((key: String, value: Int) -> value > 10)}, all: {m.all((key: String, value: Int) -> value > 10)}")
-    print("fold: {m.fold(0, (total: Int, key: String, value: Int) -> total + value)}")
+    print("any: {m.any(fn(key: String, value: Int) { value > 10 })}, all: {m.all(fn(key: String, value: Int) { value > 10 })}")
+    print("fold: {m.fold(0, fn(total: Int, key: String, value: Int) { total + value })}")
     print("keys: {m.keys().to_list().join(",")}, values: {ints(m.values().to_list())}")
     print("first: {m.first() ?? ""}, min: {m.min() ?? 0}, max: {m.max() ?? 0}")
     print("to_list: {m.to_list().len()}, items: {m.items().len()}")
@@ -62,18 +62,18 @@ sets: fn() {
     shuffled := s.shuffle()
     shuffled.sort()
     print("to_list: {ints(listed)}, values: {ints(valued)}, shuffle: {ints(shuffled)}, first: {s.has(s.first() ?? -1)}")
-    mapped := s.map(n -> n * 10)
+    mapped := s.map(fn(n) { n * 10 })
     mapped.sort()
-    kept := s.filter(n -> n > 2)
+    kept := s.filter(fn(n) { n > 2 })
     print("map: {ints(mapped)}, filter: {ints(kept)}")
     visited := [Int]{}
-    s.each(n -> visited.push(n))
+    s.each(fn(n) { visited.push(n) })
     visited.sort()
-    print("each: {ints(visited)}, all: {s.all(n -> n > 0)}")
-    spread := s.flat_map(n -> [n, n + 100]).to_list()
+    print("each: {ints(visited)}, all: {s.all(fn(n) { n > 0 })}")
+    spread := s.flat_map(fn(n) { [n, n + 100] }).to_list()
     spread.sort()
     print("flat_map: {ints(spread)}")
-    print("fold: {s.fold(0, (total: Int, n: Int) -> total + n)}, min: {s.min() ?? 0}, max: {s.max() ?? 0}")
+    print("fold: {s.fold(0, fn(total: Int, n: Int) { total + n })}, min: {s.min() ?? 0}, max: {s.max() ?? 0}")
     s.clear()
     print("clear: {s.len()}")
 }

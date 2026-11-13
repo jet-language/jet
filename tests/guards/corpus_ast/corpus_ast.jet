@@ -435,7 +435,7 @@ policy_nonnegative_numeric_literal: fn(expression: Expr) -> Bool {
 }
 policy_constant_expression: fn(expression: Expr) -> Bool {
     constant := true
-    policy_visit_expression(expression, (child) -> {
+    policy_visit_expression(expression, fn(child) {
         if policy_without_parens(child) == {
             .Str(parts, _, _) -> {
                 loop part in parts { if part == .Interp(_, _) -> constant = false }
@@ -862,7 +862,7 @@ policy_compares_parameter_pair: fn(function: Func) -> Bool {
     left_name: function.params[0].name
     right_name: function.params[1].name
     found := false
-    policy_visit_body(function.body, (expression) -> {
+    policy_visit_body(function.body, fn(expression) {
         if policy_without_parens(expression) == .Binary(operator, left, right, _, _) {
             if operator == BinOp.Eq && ((policy_ident_is(left, left_name) && policy_ident_is(right, right_name)) || (policy_ident_is(left, right_name) && policy_ident_is(right, left_name))) -> found = true
         }
@@ -899,7 +899,7 @@ policy_unused_parameter: fn(function: Func, parameter: String) -> Bool {
     loop param in function.params { if param.name == parameter -> declared = true }
     if !declared -> return false
     used := false
-    policy_visit_body(function.body, (expression) -> { if policy_ident_is(expression, parameter) -> used = true })
+    policy_visit_body(function.body, fn(expression) { if policy_ident_is(expression, parameter) -> used = true })
     !used
 }
 policy_response_decoder: fn(function: Func) -> Bool {
@@ -911,7 +911,7 @@ policy_response_decoder: fn(function: Func) -> Bool {
 }
 policy_ordinary_envelope_decoder: fn(function: Func) -> Bool {
     found := false
-    policy_visit_body(function.body, (expression) -> {
+    policy_visit_body(function.body, fn(expression) {
         if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _) {
             if method == "field" && args.len() > 0 && policy_literal_string(args[0].expr, "ok") -> found = true
         }
@@ -976,7 +976,7 @@ PolicyPendingBody: enum {
 
 policy_indexes_sequence: fn(init: Binding, body: [Stmt]) -> Bool {
     found := false
-    policy_visit_body(body, (expression) -> {
+    policy_visit_body(body, fn(expression) {
         if policy_without_parens(expression) == .Index(_, index, _, _, _) {
             if policy_ident_is(index, init.name) -> found = true
         }
@@ -999,7 +999,7 @@ policy_manual_counter_body: fn(counter: String, body: [Stmt]) -> Bool {
             increments += 1
             next
         }
-        policy_visit_body(body[index..index], (expression) -> { if policy_ident_is(expression, counter) -> used = true })
+        policy_visit_body(body[index..index], fn(expression) { if policy_ident_is(expression, counter) -> used = true })
     }
     increments == 1 && used
 }
@@ -1017,7 +1017,7 @@ policy_negative_directory_filter: fn(expression: Expr) -> Bool {
 }
 policy_body_directory_filter: fn(body: [Stmt]) -> Bool {
     found := false
-    policy_visit_body(body, (expression) -> { if policy_negative_directory_filter(expression) -> found = true })
+    policy_visit_body(body, fn(expression) { if policy_negative_directory_filter(expression) -> found = true })
     found
 }
 policy_statement_walk_filter: fn(statement: Stmt, aliases: [String: String]) -> Span? {
@@ -1133,7 +1133,7 @@ policy_body_anchored_regex_capture: fn(body: [Stmt], aliases: [String: String]) 
     anchored := false
     matched := false
     captured := false
-    policy_visit_body(body, (expression) -> {
+    policy_visit_body(body, fn(expression) {
         if policy_without_parens(expression) == {
             .StructLit(name, _, _, _, fields, _, _, _) -> {
                 if name == "Regex" && fields.len() > 0 && policy_anchored_literal(fields[0].value) -> anchored = true
@@ -1266,7 +1266,7 @@ policy_has_args_builder: fn(program: Program) -> Bool {
     aliases: policy_module_aliases(program)
     specification := false
     parsed := false
-    policy_visit_program(program, (expression) -> {
+    policy_visit_program(program, fn(expression) {
         if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _) {
             if method == "spec" && policy_receiver_is(receiver, "args", aliases) -> specification = true
             if method == "parse" || method == "parse_or_exit" -> parsed = true
@@ -1277,7 +1277,7 @@ policy_has_args_builder: fn(program: Program) -> Bool {
 policy_has_raw_process_boundary: fn(program: Program) -> Bool {
     aliases: policy_module_aliases(program)
     found := false
-    policy_visit_program(program, (expression) -> { if policy_is_process_input(expression, aliases) -> found = true })
+    policy_visit_program(program, fn(expression) { if policy_is_process_input(expression, aliases) -> found = true })
     found
 }
 policy_guidance_lint: fn(name: String) -> Bool {
@@ -1357,7 +1357,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
             "call:fs.create_dir", "call:String.replace", "call:crypto.sha256_bytes"}
     first_build := Span?{None}
     if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/Types/TypedLiteralForms.jet" {
-        policy_visit_program(program, (expression) -> {
+        policy_visit_program(program, fn(expression) {
             if first_build == None && policy_is_build_command_literal(expression) -> first_build = Val(expr_span(expression))
         })
         if first_build == .Val(span) -> violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))

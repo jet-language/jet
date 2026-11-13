@@ -27,12 +27,12 @@ run: fn() {
         .Err(.Missing(why)) -> print("missing: {why}")
     }
     print(first_key(["b", ""], plain_key))
-    print(first_key([7, 8], n -> "#{n}"))
+    print(first_key([7, 8], fn(n) { "#{n}" }))
 
     if table.sort(["b", "", "a"], false, parse_price) == {
         .Ok(rows) -> { print(rows.join(",")) }
         .Err(.Missing(why)) -> print("sort stopped: {why}")
     }
     print(table.sort(["b", "c", "a"], false, plain_key).join(","))
-    print(table.sort(["b", "c", "a"], true, name -> "{name}").join(","))
+    print(table.sort(["b", "c", "a"], true, fn(name) { "{name}" }).join(","))
 }

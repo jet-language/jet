@@ -25,15 +25,15 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
 #Test("invalid response statuses fail closed without breaking pipelines") {
     calls: Shared{S6InvalidCalls{value: 0}}
     mux: server.mux()
-    mux.get("/low", (_req: HTTPRequest) -> {
+    mux.get("/low", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(99, "secret-status-99"))
     })
-    mux.get("/high", (_req: HTTPRequest) -> {
+    mux.get("/high", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(600, "secret-status-600"))
     })
-    mux.get("/next", (_req: HTTPRequest) -> {
+    mux.get("/next", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(200, "next"))
     })

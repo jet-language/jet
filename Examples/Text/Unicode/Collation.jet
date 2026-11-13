@@ -8,13 +8,13 @@ run: fn() {
     bytes := names
     bytes.sort()
     print(bytes)
-    names.sort_by((left: String, right: String) -> text.collate(left, right))
+    names.sort_by(fn(left: String, right: String) { text.collate(left, right) })
     print(names)
     print(text.collate("apple", "Banana") == Ordering.Less)
     // "é" is e followed by U+0301 COMBINING ACUTE ACCENT: the same text as "é".
     print(text.collate("é", "é") == Ordering.Equal)
     print(text.collate("role", "Role") == Ordering.Less)
     keyed := [String]{"résumé", "resume", "Resume", "résume", "resumé"}
-    keyed.sort_by((word: String) -> text.collation_key(word))
+    keyed.sort_by(fn(word: String) { text.collation_key(word) })
     print(keyed)
 }

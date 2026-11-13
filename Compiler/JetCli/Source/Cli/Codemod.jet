@@ -800,7 +800,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
     loop index in 0..<nodes.len() {
         node: nodes[index]
         children := direct[index].copy()
-        children.sort_by((left: Int, right: Int) -> (nodes[left].slot <=> nodes[right].slot).then(nodes[left].ordinal <=> nodes[right].ordinal))
+        children.sort_by(fn(left: Int, right: Int) { (nodes[left].slot <=> nodes[right].slot).then(nodes[left].ordinal <=> nodes[right].ordinal) })
         slots := [JetCLICodemodTypedSlot]{}
         loop child in children {
             row: nodes[child]
@@ -811,7 +811,7 @@ jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodFor
                 slots.push(JetCLICodemodTypedSlot{name: row.slot.copy(), kind: row.slot_kind.copy(), children: [Int]{child}})
             }
         }
-        children.sort_by((left: Int, right: Int) -> (nodes[left].span.start <=> nodes[right].span.start).then(nodes[left].span.end <=> nodes[right].span.end))
+        children.sort_by(fn(left: Int, right: Int) { (nodes[left].span.start <=> nodes[right].span.start).then(nodes[left].span.end <=> nodes[right].span.end) })
         scalar := [U8]{}
         cursor := node.span.start
         loop child in children {
@@ -1089,7 +1089,7 @@ jet_cli_codemod_read_fingerprint: fn(path: String, inputs: &[String: String]) -[
 // Rust verify_inputs.
 jet_cli_codemod_verify_inputs: fn(inputs: [String: String]) JetCLIReadError! -[FS]> {
     paths := inputs.keys().to_list()
-    paths.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     drift := [String]{}
     loop path in paths {
         expected: inputs.get(path) ?? next
@@ -1266,7 +1266,7 @@ jet_cli_codemod_insert_unit: fn(units: &[JetCLICodemodUnit], path: String, fixtu
 jet_cli_codemod_walk: fn(directory: String, fixture: Bool, units: &[JetCLICodemodUnit]) JetCLIReadError! -[FS, Env]> {
     listed: cli_files.list_dir(directory) ?? return Err(jet_cli_codemod_error("could not read root `{directory}`: {jet_cli_io_error_text(err)}"))
     paths := loop entry in listed -> jet_cli_rooted_join(directory, entry.name)
-    paths.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    paths.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     loop path in paths {
         info: cli_files.stat(path) ?? return Err(jet_cli_codemod_error("could not inspect `{path}`: {jet_cli_io_error_text(err)}"))
         if info.is_symlink -> return Err(jet_cli_codemod_error("symlink inside codemod root is not allowed: `{path}`"))
@@ -1288,7 +1288,7 @@ jet_cli_codemod_discover_units: fn(batch: JetCLICodemodBatch) -[FS, Env]> [JetCL
             jet_cli_codemod_walk(root.path, root.fixture, units)
         }
     }
-    units.sort_by((left: JetCLICodemodUnit, right: JetCLICodemodUnit) -> jet_cli_import_path_order(left.entry, right.entry))
+    units.sort_by(fn(left: JetCLICodemodUnit, right: JetCLICodemodUnit) { jet_cli_import_path_order(left.entry, right.entry) })
     Ok(units)
 }
 
@@ -1308,12 +1308,12 @@ jet_cli_codemod_dedup_apply: fn(id: String, edits: JetCLICodemodEdits, files: &J
     order := [Int]{}
     loop index in 0..<edits.paths.len() -> order.push(index)
     order_paths: edits.paths.copy()
-    order.sort_by((left: Int, right: Int) -> jet_cli_import_path_order(order_paths[left], order_paths[right]))
+    order.sort_by(fn(left: Int, right: Int) { jet_cli_import_path_order(order_paths[left], order_paths[right]) })
     count := 0
     loop slot in order {
         path: edits.paths[slot]
         sorted := edits.edits[slot].copy()
-        sorted.sort_by((left: TextEdit, right: TextEdit) -> (left.span.start <=> right.span.start).then(left.span.end <=> right.span.end))
+        sorted.sort_by(fn(left: TextEdit, right: TextEdit) { (left.span.start <=> right.span.start).then(left.span.end <=> right.span.end) })
         unique := [TextEdit]{}
         loop edit in sorted {
             if unique.len() > 0 {
@@ -1683,7 +1683,7 @@ jet_cli_codemod_run_v1: fn(codemod: JetCLICodemodV1, apply: Bool, run: &JetCLICo
     order := [Int]{}
     loop index in 0..<edits.paths.len() -> order.push(index)
     order_paths: edits.paths.copy()
-    order.sort_by((left: Int, right: Int) -> jet_cli_import_path_order(order_paths[left], order_paths[right]))
+    order.sort_by(fn(left: Int, right: Int) { jet_cli_import_path_order(order_paths[left], order_paths[right]) })
     changes := [JetCLISourceChange]{}
     loop slot in order {
         path: edits.paths[slot]

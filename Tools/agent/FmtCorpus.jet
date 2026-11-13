@@ -1155,8 +1155,8 @@ run: fn() {
 }
 
 #Test("a pin moves past the formatter's canonical spellings") {
-    before: "show: fn() -[FS, IO]> Unit {{\n    a: apply(2, (m: Int) -> {{\n        m\n    }})\n    b: 1\n}}\n".bytes()
-    after: "show: fn() -[FS, IO]> () {{\n    a: apply(\n        2,\n        (m: Int) -> {{\n            m\n        }},\n    )\n    b: 1\n}}\n".bytes()
+    before: "show: fn() -[FS, IO]> Unit {{\n    a: apply(2, fn(m: Int) {{\n        m\n    }})\n    b: 1\n}}\n".bytes()
+    after: "show: fn() -[FS, IO]> () {{\n    a: apply(\n        2,\n        fn(m: Int) {{\n            m\n        }},\n    )\n    b: 1\n}}\n".bytes()
     map: ink_map(before, after) ?? [Int]{}
     assert(map.len() > 0)
     later: remap(before, after, map, Position{line: 5, column: 5}) ?? Position{line: 0, column: 0}

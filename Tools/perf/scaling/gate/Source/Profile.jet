@@ -79,7 +79,7 @@ number: fn(value: Dyn, key: String) -> Float Never! { (value.get(key) ?? Dyn.Nul
 // an end without a begin is ignored, and unclosed spans come last, in
 // first-opened order, running to infinity.
 phase_intervals: fn(events: [Dyn]) -> [Interval] Never! {
-    origin: if events.find(event -> shown(event, "name") == "trace.start") == .Val(start) -> number(start.get("args") ?? Dyn.Null, "unix_ms") / Float{1000.0} else -> Float{0.0}
+    origin: if events.find(fn(event) { shown(event, "name") == "trace.start" }) == .Val(start) -> number(start.get("args") ?? Dyn.Null, "unix_ms") / Float{1000.0} else -> Float{0.0}
     slots := [String: Int]{}
     open := [(phase: String, starts: [Float])]{}
     intervals := [Interval]{}
@@ -141,7 +141,7 @@ resolve: fn(symbol: String, repo: String, index: [String: String]) -> String? Ne
     rust: RUST_SYMBOL.match(symbol) ?? return None
     crate: "crates/{(rust.group(1) ?? "").replace("_", "-")}/src"
     if !files.exists(files.join(repo, crate)) -> return None
-    segments: (rust.group(2) ?? "").split("::").to_list().filter(segment -> RUST_SEGMENT.is_match(segment))
+    segments: (rust.group(2) ?? "").split("::").to_list().filter(fn(segment) { RUST_SEGMENT.is_match(segment) })
     // The module paths deepest first: crate/a/b, crate/a.
     deepest := [String]{}
     prefix := crate.copy()
@@ -180,8 +180,8 @@ count: fn(counts: &Counts, symbol: String) {
 // The TOP most counted symbols under `below`, by count (a tie keeps the
 // first seen first), with their share of `total` and their source.
 ranked: fn(counts: Counts, total: Int, below: Float, repo: String, index: [String: String]) -> [Row] Never! {
-    rows := counts.rows.filter(row -> Float{row.count} < below)
-    rows.sort_by((a, b) -> b.count <=> a.count)
+    rows := counts.rows.filter(fn(row) { Float{row.count} < below })
+    rows.sort_by(fn(a, b) { b.count <=> a.count })
     out := [Row]{}
     loop row in rows.take(TOP) -> out.push(Row{share: Float{row.count} / Float{max(1, total)}, symbol: row.symbol.copy(), source: resolve(row.symbol, repo, index)})
     out
@@ -249,7 +249,7 @@ profile: fn(dir: String, trace_file: String, wanted: [String], repo: String) -> 
     }
     index := [String: String]{}
     if samples.len() > 0 -> index_functions(repo, files.join(repo, "Compiler"), index)
-    tallies.sort_by((a, b) -> key_rank(a.phase) <=> key_rank(b.phase))
+    tallies.sort_by(fn(a, b) { key_rank(a.phase) <=> key_rank(b.phase) })
     phases := [PhaseProfile]{}
     loop tally in tallies -> phases.push(PhaseProfile{phase: tally.phase.copy(), samples: tally.samples, own: ranked(tally.own, tally.samples, math.INFINITY, repo, index), inclusive: ranked(tally.inclusive, tally.samples, Float{0.95} * Float{tally.samples}, repo, index)})
     Ok(phases)

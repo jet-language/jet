@@ -100,11 +100,11 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
         assert_eq(output.exit_code, JET_DRIVER_EXIT_OK)
         lines: output.stdout.split("\n").to_list()
         assert(lines[0].starts_with("FLAG"), "a header row comes first")
-        keep: lines.filter(line -> line.starts_with("--keep-going "))
+        keep: lines.filter(fn(line) { line.starts_with("--keep-going ") })
         assert_eq(keep.len(), 1)
         assert(keep[0].contains("check.keep_going") && keep[0].contains(" on ") && keep[0].contains("flag"), "--keep-going is on from the flag: {keep[0]}")
-        assert_eq(lines.filter(line -> line.starts_with("--trace ") && line.contains("out.json")).len(), 1)
-        assert_eq(lines.filter(line -> line.starts_with("--opt-dump")).len(), 0)
+        assert_eq(lines.filter(fn(line) { line.starts_with("--trace ") && line.contains("out.json") }).len(), 1)
+        assert_eq(lines.filter(fn(line) { line.starts_with("--opt-dump") }).len(), 0)
     } else {
         panic("`jet env vars` lists the controls")
     }
@@ -125,7 +125,7 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     expected: [[String]]{[String]{"decisions", "inspect.opt_dump"}, [String]{"inspect", "inspect.opt_dump"}, [String]{"build", "build.opt_dump"}}
     loop row in expected {
         if jet_cli_plan([String]{"env", "vars", "--command={row[0]}"}) == .Done(output) {
-            dump: output.stdout.split("\n").to_list().filter(line -> line.starts_with("--opt-dump "))
+            dump: output.stdout.split("\n").to_list().filter(fn(line) { line.starts_with("--opt-dump ") })
             assert_eq(dump.len(), 1)
             assert(dump[0].contains(" {row[1]} "), "--command={row[0]} names {row[1]}: {dump[0]}")
         } else {

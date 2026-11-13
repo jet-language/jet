@@ -115,13 +115,13 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     entries: kit_ui_discover(kit_ui_test_context(root, "scratch"))
     assert_eq(entries.len(), 6)
     assert_eq(entries[0].path, "tests/ui/a.jet")
-    assert(entries.any(entry -> entry.expected == "tests/ui/group/project/stderr"))
-    assert(entries.any(entry -> entry.expected == "tests/ui/main/stderr"))
-    assert(entries.any(entry -> entry.expected == "tests/ui/workspace.stderr"))
-    assert(entries.any(entry -> entry.expected == "tests/ui_lint/group/lint.warn"))
-    assert(!entries.any(entry -> entry.path.ends_with("helper.jet") || entry.path.ends_with(".fixed.jet") || entry.path.contains("member")))
-    assert(!entries.any(entry -> entry.path.ends_with("support.jet") || entry.path.ends_with("route.jet")))
-    assert(entries.any(entry -> entry.path == "tests/ui/group/nested.jet"))
+    assert(entries.any(fn(entry) { entry.expected == "tests/ui/group/project/stderr" }))
+    assert(entries.any(fn(entry) { entry.expected == "tests/ui/main/stderr" }))
+    assert(entries.any(fn(entry) { entry.expected == "tests/ui/workspace.stderr" }))
+    assert(entries.any(fn(entry) { entry.expected == "tests/ui_lint/group/lint.warn" }))
+    assert(!entries.any(fn(entry) { entry.path.ends_with("helper.jet") || entry.path.ends_with(".fixed.jet") || entry.path.contains("member") }))
+    assert(!entries.any(fn(entry) { entry.path.ends_with("support.jet") || entry.path.ends_with("route.jet") }))
+    assert(entries.any(fn(entry) { entry.path == "tests/ui/group/nested.jet" }))
     coverage := kit_ui_test_context(root, "coverage")
     coverage.options.coverage = true
     assert_eq(kit_ui_discover(coverage)[0].mode, "coverage")
@@ -193,7 +193,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(entries.len(), 2)
     loop (index, entry) in entries {
         outcomes: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
-        statuses: outcomes.map(outcome -> outcome.verdict.status.copy())
+        statuses: outcomes.map(fn(outcome) { outcome.verdict.status.copy() })
         if entry.path == "tests/ui/clean_crash.jet" {
             assert_eq(statuses, ["PASS", "KNOWN-FAILING", "KNOWN-FAILING"])
             assert(outcomes[1].verdict.detail.starts_with("owner companion crash: "))
@@ -222,10 +222,10 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     kit_exec_write(kit_test_ledger(root), "tests/ui/needs_tool\towner\tledger rows never claim a skipped fixture\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
-    assert_eq(entries.map(entry -> entry.path.copy()), ["tests/ui/clean_companion.jet", "tests/ui/clean_met.jet", "tests/ui/needs_tool.jet"])
+    assert_eq(entries.map(fn(entry) { entry.path.copy() }), ["tests/ui/clean_companion.jet", "tests/ui/clean_met.jet", "tests/ui/needs_tool.jet"])
     loop (index, entry) in entries {
         outcomes: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
-        statuses: outcomes.map(outcome -> outcome.verdict.status.copy())
+        statuses: outcomes.map(fn(outcome) { outcome.verdict.status.copy() })
         if {
             entry.path == "tests/ui/clean_companion.jet" -> {
                 assert_eq(statuses, ["PASS", "SKIP-HOST"])

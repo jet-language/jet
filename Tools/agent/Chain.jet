@@ -276,7 +276,7 @@ comparable_provenance: fn(bytes: [U8]) -> [U8]? Never! {
 // JSON object.
 pack_digest: fn(pack: [PackFile]) -> String? Never! {
     sorted := pack.copy()
-    sorted.sort_by((left: PackFile, right: PackFile) -> {
+    sorted.sort_by(fn(left: PackFile, right: PackFile) {
         if left.path < right.path -> return Ordering.Less
         if left.path > right.path -> return Ordering.Greater
         Ordering.Equal
@@ -444,7 +444,7 @@ diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wai
     loop path in base_paths {
         if !seen.has_key(path) -> changed.push(Change{path: path.copy(), status: "D", sha: ""})
     }
-    changed.sort_by((left: Change, right: Change) -> {
+    changed.sort_by(fn(left: Change, right: Change) {
         if left.path < right.path -> return Ordering.Less
         if left.path > right.path -> return Ordering.Greater
         Ordering.Equal
@@ -704,7 +704,7 @@ evict_store: fn(store: String, cap_text: String, cap_gb: Float) -[Exec, FS, IO]>
     }
     total := 0
     loop entry in entries -> total += entry.bytes
-    entries.sort_by((left: StoreEntry, right: StoreEntry) -> {
+    entries.sort_by(fn(left: StoreEntry, right: StoreEntry) {
         if left.used < right.used -> return Ordering.Less
         if left.used > right.used -> return Ordering.Greater
         Ordering.Equal
@@ -2077,7 +2077,7 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
         }
     }
     if unreachable < 0 -> return None
-    symbols.sort_by((left: Symbol, right: Symbol) -> {
+    symbols.sort_by(fn(left: Symbol, right: Symbol) {
         if left.value != right.value -> return if left.value < right.value -> Ordering.Less else -> Ordering.Greater
         if left.order < right.order -> return Ordering.Less
         if left.order > right.order -> return Ordering.Greater

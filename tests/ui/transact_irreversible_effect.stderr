@@ -4,7 +4,7 @@ Error [jet.IrreversibleEffectInTransaction]: `files.write` has the `FS` effect, 
   5 |         fs.write("ledger.txt", "closed") ?? return
     |            ^^^^^
  Why: A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`FS`) leaves committed external state a rollback can't take back
- Fix: Move this call after the block, or register it with `<handle>.on_commit(() -> { … })` so it runs only on a clean commit
+ Fix: Move this call after the block, or register it with `<handle>.on_commit(fn() { … })` so it runs only on a clean commit
  Denial: transaction
  Call chain: files.write
 More: jet-lang.dev/e/E0746

@@ -65,7 +65,7 @@ verdict: fn(receipt: Receipt, counts: [Count]) -> String? Never! {
     if !base.ok -> return Val("The size-one baseline must compile successfully")
     baseline: base.metrics.get(METRIC) ?? return Val(MISSING)
     if !math.is_integer(baseline) || baseline <= 0.0 || baseline > MAX_SAFE -> return Val(MISSING)
-    if counts.map(count -> count.n) != SIZES -> return Val("Every named rung is required")
+    if counts.map(fn(count) { count.n }) != SIZES -> return Val("Every named rung is required")
     loop point in counts {
         if !point.ok -> return Val("N={point.n} did not compile successfully")
         lookups: point.lookups ?? return Val("N={point.n} has no valid growing deterministic counter")
@@ -89,7 +89,7 @@ run: fn() {
     if files.exists(root) -> process.fail(1, "Proof directory already exists: {root}")
     compiler: absolute(compiler_flag)
     compiler_sha256: crypto.sha256(files.read_bytes(compiler) ?? process.fail(1, "{err}")).hex()
-    gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(n -> "{n}").join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch_root(), "scaling-module-lookups"), files.basename(root))]
+    gate: ["--compiler", "candidate=bootstrap:{compiler}", "--shape", "comptime", "--ladder", "comptime={SIZES.map(fn(n) { "{n}" }).join(",")}", "--mode", "counters", "--jobs", "1", "--layout", "files", "--seed", "1", "--memory-max", "8G", "--timeout", "60", "--work-dir", root, "--build-root", files.join(files.join(scratch_root(), "scaling-module-lookups"), files.basename(root))]
     config: options(gate, sys.executable().removesuffix(TOOL)) ?? process.fail(1, err.message)
     receipt: run_gate(config) ?? process.fail(1, err.message)
     counts := [Count]{}

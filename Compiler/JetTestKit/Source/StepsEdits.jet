@@ -75,7 +75,7 @@ kit_steps_edits: fn(step: KitStep, context: KitStepCtx, state: KitStepState) -> 
         loop edit in edits {
             if edit.file == path -> changes.push(edit)
         }
-        changes.sort_by(edit -> -edit.start)
+        changes.sort_by(fn(edit) { -edit.start })
         original: files.read_bytes(path) ?? return kit_steps_action_error(state, "apply-edits read: {err}")
         prior := original.len()
         loop edit in changes {

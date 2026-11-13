@@ -84,7 +84,7 @@ join_path: fn(directory: String, name: String) -> String Never! {
 
 sorted_names: fn(directory: String) -[FS]> [String] SkillRulesError! {
     entries: files.list_dir(directory) ?? return Err(SkillRulesError{message: "cannot list {directory}: {err}"})
-    names := entries.map((entry: DirEntry) -> entry.name)
+    names := entries.map(fn(entry: DirEntry) { entry.name })
     names.sort()
     Ok(names)
 }
@@ -264,7 +264,7 @@ run: fn() {
 #Test("each contradicted law is reported with its file and line") {
     text: "# Sample\nCreate a new branch for the experiment.\nRun `git worktree add ../scratch` first.\nWorkers may close the card when tests pass.\nWorkers should spawn helpers.\nWorkers must run the full suite.\nWrite reports under `docs/plans/`.\nUse a Luna xhigh worker.\nTwo agents may edit the same file.\nWait for the milestone sweep before closing a card."
     errors: contradiction_errors("x.md", text, contradictions())
-    topics: errors.map((error: String) -> error.partition(": ").tail.partition(":").head)
+    topics: errors.map(fn(error: String) { error.partition(": ").tail.partition(":").head })
     assert_eq(errors.len(), 9)
     assert_eq(topics.join("|"), "concurrency|worktree|worktree|worker tests|closure|review|delegation|research output|model selection")
 }

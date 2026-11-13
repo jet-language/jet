@@ -17,7 +17,7 @@ run: fn(check: Check) {
     if printed != "" -> print(printed.remove_suffix("\n"))
     written := [String]{}
     if files.is_dir("out") {
-        names := (files.list_dir("out") ?? process.fail(1, "{err}")).map(entry -> "out/{entry.name}")
+        names := (files.list_dir("out") ?? process.fail(1, "{err}")).map(fn(entry) { "out/{entry.name}" })
         names.sort()
         written = names
     }

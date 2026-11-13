@@ -7,7 +7,7 @@ use {
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
     mux: server.mux()
-    mux.post("/", (req: HTTPRequest) -> {
+    mux.post("/", fn(req: HTTPRequest) {
         body: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     })

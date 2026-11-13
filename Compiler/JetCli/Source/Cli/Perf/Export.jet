@@ -69,7 +69,7 @@ jet_cli_perf_projection: fn(trace: CanonicalJSON, kind: String, loss: String, fi
     all.push(jet_cli_perf_string_field("schema", TRACE_SCHEMA))
     all.push(jet_cli_perf_string_field("trace_id", trace_id(trace) ?? "unknown"))
     all.push(CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("{TRACE_VERSION}")})
-    all.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
+    all.sort_by(fn(left: CanonicalJSONField, right: CanonicalJSONField) { left.key <=> right.key })
     CanonicalJSON.Object(all)
 }
 
@@ -217,7 +217,7 @@ jet_cli_perf_chrome_event: fn(events: &[CanonicalJSON], item: CanonicalJSON, sta
         // copy: the verified trace keeps its symbol and the key list its key; the event owns its own.
         if jet_cli_perf_key(symbol, key) == .Val(found) -> args.push(CanonicalJSONField{key: key.copy(), value: symbol[found].value.copy()})
     }
-    args.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
+    args.sort_by(fn(left: CanonicalJSONField, right: CanonicalJSONField) { left.key <=> right.key })
     events.push(CanonicalJSON.Object([CanonicalJSONField]{
         {key: "args", value: CanonicalJSON.Object(args)},
         jet_cli_perf_integer_field("dur", duration_ns /% 1000),

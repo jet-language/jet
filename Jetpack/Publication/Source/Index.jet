@@ -269,7 +269,7 @@ publication_write_index_entry: fn(repo: String, entry: PublicationIndexEntry) IO
     lock_repo: repo.copy()
     lock_name: entry.name.copy()
     // workaround #5940(h)
-    _: publication_with_index_lock<Bool>(lock_repo, lock_name, () -> publication_write_index_entry_locked(repo, entry))
+    _: publication_with_index_lock<Bool>(lock_repo, lock_name, fn() { publication_write_index_entry_locked(repo, entry) })
 }
 
 publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> Bool IOError! {
@@ -308,7 +308,7 @@ publication_mark_yanked: fn(repo: String, name: String, version: String) -[FS, E
     lock_repo: repo.copy()
     lock_name: name.copy()
     // workaround #5940(h)
-    publication_with_index_lock<Bool>(lock_repo, lock_name, () -> publication_mark_yanked_locked(repo, name, version))
+    publication_with_index_lock<Bool>(lock_repo, lock_name, fn() { publication_mark_yanked_locked(repo, name, version) })
 }
 
 publication_mark_yanked_locked: fn(repo: String, name: String, version: String) -[FS, Env, Time]> Bool IOError! {

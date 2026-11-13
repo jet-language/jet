@@ -166,7 +166,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
         "orders.list",
         "orders",
         json.to_string(loaded) ?? panic("JSON encode"),
-        () -> {
+        fn() {
             refreshed: load_orders(route_search)
             return Ok(json.to_string(refreshed) ?? return Err(OrderError{message: "orders do not encode as JSON"}))
         },
@@ -198,7 +198,7 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     rows: order_rows()
     row_count: rows.len()
     orders_table := table.new_keyed("OrdersTable", rows, order_id)
-    orders_table.with_column(table.column("id", "Int", order -> order_id(order)))
+    orders_table.with_column(table.column("id", "Int", fn(order) { order_id(order) }))
     orders_table.with_column(table.column("customer", "String", order_customer))
     orders_table.with_column(table.column("shipped", "Bool", order_shipped))
     table.sort_by(orders_table, "id", WebTableSortDirection.Descending)

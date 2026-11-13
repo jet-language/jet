@@ -7,7 +7,7 @@ run: fn() {
     word: Regex{"struct"}
     text: "struct S {{ struct T }} structure; destruct"
     print(word.find_all(text))
-    print(word.matches(text).map(m -> "{m.start}-{m.end}:{m.group(0) ?? "none"}"))
+    print(word.matches(text).map(fn(m) { "{m.start}-{m.end}:{m.group(0) ?? "none"}" }))
     print(word.find(text) ?? "none")
     print((word.match("a struct") ?? panic("no match")).start)
     print(word.replace(text, "X"))
@@ -20,12 +20,12 @@ run: fn() {
 
     double: Regex{"aa"}
     print(double.find_all("aaaaa"))
-    print(double.matches("aaaaa").map(m -> m.start))
+    print(double.matches("aaaaa").map(fn(m) { m.start }))
     print(double.replace("aaaaa", "b"))
 
     accent: Regex{"é"}
     print(accent.find_all("café é ée"))
-    print(accent.matches("café é").map(m -> "{m.start}-{m.end}"))
+    print(accent.matches("café é").map(fn(m) { "{m.start}-{m.end}" }))
     print(accent.split("aébéc"))
 
     folded: re.compile_with("STRUCT", re.flags(true, false, false)) ?? panic("bad pattern")
@@ -38,18 +38,18 @@ run: fn() {
     // Texts of a kilobyte or more, where the search skips by the needle.
     long := ""
     loop k in 0..<200 -> long = "{long}st{k}struct sstruc structs "
-    starts: word.matches(long).map(m -> m.start)
-    print("{starts.len()} {starts.fold(0, (sum, start) -> sum + start)} {word.replace(long, "").len()}")
+    starts: word.matches(long).map(fn(m) { m.start })
+    print("{starts.len()} {starts.fold(0, fn(sum, start) { sum + start })} {word.replace(long, "").len()}")
     print(word.split(long).len())
     pairs := ""
     loop k in 0..<1000 -> pairs = "{pairs}ab"
     print(Regex{"abab"}.find_all(pairs).len())
-    print(Regex{"bab"}.matches(pairs).map(m -> m.start).fold(0, (sum, start) -> sum + start))
+    print(Regex{"bab"}.matches(pairs).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))
     runs := ""
     loop k in 0..<300 -> runs = "{runs}aaaab"
-    print(Regex{"aab"}.matches(runs).map(m -> m.start).fold(0, (sum, start) -> sum + start))
+    print(Regex{"aab"}.matches(runs).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))
     accents := ""
     loop k in 0..<600 -> accents = "{accents}eé"
     print(Regex{"eé"}.find_all(accents).len())
-    print(Regex{"éeé"}.matches(accents).map(m -> m.start).fold(0, (sum, start) -> sum + start))
+    print(Regex{"éeé"}.matches(accents).map(fn(m) { m.start }).fold(0, fn(sum, start) { sum + start }))
 }

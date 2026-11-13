@@ -59,7 +59,7 @@ store_ensure_hangar_capacity: fn(verification: &StoreVerification, roots: Hangar
     }
     // Oldest known use goes first. Unknown timestamps are last because they
     // are less informative and therefore less safe to evict.
-    candidates.sort_by((left: StoreQuotaCandidate, right: StoreQuotaCandidate) -> ((left.last_used_at == None) <=> (right.last_used_at == None)).then((left.last_used_at ?? STORE_INT_MAX) <=> (right.last_used_at ?? STORE_INT_MAX)).then(left.id <=> right.id))
+    candidates.sort_by(fn(left: StoreQuotaCandidate, right: StoreQuotaCandidate) { ((left.last_used_at == None) <=> (right.last_used_at == None)).then((left.last_used_at ?? STORE_INT_MAX) <=> (right.last_used_at ?? STORE_INT_MAX)).then(left.id <=> right.id) })
 
     loop candidate in candidates {
         _: store_tombstone_closure_record_unlocked(verification, roots, candidate.id)

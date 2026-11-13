@@ -33,5 +33,5 @@ run: fn() {
     // run with exit 1, as an uncaught error ends harness.mjs.
     receipt: run_gate(config) ?? process.fail(1, err.message)
     print("Receipt: {config.receipt}")
-    if receipt.passed != Val(true) -> process.fail(1, receipt.failures.map(failure -> "FAIL {failure}").join("\n"))
+    if receipt.passed != Val(true) -> process.fail(1, receipt.failures.map(fn(failure) { "FAIL {failure}" }).join("\n"))
 }

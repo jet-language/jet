@@ -204,13 +204,13 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
         assert(literal.head >= 0)
-        assert(literal.deferred.any(diagnostic -> diagnostic.code == "E0002"))
+        assert(literal.deferred.any(fn(diagnostic) { diagnostic.code == "E0002" }))
         assert(lexed.tables.literals[literal.head].deferred.is_empty())
         found = true
     }
     assert(found)
     plain: lexer_test_raw(`x: "a\{{b"`)
-    assert(plain.diagnostics.any(diagnostic -> diagnostic.code == "E0002"))
+    assert(plain.diagnostics.any(fn(diagnostic) { diagnostic.code == "E0002" }))
 }
 
 #Test("typed_head_doubled_braces_stay_literal") {

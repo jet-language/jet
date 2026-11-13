@@ -211,10 +211,10 @@ measure: fn(repo: String, argv: [String]) -> Evidence {
     }
     files.remove_all(scratch) ?? ()
     // Each metric's upper middle value, as the shared harness takes it.
-    per_read_surface: stats.median_high(runs.surface.map(sample -> sample.allocations_per_read)) ?? fail("no counted runs")
-    per_read_plain: stats.median_high(runs.plain.map(sample -> sample.allocations_per_read)) ?? fail("no counted runs")
-    heap_surface: stats.median_high_int(runs.surface.map(sample -> sample.peak_live_heap_bytes)) ?? fail("no counted runs")
-    heap_plain: stats.median_high_int(runs.plain.map(sample -> sample.peak_live_heap_bytes)) ?? fail("no counted runs")
+    per_read_surface: stats.median_high(runs.surface.map(fn(sample) { sample.allocations_per_read })) ?? fail("no counted runs")
+    per_read_plain: stats.median_high(runs.plain.map(fn(sample) { sample.allocations_per_read })) ?? fail("no counted runs")
+    heap_surface: stats.median_high_int(runs.surface.map(fn(sample) { sample.peak_live_heap_bytes })) ?? fail("no counted runs")
+    heap_plain: stats.median_high_int(runs.plain.map(fn(sample) { sample.peak_live_heap_bytes })) ?? fail("no counted runs")
     peak_surface: stats.median_high_int(surface_rss) ?? fail("no RSS samples")
     peak_plain: stats.median_high_int(plain_rss) ?? fail("no RSS samples")
     ratio: Float.from_int(peak_surface) / Float.from_int(peak_plain)

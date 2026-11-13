@@ -169,13 +169,13 @@ Options: struct {
 run: fn() -> Never Err! {
     // `--option=value` splits at its first `=`, as argparse splits it; a
     // positional is refused either way.
-    tokens: process.args().flat_map(arg -> text.splitn(arg, "=", 2))
+    tokens: process.args().flat_map(fn(arg) { text.splitn(arg, "=", 2) })
     values := [String: String]{"--rounds": "5000", "--samples": "5"}
     require_win := false
     i := 0
     loop i < tokens.len() {
         token: tokens[i]
-        named: OPTIONS.filter(option -> option.starts_with(token))
+        named: OPTIONS.filter(fn(option) { option.starts_with(token) })
         if named.len() != 1 -> refuse("unrecognized or ambiguous argument {tokens[i]}")
         option: named[0]
         if ["-h", "--help"].contains(option) {
@@ -213,8 +213,8 @@ positive: fn(value: String) -> Int Never! {
 // escapes, as json.dumps writes it by default: an astral character as its
 // surrogate pair.
 ascii: fn(written: String) -> String Never! {
-    astral: Regex{"[\x{{10000}}-\x{{10FFFF}}]"}.replace_all_with(written, found -> pair(scalar(found.text) - 65536))
-    Regex{"[\x{{80}}-\x{{FFFF}}]"}.replace_all_with(astral, found -> "\\u{fmt.hex(scalar(found.text), 4)}")
+    astral: Regex{"[\x{{10000}}-\x{{10FFFF}}]"}.replace_all_with(written, fn(found) { pair(scalar(found.text) - 65536) })
+    Regex{"[\x{{80}}-\x{{FFFF}}]"}.replace_all_with(astral, fn(found) { "\\u{fmt.hex(scalar(found.text), 4)}" })
 }
 
 // The surrogate pair of an astral character `offset` past U+10000.
@@ -291,7 +291,7 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
     files.create_dir_all(parent)
     scratch: files.join(parent, ".corelib-compare-{sys.pid()}-{time.now().to_unix_ms()}")
     files.create_dir_all(scratch)
-    _cleanup: scope.guard(() -> files.remove_all(scratch) ?? ())
+    _cleanup: scope.guard(fn() { files.remove_all(scratch) ?? () })
     files.write(files.join(scratch, "package.jet"), files.read(files.join(root, "Tools/perf/package.jet")))
     files.write(files.join(scratch, "source.jet"), "use builtin_b64: core.encoding.base64\nencode: fn(data: [U8]) -> String {{ builtin_b64.encode(data) }}\n")
     workload: JET_WORKLOAD.replace("{{rounds}}", "{rounds}")
@@ -308,7 +308,7 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
     paths: [builds.rust_native.artifact, builds.rust_core_aot.artifact, builds.jet_source_aot.artifact]
     // A Jet arm is unbuilt when its build failed or left no program; the
     // native arm when rustc left none.
-    ready := paths.map(path -> files.is_file(path))
+    ready := paths.map(fn(path) { files.is_file(path) })
     ready.extend([rust.exit == 0, source.exit == 0])
     if ready.contains(false) -> return Ok((report: tight(json.to_string_pretty(Unbuilt{builds: builds, metric: "runtime_only_ns", passed: false})), code: 1))
     // The warm-up checks every output and is left out of the samples.
@@ -320,7 +320,7 @@ measure: fn(options: Options) -> (report: String, code: Int) Err! {
     baseline: median(taken[0])
     arms: Arms{rust_native: arm(taken[0], baseline), rust_core_aot: arm(taken[1], baseline), jet_source_aot: arm(taken[2], baseline)}
     ratios: JetRatios{rust_core_aot: arms.rust_core_aot.ratio_to_rust_native, jet_source_aot: arms.jet_source_aot.ratio_to_rust_native}
-    passed: [ratios.rust_core_aot, ratios.jet_source_aot].all(ratio -> ratio < 1.0)
+    passed: [ratios.rust_core_aot, ratios.jet_source_aot].all(fn(ratio) { ratio < 1.0 })
     report: Report{
         arms: arms,
         builds: builds,

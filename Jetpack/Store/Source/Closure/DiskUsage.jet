@@ -175,7 +175,7 @@ store_du_all: fn() -> MachineDuReport StoreError! {
         total = store_du_checked_add(total, bytes, "machine Hangar disk usage overflowed")
         roots_found.push(MachineDuEntry{root: roots.root, hangar: hangar, bytes: bytes})
     }
-    roots_found.sort_by(entry -> entry.root)
+    roots_found.sort_by(fn(entry) { entry.root })
     Ok(MachineDuReport{shared_cas: shared_cas, roots: roots_found, total_bytes: total})
 }
 

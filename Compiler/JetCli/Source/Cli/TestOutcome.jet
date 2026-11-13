@@ -314,7 +314,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         }
         // A property's record counts the generated cases that ran where
         // others have a line; the cases its `#Pre` rejected never count.
-        line: if claim.kind == 3 -> U32.from_int(parts.property.map((run) -> run.cases) ?? 0) ?? U32{0} else -> claim.line
+        line: if claim.kind == 3 -> U32.from_int(parts.property.map(fn(run) { run.cases }) ?? 0) ?? U32{0} else -> claim.line
         record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
         if mismatch == .Val(found) -> record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
         if claim.kind == 3 -> jet_cli_test_law_attachments(record, claim.law, parts.property)

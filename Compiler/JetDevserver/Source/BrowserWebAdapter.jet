@@ -79,10 +79,10 @@ BrowserWebState: struct {
             _: self.facts.insert(panel_id, fact)
         }
         sequence := projection.sequence
-        should_apply := self.host.sequence().map_or(true, (current) -> sequence > current)
+        should_apply := self.host.sequence().map_or(true, fn(current) { sequence > current })
         if should_apply {
             revision := self.host.revision().unwrap_or(0).max(parse_revision(projection.revision).unwrap_or(sequence))
-            panels := self.panel_order.iter().filter_map((panel_id) -> self.facts.get(panel_id)).cloned().collect()
+            panels := self.panel_order.iter().filter_map(fn(panel_id) { self.facts.get(panel_id) }).cloned().collect()
             event := BrowserHostEvent.new(self.host.session_id(), revision, sequence, projection.observed_at, panels)
             self.host.apply_event(event) ?? return .Err("browser projection rejected event: {err}")
         }
@@ -116,7 +116,7 @@ normalize_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     status
 }
 bounded_optional: fn(value: String?, limit: USize) -> String? {
-    value.and_then((value) -> {
+    value.and_then(fn(value) {
         bounded := bounded_text(value, "", limit)
         if bounded.is_empty() -> .None else -> .Val(bounded)
     })
@@ -126,7 +126,7 @@ browser_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessionSta
         .Unavailable | .Stopped -> .RuntimeFailure }
 }
 sync_session: fn(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
-    cursor := state.as_ref().and_then((state) -> state.host().sequence())
+    cursor := state.as_ref().and_then(fn(state) { state.host().sequence() })
     projection := session.devtools_events_since(cursor)
     canonical_panels := session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.ALL) ?? return .Err("browser panel catalog rejected projection: {err}")
     if state.is_none() -> state = .Val(BrowserWebState.new(projection.session_id.clone()))
@@ -165,7 +165,7 @@ record_dom_snapshot: fn(state: &BrowserWebState?, session_id: String, payload: &
         }
         key := required_json_string(row, "key")?
         type_fingerprint := required_json_string(row, "type_fingerprint")?
-        identity := row.get("identity").map((value) -> value.as_str().map((s) -> s.to_string()).map_err((_) -> "web DOM island identity must be a string")).transpose()?
+        identity := row.get("identity").map(fn(value) { value.as_str().map(fn(s) { s.to_string() }).map_err(fn(_) { "web DOM island identity must be a string" }) }).transpose()?
         value := parse_dom_state_value(row.get("value").ok_or("web DOM snapshot state row has no value")?)?
         if seen.insert((kind.clone(), key.clone()), ()).is_some() -> return .Err("web DOM snapshot state keys must be unique per family")
         fact := if kind == {
@@ -181,7 +181,7 @@ record_dom_snapshot: fn(state: &BrowserWebState?, session_id: String, payload: &
         facts.push(fact)
     }
     loop update in live_value_updates -> jet_observe_live_value_update(update.key, update.type_identity, update.rendered_value.as_deref())
-    resident := state.get_or_insert_with(() -> BrowserWebState.new(session_id.to_string()))
+    resident := state.get_or_insert_with(fn() { BrowserWebState.new(session_id.to_string()) })
     resident.dom_state = facts
     .Ok(_)
 }
@@ -336,7 +336,7 @@ write_swap_receipt: fn(output: &String, receipt: &WebModuleSwapReceipt) {
     field_string(output, "page", receipt.candidate_identity.page, false)
     output.push('}')
     write_string_array(output, "changed_modules", receipt.changed_modules)
-    write_string_array(output, "reason_codes", receipt.reason_codes.iter().map((reason) -> reason.as_str().to_string()).collect())
+    write_string_array(output, "reason_codes", receipt.reason_codes.iter().map(fn(reason) { reason.as_str().to_string() }).collect())
     output.push_str(",\"preserved\":[")
     loop (index, fact) in receipt.preserved.iter().enumerate() {
         if index != 0 -> output.push(',')

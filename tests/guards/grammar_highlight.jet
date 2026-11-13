@@ -282,7 +282,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // tests/grammar.rs:176.
 #Test("every_highlight_token_is_in_each_generated_section") {
     guards_enter_root()
-    sections: [GH_VSCODE, GH_TREE_SITTER].map(path -> (path: path, section: gh_generated_section(path)))
+    sections: [GH_VSCODE, GH_TREE_SITTER].map(fn(path) { (path: path, section: gh_generated_section(path)) })
     missing := [String]{}
     loop token in gh_tokens() {
         if gh_bracket(token.text) -> next
@@ -344,7 +344,7 @@ gh_grammar_keyword_words: fn() -> [String] {
 // tests/grammar.rs:225.
 #Test("syntax_keyword_list_tokens_are_classified_for_highlighting") {
     guards_enter_root()
-    texts: gh_tokens().map(token -> token.text)
+    texts: gh_tokens().map(fn(token) { token.text })
     missing := [String]{}
     loop keyword in gh_keyword_list() {
         if !gh_has(texts, keyword) -> missing.push(keyword)

@@ -59,7 +59,7 @@ take_while: fn(src: Input, predicate: fn(String) -> Bool Never!) -> Took Never! 
     {next: Input{text: src.text, pos: i}, chunk: chunk}
 }
 
-skip_ws: fn(src: Input) -> Input Never! { take_while(src, (scalar: String) -> unicode.is_whitespace(scalar)).next }
+skip_ws: fn(src: Input) -> Input Never! { take_while(src, fn(scalar: String) { unicode.is_whitespace(scalar) }).next }
 
 digit: fn(src: Input) -> Digit? Never! {
     b: peek(src) ?? return None

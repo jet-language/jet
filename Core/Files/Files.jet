@@ -504,7 +504,7 @@ Directory: struct {
                 name_is_unicode: unicode,
             })
         }
-        out.sort_by((left: DirectoryEntry, right: DirectoryEntry) -> raw_name_order(left.raw_name, right.raw_name))
+        out.sort_by(fn(left: DirectoryEntry, right: DirectoryEntry) { raw_name_order(left.raw_name, right.raw_name) })
         Ok(out)
     }
 
@@ -1351,7 +1351,7 @@ normalize: fn(path: String) -> String Never! {
 /// before it (`join_all(["/a", "/b"])` is "/a/b", where `join("/a", "/b")` is
 /// "/b"). No non-empty part gives ".".
 join_all: fn(parts: [String]) -> String Never! {
-    normalize(parts.filter(part -> part != "").join("/"))
+    normalize(parts.filter(fn(part) { part != "" }).join("/"))
 }
 
 /// `path` made absolute against the current directory and `normalize`d, as
@@ -1517,7 +1517,7 @@ copy_dir: fn(from: String | Path, to: String | Path) IOError! -[FS]> {
     files8_preflight("FS.Read", .Read, source)
     files8_preflight("FS.Write", .Write, destination)
     context: rt.entries_context(source, destination, true)
-    _guard: core.mem.scope.guard(() -> rt.entries_close(context))
+    _guard: core.mem.scope.guard(fn() { rt.entries_close(context) })
     entries_copy_tree(context, 0, source)
 }
 
@@ -1927,8 +1927,8 @@ __walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, ignore:
         // The walk joins a child's name to its directory with `/`.
         children.push((key: "{entry.path}/", directory: entry.child))
     }
-    entries.sort_by((left: WalkEntry, right: WalkEntry) -> right.path <=> left.path)
-    children.sort_by((left: (key: String, directory: Int), right: (key: String, directory: Int)) -> right.key <=> left.key)
+    entries.sort_by(fn(left: WalkEntry, right: WalkEntry) { right.path <=> left.path })
+    children.sort_by(fn(left: (key: String, directory: Int), right: (key: String, directory: Int)) { right.key <=> left.key })
     Ok(__WalkFrame{entries: entries, children: children, depth: depth})
 }
 
@@ -2109,7 +2109,7 @@ entries_glob_tree: fn(context: Int, directory: Int, resource: String, output: &[
         if entry.at_end -> break
         children.push(entry.child)
     }
-    children.sort_by((left: Int, right: Int) -> {
+    children.sort_by(fn(left: Int, right: Int) {
         if rt.entries_before(context, left, right) -> return Ordering.Less
         if rt.entries_before(context, right, left) -> return Ordering.Greater
         Ordering.Equal
@@ -2130,7 +2130,7 @@ glob: fn(pattern: String | Path) -[FS]> [String] IOError! {
     separator: if rt.os_family() == "windows" -> U8{92} else -> U8{47}
     root: entries_glob_root(resource, separator)
     context: rt.entries_context(root, "", false)
-    _guard: core.mem.scope.guard(() -> rt.entries_close(context))
+    _guard: core.mem.scope.guard(fn() { rt.entries_close(context) })
     paths := [String]{}
     entries_glob_tree(context, 0, resource, paths)
     bytes: resource.bytes()

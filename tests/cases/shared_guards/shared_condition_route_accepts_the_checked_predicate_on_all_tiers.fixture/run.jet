@@ -20,7 +20,7 @@ mark_ready: fn(state: Shared<State>, changed: Condition) {
 take_ticket: fn(state: Shared<State>, changed: Condition) -> Int {
     guard: state.guard_edit()
     // A cancelled or failed wait hands out no ticket.
-    guard.wait(changed, value -> value.ready) ?? return 0
+    guard.wait(changed, fn(value) { value.ready }) ?? return 0
     guard.value.ticket += 1
     return guard.value.ticket
 }

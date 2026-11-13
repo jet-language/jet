@@ -12,7 +12,7 @@ NoPrintInLib: struct {
 }
 
 install: fn(meta: Compiler) {
-    meta.events(watch: .Calls{to: print}, (event) -> {
+    meta.events(watch: .Calls{to: print}, fn(event) {
         if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
     })
 }

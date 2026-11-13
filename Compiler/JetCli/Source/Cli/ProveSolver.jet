@@ -255,7 +255,7 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
         }
     }
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    keyed.sort_by((left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> jet_cli_solver_keyed_order(left, right))
+    keyed.sort_by(fn(left: JetCLISolverKeyed, right: JetCLISolverKeyed) { jet_cli_solver_keyed_order(left, right) })
     out := [JetCLISolverBool]{}
     loop (index, item) in keyed {
         if index > 0 && keyed[index - 1].text == item.text -> next
@@ -405,7 +405,7 @@ jet_cli_solver_variables: fn(ineqs: [JetCLISolverAffine]) -> [String] Never! {
             if !names.contains(term.variable) -> names.push(term.variable)
         }
     }
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     names
 }
 

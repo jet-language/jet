@@ -22,10 +22,10 @@ build_system_contract_issues: fn(axis: Dyn) -> [String] {
         {holds: text_at(axis, "schema") == Val(BUILD_SYSTEM_SCHEMA), issue: "build_system schema must be {BUILD_SYSTEM_SCHEMA}"},
         {holds: text_at(axis, "metric") == Val("wall_ns"), issue: "build_system metric must be wall_ns"},
         {holds: text_at(axis, "harness") == Val(BUILD_SYSTEM_HARNESS), issue: "build_system harness must be {BUILD_SYSTEM_HARNESS}"},
-        {holds: ids_at(axis, "peers") == ["jet", "nix"] && items_at(axis, "peers").all(peer -> is_true(peer, "required")), issue: "build_system peers must be jet and nix, both required"},
+        {holds: ids_at(axis, "peers") == ["jet", "nix"] && items_at(axis, "peers").all(fn(peer) { is_true(peer, "required") }), issue: "build_system peers must be jet and nix, both required"},
         {holds: ids_at(axis, "cells") == BUILD_SYSTEM_CELLS, issue: "build_system cells must be {BUILD_SYSTEM_CELLS.join(", ")}"},
     }
-    rules.extend(items_at(axis, "cells").flat_map(cell -> cell_rules(cell)))
+    rules.extend(items_at(axis, "cells").flat_map(fn(cell) { cell_rules(cell) }))
     rules.push(ContractRule{holds: (number_at(axis, "samples") ?? 0.0) >= 1.0 && (number_at(axis, "warmups") ?? -1.0) >= 0.0, issue: "build_system needs samples and warmups"})
     contract_issues(rules)
 }
@@ -86,10 +86,10 @@ run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemRe
         // The ratio as JSON writes it: 1, not 1.0.
         if text_at(cell, "verdict") != Val("win") -> blockers.push("{id}: jet/nix {if ratio == Dyn.Null -> "unmeasured" else -> json.stringify(ratio)} misses {json.stringify(dyn_at(cell, "target"))}")
     }
-    complete: receipt != Dyn.Null && cells.len() == items_at(axis, "cells").len() && cells.all(cell -> text_at(cell, "status") == Val("measured"))
+    complete: receipt != Dyn.Null && cells.len() == items_at(axis, "cells").len() && cells.all(fn(cell) { text_at(cell, "status") == Val("measured") })
     verdict: if {
         !complete -> "unmeasured"
-        cells.all(cell -> text_at(cell, "verdict") == Val("win")) -> "win"
+        cells.all(fn(cell) { text_at(cell, "verdict") == Val("win") }) -> "win"
         else -> "loss"
     }
     Ok(BuildSystemReport{
@@ -108,7 +108,7 @@ run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemRe
 }
 
 test_build_axis: fn() -> Dyn {
-    cells: BUILD_SYSTEM_CELLS.map(id -> "{{\"id\":\"{id}\",\"jet\":[\"{{jet}}\",\"build\"],\"nix\":[\"nix\",\"build\"],\"target\":{{\"ratio_max\":0.25}}}}").join(",")
+    cells: BUILD_SYSTEM_CELLS.map(fn(id) { "{{\"id\":\"{id}\",\"jet\":[\"{{jet}}\",\"build\"],\"nix\":[\"nix\",\"build\"],\"target\":{{\"ratio_max\":0.25}}}}" }).join(",")
     json.parse("{{\"status\":\"required\",\"schema\":\"gauntlet-axis-build-system-v1\",\"metric\":\"wall_ns\",\"harness\":\"Tools/gauntlet/harness/build-system.mjs\",\"peers\":[{{\"id\":\"jet\",\"required\":true}},{{\"id\":\"nix\",\"required\":true}}],\"cells\":[{cells}],\"samples\":5,\"warmups\":1}}") ?? panic("axis: {err}")
 }
 
@@ -126,7 +126,7 @@ test_build_axis: fn() -> Dyn {
     harness: files.join(dir, BUILD_SYSTEM_HARNESS)
     files.create_dir_all(files.dirname(harness))
     files.write(harness, "")
-    won: BUILD_SYSTEM_CELLS.map(id -> "{{\"id\":\"{id}\",\"target\":{{\"ratio_max\":0.25}},\"status\":\"measured\",\"jet\":{{\"median_ns\":1}},\"nix\":{{\"median_ns\":10}},\"ratio\":0.1,\"verdict\":\"win\"}}").join(",")
+    won: BUILD_SYSTEM_CELLS.map(fn(id) { "{{\"id\":\"{id}\",\"target\":{{\"ratio_max\":0.25}},\"status\":\"measured\",\"jet\":{{\"median_ns\":1}},\"nix\":{{\"median_ns\":10}},\"ratio\":0.1,\"verdict\":\"win\"}}" }).join(",")
     files.write(receipt, "{{\"passed\":true,\"failures\":[],\"cells\":[{won}]}}")
     run: AxisRun{run_dir: files.join(dir, "run"), jet_bin: "jet", repo_dir: dir}
     ready: run_build_system_adapter(test_build_axis(), run)

@@ -4,6 +4,6 @@ no_value: fn() -> Float? { None }
 
 run: fn() {
     values: [Float?]{Val(1.0), no_value(), Val(3.0)}
-    missing: data.query(values).filter(value -> value == None).collect() ?? panic("missing")
+    missing: data.query(values).filter(fn(value) { value == None }).collect() ?? panic("missing")
     print(missing.len())
 }

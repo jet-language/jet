@@ -145,7 +145,7 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
         }
         if first_error == .Val(error) -> return Err(error)
     }
-    plan.items.sort_by((item: NixPlanItem) -> item.package)
+    plan.items.sort_by(fn(item: NixPlanItem) { item.package })
     plan.estimated_seconds = store_nix_estimated_seconds(plan.download_bytes, store_nix_recent_throughput(roots))
     store_nix_remember_planned_narinfos(verification, roots, endpoint, planned)
     Ok(plan)

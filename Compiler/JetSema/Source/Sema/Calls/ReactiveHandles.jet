@@ -111,12 +111,12 @@ sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expecte
     source_arity: sema_reactive_source_lambda_arity(argument.expr) ?? {
         checked: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         actual: if checked == .Val(value) -> sema_type_show(value.ty) else -> "an invalid value"
-        diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+        diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `fn() {{ … }}` body so it can re-run when a signal changes", "write `reactive.{kind}(fn() {{ … }})`"))
         return None
     }
     if source_arity != 0 {
         _ := sema_expression_lambda_host_callback_stored(argument.expr, None, false, environment, program, scopes, state, tail_store, context, diagnostics)
-        diagnostics.push(sema_error("E2911", expr_span(argument.expr), "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(() -> {{ … }})` with no parameters"))
+        diagnostics.push(sema_error("E2911", expr_span(argument.expr), "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(fn() {{ … }})` with no parameters"))
         return None
     }
     expected_callback_return := expected_return
@@ -126,7 +126,7 @@ sema_reactive_check_retained_lambda: fn(kind: String, argument: CallArg, expecte
     if checked.kind == {
         .Lambda(lambda) -> Val(lambda)
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> {
-            diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {sema_type_show(checked.ty)}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+            diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {sema_type_show(checked.ty)}", "a reactive {kind} is built from a `fn() {{ … }}` body so it can re-run when a signal changes", "write `reactive.{kind}(fn() {{ … }})`"))
             return None
         }
     }
@@ -171,7 +171,7 @@ sema_reactive_derived_value: fn(member: String, type_args: [Type], span: Span, e
     lambda: sema_reactive_check_retained_lambda(member, args[0], None, expected_element, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type: lambda.ret ?? Type.Named{name: "Unit"}
     if result_type == sema_reactive_unit_type() {
-        diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.autorun(() -> {{ … }})` for a side effect"))
+        diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.autorun(fn() {{ … }})` for a side effect"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_reactive_value_ok(result_type, member, args[0].span, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}

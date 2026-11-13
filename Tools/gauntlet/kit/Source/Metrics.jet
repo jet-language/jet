@@ -27,7 +27,7 @@ LOSS_OWNERS: [LossOwner]{
 
 // The loss-owner category of a gauntlet metric.
 loss_owner_category: fn(metric: String) -> String? {
-    owner: LOSS_OWNERS.find(owner -> owner.metric == metric) ?? return None
+    owner: LOSS_OWNERS.find(fn(owner) { owner.metric == metric }) ?? return None
     Val(owner.category.copy())
 }
 

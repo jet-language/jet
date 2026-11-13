@@ -142,7 +142,7 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
             reason: reason,
         })
     }
-    results.sort_by((left: JetCLIBudgetResult, right: JetCLIBudgetResult) -> if jet_cli_budget_result_rank(left) == jet_cli_budget_result_rank(right) -> left.id <=> right.id else -> jet_cli_budget_result_rank(left) <=> jet_cli_budget_result_rank(right))
+    results.sort_by(fn(left: JetCLIBudgetResult, right: JetCLIBudgetResult) { if jet_cli_budget_result_rank(left) == jet_cli_budget_result_rank(right) -> left.id <=> right.id else -> jet_cli_budget_result_rank(left) <=> jet_cli_budget_result_rank(right) })
     outcome: if fail > 0 -> "fail" else if warn > 0 -> "warn" else -> "pass"
     content: perf_report_object_new([CanonicalJSONField]{
         CanonicalJSONField{key: "evidence_id", value: CanonicalJSON.String(evidence_id)},

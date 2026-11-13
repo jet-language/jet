@@ -57,7 +57,7 @@ STALE_NAMES_BOTH: #run { STALE_TEXT == "query: snapshot {identity_text(SCHEMA)} 
 run: fn() {
     print("markers include Pre and Post: {MARKERS.contains("Pre") && MARKERS.contains("Post")}")
     print("reads include $origin: {READS.contains("$origin")}")
-    print("no read is a marker: {!READS.any((name) -> MARKERS.contains(name))}")
+    print("no read is a marker: {!READS.any(fn(name) { MARKERS.contains(name) })}")
     print(TRUNCATED)
     print(UNSUPPORTED)
     print("no limit: {COMPLETE}")

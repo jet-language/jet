@@ -133,7 +133,7 @@ jet_driver_run_receipt_normalized_sections: fn(sections: [JetDriverRunReceiptSec
         return Err(jet_driver_run_receipt_error("receipt sections are too large (maximum 67108864 bytes)"))
     }
     normalized = loop fresh_item in normalized -> fresh_item
-    normalized.sort_by((left: JetDriverRunReceiptSection, right: JetDriverRunReceiptSection) -> left.name <=> right.name)
+    normalized.sort_by(fn(left: JetDriverRunReceiptSection, right: JetDriverRunReceiptSection) { left.name <=> right.name })
     loop index in 1..<normalized.len() {
         if normalized[index - 1].name == normalized[index].name {
             return Err(jet_driver_run_receipt_error("receipt section `{normalized[index].name}` is duplicated"))
@@ -350,7 +350,7 @@ jet_driver_run_receipt_body: fn(receipt: JetDriverRunReceipt) -> [U8] Never! {
     if receipt.sections.len() > 0 {
         sections := receipt.sections
         sections = loop fresh_item in sections -> fresh_item
-        sections.sort_by((left: JetDriverRunReceiptSection, right: JetDriverRunReceiptSection) -> left.name <=> right.name)
+        sections.sort_by(fn(left: JetDriverRunReceiptSection, right: JetDriverRunReceiptSection) { left.name <=> right.name })
         jet_driver_run_receipt_frame(out, jet_driver_run_receipt_section_marker(JET_DRIVER_RUN_RECEIPT_SECTION_MAGIC))
         section_count := [U8]{}
         jet_driver_run_receipt_uint(section_count, sections.len(), 8)

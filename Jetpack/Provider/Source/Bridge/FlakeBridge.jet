@@ -81,7 +81,7 @@ provider_bridge_host_system: fn() -[Env]> String Never! {
 // `file:` fixed-output fetches. Everything else is denied.
 provider_native_authority: fn(root: String) -[FS]> NixEvalAuthority ProviderError! {
     authority: NixProjectImportAuthority.open(root) ?? return Err(ProviderError.Unsupported("couldn't open flake project root for native authority: {err.message()}"))
-    Ok(NixEvalAuthority{answer: (request: String) -[FS]> {
+    Ok(NixEvalAuthority{answer: fn(request: String) -[FS]> {
         provider_bridge_authority_answer(authority, request)
     }})
 }

@@ -56,7 +56,7 @@ health: fn() -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
 run: fn() (HTTPError | IOError | NetError)! {
     mux: server.mux()
-    mux.get("/health", () -> health())
+    mux.get("/health", fn() { health() })
     // The serving path is live code; the case never creates the flag.
     if files.exists("serve.flag") {
         listener: net.tcp_listen("127.0.0.1:0")

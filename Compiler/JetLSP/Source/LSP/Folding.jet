@@ -32,7 +32,7 @@ lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] N
     }
     lsp_line_group_folds(src, table.lines, "//", "comment", folds)
     lsp_line_group_folds(src, table.lines, "use ", "imports", folds)
-    folds.sort_by((left: LSPFoldingRange, right: LSPFoldingRange) -> (left.start_line <=> right.start_line).then(left.start_character <=> right.start_character).then(left.end_line <=> right.end_line))
+    folds.sort_by(fn(left: LSPFoldingRange, right: LSPFoldingRange) { (left.start_line <=> right.start_line).then(left.start_character <=> right.start_character).then(left.end_line <=> right.end_line) })
     folds
 }
 

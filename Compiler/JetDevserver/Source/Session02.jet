@@ -33,7 +33,7 @@ impl ResidentDevSession {
         recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         if recording.as_mut() == .Val(state) {
             recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
-                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map((text) -> text.to_string())).map_err(recording_error)
+                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map(fn(text) { text.to_string() })).map_err(recording_error)
             state.recording.append_event(recorded).map_err(recording_error)
         }
         assigned: devtools.envelope.push(event)
@@ -112,7 +112,7 @@ impl ResidentDevSession {
         self.record_debug(request)
         if request_bool(request, "stop") -> return
         snapshot: find_debugger_snapshot(response) ?? return
-        (source_id, debugger_revision): (() -> {
+        (source_id, debugger_revision): (fn() {
             debugger: self.debugger.lock().unwrap()
             state: if snapshot.state == {
                 "running" -> "active"
@@ -142,8 +142,8 @@ impl ResidentDevSession {
         self.select_output_values(if !output.is_empty() -> .Val(output) else -> .None, if !target.is_empty() -> .Val(target) else -> .None)
     }
     select_output_values: fn(self: Self, output: String?, target: String?) -> Unit {
-        if output.filter((output) -> !output.is_empty()) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
-        if target.filter((target) -> !target.is_empty()) == .Val(selected) -> *self.selected_target.lock().unwrap() = selected.copy()
+        if output.filter(fn(output) { !output.is_empty() }) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
+        if target.filter(fn(target) { !target.is_empty() }) == .Val(selected) -> *self.selected_target.lock().unwrap() = selected.copy()
     }
     id: fn(self: Self) -> String { &self.id }
     selected_target: fn(self: Self) -> String? {
@@ -174,9 +174,10 @@ impl ResidentDevSession {
         views: (*self.last_good_views.lock().unwrap()).copy()
         live_lineage: (*self.live_lineage.lock().unwrap()).copy()
         live_values: (*self.live_values.lock().unwrap()).copy()
-        (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id): live_lineage.as_ref().map((lineage) ->
+        (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id): live_lineage.as_ref().map(fn(lineage) {
             (_0: json_value(lineage.protocol), _1: json_value(lineage.session_id), _2: json_value(lineage.source_id), _3: json_value(lineage.build_id),
-                _4: json_value(lineage.revision), _5: json_value(lineage.world_id))).unwrap_or((_0: "null", _1: "null", _2: "null", _3: "null", _4: "null", _5: "null"))
+                _4: json_value(lineage.revision), _5: json_value(lineage.world_id))
+        }).unwrap_or((_0: "null", _1: "null", _2: "null", _3: "null", _4: "null", _5: "null"))
         live_values_json: live_values.iter().map(live_value_fact_json).collect().join(",")
         now: Instant.now()
         client_state: self.clients.lock().unwrap()
@@ -191,7 +192,7 @@ impl ResidentDevSession {
         }
         listeners: "{{{listener_entries.join(",")}}}"
         custom_server_listener: if self.application_port != 0 -> "\"application\"" else -> "null"
-        receipts: self.receipts.lock().unwrap().iter().map((receipt) -> {
+        receipts: self.receipts.lock().unwrap().iter().map(fn(receipt) {
             live: receipt.live.as_ref().map(live_receipt_json).unwrap_or("null")
             "{{\"kind\":{json_value(receipt.kind)},\"status\":{json_value(receipt.status)},\"before\":{json_value(receipt.before)},\"after\":{json_value(receipt.after)},\"client\":{json_value(receipt.client)},\"output\":{json_value(receipt.output)},\"live\":{live}}}"
         }).collect().join(",")
@@ -257,8 +258,8 @@ live_receipt_json: fn(receipt: LiveReceipt) -> String {
     values: receipt.values.iter().map(live_value_fact_json).collect().join(",")
     "{{\"protocol\":{json_value(receipt.lineage.protocol)},\"session_id\":{json_value(receipt.lineage.session_id)},\"source_id\":{json_value(receipt.lineage.source_id)},\"build_id\":{json_value(receipt.lineage.build_id)},\"revision\":{json_value(receipt.lineage.revision)},\"world_id\":{json_value(receipt.lineage.world_id)},\"values\":[{values}]}}"
 }
-expire_clients: fn(clients: [String:Instant], now: Instant) -> Unit { clients.retain((_, seen) -> now.saturating_duration_since(*seen) <= CLIENT_TTL) }
-client_id_is_valid: fn(client: String) -> Bool { !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any((ch) -> ch.is_control()) }
+expire_clients: fn(clients: [String:Instant], now: Instant) -> Unit { clients.retain(fn(_, seen) { now.saturating_duration_since(*seen) <= CLIENT_TTL }) }
+client_id_is_valid: fn(client: String) -> Bool { !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any(fn(ch) { ch.is_control() }) }
 retained_view_json: fn(view: RetainedView?) -> String {
     retained: view.cloned().unwrap_or(RetainedView { revision: "", source_id: "", payload: "" })
     "{{\"revision\":{json_value(retained.revision)},\"source_id\":{json_value(retained.source_id)},\"payload\":{json_value(retained.payload)}}}"
@@ -273,7 +274,7 @@ recording_json_for_state: fn(session_id: String, state: &ResidentRecordingState,
     events: state.recording.events().map(recording_event_json).collect().join(",")
     names := state.checkpoints.keys().cloned().collect()
     names.sort()
-    checkpoints: names.into_iter().map((name) -> recording_checkpoint_json(name, state.checkpoints.get(name).unwrap())).collect().join(",")
+    checkpoints: names.into_iter().map(fn(name) { recording_checkpoint_json(name, state.checkpoints.get(name).unwrap()) }).collect().join(",")
     current_event: projection.event().map(recording_event_json).unwrap_or("null")
     truncation: state.recording.truncation()
     divergence_json: divergence.map(recording_divergence_json).unwrap_or("null")
@@ -289,7 +290,7 @@ recording_divergence_json: fn(divergence: DevtoolsRecordingDivergence) -> String
     reason: divergence.reason.as_ref().map(json_value).unwrap_or("null")
     "{{\"divergent\":{divergence.divergent},\"reason\":{reason},\"expected_sequence\":{optional_u64_json(divergence.expected_sequence)},\"actual_sequence\":{optional_u64_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
 }
-optional_u64_json: fn(value: U64?) -> String { value.map((value) -> value.to_string()).unwrap_or("null") }
+optional_u64_json: fn(value: U64?) -> String { value.map(fn(value) { value.to_string() }).unwrap_or("null") }
 json_value: fn(value: String) -> String { if value.is_empty() -> "null" else -> "\"{foundation_json_escape(value)}\"" }
 unix_time_ms: fn() -> U64 {
     // GATE #4494: wall clock uses epoch duration with original failure/overflow behavior.
@@ -307,9 +308,9 @@ json_u64: fn(value: Dyn) -> U64? {
     }
 }
 validate_devtools_text: fn(value: String, label: String) Err! {
-    if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any((ch) -> ch.is_control()) -> return .Err("devtools {label} is empty, too long, or contains control text")
+    if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any(fn(ch) { ch.is_control() }) -> return .Err("devtools {label} is empty, too long, or contains control text")
 }
-string_array_json: fn(values: [String]) -> String { "[{values.iter().map((value) -> json_value(value)).collect().join(",")}]" }
+string_array_json: fn(values: [String]) -> String { "[{values.iter().map(fn(value) { json_value(value) }).collect().join(",")}]" }
 retention_fact_json: fn(fact: StateRetentionFact) -> String {
     (decision, reason): if fact.decision == {
         .Preserve -> (_0: "preserve", _1: "")
@@ -330,9 +331,9 @@ render_json: fn(value: Dyn) -> String {
         .Float(value) -> value.to_string()
         .Number(value) -> value.copy()
         .TypedText(value) | .Text(value) -> json_value(value)
-        .Bytes(values) -> "[{values.iter().map((value) -> value.to_string()).collect().join(",")}]"
+        .Bytes(values) -> "[{values.iter().map(fn(value) { value.to_string() }).collect().join(",")}]"
         .Array(values) -> "[{values.iter().map(render_json).collect().join(",")}]"
-        .Object(values) -> "{{{values.iter().map(((key, value)) -> "{json_value(key)}:{render_json(value)}").collect().join(",")}}}"
+        .Object(values) -> "{{{values.iter().map(fn((key, value)) { "{json_value(key)}:{render_json(value)}" }).collect().join(",")}}}"
     }
 }
 object_map: fn(value: Dyn) -> [String:Dyn]? {
@@ -343,14 +344,14 @@ object_map: fn(value: Dyn) -> [String:Dyn]? {
 }
 request_string: fn(text: String, key: String) -> String {
     value: parse_json(text) ?? return ""
-    object_map(value).and_then((object) -> object.get(key).and_then(json_string).map((text) -> text.to_string())).unwrap_or_default()
+    object_map(value).and_then(fn(object) { object.get(key).and_then(json_string).map(fn(text) { text.to_string() }) }).unwrap_or_default()
 }
 request_bool: fn(text: String, key: String) -> Bool {
     value: parse_json(text) ?? return false
-    object_map(value).and_then((object) -> object.get(key).cloned()).is_some_and((value) -> if value == {
+    object_map(value).and_then(fn(object) { object.get(key).cloned() }).is_some_and(fn(value) { if value == {
         .Bool(lit0) && lit0 == true -> true
         else -> false
-    })
+    } })
 }
 set_if_present: fn(target: String, value: String) -> Unit { if !value.is_empty() -> *target = value }
 idle_debugger: fn() -> DebuggerSnapshot { DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" } }
@@ -359,12 +360,12 @@ json_string_any: fn(text: String, key: String) -> String? {
     fn find(value: Dyn, key: String) -> String? {
         if value == {
             .Object(object) -> {
-                if object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None) == .Val(found) {
+                if object.iter().find_map(fn((name, value)) { if name == key -> .Val(value) else -> .None }) == .Val(found) {
                     if json_string(found) == .Val(found_text) -> return .Val(found_text.copy())
                 }
-                object.iter().find_map(((_, value)) -> find(value, key))
+                object.iter().find_map(fn((_, value)) { find(value, key) })
             }
-            .Array(values) -> values.iter().find_map((value) -> find(value, key))
+            .Array(values) -> values.iter().find_map(fn(value) { find(value, key) })
             else -> .None
         }
     }
@@ -375,14 +376,14 @@ find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? {
     fn find(value: Dyn) -> DebuggerSnapshot? {
         if value == {
             .Object(object) -> {
-                if object.iter().find_map(((name, value)) -> if name == "id" -> .Val(value) else -> .None).and_then(json_string) == .Val(session_id) {
+                if object.iter().find_map(fn((name, value)) { if name == "id" -> .Val(value) else -> .None }).and_then(json_string) == .Val(session_id) {
                     if session_id.starts_with("canvas-debug-") {
-                        field: (key: String) -> object.iter().find_map(((name, value)) -> if name == key -> .Val(value) else -> .None)
-                            .and_then(json_string).map((text) -> text.to_string()).unwrap_or_default()
+                        field: fn(key: String) { object.iter().find_map(fn((name, value)) { if name == key -> .Val(value) else -> .None })
+                            .and_then(json_string).map(fn(text) { text.to_string() }).unwrap_or_default() }
                         return .Val(DebuggerSnapshot { state: field("state"), session_id: session_id.copy(), source_id: field("source_id"), revision: field("revision"), tier: field("tier") })
                     }
                 }
-                object.iter().find_map(((_, value)) -> find(value))
+                object.iter().find_map(fn((_, value)) { find(value) })
             }
             .Array(values) -> values.iter().find_map(find)
             else -> .None

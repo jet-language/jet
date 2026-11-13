@@ -454,7 +454,7 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScope
 sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     handles := [String]{}
     members := [String]{}
-    ast_visit_expr(condition, (expression: Expr) -> sema_shared_access_note_field_read(handles, members, expression))
+    ast_visit_expr(condition, fn(expression: Expr) { sema_shared_access_note_field_read(handles, members, expression) })
     poll := -1
     loop index in 0..<handles.len() {
         if sema_shared_access_name_is_shared(handles[index], scopes) {
@@ -464,7 +464,7 @@ sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: Sem
     }
     if poll < 0 -> return
     blocking := false
-    ast_visit_body(body, (expression: Expr) -> sema_shared_access_note_blocking_call(blocking, expression), true)
+    ast_visit_body(body, fn(expression: Expr) { sema_shared_access_note_blocking_call(blocking, expression) }, true)
     if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) -> return
     diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
 }

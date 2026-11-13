@@ -392,7 +392,7 @@ collections: fn() {
 
     // concrete map/filter are eager; `.lazy()` enters the Iter adapter plane
     // (D-CORE-EAGER1 / D-LOOPMAP1=B).
-    out: nums.indexed().zip(seen).take(2).map((p) -> p.value).to_list()
+    out: nums.indexed().zip(seen).take(2).map(fn(p) { p.value }).to_list()
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
@@ -433,12 +433,12 @@ Selector: struct {
 
 closures: fn() {
     nums: [3, 1, 2]
-    squares: nums.map((n: Int) -> n * n)
-    big: squares.filter((n: Int) -> n > 5)
-    total: nums.reduce(0, (acc: Int, n: Int) -> acc + n)
+    squares: nums.map(fn(n: Int) { n * n })
+    big: squares.filter(fn(n: Int) { n > 5 })
+    total: nums.reduce(0, fn(acc: Int, n: Int) { acc + n })
 
     // captures are implicit: copyable values copy; other owned values move
-    make: () -> total
+    make: fn() { total }
 }
 
 // Function types: `fn(T1, T2) -> R` (S47). Parameters are read-only: a function

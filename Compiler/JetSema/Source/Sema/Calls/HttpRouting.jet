@@ -1150,7 +1150,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         mux_request := Type?{None}
         if receiver_name == "HTTPMux" -> mux_request = Val(sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program))
         handler_shape: sema_http_route_shape(updated_args[1].expr, environment, program, scopes, context.host_hooks, mux_request) ?? {
-            diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `(id: Int, req: HTTPRequest) -> ...` or pass a named function"))
+            diagnostics.push(sema_error("E2805", updated_args[1].span, "HTTP route handler must be a lambda or named function with explicit typed parameters", "route binding needs source parameter names and types before it can define transport inputs", "write `fn(id: Int, req: HTTPRequest) {{ ... }}` or pass a named function"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         request_names := [String]{}

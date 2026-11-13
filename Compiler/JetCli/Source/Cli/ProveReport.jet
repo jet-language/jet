@@ -1574,7 +1574,7 @@ jet_cli_prove_stop_text: fn(item: JetCLIProveTestItem) -[FS]> String Never! {
 jet_cli_prove_write: fn(identity: JetCLIProveIdentity, report: String, consumed: [JetDriverRecordLink]) JetCLIProveRefusal! -[FS, Env, Time]> {
     report_id: prove_crypto.sha256("{report}\n".bytes()).hex()
     links := consumed.copy()
-    links.sort_by((left: JetDriverRecordLink, right: JetDriverRecordLink) -> if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind)
+    links.sort_by(fn(left: JetDriverRecordLink, right: JetDriverRecordLink) { if left.kind == right.kind -> left.artifact_id <=> right.artifact_id else -> left.kind <=> right.kind })
     consumed_json: "[{(loop link in links -> "{{\"artifact_id\":{foundation_json_quote(link.artifact_id)},\"kind\":{foundation_json_quote(link.kind)}}}").join(",")}]"
     produced_json: "[]"
     artifact_id: prove_crypto.sha256("{{\"consumed\":{consumed_json},\"produced\":{produced_json},\"report_id\":\"{report_id}\"}}\n".bytes()).hex()

@@ -27,13 +27,13 @@ work: fn(item: Int, cost: Int) -> Int {
 // interior callback work while retaining only a first/last sentinel.
 map_case: fn(count: Int, cost: Int) -> Int {
     values: input(count)
-    mapped: values.map((item: Int) -> work(item, cost))
+    mapped: values.map(fn(item: Int) { work(item, cost) })
     return mapped.sum()
 }
 
 para_map_case: fn(count: Int, cost: Int) -> Int {
     values: input(count)
-    mapped: values.para_map((item: Int) -> work(item, cost))
+    mapped: values.para_map(fn(item: Int) { work(item, cost) })
     return mapped.sum()
 }
 

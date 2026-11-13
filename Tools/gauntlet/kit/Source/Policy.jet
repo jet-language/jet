@@ -142,7 +142,7 @@ territory_cells: fn(area: Dyn, matrix_ids: [Dyn]) -> [Dyn] {
 // The cells some required area of `policy` claims.
 required_policy_cells: fn(policy: Dyn, matrix_ids: [Dyn]) -> [Dyn] {
     areas: items_at(policy, "foundations").concat(items_at(policy, "critical_areas"))
-    areas.filter(area -> is_true(area, "required")).flat_map(area -> territory_cells(area, matrix_ids))
+    areas.filter(fn(area) { is_true(area, "required") }).flat_map(fn(area) { territory_cells(area, matrix_ids) })
 }
 
 // Every way the matrix's strict performance policy departs from the ratified
@@ -153,7 +153,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
     policy: member(matrix, "strict_performance_policy") ?? Dyn.Null
     if !(policy == .Object(_)) -> return ["matrix is missing the strict performance policy"]
     cells: items_at(matrix, "cells")
-    matrix_ids: cells.map(cell -> value_at(cell, "id") ?? Dyn.Null)
+    matrix_ids: cells.map(fn(cell) { value_at(cell, "id") ?? Dyn.Null })
     same: fn(name: String) -> Bool { json.stringify(value_at(policy, name) ?? Dyn.Null) == json.stringify(value_at(ratified, name) ?? Dyn.Null) }
     issues := [String]{}
     if !same("schema") -> issues.push("matrix strict performance policy schema is {json.stringify(value_at(policy, "schema") ?? Dyn.Null)}")
@@ -192,7 +192,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
     if !same("historical_receipts") -> issues.push("matrix strict performance policy does not preserve historical receipts")
     if !same("ceiling") -> issues.push("matrix strict performance policy machine-ceiling stage differs from the ratified law")
     if text_at(policy, "text") != text_at(ratified, "text") -> issues.push("matrix strict performance policy text differs from AGENTS.md")
-    texts: matrix_ids.filter_map(id -> text_at(id, "")).filter(id -> id != "").collect()
+    texts: matrix_ids.filter_map(fn(id) { text_at(id, "") }).filter(fn(id) { id != "" }).collect()
     if texts.len() != matrix_ids.len() || combinatorics.unique<String>(texts).len() != texts.len() -> issues.push("matrix strict performance policy cannot address an invalid or duplicate matrix cell")
     covered: required_policy_cells(policy, matrix_ids)
     loop id in matrix_ids {
@@ -207,7 +207,7 @@ strict_performance_policy_issues: fn(matrix: Dyn) -> [String] {
 // reference beside the cells.json in `repo`.
 ceiling_reference_issues: fn(matrix: Dyn, references: Dyn, repo: String) -[FS]> [String] {
     if !(references == .Array(_)) -> return ["{CEILING_REFERENCES}: machine-ceiling references are missing"]
-    matrix_ids: items_at(matrix, "cells").map(cell -> value_at(cell, "id") ?? Dyn.Null)
+    matrix_ids: items_at(matrix, "cells").map(fn(cell) { value_at(cell, "id") ?? Dyn.Null })
     reference_dir: files.dirname(files.join(repo, CEILING_REFERENCES))
     issues := [String]{}
     names := [String]{}
@@ -250,9 +250,9 @@ matrix_peer_languages: fn(matrix: Dyn, cell: Dyn?) -> [String] {
             }
         }
     }
-    peers: named.filter(language -> base_language(language) != "jet")
+    peers: named.filter(fn(language) { base_language(language) != "jet" })
     run_tier: if cell == {
-        .Val(one) -> tier_policy(matrix_cell_mode(one)).any(rule -> rule.tier == "run")
+        .Val(one) -> tier_policy(matrix_cell_mode(one)).any(fn(rule) { rule.tier == "run" })
         None -> true
     }
     run: if run_tier -> texts_at(rails, "run") else -> [String]{}
@@ -312,7 +312,7 @@ ratio_verdict: fn(ratio: Float?) -> String? {
 
 #Test("the ratified policy passes, and each departure from it is an issue once") {
     ids: ["numerics.float-kernel", "numerics.fft", "numerics.tensor-map", "numerics.int-kernel", "text.kernel", "text.regex-kernel", "text.regex-find-all-large", "text.report-cli", "text.script", "files.script", "files.orchestration", "concurrency.app", "concurrency.service", "netserv.client", "netserv.service", "webfront.widget", "webfront.app", "cli.app", "cli.hello", "formats.csv-cli", "numerics.script", "numerics.notebook", "embedded.kernel", "embedded.data"]
-    cells: Dyn.Array(ids.map(id -> Dyn{[String: Dyn]{"id": id}}))
+    cells: Dyn.Array(ids.map(fn(id) { Dyn{[String: Dyn]{"id": id}} }))
     matrix := Dyn.object()
     matrix["cells"] = cells
     matrix["strict_performance_policy"] = strict_performance_policy()

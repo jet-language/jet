@@ -1047,12 +1047,12 @@ sema_call_try_scope_guard: fn(module_name: String, member: String, alias: String
         .Lambda(value) -> Val(value)
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     } ?? {
-        diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`scope.guard` needs a lambda, not {sema_type_show(callback.ty)}", "a scope guard runs a cleanup lambda when the binding goes out of scope", "write `scope.guard(() -> {{ cleanup_code }})`"))
+        diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`scope.guard` needs a lambda, not {sema_type_show(callback.ty)}", "a scope guard runs a cleanup lambda when the binding goes out of scope", "write `scope.guard(fn() {{ cleanup_code }})`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     arity: cleanup.param_types.len()
     if arity != 0 {
-        diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`scope.guard` needs a zero-parameter lambda, got {arity} parameter{if arity == 1 -> "" else -> "s"}", "the guard body takes no arguments — it captures what it needs via closure", "write `scope.guard(() -> {{ cleanup_code }})` with no parameters"))
+        diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`scope.guard` needs a zero-parameter lambda, got {arity} parameter{if arity == 1 -> "" else -> "s"}", "the guard body takes no arguments — it captures what it needs via closure", "write `scope.guard(fn() {{ cleanup_code }})` with no parameters"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     value: sema_tree_node(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
@@ -1959,7 +1959,7 @@ sema_call_web_table_column_schema: fn(args: [CallArg], checked: TExpr, environme
         diagnostics.push(sema_error("E2475", span, "table column `{column_name}` needs fields from row type `{row_name}`", "a typed table column must resolve against a declared row schema", "declare the row fields before constructing the table column"))
         return
     }
-    known: definition.fields.map(field -> field.name)
+    known: definition.fields.map(fn(field) { field.name })
     loop field in known {
         if field == column_name -> return
     }

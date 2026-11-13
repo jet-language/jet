@@ -220,7 +220,7 @@ jet_cli_gates_host: fn(request: JetDriverCompileRequest, args: [String], file: S
         kind = Val(parsed)
     }
     if !result.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
-    scope: jet_cli_option_value(args, "--scope").map((value) -> value.to_ascii_lower())
+    scope: jet_cli_option_value(args, "--scope").map(fn(value) { value.to_ascii_lower() })
     JetDriverVerbOutput{stdout: jet_cli_gates_report(result.ledger, result.source.modules, kind, scope, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

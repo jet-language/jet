@@ -5,7 +5,7 @@ run: fn() {
     listener: net.unix_listen("/tmp/jet-conformance-unix-write.sock") ?? panic("listen")
     client: net.unix_connect("/tmp/jet-conformance-unix-write.sock") ?? panic("connect")
     server: net.unix_accept(listener) ?? panic("accept")
-    print((() -> {
+    print((fn() {
         net.unix_write(client, "write") ?? panic("write")
         true
     })())

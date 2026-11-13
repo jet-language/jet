@@ -53,7 +53,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
 kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [String] {
     selected := [String]{}
     loop (index, id) in ids {
-        if filter == "" || id.contains(filter) || tests[index].any(test -> "{id}: {test}".contains(filter)) -> selected.push(id.copy())
+        if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) -> selected.push(id.copy())
     }
     selected
 }

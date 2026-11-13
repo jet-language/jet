@@ -16,6 +16,6 @@ fail_compare: fn(a: Int, b: Int, label: String) -> Ordering Never! {
 run: fn() {
     rows := Rows{values: [3, 1, 2]}
     label: "owned comparator capture {rows.values.len()}"
-    rows.values.sort_by((a: Int, b: Int) -> fail_compare(a, b, label))
+    rows.values.sort_by(fn(a: Int, b: Int) { fail_compare(a, b, label) })
     print("unreachable")
 }

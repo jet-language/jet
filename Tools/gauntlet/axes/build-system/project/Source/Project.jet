@@ -159,8 +159,8 @@ project: fn(repo: String) -[FS]> [String:String] Err! {
         """
     out["nix/flake.lock"] = "{json.stringify(pinned, 2)}\n"
     out["nix/src/Makefile"] = "# {HEADER}\nOBJS = {objects.join(" ")}\n\nmedium: $(OBJS)\n\t$(CC) -O1 -o $@ $(OBJS)\n\n%.o: %.c units.h\n\t$(CC) -O1 -c $<\n"
-    out["nix/src/units.h"] = "/* {HEADER} */\n#include <stdint.h>\n\n{every_unit(i -> "int64_t unit_{i}(int64_t seed);")}\n"
-    out["nix/src/main.c"] = "/* {HEADER} */\n#include <inttypes.h>\n#include <stdio.h>\n#include \"units.h\"\n\nint main(void) {{\n    int64_t total = 0;\n{every_unit(i -> "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS};")}\n    printf(\"checksum %\" PRId64 \"\\n\", total);\n    return 0;\n}}\n"
+    out["nix/src/units.h"] = "/* {HEADER} */\n#include <stdint.h>\n\n{every_unit(fn(i) { "int64_t unit_{i}(int64_t seed);" })}\n"
+    out["nix/src/main.c"] = "/* {HEADER} */\n#include <inttypes.h>\n#include <stdio.h>\n#include \"units.h\"\n\nint main(void) {{\n    int64_t total = 0;\n{every_unit(fn(i) { "    total = (total * 31 + unit_{i}({seed(i)})) % {MODULUS};" })}\n    printf(\"checksum %\" PRId64 \"\\n\", total);\n    return 0;\n}}\n"
     Ok(out)
 }
 

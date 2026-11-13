@@ -421,7 +421,7 @@ provider_tree_fingerprint: fn(root: String) -[FS]> String ProviderReason! {
 provider_tree_fingerprint_held: fn(root: Directory) -[FS]> String ProviderReason! {
     found := [(relative: String, bytes: [U8], mode: Int)]{}
     provider_collect_fingerprint_files(root, "", found) ?? return Err(ProviderReason{message: "{err}"})
-    found.sort_by(file -> file.relative)
+    found.sort_by(fn(file) { file.relative })
     input := [U8]{}
     loop file in found {
         loop byte in file.relative.bytes() -> input.push(byte)

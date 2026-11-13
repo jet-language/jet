@@ -397,13 +397,13 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
 // A batch-steps row: its steps verified in order from its state baseline,
 // then timed as one sequence.
 stage_steps: fn(st: Staging, language: String, staged: String, artifact: String, row: &Dyn, jet_reset: &Reset) IOError! {
-    commands: items_at(st.entry, "spec/steps").map(step -> run_command(language, artifact, words_of(step)))
+    commands: items_at(st.entry, "spec/steps").map(fn(step) { run_command(language, artifact, words_of(step)) })
     reset: make_state_reset(staged)
     if language == "jet" -> jet_reset = reset.copy()
     verification: verify_steps(st.s, staged, commands, st.expected, reset, st.s.timeout_ms)
     if verification != "" -> return failed(row, "byte_exact_stdout", verification)
     passed(row, "byte_exact_stdout")
-    row["command"] = Dyn.Array(commands.map(command -> words(command)))
+    row["command"] = Dyn.Array(commands.map(fn(command) { words(command) }))
     before := before_runs(reset)
     row["runtime"] = measure_steps(st.s, staged, commands, st.runs, before)
     if !is_true(row, "runtime/valid") -> return invalid_runs(row)
@@ -678,7 +678,7 @@ run_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn, reset: 
     out := Dyn.object()
     out["applicable"] = Dyn.Bool(true)
     out["required"] = Dyn.Bool(rule.required)
-    out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(command -> words(command)))
+    out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(fn(command) { words(command) }))
     out["verification"] = verification_of(if verification != "" -> "failed" else -> "passed", "byte_exact_stdout", Val(if verification != "" -> Dyn.Text(verification.copy()) else -> Dyn.Null))
     out["metrics"] = Dyn.object()
     if verification != "" {
@@ -717,7 +717,7 @@ tier_prefix: fn(jet_bin: String, tier: String) -> [String] {
 // entry's one run.
 tier_commands: fn(st: Staging, tier: String) -> [[String]] {
     prefix: tier_prefix(st.s.jet_bin, tier)
-    if st.mode == "batch-steps" -> return items_at(st.entry, "spec/steps").map(step -> prefix.concat(words_of(step)))
+    if st.mode == "batch-steps" -> return items_at(st.entry, "spec/steps").map(fn(step) { prefix.concat(words_of(step)) })
     [prefix.concat(words_of(dyn_at(st.entry, "spec/args")))]
 }
 
@@ -766,7 +766,7 @@ cache_states: fn(st: Staging, jet_dir: String, commands: [[String]], reset: Rese
         row := Dyn.object()
         row["cache_state"] = Dyn.Text(state.copy())
         row["gated"] = Dyn.Bool(GATED_STATE_ORDER.contains(state))
-        measured: if service -> service_state(st, jet_dir, prefix.concat(commands[0]), before) else -> runs_state(st, jet_dir, commands.map(command -> prefix.concat(command)), before)
+        measured: if service -> service_state(st, jet_dir, prefix.concat(commands[0]), before) else -> runs_state(st, jet_dir, commands.map(fn(command) { prefix.concat(command) }), before)
         states[state] = merged(row, measured)
     }
     files.write_bytes(script, original)
@@ -799,7 +799,7 @@ runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: &Befo
     out := Dyn.object()
     out["status"] = Dyn.Text(if valid -> "ok" else -> "broken")
     if !valid -> out["reason"] = Dyn.Text("measured run samples are invalid")
-    out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(command -> words(command)))
+    out["command"] = if commands.len() == 1 -> words(first) else -> Dyn.Array(commands.map(fn(command) { words(command) }))
     out["runtime"] = runtime.copy()
     metrics := Dyn.object()
     put_runtime_metrics(metrics, runtime)
@@ -812,8 +812,8 @@ runs_state: fn(st: Staging, jet_dir: String, commands: [[String]], before: &Befo
 // slower gated state's runtime and metrics, so it never reads faster than
 // either.
 settle_run_tier: fn(tier: &Dyn, metric: String, source_metrics: Dyn, kind: String) {
-    gated: GATED_STATE_ORDER.map(state -> dyn_at(tier, "cache_states/{state}"))
-    if gated.find(state -> dyn_at(state, "status") != Dyn.Text("ok")) == .Val(failed_state) {
+    gated: GATED_STATE_ORDER.map(fn(state) { dyn_at(tier, "cache_states/{state}") })
+    if gated.find(fn(state) { dyn_at(state, "status") != Dyn.Text("ok") }) == .Val(failed_state) {
         reason: "{or_text(member(failed_state, "cache_state"), "gated")} cache state: {or_text(member(failed_state, "reason"), "unmeasured")}"
         tier["status"] = Dyn.Text("broken")
         tier["reason"] = Dyn.Text(reason.copy())
@@ -850,7 +850,7 @@ timed: fn(s: Stager, cwd: String, command: [String], shell: Shell) -> Dyn {
 
 // One timer sample of `commands` run one after another.
 timed_steps: fn(s: Stager, cwd: String, commands: [[String]]) -> Dyn {
-    listed: json.stringify(Dyn.Array(commands.map(command -> words(command))))
+    listed: json.stringify(Dyn.Array(commands.map(fn(command) { words(command) })))
     timer_sample(run_in(s, cwd, ["python3", s.timer.copy(), "--sequence-json", listed], .Plain, s.timeout_ms))
 }
 
@@ -1042,7 +1042,7 @@ build_failure: fn(cold: Dyn, warm: Dyn) -> String {
 
 // Whether a build sample is the timer's, exited 0 and measured.
 valid_build_sample: fn(sample: Dyn) -> Bool {
-    dyn_at(sample, "schema") == Dyn.Text(TIMER_SCHEMA) && int_at(sample, "exit_code") == Val(0) && ["wall_seconds", "wall_time_ns", "peak_rss_kb"].all(metric -> positive(value_at(sample, metric)))
+    dyn_at(sample, "schema") == Dyn.Text(TIMER_SCHEMA) && int_at(sample, "exit_code") == Val(0) && ["wall_seconds", "wall_time_ns", "peak_rss_kb"].all(fn(metric) { positive(value_at(sample, metric)) })
 }
 
 // The default build command of `base`, None for a language without one.
@@ -1127,16 +1127,16 @@ language_spec_value: fn(value: Dyn, language: String) -> Dyn {
 }
 
 // The elements of an array, each as a string.
-words_of: fn(value: Dyn) -> [String] { items_at(value, "").map(item -> js_text(item)) }
+words_of: fn(value: Dyn) -> [String] { items_at(value, "").map(fn(item) { js_text(item) }) }
 
-words: fn(command: [String]) -> Dyn { Dyn.Array(command.map(word -> Dyn.Text(word.copy()))) }
+words: fn(command: [String]) -> Dyn { Dyn.Array(command.map(fn(word) { Dyn.Text(word.copy()) })) }
 
 // Statistics ---------------------------------------------------------------
 
 // The timer `samples` with their medians, noise and confidence, and whether
 // every one is valid.
 summarize_samples: fn(samples: [Dyn]) -> Dyn {
-    valid: samples.len() > 0 && samples.all(sample -> valid_sample(sample))
+    valid: samples.len() > 0 && samples.all(fn(sample) { valid_sample(sample) })
     medians := Dyn.object()
     loop metric in SAMPLE_METRICS -> medians[metric] = if valid -> median_of(field_values(samples, metric)) else -> Dyn.Null
     raw_medians := Dyn.object()
@@ -1159,7 +1159,7 @@ summarize_samples: fn(samples: [Dyn]) -> Dyn {
 }
 
 valid_sample: fn(sample: Dyn) -> Bool {
-    dyn_at(sample, "schema") == Dyn.Text(TIMER_SCHEMA) && int_at(sample, "exit_code") == Val(0) && SAMPLE_METRICS.concat(RAW_SAMPLE_METRICS).all(metric -> positive(value_at(sample, metric)))
+    dyn_at(sample, "schema") == Dyn.Text(TIMER_SCHEMA) && int_at(sample, "exit_code") == Val(0) && SAMPLE_METRICS.concat(RAW_SAMPLE_METRICS).all(fn(metric) { positive(value_at(sample, metric)) })
 }
 
 confidence: fn(method: String, reason: String) -> Dyn {
@@ -1173,7 +1173,7 @@ confidence: fn(method: String, reason: String) -> Dyn {
 
 // The numbers `samples` hold at `field`.
 field_values: fn(samples: [Dyn], field: String) -> [Float] {
-    samples.filter_map(sample -> number_at(sample, field)).collect()
+    samples.filter_map(fn(sample) { number_at(sample, field) }).collect()
 }
 
 // `values` in ascending order.
@@ -1238,7 +1238,7 @@ source_metrics: fn(source_dir: String, filename: String) -> Dyn IOError! {
     loc := 0
     loop line in source.split("\n") {
         trimmed: line.trim()
-        if trimmed == "" || ["//", "/*", "*", "# ", "#!"].any(prefix -> trimmed.starts_with(prefix)) || (python && trimmed.starts_with("#")) -> next
+        if trimmed == "" || ["//", "/*", "*", "# ", "#!"].any(fn(prefix) { trimmed.starts_with(prefix) }) || (python && trimmed.starts_with("#")) -> next
         loc += 1
     }
     out := Dyn.object()
@@ -1263,10 +1263,10 @@ path_sha256: fn(target: String) -> String IOError! {
 // reaches; null for none.
 web_artifact_sizes: fn(source_dir: String, command: [String]) -> Dyn IOError! {
     found := [WebFile]{}
-    roots: ["build", "dist", "out"].map(name -> path_joined(source_dir, name)).filter(root -> files.exists(root))
+    roots: ["build", "dist", "out"].map(fn(name) { path_joined(source_dir, name) }).filter(fn(root) { files.exists(root) })
     loop root in roots -> record_tree(source_dir, root, found)
     if roots.len() == 0 {
-        declared: command.find(word -> !word.starts_with("-") && web_asset(word)) ?? ""
+        declared: command.find(fn(word) { !word.starts_with("-") && web_asset(word) }) ?? ""
         entry: if declared == "" -> "" else -> files.normalize(if files.is_absolute(declared) -> declared.copy() else -> "{source_dir}/{declared}")
         relative: files.relative(entry, source_dir)
         if declared != "" && !relative.starts_with("..") && !files.is_absolute(relative) && files.exists(entry) {
@@ -1276,7 +1276,7 @@ web_artifact_sizes: fn(source_dir: String, command: [String]) -> Dyn IOError! {
         }
     }
     if found.len() == 0 -> return Ok(Dyn.Null)
-    found.sort_by((left: WebFile, right: WebFile) -> text.collate(left.path, right.path))
+    found.sort_by(fn(left: WebFile, right: WebFile) { text.collate(left.path, right.path) })
     listed := [Dyn]{}
     total := 0
     wasm := 0
@@ -1306,7 +1306,7 @@ web_asset: fn(name: String) -> Bool {
 // map, manifest or log.
 measured_asset: fn(name: String) -> Bool {
     if !web_asset(name) || name.ends_with(".map") -> return false
-    !ASSET_NAME_PART.split(name.lower()).any(part -> part == "manifest" || part == "log")
+    !ASSET_NAME_PART.split(name.lower()).any(fn(part) { part == "manifest" || part == "log" })
 }
 
 record_tree: fn(source_dir: String, dir: String, found: &[WebFile]) IOError! {
@@ -1354,7 +1354,7 @@ module_candidate: fn(source_dir: String, base: String, specifier: String) -> Str
     relative: files.relative(target, source_dir)
     if relative.starts_with("..") || files.is_absolute(relative) -> return ""
     candidates: [target.copy(), "{target}.js", "{target}.mjs", "{target}.wasm", "{target}/index.js", "{target}/index.mjs"]
-    candidates.find(candidate -> files.exists(candidate)) ?? ""
+    candidates.find(fn(candidate) { files.exists(candidate) }) ?? ""
 }
 
 // Services ---------------------------------------------------------------
@@ -1407,7 +1407,7 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOE
     if exit.code == None -> stop_process(service)
     rss: if launch_fields(report, "end") == .Val(fields) -> number_field(fields, 3) else -> Dyn.Null
     files.remove_all(reports)
-    invalid: !positive(Val(verified.startup)) || !positive(Val(rss)) || latencies.len() == 0 || !latencies.all(value -> value > 0.0)
+    invalid: !positive(Val(verified.startup)) || !positive(Val(rss)) || latencies.len() == 0 || !latencies.all(fn(value) { value > 0.0 })
     failure: if {
         measurement != "" -> Dyn.Text(measurement)
         invalid -> Dyn.Text("service timing or RSS measurement invalid")
@@ -1425,7 +1425,7 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOE
     out["startup_noise"] = noise_summary(startups)
     out["startup_confidence"] = confidence("independent_service_startup_sample", "Only one fresh-process startup sample is retained; no confidence interval is inferred.")
     out["latencyMs"] = latency
-    out["latency_samples_ms"] = Dyn.Array(latencies.map(value -> Dyn.Float(value)))
+    out["latency_samples_ms"] = Dyn.Array(latencies.map(fn(value) { Dyn.Float(value) }))
     out["latency_noise"] = noise_summary(latencies)
     out["latency_confidence"] = confidence("independent_service_probe_samples", "Probe samples are retained, but strict sub-millisecond claims require paired confidence evidence.")
     out["rssKb"] = rss
@@ -1548,7 +1548,7 @@ answered: fn(report: String, offset_ns: Int) -> Float Err! {
 launch_fields: fn(report: String, kind: String) -> [String]? {
     content: files.read(report) ?? ""
     prefix: "{kind} "
-    found: content.split("\n").to_list().find(line -> line.starts_with(prefix)) ?? return None
+    found: content.split("\n").to_list().find(fn(line) { line.starts_with(prefix) }) ?? return None
     parts: found.split(" ").to_list()
     Val(parts[1..<parts.len()])
 }

@@ -164,7 +164,7 @@ pkg_bundle_native_builtin: fn(plan: &BundlePlan, compiler_version: String) -[FS,
     loop index in 0..<paths.len() -> order.push(index)
     // The comparator owns its own key list: a non-escaping lambda consumes the locals it captures.
     keys: paths.copy()
-    order.sort_by((left: Int, right: Int) -> keys[left] <=> keys[right])
+    order.sort_by(fn(left: Int, right: Int) { keys[left] <=> keys[right] })
     digest := "jet-package-materialized-v1".bytes()
     digest.push(U8{0})
     total := 0

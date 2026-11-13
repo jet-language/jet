@@ -21,7 +21,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     mux: http_server.mux()
-    mux.post("/v1/chat/completions", (req: HTTPRequest) -> handle_completion(req))
+    mux.post("/v1/chat/completions", fn(req: HTTPRequest) { handle_completion(req) })
     t: task {
         http_server.serve_once_listener(listener, mux)
         http_server.serve_once_listener(listener, mux)

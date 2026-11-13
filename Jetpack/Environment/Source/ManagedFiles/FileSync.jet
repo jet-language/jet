@@ -138,7 +138,7 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
     state_path: files.join(files_root, ENV_FILES_STATE_FILE)
     state_before: env_files_load_state(state_path)
     sorted := declarations
-    sorted.sort_by(declaration -> declaration.destination)
+    sorted.sort_by(fn(declaration) { declaration.destination })
     planned := [PlannedFile]{}
     actions := [FileAction]{}
     state_after := state_before

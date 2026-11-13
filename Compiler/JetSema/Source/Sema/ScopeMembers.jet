@@ -264,7 +264,7 @@ sema_scope_members_check_assertionless_tests: fn(items: [Item], diagnostics: &[D
     loop item in items {
         if item == .Test(test) {
             found := false
-            loop statement in test.body -> ast_visit_statement(statement, (expression: Expr) -> sema_scope_members_note_assertion(found, expression), true)
+            loop statement in test.body -> ast_visit_statement(statement, fn(expression: Expr) { sema_scope_members_note_assertion(found, expression) }, true)
             if !found -> diagnostics.push(sema_lint("L2901", test.span, "This #Test block has no assertions.", "A test with no assertions cannot find bugs because it always passes.", "Add at least one assertion, or remove the test if it only exercises compilation."))
         }
     }

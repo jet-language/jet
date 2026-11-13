@@ -6,11 +6,11 @@ use {
 #[Target(Web), HTML(Path{"index.html"})]
 run: fn() {
     count: reactive.signal(0)
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         n := count.get()
         tree: ui.box([
             ui.text("Orders island count: {n}"),
-            ui.button("Refresh", on_click: () -> {
+            ui.button("Refresh", on_click: fn() {
                 count.set(count.get() + 1)
             })
         ])

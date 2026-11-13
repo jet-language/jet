@@ -71,7 +71,7 @@ run: fn() {
     rows: scene.query<Position, Velocity>()
     print("query={rows.len()} row={rows[0]}")
     scene.on_frame(
-    frame -> {
+    fn(frame) {
         if frame.input.pressed("jump") -> print("scene_input={frame.index}")
     },
     )
@@ -131,7 +131,7 @@ run: fn() {
     stream := rt.callback(
     48000,
     256,
-    samples -> {
+    fn(samples) {
         total := Float{0.0}
         loop sample in samples -> total += sample
     },

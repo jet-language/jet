@@ -8,11 +8,11 @@ run: fn() {
     rejected_scope: event.scope()
     rejected_scope.cancel()
     rejected: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    rejected.on(rejected_scope, (n: Int) -> {})
+    rejected.on(rejected_scope, fn(n: Int) {})
 
     once_scope: event.scope()
     once_event: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    once_sub: once_event.once(once_scope, (n: Int) -> {})
+    once_sub: once_event.once(once_scope, fn(n: Int) {})
     once_event.emit_async(1).join() ?? panic("join")
     once_sub.unsubscribe()
     once_scope.cancel()

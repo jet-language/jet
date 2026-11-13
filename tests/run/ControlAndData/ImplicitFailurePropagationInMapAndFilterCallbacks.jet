@@ -18,18 +18,18 @@ retain_flag: fn(value: Bool) -> Bool { value }
 
 run: fn() {
     values: [1, 2]
-    mapped: values.map((value: Int) -> add_one(source(value))) ?? []
-    filtered: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
-    mapped_block: values.map((value: Int) -> {
+    mapped: values.map(fn(value: Int) { add_one(source(value)) }) ?? []
+    filtered: values.filter(fn(value: Int) { retain_flag(source_flag(value)) }) ?? []
+    mapped_block: values.map(fn(value: Int) {
         add_one(source(value))
     }) ?? []
-    filtered_block: values.filter((value: Int) -> {
+    filtered_block: values.filter(fn(value: Int) {
         retain_flag(source_flag(value))
     }) ?? []
-    mapped_failed: [0, 1].map((value: Int) -> {
+    mapped_failed: [0, 1].map(fn(value: Int) {
         add_one(source(value))
     }) ?? []
-    filtered_failed: [0, 1].filter((value: Int) -> {
+    filtered_failed: [0, 1].filter(fn(value: Int) {
         retain_flag(source_flag(value))
     }) ?? []
     print(mapped[0])

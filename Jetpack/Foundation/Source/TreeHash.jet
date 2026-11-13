@@ -82,7 +82,7 @@ foundation_try_tree_hash: fn(root: String) -[FS]> String TreeHashError! {
     entries := [TreeHashFile]{}
     budget := TreeHashBudget{nodes: 0}
     foundation_collect_tree_files(root, "", root, entries, 0, budget)
-    entries.sort_by(entry -> entry.relative)
+    entries.sort_by(fn(entry) { entry.relative })
     hasher := StreamingSHA256.new()
     total_bytes := 0
     loop entry in entries {
@@ -553,7 +553,7 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
         rows := [FoundationHeldTreeFile]{}
         foundation_collect_held_tree(self.directories[self.directories.len() - 1].handle, "", rows, 0, reject_hardlinks)
-        rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
+        rows.sort_by(fn(left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) { left.relative <=> right.relative })
         hasher := StreamingSHA256.new()
         total := 0
         loop row in rows {

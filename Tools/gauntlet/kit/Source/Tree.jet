@@ -66,12 +66,12 @@ items_at: fn(tree: Dyn, path: String) -> [Dyn] {
 
 // The `id` of each element of the array at `path` ("" for one without).
 ids_at: fn(tree: Dyn, path: String) -> [String] {
-    items_at(tree, path).map(item -> text_or_empty(item, "id"))
+    items_at(tree, path).map(fn(item) { text_or_empty(item, "id") })
 }
 
 // The strings of the array at `path` (its other elements skipped).
 texts_at: fn(tree: Dyn, path: String) -> [String] {
-    items_at(tree, path).filter_map(item -> text_at(item, "")).collect()
+    items_at(tree, path).filter_map(fn(item) { text_at(item, "") }).collect()
 }
 
 // `value` as member `key` of `object` when it is set: what a JavaScript
@@ -116,7 +116,7 @@ parse_json: fn(text: String) -> Dyn EncodingError! {
 
 #Test("truthiness is JavaScript's: null, false, 0 and \"\" are falsy; any other value, an empty array included, is truthy") {
     tree: json.parse("{{\"z\": null, \"f\": false, \"o\": 0, \"e\": \"\", \"t\": true, \"n\": 2, \"s\": \"x\", \"a\": []}}")
-    assert_eq(["z", "f", "o", "e", "m", "t", "n", "s", "a"].map(key -> truthy_at(tree, key)), [false, false, false, false, false, true, true, true, true])
+    assert_eq(["z", "f", "o", "e", "m", "t", "n", "s", "a"].map(fn(key) { truthy_at(tree, key) }), [false, false, false, false, false, true, true, true, true])
 }
 
 #Test("a set value is put; an unset one is left out") {

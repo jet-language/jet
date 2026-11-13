@@ -154,7 +154,7 @@ perf_nearest_rank: fn(sorted: [PerfRational], numerator: Int, denominator: Int) 
 perf_statistics: fn(samples: [PerfRational]) -> PerfStatistics PerfBudgetError! {
     if samples.len() == 0 -> return Err(perf_error("statistics require at least one sample"))
     sorted := samples.copy()
-    sorted.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    sorted.sort_by(fn(left: PerfRational, right: PerfRational) { perf_rational_cmp(left, right) })
     p50: perf_nearest_rank(sorted, 500, 1000)
     sum := perf_rational_zero()
     deviations := [PerfRational]{}
@@ -162,7 +162,7 @@ perf_statistics: fn(samples: [PerfRational]) -> PerfStatistics PerfBudgetError! 
         sum = perf_rational_add(sum, sample)
         deviations.push(perf_rational_abs(perf_rational_sub(sample, p50)))
     }
-    deviations.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    deviations.sort_by(fn(left: PerfRational, right: PerfRational) { perf_rational_cmp(left, right) })
     Ok(PerfStatistics{
         p50: p50, p90: perf_nearest_rank(sorted, 900, 1000),
         p95: perf_nearest_rank(sorted, 950, 1000), p99: perf_nearest_rank(sorted, 990, 1000),
@@ -322,7 +322,7 @@ perf_bootstrap_values: fn(evidence_id: String, context_key: String, baseline_rep
         }
         values.push(value)
     }
-    values.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    values.sort_by(fn(left: PerfRational, right: PerfRational) { perf_rational_cmp(left, right) })
     Ok(values)
 }
 // Rust evaluate.
@@ -380,7 +380,7 @@ perf_trend: fn(report_ids: [String], estimators: [PerfRational], direction: Perf
             slopes.push(perf_rational_div(numerator, perf_rational_integer(right - left)))
         }
     }
-    slopes.sort_by((left: PerfRational, right: PerfRational) -> perf_rational_cmp(left, right))
+    slopes.sort_by(fn(left: PerfRational, right: PerfRational) { perf_rational_cmp(left, right) })
     score: perf_nearest_rank(slopes, 500, 1000)
     label: if {
         score.num > 0 -> PerfTrendLabel.Improving

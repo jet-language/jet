@@ -12,21 +12,21 @@ Scale: struct {
 
     as_fn: fn(self) -> fn(Int) -> Int {
         factor: self.factor
-        (n: Int) -> n * factor
+        fn(n: Int) { n * factor }
     }
 }
 
 show: fn(kind: String, f: fn(Int) -> Int) { print("{kind}: {f(1)} {f(5)} {f(-3)}") }
 
 // A generic caller runs its callback at the type it was given.
-apply_each: fn<T>(values: [T], f: fn(T) -> T) -> [T] { values.map((value: T) -> f(value)) }
+apply_each: fn<T>(values: [T], f: fn(T) -> T) -> [T] { values.map(fn(value: T) { f(value) }) }
 
 run: fn() {
     factor: 2
     show("named", double)
-    show("no captures", (n: Int) -> n * 2)
-    show("captures", (n: Int) -> n * factor)
-    show("generic", (n: Int) -> sum_twice(n))
+    show("no captures", fn(n: Int) { n * 2 })
+    show("captures", fn(n: Int) { n * factor })
+    show("generic", fn(n: Int) { sum_twice(n) })
     show("struct", Scale{factor: 2}.as_fn())
     print("generic caller: {apply_each([1, 5, -3], double)}")
 }

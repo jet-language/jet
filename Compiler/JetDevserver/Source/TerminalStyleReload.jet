@@ -162,7 +162,7 @@ TerminalStyleFingerprintFacts: struct {
             return Err(terminal_style_fact_error(.TooManyDependencies, "style has {dependencies.len()} dependencies; limit is {MAX_TERMINAL_STYLE_DEPENDENCIES}"))
         }
         sorted := dependencies
-        sorted.sort_by((left, right) -> (left.kind.rank() <=> right.kind.rank()).then(left.id <=> right.id).then(left.fingerprint <=> right.fingerprint))
+        sorted.sort_by(fn(left, right) { (left.kind.rank() <=> right.kind.rank()).then(left.id <=> right.id).then(left.fingerprint <=> right.fingerprint) })
         loop index in 1..<sorted.len() {
             if sorted[index - 1].kind == sorted[index].kind && sorted[index - 1].id == sorted[index].id {
                 return Err(terminal_style_fact_error(.InvalidDependency, "duplicate {sorted[index].id} dependency identity"))

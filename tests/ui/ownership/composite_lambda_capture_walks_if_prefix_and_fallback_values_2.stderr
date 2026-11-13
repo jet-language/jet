@@ -1,8 +1,8 @@
 Error [jet.UseWhileWriteActive]: `values` is being changed in this call, so it can't be used again here
-  --> tests/ui/ownership/composite_lambda_capture_walks_if_prefix_and_fallback_values_2.jet:5:28
+  --> tests/ui/ownership/composite_lambda_capture_walks_if_prefix_and_fallback_values_2.jet:5:29
     |
-  5 |     both(values, Val(() -> values.len()) ?? () -> 0)
-    |                            ^^^^^^
+  5 |     both(values, Val(fn() { values.len() }) ?? fn() { 0 })
+    |                             ^^^^^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `values` only once, or copy first with `values.copy()`
 More: jet-lang.dev/e/E0204

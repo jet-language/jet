@@ -71,7 +71,7 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
                 uses[function.name] = names
             }
             visitor := SemaPolicyUses{uses: uses.move()}
-            loop statement in function.body -> ast_visit_statement(statement, (expression: Expr) -> visitor.visit(expression), true)
+            loop statement in function.body -> ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, true)
             uses = visitor.uses.move()
         }
     }

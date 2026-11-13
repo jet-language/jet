@@ -27,7 +27,7 @@ kit_report_counts: fn(results: [KitCaseResult], suites: [String]) -> String {
     timeout: kit_report_count(results, "TIMEOUT")
     known: kit_report_count(results, "KNOWN-FAILING")
     unexpected: kit_report_count(results, "UNEXPECTED-PASS")
-    names: json.to_string(Dyn.Array(suites.map(suite -> Dyn.Text(suite.copy())))) ?? panic("testkit suite report encode: {err}")
+    names: json.to_string(Dyn.Array(suites.map(fn(suite) { Dyn.Text(suite.copy()) }))) ?? panic("testkit suite report encode: {err}")
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
 }
 
@@ -55,7 +55,7 @@ kit_report_exit_code: fn(results: [KitCaseResult]) -> Int {
 // One verdict document: the compiler, the counts and every row's record, as
 // `--results` and `jet test`'s `results` setting write it.
 kit_report_document: fn(jet: String, results: [KitCaseResult], suites: [String]) -> String {
-    records: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
+    records: results.map(fn(result) { json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}") }).join(",")
     compiler: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
     "{{\"jet\":{compiler},\"counts\":{kit_report_counts(results, suites)},\"results\":[{records}]}}\n"
 }

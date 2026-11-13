@@ -396,7 +396,7 @@ BrowserHost: struct {
             views.push(BrowserPanelView{panel_id: panel.fact.panel_id, title: panel.fact.title, freshness_ms: panel.fact.freshness_ms, status: panel.fact.status, cursor: panel.fact.cursor, open: layout.open, dock: layout.dock, nodes: panel.fact.nodes})
         }
         ranks: browser_catalog_ranks()
-        views.sort_by((left, right) -> browser_panel_rank(ranks, left.panel_id) <=> browser_panel_rank(ranks, right.panel_id))
+        views.sort_by(fn(left, right) { browser_panel_rank(ranks, left.panel_id) <=> browser_panel_rank(ranks, right.panel_id) })
         sequence_text := String?{None}
         if self.sequence == .Val(sequence) -> sequence_text = Val("{sequence}")
         elements := [BrowserHtmlElement]{}

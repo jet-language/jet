@@ -432,7 +432,7 @@ __http_serve_entry: fn(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Neve
 __static_files_entry: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
     mount: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base: __trim_trailing_slashes(prefix)
-    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)), "")
+    mux.__route("GET", "{base}/*jet_static_path", fn(request: HTTPRequest) { Ok(__static_serve(mount, request)) }, "")
 }
 
 response: fn(status: Int, body: String) -> HTTPResponse Never! {
@@ -492,18 +492,18 @@ __tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: Strin
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
     staged: Shared{[U8]{}}
     Val(__HTTPSecure{
-        read_into: (limit: Int, deadline: Duration) -> {
+        read_into: fn(limit: Int, deadline: Duration) {
             guard := staged.guard_edit()
             secure.read_into(guard.value, limit, deadline: deadline)
         },
         staged: staged,
-        write_all: (bytes: [U8], deadline: Duration) -> {
+        write_all: fn(bytes: [U8], deadline: Duration) {
             if secure.write_all(bytes, deadline: deadline) == {
                 .Ok(_) -> true
                 .Err(_) -> false
             }
         },
-        close: () -> {
+        close: fn() {
             if secure.close() == {
                 .Ok(_) -> {}
                 .Err(_) -> {}
@@ -537,7 +537,7 @@ cors_policy: fn(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{
 }
 
 cors: fn(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net, FS.Read]> {
-    mux.__middleware((next: HTTPHandler) -> __cors_handler(policy, next))
+    mux.__middleware(fn(next: HTTPHandler) { __cors_handler(policy, next) })
 }
 
 access_log: fn(request: HTTPRequest, status: Int) -[Net]> String Never! {
@@ -563,7 +563,7 @@ access_log_path: fn(path: String) -> String Never! {
 }
 
 request_id: fn(mux: HTTPMux) Never! -[Net, FS.Read]> {
-    mux.__middleware((next: HTTPHandler) -> __request_id_handler(next))
+    mux.__middleware(fn(next: HTTPHandler) { __request_id_handler(next) })
 }
 
 cors_join: fn(values: [String], fallback: &&String) -> String Never! {
@@ -580,7 +580,7 @@ cors_join: fn(values: [String], fallback: &&String) -> String Never! {
 // Middleware layers
 
 __cors_handler: fn(policy: HTTPCorsPolicy, next: HTTPHandler) -> HTTPHandler Never! {
-    __handler((request: HTTPRequest) -> __cors_apply(policy, next, request))
+    __handler(fn(request: HTTPRequest) { __cors_apply(policy, next, request) })
 }
 
 __cors_allow_origin: fn(policy: HTTPCorsPolicy, origin: String) -> String? Never! {
@@ -621,7 +621,7 @@ __cors_apply: fn(policy: HTTPCorsPolicy, next: HTTPHandler, request: HTTPRequest
 }
 
 __request_id_handler: fn(next: HTTPHandler) -> HTTPHandler Never! {
-    __handler((request: HTTPRequest) -> __request_id_apply(next, request))
+    __handler(fn(request: HTTPRequest) { __request_id_apply(next, request) })
 }
 
 __request_id_apply: fn(next: HTTPHandler, request: HTTPRequest) -> HTTPResponse HTTPError! {
@@ -653,7 +653,7 @@ __mux_next_seq: fn(mux: HTTPMux) -> Int Never! {
 __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
     tagged: __with_request_id(mux, request)
     layers: __mux_layers(mux)
-    current := __handler((routed: HTTPRequest) -> __select(mux, routed))
+    current := __handler(fn(routed: HTTPRequest) { __select(mux, routed) })
     i := layers.len()
     loop i > 0 {
         i = i - 1

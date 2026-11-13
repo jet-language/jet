@@ -144,7 +144,7 @@ s6_retirement_reviewed_candidates: fn(source: String) -> [S6RetirementReviewedCa
     lexed: lex(source.bytes())
     tokens := [Token]{}
     s6_retirement_reviewed_collect(lexed.tables, lexed.tokens, tokens)
-    tokens.sort_by(token -> token.span.start)
+    tokens.sort_by(fn(token) { token.span.start })
     candidates := [S6RetirementReviewedCandidate]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]

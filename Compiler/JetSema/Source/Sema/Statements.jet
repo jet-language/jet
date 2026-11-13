@@ -727,7 +727,7 @@ sema_stmt_lint_walk_filter: fn(var: String, collection: Expr, body: [Stmt], envi
     loop index in 1..<body.len() {
         if sema_stmt_has_structural_control_flow(body[index]) -> return
         facts := SemaStmtWalkFacts{path_uses: 0, path_bases: [Int]{}, variable_uses: [Int]{}, fallback_exit: false}
-        ast_visit_statement(body[index], (expression: Expr) -> sema_stmt_note_walk_use(facts, var, expression), true)
+        ast_visit_statement(body[index], fn(expression: Expr) { sema_stmt_note_walk_use(facts, var, expression) }, true)
         if facts.fallback_exit -> return
         loop start in facts.variable_uses {
             if !sema_stmt_int_listed(facts.path_bases, start) -> return
@@ -1597,11 +1597,11 @@ sema_stmt_check_through: fn(arms: [SwitchArm], index: Int, else_body: [Stmt]?, t
     }
     if index + 1 < arms.len() {
         names := [BindName]{}
-        ast_visit_expr(arms[index + 1].cond, (value: Expr) -> sema_stmt_through_bound_names(value, names))
+        ast_visit_expr(arms[index + 1].cond, fn(value: Expr) { sema_stmt_through_bound_names(value, names) })
         if names.len() > 0 {
             scan := SemaStmtThroughScan{names: [String]{}, found: None}
             loop bound in names -> scan.names.push(bound.name)
-            ast_visit_body(arms[index + 1].body, (value: Expr) -> sema_stmt_through_note_read(scan, value), false)
+            ast_visit_body(arms[index + 1].body, fn(value: Expr) { sema_stmt_through_note_read(scan, value) }, false)
             if scan.found == .Val(read) {
                 diagnostics.push(sema_error("E1127", read.span, "`{read.name}` is bound by this arm, so an arm before it cannot run on into it", "`#Through` on the arm before runs this body without testing this arm's pattern, so `{read.name}` holds no value then", "remove `#Through` from the arm before, or read the value without the pattern binding"))
                 return false
@@ -2277,7 +2277,7 @@ sema_stmt_for_in_tree_mentions: fn(statements: [TStmt], key: String, arena: Body
     found := false
     loop statement in statements {
         if found -> break
-        tree_each_stmt_child(statement, (child: TExpr) -> {
+        tree_each_stmt_child(statement, fn(child: TExpr) {
             if !found && sema_stmt_for_in_tree_expr_names(child, key, arena) -> found = true
         })
     }
@@ -2309,7 +2309,7 @@ sema_stmt_for_in_tree_expr_names: fn(value: TExpr, key: String, arena: BodyTree)
         .IntLit(_, _) | .StrLit(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
     found := false
-    tree_each_expr_child(value, (child: TExpr) -> {
+    tree_each_expr_child(value, fn(child: TExpr) {
         if !found && sema_stmt_for_in_tree_expr_names(child, key, arena) -> found = true
     })
     found
@@ -2333,7 +2333,7 @@ sema_stmt_for_in_row_names: fn(tree: BodyTree, index: Int, key: String) -> Bool 
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     found := false
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if !found && sema_stmt_for_in_row_names(tree, child, key) -> found = true
     })
     found
@@ -2537,7 +2537,7 @@ sema_stmt_for_in_tree_stays: fn(statements: [TStmt], key: String, arena: BodyTre
             .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
         }
         stays := true
-        tree_each_stmt_child(statement, (child: TExpr) -> {
+        tree_each_stmt_child(statement, fn(child: TExpr) {
             if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
         })
         if !stays -> return false
@@ -2570,7 +2570,7 @@ sema_stmt_for_in_tree_expr_stays: fn(value: TExpr, key: String, arena: BodyTree)
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
     stays := true
-    tree_each_expr_child(value, (child: TExpr) -> {
+    tree_each_expr_child(value, fn(child: TExpr) {
         if stays && !sema_stmt_for_in_tree_expr_stays(child, key, arena) -> stays = false
     })
     stays
@@ -2644,7 +2644,7 @@ sema_stmt_for_in_row_stmt_stays: fn(tree: BodyTree, item: Int, key: String) -> B
         .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .DeferClose(_, _, _) | .Reactive(_, _) -> {}
     }
     stays := true
-    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> {
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
         if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
     })
     stays
@@ -2672,7 +2672,7 @@ sema_stmt_for_in_row_expr_stays: fn(tree: BodyTree, index: Int, key: String) -> 
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     stays := true
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if stays && !sema_stmt_for_in_row_expr_stays(tree, child, key) -> stays = false
     })
     stays
@@ -4414,7 +4414,7 @@ SemaStmtNameScan: struct {
 
 sema_stmt_expr_mentions: fn(expression: Expr, name: String) -> Bool Never! {
     scan := SemaStmtNameScan{name: name, found: false}
-    ast_visit_expr(expression, (value: Expr) -> sema_stmt_note_name_mention(scan, value))
+    ast_visit_expr(expression, fn(value: Expr) { sema_stmt_note_name_mention(scan, value) })
     scan.found
 }
 
@@ -4440,7 +4440,7 @@ sema_stmt_state_writes: fn(statement: Stmt, name: String) -> Bool Never! {
     }
     if sema_stmt_state_nested_writes(statement, name) -> return true
     scan := SemaStmtNameScan{name: name, found: false}
-    ast_visit_statement(statement, (value: Expr) -> sema_stmt_note_state_write(scan, value), true)
+    ast_visit_statement(statement, fn(value: Expr) { sema_stmt_note_state_write(scan, value) }, true)
     scan.found
 }
 
@@ -6257,7 +6257,7 @@ sema_stmt_transaction_rollback_methods: fn(ty: Type, environment: SemaScopeEnvir
                 snapshot_method := TMethodRef?{None}
                 restore_method := TMethodRef?{None}
                 loop method_index in 0..<graph.modules[graph_module_index].impls[implementation_index].methods.len() {
-                    method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map((value) -> value.id), operator_identity: None}
+                    method_ref := TMethodRef{symbol: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.id, name: graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name, mangled: false, trait_owner: trait_owner.map(fn(value) { value.id }), operator_identity: None}
                     if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "snapshot" -> snapshot_method = Val(method_ref)
                     if graph.modules[graph_module_index].impls[implementation_index].methods[method_index].symbol.name == "restore" -> restore_method = Val(method_ref)
                 }
@@ -6332,7 +6332,7 @@ sema_stmt_transaction_stm_local: fn(span: Span) -> TLocal Never! {
 // holds the rows of the body's flat nodes (sema_node).
 sema_stmt_tree_children_touch_shared: fn(value: TExpr, arena: BodyTree) -> Bool Never! {
     found := false
-    tree_each_expr_child(value, (child: TExpr) -> {
+    tree_each_expr_child(value, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
     })
     found
@@ -6340,7 +6340,7 @@ sema_stmt_tree_children_touch_shared: fn(value: TExpr, arena: BodyTree) -> Bool 
 
 sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, arena: BodyTree) -> Bool Never! {
     found := false
-    tree_each_pattern_child(pattern, (child: TExpr) -> {
+    tree_each_pattern_child(pattern, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
     })
     found
@@ -6348,7 +6348,7 @@ sema_stmt_tree_pattern_touches_shared: fn(pattern: TPattern, arena: BodyTree) ->
 
 sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, arena: BodyTree) -> Bool Never! {
     found := false
-    tree_each_if_cond_child(condition, (child: TExpr) -> {
+    tree_each_if_cond_child(condition, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
     })
     found
@@ -6356,7 +6356,7 @@ sema_stmt_tree_condition_touches_shared: fn(condition: TIfCond, arena: BodyTree)
 
 sema_stmt_tree_statement_children_touch_shared: fn(statement: TStmt, arena: BodyTree) -> Bool Never! {
     found := false
-    tree_each_stmt_child(statement, (child: TExpr) -> {
+    tree_each_stmt_child(statement, fn(child: TExpr) {
         if !found && sema_stmt_tree_expr_touches_shared(child, arena) -> found = true
     })
     found
@@ -6587,7 +6587,7 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     found := false
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> {
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
     })
     found
@@ -6595,7 +6595,7 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
 
 sema_stmt_row_pattern_touches_shared: fn(tree: BodyTree, pattern: BodyPattern) -> Bool Never! {
     found := false
-    body_each_pattern_child(tree, pattern, (child: Int) -> {
+    body_each_pattern_child(tree, pattern, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
     })
     found
@@ -6603,7 +6603,7 @@ sema_stmt_row_pattern_touches_shared: fn(tree: BodyTree, pattern: BodyPattern) -
 
 sema_stmt_row_condition_touches_shared: fn(tree: BodyTree, condition: BodyIfCond) -> Bool Never! {
     found := false
-    body_each_if_cond_child(tree, condition, (child: Int) -> {
+    body_each_if_cond_child(tree, condition, fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
     })
     found
@@ -6708,7 +6708,7 @@ sema_stmt_row_statement_touches_shared: fn(tree: BodyTree, item: Int) -> Bool Ne
         .Contract(_) | .Let(_, _, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> {}
     }
     found := false
-    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> {
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], fn(child: Int) {
         if !found && sema_stmt_row_touches_shared(tree, child) -> found = true
     })
     found
@@ -9399,7 +9399,7 @@ sema_stmt_reads_runtime_local: fn(expression: TExpr, arena: BodyTree, found: &Bo
         .Flat(index) -> return sema_stmt_row_reads_runtime_local(arena, index, found)
         .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> {}
     }
-    tree_each_expr_child(expression, (child: TExpr) -> sema_stmt_reads_runtime_local(child, arena, found))
+    tree_each_expr_child(expression, fn(child: TExpr) { sema_stmt_reads_runtime_local(child, arena, found) })
 }
 
 sema_stmt_row_reads_runtime_local: fn(tree: BodyTree, index: Int, found: &Bool) Never! {
@@ -9407,7 +9407,7 @@ sema_stmt_row_reads_runtime_local: fn(tree: BodyTree, index: Int, found: &Bool) 
         found = true
         return
     }
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_stmt_row_reads_runtime_local(tree, child, found))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, fn(child: Int) { sema_stmt_row_reads_runtime_local(tree, child, found) })
 }
 
 sema_stmt_prep_if_not_bool: fn(cond_span: Span) -> Diagnostic {

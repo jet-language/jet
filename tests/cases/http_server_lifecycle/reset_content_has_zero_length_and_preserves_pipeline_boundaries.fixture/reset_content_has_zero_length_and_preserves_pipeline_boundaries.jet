@@ -25,11 +25,11 @@ s6_reset_exchange: fn(addr: String, lines: [String]) -> String {
 #Test("205 preserves zero length and pipeline boundaries") {
     calls: Shared{S6ResetCalls{value: 0}}
     mux: server.mux()
-    mux.get("/reset", (_req: HTTPRequest) -> {
+    mux.get("/reset", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(205, "must-not-publish").header("Content-Length", "999").header("Transfer-Encoding", "chunked").header("X-Origin", "reset"))
     })
-    mux.get("/next", (_req: HTTPRequest) -> {
+    mux.get("/next", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(200, "next"))
     })

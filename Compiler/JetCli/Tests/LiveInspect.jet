@@ -178,7 +178,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
         JetLiveChannel{id: 2, depth: 1, capacity: Val(2), send_waiters: 0, recv_waiters: 0, closed: false},
     }
     view: live_inspect_decoded(derived)
-    assert(view.tasks.map(row -> row.id) == [Int]{1, 3, 4, 5, 9})
+    assert(view.tasks.map(fn(row) { row.id }) == [Int]{1, 3, 4, 5, 9})
     assert(view.tasks[2].state == "paused" && view.tasks[0].wait == "")
     assert(view.channels[0].id == 2 && view.channels[1].capacity == None)
     assert(view.effects.get("compute") == Val(2) && view.effects.get("waiting") == Val(3) && view.effects.get("channel") == Val(0) && view.effects.get("time") == Val(1) && view.effects.get("io") == Val(2))

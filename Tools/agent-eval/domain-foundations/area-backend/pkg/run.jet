@@ -160,8 +160,8 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure | DBError)! {
     metrics: Shared{Metrics{requests: 0, errors: 0}}
     mux: http_server.mux()
     http_server.request_id(mux)
-    mux.get("/health", (req: HTTPRequest) -> health(req, metrics))
-    mux.post("/orders", (req: HTTPRequest) -> create_order(req, session_id, metrics, queue_endpoint))
+    mux.get("/health", fn(req: HTTPRequest) { health(req, metrics) })
+    mux.post("/orders", fn(req: HTTPRequest) { create_order(req, session_id, metrics, queue_endpoint) })
     server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     address: server.local_addr() ?? panic("address")
     serving: task { server.serve() }

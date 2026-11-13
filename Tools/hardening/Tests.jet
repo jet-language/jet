@@ -180,7 +180,7 @@ verdict: fn(body: String, key: String, class: String) -> String Never! {
         verdict("print(api.call(\"value\"))", call, "value"),
         verdict("api.call(\"value\")\nprint(\"done\")", call, "unit"),
         // The observer runs after the invoked lambda body.
-        verdict("print((() -> {{\n    api.call(\"value\") ?? panic(\"call\")\n    true\n}})())", call, "unit"),
+        verdict("print((fn() {{\n    api.call(\"value\") ?? panic(\"call\")\n    true\n}})())", call, "unit"),
         verdict("api.call(\"value\")", call, "never"),
         // One call reached through both arms of a pattern table is one call.
         verdict("print(if api.call(\"value\") == {{ .Ok(ok) -> true, .Err(error) -> false }})", call, "value"),
@@ -217,7 +217,7 @@ verdict: fn(body: String, key: String, class: String) -> String Never! {
     assert(verdict("api.open(\"value\")", open, "opaque").contains("no observable sink"))
     assert(verdict("api.call(\"value\")", call, "value").contains("no observable sink"))
     assert(verdict("api.call(\"value\")\nprint(\"done\")", call, "value").contains("no observable sink"))
-    assert(verdict("print((() -> {{\n    api.call(\"value\")\n    true\n}})())", call, "value").contains("no observable sink"))
+    assert(verdict("print((fn() {{\n    api.call(\"value\")\n    true\n}})())", call, "value").contains("no observable sink"))
     assert(verdict("api.call(\"value\") ?? return Err(\"call\")\nprint(\"done\")", call, "value").contains("Unit run cannot use ?? return Err"))
     assert(verdict("api.call(\"value\")\napi.call(\"again\")\nprint(\"done\")", call, "unit").contains("expected one call"))
     // Compile-only: the only call sits in a function `run` never reaches.

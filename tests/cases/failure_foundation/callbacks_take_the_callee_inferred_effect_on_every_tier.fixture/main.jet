@@ -28,22 +28,22 @@ checked: fn(row: Int) -> Int {
     row
 }
 
-ones: fn(rows: [Int]) -> Int { rows.filter((row: Int) -> score(row, "odd") == 1).len() }
+ones: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { score(row, "odd") == 1 }).len() }
 
 ordered: fn(rows: [Int]) -> [Int] {
     sorted := rows.copy()
-    sorted.sort_by((row: Int) -> row_key(row))
+    sorted.sort_by(fn(row: Int) { row_key(row) })
     sorted
 }
 
-descriptors: fn(rows: [Int]) -> [String] { rows.map((row: Int) -> descriptor(row)) }
+descriptors: fn(rows: [Int]) -> [String] { rows.map(fn(row: Int) { descriptor(row) }) }
 
 local: fn(row: Int) -> Int {
-    twice: (value: Int) -> score(value, "all") * 2
+    twice: fn(value: Int) { score(value, "all") * 2 }
     twice(row)
 }
 
-named: fn(rows: [Int]) -> Int { rows.filter((row: Int) -> text(row, "x") == "x1").len() }
+named: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { text(row, "x") == "x1" }).len() }
 
 joined: fn(values: [Int]) -> String {
     out := ""
@@ -64,10 +64,10 @@ summary: fn(rows: [Int]) -> String Never! {
 
 // The `filter` callback calls `text`, which cannot fail, so `filter` does not
 // fail with `Err` here and the `Failure!` contract holds.
-named_strict: fn(rows: [Int]) -> Int Failure! { Ok(rows.filter((row: Int) -> text(row, "x") == "x1").len()) }
+named_strict: fn(rows: [Int]) -> Int Failure! { Ok(rows.filter(fn(row: Int) { text(row, "x") == "x1" }).len()) }
 
 // `checked` can fail: the callback adopts its carrier and `filter` fails.
-positives: fn(rows: [Int]) -> Int { rows.filter((row: Int) -> checked(row) > 1).len() }
+positives: fn(rows: [Int]) -> Int { rows.filter(fn(row: Int) { checked(row) > 1 }).len() }
 
 run: fn() {
     rows := [1, 2, 3, 4, 5]

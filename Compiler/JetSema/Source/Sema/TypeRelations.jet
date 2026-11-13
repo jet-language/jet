@@ -270,7 +270,7 @@ sema_function_obligations_satisfy: fn(offered: FunctionObligations, required: Fu
 }
 
 sema_type_function_obligations_parts: fn(effect_bound: [EffectRowEntry]?, param_contract: [CallContractRow]?, call_metadata: FunctionCallMetadata?, return_view_provenance: ViewProvenanceMap?) -> FunctionObligations? {
-    effect_names: effect_bound.map((row) -> loop entry in row -> entry.name)
+    effect_names: effect_bound.map(fn(row) { loop entry in row -> entry.name })
     variadic := [Bool]?{None}
     if call_metadata == .Val(metadata) {
         has_variadic: loop flag in metadata.variadic {

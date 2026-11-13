@@ -227,7 +227,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     files.remove_all(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
     // The hook owns copies of what it captures, so the removal is observed
     // through the filesystem.
-    disappear: () -> {
+    disappear: fn() {
         store_make_tree_writable_for_removal(object) ?? panic("chmod object")
         files.remove_all(object) ?? panic("remove object")
     }

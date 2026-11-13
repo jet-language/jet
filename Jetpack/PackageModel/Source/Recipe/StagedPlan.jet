@@ -21,7 +21,7 @@ PlanInput: struct {
     // Inputs ordered by path, then digest.
     sorted: fn(inputs: [PlanInput]) -> [PlanInput] Never! {
         out := inputs
-        out.sort_by((left: PlanInput, right: PlanInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+        out.sort_by(fn(left: PlanInput, right: PlanInput) { (left.path <=> right.path).then(left.digest <=> right.digest) })
         out
     }
 }
@@ -64,7 +64,7 @@ BuildPlanFragment: struct {
     // changes the identity.
     write_canonical: fn(self, writer: &RecipeCanonicalWriter) Never! {
         actions := self.actions
-        actions.sort_by(action -> action.name)
+        actions.sort_by(fn(action) { action.name })
         writer.push_count(actions.len())
         loop action in actions {
             writer.push_text(action.name)

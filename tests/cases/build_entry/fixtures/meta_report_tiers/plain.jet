@@ -9,7 +9,7 @@ shout: fn(n: Int) { print(n) }
 build: fn(b: Build) {
     app: b.add_executable("app", ["plain.jet"], [])
     meta: b.compiler(app)
-    meta.events(watch: .Calls{to: print}, (event) -> {
+    meta.events(watch: .Calls{to: print}, fn(event) {
         if event == .Checked(.Call(c)) -> meta.report(Note{text: "printed"}, at: c)
     })
     b.default(app)

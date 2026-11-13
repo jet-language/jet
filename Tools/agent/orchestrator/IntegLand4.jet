@@ -51,7 +51,7 @@ commit: fn(patch: String, landfiles: String, msgfile: String, message: String) -
     if !(Sh{"git apply -p1 --index {patch}"}.ok()) -> return ""
     // Every path the patch staged, rename sources included (numstat names only the rename target: b6d left 12 behind).
     staged: Sh{"git diff --cached --name-only --no-renames"}.lines()
-    files.write(landfiles, staged.map(path -> "{path}\n").join(""))
+    files.write(landfiles, staged.map(fn(path) { "{path}\n" }).join(""))
     files.write(msgfile, message)
     if !(Sh{"git commit -q -F {msgfile} --"}.extend(staged).ok()) -> return "-"
     Sh{"git rev-parse --short HEAD"}.text()
@@ -74,9 +74,9 @@ run: fn() {
     // batch: the net diff BASE..origin/dev may touch no Compiler/, Core/, Jetpack/ or Tools/ file and none of the
     // batch files.
     entries: files.list_dir(integ, matching: "*.files")
-    lists: entries.map(entry -> entry.name)
-    listed: entries.flat_map(entry -> files.read_or(entry.path, "").lines())
-    bad: Sh{"git diff --name-only {base} origin/dev"}.lines().filter(path -> ["Compiler/", "Core/", "Jetpack/", "Tools/"].any(top -> path.starts_with(top)) || listed.contains(path))
+    lists: entries.map(fn(entry) { entry.name })
+    listed: entries.flat_map(fn(entry) { files.read_or(entry.path, "").lines() })
+    bad: Sh{"git diff --name-only {base} origin/dev"}.lines().filter(fn(path) { ["Compiler/", "Core/", "Jetpack/", "Tools/"].any(fn(top) { path.starts_with(top) }) || listed.contains(path) })
     if bad.len() > 0 -> fail("integ-land: origin/dev moved from {base} in build inputs or batch files: {bad.join(" ")}; rerun integrate.sh")
     if !(Sh{"git merge -q --ff-only origin/dev"}.ok()) -> fail("integ-land: cannot fast-forward the worktree to origin/dev")
     landed := [String]{}
@@ -99,7 +99,7 @@ run: fn() {
     if landed.len() == 0 -> process.exit(1)
     // The generated tables integ-apply regenerated from the composed sources land last, only when EVERY SUB the
     // batch applied landed (b4b: landing a subset with the full regen put SchedLead-6 rows on dev without their source).
-    applied: lists.filter(name -> name != "regen.files").len()
+    applied: lists.filter(fn(name) { name != "regen.files" }).len()
     // INTEG_LANDED_BEFORE=k: k SUBs of this batch already landed in an earlier, interrupted run.
     done: landed.len() + (process.env_get_or("INTEG_LANDED_BEFORE", "0").to_int() ?? 0)
     if files.read_or("{integ}/regen.patch", "") != "" {

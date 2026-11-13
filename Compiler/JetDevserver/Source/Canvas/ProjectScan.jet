@@ -19,16 +19,16 @@ use {
 
 project_file: fn(path: OSPath) -> Projection Err! [Diagnostic] { project_file_with_runtime(path, .None) }
 project_file_with_runtime: fn(path: OSPath, runtime_events: String?) -> Projection Err! [Diagnostic] {
-    jet_driver.run_compiler_work(() -> project_file_with_runtime_on_compiler_stack(path, runtime_events)) // GATE #4494: compiler worker stack.
+    jet_driver.run_compiler_work(fn() { project_file_with_runtime_on_compiler_stack(path, runtime_events) }) // GATE #4494: compiler worker stack.
 }
 project_file_with_runtime_on_compiler_stack: fn(path: OSPath, runtime_events: String?) -> Projection Err! [Diagnostic] {
     path_str := path.to_string_lossy()
-    root := path.parent().unwrap_or_else(() -> OSPath.new("."))
+    root := path.parent().unwrap_or_else(fn() { OSPath.new(".") })
     resolver := AuthorityResolver.open(root) ?? {
         error: err
         throw [error.diagnostic()]
     }
-    file_name := path.file_name().unwrap_or_else(() -> {
+    file_name := path.file_name().unwrap_or_else(fn() {
         throw [AuthorityError.Invalid { path: path.to_path_buf(), detail: "source entry has no file name" }.diagnostic()]
     })
     checked := resolver.checked_file(OSPath.new(file_name)) ?? {
@@ -48,9 +48,9 @@ project_file_with_runtime_on_compiler_stack: fn(path: OSPath, runtime_events: St
         throw [jet_semindex.package_facts_diagnostic(path, error)]
     }
     (diags, bundle, facts) := jet_driver.Driver.check_file_with_effect_facts(path_str, .Val((checked.path, src)), true)
-    errors := diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    errors := diags.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
     if !errors.is_empty() -> throw errors
-    bundle := bundle.unwrap_or_else(() -> { throw diags })
+    bundle := bundle.unwrap_or_else(fn() { throw diags })
     workspace_overlay_policy := jet_semindex.workspace_overlay_policy_for_entry(path) ?? {
         diagnostic: err
         throw [diagnostic]
@@ -73,15 +73,15 @@ ProjectChange: struct { path: OSPath; rel: String; before: String; after: String
 WorkspaceBoundary: struct { root: OSPath; member_root: OSPath?; malformed: Bool; diagnostic: Diagnostic? }
 project_context_for_entry: fn(path: OSPath) -> ProjectContext {
     entry_path := absolute_entry_path(path)
-    entry_dir := entry_path.parent().unwrap_or_else(() -> OSPath.new("."))
+    entry_dir := entry_path.parent().unwrap_or_else(fn() { OSPath.new(".") })
     workspace_boundary := find_workspace_boundary(entry_dir)
-    workspace_root := workspace_boundary.as_ref().filter((boundary) -> boundary.malformed || boundary.member_root.is_some() || same_path(entry_dir, boundary.root)).map((boundary) -> boundary.root.clone())
+    workspace_root := workspace_boundary.as_ref().filter(fn(boundary) { boundary.malformed || boundary.member_root.is_some() || same_path(entry_dir, boundary.root) }).map(fn(boundary) { boundary.root.clone() })
     manifest_diagnostic := Diagnostic?{.None}
     manifest_root := jet_driver.Loader.find_manifest_root_checked(entry_dir) ?? {
         diagnostic: err
         manifest_diagnostic = .Val(diagnostic); .None
     }
-    manifest_root = manifest_root.filter((manifest) -> {
+    manifest_root = manifest_root.filter(fn(manifest) {
         if workspace_boundary == .None -> return true
         boundary := workspace_boundary.as_ref().unwrap()
         if boundary.member_root == {
@@ -92,13 +92,13 @@ project_context_for_entry: fn(path: OSPath) -> ProjectContext {
     ecosystem_diagnostic := Diagnostic?{.None}
     workspace_ecosystem_root := OSPath?{.None}
     if workspace_root == .Val(root) {
-        resolver := AuthorityResolver.open(root).map((value) -> .Val(value)) ?? {
+        resolver := AuthorityResolver.open(root).map(fn(value) { .Val(value) }) ?? {
             error: err
             if !error.is_missing() -> ecosystem_diagnostic = .Val(error.diagnostic())
             .None
         }
         if resolver == .Val(resolver) {
-            manifest := resolver.checked_manifest(OSPath.new(".")).map((value) -> .Val(value)) ?? {
+            manifest := resolver.checked_manifest(OSPath.new(".")).map(fn(value) { .Val(value) }) ?? {
                 error: err
                 if !error.is_missing() -> ecosystem_diagnostic = .Val(error.diagnostic())
                 .None
@@ -112,20 +112,20 @@ project_context_for_entry: fn(path: OSPath) -> ProjectContext {
             }
         }
     }
-    ecosystem_root := workspace_ecosystem_root.or_else(() -> manifest_root.clone())
+    ecosystem_root := workspace_ecosystem_root.or_else(fn() { manifest_root.clone() })
     project_root := workspace_root.as_ref().or(manifest_root.as_ref()).or(ecosystem_root.as_ref()).unwrap_or(entry_dir).to_path_buf()
     (files, collection_diagnostic) := collect_project_files(project_root, entry_path, manifest_root, ecosystem_root, workspace_root)
     parts := jet_driver.ProjectParts.scan(project_root)
     project_revision := project_revision_from_files(files)
-    package_diagnostic := jet_semindex.package_facts_for_entry(entry_path).err().map((error) -> jet_semindex.package_facts_diagnostic(entry_path, error))
+    package_diagnostic := jet_semindex.package_facts_for_entry(entry_path).err().map(fn(error) { jet_semindex.package_facts_diagnostic(entry_path, error) })
     ProjectContext { entry_path: entry_path, project_root: project_root, manifest_root: manifest_root, ecosystem_root: ecosystem_root, workspace_root: workspace_root, files: files, parts: parts, project_revision: project_revision,
-        authority_diagnostic: package_diagnostic.or(collection_diagnostic).or(manifest_diagnostic).or(ecosystem_diagnostic).or_else(() -> workspace_boundary.as_ref().and_then((boundary) -> boundary.diagnostic.clone())) }
+        authority_diagnostic: package_diagnostic.or(collection_diagnostic).or(manifest_diagnostic).or(ecosystem_diagnostic).or_else(fn() { workspace_boundary.as_ref().and_then(fn(boundary) { boundary.diagnostic.clone() }) }) }
 }
 absolute_entry_path: fn(path: OSPath) -> OSPath {
     if path.is_absolute() -> return path.to_path_buf()
-    parent := path.parent().filter((parent) -> !parent.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.new("."))
-    base := fs.canonicalize(parent).or_else((_) -> std.env.current_dir().map((cwd) -> cwd.join(parent))).unwrap_or_else((_) -> parent.to_path_buf())
-    path.file_name().map((name) -> base.join(name)).unwrap_or(base)
+    parent := path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }).unwrap_or_else(fn() { OSPath.new(".") })
+    base := fs.canonicalize(parent).or_else(fn(_) { std.env.current_dir().map(fn(cwd) { cwd.join(parent) }) }).unwrap_or_else(fn(_) { parent.to_path_buf() })
+    path.file_name().map(fn(name) { base.join(name) }).unwrap_or(base)
 }
 find_workspace_boundary: fn(start: OSPath) -> WorkspaceBoundary? {
     resolver := AuthorityResolver.open(start) ?? {
@@ -156,7 +156,7 @@ find_workspace_boundary: fn(start: OSPath) -> WorkspaceBoundary? {
             }
             plan := WorkspacePlan?{.None}
             if diagnostic.is_none() {
-                plan = jet_env_model.WorkspaceFile.evaluate_checked_source(source, resolver).map((value) -> .Val(value)) ?? {
+                plan = jet_env_model.WorkspaceFile.evaluate_checked_source(source, resolver).map(fn(value) { .Val(value) }) ?? {
                     d: err
                     diagnostic = .Val(d); .None
                 }
@@ -195,21 +195,21 @@ matching_member_root: fn(resolver: AuthorityResolver, entry_dir: OSPath, plan: W
         error: err
         throw error.diagnostic()
     }
-    matches.sort_by_key((member) -> member.path.components().count())
-    result := matches.into_iter().filter((member) -> entry_path.starts_with(member.path)).map((member) -> member.path).last()
+    matches.sort_by_key(fn(member) { member.path.components().count() })
+    result := matches.into_iter().filter(fn(member) { entry_path.starts_with(member.path) }).map(fn(member) { member.path }).last()
     resolver.revalidate_root() ?? {
         error: err
         throw error.diagnostic()
     }
     result
 }
-path_is_within: fn(path: OSPath, root: OSPath) -> Bool { comparable_path(path).zip(comparable_path(root)).is_some_and((pair) -> pair._0.starts_with(pair._1)) }
-same_path: fn(left: OSPath, right: OSPath) -> Bool { comparable_path(left).zip(comparable_path(right)).is_some_and((pair) -> pair._0 == pair._1) }
-comparable_path: fn(path: OSPath) -> OSPath? { fs.canonicalize(path).ok().or_else(() -> AuthorityResolver.open(path).ok().map((resolver) -> resolver.root().to_path_buf())) }
+path_is_within: fn(path: OSPath, root: OSPath) -> Bool { comparable_path(path).zip(comparable_path(root)).is_some_and(fn(pair) { pair._0.starts_with(pair._1) }) }
+same_path: fn(left: OSPath, right: OSPath) -> Bool { comparable_path(left).zip(comparable_path(right)).is_some_and(fn(pair) { pair._0 == pair._1 }) }
+comparable_path: fn(path: OSPath) -> OSPath? { fs.canonicalize(path).ok().or_else(fn() { AuthorityResolver.open(path).ok().map(fn(resolver) { resolver.root().to_path_buf() }) }) }
 collect_project_files: fn(project_root: OSPath, entry_path: OSPath, manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> ([ProjectFileRec], Diagnostic?) {
     paths := [OSPath]{}; authority_diagnostic := Diagnostic?{.None}
     workspace_source_failed := false; workspace_member_roots := [OSPath]{}
-    resolver := AuthorityResolver.open(project_root).map((value) -> .Val(value)) ?? {
+    resolver := AuthorityResolver.open(project_root).map(fn(value) { .Val(value) }) ?? {
         error: err
         authority_diagnostic = .Val(error.diagnostic()); .None
     }
@@ -230,7 +230,7 @@ collect_project_files: fn(project_root: OSPath, entry_path: OSPath, manifest_roo
             source_resolver: tuple_5._0
             source: tuple_5._1
             if source.role == .Index {
-                snapshot := workspace_snapshot_for_source(source_resolver, source).map((value) -> .Val(value)) ?? {
+                snapshot := workspace_snapshot_for_source(source_resolver, source).map(fn(value) { .Val(value) }) ?? {
                     diagnostic: err
                     authority_diagnostic = .Val(diagnostic); .None
                 }
@@ -244,42 +244,42 @@ collect_project_files: fn(project_root: OSPath, entry_path: OSPath, manifest_roo
         }
     }
     if resolver == .Val(resolver) {
-        source_files := resolver.discover_source_files().map((value) -> .Val(value)) ?? {
+        source_files := resolver.discover_source_files().map(fn(value) { .Val(value) }) ?? {
             error: err
-            authority_diagnostic.get_or_insert_with(() -> error.diagnostic()); .None
+            authority_diagnostic.get_or_insert_with(fn() { error.diagnostic() }); .None
         }
         if source_files == .Val(source_files) {
-            paths.extend(source_files.into_iter().filter_map((file) -> {
-                is_fallback_workspace := workspace_source_failed && workspace_root.is_some_and((root) -> file.path == root.join(Syntax.WORKSPACE_FILE))
-                is_declared_workspace_source := workspace_root.is_none() || workspace_member_roots.iter().any((member_root) -> path_is_within(file.path, member_root))
+            paths.extend(source_files.into_iter().filter_map(fn(file) {
+                is_fallback_workspace := workspace_source_failed && workspace_root.is_some_and(fn(root) { file.path == root.join(Syntax.WORKSPACE_FILE) })
+                is_declared_workspace_source := workspace_root.is_none() || workspace_member_roots.iter().any(fn(member_root) { path_is_within(file.path, member_root) })
                 if is_declared_workspace_source && !is_fallback_workspace -> .Val(file.path) else -> .None
             }))
         }
     }
-    authority_root := resolver.as_ref().map((resolver) -> resolver.root()).unwrap_or(project_root)
+    authority_root := resolver.as_ref().map(fn(resolver) { resolver.root() }).unwrap_or(project_root)
     paths.sort(); paths.dedup(); files := [ProjectFileRec]{}
     loop path in paths {
         if resolver.is_none() -> break
         resolver := resolver.as_ref().unwrap()
         relative := path.strip_prefix(authority_root) ?? {
             _: err
-            authority_diagnostic.get_or_insert_with(() -> AuthorityError.Escapes(path.clone()).diagnostic()); next
+            authority_diagnostic.get_or_insert_with(fn() { AuthorityError.Escapes(path.clone()).diagnostic() }); next
         }
         checked := resolver.checked_file(relative) ?? {
             error: err
-            authority_diagnostic.get_or_insert_with(() -> error.diagnostic()); next
+            authority_diagnostic.get_or_insert_with(fn() { error.diagnostic() }); next
         }
         resolver.revalidate_file(checked) ?? {
             error: err
-            authority_diagnostic.get_or_insert_with(() -> error.diagnostic()); next
+            authority_diagnostic.get_or_insert_with(fn() { error.diagnostic() }); next
         }
-        kind := if path.file_name().and_then((n) -> n.to_str()) == .Val(.PACKAGE_FILE) -> "package"
-            else if workspace_source.as_ref().is_some_and((pair) -> path == pair.1.path) -> "workspace"
-            else if path.file_name().and_then((n) -> n.to_str()) == .Val(.ENV_FILE) -> "env"
+        kind := if path.file_name().and_then(fn(n) { n.to_str() }) == .Val(.PACKAGE_FILE) -> "package"
+            else if workspace_source.as_ref().is_some_and(fn(pair) { path == pair.1.path }) -> "workspace"
+            else if path.file_name().and_then(fn(n) { n.to_str() }) == .Val(.ENV_FILE) -> "env"
             else if rel_path(authority_root, path) == Syntax.UNIFIED_LOCK_FILE -> "lock" else -> "source"
         resolver.revalidate_file(checked) ?? {
             error: err
-            authority_diagnostic.get_or_insert_with(() -> error.diagnostic()); next
+            authority_diagnostic.get_or_insert_with(fn() { error.diagnostic() }); next
         }
         files.push(ProjectFileRec { path: rel_path(authority_root, path), revision: "sha256-{SHA256.sha256_hex(checked.bytes)}", kind: kind.to_string() })
     }
@@ -294,7 +294,7 @@ workspace_source_path: fn(root: OSPath) -> (AuthorityResolver, WorkspaceSource)?
         error: err
         throw error.workspace_diagnostic()
     }
-    source.map((source) -> (_0: resolver, _1: source))
+    source.map(fn(source) { (_0: resolver, _1: source) })
 }
 workspace_snapshot_for_source: fn(resolver: AuthorityResolver, source: WorkspaceSource) -> WorkspaceSnapshot Diagnostic! { jet_env_model.WorkspaceFile.load_checked_source(resolver, source.clone()) }
 push_existing: fn(paths: [OSPath], path: OSPath) -> Unit {
@@ -323,10 +323,10 @@ workspace_project_json: fn(project_root: OSPath, workspace_root: OSPath?) -> Str
     root := workspace_root.unwrap()
     source := workspace_source_path(root) ?? {
         diagnostic: err
-        source_path := root.join(Syntax.WORKSPACE_FILE).symlink_metadata().ok().map((_) -> rel_path(project_root, root.join(Syntax.WORKSPACE_FILE))).unwrap_or_default()
+        source_path := root.join(Syntax.WORKSPACE_FILE).symlink_metadata().ok().map(fn(_) { rel_path(project_root, root.join(Syntax.WORKSPACE_FILE)) }).unwrap_or_default()
         return "{{\"path\":{json_str(source_path)},\"members\":[],\"diagnostics\":[{diagnostic_json(diagnostic)}]}}"
     }
-    source_path := source.as_ref().map((pair) -> rel_path(project_root, pair._1.path)).unwrap_or_default()
+    source_path := source.as_ref().map(fn(pair) { rel_path(project_root, pair._1.path) }).unwrap_or_default()
     members := ""
     if source == .Val(tuple_6) {
         resolver: tuple_6._0
@@ -336,7 +336,7 @@ workspace_project_json: fn(project_root: OSPath, workspace_root: OSPath?) -> Str
                 diagnostic: err
                 return "{{\"path\":{json_str(source_path)},\"members\":[],\"diagnostics\":[{diagnostic_json(diagnostic)}]}}"
             }
-            members = snapshot.plan.members.iter().map((m) -> "{{\"name\":{json_str(m.name)},\"path\":{json_str(m.path)}}}").collect().join(",")
+            members = snapshot.plan.members.iter().map(fn(m) { "{{\"name\":{json_str(m.name)},\"path\":{json_str(m.path)}}}" }).collect().join(",")
         }
     }
     "{{\"path\":{json_str(source_path)},\"members\":[{members}],\"diagnostics\":[]}}"
@@ -348,7 +348,7 @@ packages_project_json: fn(project_root: OSPath, entry_path: OSPath, manifest_roo
     }
     if dirs.is_empty() { if inline_entry_dir(entry_path) == .Val(dir) -> dirs.push(dir) }
     dirs.sort(); dirs.dedup()
-    dirs.iter().filter_map((dir) -> package_project_json(project_root, entry_path, dir)).collect().join(",")
+    dirs.iter().filter_map(fn(dir) { package_project_json(project_root, entry_path, dir) }).collect().join(",")
 }
 package_dirs: fn(manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> [OSPath] Diagnostic! {
     dirs := package_dirs_without_workspace(manifest_root, ecosystem_root)
@@ -377,7 +377,7 @@ targets_project_json: fn(project_root: OSPath, entry_path: OSPath, manifest_root
     }
     if dirs.is_empty() { if inline_entry_dir(entry_path) == .Val(dir) -> dirs.push(dir) }
     dirs.sort(); dirs.dedup()
-    dirs.iter().filter_map((dir) -> package_targets_project_json(project_root, entry_path, dir)).flatten().collect().join(",")
+    dirs.iter().filter_map(fn(dir) { package_targets_project_json(project_root, entry_path, dir) }).flatten().collect().join(",")
 }
 package_targets_project_json: fn(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> [String]? { canonical_package_targets_project_json(project_root, entry_path, dir) }
 package_project_json: fn(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> String? { canonical_package_project_json(project_root, entry_path, dir) }
@@ -385,24 +385,24 @@ inline_entry_dir: fn(entry_path: OSPath) -> OSPath? {
     source := fs.read_to_string(entry_path).ok()
     package := Package.extract_inline_package(source) ?? {
         _: err
-        return entry_path.parent().map((path) -> path.to_path_buf())
+        return entry_path.parent().map(fn(path) { path.to_path_buf() })
     }
-    if package.is_none() -> .None else -> entry_path.parent().map((path) -> path.to_path_buf())
+    if package.is_none() -> .None else -> entry_path.parent().map(fn(path) { path.to_path_buf() })
 }
 canonical_package_facts: fn(dir: OSPath, entry_path: OSPath) -> Package.PackageFacts Err! {
-    if entry_path.parent().is_some_and((parent) -> path_is_within(entry_path, dir) || same_path(parent, dir)) {
+    if entry_path.parent().is_some_and(fn(parent) { path_is_within(entry_path, dir) || same_path(parent, dir) }) {
         if jet_semindex.package_facts_for_entry(entry_path)? == .Val(facts) -> return facts
     }
     facts := Package.PackageFacts.load_checked(dir) ?? {
         error: err
         throw error.to_string()
     }
-    facts.unwrap_or_else(() -> { throw "canonical Package `{dir.join(Syntax.PACKAGE_FILE).display()}` is missing" })
+    facts.unwrap_or_else(fn() { throw "canonical Package `{dir.join(Syntax.PACKAGE_FILE).display()}` is missing" })
 }
 projection_diagnostic_json: fn(diagnostic: Diagnostic) -> String { "{{\"diagnostics\":[{diagnostic_json(diagnostic)}]}}" }
 canonical_package_error: fn(project_root: OSPath, entry_path: OSPath, dir: OSPath, error: String) -> String {
     diagnostic := jet_semindex.package_facts_diagnostic(entry_path, error)
-    name := dir.file_name().and_then((name) -> name.to_str()).unwrap_or("package")
+    name := dir.file_name().and_then(fn(name) { name.to_str() }).unwrap_or("package")
     "{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, dir.join(Syntax.PACKAGE_FILE)))},\"name\":{json_str(name)},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{diagnostic_json(diagnostic)}]}}"
 }
 output_kind_label: fn(kind: Package.PackageOutputKind) -> String {
@@ -424,35 +424,35 @@ output_payload_json: fn(payload: Package.OutputPayload) -> String {
         .Bool(value) -> value.to_string()
         .Number(value) -> value.clone()
         .String(value) -> json_str(value)
-        .Array(values) -> "[{values.iter().map((value) -> output_payload_json(value)).collect().join(",")}]"
+        .Array(values) -> "[{values.iter().map(fn(value) { output_payload_json(value) }).collect().join(",")}]"
         .Object(values) -> {
             keys := values.keys().collect(); keys.sort()
-            fields := keys.iter().map((name) -> "{json_str(name)}:{output_payload_json(values[name])}").collect().join(",")
+            fields := keys.iter().map(fn(name) { "{json_str(name)}:{output_payload_json(values[name])}" }).collect().join(",")
             "{{{fields}}}"
         }
     }
 }
-field_provenance_json: fn(facts: Package.PackageFacts, field: String) -> String { "[{facts.field_provenance(field).iter().map((origin) -> json_str(origin)).collect().join(",")}]" }
+field_provenance_json: fn(facts: Package.PackageFacts, field: String) -> String { "[{facts.field_provenance(field).iter().map(fn(origin) { json_str(origin) }).collect().join(",")}]" }
 canonical_outputs_json: fn(facts: Package.PackageFacts) -> String {
     keys := facts.outputs.keys().collect(); keys.sort()
-    keys.iter().map((name) -> {
+    keys.iter().map(fn(name) {
         output := facts.outputs[name]
         "{{\"name\":{json_str(output.name)},\"kind\":{json_str(output_kind_label(output.kind))},\"entry\":{json_optional_str(output.entry)},\"payload\":{output_payload_json(output.payload)},\"provenance\":{field_provenance_json(facts, "outputs.{name}")}}}"
     }).collect().join(",")
 }
 canonical_environments_json: fn(facts: Package.PackageFacts) -> String {
     keys := facts.environments.keys().collect(); keys.sort()
-    keys.iter().map((key) -> {
+    keys.iter().map(fn(key) {
         environment := facts.environments[key]
         service_keys := environment.services.keys().collect(); service_keys.sort()
-        services := service_keys.iter().map((name) -> {
+        services := service_keys.iter().map(fn(name) {
             service := environment.services[name]
-            ports := service.ports.iter().map((port) -> port.to_string()).collect().join(",")
+            ports := service.ports.iter().map(fn(port) { port.to_string() }).collect().join(",")
             "{{\"name\":{json_str(name)},\"enable\":{service.enable},\"ports\":[{ports}],\"ready\":{json_optional_str(service.ready)}}}"
         }).collect().join(",")
-        tools := environment.tools.iter().map((tool) -> json_str(tool)).collect().join(",")
+        tools := environment.tools.iter().map(fn(tool) { json_str(tool) }).collect().join(",")
         secret_keys := environment.secrets.keys().collect(); secret_keys.sort()
-        secrets := secret_keys.iter().map((name) -> json_str(name)).collect().join(",")
+        secrets := secret_keys.iter().map(fn(name) { json_str(name) }).collect().join(",")
         "{{\"name\":{json_str(environment.name)},\"tools\":[{tools}],\"services\":[{services}],\"secrets\":[{secrets}]}}"
     }).collect().join(",")
 }
@@ -463,7 +463,7 @@ canonical_package_targets_project_json: fn(project_root: OSPath, entry_path: OSP
     }
     package_path := rel_path(project_root, dir); manifest_rel := rel_path(project_root, dir.join(Syntax.PACKAGE_FILE))
     keys := facts.outputs.keys().collect(); keys.sort()
-    targets := keys.iter().map((name) -> {
+    targets := keys.iter().map(fn(name) {
         output := facts.outputs[name]
         "{{\"package\":{json_str(facts.name)},\"package_path\":{json_str(package_path)},\"manifest\":{json_str(manifest_rel)},\"target\":{json_str(output.name)},\"kind\":{json_str(output_kind_label(output.kind))},\"entry\":{json_optional_str(output.entry)},\"payload\":{output_payload_json(output.payload)},\"provenance\":{field_provenance_json(facts, "outputs.{name}")}}}"
     }).collect()
@@ -492,19 +492,19 @@ canonical_package_project_json: fn(project_root: OSPath, entry_path: OSPath, dir
         diagnostic: err
         diagnostics = "[{diagnostic_json(diagnostic)}]"; .None
     }
-    workspace_overlays := policy.map((policy) -> jet_semindex.workspace_overlay_policy_json(policy)).unwrap_or_else(() -> "null")
+    workspace_overlays := policy.map(fn(policy) { jet_semindex.workspace_overlay_policy_json(policy) }).unwrap_or_else(fn() { "null" })
     dep_keys := facts.deps.keys().collect(); dep_keys.sort()
-    deps := dep_keys.iter().map((name) -> "{{\"name\":{json_str(name)},\"source\":{json_str(Package.dep_display_redacted(facts.deps[name]))}}}").collect().join(",")
-    target_profiles := facts.targets.iter().map((selection) -> "{{\"name\":{json_str(selection.name)},\"profile\":{json_str(selection.profile.as_str())}}}").collect().join(",")
+    deps := dep_keys.iter().map(fn(name) { "{{\"name\":{json_str(name)},\"source\":{json_str(Package.dep_display_redacted(facts.deps[name]))}}}" }).collect().join(",")
+    target_profiles := facts.targets.iter().map(fn(selection) { "{{\"name\":{json_str(selection.name)},\"profile\":{json_str(selection.profile.as_str())}}}" }).collect().join(",")
     output_keys := facts.outputs.keys().collect(); output_keys.sort()
-    package_targets := output_keys.iter().map((key) -> facts.outputs[key].name.clone()).collect()
-    loop package in facts.packages { if !package_targets.iter().any((name) -> name == package.name) -> package_targets.push(package.name.clone()) }
-    package_targets_json := package_targets.iter().map((name) -> json_str(name)).collect().join(",")
-    configs := facts.configs.iter().map((name) -> json_str(name)).collect().join(",")
-    members := facts.members.iter().map((member) -> json_str(if member == {
+    package_targets := output_keys.iter().map(fn(key) { facts.outputs[key].name.clone() }).collect()
+    loop package in facts.packages { if !package_targets.iter().any(fn(name) { name == package.name }) -> package_targets.push(package.name.clone()) }
+    package_targets_json := package_targets.iter().map(fn(name) { json_str(name) }).collect().join(",")
+    configs := facts.configs.iter().map(fn(name) { json_str(name) }).collect().join(",")
+    members := facts.members.iter().map(fn(member) { json_str(if member == {
         .Path(path) -> path
         .Find(path) -> path
-    })).collect().join(",")
+    }) }).collect().join(",")
     .Val("{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, dir.join(Syntax.PACKAGE_FILE)))},\"name\":{json_str(facts.name)},\"version\":{json_optional_str(facts.version)},\"targets\":[{target_profiles}],\"package_targets\":[{package_targets_json}],\"deps\":[{deps}],\"outputs\":[{canonical_outputs_json(facts)}],\"environments\":[{canonical_environments_json(facts)}],\"configs\":[{configs}],\"members\":[{members}],\"package_facts\":{jet_semindex.package_facts_json(facts)},\"workspace_overlays\":{workspace_overlays},\"effects_enabled\":false,\"diagnostics\":{diagnostics}}}")
 }
 EnvProjectJson: struct { envs: String; services: String; diagnostics: String }
@@ -533,13 +533,13 @@ env_project_json: fn(project_root: OSPath) -> EnvProjectJson {
         error: err
         return EnvProjectJson { envs: "", services: "", diagnostics: diagnostic_json(error.diagnostic()) }
     }
-    packages := plan.package_refs.iter().map((p) -> json_str(p)).collect().join(",")
-    secrets := plan.secrets.iter().map((s) -> json_str(s.name)).collect().join(",")
-    services := plan.dev_services.iter().map((service) -> dev_service_project_json(service)).collect().join(",")
-    environments := plan.environment_names.iter().map((name) -> json_str(name)).collect().join(",")
-    sources := plan.source_files.iter().map((path) -> json_str(path)).collect().join(",")
-    presets := plan.presets.iter().map((preset) -> json_str(preset.name)).collect().join(",")
-    languages := plan.languages.iter().map((language) -> json_str(language.name)).collect().join(",")
+    packages := plan.package_refs.iter().map(fn(p) { json_str(p) }).collect().join(",")
+    secrets := plan.secrets.iter().map(fn(s) { json_str(s.name) }).collect().join(",")
+    services := plan.dev_services.iter().map(fn(service) { dev_service_project_json(service) }).collect().join(",")
+    environments := plan.environment_names.iter().map(fn(name) { json_str(name) }).collect().join(",")
+    sources := plan.source_files.iter().map(fn(path) { json_str(path) }).collect().join(",")
+    presets := plan.presets.iter().map(fn(preset) { json_str(preset.name) }).collect().join(",")
+    languages := plan.languages.iter().map(fn(language) { json_str(language.name) }).collect().join(",")
     reload := if plan.lifecycle.reload == {
         .Never -> "never"
         .Prompt -> "prompt"
@@ -549,17 +549,17 @@ env_project_json: fn(project_root: OSPath) -> EnvProjectJson {
     EnvProjectJson { envs: "{{\"path\":{json_str(Syntax.ENV_FILE)},\"prompt\":{json_str(prompt)},\"environments\":[{environments}],\"sources\":[{sources}],\"presets\":[{presets}],\"languages\":[{languages}],\"reload\":{json_str(reload)},\"packages\":[{packages}],\"secrets\":[{secrets}],\"diagnostics\":[]}}", services: services, diagnostics: "" }
 }
 dev_service_project_json: fn(service: jet_env_model.ModuleEval.DevServicePlan) -> String {
-    ports := service.ports.iter().map((port) -> port.to_string()).collect().join(",")
+    ports := service.ports.iter().map(fn(port) { port.to_string() }).collect().join(",")
     extra_keys := service.extra.keys().collect(); extra_keys.sort()
-    extra := extra_keys.iter().map((key) -> "{{\"key\":{json_str(key)},\"value\":{json_str(service.extra[key])}}}").collect().join(",")
-    run := service.run.as_ref().map((args) -> "[{args.iter().map((arg) -> json_str(arg)).collect().join(",")}]").unwrap_or_else(() -> "null")
-    shutdown := service.shutdown.as_ref().map((policy) -> if policy == {
+    extra := extra_keys.iter().map(fn(key) { "{{\"key\":{json_str(key)},\"value\":{json_str(service.extra[key])}}}" }).collect().join(",")
+    run := service.run.as_ref().map(fn(args) { "[{args.iter().map(fn(arg) { json_str(arg) }).collect().join(",")}]" }).unwrap_or_else(fn() { "null" })
+    shutdown := service.shutdown.as_ref().map(fn(policy) { if policy == {
         .Kill -> "Kill"
         .Term { .. } -> "Term"
-    })
-    after := "[{service.after.iter().map((name) -> json_str(name)).collect().join(",")}]"
-    before_start := "[{service.before_start.iter().map((name) -> json_str(name)).collect().join(",")}]"
-    "{{\"name\":{json_str(service.name)},\"enable\":{service.enable},\"ports\":[{ports}],\"run\":{run},\"shutdown\":{shutdown.map((value) -> json_str(value)).unwrap_or_else(() -> "null")},\"data_dir\":{json_optional_str(service.data_dir)},\"ready\":{json_optional_str(service.ready)},\"after\":{after},\"before_start\":{before_start},\"extra\":[{extra}],\"source\":{json_str(Syntax.ENV_FILE)}}}"
+    } })
+    after := "[{service.after.iter().map(fn(name) { json_str(name) }).collect().join(",")}]"
+    before_start := "[{service.before_start.iter().map(fn(name) { json_str(name) }).collect().join(",")}]"
+    "{{\"name\":{json_str(service.name)},\"enable\":{service.enable},\"ports\":[{ports}],\"run\":{run},\"shutdown\":{shutdown.map(fn(value) { json_str(value) }).unwrap_or_else(fn() { "null" })},\"data_dir\":{json_optional_str(service.data_dir)},\"ready\":{json_optional_str(service.ready)},\"after\":{after},\"before_start\":{before_start},\"extra\":[{extra}],\"source\":{json_str(Syntax.ENV_FILE)}}}"
 }
 lock_project_json: fn(project_root: OSPath) -> String {
     resolver := AuthorityResolver.open(project_root) ?? {

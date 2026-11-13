@@ -196,7 +196,7 @@ store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String
     header: [String]{store_stamp, definition_fingerprint, project}
     loop field in header -> store_append_environment_stamp_field(canonical, field.bytes())
     ordered := selections.copy()
-    ordered.sort_by(selection -> selection.key())
+    ordered.sort_by(fn(selection) { selection.key() })
     selected := [StoreEntry]{}
     seals: files.join(roots.hangar_dir(), STORE_SEALS_DIR)
     loop selection in ordered {

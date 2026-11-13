@@ -27,11 +27,11 @@ run: fn() {
     through(push_one, named)
     print("named {named}")
     plain := [Int]{}
-    through((buf: &[Int]) -> buf.push(1), plain)
+    through(fn(buf: &[Int]) { buf.push(1) }, plain)
     print("lambda {plain}")
     one: 1
     captured := [Int]{}
-    through(buf -> buf.push(one), captured)
+    through(fn(buf) { buf.push(one) }, captured)
     print("capturing {captured}")
     generic := [Int]{}
     through_generic(push_one, generic)
@@ -40,11 +40,11 @@ run: fn() {
     wrapped := [Int]{}
     wrapper.edit(wrapped)
     print("wrapper {wrapped}")
-    held: Wrapper{edit: (buf: &[Int]) -> buf.push(1)}
+    held: Wrapper{edit: fn(buf: &[Int]) { buf.push(1) }}
     twice := [Int]{}
     held.edit(twice)
     through(held.edit, twice)
     print("held {twice}")
     print("take {take_through(grow, [7, 8])}")
-    print("take lambda {take_through((values: &&[Int]) -> values.len() * 10, [7, 8, 9])}")
+    print("take lambda {take_through(fn(values: &&[Int]) { values.len() * 10 }, [7, 8, 9])}")
 }

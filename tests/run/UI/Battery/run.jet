@@ -34,13 +34,13 @@ run: fn() {
     settings_open := reactive.signal(gui.settings_open_of(state))
     saved := reactive.signal(false)
     save_requested := reactive.signal(false)
-    status: reactive.derived(() -> if saved.get() -> "saved" else -> "dirty")
+    status: reactive.derived(fn() { if saved.get() -> "saved" else -> "dirty" })
 
     tui_backend: ui.tui_backend()
     render_backend: tui_backend.copy()
     ui.reactive_render(
-    () -> {
-        save_action: ui.node_shortcut(ui.button("Save", () -> { save_requested.set(true) }), gui.save_shortcut())
+    fn() {
+        save_action: ui.node_shortcut(ui.button("Save", fn() { save_requested.set(true) }), gui.save_shortcut())
         editor: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
         tree: ui.box(
         [

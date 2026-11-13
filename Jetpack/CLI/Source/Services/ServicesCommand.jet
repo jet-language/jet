@@ -402,7 +402,7 @@ cli_services_up: fn(verification: &StoreVerification, cache: &WorkspaceDeclarati
     env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
-    before_start: (svc: DevServicePlan) -> cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc)
+    before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
     started: services_up_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         cli_report_service_start_error(theme, "couldn't start services", err.message)
         return EXIT_USAGE
@@ -417,7 +417,7 @@ cli_services_restart: fn(verification: &StoreVerification, cache: &WorkspaceDecl
     env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
-    before_start: (svc: DevServicePlan) -> cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc)
+    before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
     restarted: services_restart_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't restart services", err.message, "check the service logs, readiness declarations, and restart policy.")
         return EXIT_USAGE
@@ -508,7 +508,7 @@ cli_services_watch: fn(verification: &StoreVerification, cache: &WorkspaceDeclar
     env := cli_compose_env(verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry: cli_find_project_entry(project_dir)
-    before_start: (svc: DevServicePlan) -> cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc)
+    before_start: fn(svc: DevServicePlan) { cli_service_before_start(verification, cache, theme, parsed, roots, project_dir, entry, svc) }
     changed: services_watch_once_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't watch services", err.message, "declare project-relative files in `watch` and inspect the service lifecycle error.")
         return EXIT_USAGE

@@ -39,7 +39,7 @@ run: fn() {
     print("{xs.para_filter(even)} {xs.filter(even)}")
     print("{xs.para_partition(even)}")
     print("{xs.para_filter(even_n)} {xs.para_partition(even_n)}")
-    print("{xs.para_fold(zero, add, add)} {xs.fold(0, (a: Int, n: Int) -> a + n)}")
+    print("{xs.para_fold(zero, add, add)} {xs.fold(0, fn(a: Int, n: Int) { a + n })}")
     big := [Int]{}
     loop i in 0..<256 -> big.push(i)
     show_list("filter", big.para_filter(pick))
@@ -55,7 +55,7 @@ run: fn() {
     }
     show_fold("fold", big.para_fold(seed, step, merge))
     show_fold("fold-ok", small.para_fold(seed, step, merge))
-    show_fold("fold-mixed", big.para_fold(() -> 0, step, (a: Int, b: Int) -> a + b))
+    show_fold("fold-mixed", big.para_fold(fn() { 0 }, step, fn(a: Int, b: Int) { a + b }))
     show_fold("fold-empty", ([Int]{}).para_fold(seed, step, merge))
     print("total {big.para_fold(zero, add, add)}")
 }

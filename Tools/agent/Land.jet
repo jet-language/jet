@@ -1075,7 +1075,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     // A receipt only for a census whose every row, areas' among them, is
     // clean (#6763); it lists them all, and gate refuses one that does not.
     rows: receipt_rows(runs)
-    if code != 0 || !RECEIPT_PASSES.all(name -> pass_clean(runs, name)) -> return code
+    if code != 0 || !RECEIPT_PASSES.all(fn(name) { pass_clean(runs, name) }) -> return code
     written: write_receipt(source_identity, read_identity(compiler_dir), head, named, rows, receipt_dir()) ?? {
         print("census: the preflight receipt cannot be written: {err.message}")
         return 2
@@ -1144,12 +1144,12 @@ first_of: fn(lines: [String], limit: Int) -> [String] Never! {
 
 // Whether the pass `name` ran and came out clean.
 pass_clean: fn(runs: [PassRun], name: String) -> Bool Never! {
-    runs.any(run -> run.name == name && run.rc == 0)
+    runs.any(fn(run) { run.name == name && run.rc == 0 })
 }
 
 // The census's exit: 0 when every pass that ran is clean, else 1.
 census_rc: fn(runs: [PassRun]) -> Int Never! {
-    if runs.any(run -> run.name != "" && run.rc != 0) -> 1 else -> 0
+    if runs.any(fn(run) { run.name != "" && run.rc != 0 }) -> 1 else -> 0
 }
 
 // A compile `argv` of the snapshot `snap` as the pass `name`: its keep-going
@@ -1438,7 +1438,7 @@ peak_after: fn(known: Int, peak: Int, rc: Int) -> Int Never! {
 // Whether a file of `named` changes the checker or the area assembler, or
 // none is named, so every area is checked.
 reaches_every_area: fn(named: [String]) -> Bool Never! {
-    named.len() == 0 || named.any(path -> CHECKER_PREFIXES.any(prefix -> path.starts_with(prefix)))
+    named.len() == 0 || named.any(fn(path) { CHECKER_PREFIXES.any(fn(prefix) { path.starts_with(prefix) }) })
 }
 
 // The areas of `areas` a census of `named` checks: every one when
@@ -1448,7 +1448,7 @@ areas_reached: fn(areas: [String], sources: [[String]], named: [String]) -> [Str
     if reaches_every_area(named) -> return areas.copy()
     out := [String]{}
     loop at in 0..<areas.len() {
-        if at < sources.len() && sources[at].any(path -> named.contains(path)) -> out.push(areas[at].copy())
+        if at < sources.len() && sources[at].any(fn(path) { named.contains(path) }) -> out.push(areas[at].copy())
     }
     out
 }
@@ -2061,7 +2061,7 @@ lock_free: fn(path: String) -[FS, Env]> Bool Never! {
 // `items` newest first.
 newest_first: fn(items: [Dated]) -> [Dated] Never! {
     sorted := items.copy()
-    sorted.sort_by((left: Dated, right: Dated) -> {
+    sorted.sort_by(fn(left: Dated, right: Dated) {
         if left.time > right.time -> return Ordering.Less
         if left.time < right.time -> return Ordering.Greater
         Ordering.Equal
@@ -3821,7 +3821,7 @@ write_receipt: fn(source_identity: String, seed_identity: String, commit: String
         "sourceIdentity": Dyn.Text(source_identity.copy()),
         "seedIdentity": Dyn.Text(seed_identity.copy()),
         "commit": Dyn.Text(commit.copy()),
-        "files": Dyn.Array(named.map(name -> Dyn.Text(name.copy()))),
+        "files": Dyn.Array(named.map(fn(name) { Dyn.Text(name.copy()) })),
         "rows": Dyn.Array(rows.copy()),
         "finished": Dyn.Text("{time.isoformat(time.now_utc())}Z"),
     })
@@ -4024,7 +4024,7 @@ int_field: fn(tree: Dyn, name: String) -> Int? Never! {
     refused: gate(source, seed, dir)
     assert(!refused.admitted)
     assert_eq(refused.reason, "the preflight receipt {written} lists failing rows: areas rc=1, area:CLI rc=1")
-    write_receipt(source, seed, "0123456789abcdef", [String]{}, receipt_rows(failing.filter(run -> run.name != "check" && run.name != "build")), dir) ?? panic(err.message)
+    write_receipt(source, seed, "0123456789abcdef", [String]{}, receipt_rows(failing.filter(fn(run) { run.name != "check" && run.name != "build" })), dir) ?? panic(err.message)
     assert_eq(gate(source, seed, dir).reason, "the preflight receipt {written} lists failing rows: areas rc=1, area:CLI rc=1; has no row for check, build")
     write_receipt(source, seed, "0123456789abcdef", [String]{}, [Dyn]{}, dir) ?? panic(err.message)
     assert_eq(gate(source, seed, dir).reason, "the preflight receipt {written} has no row for {RECEIPT_PASSES.join(", ")}")

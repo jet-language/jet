@@ -57,13 +57,13 @@ short_head: fn(l: Lander) -> String { command(l, Sh{"git rev-parse --short HEAD"
 NUMSTAT_COUNTS: Regex{"^[^\t]*\t[^\t]*\t"}
 
 files_of: fn(l: Lander, patch: String) -> [String] {
-    numstat: command(l, Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run().output.split(String.from_bytes([U8]{"\x00"}) ?? "").map(part -> NUMSTAT_COUNTS.replace_first(part, "")).to_list()
-    renames: files.read_or(patch, "").lines().filter(line -> line.starts_with("rename from ")).map(line -> line.removeprefix("rename from "))
-    [String]{}.union(numstat.concat(renames).filter(path -> path != ""))
+    numstat: command(l, Sh{"git apply --numstat -z {patch}"}).stderr(.Capture).run().output.split(String.from_bytes([U8]{"\x00"}) ?? "").map(fn(part) { NUMSTAT_COUNTS.replace_first(part, "") }).to_list()
+    renames: files.read_or(patch, "").lines().filter(fn(line) { line.starts_with("rename from ") }).map(fn(line) { line.removeprefix("rename from ") })
+    [String]{}.union(numstat.concat(renames).filter(fn(path) { path != "" }))
 }
 
 // The path list as the job's files file holds it: one path per line.
-listed: fn(paths: [String]) -> String { paths.map(path -> "{path}\n").join("") }
+listed: fn(paths: [String]) -> String { paths.map(fn(path) { "{path}\n" }).join("") }
 
 // Ends job `job` with exit status `code` and output `text`.
 finish: fn(job: String, code: Int, text: String) {
@@ -86,9 +86,9 @@ revert_job: fn(l: Lander, job: String) {
 
 // The queue's job directories, sorted.
 jobs_in: fn(queue: String) -> [String] {
-    names := files.list_dir_or(queue, []).map(entry -> entry.name)
+    names := files.list_dir_or(queue, []).map(fn(entry) { entry.name })
     names.sort()
-    names.filter(name -> !name.starts_with(".")).map(name -> "{queue}/{name}").filter(job -> files.is_dir(job))
+    names.filter(fn(name) { !name.starts_with(".") }).map(fn(name) { "{queue}/{name}" }).filter(fn(job) { files.is_dir(job) })
 }
 
 // A lock holder interrupted mid-batch must not leave patches applied in the
@@ -98,7 +98,7 @@ interrupted: fn(l: Lander) {
     if !files.is_dir(l.worktree) -> return
     queued := jobs_in(l.queue)
     queued.reverse()
-    loop job in queued.filter(job -> files.exists("{job}/applied")) {
+    loop job in queued.filter(fn(job) { files.exists("{job}/applied") }) {
         paths: files.read("{job}/files").lines()
         _ := quiet(l, Sh{"git reset -q --"}.extend(paths.copy()))
         if !quiet(l, Sh{"git diff --quiet HEAD --"}.extend(paths.copy())) || command(l, Sh{"git ls-files --others --exclude-standard --"}.extend(paths)).run().output != "" -> revert_job(l, job)
@@ -198,7 +198,7 @@ frozen: fn(l: Lander, lane: String, paths: [String]) -> Bool {
     lines: files.read_or(l.freeze, "").lines()
     end: (lines.get(0) ?? "").to_int() ?? return false
     if time.unix_ns() /% 1000000000 >= end || lane == (lines.get(1) ?? "") -> return false
-    lines.slice(2, lines.len()).any(prefix -> prefix != "" && paths.any(path -> path.starts_with(prefix)))
+    lines.slice(2, lines.len()).any(fn(prefix) { prefix != "" && paths.any(fn(path) { path.starts_with(prefix) }) })
 }
 
 // Whether the hold switch keeps `lane` from landing: it exists and does not
@@ -233,7 +233,7 @@ drain: fn(l: Lander, stop: Shared<Interrupt>) {
         peek: files_of(l, "{job}/patch")
         files.write("{job}/files.peek", listed(peek.copy()))
         // A job that touches a path already in the batch waits for the next round.
-        if frozen(l, lane, peek.copy()) || union.any(path -> peek.contains(path)) -> next
+        if frozen(l, lane, peek.copy()) || union.any(fn(path) { peek.contains(path) }) -> next
         if apply_job(l, stop.copy(), job.copy()) == .Val(paths) {
             union.extend(paths)
             batch.push(job)

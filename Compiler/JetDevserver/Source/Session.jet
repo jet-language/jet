@@ -105,7 +105,7 @@ BrowserAssetWatcher: struct {
         }
         if !metadata.file_type().is_dir() { *skipped = skipped.saturating_add(1); return }
         entries: fs.read_dir(path) ?? { *skipped = skipped.saturating_add(1); return }
-        children := entries.filter_map((entry) -> entry.ok()).map((entry) -> entry.path()).collect()
+        children := entries.filter_map(fn(entry) { entry.ok() }).map(fn(entry) { entry.path() }).collect()
         children.sort()
         loop child in children {
             Self.collect(child, files, skipped)
@@ -145,7 +145,7 @@ BrowserAssetWatcher: struct {
     }
     frame: fn(self: Self, session_id: String) -> String {
         (changes, skipped): self.poll()
-        events: changes.into_iter().filter_map((change) -> {
+        events: changes.into_iter().filter_map(fn(change) {
             logical: change.path.strip_prefix(self.root).ok()
             text: logical.to_string_lossy().replace('\\', "/")
             if text.is_empty() -> return .None
@@ -244,13 +244,13 @@ ResidentDevSession: struct {
         state: self.devtools_lock()
         envelope: &state.envelope
         source_identity: envelope.source_identity.copy()
-        revision: source_identity.as_ref().and_then((identity) -> identity.revision.copy()).unwrap_or(current_revision)
+        revision: source_identity.as_ref().and_then(fn(identity) { identity.revision.copy() }).unwrap_or(current_revision)
         latest: envelope.latest_sequence().unwrap_or(0)
         oldest: envelope.oldest_sequence()
-        truncation: envelope.truncated || cursor.is_some_and((cursor) -> oldest.is_some_and((oldest) -> cursor.saturating_add(1) < oldest))
+        truncation: envelope.truncated || cursor.is_some_and(fn(cursor) { oldest.is_some_and(fn(oldest) { cursor.saturating_add(1) < oldest }) })
         reset: envelope.reset || cursor.is_none() || truncation
         panels: envelope.events_since(cursor).cloned().collect()
-        selection: envelope.view().selection().map((selection) -> DevtoolsSelectionFact { panel_id: selection.panel_id.copy(), item_key: selection.item_key.clone().unwrap_or_default() })
+        selection: envelope.view().selection().map(fn(selection) { DevtoolsSelectionFact { panel_id: selection.panel_id.copy(), item_key: selection.item_key.clone().unwrap_or_default() } })
         diagnostic_code: (*self.diagnostic_code.lock().unwrap()).copy()
         diagnostic: (*self.diagnostic.lock().unwrap()).copy()
         accepted_revision: (*self.accepted_revision.lock().unwrap()).copy()
@@ -263,9 +263,9 @@ ResidentDevSession: struct {
             run_target: optional_fact(run_target), run_output: optional_fact(run_output), test_state: optional_fact(test_state) }
         DevtoolsProjection {
             protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.id.copy(),
-            source_id: source_identity.as_ref().and_then((identity) -> identity.source_id.copy()),
-            build_id: source_identity.as_ref().and_then((identity) -> identity.build_id.copy()), revision: revision,
-            world_id: source_identity.as_ref().and_then((identity) -> identity.world_id.copy()), sequence: latest, observed_at, panels: panels, selection: selection,
+            source_id: source_identity.as_ref().and_then(fn(identity) { identity.source_id.copy() }),
+            build_id: source_identity.as_ref().and_then(fn(identity) { identity.build_id.copy() }), revision: revision,
+            world_id: source_identity.as_ref().and_then(fn(identity) { identity.world_id.copy() }), sequence: latest, observed_at, panels: panels, selection: selection,
             status: status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.devtools_command_receipts(), reset, truncation
         }
     }
@@ -276,7 +276,7 @@ ResidentDevSession: struct {
         if accepted.is_empty() -> *accepted = revision
     }
     set_live_lineage: fn(self: &Self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
-        if [source_id, build_id, revision, world_id].iter().any((value) -> value.is_empty() || value.chars().any((ch) -> ch.is_control())) -> return .Err("live lineage is incomplete")
+        if [source_id, build_id, revision, world_id].iter().any(fn(value) { value.is_empty() || value.chars().any(fn(ch) { ch.is_control() }) }) -> return .Err("live lineage is incomplete")
         *self.live_lineage.lock().unwrap() = .Val(LiveLineage { protocol: "jet.live.v1", session_id: self.id.copy(), source_id, build_id, revision, world_id })
         self.observe_source(revision)
         self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))
@@ -355,7 +355,7 @@ ResidentDevSession: struct {
         drop(available)
         ProjectRebuildExecutorGuard { available: Arc.clone(self.project_rebuild_executor) }
     }
-    project_rebuild_executor_available: fn(self: Self) -> Bool { self.project_rebuild_executor.lock().map((available) -> *available).unwrap_or(false) }
+    project_rebuild_executor_available: fn(self: Self) -> Bool { self.project_rebuild_executor.lock().map(fn(available) { *available }).unwrap_or(false) }
     validate_devtools_command_admission: fn(self: &Self, command: &JetDevtoolsCommand) Err! {
         command.validate()
         if command.session_id() != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
@@ -432,7 +432,7 @@ ResidentDevSession: struct {
                             self.update_command_receipt(request.request_id, "rejected", .Val(error.copy()))
                             result: JetDevtoolsDatabaseExplainResult.new(request.session_id.copy(), request.request_id.copy(), request.statement_identity.copy(),
                                 "error", 0, false, 0, [], .Val("dispatch_failed"), .Val(error))
-                                .and_then((result) -> self.publish_database_explain_result(result, unix_time_ms(), "devserver"))
+                                .and_then(fn(result) { self.publish_database_explain_result(result, unix_time_ms(), "devserver") })
                             if result == .Err(publish_error) {
                                 jet_foundation.DevtoolsControl.jet_devtools_requeue_command_front(.DatabaseExplain(request))
                                 return .Err(publish_error)
@@ -513,10 +513,10 @@ ResidentDevSession: struct {
                 commands: envelope.commands().cloned().collect()
                 count: commands.len()
                 loop command in &commands -> self.validate_devtools_command_admission(command)
-                game_count: commands.iter().filter((command) -> if command == {
+                game_count: commands.iter().filter(fn(command) { if command == {
                     .GameControl(_) -> true
                     else -> false
-                }).count()
+                } }).count()
                 common_count: count.saturating_sub(game_count)
                 queued_common: jet_foundation.DevtoolsControl.jet_devtools_command_count(self.id)
                 if queued_common > JET_DEVTOOLS_MAX_COMMANDS.saturating_sub(common_count) -> return .Err("jet.devtools.v1 command queue is full")
@@ -549,7 +549,7 @@ ResidentDevSession: struct {
         self.publish_devtools_event_typed(event)
     }
     scrub: fn(self: Self, sequence: U64) -> ReplayProjection Err! {
-        projection: (() -> {
+        projection: (fn() {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.seek(state.recording, sequence).map_err(recording_error)
@@ -558,7 +558,7 @@ ResidentDevSession: struct {
         projection
     }
     scrub_time: fn(self: Self, timestamp_ms: U64) -> ReplayProjection Err! {
-        projection: (() -> {
+        projection: (fn() {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.seek_time(state.recording, timestamp_ms).map_err(recording_error)
@@ -567,7 +567,7 @@ ResidentDevSession: struct {
         projection
     }
     step: fn(self: Self) -> ReplayProjection Err! {
-        projection: (() -> {
+        projection: (fn() {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             state.cursor.step_forward(state.recording).map_err(recording_error)
@@ -576,7 +576,7 @@ ResidentDevSession: struct {
         projection
     }
     skip: fn(self: Self, count: U64) -> ReplayProjection Err! {
-        projection: (() -> {
+        projection: (fn() {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             loop _ in 0..count -> _: state.cursor.step_forward(state.recording).map_err(recording_error)
@@ -595,7 +595,7 @@ ResidentDevSession: struct {
     }
     restore: fn(self: Self, name: String) -> ReplayProjection Err! {
         validate_devtools_text(name, "checkpoint name")
-        projection: (() -> {
+        projection: (fn() {
             recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
             state: recording.as_mut() ?? return .Err(recording_unavailable())
             checkpoint: state.checkpoints.get(name).cloned() ?? return .Err(RecordingError.CheckpointUnavailable.to_string())
@@ -606,17 +606,18 @@ ResidentDevSession: struct {
         projection
     }
     divergence: fn(self: Self) -> DevtoolsRecordingDivergence Err! {
-        (envelope_sequence, envelope_identity): (() -> {
+        (envelope_sequence, envelope_identity): (fn() {
             state: self.devtools_lock()
             (_0: state.envelope.latest_sequence(), _1: state.envelope.source_identity.copy())
         })()
         recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         state: recording.as_ref() ?? return .Err(recording_unavailable())
-        expected_sequence: state.first_sequence.and_then((first) -> envelope_sequence.filter((sequence) -> *sequence >= first))
-        actual_sequence: state.recording.events().last().map((event) -> event.sequence())
+        expected_sequence: state.first_sequence.and_then(fn(first) { envelope_sequence.filter(fn(sequence) { *sequence >= first }) })
+        actual_sequence: state.recording.events().last().map(fn(event) { event.sequence() })
         reason := String?{.None}
-        if envelope_identity.as_ref().map_or(true, (identity) ->
-            identity.source_id.as_ref() != .Val(state.recording.identity().source_id) || identity.build_id.as_ref() != .Val(state.recording.identity().build_id)) {
+        if envelope_identity.as_ref().map_or(true, fn(identity) {
+            identity.source_id.as_ref() != .Val(state.recording.identity().source_id) || identity.build_id.as_ref() != .Val(state.recording.identity().build_id)
+        }) {
             reason = .Val("resident source/build identity differs from recording")
         } else if expected_sequence != actual_sequence -> reason = .Val("resident event tail differs from recording")
         else if state.recording.projection(state.cursor) == .Err(error) -> reason = .Val(error.to_string())
@@ -627,7 +628,7 @@ ResidentDevSession: struct {
     recording_control: fn(self: Self, payload: String) -> String Err! {
         root: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("recording control must be valid bounded JSON")
         object: object_map(root) ?? return .Err("recording control must be a JSON object")
-        operation: object.get("op").or_else(() -> object.get("action")).and_then(json_string) ?? return .Err("recording control must include string op")
+        operation: object.get("op").or_else(fn() { object.get("action") }).and_then(json_string) ?? return .Err("recording control must include string op")
         if operation == {
             "scrub" -> {
                 sequence: object.get("sequence").and_then(json_u64) ?? return .Err("recording scrub requires non-negative sequence")
@@ -672,7 +673,7 @@ ResidentDevSession: struct {
             else -> .None
         }
         identity: JetDevtoolsSourceIdentityFact.new(source_id, build_id, revision, world_id)
-        first_sequence: (() -> {
+        first_sequence: (fn() {
             state: self.devtools_lock()
             state.envelope.set_source_identity(.Val(identity))
             if state.envelope.latest_sequence() == {
@@ -696,11 +697,11 @@ ResidentDevSession: struct {
         validate_devtools_text(decision.module_ref, "HotSwap module")
         compatibility: if decision.is_compatible() -> "compatible" else -> "incompatible"
         reason: decision.compatibility.reason().unwrap_or("")
-        (kept, reset): decision.state.iter().partition((fact) -> fact.is_preserved())
+        (kept, reset): decision.state.iter().partition(fn(fact) { fact.is_preserved() })
         state: decision.state.iter().map(retention_fact_json).collect().join(",")
         change_facts: decision.change_facts.iter().map(game_change_fact_json).collect().join(",")
-        kept_keys: kept.iter().map((fact) -> fact.key.copy()).collect()
-        reset_keys: reset.iter().map((fact) -> fact.key.copy()).collect()
+        kept_keys: kept.iter().map(fn(fact) { fact.key.copy() }).collect()
+        reset_keys: reset.iter().map(fn(fact) { fact.key.copy() }).collect()
         fields: "{{\"module\":{json_value(decision.module_ref)},\"compatibility\":{json_value(compatibility)},\"reason\":{json_value(reason)},\"changed\":{string_array_json(decision.changed)},\"changed_functions\":{string_array_json(decision.changed_functions)},\"state\":[{state}],\"kept\":{string_array_json(kept_keys)},\"reset\":{string_array_json(reset_keys)},\"rechecked_items\":{string_array_json(decision.rechecked_items)},\"change_facts\":[{change_facts}]}}"
         event: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", fields)
         _: self.publish_devtools_event_typed(event)
@@ -709,14 +710,14 @@ ResidentDevSession: struct {
         root: parse_json(request) ?? return .Err("devtools selection must be valid JSON")
         object: object_map(root) ?? return .Err("devtools selection must be an object")
         nested: object.get("selection").and_then(object_map)
-        field: (key: String) -> object.get(key).or_else(() -> nested.as_ref().and_then((selection) -> selection.get(key))).and_then(json_string).map((text) -> text.to_string())
-        clear: object.get("clear").is_some_and((value) -> if value == {
+        field: fn(key: String) { object.get(key).or_else(fn() { nested.as_ref().and_then(fn(selection) { selection.get(key) }) }).and_then(json_string).map(fn(text) { text.to_string() }) }
+        clear: object.get("clear").is_some_and(fn(value) { if value == {
             .Bool(lit0) && lit0 == true -> true
             else -> false
-        })
+        } })
             || object.get("selection") == .Val(.Null)
-        panel_id: field("panel_id").or_else(() -> field("target"))
-        item_key: field("item_key").or_else(() -> field("source_id")).or_else(() -> field("output"))
+        panel_id: field("panel_id").or_else(fn() { field("target") })
+        item_key: field("item_key").or_else(fn() { field("source_id") }).or_else(fn() { field("output") })
         origin: field("origin").unwrap_or("host")
         validate_devtools_text(origin, "selection origin")
         loop (value, label) in [(_0: panel_id.as_ref(), _1: "panel_id"), (_0: item_key.as_ref(), _1: "item_key")] {
@@ -734,13 +735,13 @@ ResidentDevSession: struct {
             if source_id.as_ref().or(item_key.as_ref()) == .Val(source) -> self.select_project_source(source)
             self.select_output_values(output.as_ref(), target.as_ref().or(panel_id.as_ref()))
         }
-        _: (() -> {
+        _: (fn() {
             state: self.devtools_lock()
             if clear -> state.envelope.set_selection(.None)
             else {
-                previous_panel: state.envelope.view().selection().map((selection) -> selection.panel_id.copy())
+                previous_panel: state.envelope.view().selection().map(fn(selection) { selection.panel_id.copy() })
                 selected_panel: panel_id.clone().or(previous_panel).unwrap_or_default()
-                selected_item: item_key.clone().or_else(() -> state.envelope.view().selection().and_then((selection) -> selection.item_key.copy()))
+                selected_item: item_key.clone().or_else(fn() { state.envelope.view().selection().and_then(fn(selection) { selection.item_key.copy() }) })
                 state.envelope.set_selection(.Val(JetDevtoolsSelection.new(selected_panel, selected_item)))
             }
         })()
@@ -755,7 +756,7 @@ ResidentDevSession: struct {
         object: object_map(root) ?? return .Err("devtools cursor must be an object")
         origin: object.get("origin").and_then(json_string).unwrap_or("host")
         validate_devtools_text(origin, "cursor origin")
-        cursor_value: object.get("cursor").or_else(() -> object.get("sequence"))
+        cursor_value: object.get("cursor").or_else(fn() { object.get("sequence") })
         sequence: if cursor_value == {
             .None | .Val(.Null) -> .None
             .Val(.Object(entries)) -> {
@@ -766,7 +767,7 @@ ResidentDevSession: struct {
             .Val(value) -> .Val(json_u64(value) ?? return .Err("devtools cursor must be a sequence"))
         }
         { self.devtools_lock().envelope.set_cursor(sequence) }
-        sequence_json: sequence.map((value) -> value.to_string()).unwrap_or("null")
+        sequence_json: sequence.map(fn(value) { value.to_string() }).unwrap_or("null")
         fields: "{{\"sequence\":{sequence_json}}}"
         event: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Cursor", "session", fields)
         _: self.publish_devtools_event_typed(event)

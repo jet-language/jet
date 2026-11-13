@@ -318,7 +318,7 @@ store_lease_decode_optional_text: fn(value: String, field: String) -> String IOE
 store_lease_encode_members: fn(members: [LeaseMember]) -> String IOError! {
     store_lease_validate_members(members)
     sorted := members
-    sorted.sort_by(member -> member.name)
+    sorted.sort_by(fn(member) { member.name })
     lines := [String]{}
     loop member in sorted -> lines.push("{member.name}\t{member.digest}\n")
     Ok(store_lease_encode_text(lines.join("")))

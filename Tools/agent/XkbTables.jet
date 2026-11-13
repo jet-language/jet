@@ -262,7 +262,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
             text_keys.push(row.value)
         }
     }
-    text_keys.sort_by((value: Int) -> value)
+    text_keys.sort_by(fn(value: Int) { value })
     text_rows := [U8]{}
     loop value in text_keys {
         push_be(text_rows, value, 4)
@@ -271,7 +271,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
     name_text: names.join("\n")
     // Breadth-first, each node's children contiguous and sorted by keysym.
     order := nodes[0].children.copy()
-    order.sort_by((at: Int) -> nodes[at].keysym)
+    order.sort_by(fn(at: Int) { nodes[at].keysym })
     roots: order.len()
     compose_rows := [U8]{}
     pool := [U8]{}
@@ -292,7 +292,7 @@ render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: S
             push_be(compose_rows, 32768 + bytes.len(), 2)
         } else {
             children := node.children.copy()
-            children.sort_by((at: Int) -> nodes[at].keysym)
+            children.sort_by(fn(at: Int) { nodes[at].keysym })
             push_be(compose_rows, order.len(), 3)
             push_be(compose_rows, children.len(), 2)
             loop child in children -> order.push(child)

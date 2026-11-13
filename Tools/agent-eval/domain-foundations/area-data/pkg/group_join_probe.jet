@@ -28,8 +28,8 @@ join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
 run: fn() {
     rows: data.csv<Row>("team,value\nA,2.0\nB,4.0\nA,6.0\n") ?? panic("csv")
     groups: data.query(rows)
-        .group_by(row -> row.team)
-        .mean(row -> row.value)
+        .group_by(fn(row) { row.team })
+        .mean(fn(row) { row.value })
         .collect() ?? panic("groups")
     summaries := [Summary]{}
     loop group in groups {

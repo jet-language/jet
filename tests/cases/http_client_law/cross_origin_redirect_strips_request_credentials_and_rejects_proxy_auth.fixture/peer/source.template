@@ -43,7 +43,7 @@ publish: fn(listener: TCPListener, path: String) {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    starts_casefold: (raw: [U8], want: [U8]) -> {
+    starts_casefold: fn(raw: [U8], want: [U8]) {
         if raw.len() < want.len() -> return false
         loop i in 0..<want.len() {
             n := Int.from_u8(raw[i])

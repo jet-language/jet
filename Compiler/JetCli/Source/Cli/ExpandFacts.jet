@@ -74,7 +74,7 @@ jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: SemIndex) -> [Je
             facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
-    facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
+    facts.sort_by(fn(left: JetCLIExpandFact, right: JetCLIExpandFact) { left.text <=> right.text })
     facts
 }
 jet_cli_expand_layout_missing: fn(value: TComptimeValue, names: [String]) -> Bool Never! {

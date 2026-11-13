@@ -691,7 +691,7 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
             collected.push(binding)
         }
     }
-    collected.sort_by((left: JetCLICacheSource, right: JetCLICacheSource) -> left.relative_path <=> right.relative_path)
+    collected.sort_by(fn(left: JetCLICacheSource, right: JetCLICacheSource) { left.relative_path <=> right.relative_path })
     loop file in collected {
         path: jet_cli_authority_path(root, file.relative_path)
         source: String.from_bytes(file.read.bytes.move()) ?? return Val("cannot read `{path}`: file is not valid UTF-8")

@@ -27,7 +27,7 @@ use {
 
 EDIT_SCHEMA_VERSION: U32{1}
 apply_transaction_json: fn(path: OSPath, request: String) -> String Err! {
-    run_compiler_work(() -> apply_transaction_json_on_compiler_stack(path, request))
+    run_compiler_work(fn() { apply_transaction_json_on_compiler_stack(path, request) })
 }
 apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> String Err! {
     src: read_source_without_symlinks(path) ?? return .Err(edit_error("io", err.to_string()))
@@ -91,12 +91,12 @@ apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> S
         "reorder_statements" -> {
             graph_id: required_string(request, "graph_id")
             moved: SourceSpan {
-                start: json_usize_field(request, "moved_start").ok_or_else(() -> edit_error("bad_request", "missing `moved_start`")),
-                end: json_usize_field(request, "moved_end").ok_or_else(() -> edit_error("bad_request", "missing `moved_end`"))?
+                start: json_usize_field(request, "moved_start").ok_or_else(fn() { edit_error("bad_request", "missing `moved_start`") }),
+                end: json_usize_field(request, "moved_end").ok_or_else(fn() { edit_error("bad_request", "missing `moved_end`") })?
             }
             anchor: SourceSpan {
-                start: json_usize_field(request, "anchor_start").ok_or_else(() -> edit_error("bad_request", "missing `anchor_start`"))?,
-                end: json_usize_field(request, "anchor_end").ok_or_else(() -> edit_error("bad_request", "missing `anchor_end`"))?
+                start: json_usize_field(request, "anchor_start").ok_or_else(fn() { edit_error("bad_request", "missing `anchor_start`") })?,
+                end: json_usize_field(request, "anchor_end").ok_or_else(fn() { edit_error("bad_request", "missing `anchor_end`") })?
             }
             position: json_string_field(request, "position").unwrap_or("after")
             apply_reorder_statements(path, src, graph_id, moved, anchor, position)
@@ -106,8 +106,8 @@ apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> S
             pattern: required_string(request, "pattern")?
             validate_single_line_fragment(pattern, "pattern arm text must stay on one line")?
             node: SourceSpan {
-                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
-                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+                start: json_usize_field(request, "node_start").ok_or_else(fn() { edit_error("bad_request", "missing `node_start`") })?,
+                end: json_usize_field(request, "node_end").ok_or_else(fn() { edit_error("bad_request", "missing `node_end`") })?
             }
             apply_add_pattern_arm(path, src, graph_id, node, pattern)
         }
@@ -116,24 +116,24 @@ apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> S
             pattern: required_string(request, "pattern")?
             validate_single_line_fragment(pattern, "pattern arm text must stay on one line")?
             pattern_span: SourceSpan {
-                start: json_usize_field(request, "pattern_start").ok_or_else(() -> edit_error("bad_request", "missing `pattern_start`"))?,
-                end: json_usize_field(request, "pattern_end").ok_or_else(() -> edit_error("bad_request", "missing `pattern_end`"))?
+                start: json_usize_field(request, "pattern_start").ok_or_else(fn() { edit_error("bad_request", "missing `pattern_start`") })?,
+                end: json_usize_field(request, "pattern_end").ok_or_else(fn() { edit_error("bad_request", "missing `pattern_end`") })?
             }
             apply_edit_pattern_arm(path, src, graph_id, pattern_span, pattern)
         }
         "remove_pattern_arm" -> {
             graph_id: required_string(request, "graph_id")?
             pattern_span: SourceSpan {
-                start: json_usize_field(request, "pattern_start").ok_or_else(() -> edit_error("bad_request", "missing `pattern_start`"))?,
-                end: json_usize_field(request, "pattern_end").ok_or_else(() -> edit_error("bad_request", "missing `pattern_end`"))?
+                start: json_usize_field(request, "pattern_start").ok_or_else(fn() { edit_error("bad_request", "missing `pattern_start`") })?,
+                end: json_usize_field(request, "pattern_end").ok_or_else(fn() { edit_error("bad_request", "missing `pattern_end`") })?
             }
             apply_remove_pattern_arm(path, src, graph_id, pattern_span)
         }
         "toggle_switch_state" -> {
             graph_id: required_string(request, "graph_id")?
             node_span: SourceSpan {
-                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
-                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+                start: json_usize_field(request, "node_start").ok_or_else(fn() { edit_error("bad_request", "missing `node_start`") })?,
+                end: json_usize_field(request, "node_end").ok_or_else(fn() { edit_error("bad_request", "missing `node_end`") })?
             }
             apply_toggle_switch_state(path, src, graph_id, node_span)
         }
@@ -141,19 +141,19 @@ apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> S
             element: json_string_field(request, "element").unwrap_or("1")
             validate_single_line_fragment(element, "multi-input element must stay on one line")?
             node: SourceSpan {
-                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
-                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+                start: json_usize_field(request, "node_start").ok_or_else(fn() { edit_error("bad_request", "missing `node_start`") })?,
+                end: json_usize_field(request, "node_end").ok_or_else(fn() { edit_error("bad_request", "missing `node_end`") })?
             }
             apply_append_multi_input(path, src, node, element)
         }
         "remove_multi_input_element" -> {
             node: SourceSpan {
-                start: json_usize_field(request, "node_start").ok_or_else(() -> edit_error("bad_request", "missing `node_start`"))?,
-                end: json_usize_field(request, "node_end").ok_or_else(() -> edit_error("bad_request", "missing `node_end`"))?
+                start: json_usize_field(request, "node_start").ok_or_else(fn() { edit_error("bad_request", "missing `node_start`") })?,
+                end: json_usize_field(request, "node_end").ok_or_else(fn() { edit_error("bad_request", "missing `node_end`") })?
             }
             element: SourceSpan {
-                start: json_usize_field(request, "element_start").ok_or_else(() -> edit_error("bad_request", "missing `element_start`"))?,
-                end: json_usize_field(request, "element_end").ok_or_else(() -> edit_error("bad_request", "missing `element_end`"))?
+                start: json_usize_field(request, "element_start").ok_or_else(fn() { edit_error("bad_request", "missing `element_start`") })?,
+                end: json_usize_field(request, "element_end").ok_or_else(fn() { edit_error("bad_request", "missing `element_end`") })?
             }
             apply_remove_multi_input_element(path, src, node, element)
         }
@@ -164,12 +164,12 @@ apply_transaction_json_on_compiler_stack: fn(path: OSPath, request: String) -> S
                 strategy: required_string(request, "strategy")?
                 function: required_string(request, "function")?
                 from_span: SourceSpan {
-                    start: json_usize_field(request, "from_start").ok_or_else(() -> edit_error("bad_request", "missing `from_start`"))?,
-                    end: json_usize_field(request, "from_end").ok_or_else(() -> edit_error("bad_request", "missing `from_end`"))?
+                    start: json_usize_field(request, "from_start").ok_or_else(fn() { edit_error("bad_request", "missing `from_start`") })?,
+                    end: json_usize_field(request, "from_end").ok_or_else(fn() { edit_error("bad_request", "missing `from_end`") })?
                 }
                 target_span: SourceSpan {
-                    start: json_usize_field(request, "target_start").ok_or_else(() -> edit_error("bad_request", "missing `target_start`"))?,
-                    end: json_usize_field(request, "target_end").ok_or_else(() -> edit_error("bad_request", "missing `target_end`"))?
+                    start: json_usize_field(request, "target_start").ok_or_else(fn() { edit_error("bad_request", "missing `target_start`") })?,
+                    end: json_usize_field(request, "target_end").ok_or_else(fn() { edit_error("bad_request", "missing `target_end`") })?
                 }
                 return apply_exec_convergence(path, src, graph_id, from_span, target_span, from_pin_name, strategy, function, json_string_field(request, "helper_name"))
             }
@@ -264,8 +264,8 @@ apply_noop: fn(path: OSPath, _src: String) -> String Err! { .Ok(edit_ok(false, p
 apply_rename: fn(path: OSPath, src: String, from: String, to: String) -> String Err! {
     idx: semindex.open(path) ?? return .Err(edit_error("check", err.to_string()))
     edits := []
-    loop def in idx.definitions().iter().filter((d) -> d.name == from) -> edits.push(edit(def.def_span, to))
-    loop r in idx.references().iter().filter((r) -> r.name == from) -> edits.push(edit(r.span, to))
+    loop def in idx.definitions().iter().filter(fn(d) { d.name == from }) -> edits.push(edit(def.def_span, to))
+    loop r in idx.references().iter().filter(fn(r) { r.name == from }) -> edits.push(edit(r.span, to))
     if edits.is_empty() -> return .Err(edit_error("not_found", "Canvas rename found no matching binding"))
     changed: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas rename edits overlapped"))
     formatted: format_source(changed) ?? return .Err(diagnostics_error(path, changed, err))
@@ -275,13 +275,14 @@ apply_rename: fn(path: OSPath, src: String, from: String, to: String) -> String 
 }
 record_canvas_rename: fn(path: &OSPath, before: String, after: String, from: String, to: String, index: &SemIndex) Err! {
     // GATE #4494: symlink-safe exclusive creation; #4409: AlreadyExists receipt collision.
-    project: path.parent().unwrap_or_else(() -> OSPath.new("."))
+    project: path.parent().unwrap_or_else(fn() { OSPath.new(".") })
     directory: project.join(".jet/codemods")
     ensure_no_symlink_directory(directory) ?? return .Err(edit_error("io", "could not record semantic rename: {err}"))
     before_hash: sha256_hex(before.as_bytes())
     after_hash: sha256_hex(after.as_bytes())
-    targets: index.definition_facts().iter().filter((fact) -> fact.name == from).map((fact) ->
-        "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}.{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
+    targets: index.definition_facts().iter().filter(fn(fact) { fact.name == from }).map(fn(fact) {
+        "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}.{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}"
+    }).collect().join(",")
     file: "{{\"path\":{json_str(path.display().to_string())},\"before_hash\":{json_str(before_hash)},\"after_hash\":{json_str(after_hash)}}}"
     op: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets}],\"files\":[{file}]}}"
     hash_prefix := after_hash[0..<12] // #4303
@@ -312,14 +313,14 @@ apply_create_function: fn(path: OSPath, src: String, name: String, params: Strin
 apply_create_trait_impl: fn(path: OSPath, src: String, type_name: String, trait_name: String) -> String Err! {
     path_str: path.to_string_lossy()
     (diags, bundle): Driver.check_file(path_str, .None, true)
-    errors: diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    errors: diags.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
     if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
     bundle: bundle ?? return .Err(edit_error("check", "Canvas could not read checked trait facts"))
     location: find_trait_location(bundle, path, trait_name) ?? return .Err(edit_error("not_found", "Canvas trait was not found in source"))
     trait_def: location.trait_def
     if !trait_def.assoc_types.is_empty() -> return .Err(edit_error("needs_associated_types", "Canvas will not guess associated type implementations; add each associated type in source first"))
     body := ""
-    loop method in trait_def.methods.iter().filter((method) -> method.default_body.is_none()) {
+    loop method in trait_def.methods.iter().filter(fn(method) { method.default_body.is_none() }) {
         sig: trait_method_signature(src, method)
         body.push_str("    ")
         body.push_str(sig)
@@ -339,7 +340,7 @@ apply_create_trait_impl: fn(path: OSPath, src: String, type_name: String, trait_
     item_indent: if location.scope.is_empty() -> "" else -> indentation_at(src, trait_def.span.start)
     prefix_view := src[0..<insert_at] // #4303
     prefix: if insert_at == 0 || prefix_view.ends_with('\n') -> "" else -> "\n"
-    method_body: body.lines().map((line) -> "{item_indent}{line}\n").collect[String]()
+    method_body: body.lines().map(fn(line) { "{item_indent}{line}\n" }).collect[String]()
     impl_block: "{prefix}{item_indent}impl {type_name}.{local_trait_name} {{\n{method_body}{item_indent}}}\n"
     changed: FixEngine.apply_edits(src, [edit(SourceSpan { start: insert_at, end: insert_at }, impl_block)]) ?? return .Err(edit_error("overlap", "Canvas trait impl edit overlapped"))
     return write_checked_formatted(path, src, changed)
@@ -348,9 +349,9 @@ TraitLocation: struct { trait_def: &AST.TraitDef; scope: [String]; module_close:
 source_trait_path: fn(bundle: AST.ProgramBundle, module_idx: Usize, module_alias: String, name: String, span: Span, fallback_scope: [String]) -> String? {
     ledger: &bundle.name_ledger
     path: ["{module_alias}.{name}", if fallback_scope.is_empty() -> "{module_alias}.{name}" else -> "{module_alias}.{fallback_scope.join(".")}.{name}"]
-        .into_iter().find_map((candidate) -> ledger.display_path(module_idx, candidate, .Val(module_idx)))
-        .or_else(() -> ledger.canonical_path_at(module_idx, span.start, span.end))
-    return .Val(path.strip_prefix(module_alias).and_then((rest) -> rest.strip_prefix('.')).unwrap_or(path).to_string())
+        .into_iter().find_map(fn(candidate) { ledger.display_path(module_idx, candidate, .Val(module_idx)) })
+        .or_else(fn() { ledger.canonical_path_at(module_idx, span.start, span.end) })
+    return .Val(path.strip_prefix(module_alias).and_then(fn(rest) { rest.strip_prefix('.') }).unwrap_or(path).to_string())
 }
 enclosing_inline_module: fn(items: [Item], position: Usize) -> ([String], Usize)? {
     loop item in items {
@@ -378,10 +379,10 @@ find_trait_location: fn(bundle: AST.ProgramBundle, path: OSPath, trait_name: Str
             if item == {
                 .Trait(t) -> {
                     display_path: source_trait_path(bundle, module_idx, module_alias, t.name, t.name_span, scope)
-                    fallback_match: t.name == local_name && scope.iter().map((s) -> s.as_str()).eq(requested_scope.iter().copied())
+                    fallback_match: t.name == local_name && scope.iter().map(fn(s) { s.as_str() }).eq(requested_scope.iter().copied())
                     if display_path != .Val(requested_name) && !fallback_match -> next
-                    (found_scope, module_close): enclosing_inline_module(root_items, t.name_span.start).unwrap_or_else(() -> (scope.copy(), source_len))
-                    found_scope: display_path.as_ref().and_then((path) -> path.rsplit_once('.')).map(((scope, _)) -> scope.split('.').map((s) -> s.to_string()).collect()).unwrap_or(found_scope)
+                    (found_scope, module_close): enclosing_inline_module(root_items, t.name_span.start).unwrap_or_else(fn() { (scope.copy(), source_len) })
+                    found_scope: display_path.as_ref().and_then(fn(path) { path.rsplit_once('.') }).map(fn((scope, _)) { scope.split('.').map(fn(s) { s.to_string() }).collect() }).unwrap_or(found_scope)
                     return .Val(TraitLocation { trait_def: t, scope: found_scope, module_close: module_close })
                 }
                 .CodeModule(m) -> {
@@ -411,13 +412,13 @@ apply_edit_function_signature: fn(path: OSPath, src: String, graph_id: String, s
 }
 apply_inline_edit: fn(path: OSPath, src: String, inline_id: String, new_expr: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
     changed: FixEngine.apply_edits(src, [edit(inline.span, new_expr)]) ?? return .Err(edit_error("overlap", "Canvas inline edit overlapped"))
     return write_checked_formatted(path, src, changed)
 }
 apply_promote_inline: fn(path: OSPath, src: String, inline_id: String, name: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
     expr: snippet(src, Span.new(inline.span.start, inline.span.end))
     line: line_start(src, inline.span.start)
     indent: indentation_at(src, inline.span.start)
@@ -428,7 +429,7 @@ apply_promote_inline: fn(path: OSPath, src: String, inline_id: String, name: Str
 }
 apply_visible_conversion: fn(path: OSPath, src: String, inline_id: String, callee: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
     expr: snippet(src, Span.new(inline.span.start, inline.span.end))
     replacement: "{callee}({expr})"
     changed: FixEngine.apply_edits(src, [edit(inline.span, replacement)]) ?? return .Err(edit_error("overlap", "Canvas conversion edit overlapped"))
@@ -438,24 +439,24 @@ apply_break_link: fn(path: OSPath, src: String, wire_id: String) -> String Err! 
 apply_move_link: fn(path: OSPath, src: String, wire_id: String, replacement: String) -> String Err! { rewrite_wire_expr(path, src, wire_id, replacement) }
 rewrite_wire_expr: fn(path: OSPath, src: String, wire_id: String, replacement: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    span: projection.json.split("\"wire_id\":").skip(1).find_map((chunk) -> wire_span_from_json_chunk(chunk, wire_id))
+    span: projection.json.split("\"wire_id\":").skip(1).find_map(fn(chunk) { wire_span_from_json_chunk(chunk, wire_id) })
         ?? return .Err(edit_error("not_found", "Canvas wire no longer maps to a source expression"))
     changed: FixEngine.apply_edits(src, [edit(span, replacement)]) ?? return .Err(edit_error("overlap", "Canvas wire edit overlapped"))
     return write_checked_formatted(path, src, changed)
 }
 apply_insert_call: fn(path: OSPath, src: String, graph_id: String, callee: String, args: [String], bind: String?, wire_inline_expr_id: String?, wire_expr: String?, wire_origin_pin_id: String?, wire_target_pin: String?, module_path: String?) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    final_args: if args.is_empty() -> wire_expr.map((expr) -> [expr.copy()]).unwrap_or_default() else -> args.to_vec()
+    final_args: if args.is_empty() -> wire_expr.map(fn(expr) { [expr.copy()] }).unwrap_or_default() else -> args.to_vec()
     plan := insert_call_plan(src, callee, final_args, module_path)
     call: if plan.fallible -> "{plan.callee}({plan.args.join(", ")}) ?? panic(\"canvas\")" else -> "{plan.callee}({plan.args.join(", ")})"
     if wire_inline_expr_id == .Val(inline_id) {
-        inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+        inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
         edits := [edit(inline.span, call)]
         if plan.import == .Val(import) -> edits.push(import)
         changed: FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas wired insert edit overlapped"))
         return write_checked_formatted(path, src, changed)
     }
-    anchor: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    anchor: projection.graph_anchors.iter().find(fn(a) { a.graph_id == graph_id }) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     (insert_offset, indent): call_insert_target(src, graph_id, projection, anchor, wire_origin_pin_id, wire_target_pin)
     stmt: if bind == {
         .Val(name) -> "{indent}{name}: {call}\n"
@@ -468,12 +469,12 @@ apply_insert_call: fn(path: OSPath, src: String, graph_id: String, callee: Strin
 }
 call_insert_target: fn(src: String, graph_id: String, projection: &Projection, anchor: &GraphEditAnchor, wire_origin_pin_id: String?, _wire_target_pin: String?) -> (Usize, String) Err! {
     pin_id: wire_origin_pin_id ?? return .Ok((_0: anchor.insert_offset, _1: "    "))
-    (node_id, direction): pin_id.rsplit_once(":input:").map(((_0: node, _1: _)) -> (node, "input"))
-        .or_else(() -> pin_id.rsplit_once(":output:").map(((node, _)) -> (node, "output")))
+    (node_id, direction): pin_id.rsplit_once(":input:").map(fn((_0: node, _1: _)) { (node, "input") })
+        .or_else(fn() { pin_id.rsplit_once(":output:").map(fn((node, _)) { (node, "output") }) })
         ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
-    node: projection.node_refs.iter().filter((node) -> node.graph_id == graph_id)
-        .filter((node) -> node.node_id == node_id || node.node_id.ends_with(":{node_id}"))
-        .max_by_key((node) -> node.span.end.saturating_sub(node.span.start))
+    node: projection.node_refs.iter().filter(fn(node) { node.graph_id == graph_id })
+        .filter(fn(node) { node.node_id == node_id || node.node_id.ends_with(":{node_id}") })
+        .max_by_key(fn(node) { node.span.end.saturating_sub(node.span.start) })
         ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
     if node.node_id.ends_with(":entry") -> return .Ok((_0: anchor.insert_offset, _1: "    "))
     indent: indentation_at(src, node.span.start)
@@ -481,11 +482,11 @@ call_insert_target: fn(src: String, graph_id: String, projection: &Projection, a
     line: line_start(src, node.span.start)
     node_end: node.span.end.min(src.len())
     tail := src[node_end..<src.len()] // #4303
-    line_end: tail.find('\n').map((offset) -> node_end + offset).unwrap_or(src.len())
-    inline_body: line == line_start(src, anchor.insert_offset) && src.get(line..node.span.start.min(src.len())).is_some_and((prefix) -> prefix.contains('{')) && src.get(node_end..line_end).is_some_and((suffix) -> suffix.contains('}'))
+    line_end: tail.find('\n').map(fn(offset) { node_end + offset }).unwrap_or(src.len())
+    inline_body: line == line_start(src, anchor.insert_offset) && src.get(line..node.span.start.min(src.len())).is_some_and(fn(prefix) { prefix.contains('{') }) && src.get(node_end..line_end).is_some_and(fn(suffix) { suffix.contains('}') })
     if inline_body {
         body_tail := src[node_end..line_end] // #4303
-        insert: if direction == "input" -> anchor.insert_offset else -> body_tail.find('}').map((offset) -> node_end + offset).unwrap_or(line_end)
+        insert: if direction == "input" -> anchor.insert_offset else -> body_tail.find('}').map(fn(offset) { node_end + offset }).unwrap_or(line_end)
         return .Ok((_0: insert, _1: "\n{statement_indent}"))
     }
     insert: if direction == "input" -> line else -> line_after(src, node.span.end)
@@ -540,10 +541,10 @@ imported_core_prefix: fn(src: String, module_ref: String) -> String? {
         if module_ref.starts_with(prefix) {
             suffix := module_ref[prefix.len()..<module_ref.len()] // #4303
             candidate: "{import.alias}.{suffix}"
-            if best.as_ref().map_or(true, ((_0: len, _1: _)) -> import.module_ref.len() > len) -> best = .Val((import.module_ref.len(), candidate))
+            if best.as_ref().map_or(true, fn((_0: len, _1: _)) { import.module_ref.len() > len }) -> best = .Val((import.module_ref.len(), candidate))
         }
     }
-    return best.map(((_0: _, _1: alias)) -> alias.move())
+    return best.map(fn((_0: _, _1: alias)) { alias.move() })
 }
 CoreImport: struct { module_ref: String; alias: String }
 // A `use` line or a row of a `use {` block (#6542): `alias: core.x`, or
@@ -576,7 +577,7 @@ core_imports: fn(src: String) -> [CoreImport] {
     }
     return imports.move()
 }
-ident_prefix: fn(text: String) -> String { text.chars().take_while((c) -> c.is_ascii_alphanumeric() || c == '_').collect() }
+ident_prefix: fn(text: String) -> String { text.chars().take_while(fn(c) { c.is_ascii_alphanumeric() || c == '_' }).collect() }
 default_core_alias: fn(module_ref: String) -> String { module_ref.rsplit('.').next().unwrap_or("core").to_string() }
 // The new `use` line goes after the leading imports; a `use {` block's rows and
 // its closing `}` count as import lines (#6542).
@@ -602,7 +603,7 @@ core_import_insert_point: fn(src: String) -> (Usize, Bool) {
     return (_0: insert_at, _1: saw_use)
 }
 core_default_args: fn(module_ref: String, member: String) -> [String] {
-    core_call_signature(module_ref, member).map(((_0: params, _1: _)) -> params.into_iter().map(((_, ty)) -> default_arg_for_type(ty.name())).collect()).unwrap_or_default()
+    core_call_signature(module_ref, member).map(fn((_0: params, _1: _)) { params.into_iter().map(fn((_, ty)) { default_arg_for_type(ty.name()) }).collect() }).unwrap_or_default()
 }
 core_call_signature: fn(module_ref: String, member: String) -> ([(AST.AccessConvention, AST.Type)], AST.Type?)? {
     if Syntax.core_call(module_ref, member) == .Val(row) {
@@ -612,7 +613,7 @@ core_call_signature: fn(module_ref: String, member: String) -> ([(AST.AccessConv
 }
 core_call_is_fallible: fn(module_ref: String, member: String) -> Bool {
     if Syntax.core_call(module_ref, member) == .Val(row) {
-        if Sema.core_fixed_sig_for_row(row) == .Val((_, ret)) -> return ret.is_some_and((ret) -> ret.is_fallible())
+        if Sema.core_fixed_sig_for_row(row) == .Val((_, ret)) -> return ret.is_some_and(fn(ret) { ret.is_fallible() })
     }
     return Sema.core_call_is_fallible(module_ref, member)
 }
@@ -623,7 +624,7 @@ check_canvas_candidate: fn(path: OSPath, overlay_path: OSPath, source: String) -
 canvas_action_candidate: fn(path: OSPath, src: String, graph_id: String, action_id: String, callee: String, args: [String]) -> String Err! {
     overlay_path: canonical_path(path)
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    anchor: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    anchor: projection.graph_anchors.iter().find(fn(a) { a.graph_id == graph_id }) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     if !action_id.starts_with("canvas.action:") -> return .Err(edit_error("bad_request", "Canvas action id must be a package Canvas action"))
     (_, descriptor_callee): action_id.rsplit_once(':') ?? return .Err(edit_error("bad_request", "Canvas action id has no checked source callee"))
     if descriptor_callee != callee -> return .Err(edit_error("bad_request", "Canvas action callee does not match its checked descriptor"))
@@ -632,13 +633,13 @@ canvas_action_candidate: fn(path: OSPath, src: String, graph_id: String, action_
     formatted: format_source(changed) ?? return .Err(diagnostics_error(path, src, err))
     // In-memory overlay avoids a scratch pathname race before Driver reopens it.
     check: check_canvas_candidate(path, overlay_path, formatted)
-    errors: check.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    errors: check.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
     if !errors.is_empty() -> return .Err(diagnostics_error(path, formatted, errors))
     return .Ok(formatted)
 }
 apply_insert_structural: fn(path: OSPath, src: String, graph_id: String, op: String, wire_origin_pin_id: String?, wire_target_pin: String?) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    anchor: projection.graph_anchors.iter().find((a) -> a.graph_id == graph_id) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    anchor: projection.graph_anchors.iter().find(fn(a) { a.graph_id == graph_id }) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     (insert, indent): structural_insert_target(src, graph_id, projection, anchor, wire_origin_pin_id, wire_target_pin)
     stmt: if op == {
         "insert_branch" -> format("{{0}}if true {{\n{{0}}    print(\"branch\")\n{{0}}}} else {{\n{{0}}    print(\"else\")\n{{0}}}}\n", indent)
@@ -660,15 +661,15 @@ structural_insert_target: fn(src: String, graph_id: String, projection: &Project
     }
     target: wire_target_pin ?? return .Err(edit_error("bad_request", "Canvas structural wire target is missing"))
     if target != "exec" -> return .Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
-    (node_id, direction): pin_id.rsplit_once(":input:").map(((_0: node, _1: _)) -> (node, "input"))
-        .or_else(() -> pin_id.rsplit_once(":output:").map(((node, _)) -> (node, "output")))
+    (node_id, direction): pin_id.rsplit_once(":input:").map(fn((_0: node, _1: _)) { (node, "input") })
+        .or_else(fn() { pin_id.rsplit_once(":output:").map(fn((node, _)) { (node, "output") }) })
         ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
     pin_marker: "\"pin_id\":{json_str(pin_id)}"
     if !projection.json.contains(pin_marker) -> return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
-    pin_is_exec: projection.json.split(pin_marker).skip(1).any((chunk) -> chunk.split("\"pin_id\":").next().is_some_and((pin) -> pin.contains("\"type\":\"exec\"")))
+    pin_is_exec: projection.json.split(pin_marker).skip(1).any(fn(chunk) { chunk.split("\"pin_id\":").next().is_some_and(fn(pin) { pin.contains("\"type\":\"exec\"") }) })
     if !pin_is_exec -> return .Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
-    node: projection.node_refs.iter().filter((node) -> node.graph_id == graph_id).filter((node) -> node.node_id == node_id)
-        .max_by_key((node) -> node.span.end.saturating_sub(node.span.start)) ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    node: projection.node_refs.iter().filter(fn(node) { node.graph_id == graph_id }).filter(fn(node) { node.node_id == node_id })
+        .max_by_key(fn(node) { node.span.end.saturating_sub(node.span.start) }) ?? return .Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
     if node.node_id.ends_with(":entry") -> return .Ok((_0: anchor.insert_offset, _1: "    "))
     insert: if direction == "input" -> line_start(src, node.span.start) else -> line_after(src, node.span.end)
     indent: indentation_at(src, node.span.start)
@@ -677,7 +678,7 @@ structural_insert_target: fn(src: String, graph_id: String, projection: &Project
 }
 apply_create_comment_region: fn(path: OSPath, src: String, graph_id: String, start: Usize, end: Usize, title: String, color: String, alpha: String, bounds: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    if !projection.graph_anchors.iter().any((a) -> a.graph_id == graph_id) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    if !projection.graph_anchors.iter().any(fn(a) { a.graph_id == graph_id }) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     validate_comment_color(color)
     validate_comment_alpha(alpha)
     bounds: normalize_bounds(bounds)
@@ -713,10 +714,10 @@ apply_delete_hint_region: fn(path: OSPath, src: String, region_id: String, kind:
 }
 apply_create_collapse_region: fn(path: OSPath, src: String, graph_id: String, start: Usize, end: Usize, title: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    if !projection.graph_anchors.iter().any((a) -> a.graph_id == graph_id) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
+    if !projection.graph_anchors.iter().any(fn(a) { a.graph_id == graph_id }) -> return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     if start >= end || end > src.len() -> return .Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
     selected: validated_collapse_selection(path, src, graph_id, SourceSpan { start: start, end: end })
-    if canvas_collapse_hints(src).iter().any((hint) -> hint.anchor.start == selected.start && hint.anchor.end == selected.end) -> return .Err(edit_error("conflict", "Canvas selection is already collapsed"))
+    if canvas_collapse_hints(src).iter().any(fn(hint) { hint.anchor.start == selected.start && hint.anchor.end == selected.end }) -> return .Err(edit_error("conflict", "Canvas selection is already collapsed"))
     insert_at: selected.end
     indent: indentation_at(src, insert_at.min(src.len()))
     comment: "{indent}// canvas:collapse span={selected.start}..{selected.end} title={quoted_attr(title)}\n"
@@ -727,17 +728,17 @@ validated_collapse_selection: fn(path: OSPath, src: String, graph_id: String, re
     name_span: graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
     path_str: path.to_string_lossy()
     (diags, bundle): Driver.check_file(path_str, .None, true)
-    errors: diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
+    errors: diags.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
     if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
     bundle: bundle ?? return .Err(edit_error("check", "Canvas could not read checked statement facts"))
     func: find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     locs := []
     block := []
     collect_statement_locs(src, func.body, block, locs)
-    first: locs.iter().find((loc) -> requested.start == loc.anchor.start || requested.start == loc.source.start || requested.start == loc.full.start)
-        .or_else(() -> locs.iter().find((loc) -> loc.is_guard && loc.guard_span.is_some_and((span) -> requested.start >= span.start && requested.start < span.end)))
-    last: locs.iter().find((loc) -> requested.end == loc.anchor.end || requested.end == loc.source.end || requested.end == loc.full.end)
-        .or_else(() -> locs.iter().find((loc) -> loc.is_expr && requested.end > loc.source.start && requested.end <= loc.source.end))
+    first: locs.iter().find(fn(loc) { requested.start == loc.anchor.start || requested.start == loc.source.start || requested.start == loc.full.start })
+        .or_else(fn() { locs.iter().find(fn(loc) { loc.is_guard && loc.guard_span.is_some_and(fn(span) { requested.start >= span.start && requested.start < span.end }) }) })
+    last: locs.iter().find(fn(loc) { requested.end == loc.anchor.end || requested.end == loc.source.end || requested.end == loc.full.end })
+        .or_else(fn() { locs.iter().find(fn(loc) { loc.is_expr && requested.end > loc.source.start && requested.end <= loc.source.end }) })
     first: first ?? return .Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
     last: last ?? return .Err(edit_error("bad_request", "Canvas collapse must select whole statements from this graph"))
     if first.block != last.block || first.index > last.index -> return .Err(edit_error("cross_block", "Canvas collapse cannot cross a block boundary"))
@@ -745,21 +746,21 @@ validated_collapse_selection: fn(path: OSPath, src: String, graph_id: String, re
 }
 extract_inline_candidate: fn(path: OSPath, src: String, inline_id: String, function: String, ret_type: String) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
-    inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+    inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
     expr: snippet(src, Span.new(inline.span.start, inline.span.end))
     if expr.contains("#Unsafe") -> return .Err(edit_error("diagnostic", "Canvas extract cannot cross an unsafe source span"))
     params: extract_params(projection.json, expr)
-    signature: params.iter().map(((_0: name, _1: ty)) -> "{name}: {ty}").collect().join(", ")
-    args: params.iter().map(((_0: name, _1: _)) -> name.copy()).collect().join(", ")
+    signature: params.iter().map(fn((_0: name, _1: ty)) { "{name}: {ty}" }).collect().join(", ")
+    args: params.iter().map(fn((_0: name, _1: _)) { name.copy() }).collect().join(", ")
     helper: "{function}: fn({signature}) -> {ret_type} {{\n    return {expr}\n}}\n\n"
     replacement: "{function}({args})"
-    return FixEngine.apply_edits(src, [edit(SourceSpan { start: 0, end: 0 }, helper), edit(inline.span, replacement)]).map_err((_) -> edit_error("overlap", "Canvas extract edits overlapped"))
+    return FixEngine.apply_edits(src, [edit(SourceSpan { start: 0, end: 0 }, helper), edit(inline.span, replacement)]).map_err(fn(_) { edit_error("overlap", "Canvas extract edits overlapped") })
 }
 inline_helper_candidate: fn(path: OSPath, src: String, inline_id: String?, start: Usize?, end: Usize?) -> String Err! {
     projection: project_file(path) ?? return .Err(diagnostics_error(path, src, err))
     span: SourceSpan
     if inline_id == .Val(inline_id) {
-        inline: projection.inline_exprs.iter().find((i) -> i.id == inline_id) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
+        inline: projection.inline_exprs.iter().find(fn(i) { i.id == inline_id }) ?? return .Err(edit_error("not_found", "Canvas inline expression no longer exists"))
         span = inline.span
     } else { span = SourceSpan { start: start.unwrap_or(0), end: end.unwrap_or(0) } }
     call: snippet(src, Span.new(span.start, span.end))
@@ -768,6 +769,6 @@ inline_helper_candidate: fn(path: OSPath, src: String, inline_id: String?, start
     if params.len() != args.len() -> return .Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
     expr := body.move()
     loop (param, arg) in params.iter().zip(args.iter()) -> expr = replace_ident(expr, param, arg)
-    return FixEngine.apply_edits(src, [edit(span, expr)]).map_err((_) -> edit_error("overlap", "Canvas inline helper edit overlapped"))
+    return FixEngine.apply_edits(src, [edit(span, expr)]).map_err(fn(_) { edit_error("overlap", "Canvas inline helper edit overlapped") })
 }
 // Clone annotation belongs to the following slice's StatementLoc declaration.

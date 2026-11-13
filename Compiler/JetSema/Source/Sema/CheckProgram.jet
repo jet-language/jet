@@ -2215,7 +2215,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         local := checked_symbol_local(func.params[param_index].name, func.params[param_index].name_span, param_symbol.id, parameter_ty)
         local.mutable = param_mutable
         if !sema_function_explicit_receiver(function_kind, param_index, func.params[param_index]) {
-            public_label: func.params[param_index].public_label.map((label) -> label.name) ?? func.params[param_index].name
+            public_label: func.params[param_index].public_label.map(fn(label) { label.name }) ?? func.params[param_index].name
             params.push(TParameter{local: local, name: func.params[param_index].name, span: func.params[param_index].name_span, ty: parameter_ty, convention: func.params[param_index].convention, public_label: public_label, zone: func.params[param_index].zone, default: default_expr, variadic: func.params[param_index].variadic})
         } else if func.params[param_index].convention == AccessConvention.Read {
             place_borrow_receiver = param_symbol.id.key

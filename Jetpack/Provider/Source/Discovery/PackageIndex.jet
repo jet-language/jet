@@ -88,7 +88,7 @@ PackageIndex: struct {
             }
         }
         if !found -> self.packages.push(record.copy())
-        self.packages.sort_by((left: PackageIndexEntry, right: PackageIndexEntry) -> (left.source <=> right.source).then(left.name <=> right.name))
+        self.packages.sort_by(fn(left: PackageIndexEntry, right: PackageIndexEntry) { (left.source <=> right.source).then(left.name <=> right.name) })
     }
 
     // Case-insensitive search ranked exact, prefix, substring, option field,
@@ -101,9 +101,9 @@ PackageIndex: struct {
             scored.push((score: score, record: record))
         }
         // Stable passes from the least significant key.
-        scored.sort_by(item -> item.record.name)
-        scored.sort_by(item -> item.record.source)
-        scored.sort_by(item -> item.score)
+        scored.sort_by(fn(item) { item.record.name })
+        scored.sort_by(fn(item) { item.record.source })
+        scored.sort_by(fn(item) { item.score })
         found := [PackageIndexEntry]{}
         loop item in scored -> found.push(item.record)
         found

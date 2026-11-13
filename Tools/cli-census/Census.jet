@@ -279,7 +279,7 @@ right_aligned: fn(value: Int, width: Int) -> String Never! {
 // The commands in rank order, one `rank name` line each.
 ranking_lines: fn(rows: [CommandRow]) -> [String] Never! {
     ordered := rows.copy()
-    ordered.sort_by((left: CommandRow, right: CommandRow) -> (left.rank <=> right.rank).then(left.name <=> right.name))
+    ordered.sort_by(fn(left: CommandRow, right: CommandRow) { (left.rank <=> right.rank).then(left.name <=> right.name) })
     lines := [String]{}
     loop row in ordered -> lines.push("{right_aligned(row.rank, 3)} {row.name}")
     lines
@@ -309,7 +309,7 @@ padded: fn(text: String, width: Int) -> String Never! {
 // order: its usage padded to USAGE_WIDTH, then its summary.
 index_lines: fn(rows: [CommandRow], unbuilt: [String]) -> [String] Never! {
     ordered := rows.copy()
-    ordered.sort_by((left: CommandRow, right: CommandRow) -> (left.rank <=> right.rank).then(left.name <=> right.name))
+    ordered.sort_by(fn(left: CommandRow, right: CommandRow) { (left.rank <=> right.rank).then(left.name <=> right.name) })
     lines := [String]{}
     loop row in ordered {
         if unbuilt.contains(row.name) -> next

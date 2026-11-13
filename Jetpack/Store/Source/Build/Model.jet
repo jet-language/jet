@@ -482,7 +482,7 @@ build_insert_sorted_text: fn(values: &[String], value: String) Never! {
 build_insert_effect: fn(values: &[BuildEffect], ability: BuildEffect) Never! {
     if values.contains(ability) -> return
     values.push(ability.copy())
-    values.sort_by(written -> written.rank())
+    values.sort_by(fn(written) { written.rank() })
 }
 
 // Rust `BTreeSet<BuildResourcePool>::insert`.
@@ -491,7 +491,7 @@ build_insert_pool: fn(values: &[BuildResourcePool], pool: BuildResourcePool) Nev
         if existing == pool -> return
     }
     values.push(pool.copy())
-    values.sort_by((left: BuildResourcePool, right: BuildResourcePool) -> if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank())
+    values.sort_by(fn(left: BuildResourcePool, right: BuildResourcePool) { if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank() })
 }
 
 LockRecord: struct {

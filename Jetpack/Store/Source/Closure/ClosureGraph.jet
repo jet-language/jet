@@ -462,7 +462,7 @@ store_push_dir_stats: fn(table: &[U8], dir: String) StoreError! {
         return
     }
     entries := files.list_dir(dir)
-    entries.sort_by(entry -> entry.name)
+    entries.sort_by(fn(entry) { entry.name })
     loop entry in entries -> store_push_stat(table, entry.name, files.stat(entry.path))
 }
 
@@ -502,7 +502,7 @@ store_wal_state_stamp: fn(roots: HangarRoots) -> String StoreError! {
 store_migrate_closure_graph_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> (migrated: Int, graph: ClosureGraph) StoreError! {
     recovered: store_recover_closure_journal_graph_unlocked(verification, roots)
     entries := store_list_unlocked(roots)
-    entries.sort_by(entry -> entry.id)
+    entries.sort_by(fn(entry) { entry.id })
     store_migrate_closure_graph_from_entries(verification, roots, recovered.graph, entries)
 }
 
@@ -519,7 +519,7 @@ store_migrate_closure_graph_unlocked_ignoring: fn(verification: &StoreVerificati
         if ignored.contains(entry.id) -> next
         entries.push(entry)
     }
-    entries.sort_by(entry -> entry.id)
+    entries.sort_by(fn(entry) { entry.id })
     store_migrate_closure_graph_from_entries(verification, roots, graph, entries)
 }
 
@@ -656,7 +656,7 @@ store_register_entries_unlocked_with_mode: fn(verification: &StoreVerification, 
         if graph.records.get(record.id) != Val(record) -> records.push(record.copy())
     }
     if records.len() == 0 && object_map.len() == 0 -> return Ok(false)
-    records.sort_by(record -> record.id)
+    records.sort_by(fn(record) { record.id })
     object_list := [ClosureObject]{}
     loop digest in store_sorted_object_keys(object_map) -> object_list.push(object_map[digest])
     transaction: ClosureJournalEntry{kind: ClosureJournalKind.Delta, objects: object_list, records: records, deleted_records: [String]{}}
@@ -898,7 +898,7 @@ store_descriptor_for_entry: fn(verification: &StoreVerification, roots: HangarRo
             }
         }
     }
-    objects.sort_by(object -> object.digest)
+    objects.sort_by(fn(object) { object.digest })
     unique := [ClosureObject]{}
     loop object in objects {
         if unique.len() > 0 && unique[unique.len() - 1].digest == object.digest -> next

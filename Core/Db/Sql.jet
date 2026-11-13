@@ -362,7 +362,7 @@ compare_sql_cell: fn(left: String, operator: String, right: String) -> Bool Neve
 // reads against their row schema's field names.
 __validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: String) Err! {
     names: Set.from(fields)
-    validate_sql_query_schema(query, (field: String) -> names.has(field), label)
+    validate_sql_query_schema(query, fn(field: String) { names.has(field) }, label)
 }
 
 // Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
@@ -477,7 +477,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
                 }
                 unsorted[position].push(selected[at])
             }
-            keys.sort_by((left: String, right: String) -> left <=> right)
+            keys.sort_by(fn(left: String, right: String) { left <=> right })
             loop key in keys {
                 at: positions.get(key) ?? panic("SQL grouping key lost its position")
                 // copy: the group's row indices stay in `unsorted` (an element has no hole to leave); a small [U64] list per group.
@@ -505,7 +505,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
         }
     }
     if query.order == .Val(clause) {
-        projected.sort_by((left: internal.SQLOrderedRow, right: internal.SQLOrderedRow) -> {
+        projected.sort_by(fn(left: internal.SQLOrderedRow, right: internal.SQLOrderedRow) {
             order := sql_compare_values(left.order ?? JetSQLValue.Null, right.order ?? JetSQLValue.Null)
             if clause.descending -> order = reverse_order(order)
             if order == Ordering.Equal -> return source_indices_compare(left.row.source_indices, right.row.source_indices)
@@ -596,7 +596,7 @@ sql_query_fields: fn(query: JetSQLQuery, visit: fn(String)) Never! {
 // miss, but short-circuit further membership callbacks exactly as Rust does.
 validate_sql_query_schema: fn(query: JetSQLQuery, has_field: fn(String) -> Bool, label: String) Err! {
     missing := String?{None}
-    sql_query_fields(query, (field: String) -> {
+    sql_query_fields(query, fn(field: String) {
         if missing == None && !has_field(field) -> missing = Val(field.copy())
     })
     if missing == .Val(field) -> return Err("{label} references unknown field `{field}`")

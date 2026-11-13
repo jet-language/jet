@@ -187,21 +187,21 @@ jet_command: fn() -> [String] Err! {
     // What no word takes is an unclosed quote or a trailing backslash.
     left: WORD.replace(configured, "").trim()
     if left != "" -> return Err(if left.ends_with("\\") -> "ValueError: No escaped character" else -> "ValueError: No closing quotation")
-    Ok(WORD.find_all(configured).map(word -> unquote(word)))
+    Ok(WORD.find_all(configured).map(fn(word) { unquote(word) }))
 }
 
 // A shlex word without its quoting: in double quotes a backslash escapes
 // only a double quote or a backslash.
 unquote: fn(word: String) -> String Never! {
-    PIECE.replace_all_with(word, found -> "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}")
+    PIECE.replace_all_with(word, fn(found) { "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}" })
 }
 
 // repr of printable text: in single quotes, or in double quotes when it has
 // a single quote and no double quote; backslashes, that quote and control
 // characters escaped.
 python_repr: fn(text: String) -> String Never! {
-    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, found -> repr_escape(found.text))}\""
-    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, found -> repr_escape(found.text))}'"
+    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}\""
+    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}'"
 }
 
 repr_escape: fn(character: String) -> String Never! {

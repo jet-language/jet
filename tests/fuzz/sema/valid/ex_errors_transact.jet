@@ -16,8 +16,8 @@ Fail: enum {
 place_order: fn(items: Int) -> Int Fail! {
     #Transact(order) {
         print("reserving stock")
-        order.on_commit(() -> print("commit hook 1: charge card"))
-        order.on_commit(() -> print("commit hook 2: send receipt"))
+        order.on_commit(fn() { print("commit hook 1: charge card") })
+        order.on_commit(fn() { print("commit hook 2: send receipt") })
         if items == 0 {
             // `?`-failure: the block never commits, so the hooks are dropped un-run.
             return Err(Fail.Empty)
@@ -48,7 +48,7 @@ reserve_seat: fn(ok_path: Bool) -> Int Fail! {
     #Transact(booking) {
         print("seat held")
         booking.on_rollback(
-        () -> {
+        fn() {
             print("rollback hook: release seat")
         },
         )

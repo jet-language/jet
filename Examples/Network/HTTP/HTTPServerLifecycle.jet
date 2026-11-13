@@ -11,7 +11,7 @@ use {
 
 run: fn() (HTTPError | RangeError | TaskFailure)! {
     mux: http_server.mux()
-    mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "ok")))
+    mux.get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "ok")) })
     server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     print(addr.starts_with("127.0.0.1:"))

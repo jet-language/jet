@@ -591,7 +591,7 @@ sema_data_event_time_callback: fn(method: String, element: Type, argument: CallA
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
     }
-    diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{method}` wants a callback `fn({sema_type_show(element)}) -> …` without effects, but this is {sema_type_show(checked.ty)}", "the stream calls it once for each element as the stream is pulled", "pass a lambda over one element, such as `(event: {sema_type_show(element)}) -> event.timestamp`"))
+    diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{method}` wants a callback `fn({sema_type_show(element)}) -> …` without effects, but this is {sema_type_show(checked.ty)}", "the stream calls it once for each element as the stream is pulled", "pass a lambda over one element, such as `fn(event: {sema_type_show(element)}) {{ event.timestamp }}`"))
     SemaDataQueryCallback{value: None, result: None}
 }
 
@@ -1090,7 +1090,7 @@ sema_call_try_data_stream_core_call: fn(module_name: String, member: String, arg
     if {
         member == "from_items" -> {
             if type_args.len() == 1 -> row = Val(if program.registration_graph == .Val(graph) -> sema_type_resolve_declared_with_generics(graph, type_args[0], environment.module_identity, environment.generic_params) else -> type_args[0])
-            list_expected := row.map((value) -> Type.List{element: value})
+            list_expected := row.map(fn(value) { Type.List{element: value} })
             first: sema_check_expression(updated_args[0].expr, list_expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
             if row == None {
                 if first.ty == {

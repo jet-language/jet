@@ -58,7 +58,7 @@ expected_headers_match: fn(expected: Dyn, actual: Dyn) -> Bool {
     if !is_header_map(expected) || !(actual == .Object(_)) -> return false
     lowered := Dyn.object()
     loop header in members(actual) -> lowered[header.key.lower()] = header.value
-    members(expected).all(header -> header_matches(header.key, js_text(header.value), dyn_at(lowered, header.key.lower())))
+    members(expected).all(fn(header) { header_matches(header.key, js_text(header.value), dyn_at(lowered, header.key.lower())) })
 }
 
 // Whether the response header `found` is a string that compares equal to
@@ -74,7 +74,7 @@ normalized_header_value: fn(name: String, value: String) -> String {
     trimmed: value.trim()
     if name.lower() != "content-type" -> return trimmed
     parts: trimmed.split(";").to_list()
-    parameters := parts.slice(1, parts.len()).map(part -> normalized_parameter(part))
+    parameters := parts.slice(1, parts.len()).map(fn(part) { normalized_parameter(part) })
     parameters.sort()
     [parts[0].trim().lower()].concat(parameters).join(";")
 }

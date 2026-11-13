@@ -90,7 +90,7 @@ NarInfo: struct {
     to_text: fn(self) -> String StoreError! {
         out := self.unsigned_text()
         signatures := self.signatures.copy()
-        signatures.sort_by(signature -> signature.key_id)
+        signatures.sort_by(fn(signature) { signature.key_id })
         loop signature in signatures -> out = "{out}{store_nar_line("Sig", "{signature.key_id}:{signature.algorithm}:{signature.sig_hex}")}"
         Ok(out)
     }

@@ -17,7 +17,7 @@ env_overlay_test_apply: fn(source_root: String, patch_text: String) -[FS, Env, R
     source: OverlayAuthority.open(source_root, "source root")
     stage := OverlayStage.new()
     applications: env_overlay_apply_unified_patch_staged(source, patch_text, stage)
-    env_overlay_commit_staged(source, stage, (path: String) -[FS]> {})
+    env_overlay_commit_staged(source, stage, fn(path: String) -[FS]> {})
     Ok(applications)
 }
 
@@ -30,7 +30,7 @@ env_overlay_test_apply: fn(source_root: String, patch_text: String) -[FS, Env, R
     env_overlay_apply_unified_patch_staged(authority, "--- a/root.txt\n+++ b/root.txt\n@@ -1 +1 @@\n-one\n+ONE\n--- a/child/file.txt\n+++ b/child/file.txt\n@@ -1 +1 @@\n-two\n+TWO\n", stage) ?? panic("stage")
     assert(stage.entries["root.txt"].parent.handle == None)
     assert(stage.entries["child/file.txt"].parent.handle == .Val(_))
-    env_overlay_commit_staged(authority, stage, (path: String) -[FS]> {}) ?? panic("commit")
+    env_overlay_commit_staged(authority, stage, fn(path: String) -[FS]> {}) ?? panic("commit")
     assert_eq(env_overlay_test_read(files.join(root, "root.txt")), "ONE\n")
     assert_eq(env_overlay_test_read(files.join(root, "child/file.txt")), "TWO\n")
     _: authority.resolver.checked_file("root.txt") ?? panic("root remains live")
@@ -221,7 +221,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", stage) ?? panic("stage")
     files.remove(files.join(source, "tree/file.txt")) ?? panic("remove target")
     files.symlink(files.join(outside, "sentinel"), files.join(source, "tree/file.txt")) ?? panic("plant the symlink")
-    if env_overlay_commit_staged(authority, stage, (path: String) -[FS]> {}) == {
+    if env_overlay_commit_staged(authority, stage, fn(path: String) -[FS]> {}) == {
         .Ok(_) -> panic("a swapped target must be refused")
         .Err(error) -> assert(error.message().contains("symlink"))
     }
@@ -243,7 +243,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_apply_unified_patch_staged(authority, "--- a/tree/file.txt\n+++ b/tree/file.txt\n@@ -1 +1 @@\n-one\n+ONE\n", stage) ?? panic("stage")
     files.rename(files.join(source, "tree"), moved) ?? panic("move tree")
     files.symlink(outside, files.join(source, "tree")) ?? panic("plant the symlink")
-    env_overlay_commit_staged(authority, stage, (path: String) -[FS]> {}) ?? panic("commit through the held parent")
+    env_overlay_commit_staged(authority, stage, fn(path: String) -[FS]> {}) ?? panic("commit through the held parent")
     assert_eq(env_overlay_test_read(files.join(moved, "file.txt")), "ONE\n")
     assert_eq(env_overlay_test_read(files.join(outside, "sentinel")), "keep")
     assert(!files.exists(files.join(outside, "file.txt")))
@@ -268,7 +268,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     saved: files.join(moved, "one.saved")
     held_moved: moved.copy()
     held_saved: saved.copy()
-    if env_overlay_commit_staged(authority, stage, (path: String) -[FS]> {
+    if env_overlay_commit_staged(authority, stage, fn(path: String) -[FS]> {
         assert_eq(path, files.join(source, "tree/one.txt"))
         files.rename(files.join(held_moved, "one.txt"), held_saved) ?? panic("hold committed bytes")
         files.create_dir_all(files.join(held_moved, "one.txt")) ?? panic("block rollback publication")

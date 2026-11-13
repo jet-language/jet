@@ -144,7 +144,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         if row.argv.len() == 0 || kit_ui_arg(source, row.name) == None -> next
         selected = true
         call.argv = []
-        maximum: (kit_ui_arg(source, "complexity_cli") ?? "").replace("\t", " ").split(" ").filter(word -> word != "").to_list()
+        maximum: (kit_ui_arg(source, "complexity_cli") ?? "").replace("\t", " ").split(" ").filter(fn(word) { word != "" }).to_list()
         if row.name == "complexity_cli" && maximum.len() < 2 {
             call.refused = "complexity_cli requires a metric and maximum"
             return call
@@ -218,7 +218,7 @@ kit_ui_discover: fn(ctx: KitCtx) -> [KitEntry] {
     loop corpus in ctx.options.ui_corpora {
         loop entry in kit_ui_collect(ctx.root, corpus, kit_ui_lint_corpus(corpus)) -> entries.push(entry)
     }
-    entries.sort_by(entry -> entry.path)
+    entries.sort_by(fn(entry) { entry.path })
     entries
 }
 
@@ -240,7 +240,7 @@ kit_ui_rendered_only: fn(text: String) -> String {
 // comparison sides. Diagnostic bodies and imported-source paths remain exact.
 kit_ui_primary_source_headers: fn(shown: String, text: String) -> String {
     prefix: "  --> {files.basename(shown)}:"
-    text.split("\n").map(line -> if line.starts_with(prefix) -> "  --> {shown}:{line.removeprefix(prefix)}" else -> line.copy()).to_list().join("\n")
+    text.split("\n").map(fn(line) { if line.starts_with(prefix) -> "  --> {shown}:{line.removeprefix(prefix)}" else -> line.copy() }).to_list().join("\n")
 }
 
 kit_ui_normalize: fn(shown: String, actual: String, root: String) -> String {
@@ -271,12 +271,12 @@ kit_ui_actual: fn(call: KitUICall, run: KitRun) -> String {
 kit_ui_snapshot: fn(entry: KitEntry, call: KitUICall, result: KitRun, actual: String, ctx: KitCtx) -> KitVerdict {
     if kit_exec_process_failure(result) == .Val(failure) -> return failure
     if call.exit == "nonzero" && result.code == 0 -> return kit_expect_verdict("FAIL", "directive requires nonzero exit")
-    if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(line -> line.starts_with("Warning ["))) -> return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
+    if call.streams == "lint" && (result.code != 0 || !actual.split("\n").any(fn(line) { line.starts_with("Warning [") })) -> return kit_expect_verdict("FAIL", "lint fixture must compile and emit a lint")
     if (call.streams == "rendered" || call.streams == "rendered-both") && result.code != 0 && kit_expect_diagnostics(actual) == 0 -> return kit_expect_verdict("ERROR", "compiler failed without a rendered diagnostic")
     expected: files.join(ctx.root, entry.expected)
     original: kit_exec_optional(expected)
     normalized: if original == .Val(text) -> Val(kit_ui_primary_source_headers(entry.path, text)) else -> None
-    kit_expect_exact_with_count(entry.path, expected, normalized, kit_ui_primary_source_headers(entry.path, actual), ctx.bless, (text: String) -[]> kit_expect_diagnostics(text))
+    kit_expect_exact_with_count(entry.path, expected, normalized, kit_ui_primary_source_headers(entry.path, actual), ctx.bless, fn(text: String) -[]> { kit_expect_diagnostics(text) })
 }
 
 kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> [KitOutcome] {
@@ -469,7 +469,7 @@ kit_ui_hangar_tamper: fn(ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> S
     kit_exec_write(files.join(tree, "payload"), "trusted bytes\n")
     ingest: kit_exec_invoke_with_env(ctx.env, [ctx.env.jetpack, "hangar", "ingest", tree, "--name", "ui-e1315", "--version", "1.0.0", "--no-color"], source, ctx.scratch, [U8]{}, overlay)
     if ingest.code != 0 -> return Err("jetpack hangar ingest exited {ingest.code}: {ingest.stderr}")
-    digests: "{ingest.stdout}\n{ingest.stderr}".replace("\n", " ").split(" ").filter(word -> word.starts_with("sha256-")).to_list()
+    digests: "{ingest.stdout}\n{ingest.stderr}".replace("\n", " ").split(" ").filter(fn(word) { word.starts_with("sha256-") }).to_list()
     if digests.len() == 0 -> return Err("jetpack hangar ingest printed no digest: {ingest.stderr}")
     digest: digests[digests.len() - 1]
     // JETPACK_ROOT is the case scratch's `jetpack` (kit_exec_base_value).
@@ -526,13 +526,13 @@ kit_ui_report_code: fn(code: String) -> Bool {
 kit_ui_source_code: fn(code: String) -> Bool {
     bytes: code.bytes()
     if bytes.len() == 5 {
-        digits: bytes.slice(1, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+        digits: bytes.slice(1, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) })
         if digits && (bytes[0] == (U8{69}) || bytes[0] == (U8{76}) || bytes[0] == (U8{87})) -> return true
     }
-    if bytes.len() == 6 && code.starts_with("JT") && bytes.slice(2, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57})) -> return true
+    if bytes.len() == 6 && code.starts_with("JT") && bytes.slice(2, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) }) -> return true
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false
     words: kit_steps_byte_slice(code, 2, code.count_bytes()).split("-").to_list()
-    words.len() >= 2 && words.all(word -> word != "" && word.bytes().all(byte -> (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))))
+    words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) }) })
 }
 
 kit_ui_add_code: fn(codes: &[String], code: String) {

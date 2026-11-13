@@ -10,16 +10,16 @@ is_even: fn(n: Int) -> Bool { n % 2 == 0 }
 run: fn() {
     nums: [Int]{1, 2, 3, 4, 5}
     // para_map: double each element in parallel.
-    doubled: nums.para_map((n: Int) -> n * 2, limit: 2)
+    doubled: nums.para_map(fn(n: Int) { n * 2 }, limit: 2)
     print(doubled)
     // para_filter: keep even numbers.
-    evens: nums.para_filter((n: Int) -> n % 2 == 0)
+    evens: nums.para_filter(fn(n: Int) { n % 2 == 0 })
     print(evens)
     // para_partition: false items first, true items second; both preserve source order.
-    split: nums.para_partition((n: Int) -> n % 2 == 0)
+    split: nums.para_partition(fn(n: Int) { n % 2 == 0 })
     print(split.false_)
     print(split.true_)
     // para_fold: 0 is the identity and addition is associative.
-    total: nums.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)
+    total: nums.para_fold(fn() { 0 }, fn(acc: Int, n: Int) { acc + n }, fn(left: Int, right: Int) { left + right })
     print(total)
 }

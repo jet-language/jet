@@ -10,7 +10,7 @@ Traced: struct {
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.rewrite_body(f, #code {
                     print("hooked")

@@ -16,15 +16,15 @@ Fail: enum {
 }
 
 with_guards: fn(succeed: Bool) -> Int Fail! {
-    _g1: scope.guard(() -> print("guard 1 runs"))
-    _g2: scope.guard(() -> print("guard 2 runs"))
+    _g1: scope.guard(fn() { print("guard 1 runs") })
+    _g2: scope.guard(fn() { print("guard 2 runs") })
     print("body")
     if succeed -> return Ok(42)  // normal early success still cleans up
     Err(Fail.Bad)  // final failure result also cleans up
 }
 
 propagation_path: fn() -> Int Fail! {
-    _cleanup: scope.guard(() -> print("cleanup before fallback"))
+    _cleanup: scope.guard(fn() { print("cleanup before fallback") })
     // A plain fallible call propagates Fail.Bad from with_guards. The final
     // Ok below is reached only on success, so this function's failure exit still
     // runs its own guard.

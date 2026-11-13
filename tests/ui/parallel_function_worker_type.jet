@@ -8,11 +8,11 @@ CallbackPayload: enum {
 
 run: fn() {
     callbacks: [fn(Int) -> Int]{bump}
-    bad_item: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
-    bad_result: [1].para_map((n: Int) -> (x: Int) -> x + n)
-    bad_acc: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
+    bad_item: callbacks.para_filter(fn(callback: fn(Int) -> Int) { true })
+    bad_result: [1].para_map(fn(n: Int) { fn(x: Int) { x + n } })
+    bad_acc: [1].para_fold(fn() { fn(x: Int) { x } }, fn(callback: fn(Int) -> Int, n: Int) { callback }, fn(left: fn(Int) -> Int, right: fn(Int) -> Int) { left })
     payloads: [CallbackPayload]{CallbackPayload.Callback(bump)}
-    bad_enum: payloads.para_map((payload: CallbackPayload) -> 1)
-    stored: (n: Int) -> n + 1
-    bad_capture: [1].para_map((n: Int) -> stored(n))
+    bad_enum: payloads.para_map(fn(payload: CallbackPayload) { 1 })
+    stored: fn(n: Int) { n + 1 }
+    bad_capture: [1].para_map(fn(n: Int) { stored(n) })
 }

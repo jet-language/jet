@@ -684,7 +684,7 @@ store_lifecycle_scan_journal: fn(journal: PinnedLifecycleDirectory) -[FS]> Lifec
         if work > STORE_LIFECYCLE_MAX_RECOVERY_WORK -> return Err(StoreError.InvalidData("lifecycle journal exceeds work bound"))
         transactions.push(LifecycleJournalTransaction{sequence, name, entry})
     }
-    transactions.sort_by(transaction -> transaction.sequence)
+    transactions.sort_by(fn(transaction) { transaction.sequence })
     expected_sequence := through + 1
     loop transaction in transactions {
         if transaction.sequence <= through -> next

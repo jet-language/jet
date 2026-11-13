@@ -1412,7 +1412,7 @@ JSONPush: struct {
         frame := self.canonical_frames.pop() ?? return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
         if !frame.is_object || frame.key != None -> return Err(self.state_error("ObjectEnd does not match a complete canonical object"))
         if frame.value.len() != 0 -> return Err(self.state_error("canonical JSON object value was not completed"))
-        frame.entries.sort_by((left: (key: String, value: [U8]), right: (key: String, value: [U8])) -> {
+        frame.entries.sort_by(fn(left: (key: String, value: [U8]), right: (key: String, value: [U8])) {
             comparison: compare_text_units(left.key, right.key)
             if comparison < 0 -> .Less else if comparison > 0 -> .Greater else -> .Equal
         })

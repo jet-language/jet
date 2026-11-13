@@ -1,8 +1,8 @@
 Error [jet.NonCAbiType]: `fn(I32) -[]> I32` is not a C-compatible type for a foreign function parameter or return.
   --> tests/ui/cffi_callback_capture.jet:9:18
     |
-  9 |     print(c.call((x) -> x + offset, 40))
-    |                  ^^^^^^^^^^^^^^^^^
+  9 |     print(c.call(fn(x) { x + offset }, 40))
+    |                  ^^^^^^^^^^^^^^^^^^^^
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203

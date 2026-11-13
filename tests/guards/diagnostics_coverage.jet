@@ -76,12 +76,12 @@ dc_source_paths: fn() -> [String] {
 // `JT0001`) or a word-shaped code (`E-WEB-RUN`).
 dc_is_code: fn(code: String) -> Bool {
     bytes: code.bytes()
-    digits: (from: Int) -> bytes.len() > from && bytes.slice(from, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+    digits: fn(from: Int) { bytes.len() > from && bytes.slice(from, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) }) }
     if bytes.len() == 5 && (code.starts_with("E") || code.starts_with("L") || code.starts_with("W") || code.starts_with("R")) -> return digits(1)
     if bytes.len() == 6 && code.starts_with("JT") -> return digits(2)
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false
     words: dc_slice(code, 2, bytes.len()).split("-").to_list()
-    words.len() >= 2 && words.all(word -> word != "" && word.bytes().all(byte -> (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))))
+    words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57})) }) })
 }
 
 // The codes the compiler, package manager and Core sources emit, as the
@@ -132,7 +132,7 @@ dc_registered_rows: fn() -> [DcRow] {
     rows
 }
 
-dc_registered_codes: fn() -> [String] { dc_registered_rows().map(row -> row.code) }
+dc_registered_codes: fn() -> [String] { dc_registered_rows().map(fn(row) { row.code }) }
 
 dc_contains_any: fn(text: String, needles: [String]) -> Bool {
     loop needle in needles {
@@ -228,11 +228,11 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
 #Test("registered_unimplemented_codes_are_expected") {
     guards_enter_root()
     loop row in DC_SPEC_AHEAD_OF_IMPL {
-        valid: row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+        valid: row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) })
         assert(valid, "{row.code} reason must be `staged #<card>`, got `{row.reason}`")
     }
     rows: dc_registered_rows()
-    registered: rows.map(row -> row.code)
+    registered: rows.map(fn(row) { row.code })
     assert(dc_has(registered, "E0033"), "E0033 is a retired reservation and must remain in the typed rows")
     e0745 := ""
     loop row in rows {
@@ -244,7 +244,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     loop row in rows {
         if row.status != "reserved" && row.status != "retired" && !dc_has(emitted, row.code) -> dc_add(unimplemented, row.code)
     }
-    assert_eq(dc_baseline_failure(DC_SPEC_AHEAD_OF_IMPL.map(row -> row.code), unimplemented, emitted), "")
+    assert_eq(dc_baseline_failure(DC_SPEC_AHEAD_OF_IMPL.map(fn(row) { row.code }), unimplemented, emitted), "")
 }
 
 // tests/diagnostics_coverage.rs:790: the baseline comparison refuses a

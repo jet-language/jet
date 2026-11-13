@@ -28,18 +28,18 @@ checked_tree: fn(items: [String], seed: String) -> String ReduceError! {
 run: fn() {
     letters: ["b", "c", "d"]
     // (a) tree-building reducer: the grouping is left-nested.
-    print("fold: {letters.fold("a", (acc: String, s: String) -> "({acc}{s})")}")
-    print("reduce: {letters.reduce("a", (acc: String, s: String) -> "({acc}{s})")}")
+    print("fold: {letters.fold("a", fn(acc: String, s: String) { "({acc}{s})" })}")
+    print("reduce: {letters.reduce("a", fn(acc: String, s: String) { "({acc}{s})" })}")
 
     // (b) non-associative Int subtraction: ((100 - 1) - 2) - 3.
     nums: [1, 2, 3]
-    print("fold minus: {nums.fold(100, (acc: Int, n: Int) -> acc - n)}")
-    print("reduce minus: {nums.reduce(100, (acc: Int, n: Int) -> acc - n)}")
+    print("fold minus: {nums.fold(100, fn(acc: Int, n: Int) { acc - n })}")
+    print("reduce minus: {nums.reduce(100, fn(acc: Int, n: Int) { acc - n })}")
 
     // (c) empty input returns the seed; a singleton calls step once.
     none: [String]{}
-    print("empty: {none.fold("seed", (acc: String, s: String) -> "({acc}{s})")}")
-    print("singleton: {["x"].fold("seed", (acc: String, s: String) -> "({acc}{s})")}")
+    print("empty: {none.fold("seed", fn(acc: String, s: String) { "({acc}{s})" })}")
+    print("singleton: {["x"].fold("seed", fn(acc: String, s: String) { "({acc}{s})" })}")
 
     // (d) fold's step cannot fail; a failing reducer is an ordinary loop with
     // `?`. Items b and c are combined in order, c fails, d is never read.
@@ -54,13 +54,13 @@ run: fn() {
     zero: Float{0.0}
     floats: [Float]{big, one, zero - big, one}
     print("sum: {floats.sum()}")
-    print("fold acc + x: {floats.fold(zero, (acc: Float, x: Float) -> acc + x)}")
-    print("reduce acc + x: {floats.reduce(zero, (acc: Float, x: Float) -> acc + x)}")
+    print("fold acc + x: {floats.fold(zero, fn(acc: Float, x: Float) { acc + x })}")
+    print("reduce acc + x: {floats.reduce(zero, fn(acc: Float, x: Float) { acc + x })}")
 
     // (f) para_fold: each chunk keeps its first index, merge brackets the
     // pair. 200 items make chunks 0, 64, 128, 192.
     indices := [Int]{}
     loop i in 0..200 -> indices.push(i)
-    grouping: indices.para_fold(() -> "", (acc: String, n: Int) -> if acc == "" -> "{n}" else -> acc, (left: String, right: String) -> "[{left}|{right}]")
+    grouping: indices.para_fold(fn() { "" }, fn(acc: String, n: Int) { if acc == "" -> "{n}" else -> acc }, fn(left: String, right: String) { "[{left}|{right}]" })
     print("para_fold: {grouping}")
 }

@@ -12,7 +12,7 @@ run: fn() {
 
     word: Regex{"struct"}
     check("prefix skip finds every occurrence", word.find_all("struct S {{ struct T }} structure").len() == 3)
-    starts: word.matches("struct S {{ struct T }} structure").map(m -> m.start)
+    starts: word.matches("struct S {{ struct T }} structure").map(fn(m) { m.start })
     check("prefix skip keeps the starts", starts == [Int]{0, 11, 22})
 
     photo: Regex{"^IMG_(\d+)\.jpeg$"}
@@ -27,8 +27,8 @@ run: fn() {
     check("missing needle finds nothing", loose.find_all("IMG_12.png notes.txt").len() == 0)
     check("needle present but no match", loose.find("IMG_.jpeg") == None)
     groups: Regex{"IMG_(\d+)"}.matches("a IMG_1 b IMG_22")
-    check("prefix skip keeps capture starts", groups.map(m -> m.start) == [Int]{2, 10})
-    check("prefix skip keeps capture text", groups.map(m -> m.group(1) ?? "") == [String]{"1", "22"})
+    check("prefix skip keeps capture starts", groups.map(fn(m) { m.start }) == [Int]{2, 10})
+    check("prefix skip keeps capture text", groups.map(fn(m) { m.group(1) ?? "" }) == [String]{"1", "22"})
 
     accent: Regex{"é+"}
     check("a byte above 127 hands over to the vm", accent.is_match("café"))

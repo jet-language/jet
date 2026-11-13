@@ -271,7 +271,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     repo: publication_index_test_root("oci-create-new-collision")
     path: files.join(repo, "blob")
     authority: foundation_open_directory_authority(repo)
-    collide: () -[FS, Env]> {
+    collide: fn() -[FS, Env]> {
         files.write(path, "winner")
     }
     error: if foundation_write_file_nofollow_at_root(repo, "blob", "loser".bytes(), Val(collide), FoundationPublicationPolicy{create: .CreateNew}) == {
@@ -304,7 +304,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     }
     files.remove(path) ?? panic("remove winner")
     refused_path: path.copy()
-    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(publication_read_error(.Other, refused_path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
+    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(fn() -[FS, Env]> { return Err(publication_read_error(.Other, refused_path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
         .Err(refusal) -> {
             assert_eq(refusal.phase, FoundationPublicationPhase.ValidateSource)
             assert(refusal.error == .Other(_))

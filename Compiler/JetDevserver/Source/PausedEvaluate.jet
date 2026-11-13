@@ -244,7 +244,7 @@ AuthoritySet: struct {
         order := [Int]{}
         loop index in 0..<grants.len() -> order.push(index)
         order_keys: keys.copy()
-        order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
+        order.sort_by(fn(a: Int, b: Int) { order_keys[a] <=> order_keys[b] })
         kept := [AuthorityGrant]{}
         last := ""
         loop index in order {
@@ -277,7 +277,7 @@ authority_requirements_canonical: fn(requirements: [AuthorityRequirement]) -> [A
     loop index in 0..<requirements.len() -> order.push(index)
     order_keys := [String]{}
     loop requirement in requirements -> order_keys.push(requirement.key())
-    order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
+    order.sort_by(fn(a: Int, b: Int) { order_keys[a] <=> order_keys[b] })
     kept := [AuthorityRequirement]{}
     last := ""
     loop index in order {
@@ -539,7 +539,7 @@ project_scope: fn(scope: LexicalScope, identity: SessionIdentity, budget: Evalua
     order := [Int]{}
     loop index in 0..<visible.len() -> order.push(index)
     ordered: visible.copy()
-    order.sort_by((a: Int, b: Int) -> if ordered[a].name != ordered[b].name -> ordered[a].name <=> ordered[b].name else -> ordered[a].id <=> ordered[b].id)
+    order.sort_by(fn(a: Int, b: Int) { if ordered[a].name != ordered[b].name -> ordered[a].name <=> ordered[b].name else -> ordered[a].id <=> ordered[b].id })
     projected := [ValueProjection]{}
     loop index in order {
         binding: visible[index]

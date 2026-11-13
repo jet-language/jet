@@ -68,9 +68,9 @@ queue_plan: fn(config: Config) -> [Job] Never! {
         group.work_dir = files.join(config.work_dir, "counter-{plan.len() + 1}")
         plan.push(Job{name: "ScalingGate-counters-{plan.len() + 1}", shared: true, config: group})
     }
-    domains: shapes().filter(shape -> shape.kind == .Domain).map(shape -> shape.name.copy())
+    domains: shapes().filter(fn(shape) { shape.kind == .Domain }).map(fn(shape) { shape.name.copy() })
     timing := config.copy()
-    timing.shapes = config.shapes.filter(shape -> domains.contains(shape) || shape == "huge-fns" || shape == "fan-in")
+    timing.shapes = config.shapes.filter(fn(shape) { domains.contains(shape) || shape == "huge-fns" || shape == "fan-in" })
     timing.mode = "timing"
     timing.jobs = 1
     timing.timeout_s = if config.timeout_s < 20 -> config.timeout_s else -> 20
@@ -82,7 +82,7 @@ queue_plan: fn(config: Config) -> [Job] Never! {
     timing.profile_top = false
     timing.work_dir = files.join(config.work_dir, "timing")
     plan.push(Job{name: "PerfScalingGate-timing", shared: false, config: timing})
-    plan.filter(job -> job.config.shapes.len() > 0)
+    plan.filter(fn(job) { job.config.shapes.len() > 0 })
 }
 
 // run-gate's arguments for one job, as enqueue.mjs spells them.
@@ -90,12 +90,12 @@ gate_args: fn(config: Config) -> [String] Never! {
     args := [String]{}
     loop compiler in config.compilers -> args.extend(["--compiler", "{compiler.label}={compiler.kind}:{compiler.path ?? compiler.template ?? ""}"])
     loop shape in config.shapes -> args.extend(["--shape", shape.copy()])
-    args.extend(["--steps", "{config.steps}", "--domain-ladder", config.domain_ladder.map(n -> "{n}").join(","), "--memory-max", config.memory_max.copy(), "--timeout", "{config.timeout_s}", "--stop-after", js(config.stop_after_s ?? math.INFINITY)])
+    args.extend(["--steps", "{config.steps}", "--domain-ladder", config.domain_ladder.map(fn(n) { "{n}" }).join(","), "--memory-max", config.memory_max.copy(), "--timeout", "{config.timeout_s}", "--stop-after", js(config.stop_after_s ?? math.INFINITY)])
     args.extend(["--seed", "{config.seed}", "--jet-command", config.jet_command.copy(), "--work-dir", config.work_dir.copy(), "--build-root", config.build_root.copy(), "--mode", config.mode.copy(), "--jobs", "{config.jobs}"])
     loop layout in config.layouts -> args.extend(["--layout", layout.copy()])
     loop shape in config.shapes {
         if config.bases.get(shape) == .Val(base) -> args.extend(["--base", "{shape}={base}"])
-        if config.ladders.get(shape) == .Val(ladder) -> args.extend(["--ladder", "{shape}={ladder.map(n -> "{n}").join(",")}"])
+        if config.ladders.get(shape) == .Val(ladder) -> args.extend(["--ladder", "{shape}={ladder.map(fn(n) { "{n}" }).join(",")}"])
     }
     args
 }
@@ -107,7 +107,7 @@ quote: fn(value: String) -> String Never! { "'{value.replace("'", "'\\''")}'" }
 script: fn(job: Job, repo: String) -> String Never! {
     lock: quote(files.join(state_root(), "scaling-gate.lock"))
     guard: quote(files.join(state_root(), "disk-guard.sh"))
-    args: gate_args(job.config).map(arg -> quote(arg)).join(" ")
+    args: gate_args(job.config).map(fn(arg) { quote(arg) }).join(" ")
     lines: [
         "#!/usr/bin/env bash",
         "# proofq: mem={if job.shared -> 18 else -> 25}G time=50M kind={if job.shared -> "test" else -> "measure"}",
@@ -136,7 +136,7 @@ run: fn() {
     queue: files.join(state_root(), "proofq/queue")
     files.create_dir_all(config.work_dir) ?? process.fail(1, "{err}")
     files.create_dir_all(queue) ?? process.fail(1, "{err}")
-    planned: json.to_string_pretty(plan.map(job -> Planned{name: job.name.copy(), shared: job.shared, config: config_tree(job.config)})) ?? process.fail(1, "{err}")
+    planned: json.to_string_pretty(plan.map(fn(job) { Planned{name: job.name.copy(), shared: job.shared, config: config_tree(job.config)} })) ?? process.fail(1, "{err}")
     files.write(files.join(config.work_dir, "queue-plan.json"), planned) ?? process.fail(1, "{err}")
     loop job in plan {
         file: files.join(queue, "{job.name}.sh")

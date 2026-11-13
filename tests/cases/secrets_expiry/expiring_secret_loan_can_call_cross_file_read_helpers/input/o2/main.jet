@@ -11,5 +11,5 @@ run: fn() {
     ttl := Duration.seconds(1) ?? panic("duration")
     key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(key, ttl, clock)
-    _ := secret.with((borrowed) -> helper.inspect_key(borrowed))
+    _ := secret.with(fn(borrowed) { helper.inspect_key(borrowed) })
 }

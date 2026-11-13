@@ -21,7 +21,7 @@ run: fn() {
         .with_trust(.CustomOnly(roots)) ?? panic("trust policy")
     bounded: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? panic("version policy")
     mux: server.mux()
-    mux.get("/", (_request: HTTPRequest) -> Ok(server.response(200, "ok")))
+    mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "ok")) })
     listener: server.bind("127.0.0.1:0", mux, tls: server.tls(cert, key)) ?? panic("bind TLS server")
     addr: listener.local_addr() ?? panic("server address")
     serving: task { listener.serve() ?? panic("serve TLS") }

@@ -44,7 +44,7 @@ sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates
         loop application in row.program.rule_facts {
             if application.marker.name != MARKER_ALLOW -> next
             reason_expr: sema_gate_marker_expr(application.marker, 1)
-            reason: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map((expression) -> sema_gate_expression_text(expression))
+            reason: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map(fn(expression) { sema_gate_expression_text(expression) })
             detail: if sema_gate_marker_expr(application.marker, 0) == .Val(value) -> sema_gate_expression_text(value) else -> "None"
             scope: if application.site == .Val(site) -> sema_gate_rule_site_name(site) else -> "source"
             gate_ledger_push(ledger, gate_source_entry(GateKind.LintAllow, "lint", scope, row.source, application.marker.span, "#Allow", reason, detail, if reason_expr != None -> "recorded" else -> "missing"))
@@ -259,7 +259,7 @@ SemaGateVisitor: struct {
 
 sema_gate_statements: fn(source: String, body: [Stmt], ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
-    loop statement in body -> ast_visit_statement(statement, (expression: Expr) -> visitor.visit(expression), false)
+    loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { visitor.visit(expression) }, false)
     visitor.ledger.rows.reverse()
     loop visitor.ledger.rows.len() > 0 {
         entry: visitor.ledger.rows.pop() ?? break
@@ -270,7 +270,7 @@ sema_gate_statements: fn(source: String, body: [Stmt], ledger: &GateLedger, cont
 
 sema_gate_expression: fn(source: String, expression: Expr, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     visitor := SemaGateVisitor{source: source, ledger: GateLedger{rows: []}, context: context}
-    ast_visit_expr(expression, (value: Expr) -> visitor.visit(value))
+    ast_visit_expr(expression, fn(value: Expr) { visitor.visit(value) })
     visitor.ledger.rows.reverse()
     loop visitor.ledger.rows.len() > 0 {
         entry: visitor.ledger.rows.pop() ?? break

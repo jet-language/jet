@@ -188,7 +188,7 @@ jet_driver_compiler_queries_set_document: fn(queries: &JetDriverCompilerQueries,
 jet_driver_compiler_queries_documents: fn(queries: &JetDriverCompilerQueries) -> [JetDriverCompilerQueryDocument] Never! {
     documents := [JetDriverCompilerQueryDocument]{}
     loop (path, source) in queries.documents -> documents.push(JetDriverCompilerQueryDocument{path: path, source: source})
-    documents.sort_by((a, b) -> a.path <=> b.path)
+    documents.sort_by(fn(a, b) { a.path <=> b.path })
     documents
 }
 

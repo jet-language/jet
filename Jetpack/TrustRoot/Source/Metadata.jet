@@ -257,7 +257,7 @@ trust_is_test_public_key_id: fn(key_id: String) -> Bool Never! {
 trust_public_trust_manifest: fn(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
     if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
-    sorted.sort_by(key -> key.role)
+    sorted.sort_by(fn(key) { key.role })
     loop index in 1..<sorted.len() {
         if sorted[index - 1].role == sorted[index].role -> return Err(TrustRootError.InvalidKey{detail: "public trust role `{sorted[index].role}` is duplicated"})
     }

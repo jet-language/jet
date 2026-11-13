@@ -59,5 +59,5 @@ Run a lesson from the repository root, for example `jet run Examples/Basics/<Les
 - [ReturnedFunctionCall](Functions/ReturnedFunctionCall.jet) — A returned function value uses the explicit `.call(...)` projection, whether it is first bound or invoked directly.
 - [RootCalls](Functions/RootCalls.jet) — One marked receiver supports both call spellings.
 - [StructAsFn](Functions/StructAsFn.jet) — Parentheses call functions and lambdas only.
-- [TrailingBlock](Functions/TrailingBlock.jet) — Pass a multiline code block as a function argument with `() -> { … }`.
+- [TrailingBlock](Functions/TrailingBlock.jet) — Pass a multiline code block as a function argument with `fn() { … }`.
 - [VariadicsSpread](Functions/VariadicsSpread.jet) — Variadic parameters, call spread, and list spread.

@@ -147,7 +147,7 @@ ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool,
     // a list of named tuples in place.)
     later := [(key: String, index: Int)]{}
     loop index in rooted..<jobs.len() -> later.push((key: jobs[index].key.copy(), index: index))
-    later.sort_by((left: (key: String, index: Int), right: (key: String, index: Int)) -> left.key <=> right.key)
+    later.sort_by(fn(left: (key: String, index: Int), right: (key: String, index: Int)) { left.key <=> right.key })
     ranked := [Int]{}
     loop index in 0..<rooted -> ranked.push(index)
     loop row in later -> ranked.push(row.index)

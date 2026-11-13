@@ -12,6 +12,6 @@ run: fn() {
         Ticket{team: "Core", bucket: "short", minutes: 4.0},
         Ticket{team: "Core", bucket: "long", minutes: 8.0}
     }
-    cells: data.pivot_sum(rows, ticket -> ticket.team, ticket -> ticket.bucket, ticket -> ticket.minutes) ?? panic("pivot")
+    cells: data.pivot_sum(rows, fn(ticket) { ticket.team }, fn(ticket) { ticket.bucket }, fn(ticket) { ticket.minutes }) ?? panic("pivot")
     print(cells[0].sum)
 }

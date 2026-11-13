@@ -1,9 +1,9 @@
 use reactive: core.reactive
 run: fn() {
     n := reactive.signal(1)
-    doubled := reactive.derived(() -> (n.get() * 2))
+    doubled := reactive.derived(fn() { (n.get() * 2) })
     print(doubled.get())
-    subscription := reactive.autorun(() -> {
+    subscription := reactive.autorun(fn() {
         print(doubled.get())
     })
     n.set(5)

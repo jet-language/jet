@@ -739,7 +739,7 @@ count_then_key: fn(left_count: Int, left_key: [U8], right_count: Int, right_key:
 // `values` in Unicode's default collation order (a localeCompare sort).
 collated: fn(values: [String]) -> [String] Never! {
     keyed := loop value in values -> (key: text.collation_key(value), value: value.copy())
-    keyed.sort_by((left: (key: [U8], value: String), right: (key: [U8], value: String)) -> compare_bytes(left.key, right.key))
+    keyed.sort_by(fn(left: (key: [U8], value: String), right: (key: [U8], value: String)) { compare_bytes(left.key, right.key) })
     loop item in keyed -> item.value.copy()
 }
 
@@ -2205,7 +2205,7 @@ loss_clusters: fn(rows: [Row], board: Board) -> Dyn Never! {
         loop language in row.languages -> languages[at].push(language.copy())
     }
     keyed := loop (at, container) in containers -> (count: counts[at], key: text.collation_key(container), at: at)
-    keyed.sort_by((left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) -> count_then_key(left.count, left.key, right.count, right.key))
+    keyed.sort_by(fn(left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) { count_then_key(left.count, left.key, right.count, right.key) })
     out := [Dyn]{}
     loop item in keyed {
         at: item.at
@@ -2251,7 +2251,7 @@ package_attributed_containers: fn(surfaces: [LanguageSurface]) -> Dyn Never! {
             found.push((language: text.collation_key(surface.language), container: text.collation_key(container), value: entry))
         }
     }
-    found.sort_by((left: (language: [U8], container: [U8], value: Dyn), right: (language: [U8], container: [U8], value: Dyn)) -> if compare_bytes(left.language, right.language) != Ordering.Equal -> compare_bytes(left.language, right.language) else -> compare_bytes(left.container, right.container))
+    found.sort_by(fn(left: (language: [U8], container: [U8], value: Dyn), right: (language: [U8], container: [U8], value: Dyn)) { if compare_bytes(left.language, right.language) != Ordering.Equal -> compare_bytes(left.language, right.language) else -> compare_bytes(left.container, right.container) })
     Dyn.Array(loop item in found -> item.value.copy())
 }
 
@@ -2282,7 +2282,7 @@ repeated_operations: fn(rows: [Row]) -> [Repeat] Never! {
     loop (at, item) in repeats {
         if item.containers.len() >= 3 -> kept.push((count: item.containers.len(), key: text.collation_key(item.operation), at: at))
     }
-    kept.sort_by((left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) -> count_then_key(left.count, left.key, right.count, right.key))
+    kept.sort_by(fn(left: (count: Int, key: [U8], at: Int), right: (count: Int, key: [U8], at: Int)) { count_then_key(left.count, left.key, right.count, right.key) })
     out := [Repeat]{}
     loop item in kept {
         sorted := repeats[item.at].containers.copy()
@@ -2472,7 +2472,7 @@ file_digest: fn(path: String) -[FS]> String LedgerError! {
 walk_fixture_input: fn(root: String, current: String, found: &[String]) -[FS]> Int LedgerError! {
     listed: files.list_dir(current) ?? return Err(fail("cannot list {current}: {err}"))
     keyed := loop entry in listed -> (name: entry.name.copy(), is_dir: entry.is_dir)
-    keyed.sort_by((left: (name: String, is_dir: Bool), right: (name: String, is_dir: Bool)) -> compare_bytes(left.name.bytes(), right.name.bytes()))
+    keyed.sort_by(fn(left: (name: String, is_dir: Bool), right: (name: String, is_dir: Bool)) { compare_bytes(left.name.bytes(), right.name.bytes()) })
     loop entry in keyed {
         child: "{current}/{entry.name}"
         if entry.is_dir {

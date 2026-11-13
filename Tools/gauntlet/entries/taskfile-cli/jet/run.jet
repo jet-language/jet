@@ -21,7 +21,7 @@ run: fn() Err! {
         }
         "done" -> {
             id: Int.parse(args.get(1) ?? "") ?? -1
-            if tasks.position(task -> task.id == id) == {
+            if tasks.position(fn(task) { task.id == id }) == {
                 .Val(at) -> {
                     tasks[at].done = true
                     save(tasks)
@@ -31,7 +31,7 @@ run: fn() Err! {
             }
         }
         "list" -> {
-            done: tasks.count_where(task -> task.done)
+            done: tasks.count_where(fn(task) { task.done })
             loop task in tasks -> print("[{if task.done -> "x" else -> " "}] {task.id} {task.text}")
             print("open {tasks.len() - done} done {done}")
         }

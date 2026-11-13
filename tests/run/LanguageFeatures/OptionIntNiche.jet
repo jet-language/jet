@@ -77,8 +77,8 @@ run: fn() {
     print("{copied.len()} {show(copied[0])} {show(copied[1])}")
     xs: [Int]{5, 4611686018427387904, 9}
     print("{show(xs.first())} {show(xs.last())} {show(xs.get(1))} {show(xs.get(9))}")
-    print("{show(xs.index_of(4611686018427387904))} {show(xs.lazy().position((x) -> x > 6))}")
-    print("{show(xs.find((x) -> x > 6))} {show(xs.lazy().skip(2).first())}")
+    print("{show(xs.index_of(4611686018427387904))} {show(xs.lazy().position(fn(x) { x > 6 }))}")
+    print("{show(xs.find(fn(x) { x > 6 }))} {show(xs.lazy().skip(2).first())}")
     mutable := [Int]{1, 4611686018427387904}
     print("{show(mutable.pop())} {show(mutable.pop())} {show(mutable.pop())}")
     sorted: [Int]{1, 3, 4611686018427387904}
@@ -88,10 +88,10 @@ run: fn() {
     print("{show(m.get("a"))} {show(m.get("b"))}")
     print("{show(m.remove("a"))} {show(m.remove("a"))}")
     // Lazy iteration.
-    lazy: xs.lazy().filter_map((x) -> if x > 6 -> Val(x) else -> None).collect()
+    lazy: xs.lazy().filter_map(fn(x) { if x > 6 -> Val(x) else -> None }).collect()
     print("{lazy.len()} {lazy[0]} {lazy[1]}")
     print("{show(xs.lazy().first())} {show(xs.lazy().skip(1).first())} {show(xs.lazy().skip(3).first())}")
-    tried: xs.lazy().map((x) -> if x > 6 -> Val(x) else -> None).collect()
+    tried: xs.lazy().map(fn(x) { if x > 6 -> Val(x) else -> None }).collect()
     loop t in tried -> print(show(t))
     // Records and equality/ordering.
     r: Rec{name: "r", count: wrap(b)}

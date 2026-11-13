@@ -21,9 +21,9 @@ count_lines: fn(input: ScanInput) -> Int {
 run: fn(args: Args) {
     root: args.root
     needle: args.needle.copy()
-    paths := (files.walk_files(root).list() ?? panic("walk failed")).filter(entry -> entry.path.ends_with(".txt")).map(entry -> entry.path)
-    inputs: paths.map(path -> ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle})
-    counts: inputs.para_map((input: ScanInput) -> count_lines(input))
+    paths := (files.walk_files(root).list() ?? panic("walk failed")).filter(fn(entry) { entry.path.ends_with(".txt") }).map(fn(entry) { entry.path })
+    inputs: paths.map(fn(path) { ScanInput{rows: (files.read(path) ?? panic("read failed")).lines(), needle: needle} })
+    counts: inputs.para_map(fn(input: ScanInput) { count_lines(input) })
     matched := 0
     total := 0
     loop index in 0..<paths.len() {

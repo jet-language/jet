@@ -6,15 +6,15 @@ Pair: struct {
 
 map_left: fn(handle: Shared<Pair>) {
     guard: handle.guard_edit()
-    mapped := guard.map(value -> value.left)
+    mapped := guard.map(fn(value) { value.left })
     mapped.value += 10
 }
 
 split_pair: fn(handle: Shared<Pair>) {
     guard: handle.guard_edit()
     { first: left, second: right } := guard.split(
-        value -> value.left,
-        value -> value.right
+        fn(value) { value.left },
+        fn(value) { value.right }
     )
     left.value += 1
     right.value += 2

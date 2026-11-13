@@ -629,7 +629,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
             next
         }
         if item.labelled {
-            entries.sort_by((left: LabelEntry, right: LabelEntry) -> "{left.sort},[object Object]" <=> "{right.sort},[object Object]")
+            entries.sort_by(fn(left: LabelEntry, right: LabelEntry) { "{left.sort},[object Object]" <=> "{right.sort},[object Object]" })
             loop entry in entries {
                 census.push([String]{item.name, js_trim("{item.kind} {entry.label}"), "{entry.count}", fixed(entry.ns / BILLION, 3), grouped(entry.ns / lines), grouped(entry.items)})
             }

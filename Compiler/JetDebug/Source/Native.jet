@@ -396,7 +396,7 @@ native_debug_jet_frame: fn(frame: NativeFrame) -> Bool Never! {
 native_debug_locals_line: fn(locals: [NativeLocal]) -> String Never! {
     if locals.len() == 0 -> return "locals:  (none)"
     sorted := locals.copy()
-    sorted.sort_by((left: NativeLocal, right: NativeLocal) -> left.name <=> right.name)
+    sorted.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
     shown := [String]{}
     loop local in sorted -> shown.push("{local.name} = {local.value}")
     "locals:  {shown.join("   ")}"

@@ -21,9 +21,9 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
     mux: server.mux()
-    mux.get("/", (req: HTTPRequest) -> handle_root(req))
-    mux.get("/users/:id", (id: String) -> handle_user(id))
-    mux.post("/users", (req: HTTPRequest) -> handle_create(req))
+    mux.get("/", fn(req: HTTPRequest) { handle_root(req) })
+    mux.get("/users/:id", fn(id: String) { handle_user(id) })
+    mux.post("/users", fn(req: HTTPRequest) { handle_create(req) })
     t: task {
         loop i in [0, 1, 2, 3] {
             server.serve_once_listener(listener, mux) ?? panic("serve failed")

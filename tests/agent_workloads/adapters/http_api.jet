@@ -30,7 +30,7 @@ run: fn(args: WorkloadArgs) (HTTPError | IOError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0")
     address: listener.local_addr()
     mux: http_server.mux()
-    mux.post("/agent", (req: HTTPRequest) -> handle(req))
+    mux.post("/agent", fn(req: HTTPRequest) { handle(req) })
     t: task { http_server.serve_once_listener(listener, mux) }
     request: http_client.request("POST", "http://{address}/agent")
         .json(payload)

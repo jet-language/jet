@@ -69,7 +69,7 @@ TypeTupleField: struct {
 type_tuple_fields_canonical: fn(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
     sorted := fields
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by((left: TypeTupleField, right: TypeTupleField) -> left.name <=> right.name)
+    sorted.sort_by(fn(left: TypeTupleField, right: TypeTupleField) { left.name <=> right.name })
     sorted
 }
 
@@ -246,14 +246,14 @@ dimension_combine: fn(left: Dimension, right: Dimension, subtract: Bool) -> Dime
         }
     }
     axes = loop fresh_item in axes -> fresh_item
-    axes.sort_by((a: DimensionAxis, b: DimensionAxis) -> a.name <=> b.name)
+    axes.sort_by(fn(a: DimensionAxis, b: DimensionAxis) { a.name <=> b.name })
     Val(Dimension{axes: axes})
 }
 
 dimension_identity: fn(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
-        exponent: measure_signed_value(axis.exponent).map(value -> "{value}") ?? measure_expression(axis.exponent)
+        exponent: measure_signed_value(axis.exponent).map(fn(value) { "{value}" }) ?? measure_expression(axis.exponent)
         parts.push("{escape_dimension_axis(axis.name)}:{exponent}")
     }
     parts.join(";")
@@ -268,7 +268,7 @@ dimension_display_name: fn(dimension: Dimension) -> String Never! {
         rendered: if {
             exponent == (Val(1)) -> name
             else -> {
-                exponent_name: exponent.map(value -> "{value}") ?? measure_expression(axis.exponent)
+                exponent_name: exponent.map(fn(value) { "{value}" }) ?? measure_expression(axis.exponent)
                 "{name}^{exponent_name}"
             }
         }
@@ -1104,7 +1104,7 @@ type_with_effective_fn_returns: fn(ty: Type) -> Type Never! {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params := [Type]{}
             loop param in params -> normalized_params.push(type_with_effective_fn_returns(param))
-            normalized_ret := ret.map(value -> effective_callable_return(type_with_effective_fn_returns(value)))
+            normalized_ret := ret.map(fn(value) { effective_callable_return(type_with_effective_fn_returns(value)) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         .Apply(name, args) -> {
@@ -1147,7 +1147,7 @@ type_with_effective_parameter_fn_return: fn(ty: Type) -> Type Never! {
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             normalized_params := [Type]{}
             loop param in params -> normalized_params.push(type_with_effective_parameter_fn_return(param))
-            normalized_ret := ret.map(value -> effective_callable_return(value))
+            normalized_ret := ret.map(fn(value) { effective_callable_return(value) })
             Type.Fn{params: normalized_params, ret: normalized_ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
         // copy: `marker` and `inner` are payloads of read parameter `ty`, which keeps the originals; the new Type.Tagged's fields own `marker` and `inner`

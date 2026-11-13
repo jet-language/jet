@@ -17,7 +17,7 @@ drain: fn(queue: &PriorityQueue<Score>) -> String {
 }
 
 run: fn() {
-    scores := PriorityQueue.by_desc((s: Score) -> s.points)
+    scores := PriorityQueue.by_desc(fn(s: Score) { s.points })
     scores.push(Score{name: "Ana", points: 90})
     scores.push(Score{name: "Bo", points: 75})
     scores.push(Score{name: "Cy", points: 90})
@@ -28,13 +28,13 @@ run: fn() {
     print(drain(scores))
 
     team: [Score]{{name: "Ana", points: 90}, {name: "Bo", points: 75}, {name: "Cy", points: 75}}
-    lows := PriorityQueue.from_by(team, (s: Score) -> s.points)
+    lows := PriorityQueue.from_by(team, fn(s: Score) { s.points })
     print(drain(lows))
-    highs := PriorityQueue.from_by_desc(team, (s: Score) -> s.points)
+    highs := PriorityQueue.from_by_desc(team, fn(s: Score) { s.points })
     print(drain(highs))
     print(team.len())
 
-    words := PriorityQueue.by((w: String) -> w.len())
+    words := PriorityQueue.by(fn(w: String) { w.len() })
     words.push("pear")
     words.push("fig")
     words.push("kiwi")
@@ -44,7 +44,7 @@ run: fn() {
     print(words.pop() ?? "")
     print(words.pop() ?? "")
 
-    temps := PriorityQueue.by((t: Float) -> -t)
+    temps := PriorityQueue.by(fn(t: Float) { -t })
     temps.push(1.5)
     temps.push(-2.0)
     temps.push(3.25)

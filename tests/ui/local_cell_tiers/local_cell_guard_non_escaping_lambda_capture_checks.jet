@@ -8,11 +8,11 @@ run: fn() {
     cell: Cell.new(1)
     guard: cell.guard_read()
     xs: [1, 2, 3]
-    total: xs.map(x -> x + guard.get()).sum()
+    total: xs.map(fn(x) { x + guard.get() }).sum()
     print(total)
 }
 
 read_once: fn(cell: Cell<Int>) -> Int {
     guard: cell.guard_read()
-    return apply(() -> guard.get())
+    return apply(fn() { guard.get() })
 }

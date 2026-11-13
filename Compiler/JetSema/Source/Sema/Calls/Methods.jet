@@ -90,12 +90,12 @@ sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
-        diagnostics.push(sema_error("E0104", span, "`{method}` takes one lambda, got {args.len()}", if method == "on_commit" -> "a post-commit hook registers a single cleanup lambda" else -> "a rollback hook registers a single undo lambda", "write `<handle>.{method}(() -> {{ … }})`"))
+        diagnostics.push(sema_error("E0104", span, "`{method}` takes one lambda, got {args.len()}", if method == "on_commit" -> "a post-commit hook registers a single cleanup lambda" else -> "a rollback hook registers a single undo lambda", "write `<handle>.{method}(fn() {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args[0].expr == .Lambda(lambda, _) {
         if lambda.params.len() != 0 {
-            diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
+            diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(fn() {{ … }})` with no parameters"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
@@ -114,7 +114,7 @@ sema_call_try_transaction_hook: fn(receiver: Expr, receiver_value: TExpr, method
         .Lambda(value) -> Val(value)
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     } ?? {
-        diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
+        diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(fn() {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     handle_name: if receiver == {
@@ -133,11 +133,11 @@ sema_call_shared_access_result_type: fn(receiver_ty: Type, method: String, resul
 }
 
 sema_call_builtin_host_arity_diagnostic: fn(method: String, actual: Int, span: Span) -> Diagnostic {
-    sema_error("E0104", span, "`{method}` expects 1 argument, got {actual}", "`.{method}` takes exactly one closure", "call `.{method}(value -> ...)` with a closure")
+    sema_error("E0104", span, "`{method}` expects 1 argument, got {actual}", "`.{method}` takes exactly one closure", "call `.{method}(fn(value) {{ ... }})` with a closure")
 }
 
 sema_call_builtin_host_lambda_diagnostic: fn(method: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0112", span, "`{method}` needs a lambda, not {type_name(ty)}", "`.{method}` runs a short function against the locked value", "write `.{method}(value -> …)`")
+    sema_error("E0112", span, "`{method}` needs a lambda, not {type_name(ty)}", "`.{method}` runs a short function against the locked value", "write `.{method}(fn(value) {{ … }})`")
 }
 
 sema_call_try_builtin_host_route: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

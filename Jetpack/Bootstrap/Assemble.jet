@@ -106,7 +106,7 @@ run: fn() {
         if args.len() != 1 -> usage()
         problems: slice_problems(root, checkout_root(cwd)) ?? refuse_as("compiler-slice", err.message)
         if problems.len() > 0 {
-            process.fail(1, problems.map(problem -> "compiler-slice: {problem}").join("\n"))
+            process.fail(1, problems.map(fn(problem) { "compiler-slice: {problem}" }).join("\n"))
         }
         print("compiler-slice: the Jetpack compiler slice is closed under the compiler's packages")
         return
@@ -518,7 +518,7 @@ inventory: fn(config: Config) -> [Inventoried] {
 jet_files_under: fn(root: String, directory: String) -> [String] {
     out := [String]{}
     listed := files.list_dir("{root}/{directory}") ?? return out
-    listed.sort_by((left: DirEntry, right: DirEntry) -> compare_bytes(left.name.bytes(), right.name.bytes()))
+    listed.sort_by(fn(left: DirEntry, right: DirEntry) { compare_bytes(left.name.bytes(), right.name.bytes()) })
     loop entry in listed {
         path: "{directory}/{entry.name}"
         if entry.is_dir {
@@ -549,7 +549,7 @@ compare_ints: fn(left: Int, right: Int) -> Ordering {
 
 sorted: fn(items: [String]) -> [String] {
     out := items.copy()
-    out.sort_by((left: String, right: String) -> compare_bytes(left.bytes(), right.bytes()))
+    out.sort_by(fn(left: String, right: String) { compare_bytes(left.bytes(), right.bytes()) })
     out
 }
 
@@ -696,7 +696,7 @@ read_manifest: fn(config: Config, name: String, embeds: &Embeds) -> [Entry] Err!
         normalized: normalize_join(".", source_path)
         if source_path.starts_with("/") || normalized == "" || !source_path.ends_with(".jet") -> return Err("{place}: expected a repository-relative .jet source path")
         if source_path != normalized -> return Err("{place}: use the canonical path {normalized}")
-        if !ALLOWED_PREFIXES.any(prefix -> source_path.starts_with(prefix)) -> return Err("{place}: sources must live under {ALLOWED_PREFIXES.join(" or ")}")
+        if !ALLOWED_PREFIXES.any(fn(prefix) { source_path.starts_with(prefix) }) -> return Err("{place}: sources must live under {ALLOWED_PREFIXES.join(" or ")}")
         area: jetpack_area(source_path)
         if area != "" && !has(folders, area) -> misplaced.push("{place}: {source_path} belongs under the `# == {area} ==` section")
         if !in_section -> return Err("{place}: every source belongs to a `# == Area ==` section")
@@ -1020,7 +1020,7 @@ areas_command: fn(root: String, args: [String]) -> String Err! {
             populated := [String]{}
             loop area in graph.order {
                 paths: graph.sources.get(area) ?? [String]{}
-                if paths.any(path -> path.starts_with("Jetpack/")) -> populated.push(area.copy()) // copy: the order stays the graph's
+                if paths.any(fn(path) { path.starts_with("Jetpack/") }) -> populated.push(area.copy()) // copy: the order stays the graph's
             }
             Ok(populated.join("\n"))
         }
@@ -1166,7 +1166,7 @@ slice_drift: fn(root: String, members: [String]) -> [String] {
     }
     member_index := [String: Int]{}
     loop (index, path) in members -> member_index[path] = index
-    missing_order.sort_by((left: String, right: String) -> compare_ints(member_index.get(left) ?? 0, member_index.get(right) ?? 0))
+    missing_order.sort_by(fn(left: String, right: String) { compare_ints(member_index.get(left) ?? 0, member_index.get(right) ?? 0) })
     loop owner in missing_order {
         rows: missing.get(owner) ?? [String]{}
         shown := [String]{}
@@ -1702,7 +1702,7 @@ unblock_uses: fn(text: String) -> String {
         if !open {
             trimmed: line.trim_start()
             lead: line.removesuffix(trimmed)
-            if lead.bytes().all(b -> is_space(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+            if lead.bytes().all(fn(b) { is_space(b) }) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
                 indent = lead
                 open = true
                 lines[at] = blank(line)

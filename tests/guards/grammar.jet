@@ -176,7 +176,7 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     examples: testing.corpus_entries("Examples", ".jet")
     assert(examples.len() > 0, "no Examples/**/*.jet found")
     listing: files.join(scratch, "examples.txt")
-    files.write(listing, examples.map(entry -> entry.path.copy()).join("\n")) ?? panic("write {listing}: {err}")
+    files.write(listing, examples.map(fn(entry) { entry.path.copy() }).join("\n")) ?? panic("write {listing}: {err}")
     parsed: process.cmd([tree_sitter, "parse", "--quiet", "--lib-path", library, "--lang-name", "jet", "--paths", listing]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter parse: {err}")
     offenders := [String]{}
     loop line in process.stdout_lines(parsed) {

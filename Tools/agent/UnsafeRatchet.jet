@@ -675,7 +675,7 @@ jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS
     entries: files.list_dir(directory) ?? return Err(ratchet_fail("cannot list {directory}: {err}"))
     names := [String]{}
     loop entry in entries -> names.push(entry.name.copy())
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     loop name in names {
         path: files.join(directory, name)
         if files.is_symlink(path) -> next
@@ -745,7 +745,7 @@ scan: fn(root: String) -[FS]> Census RatchetError! {
         scan_source(source, file, owner, regions)
     }
     // #6319: sort_by with a named comparator crashes; the lambda forwards to it.
-    regions.sort_by((left: Region, right: Region) -> compare_regions(left, right))
+    regions.sort_by(fn(left: Region, right: Region) { compare_regions(left, right) })
     counts := [PackageCount]{}
     loop region in regions {
         last: counts.len() - 1
@@ -804,7 +804,7 @@ raw_hits: fn(code: [U8]) -> [RawHit] {
     if text.contains("sys") {
         loop found in POSIX_CONTROL.matches(text) -> hits.push(RawHit{index: found.start, operation: 3})
     }
-    hits.sort_by((left: RawHit, right: RawHit) -> if left.index != right.index -> left.index <=> right.index else -> left.operation <=> right.operation)
+    hits.sort_by(fn(left: RawHit, right: RawHit) { if left.index != right.index -> left.index <=> right.index else -> left.operation <=> right.operation })
     hits
 }
 
@@ -1107,7 +1107,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
         }
         if !known -> counts.push(PackageCount{name: region.package.copy(), count: 1})
     }
-    counts.sort_by((left: PackageCount, right: PackageCount) -> left.name <=> right.name)
+    counts.sort_by(fn(left: PackageCount, right: PackageCount) { left.name <=> right.name })
     recorded: object_fields(counts_value) ?? return Err(ratchet_fail("unsafe baseline counts do not match its region rows"))
     matches := recorded.len() == counts.len()
     loop index in 0..<counts.len() {
@@ -1261,7 +1261,7 @@ increases: fn(current: Census, baseline: Census) -> [CountChange] {
     loop entry in baseline.counts {
         if !names.contains(entry.name) -> names.push(entry.name.copy())
     }
-    names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by(fn(left: String, right: String) { left <=> right })
     changes := [CountChange]{}
     loop name in names {
         before: count_of(baseline.counts, name)

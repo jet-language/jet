@@ -180,7 +180,7 @@ jet_cli_try_group_edit: fn(groups: &[JetCLITryFileEdits], positions: &[String:In
 jet_cli_try_stage_files: fn(groups: [JetCLITryFileEdits], sources: &[String:String], checked_rename: Bool) -> [JetCLISourceChange] JetCLITryError! {
     order := [Int]{}
     loop index in 0..<groups.len() -> order.push(index)
-    order.sort_by((a, b) -> groups[a].path <=> groups[b].path)
+    order.sort_by(fn(a, b) { groups[a].path <=> groups[b].path })
     changes := [JetCLISourceChange]{}
     loop index in order {
         group: groups[index]

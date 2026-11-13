@@ -235,7 +235,7 @@ provider_packagist_write_autoloader: fn(artifacts: [RegistryArtifact], out: Stri
             mappings.push(PackagistAutoloadMapping{prefix, directories})
         }
     }
-    mappings.sort_by((left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) -> (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix))
+    mappings.sort_by(fn(left: PackagistAutoloadMapping, right: PackagistAutoloadMapping) { (right.prefix.bytes().len() <=> left.prefix.bytes().len()).then(left.prefix <=> right.prefix) })
     php := [String]{"<?php\nspl_autoload_register(static function (string $class): void {{\n"}
     loop mapping in mappings {
         php.push("    if (str_starts_with($class, '{provider_packagist_php_quote(mapping.prefix)}')) {{\n")

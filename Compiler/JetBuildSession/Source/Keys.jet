@@ -231,7 +231,7 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     build_key_text(bytes, "generated-modules")
     generated := state.generated
     generated = loop fresh_item in generated -> fresh_item
-    generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> left.path <=> right.path)
+    generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { left.path <=> right.path })
     loop generated_row in generated {
         build_key_text(bytes, generated_row.path)
         build_key_text(bytes, generated_row.source_digest)
@@ -239,7 +239,7 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
     build_key_text(bytes, "build-fact-contributions")
     contributions := state.contributions
     contributions = loop fresh_item in contributions -> fresh_item
-    contributions.sort_by((left: BuildSessionContribution, right: BuildSessionContribution) -> left.key <=> right.key)
+    contributions.sort_by(fn(left: BuildSessionContribution, right: BuildSessionContribution) { left.key <=> right.key })
     loop contribution in contributions {
         values: [String]{contribution.key, build_key_contribution(contribution.value), "function", "environment", contribution.source, "computed by fn build"}
         loop value in values -> build_key_text(bytes, value)
@@ -283,7 +283,7 @@ build_session_action_key: fn(state: BuildSessionState, id: Int) -> String Never!
 build_session_compiler_node: fn(kind: String, subject: String, input_digests: [BuildGraphInputDigest]) -> BuildGraphNode Never! {
     sorted := input_digests
     sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by((left: BuildGraphInputDigest, right: BuildGraphInputDigest) -> if left.name == right.name -> left.digest <=> right.digest else -> left.name <=> right.name)
+    sorted.sort_by(fn(left: BuildGraphInputDigest, right: BuildGraphInputDigest) { if left.name == right.name -> left.digest <=> right.digest else -> left.name <=> right.name })
     digests := [BuildGraphInputDigest]{}
     inputs := [String]{}
     previous := BuildGraphInputDigest?{None}

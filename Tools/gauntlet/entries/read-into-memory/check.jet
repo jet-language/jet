@@ -15,7 +15,7 @@ measured: fn(value: Dyn) -> Bool {
     if value == {
         .Int(number) -> return number > 0
         .Float(number) -> return number > 0.0
-        .Number(lexeme) -> return !lexeme.starts_with("-") && lexeme.partition("e").head.bytes().any(b -> b >= (U8{49}) && b <= (U8{57}))
+        .Number(lexeme) -> return !lexeme.starts_with("-") && lexeme.partition("e").head.bytes().any(fn(b) { b >= (U8{49}) && b <= (U8{57}) })
         .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> return false
     }
 }

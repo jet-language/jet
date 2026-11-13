@@ -2946,7 +2946,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         .Distinct(value) -> {
             derives = sema_checked_derive_names(value.derives)
             base: sema_checked_qualify_type_with_generics(graph, value.base, module_row.module_identity, generic_params)
-            kind = Val(TTypeDefKind.Distinct{base: base, range: value.range.map((item) -> TIntegerRange{lo: item.lo, hi: item.hi})})
+            kind = Val(TTypeDefKind.Distinct{base: base, range: value.range.map(fn(item) { TIntegerRange{lo: item.lo, hi: item.hi} })})
         }
         .TypeAlias(value) -> kind = Val(TTypeDefKind.Alias{target: sema_checked_qualify_type_with_generics(graph, value.target, module_row.module_identity, generic_params)})
         .UnitFamily(value) -> {
@@ -3686,7 +3686,7 @@ sema_checked_comptime_key: fn(key: CtKey) -> TComptimeKey? {
         }
         .Str(value) -> Val(TComptimeKey.String{value: value})
         .Bool(value) -> Val(TComptimeKey.Bool{value: value})
-        .Char(value) -> sema_checked_const_char("{value}").map((code) -> TComptimeKey.Char{value: code})
+        .Char(value) -> sema_checked_const_char("{value}").map(fn(code) { TComptimeKey.Char{value: code} })
         .Tuple(fields) -> {
             result := [TComptimeKeyField]{}
             loop field in fields {
@@ -3715,7 +3715,7 @@ sema_checked_comptime: fn(source: CtValue) -> TComptimeValue? {
             .F64(bits64) -> Val(TComptimeValue.Float{value: bits64, bits: 64})
         }
         .Bool(flag) -> Val(TComptimeValue.Bool{value: flag})
-        .Char(character) -> sema_checked_const_char("{character}").map((code) -> TComptimeValue.Char{value: code})
+        .Char(character) -> sema_checked_const_char("{character}").map(fn(code) { TComptimeValue.Char{value: code} })
         .Str(text) -> Val(TComptimeValue.String{value: text})
         .BigInt(decimal) -> Val(TComptimeValue.BigInt{decimal: decimal})
         .Bytes(bytes) -> Val(TComptimeValue.Bytes{value: bytes})
@@ -3752,10 +3752,10 @@ sema_checked_comptime: fn(source: CtValue) -> TComptimeValue? {
             }
             Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: result})
         }
-        .Present(inner) -> sema_checked_comptime(inner).map((item) -> TComptimeValue.Present{value: item})
+        .Present(inner) -> sema_checked_comptime(inner).map(fn(item) { TComptimeValue.Present{value: item} })
         .Failed(report) -> if report == {
             .Clean(ty) -> Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty}})
-            .Told(inner) -> sema_checked_comptime(inner).map((item) -> TComptimeValue.Failed{report: TComptimeReport.Told{value: item}})
+            .Told(inner) -> sema_checked_comptime(inner).map(fn(item) { TComptimeValue.Failed{report: TComptimeReport.Told{value: item}} })
         }
         .Unit -> Val(TComptimeValue.Unit)
         .Closure(_) -> None

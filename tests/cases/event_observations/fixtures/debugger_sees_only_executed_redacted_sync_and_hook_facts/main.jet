@@ -7,37 +7,37 @@ use {
 run: fn() {
     scope: event.scope()
     executed: event.new<String>()
-    executed.on_priority(scope, 17, (secret: String) -> {})
+    executed.on_priority(scope, 17, fn(secret: String) {})
     never_called: event.new<String>()
     if false { never_called.emit("UNEXECUTED_SECRET") }
     executed.emit("SYNC_PAYLOAD_SECRET")
 
     hook: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    hook.on_priority(scope, 9, (secret: String) -> HookDecision.Fail("HOOK_FAILURE_SECRET"))
+    hook.on_priority(scope, 9, fn(secret: String) { HookDecision.Fail("HOOK_FAILURE_SECRET") })
     hook.run("HOOK_PAYLOAD_SECRET")
 
     direct_scope: event.scope()
     direct: event.new<Int>()
-    direct_sub: direct.on(direct_scope, (n: Int) -> {})
+    direct_sub: direct.on(direct_scope, fn(n: Int) {})
     direct_sub.unsubscribe()
 
     once_scope: event.scope()
     once_event: event.new<Int>()
-    once_event.once(once_scope, (n: Int) -> {})
+    once_event.once(once_scope, fn(n: Int) {})
     once_event.emit(1)
     once_event.emit(2)
 
     cancel_scope: event.scope()
     cancel_hook: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    cancel_hook.on(cancel_scope, (n: Int) -> HookDecision.Continue)
+    cancel_hook.on(cancel_scope, fn(n: Int) { HookDecision.Continue })
     cancel_scope.cancel()
 
     rejected_scope: event.scope()
     rejected_scope.cancel()
     rejected_event: event.new<Int>()
-    rejected_event.on(rejected_scope, (n: Int) -> {})
+    rejected_event.on(rejected_scope, fn(n: Int) {})
     rejected_hook: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
-    rejected_hook.on(rejected_scope, (n: Int) -> HookDecision.Continue)
+    rejected_hook.on(rejected_scope, fn(n: Int) { HookDecision.Continue })
     print("READY")
     // A pipe stdout is written when its buffer fills (spec.md print); flush so
     // the debugger session sees READY before it reads the snapshot.

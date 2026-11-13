@@ -40,8 +40,8 @@
 <pre class="diag">Error [jet.ConcurrentCaptureNotOwned]: `seen` cannot cross the `parallel worker` boundary: the value writes shared state
   --&gt; tests/ui/closures/parallel_adapters_reject_unsafe_boundaries_before_codegen.jet:4:33
     |
-  4 |     ignored: [1, 2, 3].para_map((n: Int) -&gt; { seen.push(n) })
-    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  4 |     ignored: [1, 2, 3].para_map(fn(n: Int) { seen.push(n) })
+    |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule
  Fix: Give it away with `.move()`, freeze it with `freeze`, or share it with `Shared{…}`
 More: jet-lang.dev/e/E1101

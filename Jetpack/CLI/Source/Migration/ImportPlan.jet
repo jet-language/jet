@@ -109,7 +109,7 @@ ImportPlan: struct {
         }
         if unresolved_root -> return "{out}}}\n"
         deps := self.deps
-        deps.sort_by((left: ImportedDep, right: ImportedDep) -> left.name <=> right.name)
+        deps.sort_by(fn(left: ImportedDep, right: ImportedDep) { left.name <=> right.name })
         loop dep in deps {
             facts: self.provider_facts.get(dep.provider_ref) ?? next
             // A mutable foreign selector belongs in the source-linked

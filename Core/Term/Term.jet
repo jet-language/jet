@@ -423,9 +423,9 @@ decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
 
 #Test("input edit keeps each line ending and a missing final line break") {
     cr: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
-    assert_eq(__input_edit_text("a cat{cr}\nno\nlast cat", (line) -> line.replace("cat", "dog")), "a dog{cr}\nno\nlast dog")
-    assert_eq(__input_edit_text("cat\n", (line) -> line.upper()), "CAT\n")
-    assert_eq(__input_edit_text("", (line) -> line.upper()), "")
+    assert_eq(__input_edit_text("a cat{cr}\nno\nlast cat", fn(line) { line.replace("cat", "dog") }), "a dog{cr}\nno\nlast dog")
+    assert_eq(__input_edit_text("cat\n", fn(line) { line.upper() }), "CAT\n")
+    assert_eq(__input_edit_text("", fn(line) { line.upper() }), "")
 }
 
 
@@ -474,7 +474,7 @@ terminal_secret_write: fn(text: String) -[IO, Time.Wait]> String? Never! {
 }
 
 terminal_secret_read: fn() -[IO, Time.Wait]> (eof: Bool, line: String, cause: String?) Never! {
-    _guard: core.mem.scope.guard(() -> rt.terminal8_mode_leave())
+    _guard: core.mem.scope.guard(fn() { rt.terminal8_mode_leave() })
     if rt.terminal8_fault("IO.Read") -> return (eof: false, line: "", cause: Val("fault injected: IO.Read"))
     read: rt.terminal8_line()
     (eof: read.eof, line: read.line, cause: read.read_error)

@@ -21,7 +21,7 @@ use {
 // GNU time (`-f`, `-o`): the first executable `time` on PATH (the shell's
 // `time` is a keyword, not this), else the store path it was pinned to.
 gnu_time: fn() -[Env, FS]> String {
-    on_path: process.env_get_or("PATH", "").split(":").to_list().find(dir -> dir != "" && files.can_execute("{dir}/time"))
+    on_path: process.env_get_or("PATH", "").split(":").to_list().find(fn(dir) { dir != "" && files.can_execute("{dir}/time") })
     if on_path == .Val(dir) -> return "{dir}/time"
     "/nix/store/n0wrh3vjfwcqfyswwai0zcxvkpibq34v-time-1.10/bin/time"
 }
@@ -676,7 +676,7 @@ parse_counters: fn(output: String) -> [Counter] MeasureError! {
             j -= 1
         }
     }
-    Ok(order.map(at -> Counter{key: counters[at].key.copy(), value: counters[at].value}))  // copy: the sorted list owns its keys
+    Ok(order.map(fn(at) { Counter{key: counters[at].key.copy(), value: counters[at].value} }))  // copy: the sorted list owns its keys
 }
 
 // parseCounters' object, as JSON.stringify writes it.

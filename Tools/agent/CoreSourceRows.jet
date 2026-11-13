@@ -584,7 +584,7 @@ effect_rows_error: fn(source: String, machine: [EffectRow]?) -> String Never! {
     law: "    {{law: CollectionLaw.Visit, timing: \"eager\", result: \"r\", callbacks: \"c\", stop: \"s\", failure: \"f\", buffering: \"b\"}},"
     operation: "    {{receivers: CollectionReceivers.List, name: \"map\", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{{CollectionArg.ItemFn}}, result: CollectionResult.Mapped, op: CollectionOp.SeqMap, law: CollectionLaw.Visit, empty: \"empty list\", status: CollectionStatus.Current}},"
     tables: render_operation_tables("// BEGIN COLLECTION LAWS\nLAWS: {{\n{law}\n}}\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\nOPS: {{\n{operation}\n}}\n// END COLLECTION OPERATIONS\n") ?? panic("the operation tables were refused: {err.message}")
-    assert(tables.contains("| Visit | eager | r | c | s | f | b |\n") && tables.contains("| `[T]` | `map((item) -> T)` | borrows | Visit | empty list | current |\n"))
+    assert(tables.contains("| Visit | eager | r | c | s | f | b |\n") && tables.contains("| `[T]` | `map(fn(item) {{ T }})` | borrows | Visit | empty list | current |\n"))
     assert(render_operation_tables("// BEGIN COLLECTION LAWS\n{law}\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\n{operation.replace("Visit", "Gone")}\n// END COLLECTION OPERATIONS\n") == .Err(_))
     assert(render_operation_tables("// BEGIN COLLECTION LAWS\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\n{operation}\n// END COLLECTION OPERATIONS\n") == .Err(_))
 }

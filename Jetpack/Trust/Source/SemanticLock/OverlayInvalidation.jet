@@ -25,7 +25,7 @@ trust_overlay_invalidations: fn(before: [OverlayFingerprint], after: [OverlayFin
     keys := [OverlayFingerprint]{}
     loop entry in before -> keys.push(entry.copy())
     loop entry in after -> keys.push(entry.copy())
-    keys.sort_by((left: OverlayFingerprint, right: OverlayFingerprint) -> (left.overlay <=> right.overlay).then(left.package <=> right.package))
+    keys.sort_by(fn(left: OverlayFingerprint, right: OverlayFingerprint) { (left.overlay <=> right.overlay).then(left.package <=> right.package) })
     out := [OverlayInvalidation]{}
     previous_overlay := ""
     previous_package := ""

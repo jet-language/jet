@@ -140,7 +140,7 @@ startup_input_hash: fn(root: String) -[FS]> String MeasureError! {
 }
 
 boundaries: fn(events: [Dyn], cat: String, name: String, ph: String) -> [Dyn] Never! {
-    events.filter(event -> is_text(event.get("cat"), cat) && is_text(event.get("name"), name) && is_text(event.get("ph"), ph))
+    events.filter(fn(event) { is_text(event.get("cat"), cat) && is_text(event.get("name"), name) && is_text(event.get("ph"), ph) })
 }
 
 // startupTiming: the one compile span and the pinned entry's parse span of
@@ -150,13 +150,13 @@ startup_timing: fn(events: [Dyn], time_text: String, entry: String) -> Timing Me
     ends: boundaries(events, "compile", "compile", "E")
     parse_begins: boundaries(events, "parse", entry, "B")
     parse_ends: boundaries(events, "parse", entry, "E")
-    if ([[Dyn]]{begins, ends, parse_begins, parse_ends}).any(rows -> rows.len() != 1) {
+    if ([[Dyn]]{begins, ends, parse_begins, parse_ends}).any(fn(rows) { rows.len() != 1 }) {
         return Err(measure_error("missing or ambiguous compile/selected-entry parse boundaries"))
     }
     begin: begins[0]
     // begin, end, parse and parse_end, as safe integers.
-    ts: ([Dyn]{begin, ends[0], parse_begins[0], parse_ends[0]}).filter_map(event -> safe_integer(event.get("ts"))).to_list()
-    if ([Dyn]{ends[0], parse_begins[0], parse_ends[0]}).any(event -> !same(event.get("pid"), begin.get("pid")) || !same(event.get("tid"), begin.get("tid"))) ||
+    ts: ([Dyn]{begin, ends[0], parse_begins[0], parse_ends[0]}).filter_map(fn(event) { safe_integer(event.get("ts")) }).to_list()
+    if ([Dyn]{ends[0], parse_begins[0], parse_ends[0]}).any(fn(event) { !same(event.get("pid"), begin.get("pid")) || !same(event.get("tid"), begin.get("tid")) }) ||
         ts.len() != 4 || !(ts[0] < ts[2] && ts[2] <= ts[3] && ts[3] <= ts[1]) {
         return Err(measure_error("invalid compile/selected-entry parse boundaries"))
     }
@@ -181,13 +181,13 @@ timing_of: fn(timing: Timing, name: String) -> Int Never! {
 // The high median of timing `name` over `trials`. The lambda captures the
 // parameter, which it only reads, so the caller's `name` stays its own.
 median_timing: fn(trials: [Trial], name: String) -> Int? Never! {
-    stats.median_high_int(trials.map(row -> timing_of(row.timing, name)))
+    stats.median_high_int(trials.map(fn(row) { timing_of(row.timing, name) }))
 }
 
 check_identity: fn(rows: [Trial]) MeasureError! {
     first: rows[0].receipt.compiler_identity
     if ([String]{"", "unavailable"}).contains(first ?? "") -> return Err(measure_error("compiler identity unavailable"))
-    if rows.any(row -> row.receipt.compiler_identity != first) -> return Err(measure_error("compiler identity changed within an arm"))
+    if rows.any(fn(row) { row.receipt.compiler_identity != first }) -> return Err(measure_error("compiler identity changed within an arm"))
     Ok()
 }
 
@@ -204,7 +204,7 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value:
         }
         if !HEX64.full_match(row.artifact_sha256) || row.artifact_sha256 != oracle.artifact_sha256 || receipt.source_bytes != oracle.receipt.source_bytes -> return Err(measure_error("paired emitted artifact differs"))
         if !HEX64.full_match(row.source_sha256) || row.source_sha256 != oracle.source_sha256 -> return Err(measure_error("paired actual project inputs differ"))
-        if METRICS.any(name -> timing_of(row.timing, name) <= 0) -> return Err(measure_error("missing or invalid startup timing"))
+        if METRICS.any(fn(name) { timing_of(row.timing, name) <= 0 }) -> return Err(measure_error("missing or invalid startup timing"))
     }
     check_identity(plain)
     check_identity(optimized)
@@ -233,7 +233,7 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value:
 // The arm's trial-N directories in name order.
 trial_names: fn(root: String, arm: String) -[FS]> [String] MeasureError! {
     listed: files.list_dir(files.join(root, arm)) ?? return Err(measure_error("{err}"))
-    names := listed.map(entry -> entry.name.copy()).filter(name -> TRIAL.full_match(name))
+    names := listed.map(fn(entry) { entry.name.copy() }).filter(fn(name) { TRIAL.full_match(name) })
     names.sort()
     Ok(names)
 }
@@ -289,7 +289,7 @@ compare_directory: fn(root: String) -[Env, FS]> Compared MeasureError! {
     out := compare_startup(plain, optimized)
     wins: out[4].value == Dyn.Text("win")
     out.push((key: "pair", value: pair))
-    out.push((key: "trial_directories", value: Dyn.Array(trials.map(name -> Dyn.Text(name.copy())))))
+    out.push((key: "trial_directories", value: Dyn.Array(trials.map(fn(name) { Dyn.Text(name.copy()) }))))
     Ok(Compared{receipt: Dyn.Object(out), win: wins})
 }
 

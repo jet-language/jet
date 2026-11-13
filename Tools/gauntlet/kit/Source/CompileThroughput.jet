@@ -61,7 +61,7 @@ run_compile_throughput_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> Compile
     blockers: if receipt == Dyn.Null -> ["Throughput.jet exited {done.code} without a receipt"] else -> texts_at(receipt, "failures")
     programs: items_at(receipt, "programs")
     arm_count: items_at(axis, "arms").len()
-    complete: receipt != Dyn.Null && programs.len() == items_at(axis, "programs").len() && programs.all(program -> items_at(program, "arms").len() == arm_count && items_at(program, "arms").all(arm -> member(arm, "summary") != None))
+    complete: receipt != Dyn.Null && programs.len() == items_at(axis, "programs").len() && programs.all(fn(program) { items_at(program, "arms").len() == arm_count && items_at(program, "arms").all(fn(arm) { member(arm, "summary") != None }) })
     metrics := Dyn.object()
     loop program in programs {
         loop arm in items_at(program, "arms") {

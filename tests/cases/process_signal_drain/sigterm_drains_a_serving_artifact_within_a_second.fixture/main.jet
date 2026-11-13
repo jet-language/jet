@@ -13,10 +13,10 @@ use {
 run: fn() {
     process.on_signal(.Term)
     entry_mux: http_server.mux()
-    entry_mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "entry")))
+    entry_mux.get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "entry")) })
     entry_server: http_server.bind("127.0.0.1:0", entry_mux) ?? process.fail(2, "bind: {err}")
     task_mux: http_server.mux()
-    task_mux.get("/", (_req: HTTPRequest) -> Ok(http_server.response(200, "task")))
+    task_mux.get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "task")) })
     task_server: http_server.bind("127.0.0.1:0", task_mux) ?? process.fail(2, "bind: {err}")
     serving: task { task_server.serve() ?? process.fail(1, "task serve: {err}") }
     sleeping: task { time.sleep(60s) }

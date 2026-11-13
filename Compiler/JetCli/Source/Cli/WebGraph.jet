@@ -763,7 +763,7 @@ jet_cli_web_route_contracts: fn(modules: [JetDriverDocModule], functions: [Func]
 
 jet_cli_web_sort_routes: fn(routes: &[JetCLIWebRoute]) {
     routes = loop fresh_item in routes -> fresh_item
-    routes.sort_by((left: JetCLIWebRoute, right: JetCLIWebRoute) -> (sema_app_route_static_parts(right.path) <=> sema_app_route_static_parts(left.path)).then(sema_app_route_parts(right.path).len() <=> sema_app_route_parts(left.path).len()).then(left.path <=> right.path).then(left.handler <=> right.handler))
+    routes.sort_by(fn(left: JetCLIWebRoute, right: JetCLIWebRoute) { (sema_app_route_static_parts(right.path) <=> sema_app_route_static_parts(left.path)).then(sema_app_route_parts(right.path).len() <=> sema_app_route_parts(left.path).len()).then(left.path <=> right.path).then(left.handler <=> right.handler) })
 }
 
 jet_cli_web_effect_root: fn(effect_name: String) -> String {
@@ -844,7 +844,7 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
                     if !known -> captures.push(JetCLIWebCapture{name: parameter.name, ty: type_name(parameter.ty), serializable: jet_cli_web_resumable(parameter.ty, serializable)})
                 }
             }
-            captures.sort_by((left: JetCLIWebCapture, right: JetCLIWebCapture) -> left.name <=> right.name)
+            captures.sort_by(fn(left: JetCLIWebCapture, right: JetCLIWebCapture) { left.name <=> right.name })
             all := true
             loop capture in captures {
                 if !capture.serializable -> all = false
@@ -1006,17 +1006,17 @@ jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDr
 
 jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: &JetCLIWebGraph) {
     uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}}
-    loop function in functions -> ast_visit_body(function.body, (expression: Expr) -> jet_cli_web_note_use(uses, expression, modules, functions, function.name), true)
+    loop function in functions -> ast_visit_body(function.body, fn(expression: Expr) { jet_cli_web_note_use(uses, expression, modules, functions, function.name) }, true)
     queries := uses.queries
     stores := uses.stores
     forms: uses.forms
-    queries.sort_by((left: JetCLIWebQuery, right: JetCLIWebQuery) -> (left.key <=> right.key).then(left.footprint <=> right.footprint).then(left.source <=> right.source).then(left.kind <=> right.kind))
+    queries.sort_by(fn(left: JetCLIWebQuery, right: JetCLIWebQuery) { (left.key <=> right.key).then(left.footprint <=> right.footprint).then(left.source <=> right.source).then(left.kind <=> right.kind) })
     loop fact in queries {
         last: graph.queries.len() - 1
         if last >= 0 && graph.queries[last].key == fact.key && graph.queries[last].footprint == fact.footprint && graph.queries[last].source == fact.source && graph.queries[last].kind == fact.kind -> next
         graph.queries.push(fact)
     }
-    stores.sort_by((left: JetCLIWebStore, right: JetCLIWebStore) -> (left.name <=> right.name).then(left.source <=> right.source).then(left.kind <=> right.kind).then(left.history_limit <=> right.history_limit))
+    stores.sort_by(fn(left: JetCLIWebStore, right: JetCLIWebStore) { (left.name <=> right.name).then(left.source <=> right.source).then(left.kind <=> right.kind).then(left.history_limit <=> right.history_limit) })
     loop fact in stores {
         last: graph.stores.len() - 1
         if last >= 0 && graph.stores[last].name == fact.name && graph.stores[last].source == fact.source && graph.stores[last].kind == fact.kind && graph.stores[last].history_limit == fact.history_limit -> next
@@ -1031,7 +1031,7 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
         }
         if !seen -> kept.push(fact.copy())
     }
-    kept.sort_by((left: JetCLIWebForm, right: JetCLIWebForm) -> (left.model <=> right.model).then(left.action <=> right.action).then(left.provenance <=> right.provenance))
+    kept.sort_by(fn(left: JetCLIWebForm, right: JetCLIWebForm) { (left.model <=> right.model).then(left.action <=> right.action).then(left.provenance <=> right.provenance) })
     graph.forms = kept
 }
 

@@ -60,7 +60,7 @@ run: fn() {
     scope: event.scope()
     files: watcher.files(root) ?? panic("watch files failed")
     callback_path: created.to_string()
-    sub: files.on(scope, ev -> {
+    sub: files.on(scope, fn(ev) {
         if ev.path == callback_path {
             print("callback {domain_label(ev.domain)}:{kind_label(ev.kind)}:recursive")
         }
@@ -79,7 +79,7 @@ run: fn() {
     dropped_path: after_drop.to_string()
     if true {
         dropped_scope: event.scope()
-        files.on(dropped_scope, ev -> {
+        files.on(dropped_scope, fn(ev) {
             if ev.path == dropped_path -> print("leaked callback after scope drop")
         })
     }

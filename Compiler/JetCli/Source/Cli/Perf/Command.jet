@@ -478,7 +478,7 @@ jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
             if !clocks.contains(clock) -> clocks.push(clock)
         }
     }
-    clocks.sort_by((left: String, right: String) -> left <=> right)
+    clocks.sort_by(fn(left: String, right: String) { left <=> right })
     clock_list: if clocks.len() == 0 -> "none" else -> clocks.join(",")
     window: jet_cli_perf_field_text(profile, "window_status") ?? return None
     run_wall: if jet_cli_perf_field_integer(profile, "window_wall_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"

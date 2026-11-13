@@ -317,7 +317,7 @@ build_plan_execution: fn(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
 build_plan_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit: plan.storage.guard_read()
     generated := permit.value.generated.copy()
-    generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
+    generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path })
     generated
 }
 // Every setting value `build: fn` contributed (`b.contribute`), in call order.
@@ -358,6 +358,6 @@ build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGenera
     loop generated_row in permit.value.generated {
         if permit.value.targets.len() == 0 || build_session_contains_string(paths, generated_row.path) -> generated.push(generated_row)
     }
-    generated.sort_by((left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) -> if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path)
+    generated.sort_by(fn(left: BuildSessionGeneratedModule, right: BuildSessionGeneratedModule) { if left.path == right.path -> left.name <=> right.name else -> left.path <=> right.path })
     generated
 }

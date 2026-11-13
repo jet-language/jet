@@ -25,7 +25,7 @@ mutating: fn(flag: Shared<Flag>) {
 blocking: fn(flag: Shared<Flag>, changed: Condition) {
     loop flag.ready == false {
         guard: flag.guard_edit()
-        guard.wait(changed, value -> value.ready) ?? panic("wait failed")
+        guard.wait(changed, fn(value) { value.ready }) ?? panic("wait failed")
     }
 }
 

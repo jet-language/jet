@@ -155,7 +155,7 @@ store_scan_hangar_doctor: fn(verification: &StoreVerification, roots: HangarRoot
         .Ok(entries) -> store_doctor_repair_paths(entries, scan.repair_paths)
         .Err(error) -> scan.report.push("drift", "package records", "could not read: {error.message()}", DoctorRepair.NoRepair)
     }
-    scan.report.findings.sort_by(finding -> store_doctor_finding_sort_key(finding))
+    scan.report.findings.sort_by(fn(finding) { store_doctor_finding_sort_key(finding) })
     Ok(scan)
 }
 
@@ -174,7 +174,7 @@ store_doctor_finding_sort_key: fn(finding: HangarDoctorFinding) -> String Never!
 // Sorted listing of a directory.
 store_doctor_sorted_entries: fn(path: String) -[FS]> [DirEntry] StoreError! {
     entries := files.list_dir(path)
-    entries.sort_by(entry -> entry.name)
+    entries.sort_by(fn(entry) { entry.name })
     Ok(entries)
 }
 

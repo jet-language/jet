@@ -163,7 +163,7 @@ Matrix: struct {
 run: fn(args: Args) Err! {
     root: sys.executable().remove_suffix("/{HARNESS}")
     bounds: [(value: args.samples, low: 1, high: 99), (value: args.rounds, low: 1, high: 1000000), (value: args.memory_limit_mib, low: 1, high: 65536), (value: args.max_output_bytes, low: 1, high: 16777216)]
-    in_range: bounds.all(bound -> bound.value >= bound.low && bound.value <= bound.high)
+    in_range: bounds.all(fn(bound) { bound.value >= bound.low && bound.value <= bound.high })
     timeout: args.timeout ?? args.timeout_seconds
     if !in_range || !math.is_finite(timeout) || timeout <= 0.0 || timeout > 3600.0 -> usage_error("--samples 1..99, --rounds 1..1000000, --timeout-seconds above 0 and at most 3600, --memory-limit-mib 1..65536, --max-output-bytes 1..16777216")
     if args.run && args.dry_run -> usage_error("argument --dry-run: not allowed with argument --run")
@@ -191,7 +191,7 @@ run: fn(args: Args) Err! {
             "samples": args.samples, "rounds": args.rounds, "timeout_seconds": Dyn.Float(timeout),
             "memory_limit_mib": args.memory_limit_mib, "max_output_bytes": args.max_output_bytes, "scratch_root": scratch_root,
         }},
-        "cells": Dyn.Array(cells.map(cell -> cell_tree(cell))),
+        "cells": Dyn.Array(cells.map(fn(cell) { cell_tree(cell) })),
         "summary": summarize(cells),
         "peer_comparison": Dyn{[String: Dyn]{"status": "not_run", "reason": "peer comparison is outside card #3151 harness scope", "performance_win_claim": false, "arms": Dyn.Array([Dyn]{})}},
         "receipt": Dyn{[String: Dyn]{"status": "not_available", "text": Dyn.Null, "reason": "no canonical runtime receipt is claimed by this harness"}},
@@ -209,7 +209,7 @@ usage_error: fn(message: String) -> Never {
 // trailing slash.
 path_text: fn(path: String) -> String Never! {
     absolute: path.starts_with("/")
-    kept: path.split("/").filter(part -> part != "" && part != ".").to_list()
+    kept: path.split("/").filter(fn(part) { part != "" && part != "." }).to_list()
     joined: kept.join("/")
     if {
         absolute -> "/{joined}"
@@ -251,7 +251,7 @@ static_validation: fn() -> Dyn Err! {
     }
     if WORKLOAD_CASES["payload"].semantic_value != "Command.Write(\"hello\")" -> return Err("known payload semantic value changed")
     names: ["form_inventory", "case_inventory", "equal_known_payload", "wire_fixtures_are_bounded", "adjacent_is_explicitly_unavailable"]
-    Ok(Dyn{[String: Dyn]{"status": "ok", "checks": Dyn.Array(names.map(name -> Dyn{[String: Dyn]{"name": name, "status": "ok"}}))}})
+    Ok(Dyn{[String: Dyn]{"status": "ok", "checks": Dyn.Array(names.map(fn(name) { Dyn{[String: Dyn]{"name": name, "status": "ok"}} }))}})
 }
 
 workload_description: fn() -> Dyn Never! {
@@ -436,21 +436,21 @@ measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
     loop index in 0..<bench.samples {
         samples.push(sample(bench, cell, if cell.operation == "encode" -> source else -> wire, if cell.operation == "encode" -> wire else -> source, index))
     }
-    cell.sample_results = samples.map(one -> one.tree.copy())
-    statuses: samples.map(one -> one.status.copy())
+    cell.sample_results = samples.map(fn(one) { one.tree.copy() })
+    statuses: samples.map(fn(one) { one.status.copy() })
     verdict: if {
         statuses.contains("timeout") -> (status: "timeout", reason: "at least one sample exceeded the timeout")
         statuses.contains("error") -> (status: "error", reason: "at least one sample failed the adapter protocol or fixture check")
-        statuses.all(status -> status == "measured") -> (status: "measured", reason: "all samples completed with the expected codec outcome")
+        statuses.all(fn(status) { status == "measured" }) -> (status: "measured", reason: "all samples completed with the expected codec outcome")
         else -> (status: "error", reason: "no successful samples")
     }
     cell.status = verdict.status
     cell.reason = verdict.reason
     if verdict.status == "measured" {
-        cell.process_wall_median_ns = median(samples.map(one -> Val(one.wall_ns)))
-        cell.codec_median_ns = median(samples.map(one -> one.codec_ns))
+        cell.process_wall_median_ns = median(samples.map(fn(one) { Val(one.wall_ns) }))
+        cell.codec_median_ns = median(samples.map(fn(one) { one.codec_ns }))
         cell.timing_status = if cell.codec_median_ns != None -> "adapter_codec_and_process_wall" else -> "process_wall_only;adapter_codec_ns_unavailable"
-        cell.allocation_median = median(samples.map(one -> one.allocation_count))
+        cell.allocation_median = median(samples.map(fn(one) { one.allocation_count }))
         cell.allocation_count = cell.allocation_median
         cell.allocation_status = if cell.allocation_median != None -> "measured" else -> "adapter_allocation_count_unavailable"
         cell.encoded_bytes_status = if cell.operation == "encode" -> "verified" else -> "fixture"
@@ -617,7 +617,7 @@ count: fn(metrics: Dyn, field: String) -> Int? Err! {
 command_argv: fn(command: String, values: [String: String]) -> [String] Err! {
     left: WORD.replace(command, "").trim()
     if left != "" -> return Err("invalid command quoting: {if left.ends_with("\\") -> "No escaped character" else -> "No closing quotation"}")
-    parts: WORD.find_all(command).map(word -> unquote(word))
+    parts: WORD.find_all(command).map(fn(word) { unquote(word) })
     if parts.len() == 0 -> return Err("configured command is empty")
     argv := [String]{}
     placeholder := false
@@ -663,15 +663,15 @@ format_word: fn(word: String, values: [String: String]) -> String? Never! {
 // A shlex word without its quoting: in double quotes a backslash escapes
 // only a double quote or a backslash.
 unquote: fn(word: String) -> String Never! {
-    PIECE.replace_all_with(word, found -> "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}")
+    PIECE.replace_all_with(word, fn(found) { "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}" })
 }
 
 // repr of printable text: in single quotes, or in double quotes when it has
 // a single quote and no double quote; backslashes, that quote and control
 // characters escaped.
 python_repr: fn(text: String) -> String Never! {
-    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, found -> repr_escape(found.text))}\""
-    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, found -> repr_escape(found.text))}'"
+    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}\""
+    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, fn(found) { repr_escape(found.text) })}'"
 }
 
 repr_escape: fn(character: String) -> String Never! {

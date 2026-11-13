@@ -173,7 +173,7 @@ store_test_assert_nothing_published: fn(verification: &StoreVerification, roots:
     // An escaping closure owns copies of what it captures, so the race is
     // observed through the filesystem rather than a captured flag.
     fired := false
-    hook: (copied: String) -[FS]> {
+    hook: fn(copied: String) -[FS]> {
         if copied == replaced && !fired {
             fired = true
             files.rename(replacement, replaced) ?? panic("replace after copy")

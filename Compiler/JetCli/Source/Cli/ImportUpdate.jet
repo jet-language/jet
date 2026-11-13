@@ -128,7 +128,7 @@ jet_cli_import_validate_comparison_binding: fn(record: EvidenceRecord, compariso
 // Rust `indexed_comparison`: newest matched comparison bound to this boundary.
 jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cwd: String, boundary: ForeignBoundaryContract, boundary_digest: String) -[FS, Time.Wait]> ComparisonRecord JetCLIImportPlanError! {
     entries := jet_cli_record_index_query_kind(index, "comparison", true)
-    entries.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> {
+    entries.sort_by(fn(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) {
         if left.recorded_sequence != right.recorded_sequence -> return right.recorded_sequence <=> left.recorded_sequence
         left.artifact_id <=> right.artifact_id
     })
@@ -205,7 +205,7 @@ jet_cli_import_accept_update_replacement: fn(plan: &JetCLIImportPlan, cwd: Strin
     if !boundary.has_complete_artifact_coverage() -> return Err(jet_cli_import_update_error("source import replacement coverage is incomplete"))
     files := [String]{}
     jet_cli_import_collect_sources(plan.source, plan.source, plan.language, files) ?? return Err(err)
-    files.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    files.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     current_source_digest: jet_cli_import_tree_identity(plan.source, files, "jet-source-import-input-v1") ?? return Err(err)
     if current_source_digest != plan.source_digest -> return Err(jet_cli_import_update_error("source import update source changed after planning"))
     index: jet_cli_record_index_load(cwd) ?? return Err(jet_cli_import_update_error("cannot load indexed reasoning records: {err.message}"))
@@ -274,7 +274,7 @@ jet_cli_import_persist_accepted_receipt: fn(plan: JetCLIImportPlan, receipt: For
     receipt.validate() ?? return Err(jet_cli_import_update_error(err.message))
     files := [String]{}
     jet_cli_import_collect_sources(plan.source, plan.source, plan.language, files) ?? return Err(err)
-    files.sort_by((left: String, right: String) -> jet_cli_import_path_order(left, right))
+    files.sort_by(fn(left: String, right: String) { jet_cli_import_path_order(left, right) })
     if files.len() == 0 -> return Err(jet_cli_import_update_error("accepted source import has no source inputs"))
     argv: [String]{"import", plan.source.copy(), "--update"}
     paths: loop file in files -> file.copy()

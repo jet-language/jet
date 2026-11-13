@@ -735,7 +735,7 @@ body uses the type's literal notation, such as elements for `[U8]{42, 0}` and
 entries for `[String:Int]{"a": 1}`. A body of exactly one expression is decided
 by its type. When the expression is a value of the head type, or one that a
 parameter of that type accepts, the result is that whole value:
-`[Int]{[1, 2, 3].map(n -> n * 2)}` is a three-element list, `[String:Int]{m}`
+`[Int]{[1, 2, 3].map(fn(n) { n * 2 })}` is a three-element list, `[String:Int]{m}`
 is the map `m`, and `Float{rows()}` widens an `Int` with the checked rule a
 `Float` parameter applies, stopping with E3010 when the number has no exact
 Float. Otherwise the head's notation applies, so `[[Int]]{xs}` is a one-element
@@ -1076,7 +1076,7 @@ migration UserRecord {
     rename name -> display_name
     remove legacy_id
     add verified: Bool = false
-    change price: Int -> Usd via { c -> Usd.from_int(c) }
+    change price: Int -> Usd via { fn(c) { Usd.from_int(c) } }
 }
 ```
 
@@ -1245,10 +1245,10 @@ parameter.
 
 ## Closures and function values
 
-A lambda is `(params) -> expression` or `(params) -> { ... }`. A single
-assignment or a unit call needs no extra braces after the arrow. Parameter
-annotations may be omitted when an expected function type supplies them; with
-no expected type, omitted annotations report **E0801** (S46).
+A lambda is `fn(params) { body }`: the `fn` keyword, its parameters and a
+braced body whose last value is the result. Parameter annotations may be
+omitted when an expected function type supplies them; with no expected type,
+omitted annotations report **E0801** (S46).
 A locally inferred value lambda keeps the failure contract proved by its own
 body; a body with no failure has a `Never` failure rail. A same-named file
 function cannot supply the local binding's call or failure contract.
@@ -1258,8 +1258,8 @@ Use an explicit module-qualified call to select a declared function while
 keeping a same-named local value in scope.
 
 ```jet
-square: (n: Int) -> n * n
-increment: (n: Int) -> {
+square: fn(n: Int) { n * n }
+increment: fn(n: Int) {
     n + 1
 }
 ```
@@ -1926,7 +1926,7 @@ is `Shared<T?>{Val(x.move())}`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
-exit. `.map(value -> value.field)` narrows one guard to a field. `.split(first,
+exit. `.map(fn(value) { value.field })` narrows one guard to a field. `.split(first,
 second)` is legal only when sema proves the stored field paths disjoint. Guards
 are task-local and cannot be copied or sent. A public guard parameter reads by
 default; `&guard: SharedGuard<T>` requires and preserves edit access
@@ -4520,8 +4520,8 @@ use event: core.event
 run: fn() {
     scope: event.scope()
     clicked: event.new<Int>()
-    clicked.on(scope, n -> print("clicked {n}"))
-    clicked.once(scope, n -> print("once {n}"))
+    clicked.on(scope, fn(n) { print("clicked {n}") })
+    clicked.once(scope, fn(n) { print("once {n}") })
     print(clicked.emit(1).summary())
     scope.cancel()
 }

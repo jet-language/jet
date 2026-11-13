@@ -117,7 +117,7 @@ jet_cli_architecture_row: fn(index: SemIndex, kind: String, subject: String, cal
             break
         }
     }
-    evidence.sort_by((left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.role <=> right.role))
+    evidence.sort_by(fn(left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) { (left.module_path <=> right.module_path).then(left.span.start <=> right.span.start).then(left.role <=> right.role) })
     jet_cli_architecture_unique(boundaries)
     JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
 }
@@ -168,7 +168,7 @@ jet_cli_architecture_rows: fn(index: SemIndex) -> [JetCLIArchitectureRow] Never!
         seen.push(identity)
         rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
     }
-    rows.sort_by((left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> (left.subject <=> right.subject).then(left.kind <=> right.kind).then(left.scope <=> right.scope))
+    rows.sort_by(fn(left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) { (left.subject <=> right.subject).then(left.kind <=> right.kind).then(left.scope <=> right.scope) })
     if rows.len() > 64 -> rows = rows[0..63]
     rows
 }

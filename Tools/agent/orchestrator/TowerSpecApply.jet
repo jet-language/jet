@@ -63,7 +63,7 @@ sub: fn(t: String, from: String, to: String, place: String) -> String Err! {
 // The index of criterion `n` in `crit`.
 by_n: fn(crit: [Dyn], n: Dyn?, num: String) -> Int Err! {
     want: label(n)
-    Ok(crit.position(k -> label(k.get("n")) == want) ?? return Err("#{num} no c{label(n)}"))
+    Ok(crit.position(fn(k) { label(k.get("n")) == want }) ?? return Err("#{num} no c{label(n)}"))
 }
 
 apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}) Err! {
@@ -85,7 +85,7 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
         to: str(p[2])
         // The criteria a step names: one by number, or with `*` every open one holding `from`.
         held: from.copy()
-        targets: if p[0] == Dyn.Text("*") -> crit.indexed().filter(k -> text(k.item, "status") == "open" && text(k.item, "text").contains(held)).map(k -> k.idx).to_list() else -> [by_n(crit, p[0], num) ?? return Err(err)]
+        targets: if p[0] == Dyn.Text("*") -> crit.indexed().filter(fn(k) { text(k.item, "status") == "open" && text(k.item, "text").contains(held) }).map(fn(k) { k.idx }).to_list() else -> [by_n(crit, p[0], num) ?? return Err(err)]
         if targets.len() == 0 -> return Err("#{num} *: no open criterion has {from}")
         loop at in targets {
             n: label(crit[at].get("n"))
@@ -99,9 +99,9 @@ apply: fn(s: Dyn, repo: String, writer: String, patches: String, go: Bool{false}
         if text(crit[at], "status") != "open" -> return Err("#{num} c{label(n)} is {text(crit[at], "status")}, not removable")
         removed.push(at)
     }
-    next := crit.map(k -> label(k.get("n")).to_int() ?? 0).max() ?? 0
+    next := crit.map(fn(k) { label(k.get("n")).to_int() ?? 0 }).max() ?? 0
     gone: removed.copy()
-    kept := crit.indexed().filter(k -> !gone.contains(k.idx)).map(k -> k.item.copy()).to_list()
+    kept := crit.indexed().filter(fn(k) { !gone.contains(k.idx) }).map(fn(k) { k.item.copy() }).to_list()
     loop added in list(s, "add") {
         next += 1
         kept.push(Dyn.Object(["n": Dyn.Int(next), "text": added.copy(), "status": Dyn.Text("open")]))

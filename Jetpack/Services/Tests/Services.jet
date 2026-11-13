@@ -512,18 +512,18 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("term kill and final liveness failures propagate") {
-    term: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
+    term: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {
         if action == StopAction.Term -> return Err(ServicesError.new("TERM failed"))
         Err(ServicesError.new("KILL failed"))
-    }, () -> Ok(true)))
+    }, fn() { Ok(true) }))
     assert_eq(term, "TERM failed; KILL failed")
 
-    kill: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {
+    kill: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {
         if action == StopAction.Kill -> return Err(ServicesError.new("KILL failed"))
-    }, () -> Ok(true)))
+    }, fn() { Ok(true) }))
     assert_eq(kill, "KILL failed")
 
-    alive: services_test_error_of(services_stop_process_with(42, None, 0, (action) -> {}, () -> Ok(true)))
+    alive: services_test_error_of(services_stop_process_with(42, None, 0, fn(action) {}, fn() { Ok(true) }))
     assert(alive.contains("still alive"), alive)
 }
 
@@ -532,9 +532,9 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     // The process ignores TERM: alive at the post-grace check, gone once KILLed.
     // `run` owns `actions`, so liveness counts its own checks.
     checks := 0
-    services_stop_process_with(42, Val(ShutdownPolicy.Term{grace_ms: 0}), 0, (action) -> {
+    services_stop_process_with(42, Val(ShutdownPolicy.Term{grace_ms: 0}), 0, fn(action) {
         actions.push(action.copy())
-    }, () -> {
+    }, fn() {
         checks += 1
         Ok(checks == 1)
     }) ?? panic("escalated stop")
@@ -615,7 +615,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 
 #Test("pid reuse identity mismatch never reaches liveness or signal") {
     liveness_called := false
-    matched: services_process_matches_start_with("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
+    matched: services_process_matches_start_with("linux-proc-start:old", fn() { Ok(Val("linux-proc-start:reused")) }, fn() {
         liveness_called = true
         Ok(true)
     }) ?? panic("identity check")
@@ -623,7 +623,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert(!liveness_called)
 
     signaled := false
-    ran: services_run_if_start_identity_matches("linux-proc-start:old", () -> Ok(Val("linux-proc-start:reused")), () -> {
+    ran: services_run_if_start_identity_matches("linux-proc-start:old", fn() { Ok(Val("linux-proc-start:reused")) }, fn() {
         signaled = true
     }) ?? panic("identity guard")
     assert(!ran)
@@ -631,7 +631,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
 }
 
 #Test("process identity probe errors propagate before liveness") {
-    error: (if services_process_matches_start_with("expected", () -> Err(ServicesError.new("identity probe failed")), () -> {
+    error: (if services_process_matches_start_with("expected", fn() { Err(ServicesError.new("identity probe failed")) }, fn() {
         assert(false, "liveness must not run after an identity probe error")
         Ok(false)
     }) == {

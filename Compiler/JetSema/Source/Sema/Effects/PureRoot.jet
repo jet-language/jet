@@ -95,7 +95,7 @@ sema_pure_root_expr: fn(root: String, modules: [SemaGraphModuleResult], decls: D
         }
     }
     found := Diagnostic?{None}
-    body_each_expr_child(owner.tree, node, (child: Int) -> sema_pure_root_visit(root, modules, decls, positions, calls, owner, child, shallow, visited, path, found))
+    body_each_expr_child(owner.tree, node, fn(child: Int) { sema_pure_root_visit(root, modules, decls, positions, calls, owner, child, shallow, visited, path, found) })
     found
 }
 
@@ -114,7 +114,7 @@ sema_pure_root_visit: fn(root: String, modules: [SemaGraphModuleResult], decls: 
 // walk is the last use of those parameters.
 sema_pure_root_statement: fn(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
     found := Diagnostic?{None}
-    body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> sema_pure_root_visit(root, modules, decls, positions, calls, function, expression, shallow, visited, path, found))
+    body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_pure_root_visit(root, modules, decls, positions, calls, function, expression, shallow, visited, path, found) })
     found
 }
 

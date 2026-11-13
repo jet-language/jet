@@ -203,7 +203,7 @@ NixIndexRecordWire: struct {
     // This record with its outputs in name order.
     sorted: fn(self) -> NixIndexRecordWire Never! {
         outputs := self.outputs.copy()
-        outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
+        outputs.sort_by(fn(left: NixIndexOutputWire, right: NixIndexOutputWire) { left.name <=> right.name })
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
     }
 }
@@ -307,11 +307,11 @@ NixIndexDocument: struct {
         self.validate()
         records := [NixIndexRecordWire]{}
         loop record in self.records -> records.push(record.sorted())
-        records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
+        records.sort_by(fn(left: NixIndexRecordWire, right: NixIndexRecordWire) { nix_index_attrpath_order(left.attrpath, right.attrpath) })
         indexed := self.coverage.indexed.copy()
-        indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
+        indexed.sort_by(fn(left: [String], right: [String]) { nix_index_attrpath_order(left, right) })
         misses := self.coverage.not_indexed.copy()
-        misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
+        misses.sort_by(fn(left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) { nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason) })
         record_trees := [Dyn]{}
         loop record in records -> record_trees.push(record.tree())
         indexed_trees := [Dyn]{}
@@ -465,7 +465,7 @@ NixIndexChannelManifest: struct {
     canonical_bytes: fn(self) -> [U8] NixIndexError! {
         self.validate()
         targets := self.targets.copy()
-        targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
+        targets.sort_by(fn(left: NixIndexManifestTarget, right: NixIndexManifestTarget) { (left.revision <=> right.revision).then(left.system <=> right.system) })
         trees := [Dyn]{}
         loop target in targets -> trees.push(target.tree())
         Ok(pkg_json_render(Dyn.Object([
@@ -503,7 +503,7 @@ nix_index_parse_local_native_recipes: fn(bytes: [U8]) -> [NixNativeRecipe] NixIn
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     recipes := [NixNativeRecipe]{}
     loop item in values -> recipes.push(nix_index_parse_native_recipe(item))
-    recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    recipes.sort_by(fn(left: NixNativeRecipe, right: NixNativeRecipe) { (left.name <=> right.name).then(left.version <=> right.version) })
     identities := [String]{}
     loop recipe in recipes {
         identity: "{recipe.name}\n{recipe.version}"
@@ -560,7 +560,7 @@ nix_index_validate_native_recipe_url: fn(url: String) NixIndexError! {
 
 nix_index_canonical_native_recipes_bytes: fn(recipes: [NixNativeRecipe]) -> [U8] Never! {
     sorted := recipes.copy()
-    sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
+    sorted.sort_by(fn(left: NixNativeRecipe, right: NixNativeRecipe) { (left.name <=> right.name).then(left.version <=> right.version) })
     trees := [Dyn]{}
     loop recipe in sorted -> trees.push(recipe.tree())
     pkg_json_render(Dyn.Object(["schema": Dyn.Int(1), "recipes": Dyn.Array(trees)])).bytes()

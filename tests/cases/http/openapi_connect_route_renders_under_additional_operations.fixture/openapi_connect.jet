@@ -5,15 +5,15 @@ use {
 
 run: fn() {
     mux: server.mux()
-    mux.get("/a", () -> Ok(server.response(200, "a")))
-    mux.connect("/tunnel", () -> Ok(server.response(200, "t")))
+    mux.get("/a", fn() { Ok(server.response(200, "a")) })
+    mux.connect("/tunnel", fn() { Ok(server.response(200, "t")) })
     schema: web.openapi(mux)
     print(schema.starts_with("{{\"openapi\":\"3.2.0\","))
     print(schema.contains("\"/a\":{{\"get\":{{"))
     print(schema.contains("\"/tunnel\":{{\"additionalOperations\":{{\"CONNECT\":{{\"operationId\":"))
     print(schema.contains("\"connect\""))
     plain: server.mux()
-    plain.get("/a", () -> Ok(server.response(200, "a")))
+    plain.get("/a", fn() { Ok(server.response(200, "a")) })
     plain_schema: web.openapi(plain)
     print(plain_schema.starts_with("{{\"openapi\":\"3.1.0\",") && !plain_schema.contains("additionalOperations"))
 }

@@ -80,7 +80,7 @@ run: fn() {
     loop words in commands {
         command: words.decode<[String]>()
         step: run_child(launch, report, command.copy()) ?? return Err("{err}")
-        if first_ns == None -> first_ns = step.times.time_to_first_stdout_ns.map(gap -> wall_ns + gap)
+        if first_ns == None -> first_ns = step.times.time_to_first_stdout_ns.map(fn(gap) { wall_ns + gap })
         wall_ns += step.times.wall_time_ns
         if step.peak_kb > peak_kb -> peak_kb = step.peak_kb
         if step.exec_errno != 0 {
@@ -96,7 +96,7 @@ run: fn() {
         schema: "jet.gauntlet.timer.v2",
         clock: json.parse("{{\"source\":\"launch.c\",\"implementation\":\"clock_gettime(CLOCK_MONOTONIC)\",\"resolution_ns\":1,\"monotonic\":true,\"adjustable\":false}}"),
         peak_rss_kb: peak_kb,
-        steps: sequence.map(_ -> steps),
+        steps: sequence.map(fn(_) { steps }),
         error: error
     }
     print(json.to_string(sample))
@@ -162,7 +162,7 @@ report_int: fn(field: String) -> Int {
 
 // A wall time, a first stdout byte's time and an exit code as Times.
 times_of: fn(wall_ns: Int, first_ns: Int?, exit_code: Int) -> Times Never! {
-    Times{wall_time_ns: wall_ns, wall_seconds: Float{wall_ns} / 1000000000.0, exit_code: exit_code, time_to_first_stdout_ns: first_ns, time_to_first_stdout_seconds: first_ns.map(ns -> Float{ns} / 1000000000.0)}
+    Times{wall_time_ns: wall_ns, wall_seconds: Float{wall_ns} / 1000000000.0, exit_code: exit_code, time_to_first_stdout_ns: first_ns, time_to_first_stdout_seconds: first_ns.map(fn(ns) { Float{ns} / 1000000000.0 })}
 }
 
 // Prints the refusal as timer.py does, `{"error": message}`, and exits 64.

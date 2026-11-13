@@ -628,7 +628,7 @@ sema_call_compiler_allow_rewrite: fn(receiver: Expr, receiver_value: TExpr, args
 sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     watch: sema_compiler_events_watch(args) ?? {
-        diagnostics.push(sema_error("E0104", span, "`meta.events` takes `watch: .Functions{{marked: m}}` or `watch: .Calls{{to: f}}` and a handler", "the watch names what the handler hears: each checked function that carries a marker of the type of the marker value `m`, or each checked call of the function `f`", "write `meta.events(watch: .Functions{{marked: Traced{{}}}}, (event) -> {{ … }})` or `meta.events(watch: .Calls{{to: print}}, (event) -> {{ … }})`"))
+        diagnostics.push(sema_error("E0104", span, "`meta.events` takes `watch: .Functions{{marked: m}}` or `watch: .Calls{{to: f}}` and a handler", "the watch names what the handler hears: each checked function that carries a marker of the type of the marker value `m`, or each checked call of the function `f`", "write `meta.events(watch: .Functions{{marked: Traced{{}}}}, fn(event) {{ … }})` or `meta.events(watch: .Calls{{to: print}}, fn(event) {{ … }})`"))
         return failed
     }
     watched := ""

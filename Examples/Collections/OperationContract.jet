@@ -6,7 +6,7 @@ parse_int: fn(s: String) -> Int Err! {
 }
 
 report: fn(words: [String]) {
-    if words.map((w: String) -> parse_int(w)) == {
+    if words.map(fn(w: String) { parse_int(w) }) == {
         .Ok(values) -> { print(values) }
         .Err(e) -> print("first failure: {e.message}")
     }
@@ -15,8 +15,8 @@ report: fn(words: [String]) {
 run: fn() {
     // Empty inputs follow the logical identities.
     empty: [Int]{}
-    print(empty.all((x) -> x > 0))
-    print(empty.any((x) -> x > 0))
+    print(empty.all(fn(x) { x > 0 }))
+    print(empty.any(fn(x) { x > 0 }))
     print(empty.sum())
     print(empty.product())
 

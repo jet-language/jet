@@ -93,11 +93,11 @@ run: fn() {
     limit: 3
     factor: 2
     count := 0
-    keep: (name: String) -> {
+    keep: fn(name: String) {
         count += 1
         name.len() <= limit
     }
-    budget: () -> limit * factor
+    budget: fn() { limit * factor }
     show_closure(keep.reflect())
     show_closure(budget.reflect())
     kept: [budget]

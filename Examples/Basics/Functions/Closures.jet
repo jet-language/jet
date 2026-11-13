@@ -6,13 +6,13 @@
 // a collection pipeline when evaluation must wait.
 run: fn() {
     nums: [1, 2, 3, 4, 5]
-    squares: nums.map((n: Int) -> n * n)
-    big: squares.filter(n -> n > 5)
+    squares: nums.map(fn(n: Int) { n * n })
+    big: squares.filter(fn(n) { n > 5 })
     print(big)
-    total: nums.reduce(0, (acc: Int, n: Int) -> acc + n)
+    total: nums.reduce(0, fn(acc: Int, n: Int) { acc + n })
     print(total)
     words := ["pear", "apple", "fig"]
-    words.sort_by((w: String) -> w.len())
+    words.sort_by(fn(w: String) { w.len() })
     print(words)
     local_lambda_calls_lesson()
 }
@@ -28,28 +28,28 @@ each_of: fn(action: fn(Int), a: Int, b: Int) {
 }
 
 local_lambda_calls_lesson: fn() {
-    greet: () -> print("hello")
+    greet: fn() { print("hello") }
     greet()
 
-    square: (n: Int) -> n * n
+    square: fn(n: Int) { n * n }
     print("square {square(7)}")
 
     base: 5
-    show_base: () -> print("base {base}")
+    show_base: fn() { print("base {base}") }
     show_base()
 
     total := 0
-    add: (n: Int) -> {
+    add: fn(n: Int) {
         total += n
     }
     add(2)
     add(3)
     print("total {total}")
 
-    report: (n: Int) -> print("item {n}")
+    report: fn(n: Int) { print("item {n}") }
     each_of(report, 1, 2)
 
-    tick: () -> print("tick")
+    tick: fn() { print("tick") }
     tick()
     tick()
 }

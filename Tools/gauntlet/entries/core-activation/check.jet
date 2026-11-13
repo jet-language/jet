@@ -26,7 +26,7 @@ run: fn(check: Check) {
     text: if report == "" -> "" else -> files.read(report) ?? ""
     if text == "" -> print("missing") else -> show("", json.parse(text) ?? process.fail(1, err.display_text()), "")
     print("== files")
-    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(entry -> files.normalize(entry.path))
+    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(fn(entry) { files.normalize(entry.path) })
     paths.sort()
     loop path in paths -> print(path)
 }

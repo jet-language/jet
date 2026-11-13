@@ -32,7 +32,7 @@ s6_browser_request: fn(port: String, method: String, path: String, body: String)
     framed: response.split_once("{crlf}{crlf}") ?? return None
     headers: framed.before.lines()
     if headers.len() == 0 -> return None
-    words: headers[0].split(" ").filter(word -> word != "").to_list()
+    words: headers[0].split(" ").filter(fn(word) { word != "" }).to_list()
     if words.len() < 2 -> return None
     status: words[1].to_int() ?? return None
     if status < 0 || status > 65535 -> return None

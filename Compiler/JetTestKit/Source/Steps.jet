@@ -1195,7 +1195,7 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
 // packages stay out, as the package source walk skips them.
 kit_steps_package_sources: fn(directory: String, sources: &[String]) {
     entries := files.list_dir(directory) ?? return
-    entries.sort_by(entry -> entry.name)
+    entries.sort_by(fn(entry) { entry.name })
     loop entry in entries {
         if entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
         if entry.is_dir {
@@ -1429,7 +1429,7 @@ kit_steps_build_member: fn(step: KitStep) -> String {
 // walked as kit_steps_package_sources walks; None when no package does.
 kit_steps_member_dir: fn(root: String, name: String) -> String? {
     entries := files.list_dir(root) ?? return None
-    entries.sort_by(entry -> entry.name)
+    entries.sort_by(fn(entry) { entry.name })
     loop entry in entries {
         if !entry.is_dir || entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
         if kit_exec_optional(files.join(entry.path, "package.jet")) == .Val(text) {

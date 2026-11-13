@@ -742,7 +742,7 @@ DBScope: struct {
         loop value in scoped.values -> key.push(web.__live_arg<DBValue>(value))
         scope: self.copy()
         query: sql.copy()
-        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
+        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, fn() { __scope_query(scope, query, false) }))
     }
     close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
 
@@ -1806,7 +1806,7 @@ __driver_health: fn(driver: &__Driver) -> Bool Never! {
     // INDEXED BY reads the rows from the index alone: the refill wrote every
     // existing row and the later insert added its own.
     due: __driver_query(driver, "SELECT sequence FROM jobs INDEXED BY jobs_due WHERE queue = 'q1' AND state = 'ready' ORDER BY due", [DBValue]{}) ?? panic("SQLite indexed select failed")
-    assert_eq(due.map(row -> row_int(row, "sequence") ?? -1), [Int]{40, 34, 28, 22, 16, 10, 4})
+    assert_eq(due.map(fn(row) { row_int(row, "sequence") ?? -1 }), [Int]{40, 34, 28, 22, 16, 10, 4})
     schema: __driver_query(driver, "SELECT sql FROM sqlite_master WHERE name = 'jobs_due'", [DBValue]{}) ?? panic("SQLite schema read failed")
     assert_eq(row_text(schema[0], "sql") ?? "", "CREATE INDEX jobs_due ON jobs (queue, state, due, sequence)")
     if __driver_execute(driver, "CREATE UNIQUE INDEX jobs_queue ON jobs (queue)", [DBValue]{}) == {

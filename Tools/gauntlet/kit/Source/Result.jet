@@ -36,7 +36,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
     row_map: object_or_empty(value_at(result, "rows"))
     comparison_map: object_or_empty(value_at(result, "comparisons"))
     tier_map: object_or_empty(value_at(result, "jet_tiers"))
-    expected_peers: languages.filter_map(language -> text_at(language, "")).filter(language -> language != "jet" && language != "jet-expert").collect()
+    expected_peers: languages.filter_map(fn(language) { text_at(language, "") }).filter(fn(language) { language != "jet" && language != "jet-expert" }).collect()
     mode: text_at(entry, "mode") ?? ""
     policy: tier_policy(mode)
     metrics: comparison_metrics(mode)
@@ -64,7 +64,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
     if truthy(Val(matrix)) && value_at(entry, "cells") == .Val(.Array(_)) && value_at(matrix, "cells") == .Val(.Array(matrix_cells)) {
         required := [String]{}
         loop cell_id in cells {
-            found: matrix_cells.find(candidate -> is_value(value_at(candidate, "id"), cell_id)) ?? next
+            found: matrix_cells.find(fn(candidate) { is_value(value_at(candidate, "id"), cell_id) }) ?? next
             loop peer in matrix_peer_languages(matrix, Val(found)) {
                 if !required.contains(peer) -> required.push(peer)
             }
@@ -86,7 +86,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
     }
 
     loop rule in policy -> issues.extend(tier_issues(name, rule, tier_map.get(rule.tier) ?? Dyn.Null, metrics))
-    declared_tiers: policy.map(rule -> rule.tier)
+    declared_tiers: policy.map(fn(rule) { rule.tier })
     loop tier in members(tier_map) {
         if !declared_tiers.contains(tier.key) -> issues.push("{name}/jet/{tier.key}: tier is not declared for this mode")
     }
@@ -99,7 +99,7 @@ result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
         issues.extend(comparison_issues(entry, name, language, comparison_map.get(language) ?? Dyn.Null, row_map.get(language), non_applicable, metrics))
     }
     if truthy(Val(matrix)) {
-        known: items_at(matrix, "cells").filter_map(cell -> value_at(cell, "id")).collect()
+        known: items_at(matrix, "cells").filter_map(fn(cell) { value_at(cell, "id") }).collect()
         loop cell in cells {
             if !known.contains(cell) -> issues.push("{name}: result declares unknown matrix cell {js_text(cell)}")
         }
@@ -200,7 +200,7 @@ comparison_issues: fn(entry: Dyn, name: String, language: String, comparison: Dy
     declared: value_at(comparison, "tier_policy") ?? Dyn.Null
     shown_policy: if declared == .Object(_) -> json.stringify(declared) else -> "{{}}"
     if shown_policy != json.stringify(tier_policy_object(expected)) -> issues.push("{prefix}: comparison tier policy does not match the declared mode")
-    expected_tiers: expected.map(rule -> rule.tier)
+    expected_tiers: expected.map(fn(rule) { rule.tier })
     loop tier in members(tiers) {
         if !expected_tiers.contains(tier.key) -> issues.push("{prefix}/{tier.key}: comparison tier is not declared")
     }
@@ -232,7 +232,7 @@ metric_cell_issue: fn(applicability: Dyn, metric: String, tier: String, item: Dy
     }
     measured: text_at(item, "status") == Val("measured")
     if sub_millisecond(metric, value_at(item, "jet"), value_at(item, "peer")) {
-        ready: ["jet", "peer"].all(side -> text_at(item, "evidence/{side}/confidence/status") == Val("available") && truthy_at(item, "evidence/{side}/noise") && non_empty(value_at(item, "evidence/{side}/raw_samples")))
+        ready: ["jet", "peer"].all(fn(side) { text_at(item, "evidence/{side}/confidence/status") == Val("available") && truthy_at(item, "evidence/{side}/noise") && non_empty(value_at(item, "evidence/{side}/raw_samples")) })
         if !ready || !measured || value_at(item, "verdict") == .Val(.Null) -> return Val("sub-millisecond comparison lacks strict confidence evidence")
     }
     jet: number_at(item, "jet") ?? 0.0
@@ -253,7 +253,7 @@ jet_configuration: fn(language: String) -> String { if language.ends_with("-expe
 peer_tier_policy: fn(entry: Dyn, language: String) -> [TierRule] {
     policy: tier_policy(text_at(entry, "mode") ?? "")
     if !language.ends_with("-expert") && RUN_TIER_PEERS.contains(language) -> return policy
-    policy.filter(rule -> rule.tier == "aot")
+    policy.filter(fn(rule) { rule.tier == "aot" })
 }
 
 // Tier rules as a result declares them: each tier to whether it is required.
@@ -320,7 +320,7 @@ positive: fn(value: Dyn?) -> Bool {
 // ratio needs strict confidence evidence.
 sub_millisecond: fn(metric: String, jet: Dyn?, peer: Dyn?) -> Bool {
     limit: millisecond_in(metric) ?? return false
-    [jet, peer].any(value -> positive(value) && (number_at(value ?? Dyn.Null, "") ?? 0.0) < limit)
+    [jet, peer].any(fn(value) { positive(value) && (number_at(value ?? Dyn.Null, "") ?? 0.0) < limit })
 }
 
 // A millisecond in the unit of `metric`, when it is a duration.

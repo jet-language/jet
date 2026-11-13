@@ -587,10 +587,10 @@ FlakeOutputShape: struct {
 trust_flake_output_shape: fn(outputs: [FlakeOutput]) -> [FlakeOutputShape] Never! {
     facts := [FlakeOutputShape]{}
     loop output in outputs -> facts.push(FlakeOutputShape{name: output.name, kind: output.kind.label(), system: output.system, attribute: output.attribute})
-    facts.sort_by(fact -> fact.attribute)
-    facts.sort_by(fact -> fact.system)
-    facts.sort_by(fact -> fact.kind)
-    facts.sort_by(fact -> fact.name)
+    facts.sort_by(fn(fact) { fact.attribute })
+    facts.sort_by(fn(fact) { fact.system })
+    facts.sort_by(fn(fact) { fact.kind })
+    facts.sort_by(fn(fact) { fact.name })
     unique := [FlakeOutputShape]{}
     loop fact in facts {
         if unique.len() > 0 && unique[unique.len() - 1] == fact -> next

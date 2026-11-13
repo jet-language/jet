@@ -71,7 +71,7 @@ Arm: struct {
 run: fn(args: Args) Err! {
     sizes := [Int]{}
     loop part in args.sizes.split(",") -> sizes.push(Int.parse(part.trim()) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{part}'"))
-    if args.samples < 1 || args.rounds < 8 || sizes.any(size -> size != max(1, min(64, size))) -> process.fail(2, "{PROGRAM}: error: --samples >= 1, --rounds >= 8, sizes in 1..64")
+    if args.samples < 1 || args.rounds < 8 || sizes.any(fn(size) { size != max(1, min(64, size)) }) -> process.fail(2, "{PROGRAM}: error: --samples >= 1, --rounds >= 8, sizes in 1..64")
     root: files.dirname(files.dirname(files.dirname(files.dirname(files.canonicalize(sys.executable())))))
     found: sys.env_text("""
         STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
@@ -106,7 +106,7 @@ run: fn(args: Args) Err! {
         })),
         (key: "samples", value: Dyn.Int(args.samples)),
         (key: "rounds", value: Dyn.Int(args.rounds)),
-        (key: "phases", value: Dyn.Array(PHASES.map(phase -> Dyn.Text(phase.copy())))),  // copy: the report keeps its own
+        (key: "phases", value: Dyn.Array(PHASES.map(fn(phase) { Dyn.Text(phase.copy()) }))),  // copy: the report keeps its own
         (key: "win_rule", value: Dyn.Text("Jet/rust_native < 1.00 on every phase")),
     }
     cells := [Dyn]{}
@@ -207,7 +207,7 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
     phase_ns := [Int]{}
     medians := [(key: String, value: Dyn)]{}
     loop i in 0..<PHASES.len() {
-        phase_ns.push(Int.from_float(stats.median(timings.slice(1, timings.len()).map(row -> Float.from_int(row[i]))) ?? 0.0) ?? 0)
+        phase_ns.push(Int.from_float(stats.median(timings.slice(1, timings.len()).map(fn(row) { Float.from_int(row[i]) })) ?? 0.0) ?? 0)
         medians.push((key: PHASES[i], value: Dyn.Int(phase_ns[i])))
     }
     rss: sh(process.cmd([String]{binary}), 900s)
@@ -215,8 +215,8 @@ measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -
         fields: fields.concat([(key: String, value: Dyn)]{
             (key: "status", value: Dyn.Text("measured")),
             (key: "stdout", value: Dyn.Text(kept[0].out.copy())),  // copy: the stability check reads it too
-            (key: "stable_stdout", value: Dyn.Bool(kept.filter(ran -> ran.out != first).len() == 0)),
-            (key: "wall_median_ns", value: Dyn.Int(Int.from_float(stats.median(kept.map(ran -> Float.from_int(ran.wall_ns))) ?? 0.0) ?? 0)),
+            (key: "stable_stdout", value: Dyn.Bool(kept.filter(fn(ran) { ran.out != first }).len() == 0)),
+            (key: "wall_median_ns", value: Dyn.Int(Int.from_float(stats.median(kept.map(fn(ran) { Float.from_int(ran.wall_ns) })) ?? 0.0) ?? 0)),
             (key: "phase_median_ns", value: Dyn.Object(medians)),
             (key: "peak_rss_kib", value: if rss.code == 0 && rss.peak_kib > 0 -> Dyn.Int(rss.peak_kib) else -> Dyn.Text("unavailable")),
             (key: "binary_bytes", value: Dyn.Int(files.getsize(binary))),
@@ -233,9 +233,9 @@ phase_line: fn(stderr: String) -> [Int]? {
     lines.reverse()
     loop line in lines {
         fields := [String: String]{}
-        loop word in line.words().filter(word -> word.contains("=")) -> fields[word.partition("=").head] = word.partition("=").tail
+        loop word in line.words().filter(fn(word) { word.contains("=") }) -> fields[word.partition("=").head] = word.partition("=").tail
         keys: fields.keys().to_list()
-        if !PHASES.all(phase -> keys.contains(phase)) -> next
+        if !PHASES.all(fn(phase) { keys.contains(phase) }) -> next
         timings := [Int]{}
         loop phase in PHASES -> timings.push(Int.parse(fields[phase]) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{fields[phase]}'"))
         return Val(timings)

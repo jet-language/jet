@@ -20,8 +20,8 @@ run: fn() {
     print("first:{first.service}")
     rows: stream.collect(reader) ?? panic("collect")
     if data.query(rows)
-        .group_by((e) -> e.service)
-        .mean((e) -> e.latency_ms)
+        .group_by(fn(e) { e.service })
+        .mean(fn(e) { e.latency_ms })
         .collect() == {
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{error.kind} {error.operation}")

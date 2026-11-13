@@ -536,7 +536,7 @@ nixeval_test_resource_limit: fn(error: NixEvalError) -> String {
 nixeval_test_map_authority: fn(files: [String: String], label: String) -> NixEvalAuthority {
     responses: files.copy()
     prefix: label.copy()
-    NixEvalAuthority{answer: (request: String) -[]> {
+    NixEvalAuthority{answer: fn(request: String) -[]> {
         if responses.get(request) == {
             .Val(text) -> Ok(text)
             .None -> Err(NixEvalError.Denied("{prefix} `{request}`"))
@@ -710,16 +710,16 @@ nixeval_test_output_named: fn(outputs: [NixEvalDerivationOutput], name: String) 
 }
 
 #Test("nixeval native devshell does not coerce path contexts into packages") {
-    authority: NixEvalAuthority{answer: (request: String) -[]> Ok("pkgs.fd")}
+    authority: NixEvalAuthority{answer: fn(request: String) -[]> { Ok("pkgs.fd") }}
     error: nixeval_test_authority_shell_error(`{ devShells.x86_64-linux.default = pkgs.mkShell { packages = [ "${./package}" ]; }; }`, "x86_64-linux", authority)
     assert(nixeval_test_unsupported(error).contains("path string contexts"))
 }
 
 #Test("nixeval native devshell import authority rejects escape and cycles") {
-    escape_authority: NixEvalAuthority{answer: (request: String) -[]> Ok("{request}: not used")}
+    escape_authority: NixEvalAuthority{answer: fn(request: String) -[]> { Ok("{request}: not used") }}
     escape: nixeval_test_authority_shell_error("{{ devShells.x86_64-linux.default = import ../outside.nix; }}", "x86_64-linux", escape_authority)
     assert(nixeval_test_unsupported(escape).contains("escapes"))
-    cycle_authority: NixEvalAuthority{answer: (request: String) -[]> {
+    cycle_authority: NixEvalAuthority{answer: fn(request: String) -[]> {
         if request == {
             "a.nix" -> Ok("import ./a.nix")
             else -> Ok("pkgs.fd")

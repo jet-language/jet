@@ -60,7 +60,7 @@ based: fn(tree: String, worktree: String) -> Bool {
 // The generator a file's header names in its first 40 lines, one trailing `.`
 // dropped; "" when none does.
 generator_of: fn(path: String) -> String {
-    header: files.read_or(path, "").first_lines(40).find(line -> GENERATED_HEADER.is_match(line)) ?? return ""
+    header: files.read_or(path, "").first_lines(40).find(fn(line) { GENERATED_HEADER.is_match(line) }) ?? return ""
     found: GENERATOR_NAME.find(header) ?? ""
     found.slice(13, found.len()).removesuffix(".")
 }
@@ -102,9 +102,9 @@ stages: fn(tree: String, path: String) -> String {
 staged_mode: fn(tree: String, integ: String, g: String, path: String) -> String {
     work: stages(tree, path)
     diff3: Sh{"git merge-file --diff3 -p {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run().output.lines()
-    hunks: diff3.count_where(line -> line.starts_with("<<<<<<< "))
+    hunks: diff3.count_where(fn(line) { line.starts_with("<<<<<<< ") })
     // A hunk's base part holds a line when its `|||||||` marker is not followed at once by `=======`.
-    filled_base: diff3.windows(2).any(pair -> pair[0].starts_with("||||||| ") && pair[1] != "=======")
+    filled_base: diff3.windows(2).any(fn(pair) { pair[0].starts_with("||||||| ") && pair[1] != "=======" })
     mode := if hunks > 0 && !filled_base -> "union" else -> "none"
     if mode == "none" {
         merged: Sh{"node {"{g}/linemerge.mjs"} {"{work}/o"} {"{work}/b"} {"{work}/t"}"}.run()
@@ -126,10 +126,10 @@ failed: fn(integ: String, name: String, note: String{""}) {
 apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[String], failures: &[String]) -> Bool {
     s: sub.removesuffix("/")
     n: files.basename(s)
-    listed: Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records().map(cells -> cells.get(2) ?? "")
-    files.write("{integ}/{n}.files", listed.map(path -> "{path}\n").join(""))
+    listed: Sh{"git apply --numstat {"{s}/patch"}"}.run().output.tsv_records().map(fn(cells) { cells.get(2) ?? "" })
+    files.write("{integ}/{n}.files", listed.map(fn(path) { "{path}\n" }).join(""))
     excluded := [String]{}
-    loop f in listed.filter(f -> f != "") {
+    loop f in listed.filter(fn(f) { f != "" }) {
         path: "{tree}/{f}"
         // An edit of a file an earlier SUB in this batch deleted is dropped (the deleting SUB replaced the file's
         // role, e.g. ScriptLead-1 computes the script census that Tools/script-census.tsv held by hand).
@@ -154,17 +154,17 @@ apply_sub: fn(tree: String, integ: String, g: String, sub: String, order: &[Stri
     // meta file, a SUB stacks on the previous SUB of the same lead in this batch.
     meta: files.read_or("{s}/meta", "")
     stacked := [String]{}
-    loop line in meta.lines().filter(line -> line.starts_with("stack:")) {
-        loop d in line.removeprefix("stack:").replace(",", " ").words().filter(d -> d != "none") -> stacked.push(if d.contains("-") -> d else -> "{his}-{d}")
+    loop line in meta.lines().filter(fn(line) { line.starts_with("stack:") }) {
+        loop d in line.removeprefix("stack:").replace(",", " ").words().filter(fn(d) { d != "none" }) -> stacked.push(if d.contains("-") -> d else -> "{his}-{d}")
     }
     if !files.is_file("{s}/meta") {
-        same: order.filter(other -> lead(files.basename(other)) == his)
+        same: order.filter(fn(other) { lead(files.basename(other)) == his })
         if same.len() > 0 -> stacked.push(files.basename(same[same.len() - 1]))
     }
     files.append_all("{integ}/order", "{s}\n")
     order.push(s.copy())
     apply_log: "{integ}/{n}.apply"
-    dependency: stacked.filter(d -> failures.contains(d))
+    dependency: stacked.filter(fn(d) { failures.contains(d) })
     if dependency.len() > 0 {
         files.write(apply_log, "stack dependency {dependency[dependency.len() - 1]} did not apply\n")
         failed(integ, n)
@@ -233,7 +233,7 @@ regenerate: fn(tree: String, integ: String) {
     // The runtime generator outputs (RuntimeStopExports and the rest) go stale whenever a SUB changes a runtime
     // export, and no SUB names them: regenerate them in every batch.
     files.append_all("{integ}/generators", "Tools/agent/RuntimeGenerators.jet\tall\n")
-    names := files.read("{integ}/generators").lines().map(line -> line.partition("\t").head)
+    names := files.read("{integ}/generators").lines().map(fn(line) { line.partition("\t").head })
     names.sort()
     identity: files.read("{seed}/IDENTITY").trim()
     loop gen in names.dedup().to_list() {
@@ -279,5 +279,5 @@ run: fn() {
     if (Sh{"git -C {tree} add -A"}.ok()) -> files.write("{integ}/regen.patch", Sh{"git -C {tree} diff --cached --binary HEAD"}.run().output)
     files.remove_all("{tree}/.git")
     print("--applied--")
-    applied.each(path -> print(path))
+    applied.each(fn(path) { print(path) })
 }

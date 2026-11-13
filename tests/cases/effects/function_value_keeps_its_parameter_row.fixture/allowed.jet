@@ -10,13 +10,13 @@ stop_apply: fn(n: Int, f: fn(Int) -[!Panic]> Int) -> Int { f(n) }
 calm: fn(n: Int) -> Int { n + 1 }
 
 run: fn() {
-    a: apply(2, (m: Int) -> m * 2)
-    b: apply_io(3, (m: Int) -> {
+    a: apply(2, fn(m: Int) { m * 2 })
+    b: apply_io(3, fn(m: Int) {
         print("io {m}")
         m
     })
-    c: stop_apply(4, (m: Int) -> m + 1)
+    c: stop_apply(4, fn(m: Int) { m + 1 })
     d: stop_apply(5, calm)
-    e: apply(6, (m: Int) -> if m < 0 -> panic("negative") else -> m)
+    e: apply(6, fn(m: Int) { if m < 0 -> panic("negative") else -> m })
     print("{a} {b} {c} {d} {e}")
 }

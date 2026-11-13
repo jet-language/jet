@@ -120,14 +120,14 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
     entry: store_test_signed_entry(roots, "signed-output", "cache:demo", "ed25519:abcd")
     expectation: store_test_remote_expectation()
     called := false
-    assert(!store_verify_configured_signature_with(roots, entry, expectation, (key: String, message: String, signature: String) -> {
+    assert(!store_verify_configured_signature_with(roots, entry, expectation, fn(key: String, message: String, signature: String) {
         called = true
         true
     }))
     assert(!called)
     files.create_dir_all(files.join(roots.root, "trust")) ?? panic("trust dir")
     files.write(files.join(roots.root, "trust/cache.ed25519.pub"), "public-key") ?? panic("key file")
-    assert(store_verify_configured_signature_with(roots, entry, expectation, (key: String, message: String, signature: String) -> key == "public-key" && message.contains("source=source-v1") && signature == "abcd"))
+    assert(store_verify_configured_signature_with(roots, entry, expectation, fn(key: String, message: String, signature: String) { key == "public-key" && message.contains("source=source-v1") && signature == "abcd" }))
     store_test_drop_roots(roots)
 }
 

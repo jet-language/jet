@@ -151,8 +151,8 @@ sema_validate_referenced_fields: fn(rules: [SemaValidateRule], fields: [String:B
     found := [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(fields, found, expression))
-        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(fields, found, expression))
+        ast_visit_expr(rule.cond, fn(expression: Expr) { sema_validate_note_name(fields, found, expression) })
+        ast_visit_expr(rule.message, fn(expression: Expr) { sema_validate_note_name(fields, found, expression) })
     }
     found
 }

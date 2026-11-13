@@ -71,7 +71,7 @@ unpack: fn(w: String, commit: String, dir: String) -> Bool {
 
 // The FAIL rows of a test log without their durations, sorted once each.
 fail_rows: fn(path: String) -> [String] {
-    unique(loop line in lines_of(path).filter(line -> line.contains("FAIL")) -> regex.replace(DURATION, line, ""))
+    unique(loop line in lines_of(path).filter(fn(line) { line.contains("FAIL") }) -> regex.replace(DURATION, line, ""))
 }
 
 // The report lines of one SUB test line; whether it counts against the SUB.
@@ -88,20 +88,20 @@ test_entry: fn(out: &[String], tests: String, k: Int, code: String, line: String
     if base_rc != "0" && files.is_file(bo) {
         ours: fail_rows(o)
         theirs: fail_rows(bo)
-        fresh: ours.filter(row -> !theirs.contains(row))
+        fresh: ours.filter(fn(row) { !theirs.contains(row) })
         if fresh.len() == 0 && ours.len() > 0 {
             out.push("- PRE-EXISTING rc={code} `{line}`: every FAIL row also fails on origin/dev with the seed ({bo})")
             return false
         }
         out.push("- FAIL rc={code} `{line}` (full output {o}; dev with the seed also fails, rc={base_rc}, {bo}). FAIL rows not on dev:")
         out.push("```")
-        out.extend(if fresh.len() > 0 -> fresh.slice(0, 25) else -> log.filter(text -> ["error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(raw.last_lines(5)))
+        out.extend(if fresh.len() > 0 -> fresh.slice(0, 25) else -> log.filter(fn(text) { ["error", "Error", "panic", "failed"].any(fn(word) { text.contains(word) }) }).slice(0, 25).concat(raw.last_lines(5)))
         out.push("```")
         return true
     }
     out.push("- FAIL rc={code} `{line}` (full output {o}; passes on origin/dev with the seed or was not rerun):")
     out.push("```")
-    out.extend(log.filter(text -> ["FAIL", "error", "Error", "panic", "failed"].any(word -> text.contains(word))).slice(0, 25).concat(raw.last_lines(5)))
+    out.extend(log.filter(fn(text) { ["FAIL", "error", "Error", "panic", "failed"].any(fn(word) { text.contains(word) }) }).slice(0, 25).concat(raw.last_lines(5)))
     out.push("```")
     true
 }
@@ -141,12 +141,12 @@ run: fn() {
     // Apply (three-way, generated files excluded and regenerated): IntegApply6.jet prints the applied SUBs last.
     apply: Sh{"jet -A {"{o}/IntegApply6.jet"} {t} {i}"}.extend(subs).spec().stderr(.Stdout).run()
     files.write("{i}/apply.out", apply.output)
-    if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(line -> line.starts_with("integ-apply:")).last() ?? ""}", 2)
+    if apply.code != 0 -> stop("integrate: the apply step failed: {apply.output.lines().filter(fn(line) { line.starts_with("integ-apply:") }).last() ?? ""}", 2)
     listing: apply.output.partition("--applied--\n")
     if listing.head != "" -> print(listing.head.trim_end())
     applied: listing.tail.words()
     // A generator that fails on the composed sources leaves every generated table stale: report the regeneration.
-    if listing.head.lines().any(line -> line.starts_with("REGEN ") && !line.ends_with(" rc=0")) {
+    if listing.head.lines().any(fn(line) { line.starts_with("REGEN ") && !line.ends_with(" rc=0") }) {
         report.push("REGEN FAILED: the census did not run.")
         loop name in named(i, "regen.*.out") -> report.extend(["", "{name}:", "```"].concat(files.read_or("{i}/{name}", "").last_lines(20)).concat(["```"]))
         files.write(report_path, "{report.join("\n")}\n")
@@ -169,7 +169,7 @@ run: fn() {
     files.create_dir_all("{i}/ratchets")
     if ratchets.len() == 0 -> files.write("{i}/ratchets/none.out", "no ratchets listed\n")
     checks: process.run_all(loop tool in ratchets -> Sh{"nice -n 19 {"{seed}/jet"} {tool} --check"}.spec().cwd(t).env("JET_COMPILER_IDENTITY", id).env("JET_TOOLCHAIN_ROOT", t).timeout(900s).stderr(.Stdout), ratchets.len() + 1)
-    summary := census.output.lines().filter(line -> line.contains(" rc=") || line.contains("rows="))
+    summary := census.output.lines().filter(fn(line) { line.contains(" rc=") || line.contains("rows=") })
     failures := [String]{}
     rrc := if ratchets.len() == 0 -> 1 else -> 0
     loop at in 0..<ratchets.len() {
@@ -192,7 +192,7 @@ run: fn() {
     if files.can_execute("{seed}/jetpack") -> files.symlink("{seed}/jetpack", "{i}/bin/jetpack", replace: true)
     // The engine beside the batch compiler must be the jetpack this tree builds: the census's hosted bootstrap
     // names it as hosted-binary.
-    hb: (lines_of("{i}/census/jetpack.log").filter(line -> line.starts_with("hosted-binary: ")).last() ?? "").words().get(1) ?? ""
+    hb: (lines_of("{i}/census/jetpack.log").filter(fn(line) { line.starts_with("hosted-binary: ") }).last() ?? "").words().get(1) ?? ""
     if {
         hb != "" && files.can_execute(hb) -> {
             packed: "{i}/bin/jetpack.built"
@@ -204,14 +204,14 @@ run: fn() {
         }
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
     }
-    runsub: (step: String, sub: String) -> Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit)
+    runsub: fn(step: String, sub: String) { Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit) }
     golden_rcs := [String]{}
     if built {
         // Every SUB runs its test lines as one job, four SUBs at a time.
-        _ := process.run_all(loop s in applied.filter(s -> files.read_or("{s}/tests", "") != "") -> runsub("new", s), 4)
+        _ := process.run_all(loop s in applied.filter(fn(s) { files.read_or("{s}/tests", "") != "" }) -> runsub("new", s), 4)
         // A failing line reruns on a clean origin/dev export with the seed, so rows that already fail on dev are
         // told apart from the ones this batch introduces (a FAIL row present in both counts as pre-existing).
-        failing: loop name in named("{i}/tests", "*.rc").filter(name -> lines_of("{i}/tests/{name}").any(line -> !line.starts_with("0\t"))) -> name.removesuffix(".rc")
+        failing: loop name in named("{i}/tests", "*.rc").filter(fn(name) { lines_of("{i}/tests/{name}").any(fn(line) { !line.starts_with("0\t") }) }) -> name.removesuffix(".rc")
         if failing.len() > 0 {
             loop dir in ["{i}/basetree", "{i}/basebin"] -> files.create_dir_all(dir)
             _ := unpack(w, base, "{i}/basetree")
@@ -223,9 +223,9 @@ run: fn() {
         // Goldens that cite a line of a Core or Prelude file this batch touches (`<corelib>/Core/X.jet:N`) drift
         // when that file moves; run each one so the batch, not the release gate, catches it.
         cited := [String]{}
-        loop f in touched.filter(f -> regex.is_match(CORE_SOURCE, f)) -> cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
+        loop f in touched.filter(fn(f) { regex.is_match(CORE_SOURCE, f) }) -> cited.extend(Sh{"git grep -l --no-index -F {"<corelib>/{f}:"} -- *.out"}.spec().cwd(t).run().output.lines())
         cited = unique(cited)
-        files.write("{i}/goldens.list", cited.map(path -> "{path}\n").join(""))
+        files.write("{i}/goldens.list", cited.map(fn(path) { "{path}\n" }).join(""))
         loop golden in cited {
             stem: golden.removesuffix(".out").removesuffix(".err")
             ran: Sh{"bash {"{g}/capped.sh"} 24G nice -n 19 jet test Compiler --profile golden {stem}"}.spec().cwd(t)
@@ -248,8 +248,8 @@ run: fn() {
             report.extend(["Does not apply to origin/dev {base}:", "```"].concat(lines_of("{i}/{n}.apply").slice(0, 20)).concat(["```", ""]))
             next
         }
-        mine: lines_of("{i}/{n}.files").filter(path -> path != "")
-        hits: unique(rows.filter(row -> mine.any(path -> row.contains(path))))
+        mine: lines_of("{i}/{n}.files").filter(fn(path) { path != "" })
+        hits: unique(rows.filter(fn(row) { mine.any(fn(path) { row.contains(path) }) }))
         bad := hits.len() > 0
         if bad -> report.extend(["Census rows in files this patch touches:", "```"].concat(hits).concat(["```"]))
         tests: "{i}/tests/{n}"
@@ -273,8 +273,8 @@ run: fn() {
     }
     if crc != 0 {
         named_paths := [String]{}
-        loop s in applied -> named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(path -> path.trim() != ""))
-        report.extend(["## Census rows not in any submitted file", "```"].concat(rows.filter(row -> !named_paths.any(path -> row.contains(path))).slice(0, 40)).concat(["```"]))
+        loop s in applied -> named_paths.extend(lines_of("{i}/{files.basename(s)}.files").filter(fn(path) { path.trim() != "" }))
+        report.extend(["## Census rows not in any submitted file", "```"].concat(rows.filter(fn(row) { !named_paths.any(fn(path) { row.contains(path) }) }).slice(0, 40)).concat(["```"]))
     }
     files.write(report_path, "{report.join("\n")}\n")
     print(report_path)

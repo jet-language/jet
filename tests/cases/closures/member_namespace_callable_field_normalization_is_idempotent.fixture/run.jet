@@ -11,17 +11,17 @@ Counter: struct {
 Callback: struct { step: fn(Int) -> Int }
 make_callback: fn() -> Callback {
     print("receiver")
-    Callback{step: n -> n + 1}
+    Callback{step: fn(n) { n + 1 }}
 }
 run: fn() {
-    counter: Counter{value: 10, step: n -> n * 2, call: n -> n * 3}
+    counter: Counter{value: 10, step: fn(n) { n * 2 }, call: fn(n) { n * 3 }}
     print(counter.value)
     print(counter.value())
     print(counter.step(4))
     print(counter.step.call(4))
     print(counter.call(4))
     print(counter.call.call(4))
-    callback: Callback{step: n -> n + 1}
+    callback: Callback{step: fn(n) { n + 1 }}
     print(callback.step(4))
     print(callback.step.call(4))
     print(make_callback().step(4))

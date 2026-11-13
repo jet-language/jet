@@ -12,8 +12,8 @@ run: fn() {
         Sale{month: "Feb", value: 6.0}
     }
     groups: data.query(rows)
-        .group_by(sale -> sale.month)
-        .mean(sale -> sale.value)
+        .group_by(fn(sale) { sale.month })
+        .mean(fn(sale) { sale.value })
         .collect() ?? panic("groups")
     options: DataLineOptions{
         title: "Sales",

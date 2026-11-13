@@ -42,7 +42,7 @@ run: fn() {
     // by construction. `elapsed` is a Signal fed by explicit clock reads.
     clock := Clock.new(0)
     elapsed: reactive.signal(clock.now())
-    x: reactive.derived(() -> tween(Float{0.0}, Float{100.0}, elapsed.get(), 400))
+    x: reactive.derived(fn() { tween(Float{0.0}, Float{100.0}, elapsed.get(), 400) })
     backend := ui.null_backend()
     backend.layout(motion_node(x.get()), ui.rect(Float{0.0}, Float{0.0}, Float{100.0}, Float{1.0}))
     backend.paint(motion_node(x.get()))

@@ -1,8 +1,8 @@
 Error [jet.UseWhileWriteActive]: `values` is being changed in this call, so it can't be used again here
-  --> tests/ui/ownership/nested_lambda_forms_use_the_enclosing_call_access_frame.jet:7:40
+  --> tests/ui/ownership/nested_lambda_forms_use_the_enclosing_call_access_frame.jet:7:41
     |
-  7 |     both(values, Work{ callback: () -> values.len() })
-    |                                        ^^^^^^
+  7 |     both(values, Work{ callback: fn() { values.len() } })
+    |                                         ^^^^^^
  Why: While something is being changed through a write parameter, nobody else may be looking at it
  Fix: Pass `values` only once, or copy first with `values.copy()`
 More: jet-lang.dev/e/E0204

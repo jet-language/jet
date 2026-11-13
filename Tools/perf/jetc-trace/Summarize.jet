@@ -29,7 +29,7 @@ seconds: fn(us: Float) -> String {
     x: us / 1e6
     if us >= 1e8 -> "{x:Fixed(0)}" else if us >= 1e7 -> "{x:Fixed(1)}" else -> "{x:Fixed(2)}"
 }
-mb: fn(kb: Int?) -> String { kb.map(k -> "{(k + 512) /% 1024}") ?? "-" }
+mb: fn(kb: Int?) -> String { kb.map(fn(k) { "{(k + 512) /% 1024}" }) ?? "-" }
 row: fn(rows: &[Row], at: &[String: Int], kind: String, ts: Int) -> Int {
     at.get(kind) ?? {
         at[kind] = rows.len()
@@ -96,15 +96,15 @@ render: fn(file: String) -> String IOError! {
             rows[r].max = max(rows[r].max, last - open.ts)
         }
     }
-    width: max(14, rows.map(r -> r.kind.len()).max() ?? 0)
+    width: max(14, rows.map(fn(r) { r.kind.len() }).max() ?? 0)
     lines := ["{"span".pad_end(width, " ")} {"count":PadLeft(7)} {"total s":PadLeft(9)} {"max s":PadLeft(8)} {"items":PadLeft(9)} {"peak MB":PadLeft(8)}"]
-    rows.sort_by(r -> r.first)
+    rows.sort_by(fn(r) { r.first })
     loop r in rows {
         // `+N`: N spans of this kind are still open; their time so far is included.
-        lines.push("{r.kind.pad_end(width, " ")} {(if r.open > 0 -> "{r.count}+{r.open}" else -> "{r.count}"):PadLeft(7)} {seconds(Float.from_int(r.total)):PadLeft(9)} {seconds(Float.from_int(r.max)):PadLeft(8)} {(r.items.map(n -> "{n}") ?? "-"):PadLeft(9)} {(if r.peak > 0 -> mb(Val(r.peak)) else -> "-"):PadLeft(8)}")
+        lines.push("{r.kind.pad_end(width, " ")} {(if r.open > 0 -> "{r.count}+{r.open}" else -> "{r.count}"):PadLeft(7)} {seconds(Float.from_int(r.total)):PadLeft(9)} {seconds(Float.from_int(r.max)):PadLeft(8)} {(r.items.map(fn(n) { "{n}" }) ?? "-"):PadLeft(9)} {(if r.peak > 0 -> mb(Val(r.peak)) else -> "-"):PadLeft(8)}")
     }
     lines.push("")
-    stale: start.map(s -> ", last event {(Float.from_int(time.now().to_unix_ms() - s) - Float.from_int(last) / 1000.0) / 1000.0:Fixed(0)} s ago") ?? ""
+    stale: start.map(fn(s) { ", last event {(Float.from_int(time.now().to_unix_ms() - s) - Float.from_int(last) / 1000.0) / 1000.0:Fixed(0)} s ago" }) ?? ""
     lines.push("trace time {seconds(Float.from_int(last))} s{stale}, rss {mb(rss)} MB, peak {mb(peak)} MB")
     any_open := false
     loop thread in threads {
@@ -130,9 +130,9 @@ render: fn(file: String) -> String IOError! {
 
 run: fn() {
     args: process.args()
-    path: args.find(a -> !a.starts_with("--")) ?? process.fail(64, "usage: Summarize.jet <trace.json> [--watch[=seconds]]")
-    watch: args.find(a -> a == "--watch" || a.starts_with("--watch="))
-    every: watch.map(w -> Float.parse(w.split_once("=")?.after ?? "") ?? 2.0) ?? 0.0
+    path: args.find(fn(a) { !a.starts_with("--") }) ?? process.fail(64, "usage: Summarize.jet <trace.json> [--watch[=seconds]]")
+    watch: args.find(fn(a) { a == "--watch" || a.starts_with("--watch=") })
+    every: watch.map(fn(w) { Float.parse(w.split_once("=")?.after ?? "") ?? 2.0 }) ?? 0.0
     if every > 0 {
         loop {
             text: if render(path) == {

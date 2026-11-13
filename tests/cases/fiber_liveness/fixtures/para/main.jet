@@ -50,15 +50,15 @@ run: fn() {
     few: [Int]{0, 1, 2, 3, 4, 5, 6, 7}
     origin: time.instant()
 
-    wide: overlap(values.para_map((n: Int) -> parked(origin), limit: 16))
+    wide: overlap(values.para_map(fn(n: Int) { parked(origin) }, limit: 16))
     print("limit 16: parked items overlap past the 2 carriers {wide > 2}, within the limit {wide <= 16}")
-    one: overlap(few.para_map((n: Int) -> parked(origin), limit: 1))
+    one: overlap(few.para_map(fn(n: Int) { parked(origin) }, limit: 1))
     print("limit 1: parked items overlap {one}")
 
-    worked: overlap(values.para_map((n: Int) -> busy(origin)))
-    capped: overlap(values.para_map((n: Int) -> busy(origin), limit: 16))
+    worked: overlap(values.para_map(fn(n: Int) { busy(origin) }))
+    capped: overlap(values.para_map(fn(n: Int) { busy(origin) }, limit: 16))
     print("busy items: at most 2 at once {worked <= 2 && capped <= 2}")
 
-    mapped: values.para_map((n: Int) -> n * 3, limit: 16)
-    print("order kept {mapped == values.map((n: Int) -> n * 3)}")
+    mapped: values.para_map(fn(n: Int) { n * 3 }, limit: 16)
+    print("order kept {mapped == values.map(fn(n: Int) { n * 3 })}")
 }

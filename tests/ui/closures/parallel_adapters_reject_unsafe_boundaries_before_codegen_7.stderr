@@ -1,7 +1,7 @@
 Error [jet.ValueNotSendable]: `parallel item` can't cross a parallel worker boundary because `CallbackPayload` isn't sendable
   --> tests/ui/closures/parallel_adapters_reject_unsafe_boundaries_before_codegen_7.jet:6:23
     |
-  6 |     ignored: payloads.para_map((payload: CallbackPayload) -> 1)
+  6 |     ignored: payloads.para_map(fn(payload: CallbackPayload) { 1 })
     |                       ^^^^^^^^
  Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential

@@ -19,7 +19,7 @@ cause_of: fn(error: IOError) -> String {
 
 #Test("a validator capturing an IOError returns that error") {
     primary: IOError.Other(IOContext{operation: .Write, resource: Val("root"), os_code: None, cause: Val("primary")})
-    validate: () -> fail_with(primary)
+    validate: fn() { fail_with(primary) }
     if publish(Val(validate)) == {
         .Ok(_) -> panic("published")
         .Err(error) -> assert_eq(cause_of(error), "primary")
@@ -28,7 +28,7 @@ cause_of: fn(error: IOError) -> String {
 
 run: fn() {
     primary: IOError.Other(IOContext{operation: .Write, resource: Val("root"), os_code: None, cause: Val("primary")})
-    validate: () -> fail_with(primary)
+    validate: fn() { fail_with(primary) }
     if publish(Val(validate)) == {
         .Ok(_) -> print("published")
         .Err(error) -> print(cause_of(error))

@@ -343,7 +343,7 @@ run_script: fn(peer: &Peer, spec: Dyn) {
             if contains(request, text(unwanted)) -> fail("{method} request carries {text(unwanted)}: {request}")
         }
         reply: resolve(configured, request, n)
-        fill: (template: String) -> replace_all(replace_all(template, "{{id}}", id), "{{n}}", "{n}")
+        fill: fn(template: String) { replace_all(replace_all(template, "{{id}}", id), "{{n}}", "{n}") }
         write(peer, if reply == .Text(result) -> success(id, fill(result)) else -> fill(text(child(reply, "frame"))))
         after: child(spec, "after")
         loop frame in items(child(after, method)) -> write(peer, text(frame))

@@ -23,7 +23,7 @@ field: fn(value: Dyn?, key: String) -> Dyn? Never! {
 // The elements of an array (none for another value).
 items: fn(value: Dyn?) -> [Dyn?] Never! {
     if value == .Val(inner) {
-        if inner == .Array(list) -> return list.map(item -> Val(item))
+        if inner == .Array(list) -> return list.map(fn(item) { Val(item) })
     }
     []
 }
@@ -65,7 +65,7 @@ js_string: fn(value: Dyn?) -> String Never! {
         .Float(real) -> js_number(real)
         .Bool(flag) -> if flag -> "true" else -> "false"
         .Null -> "null"
-        .Array(list) -> list.map(item -> if item == .Null -> "" else -> js_string(Val(item))).join(",")
+        .Array(list) -> list.map(fn(item) { if item == .Null -> "" else -> js_string(Val(item)) }).join(",")
         .Bytes(_) | .DateTime(_) | .Object(_) -> "[object Object]"
     }
 }
@@ -99,7 +99,7 @@ truthy: fn(value: Dyn?) -> Bool Never! {
 }
 
 // String(element) of each element of an array (none for another value).
-texts: fn(value: Dyn?) -> [String] Never! { items(value).map(item -> js_string(item)) }
+texts: fn(value: Dyn?) -> [String] Never! { items(value).map(fn(item) { js_string(item) }) }
 
 // `a === b`. Two parsed objects or arrays are never the same object.
 same: fn(a: Dyn?, b: Dyn?) -> Bool Never! {

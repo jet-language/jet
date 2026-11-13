@@ -178,8 +178,8 @@ impl ProviderFactReport {
             root_version = provider_graph_json_string(nested, "version")
         }
         has_root_identity: root_name != None && root_version != None
-        packages.sort_by(package -> package.version)
-        packages.sort_by(package -> package.name)
+        packages.sort_by(fn(package) { package.version })
+        packages.sort_by(fn(package) { package.name })
         unique := [NuGetLockPackage]{}
         loop package in packages {
             if !unique.contains(package) -> unique.push(package)
@@ -333,9 +333,9 @@ impl ProviderFactReport {
                         loop dependency in provider_conan_json_dependencies(facts, node.get("build_requires"), "graph.{node_id}.build", losses) -> facts.build_dependencies.push(dependency)
                     }
                 }
-                node_identities.sort_by(identity -> identity.reference)
-                node_identities.sort_by(identity -> identity.version)
-                node_identities.sort_by(identity -> identity.name)
+                node_identities.sort_by(fn(identity) { identity.reference })
+                node_identities.sort_by(fn(identity) { identity.version })
+                node_identities.sort_by(fn(identity) { identity.name })
                 unique := [ConanNodeIdentity]{}
                 loop identity in node_identities {
                     if !unique.contains(identity) -> unique.push(identity)

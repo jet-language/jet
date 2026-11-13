@@ -149,8 +149,8 @@ cli: module {}
             .run() ?? panic("cli records process")
         rows: data.csv<NoteRow>(captured.output) ?? panic("cli records csv")
         sorted: data.query(rows)
-            .filter(row -> row.tag == wanted)
-            .sort_by(row -> row.title)
+            .filter(fn(row) { row.tag == wanted })
+            .sort_by(fn(row) { row.title })
             .collect() ?? panic("cli records sort")
         return sorted
     }

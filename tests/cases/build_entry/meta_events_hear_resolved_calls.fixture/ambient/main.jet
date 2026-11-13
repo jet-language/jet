@@ -7,7 +7,7 @@ build: fn(b: Build) {
     meta: b.compiler(app)
     meta.events(
         watch: .Calls{to: print},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Call(c)) -> panic("heard {c.callee} from {c.caller}")
         },
     )

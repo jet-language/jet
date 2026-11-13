@@ -49,15 +49,15 @@ audit: fn() {
 commit: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("  commit: hook (never runs)"))
+        tx.on_rollback(fn() { print("  commit: hook (never runs)") })
     }
 }
 
 early_return: fn(ledger: &Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("  early return: first hook"))
-        tx.on_rollback(() -> print("  early return: second hook"))
+        tx.on_rollback(fn() { print("  early return: first hook") })
+        tx.on_rollback(fn() { print("  early return: second hook") })
         if ledger.balance < 1000 -> return -1
     }
     0
@@ -66,8 +66,8 @@ early_return: fn(ledger: &Ledger) -> Int {
 failure: fn(ledger: &Ledger) -> Int Refused! {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("  failure: first hook"))
-        tx.on_rollback(() -> print("  failure: second hook"))
+        tx.on_rollback(fn() { print("  failure: first hook") })
+        tx.on_rollback(fn() { print("  failure: second hook") })
         _: refuse()
     }
     Ok(0)
@@ -77,7 +77,7 @@ loop_break: fn(ledger: &Ledger) {
     loop {
         #Transact(tx) {
             ledger.balance -= 10
-            tx.on_rollback(() -> print("  break: hook"))
+            tx.on_rollback(fn() { print("  break: hook") })
             break
         }
     }
@@ -86,9 +86,9 @@ loop_break: fn(ledger: &Ledger) {
 failing_hook: fn(ledger: &Ledger) -> Int {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("  failing hook: first hook still runs"))
-        tx.on_rollback(() -> audit())
-        tx.on_rollback(() -> print("  failing hook: third hook"))
+        tx.on_rollback(fn() { print("  failing hook: first hook still runs") })
+        tx.on_rollback(fn() { audit() })
+        tx.on_rollback(fn() { print("  failing hook: third hook") })
         if ledger.balance < 1000 -> return -1
     }
     0

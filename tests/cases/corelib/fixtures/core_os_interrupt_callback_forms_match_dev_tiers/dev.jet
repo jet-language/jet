@@ -22,10 +22,10 @@ stop_callback: fn() {
 run: fn() {
     loop indirect := stop_callback, true {
         named_alias: named_callback
-        local_lambda: () -> {
+        local_lambda: fn() {
             print("lambda")
         }
-        os.on_interrupt(() -> {
+        os.on_interrupt(fn() {
             named_alias()
         })
         os.on_interrupt(local_lambda)

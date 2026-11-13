@@ -168,7 +168,7 @@ env_hook_finish_definition_fingerprint: fn(root: String, requested_preset: Strin
     budget.push(inputs, "selection", selection.bytes())
     if budget.exceeded -> return None
     ordered := inputs
-    ordered.sort_by((left: DefinitionInput, right: DefinitionInput) -> (left.name <=> right.name).then(left.bytes <=> right.bytes))
+    ordered.sort_by(fn(left: DefinitionInput, right: DefinitionInput) { (left.name <=> right.name).then(left.bytes <=> right.bytes) })
     hasher := StreamingSHA256.new()
     loop input in ordered {
         hasher.update(input.name.bytes())

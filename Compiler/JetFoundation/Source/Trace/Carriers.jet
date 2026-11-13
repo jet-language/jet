@@ -161,7 +161,7 @@ trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {
 source_identity_to_json: fn(value: SourceIdentity) -> CanonicalJSON JetTraceError! {
     order := [Int]{}
     loop index in 0..<value.symbols.len() -> order.push(index)
-    order.sort_by((left: Int, right: Int) -> value.symbols[left] <=> value.symbols[right])
+    order.sort_by(fn(left: Int, right: Int) { value.symbols[left] <=> value.symbols[right] })
     symbols := [CanonicalJSON]{}
     loop index in order {
         pair: value.symbols[index]

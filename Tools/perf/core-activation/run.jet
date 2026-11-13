@@ -180,7 +180,7 @@ run: fn() -> Never Err! {
     if samples < 1 -> return Err("--samples must be a positive integer")
     table: batteries()
     names: args["batteries"].split(",").to_list()
-    unknown: names.find(name -> !batteries().has_key(name))
+    unknown: names.find(fn(name) { !batteries().has_key(name) })
     if unknown == .Val(name) -> return Err("unknown battery {name}")
     jet: args["jet"]
     work: args["work"]
@@ -286,12 +286,12 @@ sections: fn(binary: String) -> Dyn {
 symbol_count: fn(binary: String) -> Dyn {
     ran: timed(process.cmd([String]{"nm", "--defined-only", binary}))
     if ran.status != Val(0) -> return "unavailable".encode()
-    ran.stdout.split("\n").filter(line -> line != "").len().encode()
+    ran.stdout.split("\n").filter(fn(line) { line != "" }).len().encode()
 }
 
 reachable_core_modules: fn(rust_path: String) -> Dyn Err! {
     if !files.exists(rust_path) -> return Ok("unavailable".encode())
-    modules := regex.matches(Regex{"corelib_x3e_sCore_s([a-z0-9_]+?)_s"}, files.read(rust_path)).map(hit -> hit.groups[0].copy()).to_set().to_list()  // copy: the match keeps its groups
+    modules := regex.matches(Regex{"corelib_x3e_sCore_s([a-z0-9_]+?)_s"}, files.read(rust_path)).map(fn(hit) { hit.groups[0].copy() }).to_set().to_list()  // copy: the match keeps its groups
     modules.sort()
     Ok(Reach{generated_rust_bytes: files.stat(rust_path).size, modules: modules}.encode())
 }
@@ -322,7 +322,7 @@ allocations: fn(binary: String, lib: String, dir: String) -> Dyn Err! {
         parts: pair.split("=").to_list()
         fields.push((key: parts[0].copy(), value: number(parts.get(1))))  // copy: the split keeps its parts
     }
-    if fields.any(field -> field.key == "allocations" && field.value == 0.encode()) -> return Ok(unavailable("binary does not use the preloadable libc allocator"))
+    if fields.any(fn(field) { field.key == "allocations" && field.value == 0.encode() }) -> return Ok(unavailable("binary does not use the preloadable libc allocator"))
     Ok(Dyn.Object(fields))
 }
 

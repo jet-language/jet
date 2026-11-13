@@ -158,7 +158,7 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
     }
     words := jet_cli_test_child_words(jet_argv)
     // A child's streams are captured, so a colored run asks for color.
-    if color && !words.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> words.push("--color=always")
+    if color && !words.any(fn(argument) { argument == "--color" || argument.starts_with("--color=") }) -> words.push("--color=always")
     runs := [JetCLITestProfileRun]{}
     tests: profile.suites.contains(TEST_SUITE_TESTS)
     levels: test_settings_levels(settings)
@@ -464,7 +464,7 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
         // A shard or a filter compares the rows it holds: the others weren't run.
         if partial != "" {
             present: loop row in rows -> jet_cli_test_row_name(row)
-            baseline = baseline.filter(before -> present.contains(jet_cli_test_row_name(before)))
+            baseline = baseline.filter(fn(before) { present.contains(jet_cli_test_row_name(before)) })
         }
         diff: jet_cli_test_rows_compare(baseline, rows)
         if diff.lost.len() > 0 && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
@@ -569,7 +569,7 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String: St
         verdicts.push(JetCLITestCodeVerdict{id: id.copy(), status: status, detail: detail})
     }
     rows.sort()
-    verdicts.sort_by((left: JetCLITestCodeVerdict, right: JetCLITestCodeVerdict) -> left.id <=> right.id)
+    verdicts.sort_by(fn(left: JetCLITestCodeVerdict, right: JetCLITestCodeVerdict) { left.id <=> right.id })
     JetCLITestCodeRows{rows: rows, failures: failures, verdicts: verdicts}
 }
 
@@ -586,7 +586,7 @@ jet_cli_test_code_suite_summary: fn() -[FS, Env]> String Never! {
 // child knows no ledger, so its counts are the rows' own.
 jet_cli_test_code_rows_summary: fn(suite: String, text: String) -> String Never! {
     code: jet_cli_test_code_rows(text, None, [String: String]{})
-    passed: code.rows.filter(row -> jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED).len()
+    passed: code.rows.filter(fn(row) { jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED }).len()
     plural: if code.rows.len() == 1 -> "" else -> "s"
     "suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
 }
@@ -649,7 +649,7 @@ jet_cli_test_rows_compare: fn(baseline: [String], rows: [String]) -> JetCLITestR
     loop row in rows {
         name: jet_cli_test_row_name(row)
         wanted: name.copy()
-        if !baseline.any(before -> jet_cli_test_row_name(before) == wanted) -> diff.added.push("{name}: {jet_cli_test_row_state(row)}")
+        if !baseline.any(fn(before) { jet_cli_test_row_name(before) == wanted }) -> diff.added.push("{name}: {jet_cli_test_row_state(row)}")
     }
     diff
 }

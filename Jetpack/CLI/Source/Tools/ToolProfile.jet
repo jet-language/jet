@@ -133,7 +133,7 @@ cli_record_tool_manifest_locked: fn(tools: [InstalledUserTool], declared_sources
         }
         entries.push(ToolManifestEntry{name: tool.name, reference: reference, resolved: tool.reference, tier: tier, bins: tool.bins, members: tool.members})
     }
-    entries.sort_by((left: ToolManifestEntry, right: ToolManifestEntry) -> (left.name <=> right.name).then(left.resolved <=> right.resolved))
+    entries.sort_by(fn(left: ToolManifestEntry, right: ToolManifestEntry) { (left.name <=> right.name).then(left.resolved <=> right.resolved) })
     sources := [ToolManifestSource]{}
     names := source_map.keys().to_list()
     names.sort()
@@ -463,7 +463,7 @@ cli_migrate_legacy_tool_generations_locked: fn(verification: &StoreVerification)
         root: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CLIError.Other("tool metadata root is not an object"))
         if !root.has_key("schema") -> legacy.push(LegacyToolGeneration{generation: generation, path: entry.path, metadata: metadata})
     }
-    legacy.sort_by((left: LegacyToolGeneration, right: LegacyToolGeneration) -> left.generation <=> right.generation)
+    legacy.sort_by(fn(left: LegacyToolGeneration, right: LegacyToolGeneration) { left.generation <=> right.generation })
     loop old in legacy {
         tools: cli_parse_legacy_tool_generation_meta(verification, old.metadata, old.generation)
         digests := [String]{}
@@ -550,6 +550,6 @@ cli_parse_legacy_tool_generation_meta: fn(verification: &StoreVerification, text
         }
         tools.push(InstalledUserTool{name: name, version: version, source: source, reference: reference, bins: bins, members: members, member_digests: [String]{}, output_hash: output_hash, store_root: roots.root})
     }
-    tools.sort_by((left: InstalledUserTool, right: InstalledUserTool) -> (left.name <=> right.name).then(left.reference <=> right.reference))
+    tools.sort_by(fn(left: InstalledUserTool, right: InstalledUserTool) { (left.name <=> right.name).then(left.reference <=> right.reference) })
     Ok(tools)
 }

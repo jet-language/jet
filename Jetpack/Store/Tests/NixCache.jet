@@ -130,7 +130,7 @@ store_nix_test_bytes_with_nul: fn(before: String, after: String) -> [U8] Never! 
 // An in-memory NAR byte source reading at most `chunk` bytes per call.
 store_nix_test_byte_source: fn(bytes: [U8], chunk: Int) -> NarByteSource Never! {
     position: Cell.new(0)
-    NarByteSource.reader((limit: Int) -> {
+    NarByteSource.reader(fn(limit: Int) {
         start: position.get()
         wanted: if limit < chunk -> limit else -> chunk
         end: if start + wanted < bytes.len() -> start + wanted else -> bytes.len()
@@ -237,10 +237,10 @@ NixTestProgress: struct {
         discovered: self.discovered
         transferred: self.transferred
         ProgressHandle{
-            discovered_bytes: (bytes: Int) -> discovered.set(discovered.get() + bytes),
-            transferred_bytes: (bytes: Int) -> transferred.set(transferred.get() + bytes),
-            phase: (phase: String) -> {},
-            object_progress: (done: Int, total: Int) -> {},
+            discovered_bytes: fn(bytes: Int) { discovered.set(discovered.get() + bytes) },
+            transferred_bytes: fn(bytes: Int) { transferred.set(transferred.get() + bytes) },
+            phase: fn(phase: String) {},
+            object_progress: fn(done: Int, total: Int) {},
         }
     }
 }
@@ -754,7 +754,7 @@ NixTestProgress: struct {
     // keep feeding one byte at a time.
     position: Cell.new(0)
     sealed: Cell.new(false)
-    reader: NarByteSource.reader((limit: Int) -> {
+    reader: NarByteSource.reader(fn(limit: Int) {
         if !sealed.get() && files.is_file(files.join(destination, "payload")) {
             files.set_mode(destination, 0o555)
             sealed.set(true)

@@ -57,7 +57,7 @@ Reading: enum {
 masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
     if value == {
         .Int(_) | .Float(_) | .Number(_) -> if KEPT.contains(key) -> value.copy() else -> Dyn.Text("<measured>")
-        .Array(items) -> Dyn.Array(items.map(item -> masked(item, key, reading)))
+        .Array(items) -> Dyn.Array(items.map(fn(item) { masked(item, key, reading) }))
         .Object(_) -> {
             out := Dyn.object()
             loop field in members(value) {

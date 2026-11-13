@@ -11,5 +11,5 @@ run: fn() {
     loop row in files.read(process.args()[0]).lines() -> print(row)
     kept := loop entry in files.list_dir("out") -> entry.name
     kept.sort()
-    loop name in kept -> print("out/{name}: {files.read("out/{name}").lines().filter(line -> !line.starts_with("note: ")).join(" | ")}")
+    loop name in kept -> print("out/{name}: {files.read("out/{name}").lines().filter(fn(line) { !line.starts_with("note: ") }).join(" | ")}")
 }

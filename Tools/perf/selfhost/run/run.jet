@@ -165,7 +165,7 @@ parse_args: fn(argv: [String], workloads: [Workload]) -> Options Refusal! {
     if pending != "" -> return Err(Refusal{message: "{pending} requires a value"})
     if !PHASES.contains(options.phase ?? "all") -> return Err(Refusal{message: "unknown phase: {options.phase ?? ""}"})
     if !MODES.contains(options.mode ?? "check") -> return Err(Refusal{message: "unknown mode: {options.mode ?? ""}"})
-    known: workloads.map(workload -> workload.id.copy())
+    known: workloads.map(fn(workload) { workload.id.copy() })
     loop id in options.workloads {
         if !known.contains(id) -> return Err(Refusal{message: "unknown workload: {id}"})
     }
@@ -254,7 +254,7 @@ complexity_for: fn(directory: String) -> Dyn (IOError | Refusal | RegexError)! {
         shape: Shape{
             path: files.relative(path, directory), bytes: source.bytes().len()
             lines: if source == "" -> 0 else -> lines.len()
-            comments: lines.filter(line -> COMMENT_LINE.is_match(line)).len()
+            comments: lines.filter(fn(line) { COMMENT_LINE.is_match(line) }).len()
             declarations: declaration.matches(source).len(), control_forms: CONTROL_FORM.matches(source).len()
         }
         total.bytes += shape.bytes
@@ -317,7 +317,7 @@ run_command: fn(command: String, args: [String], cwd: String, env: [Setting], ti
                 else -> "failed"
             }
             ran.exit_code = if receipt.signal == None -> Val(receipt.code) else -> None
-            ran.signal = receipt.signal.map(number -> SIGNALS.get(number) ?? "SIG{number}")
+            ran.signal = receipt.signal.map(fn(number) { SIGNALS.get(number) ?? "SIG{number}" })
             ran.stdout = receipt.output
             ran.stderr = receipt.errors
             ran.peak_rss_bytes = receipt.peak_memory_bytes
@@ -358,13 +358,13 @@ diagnostic_matches: fn(actual: Dyn?, want: ExpectedDiagnostic) -> Bool {
     loop edit in edits {
         fixed = fixed || (edit.new_text == Val(want.fix_text) && same_span(edit.span, want.span))
     }
-    seen.code == Val(want.code) && seen.file.map(file -> files.basename(file)) == Val(want.file) && seen.line == Val(want.line) && seen.col == Val(want.col) && same_span(seen.span, want.span) && fixed
+    seen.code == Val(want.code) && seen.file.map(fn(file) { files.basename(file) }) == Val(want.file) && seen.line == Val(want.line) && seen.col == Val(want.col) && same_span(seen.span, want.span) && fixed
 }
 
 // Whether `got` is `want` exactly; null when the case states no `want` or
 // the mode, check, prints no output to hold.
 exact: fn(want: String?, got: String, mode: String) -> Bool? {
-    if mode == "check" -> None else -> want.map(text -> text == got)
+    if mode == "check" -> None else -> want.map(fn(text) { text == got })
 }
 
 compare: fn(ran: Ran, expected: Dyn, mode: String) -> Compared [FieldError]! {
@@ -372,7 +372,7 @@ compare: fn(ran: Ran, expected: Dyn, mode: String) -> Compared [FieldError]! {
     comparison: Comparison{
         expected_exit: want.exit, actual_exit: ran.exit_code
         stdout_exact: exact(want.stdout, ran.stdout, mode), stderr_exact: exact(want.stderr, ran.stderr, mode)
-        diagnostic_exact: want.diagnostic.map(diagnostic -> diagnostic_matches(parse_diagnostic("{ran.stdout}\n{ran.stderr}"), diagnostic))
+        diagnostic_exact: want.diagnostic.map(fn(diagnostic) { diagnostic_matches(parse_diagnostic("{ran.stdout}\n{ran.stderr}"), diagnostic) })
     }
     ended: ran.status == "completed" || (want.exit != 0 && ran.status == "failed")
     matches: ended && ran.exit_code == Val(want.exit) && (comparison.stdout_exact ?? true) && (comparison.stderr_exact ?? true) && (comparison.diagnostic_exact ?? true)
@@ -446,13 +446,13 @@ jet_mode: fn(study: Study, workload: Workload, mode: String, workspace: String, 
         return Ok(Record{status: built.status, tree: Dyn{[String: Dyn]{"mode": mode, "native": built.tree, "cases": Dyn.Array([Dyn]{})}}})
     }
     runs: jet_cases(study, workload, mode, workspace, env)
-    applicable: runs.filter(run -> run.applicable)
+    applicable: runs.filter(fn(run) { run.applicable })
     status: if {
-        applicable.len() > 0 && applicable.all(run -> run.matches) -> "observed"
-        applicable.any(run -> run.unavailable) -> "unavailable"
+        applicable.len() > 0 && applicable.all(fn(run) { run.matches }) -> "observed"
+        applicable.any(fn(run) { run.unavailable }) -> "unavailable"
         else -> "failed"
     }
-    Ok(Record{status: status, tree: Dyn{[String: Dyn]{"mode": mode, "native": built.tree, "cases": Dyn.Array(runs.map(run -> run.tree.copy()))}}})
+    Ok(Record{status: status, tree: Dyn{[String: Dyn]{"mode": mode, "native": built.tree, "cases": Dyn.Array(runs.map(fn(run) { run.tree.copy() }))}}})
 }
 
 // The build mode: the foreign provider, the release build, then the built
@@ -512,7 +512,7 @@ reasoning_template: fn(workload: Workload) -> Dyn {
     tasks := [Dyn]{}
     loop id in REASONING_TASKS {
         wanted: id.copy()
-        task: workload.reasoning.find(candidate -> candidate.id == wanted) ?? Task{id: id, prompt: None, expected_observations: None}
+        task: workload.reasoning.find(fn(candidate) { candidate.id == wanted }) ?? Task{id: id, prompt: None, expected_observations: None}
         tasks.push(TemplateTask{id: id, status: "unrun", evidence_class: "model", prompt: task.prompt ?? "", expected_observations: task.expected_observations ?? Dyn.Array([Dyn]{})}.encode())
     }
     Dyn.Array(tasks)
@@ -534,7 +534,7 @@ validate_capture: fn(capture: Dyn, study: Study, workload: Workload) -> Record {
         return verdict("rejected", "reasoning capture cannot grant readiness or port approval")
     }
     entries: at(capture, "tasks").decode<[Dyn]>() ?? [Dyn]{}
-    ids: entries.map(entry -> at(entry, "id"))
+    ids: entries.map(fn(entry) { at(entry, "id") })
     if entries.len() != REASONING_TASKS.len() -> return verdict("rejected", ONE_EACH)
     loop id in REASONING_TASKS {
         if ids.count(Dyn.Text(id.copy())) != 1 -> return verdict("rejected", ONE_EACH)
@@ -613,7 +613,7 @@ evidence_tree: fn(workload: Workload, identity: Dyn, complexity: Dyn, rows: [Mod
         if row.record == .Val(record) -> tree["record"] = record
         modes.push(tree)
     }
-    expected: workload.cases.map(case -> Dyn{[String: Dyn]{"id": case.id, "expected": case.expected}})
+    expected: workload.cases.map(fn(case) { Dyn{[String: Dyn]{"id": case.id, "expected": case.expected}} })
     foreign: if workload.native == .Val(plan) -> plan.trust ?? NO_FOREIGN else -> NO_FOREIGN
     Dyn{[String: Dyn]{
         "identity": identity, "sourceComplexity": complexity,
@@ -635,8 +635,8 @@ evaluate: fn(study: Study, workload: Workload, options: Options, run_root: Strin
     workspace: fresh_workspace(source, files.join(run_root, workload.id))
     identity: identity_for(source)
     complexity: complexity_for(source)
-    reasoning: load_reasoning(options.reasoning_file.map(file -> files.resolve(file) ?? file), study, workload)
-    rows := workload.supported_modes.map(mode -> ModeRow{mode: mode, status: "unrun", record: None})
+    reasoning: load_reasoning(options.reasoning_file.map(fn(file) { files.resolve(file) ?? file }), study, workload)
+    rows := workload.supported_modes.map(fn(mode) { ModeRow{mode: mode, status: "unrun", record: None} })
     records := [Dyn]{}
     jet := [Dyn]{}
     status := if requested(options, "complexity") || requested(options, "identity") -> "specified" else -> "unrun"
@@ -655,7 +655,7 @@ evaluate: fn(study: Study, workload: Workload, options: Options, run_root: Strin
         record: if mode == "build" -> outcome.tree.copy() else -> outcome.tree["cases"]
         jet.push(if mode == "build" -> Dyn{[String: Dyn]{"mode": mode, "build": outcome.tree}} else -> outcome.tree)
         wanted: mode.copy()
-        row: rows.position(candidate -> candidate.mode == wanted) ?? 0
+        row: rows.position(fn(candidate) { candidate.mode == wanted }) ?? 0
         rows[row].status = outcome.status.copy()
         rows[row].record = Val(record.copy())
         if outcome.status == "observed" -> records.push(Dyn{[String: Dyn]{"kind": mode, "record": record}})
@@ -704,7 +704,7 @@ summarize: fn(items: [Evaluated]) -> Dyn {
 }
 
 go_no_go: fn(items: [Evaluated], study: Study) -> Dyn {
-    observed: items.len() == study.manifest.workloads.len() && items.all(item -> item.complete)
+    observed: items.len() == study.manifest.workloads.len() && items.all(fn(item) { item.complete })
     Dyn{[String: Dyn]{
         "decision": if observed -> "owner-decision-required" else -> "unresolved",
         "portfolio": if observed -> "supported-within-scope" else -> "unresolved",
@@ -748,7 +748,7 @@ receipt_for: fn(study: Study, options: Options) -> Dyn (IOError | Refusal)! {
         "runRoot": run_root,
         "requested": Dyn{[String: Dyn]{"phase": options.phase ?? "all", "mode": options.mode.encode(), "workloads": ids}},
         "sourceBoundary": study.manifest.source_boundary, "evidencePolicy": study.manifest.evidence_policy,
-        "workloads": Dyn.Array(items.map(item -> item.tree.copy())), "summary": summarize(items), "goNoGo": decision,
+        "workloads": Dyn.Array(items.map(fn(item) { item.tree.copy() })), "summary": summarize(items), "goNoGo": decision,
     }})
 }
 

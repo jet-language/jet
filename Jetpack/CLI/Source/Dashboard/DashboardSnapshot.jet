@@ -441,7 +441,7 @@ cli_dashboard_collect_snapshot_from: fn(verification: &StoreVerification, cache:
     }
     entries := listed
     store_packages: entries.len()
-    entries.sort_by((left: StoreEntry, right: StoreEntry) -> (cli_dashboard_activity_time(right) <=> cli_dashboard_activity_time(left)).then(left.id <=> right.id))
+    entries.sort_by(fn(left: StoreEntry, right: StoreEntry) { (cli_dashboard_activity_time(right) <=> cli_dashboard_activity_time(left)).then(left.id <=> right.id) })
     now: time.unix_seconds(time.now())
     activity := [DashboardActivity]{}
     loop entry in entries {

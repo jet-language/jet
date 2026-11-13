@@ -22,7 +22,7 @@ cross_shared_nested: fn(cache: LocalCache) {
 cross_http: fn() {
     cell: Cell.new(0)
     mux: server.mux()
-    mux.get("/", (req: HTTPRequest) -> {
+    mux.get("/", fn(req: HTTPRequest) {
         return Ok(server.response(200, "{cell.get()}"))
     })
 }

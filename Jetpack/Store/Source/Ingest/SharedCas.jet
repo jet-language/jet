@@ -91,7 +91,7 @@ store_collect_share_candidates: fn(path: String, paths: &[String], infos: &[file
     if info.is_symlink -> return
     if info.is_dir {
         entries := files.list_dir(path)
-        entries.sort_by((entry: files.DirEntry) -> entry.name)
+        entries.sort_by(fn(entry: files.DirEntry) { entry.name })
         loop entry in entries -> store_collect_share_candidates(entry.path, paths, infos)
         return
     }

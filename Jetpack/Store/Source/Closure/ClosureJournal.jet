@@ -507,13 +507,13 @@ store_render_journal_entry: fn(entry: ClosureJournalEntry) -> String Never! {
     }
     out := "{STORE_JOURNAL_HEADER}\n{kind}"
     objects := entry.objects.copy()
-    objects.sort_by(object -> object.digest)
+    objects.sort_by(fn(object) { object.digest })
     loop object in objects {
         external: if object.external -> "1" else -> "0"
         out = "{out}object\t{store_hex_text(object.digest)}\t{store_hex_text(object.path)}\t{external}\n"
     }
     records := entry.records.copy()
-    records.sort_by(record -> record.id)
+    records.sort_by(fn(record) { record.id })
     loop record in records {
         id: store_hex_text(record.id)
         out = "{out}record\t{id}\t{store_hex_text(record.primary)}\t{store_hex_text(record.action_key)}\t{store_hex_text(record.producer_record)}\t{store_hex_text(record.package_meta)}\n"

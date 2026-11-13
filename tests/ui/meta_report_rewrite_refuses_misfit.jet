@@ -15,7 +15,7 @@ count: fn(n: Int) -> Int { n + 1 }
 build: fn(b: Build) {
     app: b.add_executable("app", ["meta_report_rewrite_refuses_misfit.jet"], [])
     meta: b.compiler(app)
-    meta.events(watch: .Calls{to: print}, (event) -> {
+    meta.events(watch: .Calls{to: print}, fn(event) {
         if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
     })
     b.default(app)

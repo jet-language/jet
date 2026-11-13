@@ -709,7 +709,7 @@ core_use: fn(line: String) -> Bool Never! {
     rest: line.removeprefix("use ")
     if rest.starts_with("core.") -> return true
     parts: rest.partition(": ")
-    parts.sep != "" && parts.head != "" && parts.head.bytes().all(b -> word_byte(b)) && parts.tail.starts_with("core.")
+    parts.sep != "" && parts.head != "" && parts.head.bytes().all(fn(b) { word_byte(b) }) && parts.tail.starts_with("core.")
 }
 
 word_byte: fn(b: U8) -> Bool Never! {
@@ -731,7 +731,7 @@ unblock_uses: fn(text: String) -> String Never! {
         if !open {
             trimmed: line.trim_start()
             lead: line.removesuffix(trimmed)
-            if lead.bytes().all(b -> space_byte(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+            if lead.bytes().all(fn(b) { space_byte(b) }) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
                 indent = lead.copy()
                 open = true
                 lines[at] = " ".repeat(line.len())

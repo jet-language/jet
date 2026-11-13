@@ -251,14 +251,14 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
         perf_validate_comparison(f[perf_report_index(f, "comparison")].value)
         perf_report_one_of(f[perf_report_index(f, "enforcement")].value, "measurement.enforcement", [String]{"warn", "fail"})
         _: perf_report_hex64(f[perf_report_index(f, "context_key")].value, "measurement.context_key")
-        perf_report_nullable(f[perf_report_index(f, "policy")].value, (v: CanonicalJSON) -> perf_validate_policy(v))
+        perf_report_nullable(f[perf_report_index(f, "policy")].value, fn(v: CanonicalJSON) { perf_validate_policy(v) })
         samples: perf_report_index(f, "samples")
         perf_report_array(f[samples].value, "measurement.samples")
         if f[samples].value == .Array(values) { loop q in values { _: perf_validate_rational(q, true, "measurement sample") } }
-        perf_report_nullable(f[perf_report_index(f, "statistics")].value, (v: CanonicalJSON) -> perf_validate_statistics(v))
-        perf_report_nullable(f[perf_report_index(f, "history")].value, (v: CanonicalJSON) -> perf_validate_history(v))
-        perf_report_nullable(f[perf_report_index(f, "baseline")].value, (v: CanonicalJSON) -> perf_validate_baseline(v))
-        perf_report_nullable(f[perf_report_index(f, "decision")].value, (v: CanonicalJSON) -> perf_validate_decision(v))
+        perf_report_nullable(f[perf_report_index(f, "statistics")].value, fn(v: CanonicalJSON) { perf_validate_statistics(v) })
+        perf_report_nullable(f[perf_report_index(f, "history")].value, fn(v: CanonicalJSON) { perf_validate_history(v) })
+        perf_report_nullable(f[perf_report_index(f, "baseline")].value, fn(v: CanonicalJSON) { perf_validate_baseline(v) })
+        perf_report_nullable(f[perf_report_index(f, "decision")].value, fn(v: CanonicalJSON) { perf_validate_decision(v) })
         if f[provider].value == .Object(p) {
             kind: perf_report_text(p[perf_report_index(p, "kind")].value, "provider.kind")
             if compile == Val(c) {

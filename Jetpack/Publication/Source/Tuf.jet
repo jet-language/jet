@@ -86,7 +86,7 @@ publication_tuf_refresh_transaction: fn(repo: String, registry_name: String, roo
     loop entries in grouped.values() {
         loop entry in entries -> current.push(entry.copy())
     }
-    current.sort_by((left: PublicationIndexEntry, right: PublicationIndexEntry) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked))
+    current.sort_by(fn(left: PublicationIndexEntry, right: PublicationIndexEntry) { (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked) })
     loop entry in current {
         wire: publication_index_to_jsonl(entry)
         if !known.has_key(wire) {
@@ -151,7 +151,7 @@ publication_tuf_all_index_entries: fn(repo: String) -[FS]> [String: [Publication
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_tuf_invalid("registry index root is not a real directory"))
     packages := files.list_dir(root)
-    packages.sort_by(entry -> entry.name)
+    packages.sort_by(fn(entry) { entry.name })
     grouped := [String: [PublicationIndexEntry]]{}
     loop package in packages {
         if package.name.starts_with(".") -> next
@@ -390,7 +390,7 @@ publication_tuf_accept_checkpoint: fn(registry_name: String, repo: String, check
     path: publication_registry_checkpoint_path(registry_name)
     lock_path: path.copy()
     // workaround #5940(h)
-    publication_tuf_with_checkpoint_lock(lock_path, () -> publication_tuf_accept_checkpoint_locked(path, repo, checkpoint))
+    publication_tuf_with_checkpoint_lock(lock_path, fn() { publication_tuf_accept_checkpoint_locked(path, repo, checkpoint) })
 }
 publication_tuf_accept_checkpoint_locked: fn(path: String, repo: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env, Time]> {
     if files.stat(path) == .Ok(metadata) {
@@ -480,7 +480,7 @@ publication_tuf_verify_payload: fn(public_key: String, payload: String, signatur
 }
 publication_tuf_validate_entries: fn(name: String, entries: &[PublicationIndexEntry]) IOError! {
     if name == "" -> return Err(publication_tuf_invalid("registry sparse metadata has an empty package name"))
-    entries.sort_by(entry -> entry.version)
+    entries.sort_by(fn(entry) { entry.version })
     prior := String?{None}
     loop entry in entries {
         if entry.name != name -> return Err(publication_tuf_invalid("registry sparse metadata contains another package"))

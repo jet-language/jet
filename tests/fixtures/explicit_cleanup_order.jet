@@ -20,19 +20,19 @@ Resource: struct {
 exit_case: fn() {
     first := Resource{name: "first"}
     defer close(first)
-    _guard_1: scope.guard(() -> print("guard 1"))
+    _guard_1: scope.guard(fn() { print("guard 1") })
     second := Resource{name: "second"}
     defer close(second)
-    _guard_2: scope.guard(() -> print("guard 2"))
+    _guard_2: scope.guard(fn() { print("guard 2") })
     process.exit(0)
 }
 stop_case: fn() {
     first := Resource{name: "first"}
     defer close(first)
-    _guard_1: scope.guard(() -> print("guard 1"))
+    _guard_1: scope.guard(fn() { print("guard 1") })
     second := Resource{name: "second"}
     defer close(second)
-    _guard_2: scope.guard(() -> print("guard 2"))
+    _guard_2: scope.guard(fn() { print("guard 2") })
     #Unsafe("exercise the explicit process-stop cleanup boundary") {
         os.stop(0)
     }

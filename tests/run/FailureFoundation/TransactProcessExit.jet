@@ -36,7 +36,7 @@ leave: fn() {
 withdraw: fn(ledger: &Ledger) {
     #Transact(tx) {
         ledger.balance -= 10
-        tx.on_rollback(() -> print("hook: release the hold"))
+        tx.on_rollback(fn() { print("hook: release the hold") })
         print("exiting inside the transaction")
         leave()
     }

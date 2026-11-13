@@ -26,10 +26,10 @@ run: fn(args: Args) (HTTPError | IOError | NetError)! {
     store: Shared{[String:String]{}}
     state: Shared{ServerState{stopped: false}}
     mux: server.mux()
-    mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-    mux.put("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, true))
-    mux.get("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, false))
-    mux.get("/shutdown", () -> {
+    mux.get("/health", fn() { reply(200, "{{\"status\":\"ok\"}}") })
+    mux.put("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, true) })
+    mux.get("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, false) })
+    mux.get("/shutdown", fn() {
         state.stopped = true
         reply(200, "{{\"bye\":true}}")
     })

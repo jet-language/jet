@@ -425,8 +425,8 @@ store_archive_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
         if !digests.contains(primary) -> next
         objects.push(HangarArchiveObject{id: candidate.id, digest: primary, meta: candidate.meta_json(), root_mode: 0, nodes: [HangarArchiveNode]{}})
     }
-    objects.sort_by(object -> object.digest)
-    objects.sort_by(object -> object.id)
+    objects.sort_by(fn(object) { object.digest })
+    objects.sort_by(fn(object) { object.id })
     output_ids := [String]{}
     package_ids := [String]{}
     loop object in objects {
@@ -704,7 +704,7 @@ store_archive_collect_nodes: fn(root: String, allow_nix_absolute_symlinks: Bool)
     hardlinks := [String: String]{}
     nodes := [HangarArchiveNode]{}
     store_archive_collect_nodes_at(root, "", canonical_root, hardlinks, nodes, allow_nix_absolute_symlinks)
-    nodes.sort_by(node -> node.path)
+    nodes.sort_by(fn(node) { node.path })
     Ok(nodes)
 }
 
@@ -801,7 +801,7 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
     loop node in nodes {
         if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node.copy())
     }
-    directories.sort_by(node -> 0 - store_archive_separator_count(node.path))
+    directories.sort_by(fn(node) { 0 - store_archive_separator_count(node.path) })
     loop node in directories -> store_archive_set_mode(files.join(root, node.path), node.mode)
     if root_mode != 0 -> store_archive_set_mode(root, root_mode)
 }

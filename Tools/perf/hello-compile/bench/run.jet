@@ -77,7 +77,7 @@ run: fn() -> Never Err! {
     results := [Row]{}
     loop toolchain in toolchains(vars["JET"]) {
         label: toolchain.label.copy()  // copy: the ONLY filter captures the label
-        if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(item -> label.contains(item)) -> next
+        if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(fn(item) { label.contains(item) }) -> next
         dir: files.join(bench, regex.replace(Regex{"[(),]"}, toolchain.label.replace(" ", "_").replace("/", "_"), ""))
         files.remove_all(dir).drop("a first run has no directory to remove")
         files.create_dir_all(dir)
@@ -102,19 +102,19 @@ toolchains: fn(jet: String) -> [Toolchain] Never! {
     jet_cold: jet.copy()  // copy: each Jet row's command holds the compiler
     jet_release: jet.copy()  // copy: each Jet row's command holds the compiler
     [Toolchain]{
-        {label: "Assembly gcc -nostdlib -static", source: "asm", build: _ -> [GCC, "-nostdlib", "-static", "-o", "hello", "hello.S"], out: Val("hello")},
-        {label: "Assembly minimal ELF (-s -n, no build-id/relro)", source: "asm", build: _ -> [GCC, "-nostdlib", "-static", "-s", "-Wl,-n,--build-id=none,-z,norelro", "-o", "hello", "hello.S"], out: Val("hello")},
-        {label: "C gcc -O2", source: "c", build: _ -> [GCC, "-O2", "main.c", "-o", "hello"], out: Val("hello")},
-        {label: "C clang -O2", source: "c", build: _ -> [CLANG, "-O2", "main.c", "-o", "hello"], out: Val("hello")},
-        {label: "Zig ReleaseFast", source: "zig", build: dir -> [ZIG, "build-exe", "-O", "ReleaseFast", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"], out: Val("hello")},
-        {label: "Zig ReleaseSmall", source: "zig", build: dir -> [ZIG, "build-exe", "-O", "ReleaseSmall", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"], out: Val("hello")},
-        {label: "Rust rustc -O", source: "rs", build: _ -> [RUSTC, "-O", "main.rs", "-o", "hello"], out: Val("hello")},
-        {label: "Rust rustc debug", source: "rs", build: _ -> [RUSTC, "main.rs", "-o", "hello"], out: Val("hello")},
-        {label: "Go go build", source: "go", build: dir -> ["env", "GOCACHE={dir}/gocache", "GO111MODULE=off", GO, "build", "-o", "hello", "main.go"], out: Val("hello")},
-        {label: "Odin -o:speed", source: "odin", build: _ -> [ODIN, "build", "main.odin", "-file", "-o:speed", "-out:hello"], out: Val("hello")},
-        {label: "Jet jet build (Rust reference, night12)", source: "jet", build: _ -> [jet, "build", "main.jet", "--quiet"], out: None},
-        {label: "Jet jet build TRUE-COLD empty store (night12)", source: "jet", build: dir -> ["env", "JET_STORE_DIR={dir}/store", jet_cold, "build", "main.jet", "--quiet"], out: None},
-        {label: "Jet jet build --release (night12)", source: "jet", build: _ -> [jet_release, "build", "main.jet", "--release", "--quiet"], out: None},
+        {label: "Assembly gcc -nostdlib -static", source: "asm", build: fn(_) { [GCC, "-nostdlib", "-static", "-o", "hello", "hello.S"] }, out: Val("hello")},
+        {label: "Assembly minimal ELF (-s -n, no build-id/relro)", source: "asm", build: fn(_) { [GCC, "-nostdlib", "-static", "-s", "-Wl,-n,--build-id=none,-z,norelro", "-o", "hello", "hello.S"] }, out: Val("hello")},
+        {label: "C gcc -O2", source: "c", build: fn(_) { [GCC, "-O2", "main.c", "-o", "hello"] }, out: Val("hello")},
+        {label: "C clang -O2", source: "c", build: fn(_) { [CLANG, "-O2", "main.c", "-o", "hello"] }, out: Val("hello")},
+        {label: "Zig ReleaseFast", source: "zig", build: fn(dir) { [ZIG, "build-exe", "-O", "ReleaseFast", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"] }, out: Val("hello")},
+        {label: "Zig ReleaseSmall", source: "zig", build: fn(dir) { [ZIG, "build-exe", "-O", "ReleaseSmall", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"] }, out: Val("hello")},
+        {label: "Rust rustc -O", source: "rs", build: fn(_) { [RUSTC, "-O", "main.rs", "-o", "hello"] }, out: Val("hello")},
+        {label: "Rust rustc debug", source: "rs", build: fn(_) { [RUSTC, "main.rs", "-o", "hello"] }, out: Val("hello")},
+        {label: "Go go build", source: "go", build: fn(dir) { ["env", "GOCACHE={dir}/gocache", "GO111MODULE=off", GO, "build", "-o", "hello", "main.go"] }, out: Val("hello")},
+        {label: "Odin -o:speed", source: "odin", build: fn(_) { [ODIN, "build", "main.odin", "-file", "-o:speed", "-out:hello"] }, out: Val("hello")},
+        {label: "Jet jet build (Rust reference, night12)", source: "jet", build: fn(_) { [jet, "build", "main.jet", "--quiet"] }, out: None},
+        {label: "Jet jet build TRUE-COLD empty store (night12)", source: "jet", build: fn(dir) { ["env", "JET_STORE_DIR={dir}/store", jet_cold, "build", "main.jet", "--quiet"] }, out: None},
+        {label: "Jet jet build --release (night12)", source: "jet", build: fn(_) { [jet_release, "build", "main.jet", "--release", "--quiet"] }, out: None},
     }
 }
 
@@ -158,7 +158,7 @@ group_resident: fn(group: Int) -> Int {
 // 0. An entry that is not a process has no stat to read; `self` is this
 // benchmark, never in the build's group.
 resident: fn(pid: String, group: Int) -> Int Err! {
-    fields: files.read("/proc/{pid}/stat").rpartition(")").tail.split(" ").filter(field -> field != "").to_list()
+    fields: files.read("/proc/{pid}/stat").rpartition(")").tail.split(" ").filter(fn(field) { field != "" }).to_list()
     if (Int.parse(fields[2]) ?? -1) != group -> return Ok(0)
     Ok((Int.parse(files.read("/proc/{pid}/statm").split(" ").to_list()[1]) ?? 0) * 4096)
 }

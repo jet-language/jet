@@ -95,13 +95,13 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
     passed := true
     loop index in 0..<listed.len() {
         item: listed[index]
-        settings: if dyn_at(item, "env") == .Object(rows) -> rows.map(row -> EnvSetting{name: row.key.copy(), value: js_text(row.value)}) else -> [EnvSetting]{}
+        settings: if dyn_at(item, "env") == .Object(rows) -> rows.map(fn(row) { EnvSetting{name: row.key.copy(), value: js_text(row.value)} }) else -> [EnvSetting]{}
         expected_value: dyn_at(item, "expected")
         expected_name: if expected_value == .Null -> "" else -> js_text(expected_value)
         expected_path: path_joined(dir, expected_name)
         expected: if files.exists(expected_path) -> Val(files.read_bytes(expected_path) ?? return Err("{err}")) else -> None
         case: ToolCase{
-            args: if dyn_at(item, "args") == .Array(list) -> list.map(arg -> js_text(arg)) else -> [String]{},
+            args: if dyn_at(item, "args") == .Array(list) -> list.map(fn(arg) { js_text(arg) }) else -> [String]{},
             env: inner.concat(settings),
             exit: int_at(item, "exit") ?? 0,
             check: text_or_empty(item, "check"),
@@ -111,7 +111,7 @@ run_tool_entry: fn(repo_dir: String, dir: String, entry: Dyn, jet_bin: String, w
         loop setting in settings -> shown_env[setting.name] = Dyn.Text(setting.value.copy())
         row := Dyn.object()
         row["case"] = Dyn.Int(index + 1)
-        row["args"] = Dyn.Array(case.args.map(arg -> Dyn.Text(arg.copy())))
+        row["args"] = Dyn.Array(case.args.map(fn(arg) { Dyn.Text(arg.copy()) }))
         row["env"] = shown_env
         row["exit"] = Dyn.Int(case.exit)
         row["expected"] = expected_value
@@ -223,7 +223,7 @@ tree_sha256: fn(root: String) -[FS]> String IOError! {
 }
 
 hash_tree: fn(hasher: &crypto.Hasher, dir: String, relative: String) IOError! {
-    names := files.list_dir(dir).map(item -> item.name.copy())
+    names := files.list_dir(dir).map(fn(item) { item.name.copy() })
     names.sort()
     loop name in names {
         full: files.join(dir, name)

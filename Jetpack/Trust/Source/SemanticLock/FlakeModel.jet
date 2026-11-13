@@ -181,12 +181,12 @@ FlakeSourcePin: struct {
 trust_flake_sorted_outputs: fn(outputs: [FlakeOutput]) -> [FlakeOutput] Never! {
     sorted := outputs
     // Stable passes from the least significant field.
-    sorted.sort_by(output -> output.provenance)
-    sorted.sort_by(output -> output.attribute)
-    sorted.sort_by(output -> output.system)
-    sorted.sort_by(output -> output.kind.other_text())
-    sorted.sort_by(output -> output.kind.rank())
-    sorted.sort_by(output -> output.name)
+    sorted.sort_by(fn(output) { output.provenance })
+    sorted.sort_by(fn(output) { output.attribute })
+    sorted.sort_by(fn(output) { output.system })
+    sorted.sort_by(fn(output) { output.kind.other_text() })
+    sorted.sort_by(fn(output) { output.kind.rank() })
+    sorted.sort_by(fn(output) { output.name })
     sorted
 }
 
@@ -220,7 +220,7 @@ trust_flake_query_fields: fn(query: String) -> [FlakeQueryField]? Never! {
         if parts.before == "" || trust_flake_query_value(fields, parts.before) != None -> return None
         fields.push(FlakeQueryField{key: parts.before, value: parts.after})
     }
-    fields.sort_by(field -> field.key)
+    fields.sort_by(fn(field) { field.key })
     Val(fields)
 }
 

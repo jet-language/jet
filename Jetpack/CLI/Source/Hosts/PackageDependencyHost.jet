@@ -197,7 +197,7 @@ cli_package_dependency_publish: fn(input: PackageDependencyInput, updated: Strin
     if raw != input.raw -> return Err(PackageDependencyWriteError{message: "{input.path} changed while the package edit was prepared"})
     resolver.revalidate_file(current) ?? return Err(PackageDependencyWriteError{message: "package source changed before writing: {err.message()}"})
     input.authority.revalidate() ?? return Err(PackageDependencyWriteError{message: "package source changed before writing: {err}"})
-    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err(PackageDependencyWriteError{message: cli_package_dependency_publication_error(input.path, err)})
+    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(fn() { input.authority.revalidate() })) ?? return Err(PackageDependencyWriteError{message: cli_package_dependency_publication_error(input.path, err)})
 }
 
 cli_package_dependency_publication_error: fn(path: String, failure: FoundationPublicationError) -> String Never! {

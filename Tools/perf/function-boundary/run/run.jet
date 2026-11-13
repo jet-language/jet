@@ -65,8 +65,8 @@ run: fn() -> Never Err! {
         }
         at += 1
     }
-    manifest: files.read(files.join(here, "cells.tsv")).lines().map(line -> line.split("\t").to_list())
-    if cells.len() == 0 -> cells = manifest.map(row -> row[0].copy()).filter(cell -> !regex.is_match(Regex{"^(?:#|cell$|$)"}, cell))  // copy: the cell list owns its names
+    manifest: files.read(files.join(here, "cells.tsv")).lines().map(fn(line) { line.split("\t").to_list() })
+    if cells.len() == 0 -> cells = manifest.map(fn(row) { row[0].copy() }).filter(fn(cell) { !regex.is_match(Regex{"^(?:#|cell$|$)"}, cell) })  // copy: the cell list owns its names
     plan: Plan{
         root: root,
         here: here,
@@ -74,7 +74,7 @@ run: fn() -> Never Err! {
         runs: Int.parse(options["--runs"]) ?? 0,
         cpu: options["--cpu"],
         out: options["--out"],
-        levels: options["--levels"].split(",").filter(level -> level != "").to_list(),
+        levels: options["--levels"].split(",").filter(fn(level) { level != "" }).to_list(),
         gate: Int.parse(roots["FB_MEM_GATE_GB"]) ?? return Err("FB_MEM_GATE_GB must be a whole number of GiB"),
         lane: roots["FB_LANE_MEM"],
     }
@@ -83,7 +83,7 @@ run: fn() -> Never Err! {
     loop cell in cells {
         build(plan, cell)
         wanted: cell.copy()  // copy: the row filter captures its own
-        rows: manifest.filter(row -> row[0] == wanted)
+        rows: manifest.filter(fn(row) { row[0] == wanted })
         n: field(rows, 2)
         pair: field(rows, 1)
         expected: files.join(here, "{cell}/expected.out")
@@ -109,7 +109,7 @@ run: fn() -> Never Err! {
 
 // Column `k` of the cell's manifest rows, one line each, as awk prints it.
 field: fn(rows: [[String]], k: Int) -> String Never! {
-    rows.map(row -> row.get(k) ?? "").join("\n")
+    rows.map(fn(row) { row.get(k) ?? "" }).join("\n")
 }
 
 // Waits until MemAvailable reaches `gib` GiB.
@@ -187,7 +187,7 @@ measure: fn(plan: Plan, exe: String, n: String, expected: String) -> Timing? Err
         samples.push(Float.from_int(start.elapsed().ns) / 1000000.0)
     }
     if samples.len() == 0 -> return Ok(Val(Timing{median: "0.0", low: "0.0", high: "0.0"}))
-    samples.sort_by((a, b) -> a <=> b)
+    samples.sort_by(fn(a, b) { a <=> b })
     Ok(Val(Timing{median: fmt.decimal(samples[(samples.len() + 1) /% 2 - 1], 1), low: fmt.decimal(samples[0], 1), high: fmt.decimal(samples[samples.len() - 1], 1)}))
 }
 

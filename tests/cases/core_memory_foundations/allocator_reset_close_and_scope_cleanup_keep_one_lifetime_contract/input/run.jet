@@ -35,8 +35,8 @@ run: fn() {
     close(fixed)
 
     // Scope guards run in reverse declaration order, before the function exits.
-    _outer: scope.guard(() -> print("outer cleanup"))
-    _inner: scope.guard(() -> print("inner cleanup"))
+    _outer: scope.guard(fn() { print("outer cleanup") })
+    _inner: scope.guard(fn() { print("inner cleanup") })
     print("live")
 
     // close is terminal ownership transfer; no view remains live here.

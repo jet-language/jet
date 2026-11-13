@@ -1437,7 +1437,7 @@ undeclared_entries: fn(sides: [Program], languages: [Language]) -> [String] Neve
             end: offset + found.counts[file]
             chosen: found.entries[file].copy()
             wanted: chosen.copy()
-            declared: definitions(found.tokens, offset, end, file, languages[side]).any(item -> item.owner == "" && item.name == wanted)
+            declared: definitions(found.tokens, offset, end, file, languages[side]).any(fn(item) { item.owner == "" && item.name == wanted })
             if chosen != "" && !declared -> out.push("its `tool.programs.{SIDES[side]}` names `{found.paths[file]}#{chosen}`, but `{found.paths[file]}` declares no `{chosen}`")
             offset = end
         }
@@ -2275,7 +2275,7 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     entry := read_entry(repo, name)
     jet_program: "{entry.dir}/jet/run.jet"
     python_program: "{entry.dir}/python/main.py"
-    tool: !entry.problems.any(problem -> problem.starts_with("it is not a tool entry"))
+    tool: !entry.problems.any(fn(problem) { problem.starts_with("it is not a tool entry") })
     if !tool && files.is_file(files.join(repo, jet_program)) && files.is_file(files.join(repo, python_program)) {
         entry.original = python_program.copy()
         entry.twin = jet_program.copy()
@@ -2476,7 +2476,7 @@ run: fn() {
 #Test("a package file's names follow its references: never a local, parameter, label, loop variable, lambda parameter, pattern binding or member") {
     dir: work_dir("references") ?? panic("a scratch directory cannot be made: {err}")
     plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
-    plant(dir, "Tools/kit/Source/A.jet", "alpha: fn(x: Int?, iota: Int) -> Int {{\n    gamma: 3\n    loop delta in [1, 2] -> print(delta)\n    if x == .Val(.Some(epsilon)) -> print(epsilon)\n    list: [1].map(eta -> eta + gamma + iota)\n    zeta() + list.beta() + Theta{{kappa: 1}}.kappa\n}}\n")
+    plant(dir, "Tools/kit/Source/A.jet", "alpha: fn(x: Int?, iota: Int) -> Int {{\n    gamma: 3\n    loop delta in [1, 2] -> print(delta)\n    if x == .Val(.Some(epsilon)) -> print(epsilon)\n    list: [1].map(fn(eta) {{ eta + gamma + iota }})\n    zeta() + list.beta() + Theta{{kappa: 1}}.kappa\n}}\n")
     loop name in ["beta", "gamma", "delta", "epsilon", "zeta", "eta", "iota", "kappa"] -> plant(dir, "Tools/kit/Source/{name}.jet", "{name}: fn() -> Int {{ 1 }}\n")
     plant(dir, "Tools/kit/Source/theta.jet", "Theta: struct {{ kappa: Int }}\n")
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[alpha]\n\nrun: fn() {{ print(alpha(None, 1)) }}\n")
@@ -2527,8 +2527,8 @@ run: fn() {
 
 #Test("a name written in a string literal's interpolation reaches its definition on both sides") {
     assert_eq(tokens("\"a{{b(c)}}d{{{{e{{f}}\"", .Jet)[0].inner, "b(c)\nf")
-    assert_eq(tokens("`a${{b}}` 'c${{d}}'", .JavaScript).map(item -> item.inner), ["b", ""])
-    assert_eq(tokens("f'{{a}}{{{{b}}}}' '{{c}}' \"\"\"{{d}}\"\"\"", .Python).map(item -> item.inner), ["a", "", ""])
+    assert_eq(tokens("`a${{b}}` 'c${{d}}'", .JavaScript).map(fn(item) { item.inner }), ["b", ""])
+    assert_eq(tokens("f'{{a}}{{{{b}}}}' '{{c}}' \"\"\"{{d}}\"\"\"", .Python).map(fn(item) { item.inner }), ["a", "", ""])
     dir: work_dir("interpolated") ?? panic("a scratch directory cannot be made: {err}")
     plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
     plant(dir, "Tools/kit/Source/Gate.jet", "gate: fn(a: Int) -> Int {{\n    if a > 0 && a < 9 -> 1 else -> 0\n}}\n")
@@ -2547,7 +2547,7 @@ run: fn() {
 // `language`.
 defined: fn(source: String, language: Language) -> [String] Never! {
     list: tokens(source, language)
-    definitions(list, 0, list.len(), 0, language).map(item -> "{item.owner}.{item.name}/{item.inert}")
+    definitions(list, 0, list.len(), 0, language).map(fn(item) { "{item.owner}.{item.name}/{item.inert}" })
 }
 
 #Test("a top-level definition starts at column 0, past closing brackets, a Python clause and the line after an attribute or decorator") {
@@ -2723,7 +2723,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant(dir, "{ENTRIES_ROOT}/sum/python/main.py", "print(1 + 2)\n")
     plant(dir, "{ENTRIES_ROOT}/sum/jet/run.jet", "run: fn() {{ print(1 + 2) }}\n")
     plant(dir, "{ENTRIES_ROOT}/lone/entry.json", "{{\"name\": \"lone\"}}\n")
-    assert_eq(measure_lines(dir, "sum").map(line -> line.split("\t").take(3).to_list().join(" ")), ["sum original 6", "sum jet 13"])
+    assert_eq(measure_lines(dir, "sum").map(fn(line) { line.split("\t").take(3).to_list().join(" ") }), ["sum original 6", "sum jet 13"])
     assert(measure_lines(dir, "lone")[0].contains("not a tool entry"))
     files.remove_all(dir) ?? ()
 }
@@ -2740,7 +2740,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant(dir, "{ENTRIES_ROOT}/driven/entry.json", "{{\"name\": \"driven\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/fx/drive.mjs\", \"jet\": \"Tools/fx/driver.jet\", \"programs\": {{\"original\": [\"Tools/fx/real.mjs\"], \"jet\": [\"Tools/fz/Run.jet\"]}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
     plant(dir, "{ENTRIES_ROOT}/driven/expected/three.out", "3\n")
     rows: measure_lines(dir, "driven")
-    assert_eq(rows.map(line -> line.split("\t").to_list()[3]), ["1", "2"])
+    assert_eq(rows.map(fn(line) { line.split("\t").to_list()[3] }), ["1", "2"])
     assert(rows[0].contains("Tools/fx/drive.mjs ") && rows[0].contains("Tools/fx/real.mjs "))
     assert(rows[1].contains("Tools/fx/driver.jet ") && rows[1].contains("Tools/fz/Run.jet ") && rows[1].contains("Tools/fz/Mate.jet ") && !rows[1].contains("Other.jet"))
     plant(dir, "{ENTRIES_ROOT}/bad/entry.json", "{{\"name\": \"bad\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/fx/drive.mjs\", \"jet\": \"Tools/fx/driver.jet\", \"programs\": {{\"original\": [\"Tools/fz/Run.jet\", \"Tools/none.mjs\"], \"jet\": [\"Tools/fx/real.mjs\"], \"both\": []}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
@@ -2792,7 +2792,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     work: work_dir("unnamed_work") ?? panic("a scratch directory cannot be made: {err}")
     report: judge(dir, "fx", planted_jet(), 1, work)
     assert_eq(lost_bars(report), BARS)
-    assert(!report.bars.any(bar -> !bar.detail.starts_with("the entry cannot be judged: its original driver")))
+    assert(!report.bars.any(fn(bar) { !bar.detail.starts_with("the entry cannot be judged: its original driver") }))
     plant(dir, "{ENTRIES_ROOT}/fx/entry.json", "{{\"name\": \"fx\", \"mode\": \"tool\", \"tool\": {{\"original\": \"{DRIVERS}fx.mjs\", \"jet\": \"{ENTRIES_ROOT}/fx/driver/run.jet\", \"programs\": {{\"original\": [\"Tools/fx/real.mjs\"], \"jet\": [\"Tools/fz/Run.jet\"]}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
     named: measure_lines(dir, "fx")
     assert_eq(named.len(), 2)
@@ -2838,11 +2838,11 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
             loop line in report_lines(report) -> print(line)
         }
         assert_eq(lost, expected[index])
-        assert(report.bars.any(bar -> bar.name == "speed"))
+        assert(report.bars.any(fn(bar) { bar.name == "speed" }))
     }
     assert_eq(tool_entries(dir) ?? panic(err.message), ["gapped", "job", "parity", "pass", "reasoning", "tokens", "wrongjob"])
     plant_entry(dir, "badgap", "Tools/fx/three.py", "Tools/fx/Big.jet", review, gaps: "[\"soon\"]")
-    assert(read_entry(dir, "badgap").problems.any(problem -> problem.contains("not a criterion")))
+    assert(read_entry(dir, "badgap").problems.any(fn(problem) { problem.contains("not a criterion") }))
     files.remove_all(dir) ?? ()
     files.remove_all(work) ?? ()
 }

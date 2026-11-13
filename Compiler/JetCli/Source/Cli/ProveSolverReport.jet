@@ -54,7 +54,7 @@ jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
         }
     }
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    rows.sort_by((left: JetCLISolverRow, right: JetCLISolverRow) -> jet_cli_solver_row_order(left, right))
+    rows.sort_by(fn(left: JetCLISolverRow, right: JetCLISolverRow) { jet_cli_solver_row_order(left, right) })
     loop index in 0..<rows.len() {
         if index >= JET_CLI_SOLVER_MAX_OBLIGATIONS {
             rows[index].outcome = JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: "structural_limit", steps: 0})

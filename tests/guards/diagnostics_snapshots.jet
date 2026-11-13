@@ -222,7 +222,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_
 // Rust REPL fixture and is not required.
 #Test("diagnostic_voice_scope_includes_owned_runtime_artifacts") {
     guards_enter_root()
-    paths: dc_snapshot_texts().map(snapshot -> snapshot.path)
+    paths: dc_snapshot_texts().map(fn(snapshot) { snapshot.path })
     loop expected in ["tests/fixtures/module-eval-diagnostics/E0970.stderr", "tests/fixtures/module-eval-diagnostics/E0971.stderr", "tests/cli/doctor_l2101.txt", "tests/cli/fetch_no_git_e1203.txt"] {
         assert(dc_has(paths, expected), "voice scan omitted {expected}")
     }

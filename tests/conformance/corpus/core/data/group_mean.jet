@@ -12,8 +12,8 @@ run: fn() {
         Ticket{team: "Core", minutes: 8.0}
     }
     groups: data.query(rows)
-        .group_by(ticket -> ticket.team)
-        .mean(ticket -> ticket.minutes)
+        .group_by(fn(ticket) { ticket.team })
+        .mean(fn(ticket) { ticket.minutes })
         .collect() ?? panic("group mean")
     print(groups[0].value)
 }

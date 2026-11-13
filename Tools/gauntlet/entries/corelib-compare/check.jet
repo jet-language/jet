@@ -19,7 +19,7 @@ run: fn(check: Check) {
     print(printed.trim_end())
     print("== scratch")
     if !files.is_dir(scratch) -> return print("missing")
-    names := (files.list_dir(scratch) ?? process.fail(1, "{err}")).map(entry -> entry.name)
+    names := (files.list_dir(scratch) ?? process.fail(1, "{err}")).map(fn(entry) { entry.name })
     names.sort()
     print("directory with {names.len()} entries")
     loop name in names -> print(name)

@@ -228,25 +228,25 @@ trust_flake_find_node: fn(nodes: [FlakeLockNode], name: String) -> FlakeLockNode
 // Nodes in Rust's derived order; names are unique by the time they sort.
 trust_flake_sorted_lock_nodes: fn(nodes: [FlakeLockNode]) -> [FlakeLockNode] Never! {
     sorted := nodes
-    sorted.sort_by(node -> node.locked)
-    sorted.sort_by(node -> node.original)
-    sorted.sort_by(node -> node.name)
+    sorted.sort_by(fn(node) { node.locked })
+    sorted.sort_by(fn(node) { node.original })
+    sorted.sort_by(fn(node) { node.name })
     sorted
 }
 
 trust_flake_sorted_edges: fn(edges: [FlakeLockEdge]) -> [FlakeLockEdge] Never! {
     sorted := edges
-    sorted.sort_by(edge -> edge.target)
-    sorted.sort_by(edge -> edge.name)
+    sorted.sort_by(fn(edge) { edge.target })
+    sorted.sort_by(fn(edge) { edge.name })
     sorted
 }
 
 trust_flake_sorted_registries: fn(entries: [FlakeRegistryEntry]) -> [FlakeRegistryEntry] Never! {
     sorted := entries
-    sorted.sort_by(entry -> entry.locked)
-    sorted.sort_by(entry -> entry.original)
-    sorted.sort_by(entry -> entry.node)
-    sorted.sort_by(entry -> entry.alias)
+    sorted.sort_by(fn(entry) { entry.locked })
+    sorted.sort_by(fn(entry) { entry.original })
+    sorted.sort_by(fn(entry) { entry.node })
+    sorted.sort_by(fn(entry) { entry.alias })
     sorted
 }
 

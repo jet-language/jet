@@ -1,7 +1,7 @@
 Error [jet.UninferableTypeArgument]: Can't figure out what `T` should be here
   --> generic_lambda_conflict.jet:4:11
     |
-  4 |     print(apply((n: Int) -> n.to_string(), 1))
+  4 |     print(apply(fn(n: Int) { n.to_string() }, 1))
     |           ^^^^^
  Why: One generic type parameter received incompatible concrete types
  Fix: T is Int from argument 2 but String from the lambda return; make those types agree
@@ -10,8 +10,8 @@ More: jet-lang.dev/e/E0904
 Error [jet.ValueTypeMismatch]: `apply` wants fn(Int) -> Int for argument 1, but this is fn(Int) -[]> String
   --> generic_lambda_conflict.jet:4:17
     |
-  4 |     print(apply((n: Int) -> n.to_string(), 1))
-    |                 ^^^^^^^^^^^^^^^^^^^^^^^
+  4 |     print(apply(fn(n: Int) { n.to_string() }, 1))
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use fn(Int) -> Int here
 More: jet-lang.dev/e/E0112

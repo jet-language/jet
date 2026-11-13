@@ -166,7 +166,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
     plan_output: ".jet/staged-plan/{namespace}/fragment.plan"
 
     ordered := fragment.actions
-    ordered.sort_by(emitted -> emitted.name)
+    ordered.sort_by(fn(emitted) { emitted.name })
     marker_paths := [String: String]{}
     loop index in 0..<ordered.len() -> marker_paths[ordered[index].name] = ".jet/staged-plan/{namespace}/actions/{index}.stamp"
     markers: marker_paths.values().to_list()
@@ -257,7 +257,7 @@ recipe_lower_staged_plan_action: fn(action: StagedPlanAction, fragment: BuildPla
         loop input in action.inputs {
             if emitted.inputs.contains(input.path) -> emitted_input_facts.push(input.copy())
         }
-        emitted_input_facts.sort_by(input -> input.path)
+        emitted_input_facts.sort_by(fn(input) { input.path })
         loop input_index in 0..<emitted_input_facts.len() {
             fact: emitted_input_facts[input_index]
             spec = spec

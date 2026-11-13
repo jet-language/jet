@@ -73,7 +73,7 @@ build_canonical_action_key: fn(plan: HermeticBuildPlan, action: HermeticBuildAct
     w.texts(action.inputs)
     w.text("input-snapshots")
     snapshots := inputs
-    snapshots.sort_by((left: ActionInputSnapshot, right: ActionInputSnapshot) -> left.path <=> right.path)
+    snapshots.sort_by(fn(left: ActionInputSnapshot, right: ActionInputSnapshot) { left.path <=> right.path })
     if observes {
         // Every declared input contributes a digest when the action surface
         // can observe source.

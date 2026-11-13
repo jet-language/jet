@@ -30,7 +30,7 @@ input: fn(name: String) -> Dyn {
 
 print_results: fn(matrix: Dyn, dir: String) {
     listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
-    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names := listed.filter(fn(item) { item.name.ends_with(".json") }).map(fn(item) { item.name.copy() })
     names.sort()
     loop name in names {
         issues: result_shape_issues(input(files.join(dir, name)), matrix)

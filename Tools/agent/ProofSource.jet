@@ -56,7 +56,7 @@ scratch_root: fn() -[Env]> String Never! {
 }
 
 is_full_sha: fn(text: String) -> Bool Never! {
-    text.len() == 40 && text.bytes().all(byte -> (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}))
+    text.len() == 40 && text.bytes().all(fn(byte) { (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}) })
 }
 
 git: fn(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
@@ -278,7 +278,7 @@ guard_fixture: fn(name: String) -[Env, FS, Time]> String {
     second: run_export(jet, checkout, commit, dir, bin, scratch)
     assert_eq(second.code, 0)
     assert_eq(second.output.trim(), source)
-    archives: (files.read(log) ?? panic("log: {err}")).split("\n").to_list().filter(line -> line == "archive")
+    archives: (files.read(log) ?? panic("log: {err}")).split("\n").to_list().filter(fn(line) { line == "archive" })
     assert_eq(archives.len(), 1)
     files.remove_all(dir) ?? panic("cleanup: {err}")
 }

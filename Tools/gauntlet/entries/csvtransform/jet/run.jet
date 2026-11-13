@@ -13,7 +13,7 @@ Args: struct {
 }
 
 run: fn(args: Args) Err! {
-    sales: data.csv<Sale>(files.read(args.input)).filter(sale -> sale.amount > 0.0)
+    sales: data.csv<Sale>(files.read(args.input)).filter(fn(sale) { sale.amount > 0.0 })
     groups: sales.group_by(.region)
     regions := groups.keys().to_list()
     regions.sort()

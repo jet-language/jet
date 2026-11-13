@@ -41,7 +41,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
     metrics: comparison_metrics(mode)
     primary: primary_metric(mode)
     row_map: object_or_empty(Val(rows))
-    peers: items_at(languages, "").filter_map(item -> text_at(item, "")).filter(language -> language != "jet" && language != "jet-expert")
+    peers: items_at(languages, "").filter_map(fn(item) { text_at(item, "") }).filter(fn(language) { language != "jet" && language != "jet-expert" })
     output := Dyn.object()
     loop language in peers {
         peer: row_map.get(language) ?? Dyn.Null
@@ -50,7 +50,7 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
         matched: row_map.get(configuration) ?? Dyn.Null
         compared_tiers: if expert -> expert_tiers(matched) else -> tiers
         policy: peer_tier_policy(entry, language)
-        required: policy.filter(rule -> rule.required).map(rule -> rule.tier)
+        required: policy.filter(fn(rule) { rule.required }).map(fn(rule) { rule.tier })
         ready := true
         loop tier in required {
             if text_at(compared_tiers, "{tier}/status") != Val("ok") -> ready = false
@@ -66,12 +66,12 @@ peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
             peer_not_applicable && declared_reason -> "declared-non-applicability"
             peer_not_applicable -> "undeclared-non-applicability"
             expert -> "jet-expert-aot-and-matched-peer"
-            policy.any(rule -> rule.tier == "run") -> "jet-aot-and-run"
+            policy.any(fn(rule) { rule.tier == "run" }) -> "jet-aot-and-run"
             else -> "jet-aot"
         }
         comparison["jet_configuration"] = configuration
         comparison["jet_tiers_ready"] = Dyn.Bool(ready)
-        comparison["required_tiers"] = Dyn.Array(required.map(tier -> Dyn.Text(tier.copy())))
+        comparison["required_tiers"] = Dyn.Array(required.map(fn(tier) { Dyn.Text(tier.copy()) }))
         comparison["tier_policy"] = tier_policy_object(policy)
         comparison["peer_sample"] = peer_sample(language, peer)
         comparison["primary_metric"] = primary
@@ -227,7 +227,7 @@ run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, c
         ordered.push((state: state, cell: metric_cell(entry, language, metric, "run", state_context)))
     }
     chosen := ordered[0]
-    unsettled: ordered.filter(item -> text_at(item.cell, "status") != Val("measured") && text_at(item.cell, "status") != Val("not_applicable"))
+    unsettled: ordered.filter(fn(item) { text_at(item.cell, "status") != Val("measured") && text_at(item.cell, "status") != Val("not_applicable") })
     if {
         unsettled.len() > 0 -> chosen = unsettled[0]
         else -> loop item in ordered {
@@ -271,7 +271,7 @@ runtime_evidence: fn(runtime: Dyn, metric: String) -> Dyn {
     raw_field: if first_stdout -> "time_to_first_stdout_ns" else -> "wall_time_ns"
     median: member(runtime, "median/{field}") ?? Dyn.Null
     noise: member(runtime, "noise/metrics/{field}") ?? Dyn.Null
-    samples: items_at(runtime, "samples").map(sample -> Dyn{[String: Dyn]{"value": finite_or_null(sample, field), "raw_ns": finite_or_null(sample, raw_field)}})
+    samples: items_at(runtime, "samples").map(fn(sample) { Dyn{[String: Dyn]{"value": finite_or_null(sample, field), "raw_ns": finite_or_null(sample, raw_field)}} })
     Dyn{[String: Dyn]{
         "protocol": TIMER_SCHEMA,
         "raw_samples": Dyn.Array(samples),

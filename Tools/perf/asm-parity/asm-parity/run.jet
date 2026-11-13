@@ -334,7 +334,7 @@ options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
     runs: integer(given["--runs"], "--runs must be an integer of at least {MIN_RUNS}")
     if runs < MIN_RUNS -> return Err("--runs must be an integer of at least {MIN_RUNS}")
     modes: given["--modes"].split(",").to_list()
-    unknown: modes.filter(mode -> !["default", "release"].contains(mode))
+    unknown: modes.filter(fn(mode) { !["default", "release"].contains(mode) })
     if unknown.len() > 0 -> return Err("unknown mode {unknown[0]}")
     candidate: given.get("--candidate")
     if candidate == None && (given.has_key("--older") || given.has_key("--gains")) -> return Err("--older and --gains need --candidate")
@@ -347,7 +347,7 @@ options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
         runs: runs
         cpu: given["--cpu"]
         modes: modes
-        cells: given.get("--cells").map(names -> names.split(",").to_list())
+        cells: given.get("--cells").map(fn(names) { names.split(",").to_list() })
         perf: given["--perf"]
         gate: gate
         candidate: candidate
@@ -357,7 +357,7 @@ options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
     })
 }
 
-selected: fn(o: Options, cell: Bench) -> Bool Never! { o.cells.map(names -> names.contains(cell.name)) ?? true }
+selected: fn(o: Options, cell: Bench) -> Bool Never! { o.cells.map(fn(names) { names.contains(cell.name) }) ?? true }
 
 // `argv` run in `cwd` to its end; a failure to start, or a nonzero status,
 // is an error.
@@ -480,19 +480,19 @@ perf_count: fn(counted: [String: String], event: String, errors: String) -> Int 
 // `runs` rounds over the variants, each round one run of every variant in
 // turn; per variant the median cycles and instructions and the cycles' range.
 measure: fn(o: Options, variants: [Variant], s: Setup) -[Exec, FS, Time.Wait]> [Pace] Err! {
-    taken := variants.map(_ -> [Counts]{})
+    taken := variants.map(fn(_) { [Counts]{} })
     loop _ in 0..<o.runs {
         loop (k, variant) in variants -> taken[k].push(sample(o, variant.exe, s))
     }
-    Ok(taken.map(counts -> pace(counts)))
+    Ok(taken.map(fn(counts) { pace(counts) }))
 }
 
 pace: fn(counts: [Counts]) -> Pace Never! {
-    cycles := counts.map(count -> Float.from_int(count.cycles))
+    cycles := counts.map(fn(count) { Float.from_int(count.cycles) })
     cycles.sort()
     Pace{
         cycles: stats.median(cycles) ?? 0.0
-        instructions: stats.median(counts.map(count -> Float.from_int(count.instructions))) ?? 0.0
+        instructions: stats.median(counts.map(fn(count) { Float.from_int(count.instructions) })) ?? 0.0
         cycles_min: cycles[0]
         cycles_max: cycles[cycles.len() - 1]
     }
@@ -535,13 +535,13 @@ scriptbench_issues: fn(all: [Bench], here: String) -[FS]> [String] Err! {
     loop cell in all {
         loop id in cell.scriptbench {
             wanted: id.copy()  // copy: the lookup's lambda takes its own
-            workload: manifest.workloads.find(w -> w.id == wanted) ?? {
+            workload: manifest.workloads.find(fn(w) { w.id == wanted }) ?? {
                 issues.push("{cell.name}: scriptbench names unknown workload {id}")
                 next
             }
             if workload.servers.len() == 0 && cell.server != None -> issues.push("{cell.name}: has a server but workload {id} uses none")
             loop served in workload.servers {
-                same: cell.server.map(own -> own.port == served.port && own.delay_ms == served.delay_ms) == Val(true)
+                same: cell.server.map(fn(own) { own.port == served.port && own.delay_ms == served.delay_ms }) == Val(true)
                 if !same -> issues.push("{cell.name}: workload {id} is served on port {served.port} with a {served.delay_ms} ms delay; the cell's server differs")
             }
         }
@@ -564,7 +564,7 @@ setup: fn(o: Options, cell: Bench) -[FS]> Setup Err! {
 }
 
 // The run plan as a row shows it: each step's arguments, steps split by ` ; `.
-args_text: fn(s: Setup) -> String Never! { s.plan.map(step -> step.join(" ")).join(" ; ") }
+args_text: fn(s: Setup) -> String Never! { s.plan.map(fn(step) { step.join(" ") }).join(" ; ") }
 
 // A number as JavaScript's String() writes an integer, else with two decimals.
 shown: fn(value: Float) -> String Never! {
@@ -581,12 +581,12 @@ row_cells: fn(row: Row) -> [String] Never! {
 // The gate: every selected cell's reference and Jet binaries compared.
 parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int Err! {
     rows := [Row]{}
-    loop cell in all.filter(cell -> selected(o, cell)) {
+    loop cell in all.filter(fn(cell) { selected(o, cell) }) {
         s: setup(o, cell)
         variants := [Variant]{Variant{label: "asm", exe: assemble(o.here, files.join_all([o.here, cell.name, "ref.S"]), s.dir, "ref")}}
         loop mode in o.modes -> variants.push(Variant{label: "jet-{mode}", exe: build_jet(o, o.jet, cell, mode, s.dir, "jet")})
         server: start_server(o, cell)
-        _stop: scope.guard(() -> stop_server(server))
+        _stop: scope.guard(fn() { stop_server(server) })
         outs: outputs(o, variants, s)
         speeds: measure(o, variants, s)
         // The reference is the first variant; every ratio is against it.
@@ -613,13 +613,13 @@ parity: fn(o: Options, all: [Bench]) -[Exec, FS, IO, Net, Time, Time.Wait]> Int 
             })
         }
     }
-    table: [COLUMNS.join("\t")].concat(rows.map(row -> row_cells(row).join("\t"))).join("\n")
+    table: [COLUMNS.join("\t")].concat(rows.map(fn(row) { row_cells(row).join("\t") })).join("\n")
     results: Results{runs: o.runs, interleaved: true, statistic: "median", cpu: o.cpu, gates: Gates{size: SIZE_GATE, cycles: CYCLES_GATE}, rows: rows}
     files.write(files.join(o.out, "results.json"), "{json.stringify(results, 2)}\n")
     files.write(files.join(o.out, "table.tsv"), "{table}\n")
     print(table)
-    wrong: rows.count_where(row -> row.output != "same")
-    gated: if o.gate -> rows.count_where(row -> row.variant != "asm" && (row.size_gate != "ok" || row.cycles_gate != "ok")) else -> 0
+    wrong: rows.count_where(fn(row) { row.output != "same" })
+    gated: if o.gate -> rows.count_where(fn(row) { row.variant != "asm" && (row.size_gate != "ok" || row.cycles_gate != "ok") }) else -> 0
     if wrong > 0 -> term.eprint("{wrong} binaries printed the wrong output")
     if gated > 0 -> term.eprint("{gated} Jet rows miss a gate")
     Ok(if wrong + gated > 0 -> 1 else -> 0)
@@ -668,11 +668,11 @@ pct: fn(to: Int, from: Int) -> String Never! {
 
 ms: fn(ns: Int) -> String Never! { fmt.decimal(Float.from_int(ns) / 1000000.0, 1) }
 
-has: fn(row: GainRow, label: String) -> Bool Never! { row.variants.any(variant -> variant.label == label) }
+has: fn(row: GainRow, label: String) -> Bool Never! { row.variants.any(fn(variant) { variant.label == label }) }
 
 // The gains of the row's variant `label`, all zero for a variant it lacks.
 gains_of: fn(row: GainRow, label: String) -> Measured Never! {
-    found: row.variants.find(variant -> variant.label == label) ?? return Measured{ns: 0, rss: 0, bytes: 0, runs: []}
+    found: row.variants.find(fn(variant) { variant.label == label }) ?? return Measured{ns: 0, rss: 0, bytes: 0, runs: []}
     found.gains
 }
 
@@ -688,11 +688,11 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
     // is the run's noise floor.
     variants.push(Variant{label: "control", exe: variants[variants.len() - 2].exe})
     server: start_server(o, cell)
-    _stop: scope.guard(() -> stop_server(server))
+    _stop: scope.guard(fn() { stop_server(server) })
     outs: outputs(o, variants, s)
     // Each round runs every variant once, back to back; odd rounds reverse
     // the order, so no variant always runs first.
-    runs := variants.map(_ -> [Timed]{})
+    runs := variants.map(fn(_) { [Timed]{} })
     n: variants.len()
     loop round in 0..<o.best {
         loop j in 0..<n {
@@ -703,9 +703,9 @@ gain_row: fn(o: Options, mode: String, cell: Bench, compilers: [Compiler], launc
     wrong := [String]{}
     measured := [(label: String, gains: Measured)]{}
     loop (k, variant) in variants {
-        if output_text(outs[k], s.expect) != "same" || runs[k].any(run -> run.code != 0) -> wrong.push(variant.label)
-        least: runs[k].fold(runs[k][0].ns, (best, run) -> min(best, run.ns))
-        most: runs[k].fold(0, (peak, run) -> max(peak, run.rss))
+        if output_text(outs[k], s.expect) != "same" || runs[k].any(fn(run) { run.code != 0 }) -> wrong.push(variant.label)
+        least: runs[k].fold(runs[k][0].ns, fn(best, run) { min(best, run.ns) })
+        most: runs[k].fold(0, fn(peak, run) { max(peak, run.rss) })
         measured.push((label: variant.label, gains: Measured{ns: least, rss: most, bytes: stripped(variant.exe), runs: runs[k]}))
     }
     Ok(GainRow{mode: mode, cell: cell.name, args: args_text(s), wrong: wrong, variants: measured})
@@ -722,19 +722,19 @@ markdown_row: fn(cells: [String]) -> String Never! { "| {cells.join(" | ")} |" }
 
 // The sum of `metric` over the rows' variant `label`.
 total: fn(rows: [GainRow], label: String, metric: fn(Measured) -> Int Never!) -> Int Never! {
-    rows.map(row -> metric(gains_of(row, label))).sum()
+    rows.map(fn(row) { metric(gains_of(row, label)) }).sum()
 }
 
 // Each row's `to` / `from` of `metric`; a row without `from`, or with a zero
 // (an RSS under the kernel's counting batch), has no ratio.
 ratios: fn(rows: [GainRow], metric: fn(Measured) -> Int Never!, to: String, from: String) -> [Float] Never! {
-    kept: rows.filter(row -> has(row, from) && metric(gains_of(row, to)) > 0 && metric(gains_of(row, from)) > 0)
-    kept.map(row -> Float.from_int(metric(gains_of(row, to))) / Float.from_int(metric(gains_of(row, from))))
+    kept: rows.filter(fn(row) { has(row, from) && metric(gains_of(row, to)) > 0 && metric(gains_of(row, from)) > 0 })
+    kept.map(fn(row) { Float.from_int(metric(gains_of(row, to))) / Float.from_int(metric(gains_of(row, from))) })
 }
 
 // The geometric mean of the ratios as a change, "-" with none.
 ratio: fn(rows: [GainRow], metric: fn(Measured) -> Int Never!, to: String, from: String) -> String Never! {
-    stats.geometric_mean(ratios(rows, metric, to, from)).map(mean -> change(mean)) ?? "-"
+    stats.geometric_mean(ratios(rows, metric, to, from)).map(fn(mean) { change(mean) }) ?? "-"
 }
 
 // `older`: the older compiler, whose columns come first when the run has one.
@@ -751,9 +751,9 @@ gain_cells: fn(row: GainRow, older: String?) -> [String] Never! {
 }
 
 total_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
-    ns: (measured: Measured) -> measured.ns
-    rss: (measured: Measured) -> measured.rss
-    bytes: (measured: Measured) -> measured.bytes
+    ns: fn(measured: Measured) { measured.ns }
+    rss: fn(measured: Measured) { measured.rss }
+    bytes: fn(measured: Measured) { measured.bytes }
     base_ns: total(rows, "base", ns)
     candidate_ns: total(rows, "candidate", ns)
     control_ns: total(rows, "control", ns)
@@ -766,17 +766,17 @@ total_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
 }
 
 mean_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
-    ns: (measured: Measured) -> measured.ns
+    ns: fn(measured: Measured) { measured.ns }
     before: if older != None -> ["", ratio(rows, ns, "base", "older")] else -> [String]{}
-    to_ceiling: stats.geometric_mean(ratios(rows, ns, "candidate", "ceiling")).map(mean -> fmt.decimal(mean, 2)) ?? "-"
-    before.concat(["", "", ratio(rows, ns, "candidate", "base"), "", ratio(rows, ns, "control", "base"), "", to_ceiling, "", "", ratio(rows, (measured: Measured) -> measured.rss, "candidate", "base"), "", "", "", ratio(rows, (measured: Measured) -> measured.bytes, "candidate", "base"), "", ""])
+    to_ceiling: stats.geometric_mean(ratios(rows, ns, "candidate", "ceiling")).map(fn(mean) { fmt.decimal(mean, 2) }) ?? "-"
+    before.concat(["", "", ratio(rows, ns, "candidate", "base"), "", ratio(rows, ns, "control", "base"), "", to_ceiling, "", "", ratio(rows, fn(measured: Measured) { measured.rss }, "candidate", "base"), "", "", "", ratio(rows, fn(measured: Measured) { measured.bytes }, "candidate", "base"), "", ""])
 }
 
 // One mode's gains as a Markdown table, with its total and geometric mean rows.
 gains_table: fn(rows: [GainRow], mode: String, older: String?) -> [String] Never! {
     head: ["program"].concat(if older != None -> ["older ms", "base vs older"] else -> [String]{}).concat(["base ms", "candidate ms", "change", "control ms", "control vs base", "ceiling ms", "candidate / ceiling", "base RSS KiB", "candidate RSS KiB", "change", "ceiling RSS KiB", "base bytes", "candidate bytes", "change", "ceiling bytes", "output"])
     // The program and output columns align left, every number right.
-    rule: [" --- "].concat(head.slice(1, head.len() - 1).map(_ -> " ---: ")).concat([" --- "])
+    rule: [" --- "].concat(head.slice(1, head.len() - 1).map(fn(_) { " ---: " })).concat([" --- "])
     lines := [String]{"## {mode}", "", markdown_row(head), "|{rule.join("|")}|"}
     loop row in rows -> lines.push(markdown_row(gain_cells(row, older)))
     lines.push(markdown_row(["**total**"].concat(total_cells(rows, older))))
@@ -789,8 +789,8 @@ gains_table: fn(rows: [GainRow], mode: String, older: String?) -> [String] Never
 // against the hand-asm ceiling where the cell has one.
 gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time, Time.Wait]> Int Err! {
     extra: json.decode<[Bench]>(files.read(files.join(o.here, "gains.json")))
-    cells: all.concat(extra).filter(cell -> selected(o, cell))
-    older: o.older.map(path -> [Compiler{label: "older", path: path}]) ?? [Compiler]{}
+    cells: all.concat(extra).filter(fn(cell) { selected(o, cell) })
+    older: o.older.map(fn(path) { [Compiler{label: "older", path: path}] }) ?? [Compiler]{}
     compilers: older.concat([Compiler]{{label: "base", path: o.jet}, {label: "candidate", path: candidate}})
     launcher: assemble(o.here, files.join(o.here, "launch.S"), o.out, "launch")
     results := [GainRow]{}
@@ -811,19 +811,19 @@ gains: fn(o: Options, all: [Bench], candidate: String) -[Exec, FS, IO, Net, Time
         interleaved: true,
         cpu: o.cpu.copy(),  // copy: the report owns its text
         compilers: Dyn.Object(named),
-        rows: results.map(row -> gain_json(row)),
+        rows: results.map(fn(row) { gain_json(row) }),
     }
     files.write(files.join(o.out, "gains.json"), "{json.stringify(report, 2)}\n")
-    older_text: o.older.map(path -> " Older: `{path}`.") ?? ""
+    older_text: o.older.map(fn(path) { " Older: `{path}`." }) ?? ""
     lines := [String]{"# Codegen gains: base against candidate (#6414)", "", "Base: `{o.jet}`. Candidate: `{candidate}`.{older_text}", "Wall time is the best of {o.best} runs, taken in rounds of every variant back to back (odd rounds in reverse order) on CPU {o.cpu}. Control is the base binary measured again as its own variant: its change against base is the noise floor, and a candidate change inside it is not a gain. RSS is the largest peak (ru_maxrss) of those runs; Linux counts it in per-CPU batches, so a peak under a few hundred KiB can read 0. Bytes are the stripped size (file bytes the PT_LOAD segments map). Ceiling is the hand-written assembly reference (asm-parity cells only). Change is candidate against base; negative is better.", ""}
     loop mode in o.modes {
         wanted: mode.copy()  // copy: the filter's lambda takes its own
-        lines.extend(gains_table(results.filter(row -> row.mode == wanted), mode, o.older))
+        lines.extend(gains_table(results.filter(fn(row) { row.mode == wanted }), mode, o.older))
     }
     doc: lines.join("\n")
     files.write(o.gains ?? files.join(o.out, "gains.md"), doc)
     print(doc.remove_suffix("\n"))
-    wrong: results.map(row -> row.wrong.len()).sum()
+    wrong: results.map(fn(row) { row.wrong.len() }).sum()
     if wrong > 0 -> term.eprint("{wrong} binaries printed the wrong output")
     Ok(if wrong > 0 -> 1 else -> 0)
 }

@@ -34,13 +34,13 @@ run: fn() {
         Item{name: "also_two", score: 2.0},
         Item{name: "minus_half", score: -0.5},
     }
-    items.sort_by((item) -> item.score)
+    items.sort_by(fn(item) { item.score })
     print(names(items))
-    items.sort_by_desc((item) -> item.score)
+    items.sort_by_desc(fn(item) { item.score })
     print(names(items))
 
     fallible := [Item]{Item{name: "b", score: 1.5}, Item{name: "a", score: -1.5}}
-    fallible.sort_by((item) -> checked_score(item)) ?? {
+    fallible.sort_by(fn(item) { checked_score(item) }) ?? {
         print("{err.code}:{err.message}")
         ()
     }
@@ -51,6 +51,6 @@ run: fn() {
         Reading{name: "nan", level: F32.NAN},
         Reading{name: "low", level: F32{ -1.0 }},
     }
-    readings.sort_by((reading) -> reading.level)
+    readings.sort_by(fn(reading) { reading.level })
     loop reading in readings -> print(reading.name)
 }

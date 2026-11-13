@@ -40,8 +40,8 @@
 <pre class="diag">Error [jet.FrameScheduleConflict]: Frame resource schedule refused: core frame primitive `core.crypto.wipe` has resource accesses but no checked completion metadata
   --&gt; tests/ui/frame_schedule_core_primitive_without_completion.jet:6:20
     |
-  6 |     scene.on_frame((frame) -&gt; {
-    |                    ^^^^^^^^^^^^
+  6 |     scene.on_frame(fn(frame) {
+    |                    ^^^^^^^^^^^
  Why: The scheduler derives dependencies, transfers, lifetimes, and reuse only from checked access and completion facts; an unresolved alias or completion would make execution unsafe.
  Fix: Move the call out of the frame callback, or give the operation a complete checked access contract and its real completion event.
 More: jet-lang.dev/e/E2967

@@ -84,7 +84,7 @@ files_hash: fn(files: [SnapshotFile]) -> String Never! {
 snapshot_entries: fn(files: [SourceFile]) -> [SnapshotFile] Never! {
     out := [SnapshotFile]{}
     loop file in files -> out.push(SnapshotFile{path: file.path.copy(), sha256: digest(file.text)})
-    out.sort_by((left: SnapshotFile, right: SnapshotFile) -> left.path <=> right.path)
+    out.sort_by(fn(left: SnapshotFile, right: SnapshotFile) { left.path <=> right.path })
     out
 }
 
@@ -126,7 +126,7 @@ parse_exclusions: fn(text: String) -> [Exclusion] Err! {
         }
         out.push(Exclusion{key: key.copy(), reason: reason.copy(), owner: owner.copy(), decision: decision.copy()})
     }
-    out.sort_by((left: Exclusion, right: Exclusion) -> left.key <=> right.key)
+    out.sort_by(fn(left: Exclusion, right: Exclusion) { left.key <=> right.key })
     Ok(out)
 }
 

@@ -178,7 +178,7 @@ init_app: fn() -> Signal<Int> {
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
     counter_backend: ui.null_backend()
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         hex := to_hex(boost_color())
         node: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
         constraint: ui.constraint(0.0, 0.0, 400.0, 200.0)
@@ -193,7 +193,7 @@ init_app: fn() -> Signal<Int> {
 init_fuel: fn() -> Signal<Int> {
     elapsed: reactive.signal(0)
     backend: ui.null_backend()
-    ui.reactive_render(() -> {
+    ui.reactive_render(fn() {
         hex := to_hex(fuel_color())
         value := tween(40.0, 95.0, elapsed.get(), 600)
         pct := Int.from_float(value) ?? 0

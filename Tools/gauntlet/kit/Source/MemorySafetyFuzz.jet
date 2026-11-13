@@ -259,7 +259,7 @@ record_summary: fn(corpus: Corpus) -> CorpusSummary {
         safe: if requested < payload -> requested else -> payload
         start: offset + corpus.metadata_bytes
         value: if {
-            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(byte -> Int.from_u8(byte)).sum().bit_and(WORD_MASK)
+            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(fn(byte) { Int.from_u8(byte) }).sum().bit_and(WORD_MASK)
             requested >= payload -> 0
             kind == CASE_WRONG_OUTPUT -> byte_at(data, start + requested).bit_xor(165)
             else -> byte_at(data, start + requested)
@@ -267,7 +267,7 @@ record_summary: fn(corpus: Corpus) -> CorpusSummary {
         semantic = (semantic + value + (kind + 1) * 257 + bounded + safe).bit_and(WORD_MASK)
         records.push(CaseRecord{index: index, kind: kind, declared_length: declared, requested_index: requested, offset: offset})
     }
-    CorpusSummary{counts: counts, checksum: data.map(byte -> Int.from_u8(byte)).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
+    CorpusSummary{counts: counts, checksum: data.map(fn(byte) { Int.from_u8(byte) }).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
 }
 
 expected_output: fn(summary: CorpusSummary, corpus: Corpus) -> String {
@@ -287,7 +287,7 @@ limited: fn(text: String, limit: Int) -> String {
     if text.len() > limit -> text.slice(0, limit) else -> text.copy()
 }
 
-texts: fn(list: [String]) -> Dyn { Dyn.Array(list.map(text -> Dyn.Text(text.copy()))) }
+texts: fn(list: [String]) -> Dyn { Dyn.Array(list.map(fn(text) { Dyn.Text(text.copy()) })) }
 
 or_null_int: fn(value: Int?) -> Dyn {
     if value == .Val(n) -> Dyn.Int(n) else -> Dyn.Null
@@ -304,7 +304,7 @@ copy_member: fn(out: &Dyn, key: String, tree: Dyn, path: String) {
 
 // The first member of `paths` that is set.
 first_member: fn(tree: Dyn, paths: [String]) -> Dyn? {
-    paths.filter_map(path -> member(tree, path)).first()
+    paths.filter_map(fn(path) { member(tree, path) }).first()
 }
 
 evidence_of: fn(outcome: CommandOutcome, limit: Int) -> Evidence {
@@ -344,7 +344,7 @@ failure_process: fn(reason: String) -> Dyn {
 // same signature.
 normalize_finding_text: fn(text: String, run: FuzzRun, limit: Int) -> String {
     normalized := text.copy()
-    loop root in [run.run_dir, run.repo_dir].filter(root -> root != "") -> normalized = normalized.replace(root, "<path>")
+    loop root in [run.run_dir, run.repo_dir].filter(fn(root) { root != "" }) -> normalized = normalized.replace(root, "<path>")
     addresses: Regex{"0[xX][0-9a-fA-F]+"}.replace(normalized, "0xADDRESS")
     lines: Regex{":\d+(?::\d+)?"}.replace(addresses, ":LINE")
     limited(Regex{"\s+"}.replace(lines, " ").trim(), limit)
@@ -354,8 +354,8 @@ normalize_finding_text: fn(text: String, run: FuzzRun, limit: Int) -> String {
 // pattern, pattern by pattern.
 evidence_hits: fn(patterns: [String], output: String) -> [Hit] {
     plain: Regex{"\x1b\[[0-?]*[ -/]*[@-~]"}.replace(output, "")
-    lines: plain.split("\n").to_list().map(line -> line.trim()).filter(line -> line != "")
-    patterns.flat_map(pattern -> lines.filter(line -> line.contains(pattern)).map(line -> Hit{pattern: pattern.copy(), line: line.copy()}))
+    lines: plain.split("\n").to_list().map(fn(line) { line.trim() }).filter(fn(line) { line != "" })
+    patterns.flat_map(fn(pattern) { lines.filter(fn(line) { line.contains(pattern) }).map(fn(line) { Hit{pattern: pattern.copy(), line: line.copy()} }) })
 }
 
 kind_for_evidence: fn(hit: Hit) -> String {
@@ -412,7 +412,7 @@ minimized_case: fn(pass: AxisPass, kind: String) -> Dyn {
         else -> [CASE_BOUNDARY, CASE_OOB, CASE_USE_AFTER_FREE]
     }
     records: pass.summary.records
-    record: preferred.filter_map(wanted -> records.find(record -> record.kind == wanted)).first() ?? pass.summary.records[0]
+    record: preferred.filter_map(fn(wanted) { records.find(fn(record) { record.kind == wanted }) }).first() ?? pass.summary.records[0]
     bytes: pass.corpus.data.slice(record.offset, record.offset + pass.corpus.bytes_per_case)
     out := Dyn.object()
     out["index"] = record.index
@@ -493,7 +493,7 @@ finding_tree: fn(finding: Finding, pass: AxisPass, probes: [Dyn]) -> Dyn {
 }
 
 findings_tree: fn(findings: [Finding], pass: AxisPass, probes: [Dyn]) -> Dyn {
-    Dyn.Array(findings.map(finding -> finding_tree(finding, pass, probes)))
+    Dyn.Array(findings.map(fn(finding) { finding_tree(finding, pass, probes) }))
 }
 
 // Files `finding` under the receipt of its signature (a wrong answer's is
@@ -503,7 +503,7 @@ record_finding: fn(receipts: &[FindingReceipt], finding: Finding, runner: Dyn, p
     signature: if finding.kind == "wrong-output" -> "{finding.kind}:{sha256_text(pass.expected)}:{sha256_text(text_or_empty(process, "stdout"))}" else -> "{finding.kind}:{normalize_finding_text(finding.detail, pass.run, 500)}"
     key: sha256_text("memory_safety_fuzz{NUL}{finding.kind}{NUL}{signature}")
     wanted: key.copy()
-    found: receipts.position(receipt -> receipt.dedupe_key == wanted)
+    found: receipts.position(fn(receipt) { receipt.dedupe_key == wanted })
     if found == None -> receipts.push(FindingReceipt{dedupe_key: key, kind: finding.kind.copy(), signature: signature, rails: [String]{}, occurrences: [Dyn]{}, payload: hardening_payload(finding, runner, process, pass, command)})
     at: found ?? receipts.len() - 1
     rail: text_or_empty(runner, "id")
@@ -650,12 +650,12 @@ run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: 
     }
     progress.probes = host.probe_tools(runner_dir, dyn_at(runner, "tools"), pass.run.jet_bin)
     result["tools"] = Dyn.Array(progress.probes.copy())
-    if progress.probes.find(probe -> text_at(probe, "status") == Val("unavailable")) == .Val(probe) {
+    if progress.probes.find(fn(probe) { text_at(probe, "status") == Val("unavailable") }) == .Val(probe) {
         result["status"] = "unavailable"
         copy_member(result, "reason", probe, "reason")
         return Ok()
     }
-    if progress.probes.find(probe -> text_at(probe, "status") == Val("probe_failed")) == .Val(probe) {
+    if progress.probes.find(fn(probe) { text_at(probe, "status") == Val("probe_failed") }) == .Val(probe) {
         reason: dyn_at(probe, "reason")
         failure: stage_failure("setup", reason)
         setup := Dyn.object()
@@ -761,13 +761,13 @@ run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host
         loop finding in outcome.findings -> record_finding(receipts, finding, runner, process, pass, command)
         runners.push(outcome.result)
     }
-    measured: runners.all(result -> finished(result))
-    receipts.sort_by((receipt: FindingReceipt) -> receipt.dedupe_key.slice(0, 16))
-    occurrences: receipts.map(receipt -> receipt.occurrences.len()).sum()
-    blockers := runners.filter(result -> !finished(result)).map(result -> "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}")
+    measured: runners.all(fn(result) { finished(result) })
+    receipts.sort_by(fn(receipt: FindingReceipt) { receipt.dedupe_key.slice(0, 16) })
+    occurrences: receipts.map(fn(receipt) { receipt.occurrences.len() }).sum()
+    blockers := runners.filter(fn(result) { !finished(result) }).map(fn(result) { "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}" })
     if receipts.len() > 0 -> blockers.push("{receipts.len()} deduplicated finding receipt(s) require Tower CLI tracking")
     valid: summary.counts[CASE_VALID]
-    findings: Dyn.Array(receipts.map(receipt -> receipt_tree(receipt)))
+    findings: Dyn.Array(receipts.map(fn(receipt) { receipt_tree(receipt) }))
     corpus_out := Dyn.object()
     copy_member(corpus_out, "path", axis, "corpus/path")
     corpus_out["generator"] = CORPUS_GENERATOR
@@ -863,7 +863,7 @@ found_at: fn(tree: Dyn, path: String) -> Dyn { value_at(tree, path) ?? Dyn.Text(
 // generated one (`copied` is the digest its copy had).
 assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
     assert(text_at(report, "status") == Val("incomplete") && text_at(report, "publication/status") == Val("blocked"))
-    assert(texts_at(report, "publication/blockers").any(blocker -> blocker.contains("test-rail: {stage} execution failed")))
+    assert(texts_at(report, "publication/blockers").any(fn(blocker) { blocker.contains("test-rail: {stage} execution failed") }))
     assert_eq(items_at(report, "runners").len(), 1)
     runner: member(report, "runners/0") ?? Dyn.Null
     assert(text_at(runner, "status") == Val("failed") && text_at(runner, "failed_stage") == Val((stage)))
@@ -880,7 +880,7 @@ assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
 #Test("the corpus is the seeded xorshift32 records and its oracle line their summary") {
     corpus: generate_corpus(member(test_memory_axis(), "corpus") ?? Dyn.Null) ?? panic("corpus: {err.message}")
     assert_eq(corpus.data.len(), 40)
-    assert_eq(corpus.data.slice(0, 8).map(byte -> Int.from_u8(byte)).slice(0, 4), [0, 1, 0, 160])
+    assert_eq(corpus.data.slice(0, 8).map(fn(byte) { Int.from_u8(byte) }).slice(0, 4), [0, 1, 0, 160])
     assert_eq(xorshift32(1), 270369)
     summary: record_summary(corpus)
     assert_eq(summary.counts, [1, 1, 1, 1, 1])

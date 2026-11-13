@@ -63,7 +63,7 @@ NamespaceScope: struct {
         prefixes := [String?]{}
         if self.default_uri != .None -> prefixes.push(None)
         loop (key, _) in self.named -> prefixes.push(Val(key.copy()))
-        prefixes.sort_by((a: String?, b: String?) -> compare_prefixes(a, b))
+        prefixes.sort_by(fn(a: String?, b: String?) { compare_prefixes(a, b) })
         prefixes.move()
     }
 }
@@ -409,7 +409,7 @@ has_canonical_xml_object: fn(value: Dyn) -> Bool Never! {
 }
 has_canonical_xml_shape: fn(value: Dyn) -> Bool Never! {
     if value == {
-        .Array(values) -> values.all(item -> has_canonical_xml_shape(item))
+        .Array(values) -> values.all(fn(item) { has_canonical_xml_shape(item) })
         .Object(_) -> {
             if !has_canonical_xml_object(value) -> return false
             loop entry in stream.object_entries(value) { if !has_canonical_xml_shape(entry.value) -> return false }
@@ -430,7 +430,7 @@ lexical_evidence_matches: fn(lexical: Dyn, expected: Dyn) -> Bool Never! {
     if field_kind(raw_text) != "null" -> return false
     if field_kind(raw_bytes) == "null" -> return true
     if array_value(raw_bytes) == {
-        .Val(bytes) -> bytes.all(byte -> if byte == .Int(value) -> value >= 0 && value <= 255 else -> false)
+        .Val(bytes) -> bytes.all(fn(byte) { if byte == .Int(value) -> value >= 0 && value <= 255 else -> false })
         .None -> false
     }
 }
@@ -1102,7 +1102,7 @@ LexicalPolicy: enum { PreserveValid Deterministic }
                 exact_keys(event, ["$xml_event", "value", "lexical"]) ?? return Err(err)
                 if self.root_seen && !self.root_closed -> return Err(XMLFault.state("document_whitespace is not legal inside an element"))
                 value: required_text(event, "value") ?? return Err(err)
-                if value.is_empty() || !value.bytes().all(c -> c == (U8{32}) || c == (U8{9}) || c == (U8{13}) || c == (U8{10})) -> return Err(XMLFault.shape("document_whitespace contains a non-XML-S character"))
+                if value.is_empty() || !value.bytes().all(fn(c) { c == (U8{32}) || c == (U8{9}) || c == (U8{13}) || c == (U8{10}) }) -> return Err(XMLFault.shape("document_whitespace contains a non-XML-S character"))
                 deterministic = value
             }
             "doctype" -> {
@@ -1121,7 +1121,7 @@ LexicalPolicy: enum { PreserveValid Deterministic }
                     "explicit" -> false
                     else -> { return Err(XMLFault.shape("empty_style must be empty or explicit")) }
                 }
-                parent: self.namespaces.last().map(context -> context.copy()) ?? base_namespaces()
+                parent: self.namespaces.last().map(fn(context) { context.copy() }) ?? base_namespaces()
                 context: validate_start(event, name, parent) ?? return Err(err)
                 if self.stack.is_empty() -> self.root_seen = true
                 node: event_element_node(event) ?? return Err(err)
@@ -1226,7 +1226,7 @@ parse_name: fn(value: Dyn) -> Name XMLFault! {
         .None -> String?{None}
         .Err(error) -> { return Err(error) }
     }
-    if !valid_name(raw) || !valid_name(local) || (prefix.map(p -> !valid_name(p)) ?? false) -> return Err(XMLFault.at_kind(0, Reason.InvalidName, "invalid XML expanded name"))
+    if !valid_name(raw) || !valid_name(local) || (prefix.map(fn(p) { !valid_name(p) }) ?? false) -> return Err(XMLFault.at_kind(0, Reason.InvalidName, "invalid XML expanded name"))
     expected: if prefix == .Val(p) -> "{p}:{local}" else -> local
     if raw != expected -> return Err(XMLFault.at_kind(0, Reason.InvalidName, "XML name raw/prefix/local fields disagree"))
     Name{raw: raw, prefix: prefix, local: local, namespace_uri: namespace_uri}
@@ -1447,7 +1447,7 @@ canonical_node: fn(value: Dyn, options: CanonicalOptions, parent_scope: Namespac
         selected: options.mode == CanonicalMode.Inclusive11 || visible.contains(prefix)
         if selected && parent_rendered.get(prefix) != (Val(uri)) -> declarations.push(NamespaceBinding{prefix: prefix, uri: uri})
     }
-    attrs.sort_by((a: CanonicalAttribute, b: CanonicalAttribute) -> if a.namespace_uri == b.namespace_uri -> a.local <=> b.local else -> a.namespace_uri <=> b.namespace_uri)
+    attrs.sort_by(fn(a: CanonicalAttribute, b: CanonicalAttribute) { if a.namespace_uri == b.namespace_uri -> a.local <=> b.local else -> a.namespace_uri <=> b.namespace_uri })
     output += "<{name.raw}"
     rendered := parent_rendered.copy()
     loop declaration in declarations {
@@ -2599,7 +2599,7 @@ Scanner: struct {
         self.offset += rel
         raw: byte_text(self.source[0..<self.source.len()], start, self.offset)
         if self.stack.is_empty() -> {
-            if !raw.bytes().all(character -> character == (U8{32}) || character == (U8{9}) || character == (U8{13}) || character == (U8{10})) {
+            if !raw.bytes().all(fn(character) { character == (U8{32}) || character == (U8{9}) || character == (U8{13}) || character == (U8{10}) }) {
                 return Err(self.fail("character data outside root element"))
             }
             Val(ScanEvent.DocumentWhitespace{value: raw.copy(), raw: raw.move()})

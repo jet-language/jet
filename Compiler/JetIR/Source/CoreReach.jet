@@ -440,12 +440,12 @@ ir_core_reach_function_keys: fn(function: FnBody, functions: [FnBody], source_ke
 // The expressions directly under statement `statement` (and its nested
 // statements), appended to `pending`.
 ir_core_reach_statement_roots: fn(tree: BodyTree, statement: Int, pending: &[Int]) Never! {
-    body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> pending.push(child))
+    body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { pending.push(child) })
 }
 
 // The child expressions of `expression`, appended to `pending`.
 ir_core_reach_expr_children: fn(tree: BodyTree, expression: Int, pending: &[Int]) Never! {
-    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> pending.push(child))
+    body_each_expr_child(tree, body_node(tree, expression), fn(child: Int) { pending.push(child) })
 }
 
 // The `Core/Math/Math.jet` helper one checked expression lowers to by name: a
@@ -475,7 +475,7 @@ ir_precise_helper_names: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [Strin
     names := [String]{}
     loop root in roots -> ir_precise_tree_names(tree, root, names)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_precise_tree_names(tree, child, names))
+        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_precise_tree_names(tree, child, names) })
     }
     names
 }
@@ -503,7 +503,7 @@ ir_named_function_keys: fn(tree: BodyTree, roots: [Int], body: [Int], decls: Dec
     keys := [String]{}
     loop root in roots -> ir_named_function_tree(tree, root, keys, decls)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_named_function_tree(tree, child, keys, decls))
+        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_named_function_tree(tree, child, keys, decls) })
     }
     keys
 }
@@ -522,7 +522,7 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    body_each_expr_child(tree, node, (child: Int) -> ir_named_function_tree(tree, child, keys, decls))
+    body_each_expr_child(tree, node, fn(child: Int) { ir_named_function_tree(tree, child, keys, decls) })
 }
 
 ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
@@ -550,7 +550,7 @@ ir_comptime_codec_targets: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [IRC
     targets := [IRComptimeCodecTarget]{}
     loop root in roots -> ir_comptime_codec_tree(tree, root, targets)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
+        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_comptime_codec_tree(tree, child, targets) })
     }
     targets
 }
@@ -568,7 +568,7 @@ ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptim
         .MethodCall(_, _, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
-    body_each_expr_child(tree, node, (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
+    body_each_expr_child(tree, node, fn(child: Int) { ir_comptime_codec_tree(tree, child, targets) })
 }
 
 // The type ids of every expression a checked body and its root expressions
@@ -583,7 +583,7 @@ ir_comptime_expression_types: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [
     ids := [Int]{}
     loop root in roots -> ir_comptime_expression_types_tree(tree, root, seen, ids)
     loop statement in body {
-        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_comptime_expression_types_tree(tree, child, seen, ids))
+        body_each_stmt_child(tree, tree.stmts[statement], fn(child: Int) { ir_comptime_expression_types_tree(tree, child, seen, ids) })
     }
     ids
 }
@@ -595,7 +595,7 @@ ir_comptime_expression_types_tree: fn(tree: BodyTree, expression: Int, seen: &[B
             ids.push(type_id)
         }
     }
-    body_each_expr_child(tree, body_node(tree, expression), (child: Int) -> ir_comptime_expression_types_tree(tree, child, seen, ids))
+    body_each_expr_child(tree, body_node(tree, expression), fn(child: Int) { ir_comptime_expression_types_tree(tree, child, seen, ids) })
 }
 
 // A Fraction division also tests its divisor (ir_precise_division), and a
@@ -626,7 +626,7 @@ ir_precise_tree_names: fn(tree: BodyTree, expression: Int, names: &[String]) Nev
             if !names.contains(rendering) -> names.push(rendering)
         }
     }
-    body_each_expr_child(tree, node, (child: Int) -> ir_precise_tree_names(tree, child, names))
+    body_each_expr_child(tree, node, fn(child: Int) { ir_precise_tree_names(tree, child, names) })
 }
 
 // The core.math precise types (`Decimal`, `Fraction`, `Complex`) a value of

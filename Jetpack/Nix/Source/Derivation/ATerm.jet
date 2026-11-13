@@ -106,7 +106,7 @@ NixDerivation: struct {
         cursor.consume(")")
 
         // Store-path order matches Nix's map iteration for a byte-exact encode.
-        input_drvs.sort_by(input -> input.path)
+        input_drvs.sort_by(fn(input) { input.path })
         Ok(NixDerivation{outputs, input_drvs, input_srcs, platform, builder, args, env: nixeval_key_ordered(env)})
     }
 

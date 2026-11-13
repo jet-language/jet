@@ -292,12 +292,12 @@ run: fn() (HTTPError | NetError | IOError)! {
     listener: net.tcp_listen("127.0.0.1:{port}")
     state: Shared{State{done: false}}
     mux: server.mux()
-    mux.get("/health", (_req: HTTPRequest) -> Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")))
-    mux.get("/hello/:name", (req: HTTPRequest) -> {
+    mux.get("/health", fn(_req: HTTPRequest) { Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")) })
+    mux.get("/hello/:name", fn(req: HTTPRequest) {
         name: req.param("name") ?? ""
         Ok(server.response(200, "Hello, {name}").header("content-type", "text/plain"))
     })
-    mux.get("/shutdown", (_req: HTTPRequest) -> {
+    mux.get("/shutdown", fn(_req: HTTPRequest) {
         state.done = true
         Ok(server.response(200, "{{\"bye\":true}}"))
     })

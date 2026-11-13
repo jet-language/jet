@@ -4,7 +4,7 @@ Error [jet.IrreversibleEffectInTransaction]: `http.get` has the `Net` effect, wh
   8 |         r: http.get("http://x") ?? server.response(200, "")
     |                 ^^^
  Why: A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`) leaves committed external state a rollback can't take back
- Fix: Move this call after the block, or register it with `<handle>.on_commit(() -> { … })` so it runs only on a clean commit
+ Fix: Move this call after the block, or register it with `<handle>.on_commit(fn() { … })` so it runs only on a clean commit
  Denial: transaction
  Call chain: http.get
 More: jet-lang.dev/e/E0746
