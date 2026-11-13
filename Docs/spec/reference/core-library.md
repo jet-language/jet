@@ -4459,6 +4459,14 @@ The module is named `debug`, as is the prelude's `debug(value)`, so a program
 that calls both imports it under another name (`use dbg: core.debug`). Its
 package source is [`Core/Debug/Debug.jet`](../../../Core/Debug/Debug.jet).
 
+### `core.context` — the task context
+
+`core.context` is the module the short name `context` stands for. It has no
+members of its own: `context.<field>` and `context.get(key)` read the task
+context (spec.md, Deadlines and teaching diagnostics). `use core.context`
+spells the import out, and `use ctx: core.context` reads the context as
+`ctx.deadline` in code where a local is named `context`.
+
 ### `core.log` — structured logging
 
 `core.log` writes structured records through a configured sink. The levels are
@@ -6361,6 +6369,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core`
 - `core.devtools`
 - `core.debug`
+- `core.context`
 - `core.archive`
 - `core.archive.gzip`
 - `core.archive.zstd`

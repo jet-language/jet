@@ -1,0 +1,26 @@
+# `context` is the short name of the Core module `core.context`. A program
+# that imports the module reads the task context through it, under its own
+# name or another one, and a parameter named `context` still hides the
+# import. Every tier reads the same values.
+fixture: context_reads_through_the_core_context_import.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none imported.jet
+exit: 0
+stdout: = "deadline -1 thread 0\ndeadline 4102444800000 thread 0\nshadowed 7\n"
+step: jet run --optimize=none renamed.jet
+exit: 0
+stdout: = "renamed deadline 4102444800000\n"
+step: jet run --optimize=basic imported.jet
+exit: 0
+stdout: = "deadline -1 thread 0\ndeadline 4102444800000 thread 0\nshadowed 7\n"
+step: jet run --optimize=basic renamed.jet
+exit: 0
+stdout: = "renamed deadline 4102444800000\n"
+step: jet run --optimize=full imported.jet
+exit: 0
+stdout: = "deadline -1 thread 0\ndeadline 4102444800000 thread 0\nshadowed 7\n"
+step: jet run --optimize=full renamed.jet
+exit: 0
+stdout: = "renamed deadline 4102444800000\n"

@@ -3883,8 +3883,13 @@ field the function can read. Compile-time code is pure in the same sense, so
 a `#run` may read the context too: it reads the build's root context, where
 `context.thread` is 0, `context.deadline` is `None` and every key holds its
 default. A field this section doesn't describe is
-**E0302**. The name `context` reads the task context only where nothing in
-scope is named `context`.
+**E0302**. `context` is the short name of the Core module `core.context`:
+the bare name reads the task context only where nothing in scope is named
+`context`, and an import of the module reaches it under any local name.
+`use core.context` reads `context.deadline` as the bare name does, and
+`use ctx: core.context` reads `ctx.deadline` and every other field the same
+way. A local that takes the import's name hides it by the ordinary scoping
+rule.
 
 A package declares its own context values with `#ContextKey` on a module
 constant: `#ContextKey request_id: 0`. The key is snake_case, and its value

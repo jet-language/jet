@@ -10,7 +10,7 @@ bootstrap Core depends_on [Effects]
 bootstrap Derives depends_on [Core]
 
 root_types { Date, LocalDate, LocalTime, Decimal, Fraction, Duration, Instant, Authority, __Decoding, __DecodeTree, __DecodeSource }
-namespace_only { core.mem.scope, core.net.mime, core.net.url, core.time.expiring }
+namespace_only { core.context, core.mem.scope, core.net.mime, core.net.url, core.time.expiring }
 
 module app exports { AppError, Auth, Live, Session, __live_arg, __live_bind, __live_invalidate, __live_invalidate_all, __live_poll, __live_push, auth, auth_oauth, auth_routes, auth_show, invalidate, live, live_stats, push, state, subscribe, sync } types { AppError:plain(Invalid|Unsupported), Auth:plain, Live:generic(2), Session:plain } depends_on [core.encoding.json, core.reactive.loadable, core.text, core.time]
 source_module app path Core/App/App.jet alias app owns { auth, auth_oauth, auth_routes, auth_show, state, live_stats, __live_bind, __live_poll, __live_push, __live_invalidate, __live_invalidate_all, __live_arg, sync } types { Live, Auth }
@@ -19,6 +19,7 @@ module core.devtools exports { publish } depends_on [core]
 source_module core.devtools path Core/Devtools/Devtools.jet alias core_core_devtools owns { publish }
 module core.debug exports { Stop, StopKind, __stop_ignore, __trace_records } types { Stop:plain, StopKind:plain(Panic|Assert|Contract|Bounds|Shift|Todo) } depends_on []
 source_module core.debug path Core/Debug/Debug.jet alias core_core_debug owns { __stop_ignore, __trace_records } types { Stop, StopKind }
+module core.context exports {  } depends_on []
 module core.archive exports { ArchiveError, adler32, crc32, deflate, inflate, compress, decompress, tar_add, tar_get, tar_names_json, unzip, zip_close, zip_decompress, zip_extract, zip_names_json, zip_next, zip_open, zip_read, zip_write, list, create } types { ArchiveError:plain(Malformed|Unsupported|Checksum|NotFound) } depends_on []
 source_module core.archive path Core/Archive/Archive.jet alias core_archive owns { crc32, adler32, deflate, inflate, compress, decompress, zip_decompress, zip_names_json, list, zip_open, zip_next, zip_read, zip_write, zip_close, zip_extract, unzip, tar_add, tar_get, tar_names_json, create }
 module core.archive.gzip exports { compress, decompress, is_gzip, isize, magic, crc, compress_text, decompress_text, peek_isize, compress_file, decompress_file, GzipFileError } types { GzipFileError:plain(Read|Write|Malformed|Unsupported|Checksum) } depends_on [core.archive]

@@ -613,10 +613,11 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         diagnostics.push(sema_error("E0003", member_span, "unknown task selector `{member}`", "task selectors use `timeout`, `all`, `race`, or `any`", "write `task.timeout(duration)`, `task.all {{ … }}`, `task.race {{ … }}`, or `task.any {{ … }}`"))
         return None
     }
-    // `context.field` with no `context` declared in scope reads the task
-    // context.
-    if base == .Ident(root, _, _) && root == "context" && sema_scope_resolve_index(scopes, root) == None && sema_expression_type_symbol(scopes, environment, program, root) == None {
-        return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
+    // `context.field`, where the root names the task context (a bare
+    // `context` nothing in scope declares, or an import of `core.context`),
+    // reads the task context.
+    if base == .Ident(root, root_span, _) {
+        if sema_context_root(root, root_span, environment, program, scopes, context) -> return sema_expression_context_read(member, Span{start: span.end - member.len(), end: span.end}, span, expected, environment, program, scopes, context, diagnostics)
     }
     // `#package.*` / `#build.*` fold from the build snapshot.
     build_fact: sema_fact_build_read(base, member, span, expected, environment, program, context, diagnostics)

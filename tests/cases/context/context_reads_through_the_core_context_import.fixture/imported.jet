@@ -1,0 +1,22 @@
+use core.context
+
+Probe: struct {
+    deadline: Int
+}
+
+// The parameter hides the import by the ordinary scoping rule.
+shadowed: fn(context: Probe) -> Int {
+    context.deadline
+}
+
+report: fn() -> String {
+    "deadline {context.deadline ?? -1} thread {context.thread}"
+}
+
+run: fn() {
+    print(report())
+    #Context(deadline: 4102444800000) {
+        print(report())
+    }
+    print("shadowed {shadowed(Probe{deadline: 7})}")
+}

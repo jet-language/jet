@@ -9670,7 +9670,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             guards.push(TContextGuard{field: field.name, value: value, key: found.key})
             next
         }
-        if field.name == "allocator" && sema_stmt_context_scratch(field.value, environment, program, scopes) {
+        if field.name == "allocator" && sema_stmt_context_scratch(field.value, environment, program, scopes, context) {
             guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: "Arena"}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
             next
         }
@@ -9722,12 +9722,12 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     true
 }
 
-// Whether the allocator guard `value` is `context.scratch`, the task's own
-// arena. Its guard is a context read of type `Arena` that lowering never
-// evaluates.
-sema_stmt_context_scratch: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool Never! {
-    if value == .Field(base, member, _, _) && member == "scratch" && base == .Ident(root, _, _) && root == "context" {
-        return sema_scope_resolve_index(scopes, root) == None && sema_expression_type_symbol(scopes, environment, program, root) == None
+// Whether the allocator guard `value` is `context.scratch` (any root that
+// names the task context, sema_context_root), the task's own arena. Its
+// guard is a context read of type `Arena` that lowering never evaluates.
+sema_stmt_context_scratch: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext) -> Bool Never! {
+    if value == .Field(base, member, _, _) && member == "scratch" && base == .Ident(root, root_span, _) {
+        return sema_context_root(root, root_span, environment, program, scopes, context)
     }
     false
 }

@@ -116,7 +116,7 @@ jet_ring_dependency_rows: fn() -> [JetRingDependencyRow] Never! {
 
 jet_ring_is_namespace_only: fn(module_name: String) -> Bool Never! {
     if module_name == {
-        "core.mem.scope" | "core.net.mime" | "core.net.url" | "core.time.expiring" -> true
+        "core.context" | "core.mem.scope" | "core.net.mime" | "core.net.url" | "core.time.expiring" -> true
         else -> false
     }
 }
@@ -153,7 +153,7 @@ jet_ring_parse_manifest_layer: fn(value: String) -> RuntimeLayer? {
 
 jet_ring_layer_of_module: fn(module_name: String) -> RuntimeLayer Never! {
     if module_name == {
-        "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> RuntimeLayer.Core
+        "core" | "core.prelude" | "core.context" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> RuntimeLayer.Core
         "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.validate" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
         else -> RuntimeLayer.Std
     }

@@ -184,18 +184,38 @@ sema_context_marker_fields: fn(marker: Marker) -> Marker Never! {
     kept
 }
 
+// Whether `root` names the task context, whose fields `root.<field>` reads.
+// `context` is the short name of the Core module `core.context`: an import
+// of that module (`use core.context`, or `use ctx: core.context`) names it
+// while no local hides the import, and the bare `context` names it while no
+// local or type of that name is in scope. Only an import binding pays for
+// the import lookup, and a use through an import is recorded on its alias.
+sema_context_root: fn(root: String, root_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext) -> Bool Never! {
+    if sema_scope_resolve_index(scopes, root) == .Val(found) {
+        if scopes.bindings[found].symbol.kind != SymbolKind.Import -> return false
+        imported: sema_call_core_import_target(environment, program, root) ?? return false
+        if imported.module_name != "core.context" -> return false
+        return sema_call_core_record_import_reference(environment, program, scopes, imported, root_span, context)
+    }
+    root == "context" && sema_expression_type_symbol(scopes, environment, program, root) == None
+}
+
 // `context.get(key)`: the value the innermost `#Context` block of this
 // task, or of the task it was spawned from, set for the `#ContextKey`
 // constant `key`, else the constant itself. Like a `context.<field>` read
 // it is an implicit input, not an effect: its site records an empty row,
 // and a `#Memo` key holds the value (Effects/Checks.jet
 // sema_effect_context_reach), compared by the type's equality.
-// Unhandled unless the receiver is the bare, unbound `context`.
+// Unhandled unless the receiver names the task context (sema_context_root).
 sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
     root := ""
-    if receiver == .Ident(name, _, _) -> root = name
-    if root != "context" || sema_scope_resolve_index(scopes, root) != None || sema_expression_type_symbol(scopes, environment, program, root) != None -> return unhandled
+    root_span := Span{start: 0, end: 0}
+    if receiver == .Ident(name, name_span, _) {
+        root = name
+        root_span = name_span
+    }
+    if root == "" || !sema_context_root(root, root_span, environment, program, scopes, context) -> return unhandled
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     span: Span{start: expr_span(receiver).start, end: method_span.end}
     if method != "get" {
