@@ -1,0 +1,11 @@
+use re: core.regex
+
+// In a typed head's body `\{{` is a backslash and a brace, so the pattern's
+// optional `{` needs no closing brace. Read as plain text, the same body
+// would leave a `{` open.
+run: fn() {
+    use_row: Regex{"\buse\s+(?:\{{\s*)?(?:\w+\s*:\s*)?core\b"}
+    print(re.is_match(use_row, "use {{ t: core.text }}"))
+    print(re.is_match(use_row, "use core.math"))
+    print(re.is_match(use_row, "use other"))
+}

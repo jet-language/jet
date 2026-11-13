@@ -1093,17 +1093,19 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
 
 // Text a typed head may take, read both ways: the plain reading is the
 // token's row and the head's reading its `head` row, each with its own
-// diagnostics deferred until the parser picks one. Text that doesn't close
-// as plain text fails as any string does.
+// diagnostics deferred until the parser picks one. A reading that doesn't
+// close (a `{` with no `}` after it) is still kept while the other reading
+// closes, as `\{{` does in a typed head's body; text that closes neither way
+// fails as any string does.
 string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: Name, literal: Int, keep: Bool) {
     plain_diagnostics := [Diagnostic]{}
     plain: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, plain_diagnostics)
-    if !plain.valid {
+    head_diagnostics := [Diagnostic]{}
+    head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics)
+    if !plain.valid && !head.valid {
         loop diagnostic in plain_diagnostics.move() -> diagnostics.push(diagnostic.move())
         return (decoded: name_empty(), keep: false, literal: -1)
     }
-    head_diagnostics := [Diagnostic]{}
-    head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics)
     head_literal := text_literal(head.interpolations, head.parts)
     head_literal.deferred = head_diagnostics.move()
     literal := text_literal(plain.interpolations, plain.parts)

@@ -166,6 +166,29 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
     assert(found)
 }
 
+// In a typed head's body `\{{` is a backslash and a brace. Plain text reads
+// `\{` as an escape and then a `{` that never closes, so only the head's
+// reading closes: the token keeps both, and the plain reading's diagnostics
+// wait for the parser rather than failing the head's text.
+#Test("a_typed_head_keeps_text_whose_plain_reading_leaves_a_brace_open") {
+    source: `x: Regex{"a\{{b"}`
+    lexed: lexer_test_raw(source)
+    assert(lexed.diagnostics.is_empty())
+    assert_eq(lexer_test_first_head_string(source), `a\{b`)
+    found := false
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_STRING -> next
+        literal: lexer_test_literal(lexed, token)
+        assert(literal.head >= 0)
+        assert(literal.deferred.any(diagnostic -> diagnostic.code == "E0002"))
+        assert(lexed.tables.literals[literal.head].deferred.is_empty())
+        found = true
+    }
+    assert(found)
+    plain: lexer_test_raw(`x: "a\{{b"`)
+    assert(plain.diagnostics.any(diagnostic -> diagnostic.code == "E0002"))
+}
+
 #Test("typed_head_doubled_braces_stay_literal") {
     assert_eq(lexer_test_first_head_string(`Regex.{"\d{{2}}"}`), `\d{2}`)
 }
