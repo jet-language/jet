@@ -195,7 +195,12 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // The plan reads the entry package's modules (its `build: fn`) and
     // manifest facts, so Core loads as the program reaches it, with no name
     // ledger (jet_driver_source_query loads every Core declaration for one).
+    // The plan's four parts are spans of the request's trace: the load, the
+    // staged compile of `build: fn`, its native run, and the final checked
+    // compile (`build.plan.load`, `.stage`, `.run`, `.check`).
+    jet_driver_trace_step_begin(request.trace_sink, "build.plan.load")
     sources: jet_driver_source_query_loaded(jet_driver_load(request), request)
+    jet_driver_trace_step_end(request.trace_sink, "build.plan.load", sources.modules.len())
     if !sources.complete -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, None)
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(request, sources.diagnostics.move(), false, Val("loaded build query has no exact entry module"))
     package: sources.modules[sources.entry_module_index].package_identity
@@ -251,6 +256,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // with the generated modules reports what generation left unresolved. A
     // build that fails internally is an internal compiler error either way:
     // the staged reports name what it would have generated, not why it failed.
+    jet_driver_trace_step_begin(request.trace_sink, "build.plan.stage")
     selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, None)
     errors := [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
@@ -258,6 +264,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         errors = selection.compile.diagnostics.move()
         selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, Val(JetDriverKeepGoing{skip: [String]{}}))
     }
+    jet_driver_trace_step_end(request.trace_sink, "build.plan.stage", if staged_failed -> 2 else -> 1)
     compiled := selection.compile.move()
     // The build's own reports (jet_driver_build_query_stopped).
     ran := [Diagnostic]{}
@@ -287,7 +294,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // comptime code.
     config.comptime_input_adapter = jet_driver_comptime_inputs_for(request, path)
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
+    jet_driver_trace_step_begin(request.trace_sink, "build.plan.run")
     run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
+    jet_driver_trace_step_end(request.trace_sink, "build.plan.run", 1)
     evaluated: run.result.move() ?? {
         build_session_abort(session)
         return jet_driver_build_query_stopped(request, errors, ran, staged_failed, false, run.problem.move())
@@ -358,7 +367,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // alone, so Core bodies are checked on demand.
     demand_core := request.doc_core_on_demand
     request.doc_core_on_demand = true
+    jet_driver_trace_step_begin(request.trace_sink, "build.plan.check")
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
+    jet_driver_trace_step_end(request.trace_sink, "build.plan.check", checked.diagnostics.len())
     request.doc_core_on_demand = demand_core
     loop request.generated_modules.len() > original_generated_count -> _: request.generated_modules.pop()
     request.target_sources = [String]{}

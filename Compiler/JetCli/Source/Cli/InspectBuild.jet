@@ -145,7 +145,8 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     // The modules every target compile loads beside the package's sources.
     target_generated := [JetDriverGeneratedModule]{}
     // The plan query is the trace's `build.plan` span: the check of the
-    // build entry and its `build: fn` run.
+    // build entry and its `build: fn` run, whose driver phases trace inside
+    // it (BuildQueries.jet jet_driver_query_build_plan).
     if trace_sink == .Val(sink) -> sink.begin("build.plan", "", -1, -1)
     // What `build: fn` read through `find`, `embed_file` and `embed_bytes`.
     build_reads := [JetDriverComptimeInputRecord]{}
@@ -157,6 +158,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             scope := JetDriverBuildQueryScope{next_session_id: 1}
             query_request := request.move()
             query_request.build_args = build_args.copy()
+            query_request.trace_sink = jet_cli_trace_boxed(trace_sink)
             // `--gate impure=allow` opens `build: fn`'s `#Impure` file calls
             // (BuildQueries.jet config.impure_gate), as it does a compile's.
             query_request.gate_set.allowed = options.gates.copy()

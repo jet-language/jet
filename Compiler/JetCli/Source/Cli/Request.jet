@@ -169,8 +169,11 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // against the embedded copy. The rows alone root the library:
 // an entry module's `run: fn` is no startup here, only an export when it is
 // `#Export(c)`. `lifecycle` is the lifecycle list's path
-// (JET_FRONT_LIBRARY_LIFECYCLE).
-jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
+// (JET_FRONT_LIBRARY_LIFECYCLE). Each lowering phase is a span of
+// `trace_sink` under the names the native route uses (Host.jet), and the web
+// partition, Core library and pack links are `runtime.web`, `runtime.core`
+// and `runtime.pack`.
+jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetDriverCompileResult {
     owned := front.move()
     result := owned.compile.move()
     if !result.complete || result.internal_problem != None -> return result
@@ -186,26 +189,38 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     }
     interface_text: jet_driver_runtime_interface_file(interface_rows)
     declarations := jet_driver_checked_declarations(checked)
+    if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     library := ir_build_library(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_text.split("\n").to_list())
+    if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
     loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     // The memory term is read now: the front end before this holds most of it.
     threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if issues.len() == 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
         _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, [String]{})
+        if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
         compiled := ir_x64_compile_module(library.program.move(), threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
         // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
         // (JetWeb Build.jet), selected from the same lowered module, as
         // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
         if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
+            if trace_sink == .Val(sink) -> sink.begin("runtime.web", "", -1, -1)
             web := web_runtime_partition(compiled.program, library.exports, library.data)
+            if trace_sink == .Val(sink) -> sink.end("runtime.web", web.bytes.len())
             if web.errors.len() > 0 {
                 cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
                 return jet_driver_compile_escaped_failure("the runtime's web partition failed; see {prefix}.issues")
@@ -213,7 +228,9 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web partition: {err}")
             cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web receipt: {err}")
         }
+        if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
         object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
+        if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
             // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
@@ -229,11 +246,16 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             // runtime's receipt is what its own receipt reaches.
             core := [U8]?{None}
             if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
+                if trace_sink == .Val(sink) -> sink.begin("runtime.core", "", -1, -1)
                 built := jet_cli_core_library(core_prefix, thread_exports, threads)
+                if trace_sink == .Val(sink) -> sink.end("runtime.core", built.bytes.len())
                 if built.problem != "" -> return jet_driver_compile_escaped_failure(built.problem)
                 core = Val(built.bytes.move())
             }
-            return jet_cli_runtime_pack(result, prefix, object.bytes.move(), core.move())
+            if trace_sink == .Val(sink) -> sink.begin("runtime.pack", "", -1, -1)
+            packed: jet_cli_runtime_pack(result, prefix, object.bytes.move(), core.move())
+            if trace_sink == .Val(sink) -> sink.end("runtime.pack", -1)
+            return packed
         }
         compiler_transfer_rows<String>(issues, object.errors)
     }
@@ -1542,7 +1564,7 @@ JetCLIOverlay: struct {
 // `entry_source` when given (`jet fmt --explicit-copies` asks sema about a
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
-// `build`, `run`, `check`, `test` and `emit` (the `--trace` control).
+// `build`, `run`, `check`, `test`, `doc` and `emit` (the `--trace` control).
 // `settings` are the command line's `--set` writers and `profile` the
 // `--profile` it selects ("" keeps the request's default; `jet check`);
 // `target_machine` is the machine without an OS it checks for ("" for the
@@ -1682,7 +1704,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get(ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT) else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
-            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get(ENV_JET_FRONT_LIBRARY_LIFECYCLE), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get(ENV_JET_FRONT_LIBRARY_LIFECYCLE), compiler_threads, trace_sink) else -> jet_cli_compile_request(selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.
