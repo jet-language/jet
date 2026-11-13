@@ -1,0 +1,8 @@
+Error [jet.FrozenValueWrite]: `chosen` cannot be assigned; it was frozen at `freeze(...)` at line 7, column 26
+  --> tests/ui/frozen_write_after_frozen_merge.jet:8:12
+    |
+  8 |     chosen.value = 3
+    |            ^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+More: jet-lang.dev/e/E1113

@@ -1,0 +1,30 @@
+// What the detach and freeze rules accept: a detached task that reads a
+// frozen snapshot, a write after a merge where one path is not frozen, and
+// freezing a frozen value.
+Box: struct {
+    value: Int
+}
+
+detached_reader: fn() {
+    frozen: freeze(Box{ value: 41 })
+    background: task { frozen.value }
+    background.detach()
+}
+
+write_after_mixed_merge: fn(flag: Bool) -> Int {
+    chosen := if flag -> freeze(Box{ value: 1 }) else -> Box{ value: 2 }
+    chosen.value = 3
+    chosen.value
+}
+
+refreeze: fn() -> Int {
+    twice: freeze(freeze(Box{ value: 7 }))
+    twice.value
+}
+
+run: fn() {
+    detached_reader()
+    print("launched")
+    print(write_after_mixed_merge(false))
+    print(refreeze())
+}

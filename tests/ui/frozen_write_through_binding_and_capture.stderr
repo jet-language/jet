@@ -1,0 +1,17 @@
+Error [jet.FrozenValueWrite]: `alias` cannot be assigned; it was frozen at `freeze(...)` at line 6, column 13
+  --> tests/ui/frozen_write_through_binding_and_capture.jet:8:11
+    |
+  8 |     alias.value = 2
+    |           ^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+More: jet-lang.dev/e/E1113
+
+Error [jet.FrozenValueWrite]: `frozen` cannot be assigned; it was frozen at `freeze(...)` at line 12, column 15
+  --> tests/ui/frozen_write_through_binding_and_capture.jet:14:16
+    |
+ 14 |         frozen.value = 2
+    |                ^^^^^
+ Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
+ Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
+More: jet-lang.dev/e/E1113

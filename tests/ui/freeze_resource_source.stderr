@@ -1,0 +1,8 @@
+Error [jet.FreezeNotSnapshotable]: `freeze` cannot snapshot `Resource`: a resource has one cleanup owner and cannot be duplicated into a snapshot
+  --> tests/ui/freeze_resource_source.jet:11:12
+    |
+ 11 |     freeze(resource)
+    |            ^^^^^^^^
+ Why: A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it.
+ Fix: Give the owned value to the task with `task &&name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value
+More: jet-lang.dev/e/E1114

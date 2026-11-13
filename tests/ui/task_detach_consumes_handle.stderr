@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `background` was consumed by `.detach()`, so it can't be used here
+  --> tests/ui/task_detach_consumes_handle.jet:4:11
+    |
+  4 |     print(background.join() ?? 0)
+    |           ^^^^^^^^^^
+  --> tests/ui/task_detach_consumes_handle.jet:3:5
+    |
+  3 |     background.detach()
+    |     ^^^^^^^^^^ `background` moved to `.detach()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `background` after the move, or give `.detach()` a copy with `background.copy()` where it moved.
+More: jet-lang.dev/e/E0121

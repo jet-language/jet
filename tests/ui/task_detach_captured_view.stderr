@@ -1,0 +1,17 @@
+Error [jet.ValueNotSendable]: `window` cannot be shared into a task — it is a view that does not live long enough
+  --> tests/ui/task_detach_captured_view.jet:4:22
+    |
+  4 |     background: task { window[0] }
+    |                      ^^^^^^^^^^^^^
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
+More: jet-lang.dev/e/E1102
+
+Error [jet.DetachWithView]: Can't detach task `background` — it captured a `view` borrow that may not live long enough
+  --> tests/ui/task_detach_captured_view.jet:5:16
+    |
+  5 |     background.detach()
+    |                ^^^^^^
+ Why: A detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
+ Fix: Pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`
+More: jet-lang.dev/e/E1106

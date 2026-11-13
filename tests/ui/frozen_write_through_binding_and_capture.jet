@@ -1,0 +1,22 @@
+Box: struct {
+    value: Int
+}
+
+through_binding: fn() {
+    frozen: freeze(Box{ value: 1 })
+    alias := frozen
+    alias.value = 2
+}
+
+through_capture: fn() {
+    frozen := freeze(Box{ value: 1 })
+    bump: fn() {
+        frozen.value = 2
+    }
+    bump()
+}
+
+run: fn() {
+    through_binding()
+    through_capture()
+}
