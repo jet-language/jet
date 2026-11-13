@@ -6421,11 +6421,13 @@ sema_name_parts_claimed: fn(shared_state: Shared<SemaNameShared>, queue: Shared<
 // ledger's module paths). They exist before checking, so a compile that fails
 // later still reports them (Rust records these edges at bundle completion,
 // before Sema, and `jet inspect structure` prints them ahead of the failure
-// diagnostics).
+// diagnostics). An edge whose source is a Core module is Core's own wiring,
+// not the program's structure, so it gets no fact.
 sema_name_structure_facts: fn(graph: SemaRegistrationGraph) -> [StructureFact] Never! {
     facts := [StructureFact]{}
     module_indices := [String:Int]{}
     loop edge_index in 0..<graph.edges.len() {
+        if sema_module_is_core_source(graph.edges[edge_index].source_module_identity) -> next
         source_index: sema_registration_cached_module_index(graph, graph.edges[edge_index].source_module_identity, module_indices) ?? next
         target_index: sema_registration_cached_module_index(graph, graph.edges[edge_index].target_module_identity, module_indices) ?? next
         source: graph.modules[source_index]

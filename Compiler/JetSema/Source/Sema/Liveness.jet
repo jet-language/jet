@@ -20,9 +20,11 @@ use jet_foundation.[
     name_rows_set,
 ]
 
+// A verdict's diagnostic is None when the lint is already reported by the
+// check that found it (an unused local binding), so only its fact is new.
 SemaLivenessVerdict: struct {
     code: String
-    diagnostic: Diagnostic
+    diagnostic: Diagnostic?
     fact: StructureFact
 }
 
@@ -34,9 +36,34 @@ SemaLivenessResult: struct {
 sema_liveness_verdict: fn(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
     verdicts.push(SemaLivenessVerdict{
         code: code,
-        diagnostic: diagnostic,
+        diagnostic: Val(diagnostic),
         fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
     })
+}
+
+// L0101: the ownership check reports a local binding no expression reads,
+// with the rename to `_name` as its edit, among the module's diagnostics.
+// Each such lint becomes the binding's `unused` fact; its name is the edit's
+// text past the `_` the rename adds.
+sema_liveness_unused_bindings: fn(diagnostics: [Diagnostic], source: String, verdicts: &[SemaLivenessVerdict]) Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "L0101" -> next
+        span: diagnostic.span ?? next
+        edit: diagnostic.edit ?? next
+        renamed: edit.new_text.split_once("_") ?? next
+        if renamed.before != "" || renamed.after == "" -> next
+        name: renamed.after
+        verdicts.push(SemaLivenessVerdict{
+            code: "L0101",
+            diagnostic: None,
+            fact: StructureFact{kind: StructureFactKind.Liveness, subject: name, source: source, span: span, status: "unused", detail: "binding is never read", gate: None},
+        })
+    }
+}
+
+sema_liveness_located: fn(diagnostic: &&Diagnostic?, segments: [SemaSourceSegment]) -> Diagnostic? Never! {
+    found: diagnostic ?? return None
+    Val(sema_diagnostic_with_source_location(found, segments))
 }
 
 sema_liveness_unused_imports: fn(program: Program, foreign_aliases: [String], source: String, verdicts: &[SemaLivenessVerdict]) {
@@ -258,6 +285,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         }
         sema_liveness_inline_asm_gate_aliases(module_row, foreign_aliases)
         sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.source_file, verdicts)
+        sema_liveness_unused_bindings(modules[module_index].diagnostics, module_row.source_file, verdicts)
         loop function in module_row.functions {
             symbol: function.symbol
             row: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
@@ -280,7 +308,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         }
         sema_liveness_unreachable_reexports(graph, module_index, verdicts)
         loop position in start..<verdicts.len() {
-            verdicts[position].diagnostic = sema_diagnostic_with_source_location(verdicts[position].diagnostic, module_row.source_segments)
+            verdicts[position].diagnostic = sema_liveness_located(verdicts[position].diagnostic, module_row.source_segments)
         }
     }
     verdicts.sort_by(fn(left: SemaLivenessVerdict, right: SemaLivenessVerdict) {
@@ -295,7 +323,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
     })
     result := SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     loop verdict in verdicts {
-        result.diagnostics.push(verdict.diagnostic)
+        if verdict.diagnostic == .Val(found) -> result.diagnostics.push(found)
         result.facts.push(verdict.fact)
     }
     result
