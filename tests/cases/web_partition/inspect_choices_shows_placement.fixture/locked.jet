@@ -1,0 +1,15 @@
+#Target(JS)
+view: fn() -> Int {
+    2
+}
+
+// `#Target(Wasm)` locks `compute` in Wasm, so its call of the JS `view`
+// fails the build instead of moving it to JS.
+#Target(Wasm)
+compute: fn() -> Int {
+    view()
+}
+
+run: fn() {
+    print("ok")
+}

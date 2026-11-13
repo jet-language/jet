@@ -14,14 +14,26 @@
 //   needs identity beyond its lexical owner is kept by the policy scope's
 //   collector, and a binding that takes such a value from its call holds it
 //   there too (sema's promotion facts, FunctionMemory.jet).
+// - Copies: each copy sema puts in a body that the source does not write
+//   (Checked.jet CopyFact). A binding moved by its plain name and read again
+//   later is shared: the move becomes a copy. A borrowed or still-used value
+//   passed to a variadic list or `debug` is materialized. `#Policy(copies:
+//   .Explicit)` locks the share out: the move stays a move, and the later
+//   read fails the build naming the binding (E0121).
+// - Placement: in a program that opts in to the web partition (a web marker
+//   or a `#Target` ceiling), the JS or Wasm bucket of each function, with
+//   why (sema's `web_reason`, WebPartition.jet). `#Target(JS|Wasm)` locks
+//   it: a Wasm-pinned function that uses `Browser` fails the build naming it
+//   (E-WEB-TARGET-BROWSER), and so does a call across the buckets
+//   (E-WEB-CROSS-PARTITION).
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, FnBody, build_options_stock]
+    jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock]
     jet_ir.[IROptInlined]
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -38,9 +50,20 @@ jet_cli_choice_order: fn(left: JetCLIChoice, right: JetCLIChoice) -> Ordering Ne
     if file != Ordering.Equal -> return file
     line: left.line <=> right.line
     if line != Ordering.Equal -> return line
+    kind: jet_cli_choice_kind_rank(left.kind) <=> jet_cli_choice_kind_rank(right.kind)
+    if kind != Ordering.Equal -> return kind
     function: left.function <=> right.function
     if function != Ordering.Equal -> return function
     left.choice <=> right.choice
+}
+
+// Where `kind` is in JET_CLI_CHOICE_KINDS, so rows on one line keep the
+// report's kind order.
+jet_cli_choice_kind_rank: fn(kind: String) -> Int Never! {
+    loop at in 0..<JET_CLI_CHOICE_KINDS.len() {
+        if JET_CLI_CHOICE_KINDS[at] == kind -> return at
+    }
+    return JET_CLI_CHOICE_KINDS.len()
 }
 
 // Whether `out` has a row identical to `choice`: each instance of a generic
@@ -91,6 +114,46 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never!
                 if !jet_cli_choice_seen(out, choice) -> out.push(choice)
             }
         }
+    }
+}
+
+// The copies choices of `functions`, at the function's line: each share
+// and each materialized copy sema records in the program's own code, naming
+// the local it copies.
+jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || function.module_identity.starts_with("<corelib>/") -> next
+        loop node in function.tree.nodes {
+            if node.kind == .Clone(value, fact) {
+                copied: body_node(function.tree, value)
+                name := "a value"
+                if copied.kind == .Local(local) -> name = "`{local.name}`"
+                text: if fact == {
+                    .Share -> "{name} shared: a later read uses it after this move, so the move copies it"
+                    .Materialize -> "{name} copied: the destination owns its value, and this scope still holds it"
+                    .Explicit | .Scalar | .ViewMaterialize -> ""
+                }
+                if text == "" -> next
+                choice: JetCLIChoice{kind: "copies", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: text}
+                if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+            }
+        }
+    }
+}
+
+// The placement choices of the program's own `functions`, at the function's
+// line: the web bucket each is in and why, when the program opts in to the
+// web partition (sema stamps `web_reason` only then).
+jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || function.web_reason == "" || function.module_identity.starts_with("<corelib>/") -> next
+        bucket: function.web_bucket ?? next
+        name: if bucket == {
+            .JS -> "JS"
+            .Wasm -> "Wasm"
+        }
+        choice: JetCLIChoice{kind: "placement", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: "{name}: {function.web_reason}"}
+        if !jet_cli_choice_seen(out, choice) -> out.push(choice)
     }
 }
 
@@ -147,6 +210,8 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             choices := jet_cli_storage_choices(inputs.functions)
             jet_cli_collection_choices(inputs.functions, choices)
+            jet_cli_copy_choices(inputs.functions, choices)
+            jet_cli_placement_choices(inputs.functions, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

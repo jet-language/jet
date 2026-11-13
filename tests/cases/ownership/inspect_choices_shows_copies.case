@@ -1,0 +1,23 @@
+# `jet inspect choices` lists copies choices. A binding moved by its plain
+# name and read again later is shared: the move copies it. The row names the
+# binding and why. A move with no later read copies nothing, and the kind
+# says none. `#Policy(copies: .Explicit)` locks the share out: the move stays
+# a move, so the later read fails the build naming the binding (E0121; the
+# UI snapshot is tests/ui/copies_explicit_share_use_after_move.stderr).
+fixture: inspect_choices_shows_copies.fixture
+env: NO_COLOR=1
+step shared: jet inspect choices copies.jet
+exit: 0
+stdout: ~ "copies: copies.jet:2 in run: `items` shared: a later read uses it after this move, so the move copies it" # the share, with the binding and why
+step moved: jet inspect choices moved.jet
+exit: 0
+stdout: ~ "copies: none" # a move with no later read copies nothing
+step json: jet inspect choices copies.jet --json
+exit: 0
+json: stdout doc $.kinds[3] = "copies"
+json: stdout doc $.choices[0].kind = "copies"
+json: stdout doc $.choices[0].function = "run"
+step locked: jet check locked.jet
+exit: 1
+stderr: ~ "E0121" # the lock refuses the hidden copy
+stderr: ~ "`items` was consumed" # the build failure names the binding

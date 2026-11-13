@@ -1,0 +1,44 @@
+// Hover lists the automatic choices the check records on the hovered line:
+// the main fixture's checker, with a copies choice on `add`'s line (1-based
+// line 1, editor line 0) and a storage form choice on `run`'s (line 5,
+// editor line 4).
+use {
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPServer, lsp_server]
+}
+
+LSPChoicesFixtureChecker: struct {
+    impl LSPChecker {
+        check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+            plain: LSPFixtureChecker{}
+            checked := plain.check(entry, overlays)
+            checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 1, kind: "copies", choice: "`left` shared: a later read uses it after this move, so the move copies it"})
+            checked.choices.push(LSPChoice{module_path: "/w/main.jet", line: 5, kind: "storage form", choice: "pending: Signal<Int> synchronized for task crossing"})
+            checked.choices.push(LSPChoice{module_path: "/w/other.jet", line: 1, kind: "copies", choice: "in another module"})
+            checked
+        }
+    }
+}
+
+lsp_test_choices_server: fn() -> LSPServer Never! {
+    server := lsp_server(LSPChoicesFixtureChecker{})
+    lsp_test_open(server, LSP_TEST_MAIN_URI, LSP_TEST_MAIN)
+    server
+}
+
+lsp_test_hover_text: fn(server: &LSPServer, line: Int, character: Int) -> String {
+    hover: lsp_test_result(server, "textDocument/hover", lsp_test_at(LSP_TEST_MAIN_URI, line, character))
+    lsp_test_text(lsp_test_field(hover, "contents"), "value")
+}
+
+#Test("hover lists the automatic choices on its line after the signature") {
+    server := lsp_test_choices_server()
+    declared: lsp_test_hover_text(server, 0, 1)
+    assert(declared.contains("add"), "the signature still leads")
+    assert(declared.contains("Automatic choices:\n- copies: `left` shared: a later read uses it after this move, so the move copies it"), "the copies choice and its reason follow")
+    assert(!declared.contains("storage form"), "another line's choice is not shown")
+    assert(!declared.contains("in another module"), "another module's choice is not shown")
+    run: lsp_test_hover_text(server, 4, 1)
+    assert(run.contains("- storage form: pending: Signal<Int> synchronized for task crossing"), "`run`'s line shows its storage form choice")
+    called: lsp_test_hover_text(server, 5, 5)
+    assert(!called.contains("Automatic choices"), "a line with no choice lists none")
+}

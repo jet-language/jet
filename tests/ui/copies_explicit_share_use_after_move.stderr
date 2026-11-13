@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `items` was consumed by the binding `kept`, so it can't be used here
+  --> tests/ui/copies_explicit_share_use_after_move.jet:8:13
+    |
+  8 |     print("{items.len()} {kept.len()}")
+    |             ^^^^^
+  --> tests/ui/copies_explicit_share_use_after_move.jet:7:13
+    |
+  7 |     kept := items
+    |             ^^^^^ `items` moved to the binding `kept` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `items` after the move, or give the binding `kept` a copy with `items.copy()` where it moved.
+More: jet-lang.dev/e/E0121

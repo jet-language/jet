@@ -5,11 +5,13 @@
 // still covers a document that does not check (as `jet fix` and codemods
 // read it). An unsaved loose buffer is checked by itself. A document that is
 // a module its package's last `jet build` generated carries what made it.
+// The check carries the automatic choices its modules record, which hovers
+// show on their lines.
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic]
-    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
+    jet_lsp.[LSPChecked, LSPChecker, LSPChoice, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemSymbol, semindex_build_symbols]
 }
 
@@ -39,11 +41,26 @@ JetCLILSPChecker: struct {
                     if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer}
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer, choices: jet_cli_lsp_choices(result.doc_modules)}
                 }
             }
         }
     }
+}
+
+// The automatic choices the checked modules record, by module and line, as
+// `jet inspect choices` finds them. Inlining is the optimizer's choice, which
+// a check does not make.
+jet_cli_lsp_choices: fn(modules: [JetDriverDocModule]) -> [LSPChoice] Never! {
+    out := [LSPChoice]{}
+    loop module_ref in modules {
+        rows := jet_cli_storage_choices(module_ref.functions)
+        jet_cli_collection_choices(module_ref.functions, rows)
+        jet_cli_copy_choices(module_ref.functions, rows)
+        jet_cli_placement_choices(module_ref.functions, rows)
+        loop row in rows -> out.push(LSPChoice{module_path: module_ref.path.copy(), line: row.line, kind: row.kind.copy(), choice: row.choice.copy()})
+    }
+    out
 }
 
 // What made `entry` when it is a module under its package's `.jet/generated/`

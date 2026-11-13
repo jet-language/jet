@@ -7,10 +7,11 @@ use {
     jet_semindex.[SemDef, SemSymbolKind]
 }
 
-// The view and the byte offset a positional request names.
+// The view, the byte offset a positional request names, and its 0-based line.
 LSPAt: struct {
     view: LSPView
     offset: Int
+    line: Int
 }
 
 lsp_at: fn(server: LSPServer, params: Dyn?) -> LSPAt? {
@@ -18,7 +19,7 @@ lsp_at: fn(server: LSPServer, params: Dyn?) -> LSPAt? {
     view: lsp_view(server, params) ?? return None
     bytes: view.doc.text.bytes()
     offset: lsp_checked_offset_bytes(lsp_line_table_bytes(bytes), bytes, position) ?? return None
-    Val(LSPAt{view: view, offset: offset})
+    Val(LSPAt{view: view, offset: offset, line: position.line})
 }
 
 lsp_hover_markdown: fn(signature: String, summary: String) -> String Never! {
@@ -43,10 +44,27 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         note: lsp_producer_markdown(producer)
         markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{note}") else -> Val(note)
     }
+    // On a line the compiler made automatic choices for, the hover lists
+    // them with their reasons.
+    if lsp_choices_markdown(at) == .Val(choices) {
+        markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{choices}") else -> Val(choices)
+    }
     text: markdown ?? return lsp_response(id, "null")
     range := ""
     if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) -> range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
     lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
+}
+
+// The automatic choices the check records on the hovered line of the
+// document's checked module, one `- kind: choice` line each.
+lsp_choices_markdown: fn(at: LSPAt) -> String? Never! {
+    module_path: at.view.module_path ?? return None
+    lines := [String]{}
+    loop choice in at.view.checked.choices {
+        if choice.module_path == module_path && choice.line == at.line + 1 -> lines.push("- {choice.kind}: {choice.choice}")
+    }
+    if lines.len() == 0 -> return None
+    Val("Automatic choices:\n{lines.join("\n")}")
 }
 
 // What made a generated module, as its hover says it: the call and function

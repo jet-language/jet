@@ -8,7 +8,8 @@
 // (E-WEB-ABI-TYPE), a Wasm function must not use `Browser`
 // (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
-// onto each FnBody (`web_bucket`).
+// onto each FnBody (`web_bucket`) and, once the program opts in, why it was
+// chosen (`web_reason`).
 use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
@@ -50,8 +51,11 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         if metas[at].row >= 0 -> rows[modules[metas[at].slot].functions[metas[at].row].key] = at
     }
     buckets := [WebBucket]{}
+    reasons := [String]{}
     loop meta in metas {
-        buckets.push(sema_web_bucket(meta, sema_web_solved(modules, meta)))
+        solved: sema_web_solved(modules, meta)
+        buckets.push(sema_web_bucket(meta, solved))
+        reasons.push(sema_web_bucket_reason(meta, solved))
     }
     // Close the partition over the call edges.
     changed := true
@@ -63,16 +67,20 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                 callee: rows.get(edge) ?? next
                 if buckets[caller] == .Wasm && buckets[callee] == .JS && metas[caller].marker == None && metas[caller].ceiling == None {
                     buckets[caller] = WebBucket.JS
+                    reasons[caller] = "calls `{metas[callee].name}`, which runs in JS"
                     changed = true
                 } else if buckets[caller] == .JS && buckets[callee] == .Wasm && metas[callee].marker == None && metas[callee].ceiling == None {
                     buckets[callee] = WebBucket.JS
+                    reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
                     changed = true
                 }
             }
         }
     }
     loop at in 0..<metas.len() {
-        if metas[at].row >= 0 -> modules[metas[at].slot].functions[metas[at].row].web_bucket = Val(buckets[at])
+        if metas[at].row < 0 -> next
+        modules[metas[at].slot].functions[metas[at].row].web_bucket = Val(buckets[at])
+        if active -> modules[metas[at].slot].functions[metas[at].row].web_reason = reasons[at].copy()
     }
     if !active -> return
     loop at in 0..<metas.len() {
@@ -238,6 +246,26 @@ sema_web_bucket: fn(meta: SemaWebMeta, solved: [String]) -> WebBucket Never! {
         }
     }
     WebBucket.Wasm
+}
+
+// Why sema_web_bucket chose its bucket, by the same precedence.
+sema_web_bucket_reason: fn(meta: SemaWebMeta, solved: [String]) -> String Never! {
+    if meta.marker == .Val(marker) {
+        pin: if marker == {
+            .JS -> "#Target(JS)"
+            .Wasm -> "#Target(Wasm)"
+            .WasmExport -> "#Export(wasm)"
+        }
+        return "pinned by `{pin}`"
+    }
+    if sema_web_has_root(solved, "Browser") -> return "uses the `Browser` effect"
+    if meta.ceiling == .Val(ceiling) -> return "its module's `#Target({sema_web_bucket_name(ceiling)})` ceiling"
+    if meta.ret == .Val(ret) {
+        if ret == .Apply(name, args) {
+            if name == "Stream" && args.len() == 1 -> return "returns a `Stream`, which runs as a JS generator"
+        }
+    }
+    "the default for code that nothing places in JS"
 }
 
 sema_web_has_root: fn(effects: [String], root: String) -> Bool Never! {

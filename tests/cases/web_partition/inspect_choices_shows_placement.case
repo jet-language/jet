@@ -1,0 +1,28 @@
+# `jet inspect choices` lists placement choices. In a program that opts in
+# to the web partition, each function's row names its JS or Wasm bucket and
+# why: a pin, a JS caller the function follows, or the Wasm default. A
+# program with no web marker and no `#Target` ceiling makes no placement
+# choice, and the kind says none. `#Target(Wasm)` locks a function in Wasm:
+# a call from it to a JS function fails the build naming both
+# (E-WEB-CROSS-PARTITION; the UI snapshots are
+# tests/ui/web_cross_partition.stderr and tests/ui/web_target_browser.stderr).
+fixture: inspect_choices_shows_placement.fixture
+env: NO_COLOR=1
+step web: jet inspect choices web.jet
+exit: 0
+stdout: ~ " in view: JS: pinned by `#Target(JS)`" # the pin and its marker
+stdout: ~ " in count: JS: called by `view`, which runs in JS" # an unpinned callee follows its JS caller
+stdout: ~ " in compute: Wasm: pinned by `#Target(Wasm)`" # the Wasm pin
+stdout: ~ " in run: Wasm: the default for code that nothing places in JS" # nothing places `run`
+step plain: jet inspect choices plain.jet
+exit: 0
+stdout: ~ "placement: none" # no opt-in, no placement choice
+step json: jet inspect choices web.jet --json
+exit: 0
+json: stdout doc $.kinds[4] = "placement"
+json: stdout doc $.choices[0].kind = "placement"
+json: stdout doc $.choices[0].function = "view"
+step locked: jet check locked.jet
+exit: nonzero
+stderr: ~ "E-WEB-CROSS-PARTITION" # the Wasm lock refuses the JS call
+stderr: ~ "`compute` is compiled to Wasm but calls `view`, which lives in JS" # the failure names the locked function and the call

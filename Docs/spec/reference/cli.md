@@ -1499,8 +1499,28 @@ the function's line, for example ``collection: main.jet:10 in build: `first`
 collected under the module `#Policy(gc)`: returned heap graph requires
 identity beyond its lexical owner``; a binding that takes such a value from
 its call holds collected storage too.
+Copies: each copy the compiler adds that the source does not write, at the
+function's line. A binding moved by its plain name and read again later is
+shared, for example ``copies: main.jet:4 in run: `items` shared: a later read
+uses it after this move, so the move copies it``. A borrowed or still-used
+value passed to a variadic list or `debug` is copied into it.
+`#Policy(copies: .Explicit)` locks the share out: the move stays a move and
+the later read fails the build (E0121).
+Placement: in a program that opts in to the web partition (a `#Target` or
+`#Export(wasm)` marker, or a `#Target` ceiling), the JS or Wasm bucket of each
+function and why, at its line, for example ``placement: app.jet:4 in render:
+JS: uses the `Browser` effect``. The reasons, in order of precedence, are a
+pin, the `Browser` effect, the module's ceiling, a `Stream` result, and the
+Wasm default. After those, a function can also move to JS to follow a JS
+caller or callee. `#Target(JS|Wasm)` locks the bucket: a Wasm pin that uses
+`Browser` fails the build (E-WEB-TARGET-BROWSER), and so does a call across
+the buckets (E-WEB-CROSS-PARTITION).
+In the editor (`jet self lsp`), hovering on a line shows the choices made at
+that line, each as `<kind>: <choice>`. Inlining is shown only by `jet inspect
+choices`, because an editor check does not optimize.
 JSON uses the `inspect.choices` status with `kinds` and one `choices` row
-(kind, file, line, function, choice) per choice.
+(kind, file, line, function, choice) per choice, in file and line order, and
+in the order of `kinds` within a line.
 
 `jet inspect target [machine] [--json]` reads only the toolchain's machine
 table, never a project. With no name it lists every declared target machine
