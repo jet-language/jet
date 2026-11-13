@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101179,
+    "rev": 101181,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78409,7 +78409,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-07T04:01:35.309Z",
+      "updated": "2026-11-13T02:32:34.715Z",
       "updatedBy": "Main"
     },
     {
@@ -93937,7 +93937,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Main ruling 2026-11-12 (c2 scope): the goal is that no ambient read is baked into the image; an effect row is one means. task_identity keeps an empty row (context is an implicit input, D-CONTEXT-EFFECT1=F) but joins a sema run-time-only set (the c3 never-computed-while-compiling rule), avoiding a Context row cascade into Compiler trace functions. os_family may stay reviewed-pure only if a case shows a cross-target fold yields the target family; otherwise it joins the run-time-only set. The census names each reviewed entry with its reason."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93975,7 +93981,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-13T02:24:34.482Z",
+      "updated": "2026-11-13T02:32:01.037Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -193899,6 +193905,219 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T02:31:52.786Z"
+    },
+    {
+      "id": "D-WEB-RUNTIME-API1",
+      "cardId": "c0y7zq8s",
+      "group": "other",
+      "title": "Which public Core API the web battery calls once the web app layer leaves Core",
+      "situation": "Card #6445 moves the web app layer out of Core into the first-party web battery (D-WEB-HOME1=A). Core gets no private powers, so the battery may call only public Core API. Today that layer reaches the runtime through names only Core may use. They are the live-query store and its WebSocket publish, the process-wide shared cell, the startup environment, a coded runtime stop and private HTTP fields. Eleven compiler rules also key on the core.web module name. This vote decides which public Core API replaces those private calls. We recommend A: host powers stay in Core modules that own them, and the battery becomes plain Jet.",
+      "gist": "When the web app layer leaves Core, which public Core API should the web battery call for the powers it uses privately today?",
+      "lesson": "A library outside the standard library can only use what the standard library makes public. Moving code out forces a choice: publish general tools anyone may use, publish narrow ones that keep each power in its owner, or let first-party packages keep private access.",
+      "explainer": "Core is Jet's standard library, compiled with the toolchain. Names that start with two underscores are Core-private. A package that uses one fails to compile with E0067.\n\nThe web app layer is Core/Web: pages, forms, router, store, tables, live queries and browser storage, about 7,100 lines. It also holds core.web.browser, the browser automation library. The battery is Jetpack/Provider/Batteries/web, a package that ships with Jet; `jet add web` adds it.\n\nThe beginner path is the same in every option. A program writes `use web`, calls web.app(), adds routes and serves. Only the battery's own source and the compiler rules behind it change. The expert path is someone writing their own battery that needs the same powers. Option C gives them the most, A gives them what Core modules already own, and B gives them nothing new.",
+      "story": "A todo app shows a list that refreshes in every open tab when one tab adds an item. It remembers the last filter in browser storage. The program below is the user's code. It is the same under every option. Each option then shows the few lines of battery source that invalidate the live list and read storage, because those are the lines that change.\n\n```jet\nuse web\n\ntodos: fn() -> [String] { [String]{\"milk\"} }\n\nhome: fn() -> WebPage { web.page(\"Todos\", todos().join(\", \")) }\n\nrun: fn() {\n    web.app()\n        .route(\"/\", home)\n        .serve()\n}\n```",
+      "inWild": "Next.js and Remix are npm packages, not part of Node; they use only public Node APIs plus their own compiler plugins. Phoenix LiveView is a Hex package on top of Phoenix.PubSub, a public publish-subscribe library. Bun exposes server.publish(topic, data) as public API for WebSocket topics. These outside facts were not re-checked for this ballot.",
+      "detail": "The private calls in Core/Web today, by count. core.mem.__process_shared (8, browser storage). core.sys.__startup_env (3) and __env_value (1, browser automation). core.net.ws.__connect (2) and core.web.browser.__ws_set_timeout (2, browser automation). core.web.__live_load, __live_replace and __live_publish (1 each, the live store). core.web.__contract_stop (1, OpenAPI). Private core.http fields: __router_mux, mux.__route, server.__state and app.__state.\n\nThe live store is shared. Core's app module (Core/App/App.jet) uses core.web for live bindings and sync sessions. So app cannot stay in Core while the store leaves.\n\nThe runtime bindings behind the live store are jet.runtime.web live_load, live_replace and live_publish. They are priv, and Guest.jet sema_guest_runtime_binding admits only the generated Core interface and the runtime package.\n\nThe compiler rules keyed on core.web, each to become a marker or trait. One: web.form lowering, Calls/Http.jet:590-716. Two: App route checks, Calls/Methods.jet:1304, 1315 and 1345. Three: the table.column schema check E2475, Calls/Core.jet:1549 and Direct.jet:1926. Four: web.openapi(mux), Calls/Http.jet:789-803.\n\nFive: live, subscribe, push, invalidate and sync, Calls/Live.jet:61 and Http.jet:807. Six: the CLI web graph matching web.app, store, form and query.live by name, WebGraph.jet:512-1002 and Entry.jet:911. Seven: runtime handle rows for core.web types, RuntimeHandles.jet:225-273. Eight: effect rows, CoreDeclarations/Calls.jet:444, 493 and 549, and Taint.jet:319 and 342.\n\nNine: thread-confined browser types, Ownership/Crossings.jet:144. Ten: fixed signature rows, CorePlatformSignatures.jet:308-312 and 635-658, and all of WebCoreSignatures.jet. Eleven: ring rows, Rings/RingLayer.jet:17 and 100-111.\n\nRule four goes away with #6055 c2, which removes server.mux(). Under every option except D, rules one, two, three and six become markers the battery declares. Under A and C, rules seven, eight and ten shrink to the rows of the Core modules that stay.\n\nMigration. The card's owner order applies: `use core.web` becomes an ordinary unknown module, with no teaching error or fix. About 470 files mention core.web today, 230 of them conformance cases.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Host powers stay in the Core modules that own them; the battery is plain Jet",
+          "gist": "Browser automation and the browser host calls move to core.browser, the live store moves to app, and the battery calls only their public API.",
+          "detail": "Three moves inside Core, and no new general primitive.\n\nOne. core.web.browser becomes core.browser with its members unchanged. It keeps its private calls (startup environment, WebSocket connect and timeout), because it stays in Core.\n\nTwo. The browser host calls move beside it. core.web.on(path: String, title: String, handler: fn(WebEvent)) -[Browser]> and core.web.value(key: String) -[Browser]> String become core.browser.host.on and core.browser.host.value. core.web.storage.local and .session become core.browser.storage.local and .session, with get(key: String) -> String?, set(key: String, value: String), remove(key: String) and clear(). Storage keeps core.mem.__process_shared, because it stays in Core.\n\nThree. The live store moves into Core's app module, which already presents it. Live<T, E>, app.live, app.subscribe, app.push, app.invalidate, app.state(binding: Live<T, E>) -> Loadable<T, E> and app.live_stats() -> String keep their signatures. The jet.runtime.web bindings stay priv and move under app. The battery calls app.invalidate and never sees the cell.\n\nOpenAPI no longer stops the program. web.openapi(site: App) returns String OpenAPIError!, an ordinary typed error, instead of the E2805 stop. The battery's App owns its route table under D-ROUTE-ONE1=A, so it needs none of core.http's private fields.\n\nCompiler rules become four markers the battery declares: #Form on a model struct, #RouteTable on App, #ColumnOf on table.column's name parameter, and #WebApp on web.app(). The checks behind them stay compiler code, keyed on the marker instead of the module name.",
+          "code": "// Battery source, Jetpack/Provider/Batteries/web/web.jet.\nuse {\n    app\n    storage: core.browser.storage\n}\n\n// The live list refreshes in every tab: app owns the live store.\n// invalidate names the source function behind the live list.\nadded: fn() { app.invalidate(todos) }\n\n// The last filter, from browser storage.\nlast_filter: fn() -[Browser]> String { storage.local.get(\"filter\") ?? \"all\" }"
+        },
+        {
+          "key": "B",
+          "name": "First-party batteries may declare runtime bindings",
+          "gist": "The battery declares its own jet.runtime bindings, as Core does today, and keeps its private calls under its own names.",
+          "detail": "sema_guest_runtime_binding also admits packages under Jetpack/Provider/Batteries. The battery declares #Import(c) priv live_load: fn() -> [U8] = \"jet_web_live_store_load\", and likewise live_replace and live_publish, and calls them directly.\n\nThe other private Core calls get battery copies in the same way: the process-wide cell, the startup environment and the WebSocket connect. Browser automation and browser storage move into the battery with the rest of core.web.\n\nThe live store is shared with Core's app module, which cannot depend on a package. So the live store and app's live and sync functions move into the battery too, and app keeps only auth.\n\nCompiler rules become the same four markers as A.\n\nThe cost is a second trust tier. First-party batteries can do what no other package can, so a third-party battery can never match the web battery. The runtime's binding rules, which today cover only Core, now cover Jetpack.",
+          "code": "// Battery source, Jetpack/Provider/Batteries/web/web.jet.\n// New: a battery may declare runtime bindings, as Core does.\n#Import(c) priv live_publish: fn(topic: String, event: String) = \"jet_web_live_publish\"\n#Import(c) priv local_get: fn(key: String) -> String? = \"jet_web_storage_local_get\"\n\n// The battery owns the live store and publishes itself.\nadded: fn(source: String) { live_publish(\"live:{source}\", \"{{\\\"live\\\":\\\"invalidate\\\"}}\") }\n\n// The last filter, from browser storage.\nlast_filter: fn() -[Browser]> String { local_get(\"filter\") ?? \"all\" }"
+        },
+        {
+          "key": "C",
+          "name": "Core publishes general primitives; the battery builds the rest",
+          "gist": "Core makes the process-wide cell, WebSocket topic publish and startup environment public; the battery rebuilds the live store and storage on them.",
+          "detail": "Three new public Core functions. core.mem.process_shared<T>(init: fn() -> T) -> Shared<T> returns one value per process, made on first use. core.http.server.publish(topic: String, event: String) -[Net]> sends an event to every WebSocket joined to a topic, as Bun's server.publish does. core.sys.startup_env() -> [String: String] is the environment as the process started.\n\nThe battery then holds everything core.web holds today: browser automation, browser storage and the live store. Core's app module cannot use a package, so its live and sync functions move into the battery, and app keeps only auth. The live store uses process_shared for its cell instead of the runtime's compare-and-replace cell. That is a lock instead of a lock-free retry, [INFERENCE] slower under contention and not measured.\n\nOpenAPI returns a typed error, as in A. Compiler rules become the same four markers as A.\n\nAny program may now hold hidden process-wide state with process_shared, which Core keeps private today. publish reaches every connection on a topic from anywhere in the program.",
+          "code": "// Battery source, Jetpack/Provider/Batteries/web/web.jet.\nuse {\n    mem: core.mem\n    server: core.http.server\n}\n\n// New public Core: the battery keeps its own live store and publishes.\nadded: fn(source: String) {\n    _store: mem.process_shared(new_live_store)\n    server.publish(\"live:{source}\", \"{{\\\"live\\\":\\\"invalidate\\\"}}\")\n}\n\n// Browser storage is the battery's own process-wide map.\nlast_filter: fn() -[Browser]> String { mem.process_shared(new_storage).get(\"filter\") ?? \"all\" }"
+        },
+        {
+          "key": "D",
+          "name": "Defer: core.web stays in Core until v1 release preparation",
+          "gist": "No new API. #6445 waits, and the web app layer keeps its private access.",
+          "detail": "core.web stays where it is. The battery keeps calling `use core_web: core.web` as it does today. Card #6445 stays open until v1 release preparation (#6068). Work that the card names as sequenced after it, the image pipeline of #4695, continues on core.web and moves with it later.\n\nNothing breaks and nothing is built now. The cost is that Core keeps a 7,100-line app framework with eleven compiler rules keyed on its name, against the ratified D-WEB-HOME1=A.",
+          "code": "// Battery source, Jetpack/Provider/Batteries/web/web.jet, today's shape.\nuse {\n    core_web: core.web\n    local: core.web.storage.local\n}\n\n// core.web still owns the live store and its private calls.\nadded: fn() { core_web.invalidate(todos) }\n\nlast_filter: fn() -[Browser]> String { local.get(\"filter\") ?? \"all\" }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A moves the layer out without giving any package a private power and without publishing a general hidden-state tool. Each private call stays in the one Core module that owns its concept, and the battery uses that module's public face.",
+        "gains": [
+          "The battery compiles as an ordinary package; a third-party battery could do the same",
+          "No new general primitive: process-wide state and runtime bindings stay inside Core",
+          "Core's app module keeps live queries and sync, so app programs do not change"
+        ],
+        "losses": [
+          {
+            "loss": "Core gains core.browser, core.browser.host and core.browser.storage, and keeps about 2,400 lines of browser code.",
+            "mitigation": "Browser automation is a test tool used outside web apps, and the host calls are Core's browser boundary. Neither belongs to the app framework the card moves."
+          },
+          {
+            "loss": "web.openapi now returns a typed error, a signature change for its callers.",
+            "mitigation": "Registered routes already reject a bad contract at compile time, so callers handle an error that only hand-built contracts can raise."
+          },
+          {
+            "loss": "Four new markers, each with compiler checks behind it.",
+            "mitigation": "Each replaces a check that exists today keyed on the module name, so no new check is added."
+          },
+          {
+            "loss": "Programs that wrote web.live must write app.live.",
+            "mitigation": "The owner order for #6445 moves every in-repo caller in the same change, with no teaching error."
+          },
+          {
+            "loss": "A frees the battery from private HTTP fields only once App owns its route table, which #6055 c2 has not built yet.",
+            "mitigation": "#6055 c2 lands first, on core.web where it lives today, and #6445 moves the finished table."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B makes first-party batteries a privileged tier that no other package can match, and moves app's live and sync out of Core."
+          },
+          {
+            "key": "C",
+            "reason": "C makes hidden process-wide state and program-wide publish public for every program, and moves app's live and sync out of Core."
+          },
+          {
+            "key": "D",
+            "reason": "D leaves a 7,100-line framework in Core against the ratified D-WEB-HOME1=A and keeps #6445 open."
+          }
+        ],
+        "tradeoff": "The battery gets no special access, but Core keeps the browser module and the live store under its own names."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Checked against Core/App/App.jet, which already forwards state and live_stats to core.web, and Core/Web (6,974 lines); the claims hold. One gap: A needs the App route table of #6055 c2 first, now a stated loss."
+      },
+      "checkInstructions": "Read the private calls with `git grep -ohE '\\b[a-z_]+\\.__[a-z_]+' -- Core/Web`. Read Core/App/App.jet lines 18-24 and 101-115 for app's use of core.web. Read Compiler/JetRuntime/Source/Public/Web.jet and Compiler/JetSema/Source/Sema/Guest.jet sema_guest_runtime_binding. Read each compiler rule at the lines the detail names, on dev 6cea1699f9.\n\nNo option's new items are built, so no option's battery code checks today. Option D's code is today's shape. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "When the web app layer leaves Core, which public Core API should the web battery call?",
+        "lesson": "A package outside the standard library can use only what it makes public. Moving code out means choosing: narrow APIs kept by their owners, general tools for everyone, or private access for first-party packages.",
+        "trio": {
+          "current": {
+            "note": "The web layer lives in Core and calls Core-private names.",
+            "code": "// Core/Web/Web.jet today.\nlive_cell_load: fn() -> [U8] { core.web.__live_load() }\n\n// Core/Web/Storage/Local.jet today.\nget: fn(key: String) -[Browser]> String? Never! {\n    state: core.mem.__process_shared(init_local_storage)\n    state.guard_read().value.entries.get(key)\n}"
+          },
+          "wild": {
+            "lang": "TypeScript (Bun)",
+            "note": "A framework package publishes to WebSocket topics through the runtime's public API.",
+            "code": "const server = Bun.serve({\n  fetch(req, server) { server.upgrade(req); },\n  websocket: { open(ws) { ws.subscribe(\"todos\"); } },\n});\n// Any code with the server may publish to a topic.\nserver.publish(\"todos\", JSON.stringify({ live: \"invalidate\" }));"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Owners keep their powers",
+            "gist": "Browser code moves to core.browser, live queries to app; the battery uses their public API.",
+            "gains": [
+              "No package gets private access",
+              "No new general hidden-state tool"
+            ],
+            "losses": [
+              "Core keeps the browser module",
+              "web.openapi returns a typed error"
+            ],
+            "proposed": {
+              "code": "use {\n    app\n    storage: core.browser.storage\n}\n\nadded: fn() { app.invalidate(todos) }\n\nlast_filter: fn() -[Browser]> String { storage.local.get(\"filter\") ?? \"all\" }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Privileged first-party batteries",
+            "gist": "The battery declares its own runtime bindings, as Core does.",
+            "gains": [
+              "No new public Core API"
+            ],
+            "losses": [
+              "A second trust tier other packages cannot reach",
+              "app's live queries leave Core"
+            ],
+            "proposed": {
+              "code": "#Import(c) priv live_publish: fn(topic: String, event: String) = \"jet_web_live_publish\"\n#Import(c) priv local_get: fn(key: String) -> String? = \"jet_web_storage_local_get\"\n\nadded: fn(source: String) { live_publish(\"live:{source}\", event) }\n\nlast_filter: fn() -[Browser]> String { local_get(\"filter\") ?? \"all\" }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "General public primitives",
+            "gist": "Core publishes a process-wide cell, topic publish and startup environment.",
+            "gains": [
+              "Third-party batteries get the same tools"
+            ],
+            "losses": [
+              "Hidden process-wide state for every program",
+              "app's live queries leave Core"
+            ],
+            "proposed": {
+              "code": "use {\n    mem: core.mem\n    server: core.http.server\n}\n\nadded: fn(source: String) { server.publish(\"live:{source}\", event) }\n\nlast_filter: fn() -[Browser]> String { mem.process_shared(new_storage).get(\"filter\") ?? \"all\" }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Defer",
+            "gist": "core.web stays in Core until v1 release preparation.",
+            "gains": [
+              "Nothing is built now"
+            ],
+            "losses": [
+              "Goes against the ratified move",
+              "#6445 stays open"
+            ],
+            "proposed": {
+              "code": "use {\n    core_web: core.web\n    local: core.web.storage.local\n}\n\nadded: fn() { core_web.invalidate(todos) }\n\nlast_filter: fn() -[Browser]> String { local.get(\"filter\") ?? \"all\" }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A moves the layer out with no private access for any package and no new hidden-state tool. Each power stays with the Core module that owns it.",
+          "gains": [
+            "The battery is an ordinary package",
+            "app programs do not change"
+          ],
+          "losses": [
+            {
+              "loss": "Core keeps the browser module.",
+              "mitigation": "Browser automation is a test tool used outside web apps."
+            },
+            {
+              "loss": "web.openapi returns a typed error.",
+              "mitigation": "Only hand-built route contracts can raise it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A privileged tier no other package can match."
+            },
+            {
+              "key": "C",
+              "reason": "Hidden process-wide state becomes public for every program."
+            },
+            {
+              "key": "D",
+              "reason": "It goes against the ratified move and keeps the card open."
+            }
+          ],
+          "tradeoff": "No special access for the battery, but Core keeps browser and live-query code."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T02:32:34.715Z"
     }
   ],
   "questions": [
@@ -197179,6 +197398,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:32:34.715Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-WEB-RUNTIME-API1",
+      "note": "Which public Core API the web battery calls once the web app layer leaves Core"
+    },
+    {
+      "at": "2026-11-13T02:32:01.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d72itt",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T02:31:52.786Z",
       "by": "Main",
