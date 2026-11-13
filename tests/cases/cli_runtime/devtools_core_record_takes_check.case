@@ -1,10 +1,17 @@
 # `jet self devtools core-record` is the compiler build's check of Core and the
-# Prelude alone (JetCli CoreRecordCheck.jet); it runs only as `--check`.
+# Prelude alone (JetCli CoreRecordCheck.jet); it runs only as `--check`, or as
+# `--write <file>`, which also writes the record to the file.
 env: NO_COLOR=1
 step: jet self devtools core-record
 exit: 2
 stdout: = ""
-stderr: = "usage: jet self devtools core-record --check\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
 step: jet self devtools core-record --check --out
 exit: 2
-stderr: = "usage: jet self devtools core-record --check\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+step: jet self devtools core-record --write
+exit: 2
+stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+step: jet self devtools core-record --write --check
+exit: 2
+stderr: = "usage: jet self devtools core-record --check | --write <file>\n"

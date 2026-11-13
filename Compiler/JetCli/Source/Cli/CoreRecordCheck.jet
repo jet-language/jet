@@ -5,17 +5,22 @@
 // this jet, with every Core body checked whether a program calls it or not,
 // stopped right before lowering (jet_driver_lowering_inputs). It prints what
 // the record would hold, or the diagnostics that keep Core from checking
-// clean.
+// clean. `--write <file>` also writes the `jet.core/v1` record of that check
+// (JetDriver CoreRecord.jet) to the file, then reads the file back and
+// encodes every row again, which must give the bytes it was read from.
 use {
     record_files: core.files
     record_time: core.time
-    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, jet_driver_check_outcome, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, jet_driver_check_outcome, jet_driver_core_record_round_trip, jet_driver_core_record_write, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
+    jet_foundation.[sha256_bytes, sha256_hex_bytes]
 }
 
-JET_CLI_CORE_RECORD_USAGE: "usage: jet self devtools core-record --check\n"
+JET_CLI_CORE_RECORD_USAGE: "usage: jet self devtools core-record --check | --write <file>\n"
 
 jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    if args.len() != 1 || args[0] != "--check" -> return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_CORE_RECORD_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
+    checking: args.len() == 1 && args[0] == "--check"
+    writing: args.len() == 2 && args[0] == "--write" && args[1] != "" && !args[1].starts_with("-")
+    if !checking && !writing -> return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_CORE_RECORD_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
     watch: record_time.start()
     scratch: record_files.temp_dir("jet-core-record") ?? return jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, color, json)
     entry: "{scratch.path}/core.jet"
@@ -30,12 +35,22 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
         .Prepared(request, snapshot) -> {
             selected := request
             selected.every_core_body = true
+            compiler: selected.host_facts.compiler_identity ?? ""
+            target: selected.host_facts.target_triple ?? ""
             front := jet_driver_lowering_inputs(selected, None)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 -> return jet_driver_check_outcome("Core", source, diagnostics, color, false)
             if front.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
             inputs: front.inputs.move() ?? return jet_cli_ice("the Core check stopped before lowering without a diagnostic")
-            JetDriverVerbOutput{stdout: jet_cli_core_record_summary(inputs, watch.elapsed_millis()), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            summary: jet_cli_core_record_summary(inputs, watch.elapsed_millis())
+            if checking -> return JetDriverVerbOutput{stdout: summary, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            file: args[1]
+            bytes: jet_driver_core_record_write(inputs, compiler, target) ?? return jet_cli_ice("the Core record can't be written: {err}")
+            record_files.write_bytes(file, bytes) ?? return jet_cli_maintenance_error("E2105", "couldn't write the Core record `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
+            stored: record_files.read_bytes(file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the Core record `{file}` back: {jet_cli_io_error_text(err)}", None, color, json)
+            counts: jet_driver_core_record_round_trip(stored) ?? return jet_cli_ice("the Core record `{file}` doesn't read back: {err}")
+            digest: sha256_hex_bytes(sha256_bytes(stored[0..<stored.len()]))
+            JetDriverVerbOutput{stdout: "{summary}core-record write: {file}: {counts.modules} modules, {counts.bodies} bodies, {counts.bytes} bytes, sha256 {digest}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }
 }

@@ -1434,7 +1434,9 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 `jet self devtools core-record --check` checks Core and the Prelude alone,
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
-counts, or the diagnostics that keep Core from checking clean.
+counts, or the diagnostics that keep Core from checking clean. `--write <file>`
+also writes the `jet.core/v1` record of that check to the file, reads it back
+and encodes every row again, which must give the bytes it was read from.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.

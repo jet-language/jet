@@ -1,0 +1,47 @@
+// Assemble with the Compiler source unit. A Core record written from a real
+// check (every Core body of the Prelude, as `jet self devtools core-record`
+// checks it) decodes: each module and body row reads back under the record's
+// own CBOR limits (CoreRecord.jet JET_CORE_RECORD_CBOR) and encodes to the
+// bytes it was read from.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_module,
+        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_write,
+        jet_driver_has_errors, jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request]
+}
+
+core_record_rows_request: fn() -> JetDriverCompileRequest {
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/core-record-fixture",
+            identity: "core-record-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/core-record-fixture/main.jet", relative_path: "main.jet", identity: "core-record-file", source: "run: fn() {{ print(\"record\") }}"}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "core-record-root",
+        entry_path: "/core-record-fixture/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    request.every_core_body = true
+    request
+}
+
+#Test("a Core record written from a real check reads every row back") {
+    front := jet_driver_lowering_inputs(core_record_rows_request(), None)
+    assert(front.compile.internal_problem == None)
+    assert(!jet_driver_has_errors(front.compile.diagnostics))
+    inputs := front.inputs.move() ?? panic("the check stopped before lowering")
+    bytes: jet_driver_core_record_write(inputs, "fixture", "x86_64-unknown-linux-gnu") ?? panic("the record can't be written: {err}")
+    counts: jet_driver_core_record_round_trip(bytes) ?? panic("the record doesn't read back: {err}")
+    assert(counts.modules > 0)
+    assert(counts.bodies > 0)
+    assert_eq(counts.bytes, bytes.len())
+    record: jet_driver_core_record_open(bytes) ?? panic("the record doesn't open: {err}")
+    row: jet_driver_core_record_module(record, 0) ?? panic("the first module row doesn't decode: {err}")
+    assert_eq(row.module_name, record.module_names[0])
+    assert_eq(row.module_identity, record.module_identities[0])
+}
