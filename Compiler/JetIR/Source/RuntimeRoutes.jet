@@ -1294,23 +1294,13 @@ ir_runtime_handle_exported: fn(runtime: String) -> Bool Never! {
 }
 
 // The runtime handle row of Jet type `name`. A Core declaration's canonical
-// identity (`<corelib>/core.encoding::EncodingCause`) whose own row names a
-// runtime type the runtime exports nothing for (a Rust-generated
-// `__jet__<identity>` name) is its bare spelling's row (ir_core_bare_handle,
-// pins and the task group kept) when the runtime exports that one: both
-// spell the same declaration, and the route names
+// identity (`<corelib>/core.encoding::EncodingCause`) names the runtime type
+// its bare spelling's row does: the route names
 // (`jet_rt_handle_drop_<runtime>`, `jet_rt_record_get_<runtime>_<member>`)
-// must be the runtime's own exports. A checked jet.runtime binding spells
-// its Core types by identity (#6760: an `EncodingCause!` binding failed its
-// route's drop and getters).
+// must be the runtime's own exports, and a checked jet.runtime binding spells
+// its Core types by identity.
 ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
     if ir_runtime_handle_row(name) == .Val(position) {
-        if name.starts_with("<corelib>/") && name.contains("::") && !ir_runtime_handle_exported(IR_RUNTIME_HANDLES[position].runtime) {
-            parts: name.split("::").to_list()
-            if ir_core_bare_handle(name, parts[parts.len() - 1]) == .Val(bare) {
-                if ir_runtime_handle_exported(bare.runtime) -> return Val(bare)
-            }
-        }
         // copy: the caller gets an owned handle row, while the row stays in the global
         // IR_RUNTIME_HANDLES table, which can't be moved from.
         return Val(IR_RUNTIME_HANDLES[position].copy())
@@ -1343,22 +1333,14 @@ IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dcbor_c_cCBORError", variants: "", fields: "kind=Rec.__jet__x3ccorelib_x3e_score_dencoding_dcbor_c_cCBORErrorKind,byte_offset=Int,path=Text,reason=Text"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dcbor_c_cCBORErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,TypeMismatch,TrailingData,NonCanonical", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dcbor_c_cCBOROptions", variants: "", fields: "max_depth=Int,max_items=Int,max_bytes=Int,require_canonical=Flag"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cDataEvent", variants: "Null,Bool=Flag,Int=Int,Float=Float,Number=Text,Text=Text,Bytes=List.Byte,ArrayStart,ArrayEnd,ObjectStart,Key=Text,ObjectEnd", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingCause", variants: "", fields: "kind=Text,os_code=OptInt,message=Text"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingError", variants: "", fields: "format=Rec.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingFormat,kind=Rec.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingErrorKind,byte_offset=Int,line=OptInt,column=OptInt,path=Text,reason=Text,cause=OptRec.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingCause"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingErrorKind", variants: "Syntax,Truncated,Unsupported,Limit,IO,State", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingFormat", variants: "JSON,JSONL,CSV,TOML,YAML,XML,CBOR", fields: ""},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", variants: "", fields: "buffer_bytes=Int,max_depth=Int,max_item_bytes=Int,max_total_bytes=OptInt,max_expansion_depth=Int,max_expansion_bytes=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLCanonicalMode", variants: "Inclusive11,Exclusive10", fields: ""},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLEncoding", variants: "UTF8,UTF8BOM,UTF16LE,UTF16BE", fields: ""},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLError", variants: "", fields: "kind=Rec.__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReason,byte_offset=OptInt,line=OptInt,column=OptInt,path=Text,reason=Text"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLLexicalPolicy", variants: "PreserveValid,Deterministic", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLLimits", variants: "", fields: "max_depth=Int,max_nodes=Int,max_attributes_per_element=Int,max_name_bytes=Int,max_text_bytes=Int,max_entity_declarations=Int,max_entity_depth=Int,max_entity_replacement_bytes=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReason", variants: "InvalidEncoding,Malformed,MismatchedTag,InvalidName,Namespace,DuplicateAttribute,Entity,EntityCycle,Limit,Canonicalization,Shape,Unsupported", fields: ""},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLRenderOptions", variants: "", fields: "encoding=Rec.__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLEncoding,lexical=Rec.__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLLexicalPolicy"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dhttp_c_cBody", variants: "Empty,Text=Text,Bytes=List.Byte", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dhttp_c_cHeader", variants: "", fields: "name=Text,value=Text"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dhttp_c_cHeaders", variants: "", fields: "fields=List.Rec.__jet__x3ccorelib_x3e_score_dhttp_c_cHeader"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobError", variants: "", fields: "type_id=Text,reason=Text,detail=OptText"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobPayload", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobQueueClaim", variants: "", fields: "receipt=Rec.__jet__x3ccorelib_x3e_score_djobs_c_cJobQueueReceipt,payload=Rec.__jet__x3ccorelib_x3e_score_djobs_c_cJobPayload,worker=Text,lease_token=Text,lease_until_ms=Int"},
@@ -1369,20 +1351,7 @@ IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobQueueState", variants: "Queued,Running,Retrying,Completed,Failed,DeadLettered,Cancelled", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobQueueStatus", variants: "", fields: "queue=Text,authority=Text,queued=Int,running=Int,retrying=Int,completed=Int,failed=Int,dead_lettered=Int,cancelled=Int,depth=Int,wait_ms=Int,throughput=Int,capacity=Int,paused=Flag,freshness_ms=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_djobs_c_cJobResult", variants: "", fields: "type_id=Text,bytes=List.Byte,publish=Flag"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cCameraDelta", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cCameraPoint", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cComplex", variants: "", fields: "real=Float,imaginary=Float"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cDecimal", variants: "", fields: "negative=Flag,magnitude=Int,scale=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cDeviceDelta", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cDevicePoint", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cFraction", variants: "", fields: "num_value=Int,den_value=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cScreenDelta", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cScreenPoint", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cTransformError", variants: "", fields: "message=Text"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cViewDelta", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cViewPoint", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cWorldDelta", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
-    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmath_c_cWorldPoint", variants: "", fields: "x=Float,y=Float,frame_id=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dmod_c_cModError", variants: "Denied=Text,NotFound=Text,Invalid=Text,Unsupported=Text", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dnet_c_cSRVRecord", variants: "", fields: "target=Text,port=Int,priority=Int,weight=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dprocess_c_cProcessSignal", variants: "Hup,Int,Quit,Usr1,Usr2,Pipe,Alrm,Term,Chld,Cont,Tstp,Ttin,Ttou,Winch", fields: ""},
@@ -1555,7 +1524,7 @@ IRHandleField: struct { runtime: String, field: String, kind: String, header_byt
 IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_dsql_c_cJetSQLQuery", field: "__jet_source", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_input", kind: "Handle.JetFileReader", header_bytes: 0},
-    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", header_bytes: 0},
+    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_delimiter", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_header", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_skip_blank", kind: "Flag", header_bytes: 0},
@@ -1579,7 +1548,7 @@ IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_eof", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_char_width", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_output", kind: "Handle.JetFileWriter", header_bytes: 0},
-    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", header_bytes: 0},
+    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_total", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_record_index", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVWriter", field: "__jet_finished", kind: "Flag", header_bytes: 0},
@@ -1589,7 +1558,7 @@ IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLParseOptions", field: "__jet_entities", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLEntityPolicy", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLParseOptions", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLLimits", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReader", field: "__jet_input", kind: "Handle.JetFileReader", header_bytes: 0},
-    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReader", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", header_bytes: 0},
+    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReader", field: "__jet_limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReader", field: "__jet_total", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dxml_c_cXMLReader", field: "__jet_eof", kind: "Flag", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_djobs_c_cJobQueue", field: "__jet_authority", kind: "Text", header_bytes: 0},
@@ -1608,8 +1577,6 @@ IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dnet_durl_c_cURL", field: "__jet_raw", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dtesting_c_cFake", field: "__jet_locale_code", kind: "Handle.JetInt", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cZone", field: "__jet_name_value", kind: "Text", header_bytes: 0},
-    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cZonedDateTime", field: "__jet_instant", kind: "Handle.__jet__x3ccorelib_x3e_score_dtime_c_cDateTime", header_bytes: 0},
-    IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cZonedDateTime", field: "__jet_zone_value", kind: "Handle.__jet__x3ccorelib_x3e_score_dtime_c_cZone", header_bytes: 0},
     IRHandleField{runtime: "CBORWriter", field: "output", kind: "Handle.JetFileWriter", header_bytes: 0},
     IRHandleField{runtime: "CBORWriter", field: "limits", kind: "Handle.EncodingLimits", header_bytes: 0},
     IRHandleField{runtime: "CBORWriter", field: "root_written", kind: "Flag", header_bytes: 0},
@@ -1918,28 +1885,22 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
     assert_eq(unread, [String]{})
 }
 
-// #6760: every Core declaration's identity resolves to a runtime handle the
-// runtime exports whenever its bare spelling's is exported, each error and
-// record type alike (EncodingCause, EncodingError, XMLError, the math and
-// time handles).
+// Every Core declaration's identity whose bare spelling has a runtime handle
+// the runtime exports names an exported runtime handle in its own row, each
+// error and record type alike (EncodingCause, EncodingError, XMLError, the
+// math and time handles): no lookup stands in for the row.
 #Test("a Core identity's runtime handle is the runtime's exported one") {
     unexported := [String]{}
-    resolved := 0
     loop row in IR_RUNTIME_HANDLES {
         if !row.jet_name.starts_with("<corelib>/") -> next
         if !row.jet_name.contains("::") -> next
         parts: row.jet_name.split("::").to_list()
         bare: ir_core_bare_handle(row.jet_name, parts[parts.len() - 1]) ?? next
         if !ir_runtime_handle_exported(bare.runtime) -> next
-        handle: ir_runtime_handle(row.jet_name) ?? {
-            unexported.push(row.jet_name.copy())
-            next
-        }
-        if !ir_runtime_handle_exported(handle.runtime) -> unexported.push(row.jet_name.copy())
-        if handle.runtime != row.runtime -> resolved += 1
+        if !ir_runtime_handle_exported(row.runtime) -> unexported.push(row.jet_name.copy())
     }
     assert_eq(unexported, [String]{})
-    assert(resolved > 1)
+    cause: ir_runtime_handle("<corelib>/core.encoding::EncodingCause") ?? panic("EncodingCause lost its handle")
+    assert_eq(cause.runtime, "EncodingCause")
     assert(ir_runtime_exports("jet_rt_handle_drop_encoding_cause"))
-    assert(!ir_runtime_exports("jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dencoding_c_c_encoding_cause"))
 }

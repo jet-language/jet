@@ -563,11 +563,14 @@ ir_handle_runtime: fn(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
 // The task group handle is only ever the bare `Group` sema gives a
 // `task.group` binding; a Core struct spelled `Group` (core.data's carrier,
 // core.ui.xkb's key group) is its own declaration and lays out as itself.
+// Another Core identity of the same name on the bare row's runtime pins the
+// bare spelling to that declaration; identities of other names sharing the
+// runtime (the math frame points on JetCoord2) pin nothing.
 ir_core_bare_handle: fn(key: String, name: String) -> IRRuntimeHandle? Never! {
     bare: ir_runtime_handle(name) ?? return None
     if bare.runtime == "JetTaskGroup" -> return None
     loop index in 0..<IR_RUNTIME_HANDLES.len() {
-        pinned: IR_RUNTIME_HANDLES[index].jet_name.starts_with("<corelib>/") && IR_RUNTIME_HANDLES[index].jet_name != key
+        pinned: IR_RUNTIME_HANDLES[index].jet_name.starts_with("<corelib>/") && IR_RUNTIME_HANDLES[index].jet_name != key && IR_RUNTIME_HANDLES[index].jet_name.ends_with("::{name}")
         if pinned && IR_RUNTIME_HANDLES[index].runtime == bare.runtime -> return None
     }
     Val(bare)
@@ -4666,4 +4669,8 @@ ir_numeric_op_name: fn(operation: TNumericOp) -> String Never! {
     assert(ir_core_bare_handle("<corelib>/__core_crypto_jetc::Reader", "Reader") == None)
     reader: ir_core_bare_handle("<corelib>/core.term::Reader", "Reader") ?? panic("core.term's Reader lost its handle")
     assert_eq(reader.runtime, "JetReader")
+    // Identities of other names on the same runtime pin nothing: the frame
+    // points share JetCoord2 with the generic Point2.
+    point: ir_core_bare_handle("<corelib>/core.math::Point2", "Point2") ?? panic("core.math's Point2 lost its handle")
+    assert_eq(point.runtime, "JetCoord2")
 }
