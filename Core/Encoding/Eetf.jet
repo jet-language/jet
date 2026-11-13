@@ -7,7 +7,7 @@ use {
     stream: __core_encoding_stream
     json: core.encoding.json
     binary: core.encoding.binary
-    archive: core.archive
+    zlib: __core_encoding_zlib
     math: core.math
 }
 
@@ -203,7 +203,9 @@ read: fn(bytes: [U8], view: Bool, layout: TermLayout, strings: StringEncoding, l
         if bytes.len() < 6 -> return Err(etf_error(.Truncated, bytes.len(), "$", "a compressed term needs its four-byte inflated size"))
         size: u32_at(bytes, 2)
         if size > limits.max_item_bytes -> return Err(etf_error(.Limit, 2, "$", "max_item_bytes {limits.max_item_bytes} exceeded by a compressed term of {size} bytes"))
-        inflated: archive.decompress(slice(bytes, 6, bytes.len())) ?? return Err(etf_error(.Syntax, 6, "$", "the compressed term is not a valid zlib stream ({err})"))
+        inflated := [U8]{}
+        status: zlib.decompress_into(slice(bytes, 6, bytes.len()), inflated)
+        if status != zlib.C_INFLATE_OK -> return Err(etf_error(.Syntax, 6, "$", "the compressed term is not a valid zlib stream ({zlib.fault(status)})"))
         if inflated.len() != size {
             return Err(etf_error(.Syntax, 2, "$", "the compressed term declares {size} inflated bytes but inflates to {inflated.len()}"))
         }
