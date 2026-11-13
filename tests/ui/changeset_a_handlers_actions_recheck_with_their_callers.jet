@@ -1,0 +1,39 @@
+// @programmable_build
+// @cli_build
+// A handler's actions are checked together with the callers they affect. The
+// handler adds `extra` and rewrites `load` to call it, and `run`, written by
+// hand, calls `extra` too. Neither the rewrite nor `run` checks without the
+// added function, so the build checks the handler's actions and their callers
+// as one change.
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#Traced
+load: fn() -> Int { 1 }
+
+install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra")
+                meta.rewrite_body(f, #code {
+                    added: extra()
+                    print("added {added}")
+                    #{f.body}
+                })
+            }
+        },
+    )
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["changeset_a_handlers_actions_recheck_with_their_callers.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(load() + extra()) }

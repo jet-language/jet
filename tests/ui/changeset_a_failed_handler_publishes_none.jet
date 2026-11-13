@@ -1,0 +1,42 @@
+// @programmable_build
+// @cli_build
+// A failed handler publishes none of its actions. The handler adds `broken`,
+// whose body fails its check, then hands `meta.add` code the build refuses.
+// The handler fails, so `broken` is never published or checked: the refusal
+// is the build's one problem.
+Traced: struct {
+    impl Marker {
+        sites: [.Function]
+    }
+}
+
+#Traced
+load: fn() -> Int { 1 }
+
+install: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Traced{}},
+        (event) -> {
+            if event == .Checked(.Function(f)) {
+                meta.add(#code { broken: fn() -> Int { "not an Int" } }, scope: "broken")
+                refused: #code {
+                    refused_count: fn() -> Int {
+                        #Unsafe("generated") {
+                            print("added")
+                        }
+                        1
+                    }
+                }
+                meta.add(refused, scope: "refused")
+            }
+        },
+    )
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["changeset_a_failed_handler_publishes_none.jet"], [])
+    install(b.compiler(app))
+    b.default(app)
+}
+
+run: fn() { print(load()) }
