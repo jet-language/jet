@@ -852,11 +852,14 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler240: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler256: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
-// blocked208 monitorArmed216 monitor224 sizedPools232.
+// blocked208 monitorArmed216 monitor224 sizedPools232 liveLock240
+// liveTasks248.
+// liveTasks heads the list of every task state not yet freed, under its own
+// mutex liveLock (Task.jet task_live_link), not the thread lock.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
 // The FIFO holds submitted task states (linked through their reserved word
 // @88); ready holds fibers to resume (Fiber.jet). live counts tasks taken and
@@ -892,7 +895,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // finds no idle carrier; monitor is its thread handle (0: not started, -1:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
-SCHEDULER_ROOT_BYTES: I64{240}
+SCHEDULER_ROOT_BYTES: I64{256}
 SCHEDULER_CARRIER_BYTES: I64{64}
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
 SCHEDULER_STAT_BYTES: I64{512}
@@ -1536,22 +1539,6 @@ scheduler_idle: fn() -> Bool {
 #Export(c) jet_scheduler_drain_after_exit: fn() {
     loop {
         if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
-        fiber_spin_yield()
-    }
-}
-
-// The drain after a parked-task report (E3013), which ends the process: the
-// tasks it cancelled unwind, but one it could not reach (a task past the
-// registry's cap, Observe.jet OBSERVE_TASK_CAP) stays parked, so this returns
-// once nothing is queued, ready or running and every live task is parked.
-// The parked count lags a commit and leads a wake, so it only ever reads low.
-scheduler_settle_after_report: fn() {
-    root: scheduler_root_required()
-    loop {
-        sync_thread_lock(root)
-        settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
-        sync_thread_unlock(root)
-        if settled && jet_rt_observe_io_quiescent() -> return
         fiber_spin_yield()
     }
 }

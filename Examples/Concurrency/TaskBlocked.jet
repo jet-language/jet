@@ -1,8 +1,8 @@
-// A detached child parked on a full channel
-// is named at the shared process-exit boundary.
+// A detached child blocked on a full channel when run returns
+// is cancelled at its send, and the process exits 0.
 package: {
     name: "task_blocked"
-    authority: { allow: [Time.Wait] }
+    authority: { allow: [IO, Time.Wait] }
 }
 
 use tasks: core.tasks
@@ -16,4 +16,5 @@ run: fn() {
     }
     blocked.detach()
     tasks.yield_now()
+    print("leaving")
 }

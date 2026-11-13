@@ -1,8 +1,12 @@
-// #6185: one test fails an assert and another leaves a detached task parked on
-// a full channel, so the test process dies at exit (E3013) after every outcome
-// has streamed. The run still reports each test, and the tests after either
-// culprit run and pass.
-use tasks: core.tasks
+// One test fails an assert and another registers an exit handler that
+// panics, so its test process dies at exit after every outcome has
+// streamed. A third leaves a detached task parked on a full channel, which
+// the exit cancels, so it passes. The run still reports each test, and the
+// tests after either culprit run and pass.
+use {
+    os: core.sys
+    tasks: core.tasks
+}
 
 #Test("before the failures") { assert(true) }
 
@@ -19,6 +23,12 @@ use tasks: core.tasks
     }
     blocked.detach()
     tasks.yield_now()
+}
+
+#Test("fails at exit") {
+    #Unsafe("the exit callback has no captured state") {
+        os.atexit(fn() { panic("exit handler fails") })
+    }
 }
 
 #Test("after the failures") { assert(true) }

@@ -7329,21 +7329,14 @@ StackOverflow: struct {
     }
 }
 
-ParkedTasksAtExit: struct {
-    msg: String
-
+RetiredParkedTasksAtExit: struct {
     impl Diagnostic {
         code: "E3013"
-        safety_class: .Soundness
-        safety_reason: "Tasks still blocked at exit never finish, so their work and resources are lost."
-        expert_path: "none: every task is woken or joined before exit"
-        stage: [.Runtime]
-        meaning: "A task remained parked at the process exit boundary"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "Parked tasks remain at process exit: {self.msg}" }
-        why: fn(self) -> String { "The scheduler reached process exit while one or more tasks were blocked on a wait target." }
-        fix: fn(self) -> String { "Join each task or make its wait reachable before process exit." }
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: parked tasks remain at process exit)" }
+        why: fn(self) -> String { "When run returns, the runtime cancels every live task, lets them unwind for up to 1 s, then exits with run's status" }
+        fix: fn(self) -> String { "Do not use E3013" }
     }
 }
 

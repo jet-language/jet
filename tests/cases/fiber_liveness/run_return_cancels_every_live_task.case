@@ -1,0 +1,33 @@
+# When run returns, the runtime cancels every live task and lets them run
+# until none is queued, ready or running, or 1 s has passed, then exits with
+# run's status. A waiting task unwinds at its wait and runs its cleanup; a
+# busy task that reaches no wait point is abandoned after the second. Same
+# outcome at O0, O1 and O2; no parked-task report remains.
+fixture: run_return_cancels_every_live_task.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step wait0: jet run --optimize=none waiting.jet
+exit: 0
+stdout: = "run returns\nwaiter cleaned up\n"
+stderr: !~ "Stop [" # O0: the cancelled waiter is no stop
+step wait1: jet run --optimize=basic waiting.jet
+exit: 0
+stdout: = "run returns\nwaiter cleaned up\n"
+stderr: !~ "Stop [" # O1: the cancelled waiter is no stop
+step wait2: jet run --optimize=full waiting.jet
+exit: 0
+stdout: = "run returns\nwaiter cleaned up\n"
+stderr: !~ "Stop [" # O2: the cancelled waiter is no stop
+step busy0: jet run --optimize=none busy.jet
+exit: 0
+stdout: = "run returns\n"
+stderr: !~ "Stop [" # O0: the abandoned spinner is no stop
+step busy1: jet run --optimize=basic busy.jet
+exit: 0
+stdout: = "run returns\n"
+stderr: !~ "Stop [" # O1: the abandoned spinner is no stop
+step busy2: jet run --optimize=full busy.jet
+exit: 0
+stdout: = "run returns\n"
+stderr: !~ "Stop [" # O2: the abandoned spinner is no stop

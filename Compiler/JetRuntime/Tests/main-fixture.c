@@ -22,11 +22,6 @@ extern _Bool jet_rt_observe_has_parked_tasks(void);
 extern void jet_rt_process_exit_begin(int64_t), jet_rt_process_exit_finish(void);
 extern void jet_std_process_exit(int64_t);
 extern void jet_rt_panic_division_by_zero(void);
-extern void jet_rt_observe_runtime_start_from_env(void);
-extern int64_t jet_rt_control_new(void), jet_rt_observe_task_register(int64_t, int64_t, int64_t);
-extern void jet_rt_scheduler_control_drop(int64_t), jet_rt_observe_task_enter(int64_t);
-extern void jet_rt_observe_task_wait(int64_t, int64_t, int64_t, int64_t), jet_rt_observe_task_finish(int64_t);
-extern int64_t jet_rt_observe_parked_tasks_report(int64_t, int64_t);
 static const char *mode;
 static unsigned entries;
 static _Atomic unsigned ready;
@@ -80,33 +75,6 @@ static int64_t fatal_worker(int64_t env, int64_t out) {
     assert(0);
     return 0;
 }
-static void observe_cycles(int enabled) {
-    /* The Rust original returned for disabled/invalid identity and
-       reset EXIT_REPORTED on accepted starts; its report swapped true.
-       Jet ObserveLive:582-635/710-712 already has the same accepted reset.
-       These are real API cycles, not two parked Main returns (first exits70). */
-    for (unsigned cycle = 0; cycle != 2; ++cycle) {
-        jet_rt_observe_runtime_start_from_env();
-        int64_t control = jet_rt_control_new(), label = jet_rt_string_from_static(word("restart-child"), 13);
-        int64_t wait = jet_rt_string_from_static(word("channel receive"), 15);
-        int64_t id = jet_rt_observe_task_register(control, 41, label);
-        jet_rt_observe_task_enter(id);
-        jet_rt_observe_task_wait(2, wait, 0, 0);
-        int64_t rendered = 0x1234, status = 0x5678;
-        int64_t present = jet_rt_observe_parked_tasks_report(word(&rendered), word(&status));
-        assert(present == (enabled || cycle == 0));
-        if (present) {
-            assert(status == 70);
-            int64_t error = 0, zero = 0;
-            jet_stdio_stderr_write_raw(rendered, 0, word(&error), word(&zero));
-            assert(error == 0 && zero == 0);
-            jet_rt_string_drop(rendered);
-        } else assert(rendered == 0x1234 && status == 0x5678);
-        jet_rt_observe_task_finish(id);
-        jet_rt_scheduler_control_drop(control);
-        jet_rt_string_drop(label); jet_rt_string_drop(wait);
-    }
-}
 static void entry(void) {
     ++entries;
     text("entry", 0); /* No LF: normal return must actually flush the buffer. */
@@ -114,8 +82,6 @@ static void entry(void) {
     if (strcmp(mode, "flush") == 0) text("error", 1);
     if (strcmp(mode, "explicit") == 0) jet_std_process_exit(73); /* never returns */
     if (strcmp(mode, "second-fatal") == 0 && entries == 2) jet_rt_panic_division_by_zero();
-    if (strcmp(mode, "observe-enabled") == 0) observe_cycles(1);
-    if (strcmp(mode, "observe-disabled") == 0) observe_cycles(0);
     if (strcmp(mode, "worker-fatal") == 0 || strcmp(mode, "concurrent-fatal") == 0) {
         spawn(0, fatal_worker); spawn(1, fatal_worker);
         for (;;) sched_yield(); /* main never wins a normal-return claim */
@@ -129,7 +95,8 @@ static void entry(void) {
         int64_t child = jet_rt_native_task_spawn(23, label, rx, word(blocked_body), word(blocked_drop), word(meta));
         jet_rt_string_drop(label);
         jet_rt_native_task_detach(child);
-        /* Observe the actual child wait, never manufacture a registry state. */
+        /* Observe the actual child wait, never manufacture a registry state.
+           The normal return cancels it, and it unwinds before the exit. */
         while (!jet_rt_observe_has_parked_tasks()) sched_yield();
         (void)tx;
     }
@@ -139,11 +106,9 @@ int main(int argc, char **argv, char **envp) {
     mode = argv[1];
     assert(strcmp(mode, "normal") == 0 || strcmp(mode, "flush") == 0 || strcmp(mode, "parked") == 0 ||
            strcmp(mode, "explicit") == 0 || strcmp(mode, "worker-fatal") == 0 || strcmp(mode, "concurrent-fatal") == 0 ||
-           strcmp(mode, "twice") == 0 || strcmp(mode, "second-fatal") == 0 ||
-           strcmp(mode, "observe-enabled") == 0 || strcmp(mode, "observe-disabled") == 0);
+           strcmp(mode, "twice") == 0 || strcmp(mode, "second-fatal") == 0);
     jet_rt_host_arguments(argc, word(argv), word(envp));
     int32_t code = jet_rt_main(entry);
-    assert(strcmp(mode, "parked") != 0); /* parked edge must exit, not return */
     assert(code == 0);
     if (strcmp(mode, "twice") == 0 || strcmp(mode, "second-fatal") == 0) {
         assert(jet_rt_main(entry) == 0);

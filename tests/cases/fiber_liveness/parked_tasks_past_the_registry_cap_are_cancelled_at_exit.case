@@ -1,0 +1,30 @@
+# 5000 detached tasks stay parked when run returns. The task registry holds
+# 4096, but the exit cancels every live task, not only the registered ones:
+# all 5000 unwind at their waits and the process exits 0 rather than hanging
+# or reporting. Same output on jet run and at O0, O1 and O2.
+fixture: fixtures/cap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step run: jet run main.jet
+exit: 0
+stdout: = "leaving with 5000 parked\n"
+stderr: !~ "Stop [" # jet run: no parked-task report
+step build0: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+exit: 0
+stdout: = "leaving with 5000 parked\n"
+stderr: !~ "Stop [" # O0: no parked-task report
+step build1: jet build --optimize=basic main.jet
+exit: 0
+step o1: built
+exit: 0
+stdout: = "leaving with 5000 parked\n"
+stderr: !~ "Stop [" # O1: no parked-task report
+step build2: jet build --release main.jet
+exit: 0
+step o2: built
+exit: 0
+stdout: = "leaving with 5000 parked\n"
+stderr: !~ "Stop [" # O2: no parked-task report

@@ -40,7 +40,8 @@ extern void jet_rt_sync_fixture_condition_fifo(W), jet_rt_sync_fixture_set_revis
 extern W jet_rt_sync_fixture_cell_word(W,W);
 extern W jet_rt_string_data(W), jet_rt_string_byte_len(W), jet_rt_string_from_static(W,W);
 extern void jet_rt_string_drop(W);
-extern W jet_rt_observe_parked_tasks_report(W,W), jet_rt_sync_fixture_observe_park(W,W,W,W);
+extern W jet_rt_observe_exit(W), jet_rt_sync_fixture_observe_park(W,W,W,W);
+extern _Bool jet_rt_observe_has_parked_tasks(void);
 extern void jet_rt_observe_task_finish(W), jet_rt_sync_fixture_observe_reset(void);
 static _Atomic unsigned clones, drops, fail_clone;
 static W clone_word(W input, W output) {
@@ -263,19 +264,19 @@ static void condition_tests(void) {
 #endif
 #ifdef JET_OBSERVE_FIXTURE
 static W text(const char *s) { return jet_rt_string_from_static((W)s,strlen(s)); }
-static void observe_report(void) {
-    W rendered=0x1234,status=0x5678; jet_rt_sync_fixture_observe_reset();
-    assert(jet_rt_observe_parked_tasks_report((W)&rendered,(W)&status)==0);
-    assert(rendered==0x1234 && status==0x5678);
+static void observe_parked(void) {
+    jet_rt_sync_fixture_observe_reset();
+    assert(!jet_rt_observe_has_parked_tasks());
     W control=jet_rt_control_new(),label=text("kid\"\\\n"),wait=text("channel recv");
-    W id=jet_rt_sync_fixture_observe_park(control,7,label,wait); jet_rt_sync_fixture_observe_reset();
-    assert(jet_rt_observe_parked_tasks_report((W)&rendered,(W)&status)==1 && status==70);
-    text_is(rendered,"Stop [E3013]: Parked tasks remain at process exit: \n  kid\\\"\\\\  (spawn site 7)\n    state: blocked\n    wait target: channel recv\n Why: The scheduler reached process exit while one or more tasks were blocked on a wait target.\n Fix: Join each task or make its wait reachable before process exit.\nMore: jet-lang.dev/e/E3013\n");
-    jet_rt_string_drop(rendered); rendered=0x1234; status=0x5678;
-    assert(jet_rt_observe_parked_tasks_report((W)&rendered,(W)&status)==0);
-    assert(rendered==0x1234 && status==0x5678);
-    jet_rt_observe_task_finish(id); jet_rt_string_drop(label); jet_rt_string_drop(wait); jet_rt_scheduler_control_drop(control);
-    puts("Observe empty/parked exact report/owned once ok");
+    W id=jet_rt_sync_fixture_observe_park(control,7,label,wait);
+    assert(jet_rt_observe_has_parked_tasks());
+    // The exit publication runs once and leaves the registry to the tasks.
+    assert(jet_rt_observe_exit(0)==0 && jet_rt_observe_exit(0)==0);
+    assert(jet_rt_observe_has_parked_tasks());
+    jet_rt_observe_task_finish(id);
+    assert(!jet_rt_observe_has_parked_tasks());
+    jet_rt_string_drop(label); jet_rt_string_drop(wait); jet_rt_scheduler_control_drop(control);
+    puts("Observe parked/exit publication/owned once ok");
 }
 #endif
 int main(void) {
@@ -285,7 +286,7 @@ int main(void) {
     condition_tests();
 #endif
 #ifdef JET_OBSERVE_FIXTURE
-    observe_report();
+    observe_parked();
 #endif
     jet_rt_thread_detach(); return 0;
 }

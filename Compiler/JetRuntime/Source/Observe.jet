@@ -197,13 +197,13 @@ observe_task_node_drop: fn(node: I64) {
     jet_rt_free(node, OBSERVE_TASK_BYTES, I64{8})
 }
 
-// The parked-task report as the process exit's last step (Main.jet
-// main_parked_report_code): only a program with an observed task or an
-// observe writer can have anything to report.
-observe_exit_report_install: fn() {
-    if (main_parked_report_code == I64{0}) -> main_parked_report_install(rt_observe_parked_tasks_report_address())
+// The observe writer's last publication as a process exit step (Main.jet
+// main_observe_exit_code): only a program with an observed task or an
+// observe writer has anything to publish.
+observe_exit_install: fn() {
+    if (main_observe_exit_code == I64{0}) -> main_observe_exit_install(rt_observe_exit_address())
 }
-rt_observe_parked_tasks_report_address: fn() -> I64 {
+rt_observe_exit_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
@@ -217,7 +217,7 @@ observe_task_linked := I64{0}
     #Unsafe("an idempotent flag: every writer stores the same 1") {
         observe_task_linked = I64{1}
     }
-    observe_exit_report_install()
+    observe_exit_install()
     parent: observe_current_task()
     id: sync_add(wrapping(observe_root + I64{8}), I64{1})
     sync_mutex_lock(observe_root)
@@ -338,126 +338,6 @@ observe_task_linked := I64{0}
     false
 }
 
-// IDs are usize in the reference; comparing their signed storage would put
-// high-bit IDs before low IDs. Heap-sort the borrowed pointers under the lock.
-observe_task_later: fn(left: I64, right: I64) -> Bool {
-    a: sync_load(wrapping(left + I64{8}))
-    b: sync_load(wrapping(right + I64{8}))
-    if (a < I64{0}) != (b < I64{0}) -> return a < I64{0}
-    a > b
-}
-
-observe_task_sift: fn(array: I64, count: I64, root: I64) {
-    at := root
-    loop at < count /% (I64{2}) {
-        child := at * I64{2} + I64{1}
-        if child + (I64{1}) < count && observe_task_later(sync_load(wrapping(array + (child + I64{1}) * I64{8})), sync_load(wrapping(array + child * I64{8}))) -> child += I64{1}
-        value: sync_load(wrapping(array + at * I64{8}))
-        other: sync_load(wrapping(array + child * I64{8}))
-        if !observe_task_later(other, value) -> return
-        sync_store(wrapping(array + at * I64{8}), other)
-        sync_store(wrapping(array + child * I64{8}), value)
-        at = child
-    }
-}
-
-observe_parked_details: fn(details: I64) -> I64 {
-    sync_mutex_lock(observe_root)
-    count := I64{0}
-    node := sync_load(wrapping(observe_root + I64{24}))
-    loop node != (I64{0}) {
-        if sync_load(wrapping(node + I64{40})) == (I64{2}) -> count += I64{1}
-        node = sync_load(node)
-    }
-    if count == (I64{0}) {
-        sync_mutex_unlock(observe_root)
-        return I64{0}
-    }
-    array: jet_rt_alloc(count * I64{8}, I64{8})
-    at := I64{0}
-    node = sync_load(wrapping(observe_root + I64{24}))
-    loop node != (I64{0}) {
-        if sync_load(wrapping(node + I64{40})) == (I64{2}) {
-            sync_store(wrapping(array + at * I64{8}), node)
-            at += I64{1}
-        }
-        node = sync_load(node)
-    }
-    at = count /% I64{2}
-    loop at > (I64{0}) {
-        at -= I64{1}
-        observe_task_sift(array, count, at)
-    }
-    at = count
-    loop at > (I64{1}) {
-        at -= I64{1}
-        first: sync_load(array)
-        sync_store(array, sync_load(wrapping(array + at * I64{8})))
-        sync_store(wrapping(array + at * I64{8}), first)
-        observe_task_sift(array, at, I64{0})
-    }
-    entry: jet_rt_string_builder_new()
-    omitted := I64{0}
-    at = I64{0}
-    loop at < count {
-        node = sync_load(wrapping(array + at * I64{8}))
-        // Reuse the owned entry allocation; the bounded exit path does not
-        // clone task strings or allocate a fresh entry for each parked task.
-        rt_text_store(wrapping(entry + I64{8}), I64{0})
-        observe_msg_entry(entry)
-        observe_escape(entry, sync_load(wrapping(node + I64{32})))
-        observe_msg_report_site(entry)
-        observe_decimal_unsigned(entry, sync_load(wrapping(node + I64{24})))
-        observe_msg_report_state(entry)
-        observe_msg_blocked(entry)
-        observe_msg_report_wait(entry)
-        wait: sync_load(wrapping(node + I64{48}))
-        if wait == (I64{0}) || rt_text_len(wait) == (I64{0}) -> observe_msg_unknown(entry) else -> observe_escape(entry, wait)
-        if {
-            rt_text_len(details) + rt_text_len(entry) > (I64{65408}) -> omitted += I64{1}
-            else -> rt_text_append(details, rt_text_data(entry), rt_text_len(entry))
-        }
-        at += I64{1}
-    }
-    sync_mutex_unlock(observe_root)
-    jet_rt_free(array, count * I64{8}, I64{8})
-    jet_rt_string_drop(entry)
-    if omitted != (I64{0}) {
-        observe_msg_omitted_head(details)
-        observe_decimal_unsigned(details, omitted)
-        observe_msg_omitted_tail(details)
-    }
-    count
-}
-
-// Parked tasks with no cancellation requested. A parked task whose cancel is
-// already requested has been woken to unwind, so it is not yet a leaked wait.
-observe_parked_unsettled: fn() -> I64 {
-    sync_mutex_lock(observe_root)
-    count := I64{0}
-    node := sync_load(wrapping(observe_root + I64{24}))
-    loop node != (I64{0}) {
-        if sync_load(wrapping(node + I64{40})) == (I64{2}) && sync_load(wrapping(node + I64{72})) == (I64{0}) -> count += I64{1}
-        node = sync_load(node)
-    }
-    sync_mutex_unlock(observe_root)
-    count
-}
-
-observe_has_live_child: fn() -> Bool {
-    sync_mutex_lock(observe_root)
-    node := sync_load(wrapping(observe_root + I64{24}))
-    loop node != (I64{0}) {
-        if sync_load(wrapping(node + I64{8})) != (I64{1}) {
-            sync_mutex_unlock(observe_root)
-            return true
-        }
-        node = sync_load(node)
-    }
-    sync_mutex_unlock(observe_root)
-    false
-}
-
 observe_cancel_live_tasks: fn() {
     sync_mutex_lock(observe_root)
     capacity: sync_load(wrapping(observe_root + I64{32}))
@@ -489,38 +369,12 @@ observe_cancel_live_tasks: fn() {
     jet_rt_free(controls, capacity * I64{8}, I64{8})
 }
 
-// Presence0 leaves both distinct writable eight-byte outputs uninitialized.
-// Presence1 transfers one E4 String owner and the registered stop status70.
-#Export(c) jet_rt_observe_parked_tasks_report: fn(rendered_out: I64, exit_code_out: I64) -> I64 {
+// Publishes the writer's exit snapshot, once per process run.
+#Export(c) jet_rt_observe_exit: fn(_unused: I64) -> I64 {
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()
-    // The window lets a just-submitted child publish its first wait and a
-    // cancelled one finish unwinding; any task still parked after it is
-    // reported, cancelled or not.
-    attempt := I64{0}
-    loop observe_parked_unsettled() == (I64{0}) && attempt < (I64{25}) {
-        if !observe_has_live_child() -> return I64{0}
-        // OS observation delay, not a scheduler wait: it must not alter the
-        // exiting task's wait state or deliver its pending cancellation.
-        _ := sync_wait(observe_root + I64{64}, I64{1}, sync_deadline(I64{1000000}))
-        attempt += I64{1}
-    }
-    details: jet_rt_string_builder_new()
-    count: observe_parked_details(details)
-    observe_cancel_live_tasks()
-    if count == (I64{0}) {
-        jet_rt_string_drop(details)
-        return I64{0}
-    }
-    report: jet_rt_string_builder_new()
-    observe_msg_report_head(report)
-    rt_text_append(report, rt_text_data(details), rt_text_len(details))
-    observe_msg_report_tail(report)
-    jet_rt_string_drop(details)
-    sync_store(rendered_out, report)
-    sync_store(exit_code_out, EXIT_RUNTIME_PANIC)
-    I64{1}
+    I64{0}
 }
 
 #Export(c) jet_rt_observe_pool: fn(workers: I64, queued_delta: I64) {

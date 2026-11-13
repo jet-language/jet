@@ -1,8 +1,7 @@
 // 5000 detached tasks park in a receive that never comes (each holds a
 // sender, so the channel never closes) and the program returns. The task
-// registry holds at most 4096 tasks, so the exit report (E3013) counts
-// exactly 4096 parked tasks: those it lists within its byte limit plus the
-// omitted rest. The tasks past the cap run unobserved.
+// registry holds at most 4096 tasks; the exit's cancel reaches all 5000,
+// those past the cap too, so every one unwinds and the process exits 0.
 package: {
     name: "observe_cap"
     authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }

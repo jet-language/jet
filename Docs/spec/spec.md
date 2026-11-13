@@ -3737,6 +3737,14 @@ the same way: at the next wait point or check, as E3003, so a handler busy in
 a loop stops at its deadline. A task or root that has set a deadline reads
 the clock at each check.
 
+When `run` returns, the runtime cancels every live task, however many there
+are, and keeps running them until none is queued, ready or running, or until
+1 s of monotonic time has passed; the process then exits with `run`'s status.
+A task waiting at that point unwinds at its wait and runs its cleanup. A task
+that reaches no wait point within the second is abandoned, and the process
+exits around it. Leaving tasks parked at exit is not an error. An explicit
+`process.exit` or a fatal stop neither cancels nor waits (D-EXIT-TASKS1=A).
+
 `#Shield { ... }` defers cancellation or a blown deadline until the lexical
 critical section exits. It takes no arguments, nests, and always restores its
 state through an RAII guard on return, error propagation, or unwinding. An

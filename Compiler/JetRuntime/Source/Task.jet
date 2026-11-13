@@ -2,12 +2,14 @@
 // refs0 control8 mutex16 done24 stopKind32 ownedMeta40 resultSlot48 initialized56
 // env64 invoke72 release80 queueNext88 stack96 completionPark104
 // completionLo112/Hi120 identity128 group136 permit144 taken152 inlineSlot160..183
-// typedDeadline184 ownedWorld192, then the task's Context record (Context.jet)
-// at TASK_CONTEXT. Result initializes only after Propagate == 0. stack is the
-// stack size of the fiber the task runs on (Fiber.jet fiber_stack_class; 0,
-// the default size): its group's, else the starting task's. queueNext88 holds
-// TASK_DEFERRED until a deferred task is claimed (task_claim).
-TASK_CONTEXT: I64{200}
+// typedDeadline184 ownedWorld192 liveNext200 livePrev208, then the task's
+// Context record (Context.jet) at TASK_CONTEXT. Result initializes only after
+// Propagate == 0. stack is the stack size of the fiber the task runs on
+// (Fiber.jet fiber_stack_class; 0, the default size): its group's, else the
+// starting task's. liveNext/livePrev link the state into the live tasks
+// (task_live_link) from task_state_new until its last ref drops. queueNext88
+// holds TASK_DEFERRED until a deferred task is claimed (task_claim).
+TASK_CONTEXT: I64{216}
 // A grouped task its handle's join follows at once
 // (jet_rt_native_group_spawn_joined) is not submitted: the join runs it on
 // the joining thread (task_run_joined), so a program whose only task is so
@@ -133,6 +135,7 @@ task_retain: fn(child: I64) { _ := sync_add(child, I64{1}) }
 task_drop: fn(child: I64) {
     if (child == I64{0}) -> return
     if (sync_add(child, I64{-1}) != I64{1}) -> return
+    task_live_unlink(child)
     meta: sync_load(wrapping(child + I64{40}))
     slot: sync_load(wrapping(child + I64{48}))
     if (sync_load(wrapping(child + I64{56})) != I64{0}) -> coll_slot_drop(slot, meta)
@@ -189,6 +192,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(control + I64{56}), id)
     sync_store(wrapping(child + I64{128}), jet_rt_observe_task_identity(id))
     if (group != I64{0}) -> task_group_register(group, child)
+    task_live_link(child)
     world: world_current()
     if (world != I64{0}) {
         sync_store(wrapping(child + I64{192}), jet_rt_world_clone(world))
@@ -644,4 +648,115 @@ rt_task_exit_run_address: fn() -> I64 {
 #Export(c) jet_rt_task_exit_run: fn(_unused: I64) -> I64 {
     jet_rt_task_exit_handlers()
     I64{0}
+}
+
+// The live tasks: every task state from task_state_new until its last ref
+// drops, linked through its liveNext200/livePrev208 from the scheduler
+// root's liveTasks248 under its liveLock240 (Scheduler.jet). The exit's
+// cancel walks it, so it reaches every task; the observe registry holds at
+// most OBSERVE_TASK_CAP of them. The first link installs that cancel as the
+// process exit's task step (Main.jet main_exit_tasks_code), so a program
+// that starts no task links none.
+task_live_link: fn(child: I64) {
+    main_exit_tasks_install(rt_task_exit_settle_address())
+    root: scheduler_root_required()
+    sync_mutex_lock(wrapping(root + I64{240}))
+    head: sync_load(wrapping(root + I64{248}))
+    sync_store(wrapping(child + I64{200}), head)
+    if (head != I64{0}) -> sync_store(wrapping(head + I64{208}), child)
+    sync_store(wrapping(root + I64{248}), child)
+    sync_mutex_unlock(wrapping(root + I64{240}))
+}
+
+task_live_unlink: fn(child: I64) {
+    root: scheduler_root_required()
+    sync_mutex_lock(wrapping(root + I64{240}))
+    next: sync_load(wrapping(child + I64{200}))
+    previous: sync_load(wrapping(child + I64{208}))
+    if (previous == I64{0}) -> sync_store(wrapping(root + I64{248}), next) else -> sync_store(wrapping(previous + I64{200}), next)
+    if (next != I64{0}) -> sync_store(wrapping(next + I64{208}), previous)
+    sync_mutex_unlock(wrapping(root + I64{240}))
+}
+
+// Whether a live task still owes its cancel: it has not finished and
+// nothing has cancelled it.
+task_live_uncancelled: fn(child: I64) -> Bool {
+    sync_load(wrapping(child + I64{24})) == I64{0} && sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{16})) == I64{0}
+}
+
+// Cancels every live task that owes its cancel. The controls are taken
+// under the lock and cancelled outside it, since a cancel runs callbacks
+// that can start or drop tasks.
+task_live_cancel: fn(root: I64) {
+    sync_mutex_lock(wrapping(root + I64{240}))
+    capacity := I64{0}
+    node := sync_load(wrapping(root + I64{248}))
+    loop node != (I64{0}) {
+        if task_live_uncancelled(node) -> capacity += I64{1}
+        node = sync_load(wrapping(node + I64{200}))
+    }
+    sync_mutex_unlock(wrapping(root + I64{240}))
+    if (capacity == I64{0}) -> return
+    controls: jet_rt_alloc(capacity * I64{8}, I64{8})
+    count := I64{0}
+    sync_mutex_lock(wrapping(root + I64{240}))
+    node = sync_load(wrapping(root + I64{248}))
+    loop node != (I64{0}) && count < capacity {
+        if task_live_uncancelled(node) {
+            control: sync_load(wrapping(node + I64{8}))
+            scheduler_control_retain(control)
+            sync_store(wrapping(controls + count * I64{8}), control)
+            count += I64{1}
+        }
+        node = sync_load(wrapping(node + I64{200}))
+    }
+    sync_mutex_unlock(wrapping(root + I64{240}))
+    at := I64{0}
+    loop at < count {
+        control: sync_load(wrapping(controls + at * I64{8}))
+        scheduler_control_cancel(control)
+        scheduler_control_drop(control)
+        at += I64{1}
+    }
+    jet_rt_free(controls, capacity * I64{8}, I64{8})
+}
+
+// The live tasks that have not finished.
+task_live_unfinished: fn(root: I64) -> I64 {
+    sync_mutex_lock(wrapping(root + I64{240}))
+    count := I64{0}
+    node := sync_load(wrapping(root + I64{248}))
+    loop node != (I64{0}) {
+        if (sync_load(wrapping(node + I64{24})) == I64{0}) -> count += I64{1}
+        node = sync_load(wrapping(node + I64{200}))
+    }
+    sync_mutex_unlock(wrapping(root + I64{240}))
+    count
+}
+
+// How long the exit waits for cancelled tasks to unwind: 1 s.
+TASK_EXIT_DRAIN_NS: I64{1000000000}
+
+// The process exit's task step when run returns (Main.jet jet_rt_main):
+// cancel every live task, then let them run until none is queued, ready or
+// running, or TASK_EXIT_DRAIN_NS of monotonic time has passed. A waiting
+// task unwinds at its wait and runs its cleanup; one that reaches no wait
+// point in that time is abandoned. A task started meanwhile is cancelled on
+// the next pass. Returns how many tasks have not finished.
+#Export(c) jet_rt_task_exit_settle: fn(_unused: I64) -> I64 {
+    root: scheduler_root_required()
+    deadline: time_host_monotonic_i64() + TASK_EXIT_DRAIN_NS
+    loop {
+        task_live_cancel(root)
+        sync_thread_lock(root)
+        settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
+        sync_thread_unlock(root)
+        if (settled && jet_rt_observe_io_quiescent()) || time_host_monotonic_i64() >= deadline -> break
+        fiber_spin_yield()
+    }
+    task_live_unfinished(root)
+}
+// RuntimeLower resolves this checked address through its sole intrinsic table.
+rt_task_exit_settle_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }

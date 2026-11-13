@@ -1,0 +1,24 @@
+// A detached task spins without ever reaching a wait point when run
+// returns. The exit cancels it, waits 1 s for it to unwind, then exits 0
+// around it rather than hanging.
+package: {
+    name: "exit_busy"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use time: core.time
+
+spin: fn(start: Int) -> Int {
+    count := start
+    loop count >= 0 {
+        count = if count > 1000 -> 0 else -> count + 1
+    }
+    count
+}
+
+run: fn() {
+    busy: task spin(0)
+    busy.detach()
+    time.sleep(100ms)
+    print("run returns")
+}

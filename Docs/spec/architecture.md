@@ -1276,17 +1276,20 @@ arbitrary task and channel wait cycles. The M:N scheduler parks tasks at
 `channel` waits; `task` and `task.group` handles define join duties. These
 mechanisms do not detect arbitrary wait cycles.
 
-At the process-exit boundary, the observe registry emits the registered E3013
-runtime diagnostic when tasks remain parked. A parked task whose cancellation
-is already requested is unwinding, so it gets the same short exit window as a
-child that has yet to publish its first wait; it is reported only if it is
-still parked after that window. The report is bounded by both task
-cardinality and rendered bytes; each row carries the task identity, state, wait
-target, and compiler spawn site, while channel payloads and task locals stay
-outside the report. A direct named task call uses that function name plus the
-spawn site for identity; an arbitrary task expression uses the bounded
-`task@<site>` fallback. A child panic reaches `TaskFailure.Panicked(reason)` with
-the same identity prefix and the original child text.
+At the process-exit boundary, when `run` returns, the runtime cancels every
+task still live: each task state is linked into the scheduler root's live list
+from its creation until its last reference drops, so the cancel reaches every
+task, not only the at most `OBSERVE_TASK_CAP` the observe registry holds
+(`Task.jet` `jet_rt_task_exit_settle`). It then runs the scheduler until no task
+is queued, ready or running, or until 1 s of monotonic time has passed, and the
+process exits with `run`'s status. A waiting task unwinds at its wait and runs
+its cleanup; a task that reaches no wait point in that time is abandoned, and
+the process exits around it rather than returning to a loaded-image host. An
+explicit or fatal exit neither cancels nor waits. A direct named task call uses
+that function name plus the spawn site for identity; an arbitrary task
+expression uses the bounded `task@<site>` fallback. A child panic reaches
+`TaskFailure.Panicked(reason)` with the same identity prefix and the original
+child text.
 
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
 vetted runtime internal must also uphold its boundary contract.

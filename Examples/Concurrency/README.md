@@ -25,7 +25,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 - [ShieldCommit](ShieldCommit.jet) — Cancellation is deferred inside `#Shield`.
 - [SyncCRDT](SyncCRDT.jet) — Shipped CRDT values and the database row policy check.
 - [TaskAllNamed](TaskAllNamed.jet) — Positional and named `task.all` run the same branches the same way; the named form returns a record of branch names.
-- [TaskBlocked](TaskBlocked.jet) — A detached child parked on a full channel is named at the shared process-exit boundary.
+- [TaskBlocked](TaskBlocked.jet) — A detached child blocked on a full channel when run returns is cancelled at its send, and the process exits 0.
 - [TaskCPUClock](TaskCPUClock.jet) — Each task has its own CPU clock, which advances only while the task runs.
 - [TaskControls](TaskControls.jet) — Coroutine-grade control via task handles (internal substrate).
 - [TaskGroup](TaskGroup.jet) — Structured `task.group` with nested combinators.

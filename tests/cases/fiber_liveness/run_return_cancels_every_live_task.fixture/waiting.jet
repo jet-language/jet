@@ -1,0 +1,33 @@
+// A detached task waits on a receive that never comes (it holds a sender,
+// so the channel never closes) when run returns. The exit cancels it: it
+// unwinds at its wait and its deferred close runs before the process exits 0.
+package: {
+    name: "exit_waiting"
+    authority: { allow: [IO, Mem.Alloc, Time, Time.Wait] }
+}
+
+use time: core.time
+
+Cleanup: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) {
+            print("{self.name} cleaned up")
+        }
+    }
+}
+
+waiter: fn(tx: Sender<Int>, rx: Receiver<Int>) -> Int {
+    guard := Cleanup{name: "waiter"}
+    defer close(guard)
+    rx.receive() ?? 0
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    parked: task waiter(tx, rx)
+    parked.detach()
+    time.sleep(100ms)
+    print("run returns")
+}

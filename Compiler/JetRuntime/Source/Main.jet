@@ -110,48 +110,49 @@ main_exit_claim: fn(code: I64) {
     }
 }
 
-// The process exit's two optional steps, zero until a program needs them:
+// The process exit's three optional steps, zero until a program needs them:
 // the first exit-handler registration (Task.jet jet_rt_task_exit_init)
 // installs the handlers' drain, the first observed task or the observe
-// writer (Observe.jet observe_exit_report_install) the parked-task report.
-// A program with neither links neither.
+// writer (Observe.jet observe_exit_install) the writer's exit publication,
+// and the first task (Task.jet task_live_link) the cancel of every task
+// still live when run returns. A program with none links none.
 main_exit_handlers_code := I64{0}
-main_parked_report_code := I64{0}
+main_observe_exit_code := I64{0}
+main_exit_tasks_code := I64{0}
 
 main_exit_handlers_install: fn(code: I64) {
     #Unsafe("an idempotent install: every writer stores the same code address") {
         main_exit_handlers_code = code
     }
 }
-main_parked_report_install: fn(code: I64) {
+main_observe_exit_install: fn(code: I64) {
     #Unsafe("an idempotent install: every writer stores the same code address") {
-        main_parked_report_code = code
+        main_observe_exit_code = code
+    }
+}
+main_exit_tasks_install: fn(code: I64) {
+    if (main_exit_tasks_code != I64{0}) -> return
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        main_exit_tasks_code = code
     }
 }
 
-main_exit_cleanup: fn() -> I64 {
-    // Exit callbacks run before the observer's report.
+// Every exit's steps: the exit callbacks, then the observe writer's exit
+// publication.
+main_exit_cleanup: fn() {
     handlers: main_exit_handlers_code
     if (handlers != I64{0}) -> _ := coll_call1(handlers, I64{0})
-    parked: main_parked_report_code
-    if (parked == I64{0}) -> return I64{0}
-    scratch: wrapping(main_exit_root + I64{16})
-    present: coll_call2(parked, scratch, scratch + I64{8})
-    if (present == I64{0}) -> return I64{0}
-    rendered: trap_word(scratch)
-    code: trap_word(wrapping(scratch + I64{8}))
-    main_write_report(rendered, scratch)
-    jet_rt_string_drop(rendered)
-    code
+    observe: main_observe_exit_code
+    if (observe != I64{0}) -> _ := coll_call1(observe, I64{0})
 }
 
-// Called BEFORE the first fatal diagnostic byte, so callback/parked output
+// Called BEFORE the first fatal diagnostic byte, so exit callback output
 // precedes the original stop report, rather than follows it.
 #Export(c) jet_rt_process_exit_begin: fn(code: I64) {
     main_exit_claim(code)
     // Only the winner gets here, and it always ends the process.
     main_process_end()
-    _ := main_exit_cleanup()
+    main_exit_cleanup()
     // Fatal/explicit process::exit does not join other threads. Never drain
     // here: the winner may be a live scheduler worker counted as in-flight.
     main_flush(wrapping(main_exit_root + I64{16}))
@@ -194,7 +195,7 @@ rt_main_stopped_address: fn() -> I64 {
     scheduler_stop_drop(record)
     jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(code)
-    _ := main_exit_cleanup()
+    main_exit_cleanup()
     main_flush(wrapping(main_exit_root + I64{16}))
     if (report != I64{0}) {
         trap_write_handle(report)
@@ -281,20 +282,24 @@ main_call_stopped: fn() {
     }
     jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(I64{0})
-    parked_code: main_exit_cleanup()
+    main_exit_cleanup()
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
-    // the worker executing the process boundary and cannot self-wait. A
-    // parked-task report ends the process, so it settles rather than joins.
-    if (parked_code != I64{0}) -> scheduler_settle_after_report() else -> jet_scheduler_drain_after_exit()
+    // the worker executing the process boundary and cannot self-wait. Every
+    // task still live is cancelled and gets 1 s to unwind (Task.jet
+    // jet_rt_task_exit_settle); the process then exits with run's status
+    // around any task left, rather than returning to a loaded-image host.
+    tasks: main_exit_tasks_code
+    abandoned := I64{0}
+    if (tasks != I64{0}) -> abandoned = coll_call1(tasks, I64{0})
+    if (abandoned != I64{0}) {
+        main_flush(wrapping(main_exit_root + I64{16}))
+        jet_rt_process_exit_finish()
+    }
+    jet_scheduler_drain_after_exit()
     // Checked mode (Alloc.jet, `--checked-alloc`): a write after one of the
     // last frees traps here rather than going unseen.
     alloc_check_sweep()
     main_flush(wrapping(main_exit_root + I64{16}))
-    if (parked_code != I64{0}) {
-        // A parked-task stop exits rather than returning to a loaded-image host.
-        sync_store(wrapping(main_exit_root + I64{8}), parked_code)
-        jet_rt_process_exit_finish()
-    }
     // Loaded-image hosts can run another normal entry in this same process,
     // which frees again. Fatal/explicit claims never reach this release. An
     // ending process dropped nothing, so its live Secrets are scrubbed here.
