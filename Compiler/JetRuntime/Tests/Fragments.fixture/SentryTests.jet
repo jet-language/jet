@@ -42,7 +42,7 @@ sentry_test_report_exit: fn() {
     fault := I64{1}
     loop fault <= (I64{4}) {
         detail: sentry_detail(fault, I64{4097}, I64{8})
-        report: sentry_report(fault, operation, obligation, I64{0}, false, gate, detail)
+        report: sentry_report(fault, operation, obligation, I64{0}, false, gate, detail, I64{0})
         jet_rt_string_drop(detail)
         data: rt_text_data(report)
         length: rt_text_len(report)
@@ -206,7 +206,7 @@ sentry_test_report_exit: fn() {
     jet_rt_sentry_register_stack_allocation(value, I64{8})
     jet_rt_sentry_frame_leave(frame)
     if (stop != I64{0}) {
-        _ := jet_rt_sentry_read(value, I64{8}, I64{8})
+        _ := jet_rt_sentry_read(value, I64{8}, I64{8}, I64{0})
         sentry_test_require(false)
     } else {
         sentry_test_require(jet_rt_sentry_check(value, I64{8}, I64{8}, I64{1}) == I64{4})

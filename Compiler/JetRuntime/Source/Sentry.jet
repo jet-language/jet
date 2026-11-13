@@ -340,10 +340,13 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
     jet_rt_string_drop(detail)
     fault
 }
-#Export(c) jet_rt_sentry_read: fn(start: I64, bytes: I64, alignment: I64) -> I64 {
+// The access `site` packs the faulting access's source line (low 32 bits)
+// and column (high 32 bits); 0 when the caller has no source location, and
+// the report then names the gate's line alone.
+#Export(c) jet_rt_sentry_read: fn(start: I64, bytes: I64, alignment: I64, site: I64) -> I64 {
     fault: jet_rt_sentry_check(start, bytes, alignment, I64{1})
     if (fault != I64{0}) {
-        sentry_stop(fault, start, alignment, I64{0}, false, services_msg_sentry_read())
+        sentry_stop(fault, start, alignment, I64{0}, false, services_msg_sentry_read(), site)
         return I64{0}
     }
     start
@@ -351,10 +354,10 @@ sentry_checked_fault: fn(fault: I64, start: I64, alignment: I64) -> I64 {
 // A named raw access (`volatile_read`, `volatile_write`): the strict check
 // of jet_rt_sentry_read, whose fault report names the operation, the static
 // text at `operation` (`operation_len` bytes).
-#Export(c) jet_rt_sentry_access: fn(start: I64, bytes: I64, alignment: I64, operation: I64, operation_len: I64) -> I64 {
+#Export(c) jet_rt_sentry_access: fn(start: I64, bytes: I64, alignment: I64, operation: I64, operation_len: I64, site: I64) -> I64 {
     fault: jet_rt_sentry_check(start, bytes, alignment, I64{1})
     if (fault != I64{0}) {
-        sentry_stop(fault, start, alignment, I64{0}, false, rt_text_copy(operation, operation_len))
+        sentry_stop(fault, start, alignment, I64{0}, false, rt_text_copy(operation, operation_len), site)
         return I64{0}
     }
     start
@@ -553,7 +556,9 @@ sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
         else -> sentry_range_detail(fault, start)
     }
 }
-sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64, detail: I64) -> I64 {
+// The location line names the faulting access's line and column when the
+// caller passed its `site` (jet_rt_sentry_read), else the gate's line.
+sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64, detail: I64, site: I64) -> I64 {
     code: sentry_code(fault)
     report: jet_rt_string_builder_new()
     what: if {
@@ -568,7 +573,13 @@ sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, f
         sentry_append_owned(report, services_msg_sentry_location())
         rt_text_append(report, sync_load(wrapping(base + I64{136})), sync_load(wrapping(base + I64{144})))
         rt_text_push_scalar(report, I64{58})
-        sentry_append_number(report, sync_load(wrapping(base + I64{152})))
+        if (site != I64{0}) {
+            sentry_append_number(report, site.bit_and(I64{4294967295}))
+            rt_text_push_scalar(report, I64{58})
+            sentry_append_number(report, (site >> I64{32}).bit_and(I64{4294967295}))
+        } else {
+            sentry_append_number(report, sync_load(wrapping(base + I64{152})))
+        }
         sentry_append_owned(report, services_msg_sentry_gate())
         sentry_quote(report, gate, false)
         rt_text_push_scalar(report, I64{10})
@@ -607,8 +618,8 @@ sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, f
 }
 // A sentry stop records the raw fault detail (never the
 // rendered report) on every active expectation frame before it stops. The
-// report names `operation`, an owned text.
-sentry_stop: fn(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool, operation: I64) {
+// report names `operation`, an owned text, and the access `site`.
+sentry_stop: fn(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool, operation: I64, site: I64) {
     detail: sentry_detail(fault, start, alignment)
     code: if {
         (sentry_code(fault) == I64{2}) -> TEST_SCOPE_R0802
@@ -621,7 +632,7 @@ sentry_stop: fn(fault: I64, start: I64, alignment: I64, component: I64, fenced: 
     if (domain != I64{0}) -> _ := scheduler_panic_check()
     obligation: services_msg_sentry_valid_ptr()
     gate: sentry_gate_name()
-    report: sentry_report(fault, operation, obligation, component, fenced, gate, detail)
+    report: sentry_report(fault, operation, obligation, component, fenced, gate, detail, site)
     jet_rt_string_drop(detail)
     jet_rt_string_drop(operation)
     jet_rt_string_drop(obligation)

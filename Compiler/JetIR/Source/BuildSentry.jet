@@ -44,7 +44,7 @@ ir_unsafe_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, gate: TUnsafeGate
     fenced: ir_word_const(m, b, if gate.fenced -> 1 else -> 0)
     line: ir_word_const(m, b, gate.line)
     _: ir_runtime(m, b, "jet_rt_sentry_scope_enter", [Int]{save, enabled, fenced, file[0], file[1], line, reason[0], reason[1]}, -1)
-    ir_sentry_body(m, p, b, save, body)
+    ir_sentry_body(m, p, b, save, body, true)
 }
 
 // `#Policy(sentries: …) { body }`: the body runs with the gate's checks on
@@ -57,7 +57,7 @@ ir_sentry_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, enabled: Bool, b
     save: ir_sentry_save(m, b)
     flag: ir_word_const(m, b, if enabled -> 1 else -> 0)
     _: ir_runtime(m, b, "jet_rt_sentry_policy_enter", [Int]{save, flag}, -1)
-    ir_sentry_body(m, p, b, save, body)
+    ir_sentry_body(m, p, b, save, body, false)
 }
 
 // The stack save area of the gate a scope replaces: seven words.
@@ -69,9 +69,10 @@ ir_sentry_save: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
 }
 
 // A gate's body as its own scope: its bindings drop before the replaced
-// gate comes back, and an early exit restores it (IRTxFrame.sentry).
-ir_sentry_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, save: Int, body: [Int]) Never! {
-    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, sentry: save})
+// gate comes back, and an early exit restores it (IRTxFrame.sentry). `gate`:
+// the scope is an `#Unsafe` block's, not a `#Policy` one's.
+ir_sentry_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, save: Int, body: [Int], gate: Bool) Never! {
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, sentry: save, gate: gate})
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
     if ir_failed(b) -> return
@@ -108,23 +109,24 @@ ir_sentry_register: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, 
 
 // The address a raw access of row `row` at `pointer` uses: the sentry
 // checks it first and stops on a fault, reporting `operation` ("": a plain
-// `read`).
-ir_sentry_access: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, row: Int, operation: String) -> Int Never! {
+// `read`) at the access's `span`.
+ir_sentry_access: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, row: Int, operation: String, span: Span) -> Int Never! {
     if !p.sentries || m.types[row].kind == .Unit -> return pointer
     bytes: m.types[row].size
     alignment: m.types[row].align
     size: ir_word_const(m, b, bytes)
     align: ir_word_const(m, b, alignment)
+    site: ir_sentry_site(m, p, b, span)
     pointer_row: ir_pointer_row(m)
-    if operation == "" -> return ir_runtime(m, b, "jet_rt_sentry_read", [Int]{pointer, size, align}, pointer_row)
+    if operation == "" -> return ir_runtime(m, b, "jet_rt_sentry_read", [Int]{pointer, size, align, site}, pointer_row)
     name: ir_static_text(m, b, operation)
-    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{pointer, size, align, name[0], name[1]}, pointer_row)
+    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{pointer, size, align, name[0], name[1], site}, pointer_row)
 }
 
 // The word address of a raw access of `bytes` bytes (a word above zero) at
 // `pointer`, aligned as row `row`: the sentry checks the whole range first
-// and stops on a fault, reporting `operation`.
-ir_sentry_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, bytes: Int, row: Int, operation: String) -> Int Never! {
+// and stops on a fault, reporting `operation` at the access's `span`.
+ir_sentry_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, bytes: Int, row: Int, operation: String, span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     address: ir_temp(m, b, word_row)
     ir_emit(b.f, IROp.Copy, address, pointer, -1, -1, b.line)
@@ -132,7 +134,24 @@ ir_sentry_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, byt
     alignment: m.types[row].align
     align: ir_word_const(m, b, alignment)
     name: ir_static_text(m, b, operation)
-    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{address, bytes, align, name[0], name[1]}, word_row)
+    site: ir_sentry_site(m, p, b, span)
+    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{address, bytes, align, name[0], name[1], site}, word_row)
+}
+
+// A sentry route's access site: the 1-based line of `span` in the building
+// function's source in the low 32 bits and its column in the high 32. It is
+// 0, and the report names the gate's line, when the access is not lexically
+// inside an `#Unsafe` block of this function (the gate in force is a
+// caller's, maybe in another file) or the span is not in a checked source.
+ir_sentry_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, span: Span) -> Int Never! {
+    gated := false
+    loop frame in b.transactions {
+        if frame.gate -> gated = true
+    }
+    line: if gated -> (ir_source_line_of(p, b.f.source_file, span.start) ?? 0) else -> 0
+    column: if gated -> (ir_source_column(p, b.f.source_file, span.start) ?? 0) else -> 0
+    packed: if line < 1 || line > 4294967295 || column < 1 || column > 2147483647 -> 0 else -> line + column * 4294967296
+    ir_word_const(m, b, packed)
 }
 
 // `core.mem.volatile_read<T>(pointer)` / `core.mem.volatile_write<T>(pointer,
@@ -147,12 +166,12 @@ ir_core_volatile: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, 
     pointer: ir_expr(m, p, b, args[0])
     if ir_failed(b) || pointer < 0 -> return -1
     if !writes {
-        address: ir_sentry_access(m, p, b, pointer, row, member)
+        address: ir_sentry_access(m, p, b, pointer, row, member, span)
         return ir_load_at(m, b, address, 0, row)
     }
     value := ir_expr(m, p, b, args[1])
     if ir_failed(b) -> return -1
-    address: ir_sentry_access(m, p, b, pointer, row, member)
+    address: ir_sentry_access(m, p, b, pointer, row, member, span)
     drops: m.types[row].drop != ""
     if value >= 0 && drops && !b.fresh[value] -> value = ir_clone(m, b, value, row)
     ir_store_at(m, p, b, address, 0, value)
@@ -187,9 +206,9 @@ ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String,
         ir_open_if(b.f, any, b.line)
         width: ir_word_const(m, b, stride)
         total: ir_word_op(m, b, IROp.Mul, count, width)
-        to: ir_sentry_range(m, p, b, target, total, row, member)
+        to: ir_sentry_range(m, p, b, target, total, row, member, span)
         if copies {
-            from: ir_sentry_range(m, p, b, second, total, row, member)
+            from: ir_sentry_range(m, p, b, second, total, row, member, span)
             _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, from, total}, -1)
         } else {
             ir_core_mem_fill(m, p, b, to, second, row, count, total)
@@ -295,7 +314,7 @@ ir_core_free_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], spa
     pointer: ir_expr(m, p, b, args[0])
     if ir_failed(b) || pointer < 0 -> return -1
     one: ir_word_const(m, b, 1)
-    start: ir_sentry_range(m, p, b, pointer, one, byte_row, "free_raw")
+    start: ir_sentry_range(m, p, b, pointer, one, byte_row, "free_raw", span)
     room: ir_word_const(m, b, 16)
     header: ir_word_op(m, b, IROp.Sub, start, room)
     size: ir_load_word(m, b, header, 0)
