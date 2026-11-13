@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100160,
+    "rev": 100165,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26587,15 +26587,20 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nOwner order: sweep every example that prints an error, then fix every example before resuming the remaining bug cards, other bugs and ICEs, and finally all tests and suites. Every applicable shipped example must run with its intended output on a freshly built default execution chain.\n\n## Current state\n- Criterion 1 is met. Receipts are at `~/.cache/jet-luna/examples106/manifest.json`: 1003 files, 98 package manifests and 905 executed, with exit0=268 and 637 nonzero outcomes (101=258, 1=359, 70=12, signal6=2, signal11=3, timeout124=3).\n- Those receipts are stale. They were recorded with binary sha 266535…, while the current binary is cbaeb13…, and the D-TYPE-SUFFIX1, D-CAP-RECEIVER1, D-PREP and D-FENCE2 codemods (2026-09-28) invalidate them again.\n- Known live failures:\n  - `Core/http/http.jet:456-457` calls `core.http.server.serve(addr, mux)` with 2 arguments, but `Core/http/server.jet:24` declares `serve(addr, mux, tls: HTTPServerTls?, deadline: Duration?)`. As a result `jet check` reports E0104 inside Core for `Examples/features/net/http_serve_entry.jet` and `http_routes.jet`.\n  - `http_serve_entry.jet:6` wraps the call in `#Unsafe(...)` and passes a closure where a mux is expected.\n- The per-example runner is `node Tools/agent/run-feature-examples.mjs` (bounded default `jet run`, timeout, jobs).\n\n## Changes\n1. Rebuild `jet`, then re-run the whole sweep with fresh receipts.\n2. Group failures by root cause and fix each in its home, without patching archived crates/jet-sema or crates/jet-codegen TIR paths unless the default chain still depends on them. Where it does, file that case as a host card.\n   - Front-end, type and lowering causes: `Compiler/` (JetSema, JetCodegen), mirrored only where the running chain needs it.\n   - JIT, Prelude and rustc-emission causes: the retained host crates.\n   - Core API defects: `Core/*.jet`. Start with `Core/http/http.jet:457`, which should call `core.http.server.serve(addr, mux, None, None)`.\n   - Example-local mistakes: the example itself. Start with `http_serve_entry.jet`, which should build a real `HTTPMux` and drop the misplaced `#Unsafe`.\n3. Classify intentional negatives, non-entry modules and platform prerequisites explicitly. They never count as passes and never hide an ICE.\n4. Repeat until criterion 2 holds on the integrated fresh binary.\n\n## Proof\n- `Tools/agent/jet-env jet check Examples/features/net/http_serve_entry.jet` and the same check on `http_routes.jet` report no E0104 inside Core.\n- `node Tools/agent/run-feature-examples.mjs --json --jobs 2 --timeout 90`, run with the fresh binary under the memory-capped wrapper. Every applicable example exits 0 and matches its `.out`/`.err.out`, negatives match their contract, and the run shows zero ICE, native code generator failure, timeout or missing receipt. The per-example receipts are stored.\n- `jet test Compiler --profile golden` (unfiltered; the owner ordered this sweep) is green.\n\n## Batch\n`batch-host-runtime`. The proof is a corpus run on `jet run`, AOT and the host tiers.\n\n## Dependencies\nNone blocking. Fixes land card by card; this card owns the sweep and the final green receipt.",
       "checkSteps": "Inspect every recorded exit and error stream; require existing expected output and explicit expected-error contracts; verify service/platform examples through their actual applicable entry path. No tier fallback, example deletion, expectation weakening or missing rows.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by owner direction 2026-11-12 evening: c1 and c2 (the whole example corpus has receipts and runs green) removed; both stay enforced as the standing release gate on every admitted compiler. c3 and c4 (Embedded battery) are met at 566af3ae17."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -26709,24 +26714,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "Every discovered example source has a retained execution receipt or an explicit source-backed non-executable classification; the sweep completes without stopping at the first failure.",
-          "status": "met",
-          "metBy": "agent",
-          "verifiedBy": null,
-          "evidence": "Complete owner-ordered default-run sweep: 1003 .jet paths discovered through bounded glob subtrees with no truncation; 98 package.jet manifests classified as non-executable data per tests/golden.rs; all other 905 paths have receipts. Binary SHA256 266535835705bd9899c8ecc0ba7f8218d1b69dd2543c4ba2202fcd3247228034. Evidence ~/.cache/jet-luna/examples106/{manifest,observed,summary}.json. No missing receipts.",
-          "at": "2026-09-11T11:47:38.485Z"
-        },
-        {
-          "n": 2,
-          "text": "Every applicable shipped example runs with its intended observable output on the freshly built default execution chain. No unexpected diagnostics, MIR ICE, native code generator failure, timeout or missing result remains; intentional negative examples match their existing contract and never ICE.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-11T11:38:16.999Z"
-        },
-        {
           "n": 3,
           "text": "(was #2801 c2) Every library part is exercised in the battery/example source; hardware/provider-dependent parts and their exact open gates are explicitly named, without a host replay being claimed as hardware proof [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
@@ -26770,12 +26757,13 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-09-11T11:38:15.802Z",
-      "updated": "2026-11-11T21:19:37.500Z",
+      "updated": "2026-11-13T01:01:01.203Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-07T04:02:56.296Z",
       "goals": [
         "G12"
-      ]
+      ],
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-13T01:01:01.203Z"
     },
     {
       "id": "c0p39lw2",
@@ -200896,6 +200884,41 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T01:01:04.617Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G12",
+      "note": "Closed by owner direction 2026-11-12 evening: \"remove the bl"
+    },
+    {
+      "at": "2026-11-13T01:01:02.989Z",
+      "by": "Main",
+      "action": "goal.update",
+      "ref": "G12",
+      "note": "status"
+    },
+    {
+      "at": "2026-11-13T01:01:01.203Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08fc2sx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T01:00:58.186Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c08fc2sx",
+      "note": "#1: Owner 2026-11-12 evening: remove the blocking criteria from G12 and close it. c1 (an execution receipt for every example, swept collect-all) is the same standing release gate as the removed c2: the golden profile that Tools/release/Main.jet admit runs covers every example on each admitted compiler. Its old evidence was a September scratch sweep, which closure refuses.; was [met]: Every discovered example source has a retained execution receipt or an explicit source-backed non-executable classification; the sweep completes without stopping at the first failure."
+    },
+    {
+      "at": "2026-11-13T01:00:22.202Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c08fc2sx",
+      "note": "#2: Owner 2026-11-12 evening: remove the blocking criteria from G12 and close it; passing examples and goldens is a standing gate on every compiler release (Tools/release/Main.jet admit runs the golden suite), not a G12 closure criterion.; was [open]: Every applicable shipped example runs with its intended observable output on the freshly built default execution chain. No unexpected diagnostics, MIR ICE, native code generator failure, timeout or mi"
+    },
+    {
       "at": "2026-11-13T00:58:54.484Z",
       "by": "Main",
       "action": "goal.log",
@@ -207036,8 +207059,13 @@
       "id": "G12",
       "title": "Docs and examples",
       "body": "Published docs and examples match current syntax and law, and the docs site is generated from executable sources. Owner order 2026-11-08: G1, G4, G8, G6, G3, then G5, G7, G9, G10, G11 and G12 in their earlier order; this goal is eleventh.",
-      "status": "active",
+      "status": "achieved",
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by owner direction 2026-11-12 evening: \"remove the blocking criteria from g12 and close g12. the passing examples/goldens is a standing blocker for new compiler releases, that shouldnt block closure of this.\" #3065 c1 and c2 removed (both are the standing release golden gate); #3065 done; every other G12 card is done."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -207050,7 +207078,7 @@
         }
       ],
       "created": "2026-11-04T18:09:57.789Z",
-      "updated": "2026-11-12T02:21:43.952Z",
+      "updated": "2026-11-13T01:01:04.617Z",
       "updatedBy": "Main"
     },
     {
