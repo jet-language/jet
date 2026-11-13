@@ -2186,11 +2186,11 @@ DivergentStatePaths: struct {
         code: "L0152"
         severity: .Lint
         lint_name: "divergent_state_paths"
-        meaning: "Typestate: two paths meet and leave one value in different states, so it is untracked from there (warning)"
+        meaning: "Typestate: two paths meet and leave one value in different states, so an operation that needs one of them is rejected from there (warning)"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`{self.value}` ends in state `{self.one}` on one path and `{self.other}` on another." }
-        why: fn(self) -> String { "Typestate: after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent." }
+        why: fn(self) -> String { "Typestate: after two paths meet, a state holds only when both paths agree — here they do not, so from this point an operation that needs one of these states is rejected." }
         fix: fn(self) -> String { "Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it." }
     }
 }

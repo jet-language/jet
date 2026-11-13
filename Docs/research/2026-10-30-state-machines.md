@@ -37,14 +37,15 @@ run time. Probed with the `#Transition` spelling:
 | Call a `Draft` method after `confirm()` | t02 | E0150 |
 | Typo in a state name | t07 | E0151 "`Fersh` is not a declared state" |
 | A state no entry path reaches | t04 | L0153 under `--verbose` (D-STATE-TERMINAL1=A) |
-| `if flag -> o.confirm() else -> o`, then a `Confirmed` call | t03 | accepted; the `else` path is still `Draft` |
+| `if flag -> o.confirm() else -> o`, then a `Confirmed` call | t03 | E0150: `o` may be in state `Draft` |
 | A parameter `o: Order` calling a `Confirmed` method | t06 | accepted; a parameter has no state |
 | A `:=` typestate value inside a loop | t08 | accepted |
 
-The checker tracks a local's state along straight-line code
-(`Compiler/JetSema/Source/Sema/Typestate.jet:520-521`). It accepts a branch
-join that mixes states (t03) and a parameter of unknown state (t06). No
-spelling exists to name a state on a parameter or result.
+The checker tracks a local's state along straight-line code and through
+joins: where paths that leave it in different states meet, it may be in any
+of them, so a call that needs one is E0150 (t03). It accepts a parameter of
+unknown state (t06). No spelling exists to name a state on a parameter or
+result.
 
 Three later rulings are not built:
 
@@ -118,7 +119,7 @@ which. Rust gets that only from typestate, one type per state.
 | L0529 unchanged state-loop header | yes | no emitter found |
 | Readiness wait with `after` (D-CONC-CHAN2=D) | yes | yes |
 | Typestate E0150 / E0151 / L0153 | yes | yes, straight-line locals |
-| Typestate at joins and parameters | D-STATE1 implies it | no (t03, t06) |
+| Typestate at joins and parameters | D-STATE1 implies it | joins yes (t03); parameters no (t06) |
 | `#State(A -> B)` (D-STATE-ARROW1=A) | yes | no (E0930) |
 | `Order.State.Draft` (D-STATE-NS1=A) | yes | no (E0302) |
 | Multiway branch for enum dispatch | not decided | no; arms tested in order |

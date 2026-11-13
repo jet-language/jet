@@ -1,4 +1,5 @@
 # Port of tests/typestate.rs::counted_loop_zero_iterations_reports_the_pre_loop_divergence; original guest source preserved.
 fixture: fixtures/counted_loop_zero_iterations_reports_the_pre_loop_divergence
 step: jet check fixture.jet --json --verbose
-json: stdout doc $.reports[?code="L0152"] #>= 1 # original predicate: any code
+exit: nonzero # `ship` needs `Confirmed`, but the zero-turn path is still `Draft`
+json: stdout doc $.reports[?code="E0150"] #= 1 # the zero-turn and one-turn paths meet in `Confirmed` and `Draft`

@@ -4,8 +4,11 @@
 // and leaves `To`. Each body is walked once, statement by statement, with the
 // state of every tracked local. Calling an operation in the wrong state is
 // E0150; an untracked local stays silent. Where two paths meet, a local keeps
-// its state only when both paths agree; otherwise it becomes untracked and
-// L0152 says so. A spawned task is a compiler-owned row: it
+// its state only when both paths agree; otherwise L0152 says so, and the local
+// may be in any of their states, so an operation that needs one of them is
+// E0150. A path that leaves its block (`return`, `break`, `continue`) meets
+// no join after it; a `break` or `continue` meets the paths that leave its
+// loop. A spawned task is a compiler-owned row: it
 // starts `Running` and `join`/`detach` move it to `Joined`/`Detached`.
 //
 // The receiver's type comes from the function's checked body: the type of the
@@ -40,14 +43,26 @@ SemaStateTable: struct {
     entry_ctors: [String:String]
 }
 
-// One function's walk: the state of each tracked local, the spans of the
-// pattern tables sema could not prove exhaustive (E0307), and the findings.
+// One function's walk: the facts at the current point, whether the current
+// path has left its block, the facts of each path that left the innermost
+// loop, the spans of the pattern tables sema could not prove exhaustive
+// (E0307), and the findings.
 SemaStateWalk: struct {
     table: SemaStateTable
     states: [String:String]
+    mixed: [String:[String]]
+    ended: Bool
+    exits: [SemaStateFacts]
     open_switches: [Span]
     typed: Bool
     diagnostics: [Diagnostic]
+}
+
+// The facts one path carries to a join: each local in one known state, and
+// each local whose paths met in different states, with those states in order.
+SemaStateFacts: struct {
+    states: [String:String]
+    mixed: [String:[String]]
 }
 
 // Where two paths meet and leave `name` in two states.
@@ -68,7 +83,7 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
         loop diagnostic in modules[module_index].diagnostics {
             if diagnostic.code == "E0307" && diagnostic.span == .Val(span) -> open_switches.push(span.copy())
         }
-        walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
+        walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, mixed: [String:[String]]{}, ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
         loop item in graph.modules[registration].program.items {
             if item == {
                 .Func(function) -> sema_state_check_function(walk, function, None, modules[module_index].functions)
@@ -85,7 +100,7 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
                     loop method in definition.methods -> sema_state_check_function(walk, method, Val(definition.name), modules[module_index].functions)
                 }
                 .Test(test) -> {
-                    walk.states = [String:String]{}
+                    sema_state_start(walk)
                     walk.typed = false
                     tree := body_tree_new()
                     loop function in modules[module_index].functions {
@@ -108,10 +123,18 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
     }
 }
 
+// A body starts with no facts, on a path that has not left it.
+sema_state_start: fn(walk: &SemaStateWalk) Never! {
+    walk.states = [String:String]{}
+    walk.mixed = [String:[String]]{}
+    walk.ended = false
+    walk.exits = [SemaStateFacts]{}
+}
+
 // Rust `check_func_state`: `self` starts in the state its own `#State(S)` or
 // `#State(A -> B)` marker names, so a chain of self-transitions checks.
 sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, owner: String?, bodies: [FnBody]) Never! {
-    walk.states = [String:String]{}
+    sema_state_start(walk)
     walk.typed = false
     tree := body_tree_new()
     loop body in bodies {
@@ -233,57 +256,108 @@ sema_state_static_type: fn(receiver: Expr) -> String? Never! {
 }
 
 sema_state_block: fn(walk: &SemaStateWalk, tree: BodyTree, statements: [Stmt]) Never! {
-    loop statement in statements -> sema_state_statement(walk, tree, statement)
+    loop statement in statements {
+        if walk.ended -> break
+        sema_state_statement(walk, tree, statement)
+    }
 }
 
-// Walk one path from `before` and return the states it ends with.
-sema_state_path: fn(walk: &SemaStateWalk, tree: BodyTree, before: [String:String], body: [Stmt]) -> [String:String] Never! {
-    walk.states = before.copy()
+// The facts at the current point, to carry to a join.
+sema_state_facts: fn(walk: SemaStateWalk) -> SemaStateFacts Never! {
+    SemaStateFacts{states: walk.states.copy(), mixed: walk.mixed.copy()}
+}
+
+// Continue from `facts` on a path that has not left its block.
+sema_state_restore: fn(walk: &SemaStateWalk, facts: SemaStateFacts) Never! {
+    walk.states = facts.states.copy()
+    walk.mixed = facts.mixed.copy()
+    walk.ended = false
+}
+
+// The states `name` may be in: one, several where paths met in different
+// states, or none when it is untracked.
+sema_state_possible: fn(states: [String:String], mixed: [String:[String]], name: String) -> [String] Never! {
+    if states.get(name) == .Val(state) -> return [String]{state}
+    mixed.get(name) ?? [String]{}
+}
+
+sema_state_set: fn(walk: &SemaStateWalk, name: String, state: String) Never! {
+    walk.states[name] = state
+    _ := walk.mixed.remove(name)
+}
+
+sema_state_forget: fn(walk: &SemaStateWalk, name: String) Never! {
+    _ := walk.states.remove(name)
+    _ := walk.mixed.remove(name)
+}
+
+// Walk one path from `before`; when it falls through to the end of `body`,
+// its facts join `paths`.
+sema_state_path: fn(walk: &SemaStateWalk, tree: BodyTree, before: SemaStateFacts, body: [Stmt], paths: &[SemaStateFacts]) Never! {
+    sema_state_restore(walk, before)
     sema_state_block(walk, tree, body)
-    walk.states.copy()
+    if !walk.ended -> paths.push(sema_state_facts(walk))
 }
 
 // Rust `FlowFacts::join_paths` for the typestate plane: a state survives only
-// when both paths carry it and agree.
-sema_state_join: fn(left: [String:String], right: [String:String], splits: &[SemaStateSplit]) -> [String:String] Never! {
-    out := [String:String]{}
-    loop name in left.keys() {
-        one: left.get(name) ?? next
-        other: right.get(name) ?? next
-        if one == other {
-            out[name] = one
-        } else {
-            splits.push(SemaStateSplit{name: name, one: one, other: other})
+// when both paths carry it and agree. Where both track a local and disagree,
+// it may be in any of their states; a split of two known states is L0152.
+sema_state_join: fn(left: SemaStateFacts, right: SemaStateFacts, splits: &[SemaStateSplit]) -> SemaStateFacts Never! {
+    out := SemaStateFacts{states: [String:String]{}, mixed: [String:[String]]{}}
+    names := [String]{}
+    loop name in left.states.keys() -> names.push(name)
+    loop name in left.mixed.keys() -> names.push(name)
+    loop name in names {
+        one: sema_state_possible(left.states, left.mixed, name)
+        other: sema_state_possible(right.states, right.mixed, name)
+        if other.len() == 0 -> next
+        if one.len() == 1 && other.len() == 1 {
+            if one[0] == other[0] {
+                out.states[name] = one[0]
+                next
+            }
+            splits.push(SemaStateSplit{name: name, one: one[0], other: other[0]})
         }
+        possible := one.copy()
+        loop state in other {
+            if !possible.contains(state) -> possible.push(state)
+        }
+        possible.sort()
+        out.mixed[name] = possible
     }
     out
 }
 
-// The one branch-merge rule: the paths meet, and every split is L0152.
-sema_state_merge: fn(walk: &SemaStateWalk, before: [String:String], paths: [[String:String]], span: Span) Never! {
+// The one branch-merge rule: the paths that fall through meet, and every split
+// is L0152. When none falls through, the walk after them has left its block.
+sema_state_merge: fn(walk: &SemaStateWalk, paths: [SemaStateFacts], span: Span) Never! {
     if paths.len() == 0 {
-        walk.states = before.copy()
+        walk.ended = true
         return
     }
     splits := [SemaStateSplit]{}
     merged := paths[0].copy()
     loop at in 1..<paths.len() -> merged = sema_state_join(merged, paths[at], splits)
-    walk.states = merged
+    sema_state_restore(walk, merged)
     sema_state_report(walk, splits, span)
 }
 
-// The one loop rule: the zero-turn path meets the one-turn path.
+// The one loop rule: the zero-turn path meets the one-turn path and every
+// path that leaves the body with `break` or `continue`.
 sema_state_loop: fn(walk: &SemaStateWalk, tree: BodyTree, body: [Stmt], span: Span) Never! {
-    before: walk.states.copy()
+    before: sema_state_facts(walk)
+    outer_exits: walk.exits.copy()
+    walk.exits = [SemaStateFacts]{}
     sema_state_block(walk, tree, body)
-    sema_state_after_loop(walk, before, span)
+    sema_state_after_loop(walk, before, outer_exits, span)
 }
 
-sema_state_after_loop: fn(walk: &SemaStateWalk, before: [String:String], span: Span) Never! {
-    splits := [SemaStateSplit]{}
-    after_body: walk.states.copy()
-    walk.states = sema_state_join(before, after_body, splits)
-    sema_state_report(walk, splits, span)
+sema_state_after_loop: fn(walk: &SemaStateWalk, before: SemaStateFacts, outer_exits: [SemaStateFacts], span: Span) Never! {
+    paths := [SemaStateFacts]{before.copy()}
+    if !walk.ended -> paths.push(sema_state_facts(walk))
+    loop exit in walk.exits -> paths.push(exit.copy())
+    walk.exits = outer_exits.copy()
+    sema_state_merge(walk, paths, span)
 }
 
 // One L0152 per diverging local, in name order; the first split by state
@@ -302,7 +376,7 @@ sema_state_report: fn(walk: &SemaStateWalk, splits: [SemaStateSplit], span: Span
         }
         pairs.sort()
         states: pairs[0].split(" ").to_list()
-        walk.diagnostics.push(sema_lint("L0152", span, "`{name}` ends in state `{states[0]}` on one path and `{states[1]}` on another.", "typestate: after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent.", "bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it."))
+        walk.diagnostics.push(sema_lint("L0152", span, "`{name}` ends in state `{states[0]}` on one path and `{states[1]}` on another.", "typestate: after two paths meet, a state holds only when both paths agree — here they do not, so from this point an operation that needs one of these states is rejected.", "bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it."))
     }
 }
 
@@ -321,43 +395,48 @@ sema_state_switch_exhaustive: fn(walk: SemaStateWalk, arms: [SwitchArm], span: S
 
 sema_state_switch: fn(walk: &SemaStateWalk, tree: BodyTree, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) Never! {
     sema_state_expr(walk, tree, subject)
-    before: walk.states.copy()
-    paths := [[String:String]]{}
+    before: sema_state_facts(walk)
+    paths := [SemaStateFacts]{}
     loop arm in arms {
-        walk.states = before.copy()
+        sema_state_restore(walk, before)
         sema_state_expr(walk, tree, arm.cond)
         sema_state_block(walk, tree, arm.body)
-        paths.push(walk.states.copy())
+        if !walk.ended -> paths.push(sema_state_facts(walk))
     }
     if else_body == .Val(body) {
-        paths.push(sema_state_path(walk, tree, before, body))
+        sema_state_path(walk, tree, before, body, paths)
     } else if !sema_state_switch_exhaustive(walk, arms, span) {
         paths.push(before.copy())
     }
-    sema_state_merge(walk, before, paths, span)
+    sema_state_merge(walk, paths, span)
 }
 
 // A binding or plain assignment takes the to-state of a transition call, the
-// entry state of a constructor, or (a binding only) the state of the local
+// entry state of a constructor, or (a binding only) the states of the local
 // it aliases; otherwise it is untracked.
 sema_state_rebind: fn(walk: &SemaStateWalk, tree: BodyTree, name: String, value: Expr, aliases: Bool) Never! {
     if sema_state_result(walk, tree, value) == .Val(to) {
-        walk.states[name] = to
+        sema_state_set(walk, name, to)
         return
     }
     if sema_state_entry(walk, value) == .Val(state) {
-        walk.states[name] = state
+        sema_state_set(walk, name, state)
         return
     }
     if aliases {
         if value == .Ident(source, _, _) {
             if walk.states.get(source) == .Val(state) {
-                walk.states[name] = state
+                sema_state_set(walk, name, state)
+                return
+            }
+            if walk.mixed.get(source) == .Val(possible) {
+                _ := walk.states.remove(name)
+                walk.mixed[name] = possible.copy()
                 return
             }
         }
     }
-    _ := walk.states.remove(name)
+    sema_state_forget(walk, name)
 }
 
 sema_state_statement: fn(walk: &SemaStateWalk, tree: BodyTree, statement: Stmt) Never! {
@@ -365,8 +444,14 @@ sema_state_statement: fn(walk: &SemaStateWalk, tree: BodyTree, statement: Stmt) 
         .Expr(value) -> sema_state_expr(walk, tree, value)
         .Yield(value, _) -> sema_state_expr(walk, tree, value)
         .DeferClose(value, _) -> sema_state_expr(walk, tree, value)
-        .BreakValue(value, _) -> sema_state_expr(walk, tree, value)
-        .BreakLabelValue(_, _, value, _) -> sema_state_expr(walk, tree, value)
+        .BreakValue(value, _) -> {
+            sema_state_expr(walk, tree, value)
+            sema_state_leave_loop(walk)
+        }
+        .BreakLabelValue(_, _, value, _) -> {
+            sema_state_expr(walk, tree, value)
+            sema_state_leave_loop(walk)
+        }
         .Val(binding) -> {
             sema_state_expr(walk, tree, binding.init)
             if binding.name.len() > 0 -> sema_state_rebind(walk, tree, binding.name, binding.init, true)
@@ -379,6 +464,7 @@ sema_state_statement: fn(walk: &SemaStateWalk, tree: BodyTree, statement: Stmt) 
         }
         .Return(value, _) -> {
             if value == .Val(returned) -> sema_state_expr(walk, tree, returned)
+            walk.ended = true
         }
         .While(cond, body, span, _, _) -> {
             sema_state_expr(walk, tree, cond)
@@ -403,10 +489,12 @@ sema_state_statement: fn(walk: &SemaStateWalk, tree: BodyTree, statement: Stmt) 
         .CountedLoop(init, cond, step, body, span, _, _) -> {
             sema_state_expr(walk, tree, init.init)
             sema_state_expr(walk, tree, cond)
-            before: walk.states.copy()
+            before: sema_state_facts(walk)
+            outer_exits: walk.exits.copy()
+            walk.exits = [SemaStateFacts]{}
             sema_state_block(walk, tree, body)
             if step == .Val(advance) -> sema_state_statement(walk, tree, advance)
-            sema_state_after_loop(walk, before, span)
+            sema_state_after_loop(walk, before, outer_exits, span)
         }
         .Loop(body, span, _, _) -> sema_state_loop(walk, tree, body, span)
         .Unsafe(_, _, body, _) -> sema_state_block(walk, tree, body)
@@ -426,18 +514,29 @@ sema_state_statement: fn(walk: &SemaStateWalk, tree: BodyTree, statement: Stmt) 
         .ComptimeBlock(body, _, _) -> sema_state_block(walk, tree, body)
         .ComptimeIf(cond, _, then_body, else_body, span, _) -> {
             sema_state_expr(walk, tree, cond)
-            before: walk.states.copy()
-            then_path: sema_state_path(walk, tree, before, then_body)
-            other_path := before.copy()
-            if else_body == .Val(body) -> other_path = sema_state_path(walk, tree, before, body)
-            sema_state_merge(walk, before, [[String:String]]{then_path, other_path}, span)
+            before: sema_state_facts(walk)
+            paths := [SemaStateFacts]{}
+            sema_state_path(walk, tree, before, then_body, paths)
+            if else_body == .Val(body) {
+                sema_state_path(walk, tree, before, body, paths)
+            } else {
+                paths.push(before.copy())
+            }
+            sema_state_merge(walk, paths, span)
         }
         .ContextBlock(fields, body, _) -> {
             loop field in fields -> sema_state_expr(walk, tree, field.value)
             sema_state_block(walk, tree, body)
         }
-        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+        .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> sema_state_leave_loop(walk)
     }
+}
+
+// A `break` or `continue` leaves the body: its facts meet the paths that
+// leave the loop, and nothing after it in the block runs on this path.
+sema_state_leave_loop: fn(walk: &SemaStateWalk) Never! {
+    if !walk.ended -> walk.exits.push(sema_state_facts(walk))
+    walk.ended = true
 }
 
 // Rust `entry_state_of`: a spawn starts `Running`; an entry-transition
@@ -508,13 +607,26 @@ sema_state_expr_id: fn(value: Expr) -> Int Never! {
     }
 }
 
-// E0150 when the local's state is known and is not `required`.
-sema_state_require: fn(walk: &SemaStateWalk, local: String, current: String?, required: String, owner: String, operation: String, span: Span) Never! {
-    state: current ?? return
-    if state == required -> return
+// E0150 when the local's state is known and is not `required`, or when paths
+// that left it in different states met before this operation.
+sema_state_require: fn(walk: &SemaStateWalk, local: String, possible: [String], required: String, owner: String, operation: String, span: Span) Never! {
+    if possible.len() == 0 -> return
+    if possible.len() == 1 && possible[0] == required -> return
     transition: sema_state_hint(walk, owner, required)
-    fix: if transition.len() == 0 -> "transition `{local}` into state `{required}` before calling `{operation}`" else -> "transition it first: call `{transition}` to reach `{required}`"
-    walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate: `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
+    if possible.len() == 1 {
+        state: possible[0]
+        fix: if transition.len() == 0 -> "transition `{local}` into state `{required}` before calling `{operation}`" else -> "transition it first: call `{transition}` to reach `{required}`"
+        walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate: `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
+        return
+    }
+    other := possible[0]
+    shown := [String]{}
+    loop state in possible {
+        if other == required -> other = state
+        shown.push("`{state}`")
+    }
+    last: shown.pop() ?? ""
+    walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` may be in state `{other}`", "typestate: paths that leave `{local}` in {shown.join(", ")} and {last} meet before this, so `{operation}` may run in `{other}`, the out-of-order-events bug it prevents", "bring every path to `{required}` before they meet, or call `{operation}` inside the path that reaches `{required}`"))
 }
 
 // The operation that reaches `required` on `owner`: a method transition of
@@ -539,11 +651,11 @@ sema_state_hint: fn(walk: SemaStateWalk, owner: String, required: String) -> Str
 
 sema_state_method: fn(walk: &SemaStateWalk, tree: BodyTree, receiver: Expr, method: String, method_span: Span) Never! {
     local: sema_state_local(receiver) ?? return
-    current: walk.states.get(local)
+    possible: sema_state_possible(walk.states, walk.mixed, local)
     task_key: "{SEMA_STATE_TASK}::{method}"
     // Built-in Task methods resolve through the task row this pass owns: only
     // a local already in a task state moves.
-    state: current ?? ""
+    state: if possible.len() == 1 -> possible[0] else -> ""
     implicit_task: walk.table.transitions.get(task_key) != None && (state == SEMA_STATE_TASK_RUNNING || state == SEMA_STATE_TASK_JOINED || state == SEMA_STATE_TASK_DETACHED)
     owner := sema_state_node_type(walk, tree, sema_state_expr_id(receiver))
     if (owner ?? "") == SEMA_STATE_TASK && !implicit_task -> return
@@ -551,23 +663,23 @@ sema_state_method: fn(walk: &SemaStateWalk, tree: BodyTree, receiver: Expr, meth
     type_name: owner ?? return
     key: "{type_name}::{method}"
     if type_name != SEMA_STATE_TASK {
-        if walk.table.requires.get(key) == .Val(required) -> sema_state_require(walk, local, current, required, type_name, method, method_span)
+        if walk.table.requires.get(key) == .Val(required) -> sema_state_require(walk, local, possible, required, type_name, method, method_span)
     }
     move: walk.table.transitions.get(key) ?? return
     if type_name != SEMA_STATE_TASK {
-        if move.from == .Val(from) -> sema_state_require(walk, local, current, from, type_name, method, method_span)
+        if move.from == .Val(from) -> sema_state_require(walk, local, possible, from, type_name, method, method_span)
     }
-    walk.states[local] = move.to
+    sema_state_set(walk, local, move.to)
 }
 
 sema_state_call: fn(walk: &SemaStateWalk, name: String, first: Expr) Never! {
     local: sema_state_local(first) ?? return
     span: expr_span(first)
-    current: walk.states.get(local)
-    if walk.table.fn_requires.get(name) == .Val(required) -> sema_state_require(walk, local, current, required, local, name, span)
+    possible: sema_state_possible(walk.states, walk.mixed, local)
+    if walk.table.fn_requires.get(name) == .Val(required) -> sema_state_require(walk, local, possible, required, local, name, span)
     move: walk.table.fn_transitions.get(name) ?? return
-    if move.from == .Val(from) -> sema_state_require(walk, local, current, from, local, name, span)
-    walk.states[local] = move.to
+    if move.from == .Val(from) -> sema_state_require(walk, local, possible, from, local, name, span)
+    sema_state_set(walk, local, move.to)
 }
 
 // The local a receiver or first argument names, if it is a bare local or a
@@ -686,15 +798,16 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
         }
         .If(cond, then_body, then_value, else_body, else_value, span, _) -> {
             sema_state_expr(walk, tree, cond)
-            before: walk.states.copy()
+            before: sema_state_facts(walk)
+            paths := [SemaStateFacts]{}
             sema_state_block(walk, tree, then_body)
-            sema_state_expr(walk, tree, then_value)
-            then_path: walk.states.copy()
-            walk.states = before.copy()
+            if !walk.ended -> sema_state_expr(walk, tree, then_value)
+            if !walk.ended -> paths.push(sema_state_facts(walk))
+            sema_state_restore(walk, before)
             sema_state_block(walk, tree, else_body)
-            sema_state_expr(walk, tree, else_value)
-            else_path: walk.states.copy()
-            sema_state_merge(walk, before, [[String:String]]{then_path, else_path}, span)
+            if !walk.ended -> sema_state_expr(walk, tree, else_value)
+            if !walk.ended -> paths.push(sema_state_facts(walk))
+            sema_state_merge(walk, paths, span)
         }
         .PatternTest(subject, _, _, _) -> sema_state_expr(walk, tree, subject)
         .PtrFromAddr(_, _, _, addr, _, _) -> sema_state_expr(walk, tree, addr)
@@ -704,17 +817,24 @@ sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
         }
         .OrFallback(inner, fallback, _, _, _) -> {
             sema_state_expr(walk, tree, inner)
+            paths := [SemaStateFacts]{sema_state_facts(walk)}
             if fallback == {
                 .Value(other) -> sema_state_expr(walk, tree, other)
                 .Block(body, result, _) -> {
                     sema_state_block(walk, tree, body)
-                    if result == .Val(other) -> sema_state_expr(walk, tree, other)
+                    if !walk.ended {
+                        if result == .Val(other) -> sema_state_expr(walk, tree, other)
+                    }
                 }
                 .Return(result, _) -> {
                     if result == .Val(other) -> sema_state_expr(walk, tree, other)
+                    walk.ended = true
                 }
-                .Panic(_, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
+                .Panic(_, _) -> walk.ended = true
+                .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> sema_state_leave_loop(walk)
             }
+            if !walk.ended -> paths.push(sema_state_facts(walk))
+            sema_state_merge(walk, paths, expr_span(value))
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .Ident(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Lambda(_, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }

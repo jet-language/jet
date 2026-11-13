@@ -1,5 +1,5 @@
 # Port of tests/typestate.rs::divergent_branch_does_not_keep_the_last_walked_arm; original guest source preserved.
 fixture: fixtures/divergent_branch_does_not_keep_the_last_walked_arm
 step: jet check fixture.jet --json --verbose
-json: stdout doc $.reports[?code="E0150"] #= 0 # original predicate: absent code
-json: stdout doc $.reports[?code="L0152"] #>= 1 # original predicate: any code
+exit: nonzero # neither arm's state is kept: `ship` may run in `Cancelled`
+json: stdout doc $.reports[?code="E0150"] #= 1 # the arms meet in `Cancelled` and `Confirmed`

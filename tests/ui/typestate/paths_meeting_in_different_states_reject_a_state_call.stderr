@@ -1,0 +1,8 @@
+Error [jet.TypestateWrongState]: `ship` needs `Order` in state `Confirmed`, but `order` may be in state `Draft`
+  --> tests/ui/typestate/paths_meeting_in_different_states_reject_a_state_call.jet:19:11
+    |
+ 19 |     order.ship()
+    |           ^^^^
+ Why: Typestate: paths that leave `order` in `Confirmed` and `Draft` meet before this, so `ship` may run in `Draft`, the out-of-order-events bug it prevents
+ Fix: Bring every path to `Confirmed` before they meet, or call `ship` inside the path that reaches `Confirmed`
+More: jet-lang.dev/e/E0150
