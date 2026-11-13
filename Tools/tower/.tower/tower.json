@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101743,
+    "rev": 101745,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95575,6 +95575,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Review round 5 (G6Meta-4, SUB G6Meta-6792c3-review5): PASSES. All 8 R4-5 gaps are closed and C3 safety holds against every attack. C1, C2 and C3 hold; C4 holds within limits; c1, c2, c6, c7 and c8 are met by the review. c3 is met once G12Docs-5 lands the five R5-4 text fixes (push transport keys per FCM, Web Push and APNs limits; the mail repeat claim; the policy memo scope when the transaction writes; the upload test name and a size cap without Content-Length; a lapsed-invitation test) and the #6825 c1 edit is filed (done). No sixth round is needed. Next: the proposal and the review audits land on dev, the criteria are met from the landed files, and D-WEBAPP-SHAPE1 is posted."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Review round 4 (G6Meta-4, SUB G6Meta-6792c3-review4): FAILS narrowly on c3 alone; c1, c2, c6, c7 and c8 are met. 23 of the 28 round-3 items are closed; 4, 11, 12, 13 and 15 are partly closed. C3 fails on 3 points: the upload spool comes before the policy check (against #6813 c3), the members policy ignores invitation expiry, and the creator rule is not tied to the project row. CL7 holds except native.background, whose failures reach only a log. 8 gaps go to G12Docs-5 for r5. #6825 c1 now asks for a key per push, and #3709 c26 says a replayed edit keeps its version and can conflict."
         },
         {
@@ -95675,7 +95680,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:36:35.100Z",
-      "updated": "2026-11-13T18:26:03.696Z",
+      "updated": "2026-11-13T18:49:52.788Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -97582,12 +97587,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the run's key, the recipient and the send's open: or link: value, and app.notify and app.mail pass it to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID). A retried run repeats each key even when its query returns rows in another order, so the transport collapses repeats, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the run key, the recipient and the send open: or link: value, sent hashed to fit each transport limit. app.notify and app.mail pass it to the transport: APNs apns-collapse-id, FCM android.notification.tag on a non-collapsible message, Web Push Topic header and notification tag, and mail Message-ID. A retried run repeats each key even when its query returns rows in another order, so a repeat replaces its earlier copy, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:43:03.606Z"
+          "at": "2026-11-13T18:49:51.672Z"
         },
         {
           "n": 2,
@@ -97634,7 +97639,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-13T18:43:03.606Z",
+      "updated": "2026-11-13T18:49:51.672Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -204066,6 +204071,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:49:52.788Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0snkbac",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T18:49:51.672Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#1: #6792 review round 5 (G6Meta-4): FCM keeps only 4 collapse keys per device, so send non-collapsible with a tag; Web Push uses Topic; was: app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried"
+    },
     {
       "at": "2026-11-13T18:43:09.146Z",
       "by": "Main",
