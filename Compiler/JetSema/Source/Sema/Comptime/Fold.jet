@@ -5,7 +5,8 @@
 // native CLI) evaluates nothing. So every value that is literal data folds
 // here: Int, sized-integer (`I64{208}`, `U8{7}`), Float, Bool, Char and string
 // literals, their negation, the checked Int-to-fixed conversion of a literal,
-// lists, struct literals (sema has already filled each omitted field's
+// lists, map literals (each key a scalar, payload-free enum case or struct of
+// them, no key repeated), struct literals (sema has already filled each omitted field's
 // default), enum constructors with positional or named payloads, `Val(x)` and
 // `None`, constants that already landed, and integer, Float and Bool arithmetic
 // and comparison over them. It reads the same checked facts evaluation does: a
@@ -26,17 +27,22 @@
 use jet_foundation.[
     BodyEnumPayload,
     BodyIfCond,
+    BodyMapEntry,
     BodyTree,
     NodeKind,
     TBinaryOp,
     TBuiltinOp,
     TComptimeEnumArg,
     TComptimeField,
+    TComptimeKey,
+    TComptimeKeyField,
+    TComptimeMapEntry,
     TComptimeReport,
     TComptimeValue,
     TUnaryOp,
     Type,
     body_type_id,
+    checked_comptime_integer_key,
 ]
 
 sema_comptime_fold: fn(tree: BodyTree, expression: Int, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
@@ -165,6 +171,9 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
             if coercion == None -> return sema_comptime_fold_list(tree, elements, values)
         }
         .ListLit(elements) -> return sema_comptime_fold_list(tree, elements, values)
+        .Map(entries) | .MapLit(entries) -> {
+            if expression_ty == .Map(_, _, _) -> return sema_comptime_fold_map(tree, entries, values)
+        }
         // An unsuffixed decimal literal checks as `Decimal.from_str("…")`
         // (sema_expr_decimal_literal); its value is the Core Decimal record.
         .PreciseBuiltin(type_name, function, args) -> {
@@ -173,7 +182,7 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
                 if folded == .String(text) -> return sema_comptime_fold_decimal(text)
             }
         }
-        .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
+        .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .CompareChain(_, _, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Ok(_) | .Err(_) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
     None
 }
@@ -308,6 +317,65 @@ sema_comptime_fold_list: fn(tree: BodyTree, elements: [Int], values: [SemaCompti
     folded := [TComptimeValue]{}
     loop element in elements -> folded.push(sema_comptime_fold(tree, element, values) ?? return None)
     Val(TComptimeValue.List{values: folded})
+}
+
+// A map literal's entries in their written order. A key is a scalar, a
+// payload-free enum case, or a struct of keys; a repeated key is not folded,
+// so the evaluator's later-entry-wins insert decides it.
+sema_comptime_fold_map: fn(tree: BodyTree, entries: [BodyMapEntry], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
+    folded := [TComptimeMapEntry]{}
+    seen := [String: Bool]{}
+    loop entry in entries {
+        key: sema_comptime_fold_key(sema_comptime_fold(tree, entry.key, values) ?? return None) ?? return None
+        spelled: sema_comptime_fold_key_text(key)
+        if seen.get(spelled) != None -> return None
+        seen[spelled] = true
+        folded.push(TComptimeMapEntry{key: key, value: sema_comptime_fold(tree, entry.value, values) ?? return None})
+    }
+    Val(TComptimeValue.Map{entries: folded})
+}
+
+// The map key a folded key value spells; None for a value no key spells.
+sema_comptime_fold_key: fn(value: TComptimeValue) -> TComptimeKey? Never! {
+    if value == {
+        .Int(number) -> Val(checked_comptime_integer_key(number))
+        .BigInt(decimal) -> Val(TComptimeKey.BigInt{decimal: decimal})
+        .String(text) -> Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> Val(TComptimeKey.Bool{value: flag})
+        .Char(code) -> Val(TComptimeKey.Char{value: code})
+        .Enum(type_name, variant, args) -> {
+            if args.len() > 0 -> return None
+            Val(TComptimeKey.Enum{type_name: type_name, variant: variant})
+        }
+        .Struct(type_name, fields) -> {
+            keys := [TComptimeKeyField]{}
+            loop field in fields -> keys.push(TComptimeKeyField{name: field.name, key: sema_comptime_fold_key(field.value) ?? return None})
+            Val(TComptimeKey.Struct{type_name: type_name, fields: keys})
+        }
+        .Float(_, _) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit -> None
+    }
+}
+
+// One text per distinct key: each part is tagged and each text is
+// length-prefixed, so two different keys never spell the same text.
+sema_comptime_fold_key_text: fn(key: TComptimeKey) -> String Never! {
+    if key == {
+        .Int(value) -> "i{value};"
+        .BigInt(decimal) -> "i{decimal};"
+        .String(value) -> "s{value.bytes().len()}:{value}"
+        .Bool(value) -> "b{value};"
+        .Char(value) -> "c{value};"
+        .Tuple(fields) -> "t{sema_comptime_fold_key_fields(fields)}"
+        .Struct(type_name, fields) -> "r{type_name.bytes().len()}:{type_name}{sema_comptime_fold_key_fields(fields)}"
+        .Enum(type_name, variant) -> "e{type_name.bytes().len()}:{type_name}{variant.bytes().len()}:{variant}"
+    }
+}
+
+// The field part of a tuple or struct key's text.
+sema_comptime_fold_key_fields: fn(fields: [TComptimeKeyField]) -> String Never! {
+    parts := [String]{}
+    loop field in fields -> parts.push("{field.name.bytes().len()}:{field.name}{sema_comptime_fold_key_text(field.key)}")
+    "{fields.len()}({parts.join("")})"
 }
 
 sema_comptime_fold_enum: fn(tree: BodyTree, type_name: String, variant: String, payload: BodyEnumPayload, values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {

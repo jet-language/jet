@@ -1,0 +1,30 @@
+// One process-wide table in a module `Shared` cell. The build stores its
+// starting map literal; two tasks each add an entry and read their own back,
+// and run then sees every entry.
+Storage: struct { items: [String: String] }
+
+STORE: Shared{Storage{items: [String: String]{"theme": "plain"}}}
+
+EMPTY: Shared{Storage{items: [String: String]{}}}
+
+set: fn(key: String, value: String) { STORE.items[key] = value.copy() }
+
+get: fn(key: String) -> String? { STORE.items.get(key) }
+
+run: fn() {
+    a: task {
+        set("a", "dark")
+        get("a") ?? "missing"
+    }
+    b: task {
+        set("b", "light")
+        get("b") ?? "missing"
+    }
+    av: a.join() ?? panic("task a failed")
+    bv: b.join() ?? panic("task b failed")
+    print("{av} {bv}")
+    print("theme {get("theme") ?? "missing"}")
+    print("entries {STORE.items.len()}")
+    EMPTY.items["only"] = "one"
+    print("empty then {EMPTY.items.len()}")
+}

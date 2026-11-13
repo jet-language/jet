@@ -1,0 +1,17 @@
+# A module `Shared` cell may start from a map literal: the build stores the
+# map, a filled one or an empty one, and every task reads and writes the one
+# process-wide table, on every optimization level.
+fixture: module_shared_table_starts_from_a_map_literal_and_is_written_by_tasks.fixture
+env: NO_COLOR=1
+step none: jet run --optimize=none main.jet
+exit: 0
+stdout: = module_shared_table_starts_from_a_map_literal_and_is_written_by_tasks.out
+stderr: empty
+step basic: jet run --optimize=basic main.jet
+exit: 0
+stdout: = module_shared_table_starts_from_a_map_literal_and_is_written_by_tasks.out
+stderr: empty
+step full: jet run --optimize=full main.jet
+exit: 0
+stdout: = module_shared_table_starts_from_a_map_literal_and_is_written_by_tasks.out
+stderr: empty
