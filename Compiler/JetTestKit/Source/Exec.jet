@@ -141,18 +141,25 @@ kit_exec_toolchain_root: fn(root: String) -> String? {
 
 // The children's PATH leads with the directory of the `jet` under test, so a
 // script's `#!/usr/bin/env jet` runs it rather than the host's `jet` (a seed
-// launcher reads the home the kit replaced). The inherited PATH when the run
-// has no `jet` or it is named otherwise.
+// launcher reads the home the kit replaced). A `jet` under test that is itself
+// a Jet script (a CLI double) runs under the caller's JET, so PATH leads with
+// that one's directory instead. The inherited PATH when neither names a `jet`.
 kit_exec_path: fn(jet: String) -> String? {
     inherited: sys.get("PATH")
-    if jet == "" -> return inherited
-    canonical: files.canonicalize(jet) ?? return inherited
-    if files.basename(canonical) != "jet" -> return inherited
-    directory: files.dirname(canonical)
+    under_test: if jet.ends_with(".jet") -> sys.get("JET") ?? "" else -> jet
+    directory: kit_exec_jet_directory(under_test) ?? return inherited
     if inherited == {
         .Val(path) -> Val("{directory}:{path}")
         .None -> Val(directory)
     }
+}
+
+// The directory of `jet` when it resolves to a file named `jet`.
+kit_exec_jet_directory: fn(jet: String) -> String? {
+    if jet == "" -> return None
+    canonical: files.canonicalize(jet) ?? return None
+    if files.basename(canonical) != "jet" -> return None
+    Val(files.dirname(canonical))
 }
 
 kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {

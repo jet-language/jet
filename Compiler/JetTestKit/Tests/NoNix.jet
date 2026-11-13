@@ -39,7 +39,10 @@ no_nix_test_assets: fn(root: String) {
     pid: process.current_pid()
     loop name in ["enabled", "disabled"] {
         relation: if name == "enabled" -> "test" else -> "! test"
-        cases_test_source(root, name, "env: CASE_VALUE=value\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/net/dev -ef /proc/{pid}/net/dev; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
+        // The namespace hides the host's locale data, so the shell runs in the
+        // C locale it always has: an inherited LC_ALL=C.UTF-8 would add a
+        // setlocale warning to the stderr this case pins empty.
+        cases_test_source(root, name, "env: CASE_VALUE=value\nenv: LC_ALL=C\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/net/dev -ef /proc/{pid}/net/dev; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
         context := cases_test_context(root, files.join(root, "scratch-{name}"))
         context.env.jet = cases_test_real_jet("to build the no-nix launcher")
         outcome: kit_cases_run(cases_test_entry(name), context)[0]
