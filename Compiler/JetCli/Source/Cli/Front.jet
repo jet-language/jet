@@ -1332,14 +1332,16 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
             }
         } else {
             if {
-                name == "release" -> written.extend(jet_cli_stock_release_choices())
+                // The stock `hardened` profile builds as `release` does and
+                // keeps the memory sentry (jet_cli_native_program).
+                name == "release" || name == "hardened" -> written.extend(jet_cli_stock_release_choices(name))
                 // The stock `debug` profile is `optimize: none` over the stock values; the front end
                 // keeps its `dev` profile.
                 name == "debug" -> {
                     written.extend(jet_cli_stock_debug_choices())
                     profile = ""
                 }
-                name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
+                name == "ci" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
                 // The registered E1219 row is the unknown-profile report; its holes name the profile.
                 // An undeclared profile name is a user problem (exit 1), not a malformed flag (exit 2).
                 else -> {
@@ -1453,9 +1455,10 @@ jet_cli_gate_flags: fn(jet_argv: [String], color: Bool) -> JetCLIGateFlags Never
 }
 
 // The stock `release` profile: `optimize: full`, and `debug_info: split`,
-// which `jet build` writes as a side debug file beside the image.
-jet_cli_stock_release_choices: fn() -> [BuildOptionChoice] Never! {
-    site: "of the stock `release` profile"
+// which `jet build` writes as a side debug file beside the image. The stock
+// `hardened` profile (`name`) has the same options.
+jet_cli_stock_release_choices: fn(name: String) -> [BuildOptionChoice] Never! {
+    site: "of the stock `{name}` profile"
     [BuildOptionChoice]{
         {name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: site.copy(), pinned: false},
         {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.copy(), pinned: false},

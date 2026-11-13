@@ -580,8 +580,12 @@ none is E2102 too, never ignored: a switch takes no `=value`
 (`jet fmt --check=true`), and a true/false flag takes only `=true` or `=false`.
 
 - `--target` selects a triple, `board.<name>`, or named database target;
-  `--profile` selects `release`, `debug`, or a named bundle (`ci` and
-  `hardened` are not built yet).
+  `--profile` selects `release`, `debug`, `hardened`, or a named bundle
+  (`ci` is not built yet). `hardened` builds as `release` does and, like
+  `policy: { harden: true }`, keeps the memory sentry: a raw access through
+  an `#Unsafe` pointer outside its storage stops with its R08xx runtime
+  fault and the gate's source location at every optimization level. A
+  plain `release` build carries no sentry call.
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
   `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows and
   acknowledges every right on `run` and `build`, so a run names none; `jet inspect gates` records these and the other

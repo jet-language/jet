@@ -40,7 +40,7 @@ JetCLIDecisions: struct {
 jet_cli_decisions_options: fn(options: [String], profile: String) -> BuildOptionsResolved Never! {
     release: profile == "release" || profile == "hardened"
     written := [BuildOptionChoice]{}
-    if release -> written.extend(jet_cli_stock_release_choices())
+    if release -> written.extend(jet_cli_stock_release_choices(profile))
     if profile == "debug" -> written.extend(jet_cli_stock_debug_choices())
     if build_option_flags(options) == {
         .Refused(code, what, fix) -> return BuildOptionsResolved.Refused{code: code, what: what, fix: fix}
@@ -59,15 +59,17 @@ jet_cli_opt_options: fn(level: Int, build: BuildOptions) -> IROptOptions {
 }
 
 // Builds `inputs` into one IR module from its entry and optimizes it as
-// `build` (the build options) has `jet build` do; `harden` is the entry
-// package's `policy.harden`.
-jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads, harden: Bool) -> JetCLIDecisions {
+// `build` (the build options) has `jet build` do under `profile`; `harden`
+// is the entry package's `policy.harden`. A release build keeps the memory
+// sentry only when it is hardened, as jet_cli_native_program builds it.
+jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, threads: CompilerThreads, profile: String, harden: Bool) -> JetCLIDecisions {
     checked := inputs.move()
     declarations := jet_driver_checked_declarations(checked)
-    timing_host := ""
-    if body_fixed_timing(checked.functions) -> timing_host = if harden -> "policy.harden refuses an unconfirmed host at start" else -> "an unconfirmed host runs it; policy.harden would refuse one at start"
     checks := ir_checks_stock()
-    checks.harden = harden
+    checks.release = profile == "release" || profile == "hardened"
+    checks.harden = harden || profile == "hardened"
+    timing_host := ""
+    if body_fixed_timing(checked.functions) -> timing_host = if checks.harden -> "policy.harden refuses an unconfirmed host at start" else -> "an unconfirmed host runs it; policy.harden would refuse one at start"
     built := ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, threads)
     unbuilt := [String]{}
     loop failure in built.failures -> unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
@@ -139,7 +141,7 @@ jet_cli_inspect_decisions_host: fn(job: JetCLIInspectJob, source: String) -> Jet
             threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
             build := build_options_stock("build")
             if job.build == .Val(given) -> build = given.copy()
-            decisions: jet_cli_decisions(inputs, build, threads, front.compile.harden)
+            decisions: jet_cli_decisions(inputs, build, threads, job.profile, front.compile.harden)
             report: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }

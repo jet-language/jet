@@ -10,6 +10,26 @@ use jet_foundation.[TUnsafeGate]
 // raw read or a volatile access is checked against the gate in force (a
 // caller's, inside an `#Unsafe` function) and stops the run on a fault;
 // outside an enabled gate the check passes.
+//
+// A dev build keeps the sentry at every optimization level. A release
+// build keeps it only when it is hardened (`policy.harden` or the
+// `hardened` profile, IRChecks.harden); an ordinary release build emits no
+// sentry call and turns the runtime's allocator sentry off at its start
+// (ir_sentry_release_link).
+
+// Whether a program or test image built under `checks` keeps the sentry.
+ir_checks_sentries: fn(checks: IRChecks) -> Bool Never! {
+    !checks.release || checks.harden
+}
+
+// The first step of an image without the sentry: the runtime's allocators
+// stop registering, quarantining and poisoning storage for it
+// (jet_rt_sentry_set_release).
+ir_sentry_release_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
+    if p.sentries -> return
+    on: ir_word_const(m, b, 1)
+    _: ir_runtime(m, b, "jet_rt_sentry_set_release", [Int]{on}, -1)
+}
 
 // `#Unsafe("audit") { body }`: the body runs under its gate.
 ir_unsafe_scope: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, gate: TUnsafeGate, body: [Int]) Never! {

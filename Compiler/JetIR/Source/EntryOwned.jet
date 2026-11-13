@@ -28,7 +28,9 @@ use jet_foundation.[name_rows_value]
 // a negative exponent is int_stop, the numeric stop's report, and the
 // scheduler is read only after it), the failed entry's exit
 // (JourneyTLS.jet), the fixed-timing host admission (HostTiming.jet: a CPUID
-// probe, then the failed entry's exit), the backtrace mode and the cleanup
+// probe, then the failed entry's exit), the backtrace mode, the sentry's
+// release switch (Sentry.jet: a word of the sentry root runtime init
+// allocates) and the cleanup
 // scopes (with no root no stop is ever pending). jet_rt_process_entry_return
 // only marks the end of a rooted process, so an owned main drops its calls.
 // Int shifts are not here: jet_int_shl/shr read the scheduler on every call.
@@ -100,6 +102,7 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_process_entry_return",
     "jet_rt_record_get_utf8_error_message",
     "jet_rt_require_stop",
+    "jet_rt_sentry_set_release",
     "jet_rt_session_propagate",
     "jet_rt_string_append",
     "jet_rt_string_builder_finish",

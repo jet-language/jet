@@ -303,9 +303,11 @@ IRChecks: struct {
     // filters the entry passes to the runtime (ir_log_configure).
     log_package: String{""}
     log_flag: String{""}
-    // The entry package's `policy.harden`: when a function holds a
-    // `timing: .Fixed` value, the entry first calls jet_rt_timing_admit,
-    // which ends the program on an unconfirmed host (ir_timing_admitted).
+    // The entry package's `policy.harden` or the `hardened` profile: a
+    // release build keeps the memory sentry (ir_checks_sentries), and when
+    // a function holds a `timing: .Fixed` value, the entry first calls
+    // jet_rt_timing_admit, which ends the program on an unconfirmed host
+    // (ir_timing_admitted).
     harden: Bool{false}
     // A release build (the `release` or `hardened` profile): an
     // `#Off(.Release)` body emits no code (ir_stmt).
@@ -420,9 +422,10 @@ IRProgram: struct {
     // (ir_build_library), never for a program.
     asm_rails: Bool{false}
     // Whether `#Unsafe` scopes enter the runtime sentry and raw accesses are
-    // checked by it (BuildSentry.jet): true for a program or test image
-    // (ir_build_program, ir_build_tests); false for the runtime library the
-    // sentry is part of and for compile-time evaluation.
+    // checked by it (BuildSentry.jet): for a program or test image, as its
+    // checks have it (ir_checks_sentries, in ir_build_program and
+    // ir_build_tests); false for the runtime library the sentry is part of
+    // and for compile-time evaluation.
     sentries: Bool{false}
     // Whether each checked `#Pre`/`#Post` clause reports its outcome to the
     // runtime's contract records (BuildContracts.jet ir_contract,
@@ -1290,7 +1293,7 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
     p.checks = checks
-    p.sentries = true
+    p.sentries = ir_checks_sentries(checks)
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
@@ -1341,11 +1344,12 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // The function the executable starts: `entry` itself when it takes nothing,
 // returns nothing, the `backtrace` build option is the stock `full`, the
 // program allocator the system heap, no job is selectable, the build is
-// neither checked nor
-// observed and sets no log filter, otherwise a generated `entry` function.
-// It first links a checked build's checked heap (ir_checked_alloc_link) and
-// an observed build's observation start (ir_observe_link), passes the log
-// filters (ir_log_configure), a `brief` or `off` backtrace to
+// neither checked nor observed, sets no log filter and keeps the sentry,
+// otherwise a generated `entry` function. It first turns the runtime's
+// sentry off in a build without it (ir_sentry_release_link), links a
+// checked build's checked heap (ir_checked_alloc_link) and an observed
+// build's observation start (ir_observe_link), passes the log filters
+// (ir_log_configure), a `brief` or `off` backtrace to
 // the runtime (jet_rt_fault_backtrace, the IRBacktrace word) and a counting
 // program allocator's cap (jet_rt_program_allocator_configure,
 // IRChecks.counting), then runs the job the program's
@@ -1354,7 +1358,7 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p)) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p) && p.sentries) -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}#entry"
     id: m.functions.len()
@@ -1363,6 +1367,7 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     b := ir_builder_new(m.functions[id].copy())
     b.line = m.functions[entry].line
     span: Span{start: 0, end: 0}
+    ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)
     if ir_timing_admitted(p) {
         _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)

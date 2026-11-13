@@ -58,7 +58,7 @@ IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bo
 ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
     p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
     p.checks = checks
-    p.sentries = true
+    p.sentries = ir_checks_sentries(checks)
     p.contract_records = true
     p.coverage = harness.coverage.copy()
     ir_foreign_index(p, foreign, decls)
@@ -622,6 +622,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     id: ir_test_function(m, "main", -1, "main")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row: ir_pointer_row(m)
+    ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     report_path: ir_test_env(m, b, "JET_NATIVE_TEST_REPORT_PATH")

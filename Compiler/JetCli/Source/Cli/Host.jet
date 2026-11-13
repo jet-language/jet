@@ -1166,7 +1166,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checks.observe = options.observe
     checks.log_package = result.log_filter.copy()
     checks.log_flag = options.log.copy()
-    checks.harden = result.harden
+    // The `hardened` profile sets the same hardening fact as the entry
+    // package's `policy.harden`: the release build keeps the memory sentry.
+    checks.harden = result.harden || options.profile == "hardened"
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
