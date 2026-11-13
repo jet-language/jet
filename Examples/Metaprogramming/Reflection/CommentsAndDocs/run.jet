@@ -4,7 +4,7 @@
 // so a `//` inside one is text. TypeInfo, FieldInfo, MethodInfo and
 // FunctionInfo each list their declaration's documentation, and ModuleInfo
 // lists every comment written in its file. Every span names the source file
-// whose text its offsets index.
+// whose text its offsets index, by its path from the package root.
 Note: struct {
     text: String
 
@@ -24,7 +24,7 @@ Order: struct {
     total: Int /* in cents */
 
     /// The total in whole dollars.
-    dollars: fn(self) -> Int { self.total / 100 }
+    dollars: fn(self) -> Int { self.total /% 100 }
 }
 
 /// Joins comment texts with " / ".
@@ -39,14 +39,14 @@ ID: #run joined(Order.reflect().fields[0].documentation)
 TOTAL: #run joined(Order.reflect().fields[1].documentation)
 DOLLARS: #run joined(Order.reflect().methods[0].documentation)
 NOTE: #run { Order.reflect().marker(Note)?.text ?? "none" }
-DOC_FILE: #run Order.reflect().documentation[0].span.file.ends_with("/run.jet")
-ID_FILE: #run Order.reflect().fields[0].span.file.ends_with("/run.jet")
+DOC_FILE: #run { Order.reflect().documentation[0].span.file == "run.jet" }
+ID_FILE: #run { Order.reflect().fields[0].span.file == "run.jet" }
 
 build: fn(b: Build) {
     loop function in b.program.functions() {
         if function.name == "joined" {
             b.contribute("function", joined(function.documentation))
-            in_run: function.span.file.ends_with("/run.jet")
+            in_run: function.span.file == "run.jet"
             b.contribute("function_file", "{in_run}")
         }
     }
@@ -65,7 +65,7 @@ build: fn(b: Build) {
                     .Documentation -> docs += 1
                 }
                 if comment.text.contains("a marker argument") -> argument = true
-                if !comment.span.file.ends_with("/run.jet") -> named = false
+                if comment.span.file != "run.jet" -> named = false
             }
             b.contribute("comments", "{written.name}: {lines} line, {blocks} block, {docs} documentation; marker argument read as a comment: {argument}; every span in run.jet: {named}")
         }
