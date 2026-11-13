@@ -1,13 +1,13 @@
 // Checked declarations, not hand-authored BuildGraph rows, drive the reports.
 use {
-    jet_foundation.[DIAGNOSTIC_LINT, diagnostic_from_registry]
+    jet_foundation.[DIAGNOSTIC_LINT, Diagnostic, diagnostic_from_registry]
     core.build.[BuildGraphNode, BuildGraphInputDigest]
     jet_driver.[
         jet_driver_query_build_nodes, jet_driver_compile, jet_driver_source_query,
         JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
         JetDriverAuthorizedSourceSnapshot, JetDriverBuildQueryResult, JetDriverBuildQueryScope,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverGeneratedModule,
-        jet_driver_build_plan_json, jet_driver_query_build_plan,
+        jet_driver_build_plan_json, jet_driver_build_query_stopped, jet_driver_query_build_plan,
     ]
     jet_cli.[
         JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
@@ -207,6 +207,43 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     internal_query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost its plan")}
     internal_failure: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
     inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
+}
+
+// A build query whose staging check failed, stopped before its plan with the
+// build's reports `ran`, a refused call (`refused`) and the internal
+// `problem`: an internal compiler error, never the staged report on the name
+// the build would have generated.
+inspect_build_stopped_is_internal: fn(ran: [Diagnostic], refused: Bool, problem: String) Never! {
+    errors := [Diagnostic]{diagnostic_from_registry("E0107", None, "Nothing named `Shape` exists here", "A name must be declared before it's used", "Declare it first")}
+    reports := ran
+    held := String?{None}
+    // copy: the query owns its problem; the checks below read this one.
+    held = Val(problem.copy())
+    request := inspect_build_request()
+    response := jet_driver_build_query_stopped(request, errors, reports, true, refused, held)
+    query := response.query.move()
+    inspect_build_require(!query.complete && (query.internal_problem ?? "") == problem, "a staged build query keeps its internal problem: {problem}")
+    failure: jet_cli_build_query_failure(response.request.move(), query, "main.jet", false, false, false)
+    inspect_build_require(failure.exit_code == JET_CLI_EXIT_ICE && failure.stdout == "" && failure.stderr.contains("internal compiler error: {problem}") && !failure.stderr.contains("Shape"), "a staged build that failed internally is an internal compiler error: {problem}")
+}
+#Test("inspect_build staged internal problem") {
+    // The trapped compile failed internally.
+    inspect_build_stopped_is_internal([Diagnostic]{}, false, "the trapped compile lost its build entry")
+    // The invocation could not run.
+    inspect_build_stopped_is_internal([Diagnostic]{}, false, "the IR builder refused the invocation's code: a value of String where TypeId is expected")
+    // The native run failed internally after the build refused a call.
+    refusal: diagnostic_from_registry("E3502", None, "`meta.add_struct` was given a type that is not one type's spelling", "generated source could not materialize", "Spell one type")
+    inspect_build_stopped_is_internal([Diagnostic]{refusal}, true, "the native run of the build entry failed internally: compiler value handle 3 is not live")
+    // Without an internal problem, a run that stopped at a trap restates the
+    // staged report.
+    staged := [Diagnostic]{diagnostic_from_registry("E0107", None, "Nothing named `Shape` exists here", "A name must be declared before it's used", "Declare it first")}
+    none := [Diagnostic]{}
+    held := String?{None}
+    request := inspect_build_request()
+    trapped := jet_driver_build_query_stopped(request, staged, none, true, false, held)
+    trapped_query := trapped.query.move()
+    trapped_failure: jet_cli_build_query_failure(trapped.request.move(), trapped_query, "main.jet", false, false, false)
+    inspect_build_require(trapped_failure.exit_code == JET_DRIVER_EXIT_USER_ERROR && trapped_failure.stderr.contains("Shape"), "a staged run that stopped at a trap reports the staged check")
 }
 
 // The compiler under test, never this test binary, owns the runtime pack:
