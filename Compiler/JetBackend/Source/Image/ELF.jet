@@ -68,14 +68,7 @@ x64_executable_add_part: fn(image: [U8], name: String, payload: [U8]) -> [U8] Er
     table_size: (phnum + 2) * 56
     note_at: at + table_size
     descriptor: (label.len() + 8) /% 8 * 8
-    note := [U8]{}
-    elf64_u32(note, 4)
-    elf64_u32(note, descriptor + payload.len())
-    elf64_u32(note, ELF64_JET_PART_NOTE)
-    loop byte in ([U8]{U8{74}, U8{101}, U8{116}, U8{0}}) -> note.push(byte)
-    note.extend(label)
-    loop note.len() < 16 + descriptor -> note.push(U8{0})
-    note.extend(payload.copy())
+    note_size: 16 + descriptor + payload.len()
     loop k in 0..<phnum {
         if loader_u32(table, k * 56) != 6 -> next
         link_put64(table, k * 56 + 8, at)
@@ -84,12 +77,21 @@ x64_executable_add_part: fn(image: [U8], name: String, payload: [U8]) -> [U8] Er
         link_put64(table, k * 56 + 32, table_size)
         link_put64(table, k * 56 + 40, table_size)
     }
-    link_phdr(table, at, 1, 4, distance + at, table_size + note.len(), table_size + note.len(), OS_PAGE_SIZE)
-    link_phdr(table, note_at, 4, 4, distance + note_at, note.len(), note.len(), 8)
-    out := image.copy()
+    link_phdr(table, at, 1, 4, distance + at, table_size + note_size, table_size + note_size, OS_PAGE_SIZE)
+    link_phdr(table, note_at, 4, 4, distance + note_at, note_size, note_size, 8)
+    // The image, the table and the note are written once each, straight
+    // into the output.
+    out := [U8]{}
+    out.extend(image[0..<image.len()])
     link_pad_to(out, at, 0)
     out.extend(table)
-    out.extend(note)
+    elf64_u32(out, 4)
+    elf64_u32(out, descriptor + payload.len())
+    elf64_u32(out, ELF64_JET_PART_NOTE)
+    loop byte in ([U8]{U8{74}, U8{101}, U8{116}, U8{0}}) -> out.push(byte)
+    out.extend(label)
+    loop out.len() < note_at + 16 + descriptor -> out.push(U8{0})
+    out.extend(payload[0..<payload.len()])
     link_put64(out, 32, at)
     link_put16(out, 56, phnum + 2)
     Ok(out)
