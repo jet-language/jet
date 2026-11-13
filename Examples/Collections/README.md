@@ -35,7 +35,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [Set](Set.jet) — Set<T> — hash-backed unordered set.
 - [Sketch](Sketch.jet) — core.data.sketch — approximate data structures.
 - [SortByKey](SortByKey.jet) — sort_by and sort_by_desc reorder the marked list in place by a key closure.
-- [TupleOrder](TupleOrder.jet) — Named tuples order member by member in label order: the labels sorted by name, not the order they are written in.
+- [TupleOrder](TupleOrder.jet) — Named tuples order member by member in written order.
 - [WordCount](WordCount.jet)
 
 ## Iterators

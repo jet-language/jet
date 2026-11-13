@@ -2,7 +2,7 @@
 // No reserved-name parser exemption or compatibility alias is involved.
 use jet_foundation.[
     Type, TypeTupleField, core_call, core_host_fixed_signature,
-    core_module_export, type_identity_equal, type_tuple_fields_canonical,
+    core_module_export, type_identity_equal,
 ]
 
 raw_host_key_fixture: fn(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: String, effect_leaf: String?) {
@@ -42,13 +42,13 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     wire: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
     result: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, "Net", Val("Time.Wait"))
-    // Named tuple fields are canonical by name (S73), as the signature row reads them.
-    link_facts: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
+    // The signature row lists the members in the kernel's slot order.
+    link_facts: Type.Tuple{fields: [TypeTupleField]{
         {name: "available", ty: Type.Bool},
         {name: "held", ty: Type.Bool},
         {name: "value", ty: Type.Int},
         {name: "errno", ty: Type.Int}
-    })}
+    }}
     raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, "FS", Val("FS.Write"))
     files: core_module_export("core.files") ?? panic("files exports are registered")
     assert(files.members.contains("compiler_link_held"))

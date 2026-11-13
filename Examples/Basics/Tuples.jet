@@ -1,4 +1,7 @@
 // S73: named-only tuples — literals, types, access, equality, destructure.
+// Member order is part of a tuple's type and decides how tuples compare.
+
+// A literal in another order converts to the declared return type.
 bounds: fn() -> (max: Int, min: Int) { (min: 0, max: 10) }
 
 // Public APIs return new answers; no dummy & outputs.
@@ -8,7 +11,7 @@ split: fn(n: Int, d: Int) -> (quotient: Int, remainder: Int) {
 
 run: fn() {
     p: (x: 1, y: 2)
-    q: (y: 3, x: 4)
+    q: (x: 4, y: 3)
     same_shape: p == q
     { x: a, y: b }: p.copy()
     print("{p.x} {p.y} {a} {b} {same_shape}")
@@ -19,4 +22,8 @@ run: fn() {
     // Names bind the members they name, in any written order.
     (min, max): bounds()
     print("{min} {max}")
+    // Tuples sort by their members in written order: year, then month.
+    dates := [(year: 2024, month: 3), (year: 2023, month: 11)]
+    dates.sort()
+    print("{dates[0].year}-{dates[0].month}")
 }

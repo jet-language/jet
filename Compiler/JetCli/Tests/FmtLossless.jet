@@ -1169,12 +1169,6 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
             formatted_i = union.formatted
             next
         }
-        tuple: fl_reordered_named_tuple_type(original, original_i, formatted, formatted_i)
-        if tuple.ok {
-            original_i = tuple.original
-            formatted_i = tuple.formatted
-            next
-        }
         if fl_typed_literal_dot_rewrite(original, original_i, formatted, formatted_i) {
             original_i += 1
             next
@@ -1249,36 +1243,6 @@ fl_reordered_simple_union_type: fn(original: [FmtTok], original_i: Int, formatte
     if left.end < 0 || right.end < 0 -> return fl_no_step()
     if fl_sorted(left.members) != fl_sorted(right.members) -> return fl_no_step()
     FmtStep{ok: true, original: left.end, formatted: right.end}
-}
-
-// A named tuple type orders its members by label (the parser's
-// `type_tuple_fields_canonical`), so `(key: String, index: Int)` and
-// `(index: Int, key: String)` are one type.
-fl_reordered_named_tuple_type: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> FmtStep {
-    left: fl_named_tuple_type_members(original, original_i)
-    right: fl_named_tuple_type_members(formatted, formatted_i)
-    if left.end < 0 || right.end < 0 -> return fl_no_step()
-    if fl_sorted(left.members) != fl_sorted(right.members) -> return fl_no_step()
-    FmtStep{ok: true, original: left.end, formatted: right.end}
-}
-
-// The members of `(label: Type, …)` whose first label is at `start`, every
-// member type one capitalized name; `end` is the index after `)`, or -1.
-fl_named_tuple_type_members: fn(tokens: [FmtTok], start: Int) -> (members: [String], end: Int) {
-    none: (members: [String]{}, end: -1)
-    if fl_kind(tokens, start - 1) != TOKEN_LPAREN -> return none
-    members := [String]{}
-    cursor := start
-    loop {
-        if !fl_is_ident(tokens, cursor) || fl_kind(tokens, cursor + 1) != TOKEN_COLON || !fl_is_ident(tokens, cursor + 2) || !fl_uppercase_start(tokens[cursor + 2].text) -> return none
-        members.push("{tokens[cursor].text}: {tokens[cursor + 2].text}")
-        after: fl_kind(tokens, cursor + 3)
-        if after == TOKEN_RPAREN -> break
-        if after != TOKEN_COMMA -> return none
-        cursor += 4
-    }
-    if members.len() < 2 -> return none
-    (members: members, end: cursor + 4)
 }
 
 fl_typed_literal_dot_rewrite: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> Bool {

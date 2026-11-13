@@ -4383,9 +4383,8 @@ ir_string_cut: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, input
         hit: ir_bool_op(m, b, IROp.Ne, cut_flag, zero)
         ir_open_if(b.f, hit, b.line)
     }
-    // Some((before, after)): the box holds the String pair at offset 0. The
-    // pair's members are label-sorted (S73: `after` precedes `before`), so
-    // each half goes to the member of its own name.
+    // Some((before, after)): the box holds the String pair at offset 0, and
+    // each half goes to the pair's member of its own name.
     swapped: members[0].name == "after"
     pair_size: m.types[pair_row].size
     boxed: ir_box_alloc(m, b, pair_size, result_row)

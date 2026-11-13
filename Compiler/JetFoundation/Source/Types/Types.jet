@@ -67,16 +67,6 @@ TypeTupleField: struct {
     ty: Type
 }
 
-// S73: named tuple fields sorted by name, so type identity ignores source
-// order (the Rust reference's `canonicalize_tuple_fields`). The sort is stable,
-// so positional members keep their written order.
-type_tuple_fields_canonical: fn(fields: [TypeTupleField]) -> [TypeTupleField] Never! {
-    sorted := fields
-    sorted = loop fresh_item in sorted -> fresh_item
-    sorted.sort_by(fn(left: TypeTupleField, right: TypeTupleField) { left.name <=> right.name })
-    sorted
-}
-
 AccessConvention: enum {
     Read
     Write

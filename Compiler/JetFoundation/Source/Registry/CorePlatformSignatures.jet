@@ -63,8 +63,8 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
 }
 
 // A `(name:T,…)` return's labels, or a `Result<T,(name:T,…)>` return's error
-// labels, in row (kernel declaration) order; the parsed Type sorts them
-// canonically. Empty for any other return field.
+// labels, in row (kernel declaration) order, which is the parsed tuple's
+// member order. Empty for any other return field.
 core_sig_row_tuple_labels: fn(field: String) -> [String] Never! {
     bytes: field.bytes()
     labels := [String]{}
@@ -174,7 +174,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
             done = core_sig_row_code(bytes, field.next) != 44
             next = field.next + 1
         }
-        return CoreSigRowType{ty: Type.Tuple{fields: type_tuple_fields_canonical(fields)}, next: next}
+        return CoreSigRowType{ty: Type.Tuple{fields: fields}, next: next}
     }
     end := start
     loop core_sig_row_is_name_code(core_sig_row_code(bytes, end)) -> end += 1

@@ -2948,6 +2948,13 @@ ir_adapt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, spa
         if ir_untag(member_ty) == .Union(_) -> return ir_union_rewiden_fresh(m, p, b, slot, member_ty, union_ty, span)
         return ir_union_box(m, p, b, slot, member_ty, union_ty, span)
     }
+    // A record where one of the same named members in another order is
+    // wanted is rebuilt member by member in the wanted order.
+    if ir_untag(union_ty) == .Tuple(want_fields) {
+        if ir_untag(member_ty) == .Tuple(have_fields) {
+            if ir_record_member_order_differs(want_fields, have_fields) -> return ir_record_reorder(m, p, b, slot, have_fields, want_fields, row, span)
+        }
+    }
     // An inline `[T#N]` where a `[T]` is wanted is a List copy of it; no
     // other value stands for an inline `[T#N]`.
     have_fixed: ir_fixed_count(m, have) != None
@@ -2956,6 +2963,35 @@ ir_adapt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, spa
     if have_fixed != want_fixed -> return ir_fail_slot(b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
     if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size -> return slot
     ir_fail_slot(b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
+}
+
+// Whether two records list their members in different orders.
+ir_record_member_order_differs: fn(want_fields: [TypeTupleField], have_fields: [TypeTupleField]) -> Bool Never! {
+    if want_fields.len() != have_fields.len() -> return false
+    loop (index, field) in want_fields {
+        if field.name != have_fields[index].name -> return true
+    }
+    false
+}
+
+// The record `slot` (members `have_fields`) as a fresh record of row `row`
+// (the same named members, `want_fields`, in another order): each member
+// is owned into the new record at its own name. Releases `slot`.
+ir_record_reorder: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, have_fields: [TypeTupleField], want_fields: [TypeTupleField], row: Int, span: Span) -> Int Never! {
+    have_members: ir_tuple_members(m, p, have_fields) ?? return ir_fail_slot(b, span, "layout of {ir_type_name(m.types[b.f.slot_type[slot]].ty)}")
+    want_members: ir_tuple_members(m, p, want_fields) ?? return ir_fail_slot(b, span, "layout of {ir_type_name(m.types[row].ty)}")
+    storage: ir_fresh_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    loop member in want_members {
+        source: loop candidate in have_members {
+            if candidate.name == member.name -> break candidate
+        } ?? return ir_fail_slot(b, span, "record member {member.name} of {ir_type_name(m.types[row].ty)}")
+        loaded: ir_load_at(m, b, slot, source.offset, source.ty)
+        owned: ir_own(m, p, b, loaded)
+        ir_member_write(m, p, b, storage, member, owned)
+    }
+    ir_release(m, b, slot)
+    storage
 }
 
 // The Result box `slot` as a new box of the Result row `row`: the selector

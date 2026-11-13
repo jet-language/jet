@@ -35,7 +35,6 @@ use jet_foundation.[
     expr_span,
     is_compute_tensor_family,
     symbol_id,
-    type_tuple_fields_canonical,
 ]
 
 SemaComputeModelsSpecialCheck: struct {
@@ -398,11 +397,11 @@ sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], 
     gradient_value: gradient_value_type ?? Type.Named{name: "Tensor"}
     gradient_fields := [TypeTupleField]{}
     loop name in gradient_names -> gradient_fields.push(TypeTupleField{name: name, ty: gradient_value})
-    // Named tuple types are canonical (S73: fields by name), as the tuple
-    // literals the expanded transforms return are.
-    gradient_type := Type.Tuple{fields: type_tuple_fields_canonical(gradient_fields)}
-    value_and_gradient_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}})}
-    jvp_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}})}
+    // The members are in the order the expanded transforms' tuple literals
+    // write them.
+    gradient_type := Type.Tuple{fields: gradient_fields}
+    value_and_gradient_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}}}
+    jvp_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}}}
     run_type := Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
     direct_return := if {
         member == "gradient" -> gradient_type

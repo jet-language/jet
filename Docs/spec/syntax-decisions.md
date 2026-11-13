@@ -1324,13 +1324,17 @@ does not alter the method's declared generic signature.
 
 **S73 — Tuples**: named members only — `p: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
-Named tuple identity uses fields sorted by name at construction, irrespective of
-source spelling order. Synthesized Core signatures obey the same invariant,
-including tuples nested in containers, callbacks, and failure domains; assignment
-does not repair or suppress a mismatched identity. **D-TUPLE-ORDER1=A**: a named
-tuple's order (`<`, `<=>`, `sort`, `sort_desc`, `min`, `max`, Map keys) compares
-members in that same label order, so `(key, index)` orders by `index`, then `key`.
-To order by another member first, use `sort_by` (example: collections/tuple_order).
+**D-RECORD-ORDER1=A**: member order is part of a record's type. `(x: Int,
+y: Int)` and `(y: Int, x: Int)` are two types, and the written order is the
+one comparison (`<`, `<=>`, `sort`, `sort_desc`, `min`, `max`, Map keys),
+printing and encoding use: the first written member decides first. A record
+converts by name to an expected record type with the same members (a parameter,
+return, annotation or field type); its members run in written order before they
+are arranged. An untyped list takes its order from its first entry. Comparing
+two records whose members are in different orders is refused (E0109) until one
+side names its target type. Synthesized Core signatures keep the order they
+declare. To order by another member first, use `sort_by` (example:
+collections/tuple_order).
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal

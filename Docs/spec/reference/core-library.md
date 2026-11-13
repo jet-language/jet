@@ -281,7 +281,7 @@ A call crosses the runtime's route carriers, not the C law: an `Int` or a
 machine integer as a word, a `Bool` as a flag, a `Float`, a `String` as text,
 and a `List` of scalars; a result may also be an `Option` of one of those or
 of a tuple, or a tuple whose items are those or an `Option` of one, whose
-items the export writes in the tuple's label-sorted order. A binding
+items the export writes in the tuple's written order. A binding
 parameter or result outside those carriers is
 E3203. Only the generated interface units and the runtime's own inline
 modules declare bindings; an `#Import(c)` in a user module of any name,
@@ -671,9 +671,9 @@ keys. `min_by` and `max_by` retain the last source item for equal keys.
 A Float or F32 key to `sort_by`, `sort_by_desc`, their `try_` forms, `min_by`
 or `max_by` orders by IEEE 754 totalOrder, as `<=>` does: a negative NaN
 first, then `-inf`, `-0.0` before `+0.0`, `+inf`, and a positive NaN last.
-`sort`, `sort_desc`, `min` and `max` on named tuples compare members in label
-order, not written order (S73, D-TUPLE-ORDER1=A). So `(key, index)` sorts by
-`index`, then `key`; use `sort_by` to put another member first.
+`sort`, `sort_desc`, `min` and `max` on named tuples compare members in written
+order (S73, D-RECORD-ORDER1=A). So `(key, index)` sorts by `key`, then `index`;
+use `sort_by` to put another member first.
 `binary_search` returns a matching index, not an insertion position or a
 promise to return the first equal item. `counts()` returns a map of element
 counts; `top_n(n)` orders by descending count and ascending key for ties.

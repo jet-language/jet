@@ -47,7 +47,6 @@ use jet_foundation.[
     jet_target_layout_pointer_size,
     symbol_id,
     type_name,
-    type_tuple_fields_canonical,
     sema_casing_snake_words,
     sema_casing_marker_qualifier,
     fact_read_detail_field,
@@ -1327,10 +1326,10 @@ sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Ty
         if !sema_fact_uses_in_items(graph, module_index, graph.modules[module_index].program.items, "", target, uses, span, diagnostics) -> return sema_fact_read_failed()
     }
     marker_type: sema_call_resolved_type(Type.Named{name: name}, environment, program)
-    use_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
+    use_type: Type.Tuple{fields: [TypeTupleField]{
         TypeTupleField{name: target.field, ty: marker_type},
         TypeTupleField{name: "site", ty: sema_fact_named("ItemInfo")},
-    })}
+    }}
     folded: sema_tree_node(Type.List{element: use_type}, TExprKind.CtLit{value: TComptimeValue.List{values: uses}}, span)
     SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, diagnostics)}
 }
@@ -1441,10 +1440,8 @@ sema_fact_uses_at: fn(graph: SemaRegistrationGraph, module_index: Int, markers: 
             TComptimeField{name: "module", value: TComptimeValue.String{value: graph.modules[module_index].module_path}},
             TComptimeField{name: "kind", value: TComptimeValue.String{value: kind}},
         })
-        // The record's members in the tuple type's canonical (sorted) order.
-        fields := [TComptimeField]{TComptimeField{name: target.field, value: value}, TComptimeField{name: "site", value: site}}
-        fields.sort_by(fn(left: TComptimeField, right: TComptimeField) { left.name <=> right.name })
-        uses.push(sema_fact_struct("Tuple", fields))
+        // The record's members in the order of its tuple type.
+        uses.push(sema_fact_struct("Tuple", [TComptimeField]{TComptimeField{name: target.field, value: value}, TComptimeField{name: "site", value: site}}))
     }
     true
 }

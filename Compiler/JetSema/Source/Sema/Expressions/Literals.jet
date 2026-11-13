@@ -33,7 +33,6 @@ use jet_foundation.[
     symbol_id,
     type_identity_equal,
     type_name,
-    type_tuple_fields_canonical,
 ]
 
 sema_expression_unit_literal_type_name: fn(name: String) -> String Never! {
@@ -435,6 +434,9 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
                             checked_parts[part_index] = Val(TListSpreadPart.Element{value: converted})
                             element_types[part_index] = Val(inferred_element)
                         }
+                        // A later record with the first item's members in
+                        // another order converts to the first item's type.
+                        sema_type_record_converts(inferred_element, item_type) -> element_types[part_index] = Val(inferred_element)
                         else -> {
                             sema_expression_list_inference_error(item_type, inferred_element, part_index, expr_span(elements[part_index]), diagnostics)
                             inference_failed = true
@@ -699,8 +701,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, env
             diagnostics.push(sema_error("E0105", span, "tuple field `{field.name}` is supplied more than once", "tuple field names must be unique", "remove the duplicate tuple field"))
             return None
         }
-        // S73: members match the expected tuple by name, in any order (Rust
-        // `infer_tuple_lit`).
+        // Members match the expected record by name, written in any order.
         field_expected := Type?{None}
         if expected_fields == .Val(rows) {
             loop row in rows {
@@ -727,19 +728,26 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, env
         diagnostics.push(sema_error("E0108", span, "tuple fields do not match the expected tuple type", "tuple arity is part of the tuple type", "provide every tuple field exactly once"))
         return None
     }
-    // S73: the tuple type and its values take the canonical member order, as
-    // the Rust reference types the literal and lowers each member by name.
-    canonical: type_tuple_fields_canonical(types)
-    ordered := [TExpr]{}
-    loop member in canonical {
-        loop (index, written) in types {
-            if written.name == member.name {
-                ordered.push(values[index])
-                break
+    // An expected record's member order is part of its type: the literal
+    // evaluates its members in written order and arranges them in the
+    // expected order, storing each by name.
+    if expected_fields == .Val(rows) {
+        reordered: loop (index, row) in rows {
+            if row.name != types[index].name -> break true
+        } ?? false
+        if reordered {
+            record: Type.Tuple{fields: rows.copy()}
+            members := [TStructFieldValue]{}
+            loop (index, written) in types {
+                member_ty: loop row in rows {
+                    if row.name == written.name -> break row.ty.copy()
+                } ?? written.ty.copy()
+                members.push(TStructFieldValue{field: sema_expression_tuple_field_ref(record, written.name, member_ty), value: values[index], boxed: false})
             }
+            return sema_expr_expected_owned(sema_tree_node(record, TExprKind.StructLit{fields: members}, span), expected, environment, program, diagnostics)
         }
     }
-    sema_expr_expected_owned(sema_tree_node(Type.Tuple{fields: canonical}, TExprKind.Tuple{values: ordered}, span), expected, environment, program, diagnostics)
+    sema_expr_expected_owned(sema_tree_node(Type.Tuple{fields: types}, TExprKind.Tuple{values: values}, span), expected, environment, program, diagnostics)
 }
 
 sema_expression_range: fn(start: Expr, end: Expr, exclusive: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

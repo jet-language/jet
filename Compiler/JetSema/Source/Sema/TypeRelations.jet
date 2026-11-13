@@ -575,9 +575,30 @@ sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
             // A container of it does not (sema_type_carrier_compatible).
             if offered == .Union(offered_members) -> return sema_type_union_covers(members, offered_members)
         }
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        // A record whose members are the same named members in another
+        // order converts by value. A container of it does not.
+        .Tuple(_) -> return sema_type_record_converts(required, offered)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
+}
+
+// Whether `offered` is a record holding exactly the named members of the
+// record `required`, each of the same type, in another order: it converts
+// by value.
+sema_type_record_converts: fn(required: Type, offered: Type) -> Bool Never! {
+    required_fields: if required == .Tuple(fields) -> fields else -> { return false }
+    offered_fields: if offered == .Tuple(fields) -> fields else -> { return false }
+    if required_fields.len() != offered_fields.len() -> return false
+    reordered := false
+    loop (index, required_field) in required_fields {
+        if required_field.name != offered_fields[index].name -> reordered = true
+        matched: loop offered_field in offered_fields {
+            if offered_field.name == required_field.name -> break type_identity_equal(required_field.ty, offered_field.ty)
+        } ?? false
+        if !matched -> return false
+    }
+    reordered
 }
 
 // Whether every member of `offered_members` is one of `members`.
