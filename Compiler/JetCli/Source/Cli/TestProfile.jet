@@ -27,6 +27,7 @@ use {
         EvidenceRecord,
         TEST_SETTINGS_ENV,
         TestSetting,
+        build_option_row,
         evidence_outcome_name,
         evidence_report_read,
         test_settings_get,
@@ -40,7 +41,7 @@ use {
         test_settings_time_limit_ms,
     ]
     jet_pkg_model.[ComposeError, PackageFacts, TEST_CODE_SUITES_FILE, TEST_SUITE_TESTS, pkg_test_code_suites]
-    jet_testkit.[KitCaseResult, kit_exec_defaults, kit_execute_suites, kit_expect_bless_error, kit_known_load]
+    jet_testkit.[KitCaseResult, kit_exec_defaults, kit_execute_suites, kit_expect_bless_error, kit_golden_tier_of_level, kit_golden_tiers, kit_known_load]
 }
 
 // Set in each child of a profile run to the profile's name: a child never
@@ -282,11 +283,10 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     options.list = test_settings_on(settings, "list")
     options.coverage = test_settings_on(settings, "diagnostic_coverage")
     if test_settings_time_limit_ms(settings) == .Val(limit) -> options.timeout = (limit + 999) /% 1000
-    // `optimize` picks the golden tiers: none is o0 (`jet run`), basic o1
-    // (`jet build --optimize=basic`), full o2 (`jet build --release`); unset
-    // runs all three.
+    // `optimize` picks the golden tiers, each the testkit tier of that level
+    // (none o0, basic o1, full o2); unset runs them all.
     levels: test_settings_levels(settings)
-    if levels.len() > 0 -> options.tiers = (loop level in levels -> if level == "none" -> "o0" else if level == "basic" -> "o1" else -> "o2")
+    if levels.len() > 0 -> options.tiers = (loop level in levels -> kit_golden_tier_of_level(level) ?? level)
     if chosen.baseline == .Val(ledger) {
         options.ledger = cli_files.realpath(jet_cli_rooted_join(package, ledger)) ?? return JetDriverVerbOutput{stdout: "", stderr: "{site}: couldn't resolve the baseline `{ledger}`: {jet_cli_io_error_text(err)}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
@@ -704,4 +704,10 @@ jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetC
     assert_eq(code.failures, [String]{"fixed: #2 was broken: remove stale known-failing annotation", "new: boom"})
     assert_eq((loop verdict in code.verdicts -> "{verdict.id} {verdict.status}"), [String]{"fixed UNEXPECTED-PASS", "new FAIL", "slow KNOWN-FAILING"})
     assert_eq(code.verdicts[2].detail, "#1 over budget: 6.0x")
+}
+
+#Test("the testkit's golden tiers are the optimize levels of the build-option table, in order") {
+    optimize: build_option_row("optimize") ?? panic("the build-option table has no optimize row")
+    assert_eq((loop tier in kit_golden_tiers() -> tier.level), optimize.values)
+    assert_eq((loop level in optimize.values -> kit_golden_tier_of_level(level) ?? "missing"), (loop tier in kit_golden_tiers() -> tier.name))
 }

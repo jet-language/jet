@@ -1,10 +1,30 @@
 use files: core.files
 
 
+// The golden tiers, one per optimize level, the testkit's one table of tier
+// names and their flags: o0 runs the entry (`jet run`), o1 builds it with
+// `--optimize=basic` and o2 with `--release`.
 kit_golden_tiers: fn() -> [KitTier] {
-    [KitTier{name: "o0", flags: [], direct: true, test_flags: ["--optimize=none"]},
-     KitTier{name: "o1", flags: ["--optimize=basic"], direct: false, test_flags: ["--optimize=basic"]},
-     KitTier{name: "o2", flags: ["--release"], direct: false, test_flags: ["--release"]}]
+    [KitTier{name: "o0", level: "none", flags: [], direct: true, test_flags: ["--optimize=none"]},
+     KitTier{name: "o1", level: "basic", flags: ["--optimize=basic"], direct: false, test_flags: ["--optimize=basic"]},
+     KitTier{name: "o2", level: "full", flags: ["--release"], direct: false, test_flags: ["--release"]}]
+}
+
+// The tier named `name`; the first tier for any other name.
+kit_golden_tier: fn(name: String) -> KitTier {
+    tiers: kit_golden_tiers()
+    loop row in tiers {
+        if row.name == name -> return row.copy()
+    }
+    tiers[0].copy()
+}
+
+// The name of the tier that builds at optimize level `level`.
+kit_golden_tier_of_level: fn(level: String) -> String? {
+    loop row in kit_golden_tiers() {
+        if row.level == level -> return Val(row.name.copy())
+    }
+    None
 }
 
 kit_golden_exists: fn(path: String) -> Bool { files.exists(path) }
@@ -409,10 +429,7 @@ kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     results := [KitOutcome]{}
     loop (index, tier_name) in context.options.tiers {
         if independent && index > 0 -> next
-        tier := kit_golden_tiers()[0]
-        loop row in kit_golden_tiers() {
-            if row.name == tier_name -> tier = row
-        }
+        tier: kit_golden_tier(tier_name)
         scratch: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
             results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
