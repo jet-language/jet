@@ -4043,15 +4043,19 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 // A Core module the Core record holds: its registration row decoded, the
 // row's tree the unit's program, the row kept without it. It spells no word
 // and demands nothing: the record's check loaded every module it names, and
-// the row's imports are already final. A record this jet wrote whose row
-// doesn't decode is a compiler fault.
+// the row's imports are already final. Its line table is the row's own, so
+// no load step scans the module's text for one (jet_driver_fill_line_starts).
+// A record this jet wrote whose row doesn't decode is a compiler fault.
 jet_driver_core_record_parsed_unit: fn(row: [U8], module_name: String, index: Int) -> JetDriverParsedUnit {
     registration := jet_driver_core_record_registration_decode(row, module_name) ?? panic("the Core record: {err}")
     program := registration.program.move()
     registration.program = ast_program()
+    // copy: the seeded row keeps its segments for sema's spans.
+    line_starts: if registration.source_segments.len() == 1 -> registration.source_segments[0].line_starts.copy() else -> [Int]{}
     JetDriverParsedUnit{
         parsed: ParseResult{program: program.move(), diagnostics: [Diagnostic]{}},
         demand: jet_driver_empty_core_identifier_demand(),
+        line_starts: line_starts,
         core_record_index: index,
         core_registration: [SemaRegistrationModule]{registration.move()},
     }
