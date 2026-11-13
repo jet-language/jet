@@ -365,7 +365,11 @@ js: fn(value: Float) -> String Never! {
 }
 
 // A rounded number as JavaScript prints `Math.round(value)`.
-whole: fn(value: Float) -> String Never! { if math.is_finite(value) -> "{math.round(value)}" else -> js(value) }
+whole: fn(value: Float) -> String Never! {
+    if !math.is_finite(value) -> return js(value)
+    rounded: Int{math.round(value)}
+    "{rounded}"
+}
 
 // Two decimals, `inf`, or `?` for no number.
 two: fn(value: Float?) -> String Never! {
@@ -802,7 +806,7 @@ phase_table: fn(path: String, spawn_unix_ms: Int) -> PhaseTable Never! {
             high = math.max_float(high, span.end)
         }
         wall += high - low
-        phases[kind.copy()] = PhaseRow{wall_ns: Float{math.round(wall)}, count: list.len(), items: items}
+        phases[kind.copy()] = PhaseRow{wall_ns: math.round(wall), count: list.len(), items: items}
     }
     PhaseTable{phases: phases, first_begin_ns: first, unclosed: unclosed, events: events.len()}
 }
@@ -849,7 +853,7 @@ finish: fn(config: Config, compiler: Compiler, started: Started) -> Point Err! {
     metrics := [String: Float]{}
     metrics["wall_seconds"] = Float{wall_ns} / Float{1000000000.0}
     metrics["user_seconds"] = Float{receipt.user_cpu_ns ?? 0} / Float{1000000000.0}
-    metrics["peak_rss_kb"] = Float{math.round(Float{receipt.peak_memory_bytes ?? 0} / Float{1024.0})}
+    metrics["peak_rss_kb"] = math.round(Float{receipt.peak_memory_bytes ?? 0} / Float{1024.0})
     if table.first_begin_ns == .Val(first) -> metrics["startup_seconds"] = first / Float{1000000000.0}
     loop (kind, phase) in table.phases {
         metrics["phase.{kind}"] = phase.wall_ns / Float{1000000000.0}

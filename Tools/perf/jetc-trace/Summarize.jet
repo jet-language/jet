@@ -141,7 +141,7 @@ run: fn() {
             }
             esc: String.from_bytes_lossy([U8]{27})
             print("{esc}[2J{esc}[H{time.now().in_host_zone().format("%-I:%M:%S %p")}  {path}\n\n{text}")
-            time.sleep(time.duration_ns(math.round(every * 1e9)))
+            time.sleep(time.duration_ns(Int{math.round(every * 1e9)}))
         }
     }
     print(render(path) ?? process.fail(1, "{err}"))

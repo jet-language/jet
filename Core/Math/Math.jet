@@ -87,7 +87,7 @@ acos: fn(n: Float) -> Float Never! {
             return NAN
         }
         t: Float{2.0} - Float{2.0} * fabs(n)
-        jd: round_even(t * Float{32.0})
+        jd: __round_even(t * Float{32.0})
         z: copysign(sqrt(t), n)
         zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
         tj: Float{0.25} * t - jd * Float{0.0078125}
@@ -109,7 +109,7 @@ acos: fn(n: Float) -> Float Never! {
         return lb
     }
     // pi/2 - asin(x)
-    jd: round_even(n * n * Float{128.0})
+    jd: __round_even(n * n * Float{128.0})
     t: fma(n, n, Float{-0.0078125} * jd)
     r: __asin_core(jd, t, -n, Float{0.0}, f0h, f0l, (-n * t) * Float{3.3393426912553537e-16})
     if r.lb != r.ub -> return __acos_refine(n, r.lb)
@@ -233,7 +233,7 @@ asin: fn(n: Float) -> Float Never! {
             return NAN
         }
         t: Float{2.0} - Float{2.0} * fabs(n)
-        jd: round_even(t * Float{32.0})
+        jd: __round_even(t * Float{32.0})
         z: copysign(sqrt(t), -n)
         zl: fma(z, z, -t) * ((Float{-0.5} / t) * z)
         tj: Float{0.25} * t - jd * Float{0.0078125}
@@ -243,7 +243,7 @@ asin: fn(n: Float) -> Float Never! {
     }
     // |x| < 2.149119332890821e-8: x rounds as asin(x) does
     if ax < 0x7CAE_26E8_9224_7DEC -> return fma(Float{2.7755575615628914e-17}, n, n)
-    jd: round_even(n * n * Float{128.0})
+    jd: __round_even(n * n * Float{128.0})
     t: fma(n, n, Float{-0.0078125} * jd)
     r: __asin_core(jd, t, n, Float{0.0}, Float{0.0}, Float{0.0}, fabs(n * t) * Float{3.2526065174565133e-16})
     if r.lb != r.ub -> return __asin_refine(n, r.lb)
@@ -1041,7 +1041,7 @@ exp: fn(n: Float) -> Float Never! {
         if bits >= 0 -> return INFINITY
         if ax >= 0x4087_4910_D52D_3052 -> return 0.0
     }
-    t: round_even(n * Float{5909.278887481194})
+    t: __round_even(n * Float{5909.278887481194})
     jt: __whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -1088,9 +1088,9 @@ exp2: fn(n: Float) -> Float Never! {
     }
     // 2^x rounds to 1 for |x| <= 2^-53.47
     if ax <= 0x3C97_1547_652B_82FE -> return Float{1.0} + copysign(Float{5.551115123125783e-17}, n)
-    whole: floor(n) == n
+    whole: core.math.floor(n) == n
     sx: Float{4096.0} * n
-    fx: round_even(sx)
+    fx: __round_even(sx)
     z: sx - fx
     z2: z * z
     k: __whole_i64(fx)
@@ -1136,14 +1136,14 @@ exp10: fn(n: Float) -> Float Never! {
         if bits >= 0 -> return INFINITY
         if ax > 0x4074_39B7_46E3_6B52 -> return 0.0
     }
-    if (bits.bit_and(0xFFFF_FFFF_FFFF) == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && round_even(n) == n) {
+    if (bits.bit_and(0xFFFF_FFFF_FFFF) == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && __round_even(n) == n) {
         r := Float{1.0}
         loop _ in 0..<(Int.from_float(n) ?? 0) { r = r * Float{10.0} }
         return r
     }
     // 10^x rounds to 1 for |x| <= 2^-55.2
     if ax <= 0x3C7B_CB7B_1526_E50E -> return Float{1.0} + n
-    t: round_even(Float{13606.617476658635} * n)
+    t: __round_even(Float{13606.617476658635} * n)
     jt: __whole_i64(t)
     i1: Int{jt.bit_and(0x3F)}
     i0: Int{(jt >> 6).bit_and(0x3F)}
@@ -1185,7 +1185,7 @@ exp_m1: fn(n: Float) -> Float Never! {
         }
         // |x| < 1/4: e^(i/128) - 1 from __EXPM1CR_TZ times e^(z/128)
         sx: Float{128.0} * n
-        fx: round_even(sx)
+        fx: __round_even(sx)
         z: sx - fx
         z2: z * z
         i: Int{__whole_i64(fx)} + 32
@@ -1216,7 +1216,7 @@ exp_m1: fn(n: Float) -> Float Never! {
         if ax >= 0x4042_B708_8723_20E2 -> return -1.0
         return ((Float{36.7368005696771} + n) + Float{6.739832990259606e-16}) * Float{8.008566259537294e-17} - Float{0.9999999999999999}
     }
-    t: round_even(n * Float{5909.278887481194})
+    t: __round_even(n * Float{5909.278887481194})
     jt: __whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -1264,7 +1264,7 @@ exp2_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.3190468138462996e-17}, n, fma(Float{0.6931471805599453}, n, -h)) + Float{0.24022650695910072} * n * n
         return h + l
     }
-    if (fabs(n) <= Float{53.0} && n == trunc(n)) -> return ldexp(Float{1.0}, Int.from_float(n) ?? 0) - Float{1.0}
+    if (fabs(n) <= Float{53.0} && n == core.math.trunc(n)) -> return ldexp(Float{1.0}, Int.from_float(n) ?? 0) - Float{1.0}
     tiny: ax <= 0x3FC0_0000_0000_0000
     f: __exp2_m1_fast(n, tiny)
     left: f.hi + (f.lo - f.err)
@@ -1272,7 +1272,7 @@ exp2_m1: fn(n: Float) -> Float Never! {
     if tiny -> return __exp2_m1_accurate_tiny(n)
     r: __hard_case(__EXP2M1_HARD, n)
     if !is_nan(r) -> return r
-    k: round_even(n * Float{4096.0})
+    k: __round_even(n * Float{4096.0})
     y: __s_mul(fma(-k, Float{0.000244140625}, n), Float{0.6931471805599453}, Float{2.3190468138462996e-17})
     e: __exp_dd_tail(k, __exp_q2(y.hi, y.lo))
     d: __dd_minus_one(n, e.hi, e.lo)
@@ -1302,7 +1302,7 @@ exp10_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.650949055239199} * n, n, fma(Float{-2.1707562233822494e-16}, n, fma(Float{2.302585092994046}, n, -h)))
         return h + l
     }
-    if (n >= Float{1.0} && n <= Float{15.0} && n == trunc(n)) -> return __EXP10_POWERS[(Int.from_float(n) ?? 0) + 15] - Float{1.0}
+    if (n >= Float{1.0} && n <= Float{15.0} && n == core.math.trunc(n)) -> return __EXP10_POWERS[(Int.from_float(n) ?? 0) + 15] - Float{1.0}
     tiny: ax <= 0x3FB0_0000_0000_0000
     f: __exp10_m1_fast(n, tiny)
     left: f.hi + (f.lo - f.err)
@@ -1310,7 +1310,7 @@ exp10_m1: fn(n: Float) -> Float Never! {
     if tiny -> return __exp10_m1_accurate_tiny(n)
     r: __hard_case(__EXP10M1_HARD, n)
     if !is_nan(r) -> return r
-    k0: round_even(n * Float{13606.617476658635})
+    k0: __round_even(n * Float{13606.617476658635})
     // k = 2^22 would scale by 2^1024
     k: if (k0 == Float{4194304.0}) -> Float{4194303.0} else -> k0
     yh: fma(-k, Float{0.00007349365128515166}, n)
@@ -1372,7 +1372,7 @@ __erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
         return (hi: h, lo: fma(l1, z, fma(s1.hi, z, -h)), err: Float{2.4881592825595072e-21})
     }
     // i/16 <= z < (i + 1)/16, and z - 1/32 - v/16 is exact
-    v: floor(Float{16.0} * z)
+    v: core.math.floor(Float{16.0} * z)
     b: 13 * ((Int.from_float(v) ?? 1) - 1)
     x: (z - Float{0.03125}) - Float{0.0625} * v
     x2: x * x
@@ -1399,7 +1399,7 @@ __erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
 // relatively, for 2^-61 <= z <= 5.9215871957945065.
 __erf_accurate: fn(z: Float) -> (hi: Float, lo: Float) Never! {
     if (z < Float{0.125}) -> return __erf_accurate_tiny(z)
-    v: floor(Float{8.0} * z)
+    v: core.math.floor(Float{8.0} * z)
     b: 27 * ((Int.from_float(v) ?? 1) - 1)
     x: (z - Float{0.0625}) - Float{0.125} * v
     h := __ERF_C2[b + 26]
@@ -1928,7 +1928,7 @@ __ERFC_ACC_CUT: [Float]{
 // relatively, for -742 < xh: xh + xl = k log(2) + y, then a degree-19
 // polynomial of y.
 __erfc_exp_accurate: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, k: Int) Never! {
-    kf: round_even(xh * Float{1.4426950408889634})
+    kf: __round_even(xh * Float{1.4426950408889634})
     // exact by Sterbenz
     yh: fma(-kf, Float{0.6931471805599453}, xh)
     t: __two_sum(-kf * Float{2.31904681384628e-17}, xl)
@@ -2092,7 +2092,7 @@ gamma: fn(n: Float) -> Float Never! {
         return __tgamma_accurate(n)
     }
     if (n >= Float{171.62437695630274}) -> return Float{1.7415152243978685e308} + Float{1.7415152243978685e308}
-    fx: floor(n)
+    fx: core.math.floor(n)
     if fx == n {
         if (n < Float{0.0}) -> return Float{0.0} / Float{0.0}
         // (n - 1)! exactly in double-double up to 23!, then rounded once
@@ -2155,7 +2155,7 @@ gamma: fn(n: Float) -> Float Never! {
     }
     // -3 <= x <= 4: gamma(x) = gamma(x + j) / (x (x + 1) ... (x + j - 1)),
     // x + j within 1/2 of 3.5
-    i: round_even(n - Float{3.5})
+    i: __round_even(n - Float{3.5})
     d: n - (i + Float{3.5})
     d2: d * d
     d4: d2 * d2
@@ -2212,7 +2212,7 @@ __tgamma_accurate: fn(x: Float) -> Float Never! {
         }
         return u.hi + v.hi
     }
-    ix: floor(x)
+    ix: core.math.floor(x)
     d: Float{2.0} * (x - (ix + Float{0.5}))
     i: Int.from_float(ix) ?? 0
     seg := 0
@@ -2383,7 +2383,7 @@ __gamma_log: fn(x: Float) -> (hi: Float, lo: Float) Never! {
 // cos(pi (x - 1/2)) from t at the nearest multiple of 1/128.
 __gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
-    iv: round_even(v)
+    iv: __round_even(v)
     d: iv - v
     d2: d * d
     ky: Int.from_float(iv) ?? 0
@@ -2405,7 +2405,7 @@ __gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
 // 2^(k/1024) from two tables and 2^(y/1024) - 1 by a polynomial.
 __tgamma_exp: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, e: Int) Never! {
     t: __exp_cr_muldd(xh, xl, Float{1477.3197218702985}, Float{2.0843800310713378e-14})
-    kf: round_even(t.hi)
+    kf: __round_even(t.hi)
     y: __fast_two_sum(t.hi - kf, t.lo)
     k: Int.from_float(kf) ?? 0
     i0: (k >> 5).bit_and(31)
@@ -2910,7 +2910,7 @@ lgamma: fn(n: Float) -> Float Never! {
         if is_nan(n) -> return n + n
         return INFINITY
     }
-    fx: floor(n)
+    fx: core.math.floor(n)
     if fx == n {
         if (n <= Float{0.0}) -> return INFINITY
         if (n == Float{1.0} || n == Float{2.0}) -> return Float{0.0}
@@ -3056,7 +3056,7 @@ __lgamma_piece_poly: fn(j: Int, z: Float) -> (hi: Float, lo: Float) Never! {
 // series in z = 1/2 - |x - 1/2| within 1/64 of 0 and 1.
 __lgamma_sin_pi: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     ax: fabs(x - Float{0.5})
-    if (round_even(ax * Float{128.0}) <= Float{62.0}) -> return __gamma_sin_pi(x, __LGAMMA_SIN_PI_T)
+    if (__round_even(ax * Float{128.0}) <= Float{62.0}) -> return __gamma_sin_pi(x, __LGAMMA_SIN_PI_T)
     z: Float{0.5} - ax
     z2: z * z
     z2l: fma(z, z, -z2)
@@ -3148,7 +3148,7 @@ __lgamma_accurate: fn(sx: Float) -> Float Never! {
             f = __lgamma_add3(f.hi, f.mid, f.lo, lg.hi, lg.mid, lg.lo)
         }
         if neg {
-            phi: if (sx < Float{-0.5}) -> sx - floor(sx) else -> -sx
+            phi: if (sx < Float{-0.5}) -> sx - core.math.floor(sx) else -> -sx
             sp: __lgamma_sin_pi_accurate(phi)
             lg: __lgamma_log_accurate(sp.hi)
             r: __lgamma_add3(f.hi, f.mid, f.lo, lg.hi, lg.mid + (sp.lo / sp.hi + lg.lo), Float{0.0})
@@ -3255,7 +3255,7 @@ __lgamma_log_accurate: fn(x: Float) -> (hi: Float, mid: Float, lo: Float) Never!
 // < 1, as __gamma_sin_pi with double-double series.
 __lgamma_sin_pi_accurate: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
-    iv: round_even(v)
+    iv: __round_even(v)
     d: iv - v
     ky: Int.from_float(iv) ?? 0
     kx: 64 - ky
@@ -3915,9 +3915,11 @@ __LGAMMA_HARD: [Float]{
     -0.2973583944297599, 1.4704714463332447, -5.551115123125783e-17,
     -0.28766719635854177, 1.4919855103221742, 5.551115123125783e-17
 }
-floor: fn(n: Float) -> Float Never! { core.math.floor(n) }
-ceil: fn(n: Float) -> Float Never! { core.math.ceil(n) }
-fract: fn(n: Float) -> Float Never! { n - trunc(n) }
+/// The greatest integral value at most `n`, of `n`'s own type (Roundable).
+floor: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardNegative) }
+/// The least integral value at least `n`, of `n`'s own type (Roundable).
+ceil: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardPositive) }
+fract: fn(n: Float) -> Float Never! { n - core.math.trunc(n) }
 /// sqrt(a^2 + b^2), correctly rounded (CORE-MATH hypot.c): never overflows
 /// or underflows early; +inf when a side is infinite and the other is a
 /// number or a quiet NaN, else NaN for a NaN.
@@ -3984,7 +3986,7 @@ __isqrt_floor: fn(n: Int) -> Int Never! {
     if n < 2 -> return n
     b: __bit_len(n)
     sh: if b > 100 -> (b - 100) /% 2 else -> 0
-    seed: Int.from_float(floor(sqrt(approx(n >> (2 * sh))))) ?? 1
+    seed: Int.from_float(core.math.floor(sqrt(approx(n >> (2 * sh))))) ?? 1
     x0: if seed < 1 -> Int{1} << sh else -> seed << sh
     // one step lands at or above floor(sqrt(n)); from there it decreases
     x := (x0 + n /% x0) /% 2
@@ -4823,7 +4825,7 @@ __pow_float: fn(x: Float, y: Float) -> Float Never! {
         return y + y
     }
     if y == 0.0 || (x == Float{1.0}) -> return Float{1.0}
-    odd: is_finite(y) && trunc(y) == y && trunc(y * Float{0.5}) != y * Float{0.5}
+    odd: is_finite(y) && core.math.trunc(y) == y && core.math.trunc(y * Float{0.5}) != y * Float{0.5}
     if is_inf(x) {
         // x^y for -inf takes an odd y's sign
         if (x > Float{0.0}) || !odd {
@@ -4846,7 +4848,7 @@ __pow_float: fn(x: Float, y: Float) -> Float Never! {
         return sz * Float{0.0}
     }
     if (x > Float{0.0}) -> return __pow_cr(x, y)
-    if trunc(y) != y -> return NAN
+    if core.math.trunc(y) != y -> return NAN
     if odd -> return -__pow_cr(-x, y)
     __pow_cr(-x, y)
 }
@@ -4930,7 +4932,7 @@ __pow_exp_1: fn(rh: Float, rl: Float) -> (hi: Float, lo: Float) Never! {
         if (rh < Float{-745.1332670341407}) -> return (hi: 0.0, lo: 0.0)
         return (hi: NAN, lo: NAN)
     }
-    k: round_even(rh * Float{5909.278887481194})
+    k: __round_even(rh * Float{5909.278887481194})
     zh: fma(Float{0.0001692253858788929}, -k, rh)
     zl: fma(Float{5.661735385366942e-21}, -k, rl)
     __exp_dd_tail(k, __pow_q_1(zh + zl))
@@ -6340,7 +6342,7 @@ __pi_trig_special: fn(n: Float) -> Float Never! {
 // x/(2pi) in 128-bit fixed point and evaluates there.
 __sin_moderate: fn(x: Float) -> Float Never! {
     ax: fabs(x)
-    k: round_even(Float{5215.189175235227} * ax)
+    k: __round_even(Float{5215.189175235227} * ax)
     r: fma(k, Float{-0.00019174759848570515}, ax) + k * Float{-7.474650873702107e-21}
     r2: r * r
     j: __whole_i64(k)
@@ -6366,7 +6368,7 @@ __sin_large: fn(x: Float) -> Float Never! {
     __sin_accurate(x)
 }
 __cos_moderate: fn(x: Float) -> Float Never! {
-    k: round_even(Float{5215.189175235227} * x)
+    k: __round_even(Float{5215.189175235227} * x)
     r: fma(k, Float{-0.00019174759848570515}, x) + k * Float{-7.474650873702107e-21}
     r2: r * r
     j: __whole_i64(k)
@@ -6944,7 +6946,7 @@ __tan_reduce_fast: fn(x: Float) -> (i: Int, h: Float, l: Float) Never! {
             }
         }
     }
-    k: floor(h * Float{2048.0})
+    k: core.math.floor(h * Float{2048.0})
     (i: Int.from_float(k) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l)
 }
 // tan x as hi + lo within |err| (CORE-MATH tan_fast): sin2pi and cos2pi of
@@ -8561,7 +8563,7 @@ __asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> (hi: Float, mid: Float, lo
 // asin to about 2^-149 for the inputs the fast path cannot round: phi
 // approximates asin(x), x = sin(j pi/64 + delta); the hardest are tabulated.
 __asin_refine: fn(x: Float, phi: Float) -> Float Never! {
-    jf: round_even(fabs(phi) * Float{20.371832715762604})
+    jf: __round_even(fabs(phi) * Float{20.371832715762604})
     r: __asin_rotate(x, Int.from_float(jf) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: __asin_series(r.hi, r.lo, sg)
@@ -8585,7 +8587,7 @@ __asin_refine: fn(x: Float, phi: Float) -> Float Never! {
 // approximates acos(x), x = cos(pi/2 -+ j pi/64 - delta). A tail on a
 // rounding boundary is nudged by the next term's sign; five inputs are listed.
 __acos_refine: fn(x: Float, phi: Float) -> Float Never! {
-    jf: round_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
+    jf: __round_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
     r: __asin_rotate(x, Int.from_float(jf) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: __asin_series(r.hi, r.lo, -sg)
@@ -9795,7 +9797,7 @@ __atan2_pi_fast: fn(y0: Float, x0: Float) -> (hi: Float, lo: Float, err: Float) 
     sz: if neg -> Float{-1.0} else -> Float{1.0}
     zh0: if neg -> -qh else -> qh
     zl: if neg -> -ql else -> ql
-    i: Int.from_float(trunc(Float{64.0} * zh0)) ?? 0
+    i: Int.from_float(core.math.trunc(Float{64.0} * zh0)) ?? 0
     b: 10 * i
     zh: zh0 - __ATAN2PI_POINT[i]
     z: zh + zl
@@ -10323,7 +10325,7 @@ __ATAN2PI_ERR: [Float]{
 // e^(xh + xl) within 2^-74.139 relatively, for |xl/xh| < 2^-23.89 and |xl| <
 // 2^-14.3486: x = k log(2)/4096 + y, then 2^(k/4096) e^y.
 __exp_dd_fast: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float) Never! {
-    k: round_even(xh * Float{5909.278887481194})
+    k: __round_even(xh * Float{5909.278887481194})
     kp: __s_mul(k, Float{0.0001692253858788929}, Float{5.661735385366942e-21})
     y: __fast_two_sum(xh - kp.hi, xl)
     __exp_dd_tail(k, __exp_q1(y.hi, y.lo - kp.lo))
@@ -10414,7 +10416,7 @@ __exp_cr_subnormal: fn(y: Float) -> Float Never! { __from_bits_i64(__to_bits_i64
 // exp's accurate path for |x| > 2^-54: a degree-7 double-double polynomial
 // after a three-part Cody-Waite reduction, then __EXPCR_HARD's exceptions.
 __exp_cr_accurate: fn(n: Float) -> Float Never! {
-    t: round_even(n * Float{5909.278887481194})
+    t: __round_even(n * Float{5909.278887481194})
     jt: __whole_i64(t)
     i0: Int{(jt >> 6).bit_and(0x3F)}
     i1: Int{jt.bit_and(0x3F)}
@@ -10575,7 +10577,7 @@ __exp2_cr_polydd: fn(xh: Float, c: [Float], n: Int) -> (hi: Float, lo: Float) Ne
 // reduced 4096 x, then __EXP2CR_HARD's exceptions.
 __exp2_cr_accurate: fn(n: Float) -> Float Never! {
     sx: Float{4096.0} * n
-    fx: round_even(sx)
+    fx: __round_even(sx)
     z: sx - fx
     k: __whole_i64(fx)
     i1: Int{k.bit_and(0x3F)}
@@ -10645,7 +10647,7 @@ __EXP10CR_C: [Float]{
 // exp10's accurate path: a three-part reduction x = t log10(2)/4096 + dx,
 // a degree-6 double-double polynomial, then __EXP10CR_HARD's exceptions.
 __exp10_cr_accurate: fn(n: Float) -> Float Never! {
-    t: round_even(Float{13606.617476658635} * n)
+    t: __round_even(Float{13606.617476658635} * n)
     jt: __whole_i64(t)
     i1: Int{jt.bit_and(0x3F)}
     i0: Int{(jt >> 6).bit_and(0x3F)}
@@ -10845,7 +10847,7 @@ __exp_m1_cr_accurate: fn(n: Float) -> Float Never! {
         }
         return c0.hi + v1
     }
-    t: round_even(n * Float{5909.278887481194})
+    t: __round_even(n * Float{5909.278887481194})
     jt: Int.from_float(t) ?? 0
     i0: (jt >> 6).bit_and(0x3F)
     i1: jt.bit_and(0x3F)
@@ -11911,7 +11913,7 @@ __ln_1p_cr_refine: fn(x: Float, a: Float) -> Float Never! {
         return __log_cr_round3(x, m.hi, m.lo)
     }
     // 2^16 / log(2)
-    j: Int.from_float(round_even(a * Float{94548.4621996991})) ?? 0
+    j: Int.from_float(__round_even(a * Float{94548.4621996991})) ?? 0
     i: j + 34952
     j1: (i >> 12).bit_and(15)
     j2: (i >> 8).bit_and(15)
@@ -13746,8 +13748,10 @@ __TANH_HARD: [Float]{
     0.6013177353473791, 0.5379865745157587, 2.7755575615628914e-17,
     0.6444266668744435, 0.5679060815628252, -4.930380657631324e-32
 }
-trunc: fn(n: Float) -> Float Never! { core.math.trunc(n) }
-truncate: fn(n: Float) -> Float Never! { trunc(n) }
+/// `n` without its fraction (rounded toward zero), of `n`'s own type
+/// (Roundable).
+trunc: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TowardZero) }
+truncate: fn(n: Float) -> Float Never! { core.math.trunc(n) }
 
 cot: fn(n: Float) -> Float Never! { 1.0 / tan(n) }
 copysign: fn(value: Float, sign_value: Float) -> Float Never! {
@@ -14066,16 +14070,10 @@ TAU: Float{6.2831853071795864769}
 INFINITY: Float{1.0} / Float{0.0}
 NAN: Float{0.0} / Float{0.0}
 
-/// The Int nearest `n`, ties away from zero. A NaN, an infinity, or a value
-/// outside the signed 64-bit range has no nearest Int here, so it stops
-/// (`math.round_even` and `Int{…}` give the other roundings).
-round: fn(n: Float) -> Int Never! {
-    whole := trunc(n)
-    fraction: n - whole
-    if fraction >= 0.5 -> whole = whole + 1.0
-    if fraction <= -0.5 -> whole = whole - 1.0
-    Int.from_float(whole) ?? panic("math.round needs a finite Float in the signed 64-bit range, but got {n}")
-}
+/// The integral value nearest `n`, ties away from zero, of `n`'s own type
+/// (Roundable): a Float 2.5 rounds to 3.0, and `Int{math.round(x)}`
+/// is the nearest Int. A NaN or an infinity is itself.
+round: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TiesToAway) }
 to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 // `math.to_bits` on F32: the binary32 bits as an Int in 0..<2^32, and its
 // inverse, the F32 of binary32 `bits` in that range. Both are one bit copy
@@ -14522,9 +14520,12 @@ Rounding: enum {
     TiesToEven
 }
 
+/// The integral value nearest `n`, ties to the even one, of `n`'s own type
+/// (Roundable; C23 roundeven for a Float).
+round_even: fn<T: Roundable>(n: T) -> T Never! { n.rounded(.TiesToEven) }
 /// The integral Float nearest `n`, ties to the even one (C23 roundeven); an
 /// infinity, a NaN or a whole `n` is itself, and the sign of zero is kept.
-round_even: fn(n: Float) -> Float Never! {
+__round_even: fn(n: Float) -> Float Never! {
     a: fabs(n)
     if !(a < Float{4503599627370496.0}) -> return n
     // a + 2^52 lands where the unit is 1, so its rounding (to nearest, ties
@@ -14534,18 +14535,70 @@ round_even: fn(n: Float) -> Float Never! {
 // The integral Float nearest `n`, ties away from zero (C round).
 __round_away: fn(n: Float) -> Float Never! {
     if !(fabs(n) < Float{4503599627370496.0}) -> return n
-    whole: trunc(n)
+    whole: core.math.trunc(n)
     if (fabs(n - whole) >= Float{0.5}) -> return whole + copysign(Float{1.0}, n)
     whole
 }
 // `n` rounded to an integral Float in `mode`.
 __rounded: fn(n: Float, mode: Rounding) -> Float Never! {
     if mode == {
-        .TowardNegative -> floor(n)
-        .TowardPositive -> ceil(n)
-        .TowardZero -> trunc(n)
+        .TowardNegative -> core.math.floor(n)
+        .TowardPositive -> core.math.ceil(n)
+        .TowardZero -> core.math.trunc(n)
         .TiesToAway -> __round_away(n)
-        .TiesToEven -> round_even(n)
+        .TiesToEven -> __round_even(n)
+    }
+}
+
+/// A number type that rounds to an integral value of its own type. `mode`
+/// picks the direction or the tie rule; `math.trunc`, `floor`, `ceil`,
+/// `round` and `round_even` each pass one fixed mode, and `x.rounded(mode)`
+/// takes it as a value. A Float or F32 NaN or infinity is itself, and the
+/// sign of zero is kept. An integer type is already integral and returns
+/// itself. `impl MyNumber.Roundable` makes a user type round the same way.
+Roundable: trait {
+    rounded: fn(self, mode: Rounding) -> Self
+}
+impl Float.Roundable {
+    rounded: fn(self, mode: Rounding) -> Float Never! { __rounded(self, mode) }
+}
+// An F32 rounds through its exact Float widening. Below 2^23 in magnitude the
+// integral result is an F32 again; any other F32 (a NaN, an infinity, a value
+// already whole) is itself.
+impl F32.Roundable {
+    rounded: fn(self, mode: Rounding) -> F32 Never! {
+        wide: Float.from_f32(self)
+        if !(fabs(wide) < Float{8388608.0}) -> return self
+        F32{__rounded(wide, mode)}
+    }
+}
+impl Decimal.Roundable {
+    rounded: fn(self, mode: Rounding) -> Decimal Never! { __decimal_rounded(self, mode) }
+}
+impl Fraction.Roundable {
+    rounded: fn(self, mode: Rounding) -> Fraction Never! { __fraction_rounded(self, mode) }
+}
+impl Int.Roundable { rounded: fn(self, mode: Rounding) -> Int Never! { self } }
+impl I8.Roundable { rounded: fn(self, mode: Rounding) -> I8 Never! { self } }
+impl I16.Roundable { rounded: fn(self, mode: Rounding) -> I16 Never! { self } }
+impl I32.Roundable { rounded: fn(self, mode: Rounding) -> I32 Never! { self } }
+impl I64.Roundable { rounded: fn(self, mode: Rounding) -> I64 Never! { self } }
+impl U8.Roundable { rounded: fn(self, mode: Rounding) -> U8 Never! { self } }
+impl U16.Roundable { rounded: fn(self, mode: Rounding) -> U16 Never! { self } }
+impl U32.Roundable { rounded: fn(self, mode: Rounding) -> U32 Never! { self } }
+impl U64.Roundable { rounded: fn(self, mode: Rounding) -> U64 Never! { self } }
+// Whether a value of sign `negative` and magnitude `quotient` + `remainder` /
+// `denominator` (0 <= remainder < denominator) rounds in `mode` to the
+// magnitude `quotient` + 1 rather than `quotient`: the exact rounding rule
+// Decimal and Fraction share.
+__magnitude_rounds_up: fn(negative: Bool, quotient: Int, remainder: Int, denominator: Int, mode: Rounding) -> Bool Never! {
+    if remainder == 0 -> return false
+    if mode == {
+        .TowardNegative -> negative
+        .TowardPositive -> !negative
+        .TowardZero -> false
+        .TiesToAway -> remainder * 2 >= denominator
+        .TiesToEven -> remainder * 2 > denominator || (remainder * 2 == denominator && quotient %% 2 == 1)
     }
 }
 /// `n` rounded in `mode` to an integer that fits a two's-complement integer
@@ -14698,7 +14751,7 @@ set_payload_signaling: fn(payload: Float) -> Float? Never! {
 }
 // A payload Float's integer, when it is +0 or whole and below 2^51.
 __payload_bits: fn(payload: Float) -> Int? Never! {
-    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || trunc(payload) != payload -> return None
+    if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || core.math.trunc(payload) != payload -> return None
     Val(Int.from_float(payload) ?? 0)
 }
 // The F32 forms (an all-F32 call) of the bit operations above, on the
@@ -14826,13 +14879,45 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert_eq(radix(0.0), 2)
 }
 
-#Test("math rounding uses ties away from zero and stays exact at the range ends") {
-    assert_eq(round(1.5), 2)
-    assert_eq(round(-1.5), -2)
-    assert_eq(round(2.5), 3)
-    assert_eq(round(0.49999999999999994), 0)
-    assert_eq(round(-9223372036854775808.0), -9223372036854775808)
-    assert_eq(round(9223372036854774784.0), 9223372036854774784)
+#Test("math rounding keeps the argument's type and its tie rule") {
+    assert_eq(round(Float{1.5}), 2.0)
+    assert_eq(round(Float{-1.5}), -2.0)
+    assert_eq(round(Float{2.5}), 3.0)
+    assert_eq(round(Float{0.49999999999999994}), 0.0)
+    assert(sign_bit(round(Float{-0.25})))
+    assert(is_nan(round(NAN)))
+    assert_eq(round(-INFINITY), -INFINITY)
+    assert_eq(round_even(Float{2.5}), 2.0)
+    assert_eq(round_even(Float{-3.5}), -4.0)
+    assert_eq(floor(Float{-1.5}), -2.0)
+    assert_eq(ceil(Float{-1.5}), -1.0)
+    assert_eq(trunc(Float{-1.5}), -1.0)
+    assert_eq(round(F32{2.5}), F32{3.0})
+    assert_eq(round_even(F32{2.5}), F32{2.0})
+    assert_eq(floor(F32{16777215.0}), F32{16777215.0})
+    assert_eq(round(7), 7)
+    assert_eq(floor(U8{7}), U8{7})
+    assert_eq(Float{2.5}.rounded(Rounding.TowardZero), 2.0)
+}
+
+#Test("Decimal and Fraction round exactly in every mode") {
+    down: __decimal_from_str("-2.5")
+    assert_eq(__decimal_to_string(__decimal_rounded(down, Rounding.TowardNegative)), "-3")
+    assert_eq(__decimal_to_string(__decimal_rounded(down, Rounding.TowardPositive)), "-2")
+    assert_eq(__decimal_to_string(__decimal_rounded(down, Rounding.TowardZero)), "-2")
+    assert_eq(__decimal_to_string(__decimal_rounded(down, Rounding.TiesToAway)), "-3")
+    assert_eq(__decimal_to_string(__decimal_rounded(down, Rounding.TiesToEven)), "-2")
+    assert_eq(__decimal_to_string(__decimal_rounded(__decimal_from_str("3.5"), Rounding.TiesToEven)), "4")
+    assert_eq(__decimal_to_string(__decimal_rounded(__decimal_from_str("0.125"), Rounding.TiesToEven)), "0")
+    assert_eq(__decimal_to_string(__decimal_rounded(__decimal_from_str("12.50"), Rounding.TiesToEven)), "12")
+    half: __fraction_from_parts(-5, 2)
+    assert_eq(__fraction_rounded(half, Rounding.TowardNegative).numerator(), -3)
+    assert_eq(__fraction_rounded(half, Rounding.TowardPositive).numerator(), -2)
+    assert_eq(__fraction_rounded(half, Rounding.TowardZero).numerator(), -2)
+    assert_eq(__fraction_rounded(half, Rounding.TiesToAway).numerator(), -3)
+    assert_eq(__fraction_rounded(half, Rounding.TiesToEven).numerator(), -2)
+    assert_eq(__fraction_rounded(__fraction_from_parts(7, 2), Rounding.TiesToEven).numerator(), 4)
+    assert_eq(__fraction_rounded(__fraction_from_parts(7, 3), Rounding.TiesToAway).denominator(), 1)
 }
 
 #Test("math adjacent values and exponent decomposition") {
@@ -14864,11 +14949,11 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
 }
 
 #Test("math C23 exact operations follow IEEE 754-2019") {
-    assert_eq(round_even(2.5), 2.0)
-    assert_eq(round_even(3.5), 4.0)
-    assert_eq(round_even(-2.5), -2.0)
-    assert(sign_bit(round_even(-0.25)))
-    assert_eq(round_even(4503599627370497.0), 4503599627370497.0)
+    assert_eq(__round_even(2.5), 2.0)
+    assert_eq(__round_even(3.5), 4.0)
+    assert_eq(__round_even(-2.5), -2.0)
+    assert(sign_bit(__round_even(-0.25)))
+    assert_eq(__round_even(4503599627370497.0), 4503599627370497.0)
     assert_eq(round_to_signed(2.5, Rounding.TiesToEven, 8), Val(2))
     assert_eq(round_to_signed(2.5, Rounding.TiesToAway, 8), Val(3))
     assert_eq(round_to_signed(-2.5, Rounding.TowardNegative, 8), Val(-3))
@@ -15779,6 +15864,15 @@ __fraction_div: fn(left: Fraction, right: Fraction) -> Fraction Never! {
 }
 __fraction_numerator: fn(value: Fraction) -> Int Never! { value.num_value.copy() }
 __fraction_denominator: fn(value: Fraction) -> Int Never! { value.den_value.copy() }
+// `value` rounded in `mode` to a whole Fraction (denominator 1), exactly. The
+// denominator is positive, so the numerator carries the sign.
+__fraction_rounded: fn(value: Fraction, mode: Rounding) -> Fraction Never! {
+    negative: value.num_value < 0
+    magnitude: abs(value.num_value)
+    quotient := magnitude /% value.den_value
+    if __magnitude_rounds_up(negative, quotient, magnitude %% value.den_value, value.den_value, mode) -> quotient = quotient + 1
+    Fraction{num_value: if negative -> -quotient else -> quotient, den_value: 1}
+}
 #Test("Fraction source construction reduces and fixes denominator sign") {
     positive: __fraction_from_parts(6, -8)
     assert_eq(positive.numerator(), -3)
@@ -15805,9 +15899,6 @@ Decimal: struct {
     magnitude: Int
     scale: Int
 
-    round: fn(self) -> Decimal Never! { __decimal_round(self) }
-    floor: fn(self) -> Decimal Never! { __decimal_floor(self) }
-    ceil: fn(self) -> Decimal Never! { __decimal_ceil(self) }
     to_string: fn(self) -> String Never! { __decimal_to_string(self) }
 
     // Decimal crosses Dyn exactly: it encodes as its scale-keeping text and
@@ -16257,26 +16348,11 @@ __decimal_compare: fn(left: Decimal, right: Decimal) -> Ordering Never! {
 __decimal_equal: fn(left: Decimal, right: Decimal) -> Bool Never! {
     __decimal_compare(left, right) == Ordering.Equal
 }
-__decimal_floor: fn(value: Decimal) -> Decimal Never! {
+// `value` rounded in `mode` to a whole Decimal (scale 0), exactly.
+__decimal_rounded: fn(value: Decimal, mode: Rounding) -> Decimal Never! {
     denominator: exact_power(10, value.scale)
     quotient := value.magnitude /% denominator
-    if value.negative {
-        if value.magnitude %% denominator != 0 -> quotient = quotient + 1
-        quotient = -quotient
-    }
-    __decimal_from_int(quotient)
-}
-__decimal_ceil: fn(value: Decimal) -> Decimal Never! {
-    denominator: exact_power(10, value.scale)
-    quotient := value.magnitude /% denominator
-    if !value.negative && value.magnitude %% denominator != 0 -> quotient = quotient + 1
-    if value.negative -> quotient = -quotient
-    __decimal_from_int(quotient)
-}
-__decimal_round: fn(value: Decimal) -> Decimal Never! {
-    denominator: exact_power(10, value.scale)
-    quotient := value.magnitude /% denominator
-    if (value.magnitude %% denominator) * 2 >= denominator -> quotient = quotient + 1
+    if __magnitude_rounds_up(value.negative, quotient, value.magnitude %% denominator, denominator, mode) -> quotient = quotient + 1
     if value.negative -> quotient = -quotient
     __decimal_from_int(quotient)
 }
@@ -16289,9 +16365,9 @@ __decimal_round: fn(value: Decimal) -> Decimal Never! {
     assert_eq(__decimal_mul(left, __decimal_from_str("2.00")).magnitude, 240)
     assert_eq(__decimal_mul(left, __decimal_from_str("2.00")).scale, 2)
     assert(__decimal_equal(left, __decimal_from_str("1.2")))
-    assert_eq(__decimal_floor(__decimal_from_str("-1.2")).magnitude, 2)
-    assert_eq(__decimal_ceil(__decimal_from_str("-1.2")).magnitude, 1)
-    assert_eq(__decimal_round(__decimal_from_str("-1.5")).magnitude, 2)
+    assert_eq(__decimal_rounded(__decimal_from_str("-1.2"), Rounding.TowardNegative).magnitude, 2)
+    assert_eq(__decimal_rounded(__decimal_from_str("-1.2"), Rounding.TowardPositive).magnitude, 1)
+    assert_eq(__decimal_rounded(__decimal_from_str("-1.5"), Rounding.TiesToAway).magnitude, 2)
     assert_eq(__decimal_div(left, right).numerator(), 4)
     assert_eq(__decimal_from_str("-0.00").scale, 2)
     assert(!__decimal_from_str("-0.00").negative)

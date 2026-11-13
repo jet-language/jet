@@ -245,7 +245,7 @@ Face: struct {
     /// this one. A size outside 1/64..16384 pixels, or a mask over the
     /// MASK_SIDE_MAX and MASK_PIXELS_MAX budgets, is empty.
     raster: fn(self, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
-        shift: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 64.0) else -> 0
+        shift: if x_frac > 0.0 && x_frac < 1.0 -> Int{math.round(x_frac * 64.0)} else -> 0
         raster_glyph(self, id, size_64(size_px), shift)
     }
 }
@@ -408,7 +408,7 @@ GlyphCache: struct {
     /// `face.raster(id, size_px, x_frac)` with `x_frac` rounded to a quarter
     /// pixel, drawn the first time and kept.
     glyph: fn(&self, face: Face, id: Int, size_px: Float, x_frac: Float) -> GlyphMask {
-        quarter: if x_frac > 0.0 && x_frac < 1.0 -> math.round(x_frac * 4.0) else -> 0
+        quarter: if x_frac > 0.0 && x_frac < 1.0 -> Int{math.round(x_frac * 4.0)} else -> 0
         cached_mask(self, face, id, size_64(size_px), quarter)
     }
 }
@@ -1356,7 +1356,7 @@ priv internal: module {
     // A size in 1/64 pixels; 0 for a size outside 1/64..16384 pixels.
     size_64: fn(size_px: Float) -> Int {
         if !(size_px > 0.0) || !(size_px <= 16384.0) -> return 0
-        math.round(size_px * 64.0)
+        Int{math.round(size_px * 64.0)}
     }
 
     // Font units as 1/64 pixels at `size` 1/64 pixels per em, to the nearest.

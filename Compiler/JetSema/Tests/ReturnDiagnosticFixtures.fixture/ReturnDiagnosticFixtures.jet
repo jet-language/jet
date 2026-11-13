@@ -36,7 +36,7 @@ run: fn() {
     span: Span{start: 12, end: 17}
     if !sema_expression_typed_literal_float_to_integer(Type.Int, Type.Float, span, narrowing) -> panic("Float typed body became Int")
     if narrowing.len() != 1 || narrowing[0].code != "E0112" || narrowing[0].span != (Val(span)) -> panic("typed body diagnostic lost its identity or span")
-    if !narrowing[0].fix.contains("Int.from_float(value)") || !narrowing[0].fix.contains("math.round(value)") -> panic("typed body diagnostic lost its conversion repair")
+    if !narrowing[0].fix.contains("Int{{value}}") || !narrowing[0].fix.contains("Int{{math.round(value)}}") -> panic("typed body diagnostic lost its conversion repair")
     if sema_expression_typed_literal_float_to_integer(Type.Float, Type.Int, span, narrowing) -> panic("valid numeric widening was rejected")
     if sema_expression_typed_literal_float_to_integer(Type.Int, Type.Int, span, narrowing) -> panic("same-type body was rejected")
     print("E0112 typed scalar narrowing: passed")

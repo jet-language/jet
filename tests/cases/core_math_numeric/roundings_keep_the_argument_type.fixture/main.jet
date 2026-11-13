@@ -1,0 +1,50 @@
+// Every rounding keeps the type it is given (math.Roundable): a Float or F32
+// stays one, a Decimal and a Fraction round exactly, an integer is itself, and
+// a user number type rounds through its own impl. round ties away from zero
+// and round_even ties to even.
+use math: core.math
+
+// An amount in cents that rounds to whole units of 100.
+Cents: struct {
+    value: Int
+}
+
+impl Cents.math.Roundable {
+    rounded: fn(self, mode: math.Rounding) -> Cents {
+        units: math.fraction(self.value, 100) ?? panic("a hundred is not zero")
+        Cents{value: Int{units.rounded(mode)} * 100}
+    }
+}
+
+run: fn() {
+    print(math.trunc(Float{-2.5}))
+    print(math.floor(Float{-2.5}))
+    print(math.ceil(Float{-2.5}))
+    print(math.round(Float{-2.5}))
+    print(math.round_even(Float{-2.5}))
+    print(math.round_even(Float{3.5}))
+    print(math.is_nan(math.round(math.NAN)))
+    print(math.round(F32{2.5}) == F32{3.0})
+    print(math.round_even(F32{2.5}) == F32{2.0})
+
+    price: math.decimal("-2.5")
+    print(math.trunc(price).to_string())
+    print(math.floor(price).to_string())
+    print(math.ceil(price).to_string())
+    print(math.round(price).to_string())
+    print(math.round_even(price).to_string())
+    print(math.round_even(math.decimal("3.5")).to_string())
+    a: 7
+    b: 2
+    print(math.round(a / b).to_string())
+    print(math.round_even(a / b).to_string())
+    print(math.floor(a / b).to_string())
+
+    print(math.round(a))
+    print(math.floor(U8{200}))
+
+    print(Float{2.5}.rounded(math.Rounding.TowardZero))
+    print(math.round(Cents{value: 250}).value)
+    print(math.round_even(Cents{value: 250}).value)
+    print(math.trunc(Cents{value: -250}).value)
+}

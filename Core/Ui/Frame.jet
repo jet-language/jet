@@ -408,7 +408,7 @@ kit_row: fn(kit: Kit, y: Int, width: Int, height: Int, x0: Int, x1: Int) -> KitR
 // The window's coverage in the square at a rounded corner, `side` x `side`
 // pixels (side = corner_side), rows top to bottom, for the bottom-left
 // corner; the other corners mirror it.
-corner_side: fn(scale120: Int) -> Int { math.round(math.ceil(Float{RADIUS * scale120} / 120.0)) }
+corner_side: fn(scale120: Int) -> Int { Int{math.ceil(Float{RADIUS * scale120} / 120.0)} }
 
 bottom_left_cover: fn(scale120: Int) -> [U8] {
     r: Float{RADIUS * scale120} / 120.0
@@ -471,13 +471,13 @@ header: fn(&p: Painter, look: FrameLook, width: Int, scale120: Int) -> [U8] {
     size: s * TITLE_SIZE
     room: fmax(title_end - title_x, 0.0) * s
     shown: fit_title(p, look.title, size, room)
-    start: math.round(title_x * s)
+    start: Int{math.round(title_x * s)}
     advance: title_width(p.face, shown, size)
-    left: math.round(title_left(Float{width}, Float{start}, Float{start} + room, advance))
-    clip: UIRect{x: start, y: 0, width: math.round(room), height: height}
+    left: Int{math.round(title_left(Float{width}, Float{start}, Float{start} + room, advance))}
+    clip: UIRect{x: start, y: 0, width: Int{math.round(room)}, height: height}
     // The face's capitals are 0.668 em tall, centered on the header: the
     // baseline is half of 13 * 0.668 = 4.342 units below its middle.
-    baseline: math.round((Float{HEADER} / 2.0 + 4.342) * s)
+    baseline: Int{math.round((Float{HEADER} / 2.0 + 4.342) * s)}
     _: font.draw_text(pixels, width, height, width * 4, p.cache, p.face, shown, size, left, baseline, ink, clip)
     ring: colors.focus
     round: s * 5.0
@@ -857,8 +857,8 @@ fmin: fn(a: Float, b: Float) -> Float { if a < b -> a else -> b }
 fmax: fn(a: Float, b: Float) -> Float { if a > b -> a else -> b }
 fabs: fn(a: Float) -> Float { if a < 0.0 -> -a else -> a }
 clamp01: fn(a: Float) -> Float { fmax(0.0, fmin(1.0, a)) }
-floor_int: fn(a: Float) -> Int { math.round(math.floor(a)) }
-ceil_int: fn(a: Float) -> Int { math.round(math.ceil(a)) }
+floor_int: fn(a: Float) -> Int { Int{math.floor(a)} }
+ceil_int: fn(a: Float) -> Int { Int{math.ceil(a)} }
 min_int: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
 max_int: fn(a: Int, b: Int) -> Int { if a > b -> a else -> b }
 alpha_of: fn(color: Int) -> Int { (color >> 24).bit_and(255) }
@@ -1239,7 +1239,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
             if first < 0 && Int.from_u8(bar[(row * 400 + col) * 4]) > 100 -> first = col
         }
     }
-    centered: math.round((400.0 - advance) / 2.0)
+    centered: Int{math.round((400.0 - advance) / 2.0)}
     assert(first >= centered - 1 && first <= centered + 3, "the short title is centered, first ink at {first}, center start {centered}")
 }
 

@@ -1,0 +1,20 @@
+# math.trunc, floor, ceil, round and round_even are fn<T: Roundable>(n: T) -> T:
+# Float and F32 stay binary floats (a NaN is itself), Decimal and Fraction round
+# exactly in both tie rules, Int and U8 are themselves, x.rounded(mode) takes
+# the mode as a value, and a user type rounds through its own impl. The same
+# output on O0, O1 and O2.
+fixture: roundings_keep_the_argument_type.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = roundings_keep_the_argument_type.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = roundings_keep_the_argument_type.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = roundings_keep_the_argument_type.out
+stderr: empty

@@ -2317,7 +2317,7 @@ sema_expression_typed_literal_text_mismatch: fn(head: Type, value: Expr, diagnos
 // no Float body: it uses parameter acceptance, never a numeric retag.
 sema_expression_typed_literal_float_to_integer: fn(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
-        diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "convert it to an integer first with `Int{{value}}`, which stops unless the value is whole, or round it with `math.round(value)`"))
+        diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "convert it to an integer first with `Int{{value}}`, which stops unless the value is whole, or round it first, as in `Int{{math.round(value)}}`"))
         return true
     }
     false

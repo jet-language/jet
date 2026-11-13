@@ -1,4 +1,4 @@
-// Card #4460: `to_bits` and `round` return raw machine words that must
+// Card #4460: `to_bits` and `Int{math.round(x)}` return raw machine words that must
 // re-enter the exact Int carrier on every tier, including words past the
 // inline range; `from_bits` narrows its Int back to the machine word.
 use math: core.math
@@ -19,7 +19,7 @@ run: fn() {
     print("roundtrip-negative={math.from_bits(negative)}")
     print("roundtrip-small={math.from_bits(small)}")
 
-    big: math.round(4.0e18)
+    big: Int{math.round(Float{4.0e18})}
     print("round-big={big}")
     print("round-big-half={big / 2}")
 }

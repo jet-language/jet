@@ -568,7 +568,10 @@ args_text: fn(s: Setup) -> String Never! { s.plan.map(fn(step) { step.join(" ") 
 
 // A number as JavaScript's String() writes an integer, else with two decimals.
 shown: fn(value: Float) -> String Never! {
-    if math.is_integer(value) -> return "{math.round(value)}"
+    if math.is_integer(value) {
+        whole: Int{value}
+        return "{whole}"
+    }
     fmt.decimal(value, 2)
 }
 

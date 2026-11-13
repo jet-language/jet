@@ -904,11 +904,12 @@ sema_call_core_math_round_f32: fn(wide: TExpr, span: Span) -> TExpr Never! {
 // all-F32 call computes at F32 width (sqrt keeps its own record rule). The
 // exact ones (fmod through scaleb) are exact on the widened arguments too.
 // The other spellings (expm1, truncate, log1p, nextafter, abs_float) are
-// their members' F32 forms.
+// their members' F32 forms. The roundings are Roundable, whose F32 impl
+// rounds at F32 width itself.
 sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     if member == {
-        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "expm1" | "degrees" | "radians" | "log" | "floor" | "ceil" | "trunc" | "truncate" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
-        "fmod" | "remainder" | "round_even" | "fdim" | "max_float" | "min_float" | "maximum" | "minimum" | "maximum_mag" | "minimum_mag" | "maximum_num" | "minimum_num" | "maximum_mag_num" | "minimum_mag_num" | "logb" | "ldexp" | "scaleb" -> true
+        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "expm1" | "degrees" | "radians" | "log" | "truncate" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
+        "fmod" | "remainder" | "fdim" | "max_float" | "min_float" | "maximum" | "minimum" | "maximum_mag" | "minimum_mag" | "maximum_num" | "minimum_num" | "maximum_mag_num" | "minimum_mag_num" | "logb" | "ldexp" | "scaleb" -> true
         else -> sema_call_core_math_f32_own(member)
     }
 }

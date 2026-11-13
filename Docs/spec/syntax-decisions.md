@@ -1434,12 +1434,20 @@ value in the head's range exactly; any other value stops with E3010, naming
 the roundings. `Int` has the signed 64-bit range here. A literal body is
 checked when it is written: `Int{2.5}` is E0112 and `U8{300.0}` is E1003.
 Pick the rounding first: `Int{math.trunc(x)}`, `Int{math.floor(x)}`,
-`Int{math.ceil(x)}`, or `math.round(x)` (ties away from zero, already an
-`Int`). `checked(Int{x})` is `None` where `Int{x}` would stop, and
-`saturating(Int{x})` truncates toward zero, clamps to the head's range and
-maps NaN to 0. `wrapping` is E1005 around a Float body, which has no low bits
-to keep. `math.round` stops on NaN, an infinity, or a value outside the signed
-64-bit range.
+`Int{math.ceil(x)}`, `Int{math.round(x)}` (ties away from zero) or
+`Int{math.round_even(x)}` (ties to even). `checked(Int{x})` is `None` where
+`Int{x}` would stop, and `saturating(Int{x})` truncates toward zero, clamps to
+the head's range and maps NaN to 0. `wrapping` is E1005 around a Float body,
+which has no low bits to keep.
+
+Each rounding keeps the type it is given: `math.trunc`, `floor`, `ceil`,
+`round` and `round_even` are `fn<T: Roundable>(n: T) -> T`, so a Float stays a
+Float (`math.round` of a Float 2.5 is 3.0, and a NaN or an infinity is itself),
+a `Decimal` or `Fraction` rounds exactly to a whole value of its own type, and
+an `Int` or sized integer is itself. `x.rounded(mode)` takes the
+`math.Rounding` as a value, and `impl MyNumber.Roundable` makes a user number
+type round the same way. A bare literal argument such as `math.round(2.5)` is
+a `Decimal`; write `Float{2.5}` for the binary value.
 
 `Int{x}` of an exact number, a `Decimal` or a `Fraction`, converts a whole
 value exactly; any other value stops with E3010, naming the same roundings.
