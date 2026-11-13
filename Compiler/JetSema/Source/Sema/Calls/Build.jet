@@ -796,37 +796,40 @@ SemaCompilerReportRewrite: struct {
     replacement: Expr
 }
 
-// The `impl Diagnostic` of a finding's type `ty`, written as a top-level
-// `impl T.Diagnostic` or inside the type's body, the current module's first:
-// its `code` constant (else the type path `module.T`) and the variant its
-// `tier` constant names (else `Error`). None when the type has none.
+// The `impl Diagnostic` of a finding's type `ty`, written inside the type's
+// body or as an `impl T.Diagnostic` in any module, matched by the type's
+// registered row (a checked type is spelled by its resolved identity, never
+// as written): its `code` constant (else the type path `module.T`) and the
+// variant its `tier` constant names (else `Error`). None when the type has
+// none.
 sema_compiler_report_facts: fn(ty: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCompilerReportFacts? Never! {
-    named: if ty == .Val(.Named(name)) -> name else -> { return None }
-    leaf: named.slice(named.rfind(".") + 1, named.len())
+    finding: ty ?? return None
     graph: program.registration_graph ?? return None
-    found := SemaDeriveReport?{None}
-    loop module_row in graph.modules {
-        reports := [SemaDeriveReport]{}
-        loop item in module_row.program.items {
-            if item == {
-                .Impl(definition) -> {
-                    if definition.type_name == leaf && definition.trait_name == .Val(trait_name) {
-                        if trait_name == "Diagnostic" -> reports.push(SemaDeriveReport{module_name: module_row.module_name, definition: definition})
-                    }
-                }
-                .Struct(definition) -> { if definition.name == leaf -> sema_user_rule_nested_reports(module_row.module_name, definition.name, definition.name_span, definition.trait_impls, reports) }
-                .Enum(definition) -> { if definition.name == leaf -> sema_user_rule_nested_reports(module_row.module_name, definition.name, definition.name_span, definition.trait_impls, reports) }
-                .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    owner: sema_type_resolve_nominal_row(graph, finding, environment.module_identity) ?? return None
+    owner_module: graph.modules[owner.module_index].module_name
+    owner_name: graph.modules[owner.module_index].nominals[owner.row].symbol.name
+    reports := [SemaDeriveReport]{}
+    if sema_registration_nominal_source_item(graph.modules[owner.module_index].nominals[owner.row].source) == .Val(source) {
+        if source == {
+            .Struct(definition) -> sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
+            .Enum(definition) -> sema_user_rule_nested_reports(owner_module, owner_name, definition.name_span, definition.trait_impls, reports)
+            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    loop module_index in 0..<graph.modules.len() {
+        loop item in graph.modules[module_index].program.items {
+            if item == .Impl(definition) {
+                trait_name: definition.trait_name ?? next
+                if trait_name != "Diagnostic" -> next
+                // The impl's type resolves from the module that writes it.
+                written: Type.Named{name: definition.type_name.copy()}
+                row: sema_type_resolve_nominal_row(graph, written, graph.modules[module_index].module_identity) ?? next
+                if row.module_index == owner.module_index && row.row == owner.row -> reports.push(SemaDeriveReport{module_name: owner_module.copy(), definition: definition})
             }
         }
-        if reports.len() == 0 -> next
-        if module_row.module_identity == environment.module_identity {
-            found = Val(reports[0])
-            break
-        }
-        if found == None -> found = Val(reports[0])
     }
-    report: found ?? return None
+    if reports.len() == 0 -> return None
+    report: reports[0]
     code := "{report.module_name}.{report.definition.type_name}"
     tier := "Error"
     rewrite := SemaCompilerReportRewrite?{None}

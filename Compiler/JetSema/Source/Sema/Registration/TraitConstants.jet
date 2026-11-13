@@ -414,7 +414,8 @@ sema_trait_constant_eval_enum: fn(graph: SemaRegistrationGraph, expr: Expr, name
 // (Calls/Build.jet sema_call_try_compiler_report) both resolve to functions
 // and their types are compared. None for any other method call.
 sema_trait_constant_rewrite: fn(name: String, receiver: Expr, method: String, args: [CallArg]) -> SemaTraitConstantEval? Never! {
-    if name != "DiagnosticEdit" && !name.ends_with(".DiagnosticEdit") -> return None
+    // `name` is resolved: Core's enum is `<corelib>/core.prelude::DiagnosticEdit`.
+    if name != "DiagnosticEdit" && name != "<corelib>/core.prelude::DiagnosticEdit" -> return None
     if method != "rewrite" || !sema_trait_constant_is_syntax(receiver) -> return None
     callee := String?{None}
     replacement := String?{None}
