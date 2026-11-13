@@ -782,15 +782,15 @@ A `-e` after the program (`jet run hello.jet -e …`) is
 refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
 may declare: a line of it (between `;`s) that is a declaration alone, such as
 a type, a function, an `impl` or a `use`, goes above `run: fn`, so
-`jet -e 'S: struct { amount: Float }; input.csv<S>().map((s) -> s.amount).sum()' sales.csv`
+`jet -e 'S: struct { amount: Float }; input.csv<S>().map(fn(s) { s.amount }).sum()' sales.csv`
 prints the column's sum. A binding such as `x: 1` stays in the body.
 
 CODE reads the program's input through plain Core names, which work the same
 in a script: `input` is the lines of the files named after CODE, else of
-standard input (`jet -e 'input.map((l) -> l.words()[1])' log.txt`);
+standard input (`jet -e 'input.map(fn(l) { l.words()[1] })' log.txt`);
 `input.csv<Row>()` and `input.json<Row>()` decode it into records;
 `input.edit(change)` rewrites each named file in place
-(`jet -e 'input.edit((l) -> l.replace("http:", "https:"))' *.md`). `jet help
+(`jet -e 'input.edit(fn(l) { l.replace("http:", "https:") })' *.md`). `jet help
 input` lists every such name with an example, and `jet help run` points to it.
 
 `jet run - [args...]` runs the program read from standard input

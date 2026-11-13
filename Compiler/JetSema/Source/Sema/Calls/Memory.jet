@@ -386,9 +386,10 @@ sema_call_memory_guard_ast_projection: fn(expression: Expr) -> [String]? {
     }
     lambda: lambda_value ?? return None
     if lambda.params.len() != 1 -> return None
+    // A braced body counts when its only line is the expression.
     body_value: if lambda.body == {
         .Expr(value) -> Val(value)
-        .Block(_) -> None
+        .Block(statements) -> if statements.len() == 1 && statements[0] == .Expr(value) -> Val(value) else -> None
     }
     body := body_value ?? return None
     fields := [String]{}
@@ -417,9 +418,10 @@ sema_call_memory_guard_tree_projection: fn(value: TExpr, parameter: String) -> [
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     }
     lambda: lambda_value ?? return None
+    // A braced body's only line is checked into its return.
     body_value: if lambda.executable == {
         .Expr(found) -> Val(found)
-        .Block(_) -> None
+        .Block(statements) -> if statements.len() == 1 && statements[0] == .Return(returned, _) -> returned else -> None
     }
     body := body_value ?? return None
     fields := [TFieldRef]{}

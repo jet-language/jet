@@ -2066,7 +2066,7 @@ ir_closure_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFlatMap || operation == .MapFold || operation == .BagAny {
         return ir_closure_map_method(m, p, b, ty, receiver, operation, args, span)
     }
-    // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
+    // A Float fold whose step is exactly `fn(acc, x) { acc + x }` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
         lent: ir_expr(m, p, b, receiver)
@@ -2148,25 +2148,36 @@ ir_items_element: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, source: Int) -> 
     ir_list_element(m, p, b, source)
 }
 
-// Whether `callback` is the literal step `(acc, x) -> acc + x`: two
+// Whether `callback` is the literal step `fn(acc, x) { acc + x }`: two
 // parameters, no captures, and a body that adds the first to the second.
 ir_float_add_fold_step: fn(p: IRProgram, b: IRBuilder, callback: Int) -> Bool Never! {
     node: ir_body_node(p, b, callback)
     if node.kind == .Lambda(lambda) {
         if lambda.source_params.len() != 2 || lambda.captures.len() != 0 -> return false
-        if lambda.executable == .Expr(value) {
-            body: ir_body_node(p, b, value)
-            if body.kind == .Binary(op, _, _, lhs, rhs) {
-                if op != .Add -> return false
-                left: ir_body_node(p, b, lhs)
-                right: ir_body_node(p, b, rhs)
-                if left.kind == .Local(first) {
-                    if right.kind == .Local(second) -> return first.name == lambda.source_params[0] && second.name == lambda.source_params[1]
-                }
+        value: ir_lambda_only_value(p, b, lambda.executable) ?? return false
+        body: ir_body_node(p, b, value)
+        if body.kind == .Binary(op, _, _, lhs, rhs) {
+            if op != .Add -> return false
+            left: ir_body_node(p, b, lhs)
+            right: ir_body_node(p, b, rhs)
+            if left.kind == .Local(first) {
+                if right.kind == .Local(second) -> return first.name == lambda.source_params[0] && second.name == lambda.source_params[1]
             }
         }
     }
     false
+}
+
+// The one expression a lambda body is: an expression body, or a block whose
+// only statement returns a value (sema makes a block's last line that
+// return). None for any other body.
+ir_lambda_only_value: fn(p: IRProgram, b: IRBuilder, executable: BodyLambdaBody) -> Int? Never! {
+    if executable == .Expr(value) -> return Val(value)
+    if executable == .Block(body) {
+        if body.len() != 1 -> return None
+        if ir_body_stmt(p, b, body[0]) == .Return(returned, _) -> return returned
+    }
+    None
 }
 
 // The Map closure method `operation`: each entry, in key order, lends its

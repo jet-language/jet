@@ -69,7 +69,7 @@ apply_exec_convergence: fn(path: OSPath, src: String, graph_id: String, from_spa
                 trimmed := line.trim() // #4303
                 "    {trimmed}\n"
             }).collect<String>()
-            helper := "{function}: fn({signature}) -> {{\n{body}}}\n\n"
+            helper := "{function}: fn({signature}) {{\n{body}}}\n\n"
             edits.push(edit(SourceSpan { start: 0, end: 0 }, helper))
         }
         "duplicate" -> {}
@@ -364,7 +364,7 @@ source_snippet: fn(src: String, span: SourceSpan) -> String { src.get(span.start
 formatted_expression_matches: fn(left: String, right: String) -> Bool {
     wrap := fn(expr: String) {
         trimmed := expr.trim() // #4303
-        candidate := "canvas_match: fn() -> {{\n    {trimmed}\n}}\n"
+        candidate := "canvas_match: fn() {{\n    {trimmed}\n}}\n"
         jet_driver.Formatter.format_source(candidate).unwrap_or_else(fn(_) { candidate.clone() })
     }
     l := wrap(left); r := wrap(right)

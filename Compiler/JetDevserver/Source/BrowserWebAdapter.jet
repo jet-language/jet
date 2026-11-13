@@ -514,14 +514,14 @@ INTENT_GROUPS: [(String, [String])]{[
     ("Data & requests", ["routes", "queries", "mutations", "forms", "table", "store", "database"]),
     ("Runtime & interface", ["traces", "cost", "profiler", "ui-tree", "topology", "game", "world"])
 ]}
-intent_group: fn(panel_id: String) -> USize { INTENT_GROUPS.iter().position((group) -> group.1.contains(panel_id)).unwrap_or(INTENT_GROUPS.len() - 1) }
+intent_group: fn(panel_id: String) -> USize { INTENT_GROUPS.iter().position(fn(group) { group.1.contains(panel_id) }).unwrap_or(INTENT_GROUPS.len() - 1) }
 panel_available: fn(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
 unavailable_reason_text: fn(status: String) -> String {
-    status.trim_start_matches("unavailable:").split(',').map((reason) -> if reason == {
+    status.trim_start_matches("unavailable:").split(',').map(fn(reason) { if reason == {
         "unsupported-host" | "host-kind" -> "not offered by this host".to_string()
         "missing-capability" -> "needs a grant this session does not hold".to_string()
         other -> other.to_string()
-    }).collect().join(", ")
+    } }).collect().join(", ")
 }
 diagnostic_file: fn(diagnostic: String) -> String? {
     rest := diagnostic.split("-->").nth(1)?.trim_start() // #4303
@@ -534,7 +534,7 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     state_json := frame_json(frame)
     workbench := placement == .Workbench
     selection := frame.selection.as_ref()
-    any_open := frame.panels.iter().any((panel) -> panel.open && panel_available(panel))
+    any_open := frame.panels.iter().any(fn(panel) { panel.open && panel_available(panel) })
     html := String.with_capacity(16 * 1024)
     html.push_str("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools")
     if workbench -> html.push_str(" workbench")
@@ -556,11 +556,11 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     html.push_str("<div class=\"body\"><section class=\"facts\" data-scroll aria-label=\"Facts\">")
     if !workbench -> render_selected(html, frame)
     loop (index, group) in INTENT_GROUPS.iter().enumerate() {
-        members := frame.panels.iter().filter((panel) -> intent_group(panel.panel_id) == index).collect()
+        members := frame.panels.iter().filter(fn(panel) { intent_group(panel.panel_id) == index }).collect()
         if members.is_empty() -> next
-        available_count := members.iter().filter((panel) -> panel_available(panel)).count()
-        open_count := members.iter().filter((panel) -> panel.open && panel_available(panel)).count()
-        selected_here := selection.is_some_and((selected) -> members.iter().any((panel) -> panel.panel_id == selected.panel_id))
+        available_count := members.iter().filter(fn(panel) { panel_available(panel) }).count()
+        open_count := members.iter().filter(fn(panel) { panel.open && panel_available(panel) }).count()
+        selected_here := selection.is_some_and(fn(selected) { members.iter().any(fn(panel) { panel.panel_id == selected.panel_id }) })
         forced := selected_here || open_count > 0 || (!workbench && index == 0 && (frame.status.state == .Building || frame.status.state == .Error))
         initially_open := forced || (workbench && index == 0 && !any_open && selection.is_none())
         html.push_str("<details class=\"group\" data-intent=\""); html.push_str(index.to_string())
@@ -574,11 +574,11 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
             html.push_str("{open_count} open · {available_count} panel{suffix}")
         } else { html.push_str("{available_count} available") }
         html.push_str("</span></summary><div class=\"group-body\">")
-        loop panel in members.iter().filter((panel) -> panel_available(panel)) -> render_panel(html, panel, selection)
+        loop panel in members.iter().filter(fn(panel) { panel_available(panel) }) -> render_panel(html, panel, selection)
         unavailable_count := members.len() - available_count
         if unavailable_count > 0 {
             html.push_str("<details class=\"fold\"><summary>{unavailable_count} not available here</summary>")
-            loop panel in members.iter().filter((panel) -> !panel_available(panel)) {
+            loop panel in members.iter().filter(fn(panel) { !panel_available(panel) }) {
                 html.push_str("<div class=\"u\"><span>"); html.push_str(html_escape(panel.title))
                 html.push_str("</span><small>"); html.push_str(html_escape(unavailable_reason_text(panel.status)))
                 html.push_str("</small></div>")
@@ -587,7 +587,7 @@ render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
         }
         html.push_str("</div></details>")
     }
-    if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") } else if frame.panels.iter().all((panel) -> !panel_available(panel)) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
+    if frame.panels.is_empty() { html.push_str("<p class=\"empty\">Waiting for the first devtools fact.</p>") } else if frame.panels.iter().all(fn(panel) { !panel_available(panel) }) { html.push_str("<p class=\"empty\">No live panels are available on this host.</p>") }
     html.push_str("</section>")
     if workbench -> render_inspector(html, frame)
     html.push_str("</div><script>const S=JSON.parse(\"")
@@ -641,7 +641,7 @@ render_source_tool: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     html.push_str("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
 }
 render_panel: fn(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
-    node_id := selection.filter((selection) -> selection.panel_id == panel.panel_id).and_then((selection) -> selection.node_id.as_deref())
+    node_id := selection.filter(fn(selection) { selection.panel_id == panel.panel_id }).and_then(fn(selection) { selection.node_id.as_deref() })
     html.push_str("<article class=\"panel\" data-panel-id=\""); html.push_str(html_escape(panel.panel_id))
     html.push_str("\" data-open=\""); html.push_str(if panel.open -> "true" else -> "false")
     html.push_str("\"><header><h2><button class=\"toggle\" data-layout=\""); html.push_str(if panel.open -> "close" else -> "open")
@@ -657,9 +657,9 @@ render_panel: fn(html: &String, panel: &BrowserPanelView, selection: &BrowserSel
 }
 render_selected: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     selection := frame.selection.as_ref() ?? return
-    panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? return
+    panel := frame.panels.iter().find(fn(panel) { panel.panel_id == selection.panel_id }) ?? return
     path := [&BrowserNode]{}
-    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, path)).and_then((_) -> path.last().copied())
+    node := selection.node_id.as_deref().filter(fn(node_id) { find_path(panel.nodes, node_id, path) }).and_then(fn(_) { path.last().copied() })
     html.push_str("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
     render_crumbs(html, panel, path)
     if node == { .Val(node) -> render_node_detail(html, panel.panel_id, node)
@@ -680,7 +680,7 @@ render_node_detail: fn(html: &String, panel_id: String, node: &BrowserNode) {
     if node.status == .Val(status) { html.push_str(" <small class=\"mono\">"); html.push_str(html_escape(status)); html.push_str("</small>") }
     html.push_str("</h3>")
     if node.value == .Val(value) { html.push_str("<code class=\"value\">"); html.push_str(html_escape(value)); html.push_str("</code>") }
-    (leaves, trees) := node.children.iter().partition((child) -> child.children.is_empty() && child.value.is_some())
+    (leaves, trees) := node.children.iter().partition(fn(child) { child.children.is_empty() && child.value.is_some() })
     if !leaves.is_empty() {
         html.push_str("<dl class=\"kv\">")
         loop leaf in leaves {
@@ -699,11 +699,11 @@ render_node_detail: fn(html: &String, panel_id: String, node: &BrowserNode) {
 render_inspector: fn(html: &String, frame: &BrowserDevtoolsFrame) {
     html.push_str("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
     selection := frame.selection.as_ref() ?? { html.push_str("<p class=\"empty\">Select a fact to inspect it.</p></aside>"); return }
-    panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? {
+    panel := frame.panels.iter().find(fn(panel) { panel.panel_id == selection.panel_id }) ?? {
         html.push_str("<p class=\"empty\">Selected panel is not in the current catalog.</p></aside>"); return
     }
     path := [&BrowserNode]{}
-    node := selection.node_id.as_deref().filter((node_id) -> find_path(panel.nodes, node_id, path)).and_then((_) -> path.last().copied())
+    node := selection.node_id.as_deref().filter(fn(node_id) { find_path(panel.nodes, node_id, path) }).and_then(fn(_) { path.last().copied() })
     render_crumbs(html, panel, path)
     if node == {
         .Val(node) -> render_node_detail(html, panel.panel_id, node)
@@ -727,10 +727,10 @@ panel_from_projection: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact
     descriptor := panel.availability.descriptor
     status := if {
         panel.availability.is_available() -> {
-            panel.events.last().map((event) -> event.kind().to_string()).unwrap_or_else(() -> "available".to_string())
+            panel.events.last().map(fn(event) { event.kind().to_string() }).unwrap_or_else(fn() { "available".to_string() })
         }
         else -> {
-            reasons := panel.availability.unavailable_reasons().iter().map((reason) -> reason.as_str()).collect().join(",")
+            reasons := panel.availability.unavailable_reasons().iter().map(fn(reason) { reason.as_str() }).collect().join(",")
             "unavailable:{reasons}"
         }
     }
@@ -777,7 +777,7 @@ frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
     field_string(output, "revision", frame.revision, false)
     field_optional_string(output, "world_id", frame.world_id.as_deref())
     field_u64_option(output, "sequence", frame.sequence)
-    field_u64_option(output, "cursor", frame.cursor.map((cursor) -> cursor.sequence))
+    field_u64_option(output, "cursor", frame.cursor.map(fn(cursor) { cursor.sequence }))
     field_string(output, "state", frame.state.as_str(), false)
     output.push_str(",\"status\":"); status_json(output, frame.status)
     output.push_str(",\"tools\":{{\"source\":{{")
@@ -962,7 +962,7 @@ parse_action: fn(payload: [U8], default_placement: BrowserPlacement) -> BrowserH
     text := std.str.from_utf8(payload) ?? return .Err("browser action body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser action body is not valid bounded JSON")
     object := object_map(root) ?? return .Err("browser action body must be an object")
-    name := required_string(object, "action").or_else((_) -> required_string(object, "op"))?
+    name := required_string(object, "action").or_else(fn(_) { required_string(object, "op") })?
     placement := object.get("placement").map(parse_placement).transpose()?.unwrap_or(default_placement)
     if name == {
         "open" | "open_panel" -> .Ok(BrowserHostAction.open(placement, required_string(object, "panel_id")?))
@@ -980,7 +980,7 @@ parse_source_grant: fn(object: [String:Dyn]) -> BrowserSourceGrant Err! {
     grant := nested_object(object, "grant")?
     source := nested_object(grant, "source")?
     function := optional_string(source, "function")
-    location := BrowserSourceLocation.new(required_string(source, "source_id")?, required_u32(source, "line")?, optional_u32(source, "column").unwrap_or(0), function.map((s) -> s.to_string()))
+    location := BrowserSourceLocation.new(required_string(source, "source_id")?, required_u32(source, "line")?, optional_u32(source, "column").unwrap_or(0), function.map(fn(s) { s.to_string() }))
     .Ok(BrowserSourceGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, location))
 }
 parse_action_grant: fn(object: [String:Dyn]) -> BrowserActionGrant Err! {
@@ -989,26 +989,26 @@ parse_action_grant: fn(object: [String:Dyn]) -> BrowserActionGrant Err! {
 }
 nested_object: fn(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
-    object_map(value).map_err((_) -> "browser action `{key}` must be an object")
+    object_map(value).map_err(fn(_) { "browser action `{key}` must be an object" })
 }
 required_string: fn(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
-    value.as_str().map_err((_) -> "browser action `{key}` must be a string")
+    value.as_str().map_err(fn(_) { "browser action `{key}` must be a string" })
 }
-optional_string: fn(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
+optional_string: fn(object: [String:Dyn], key: String) -> String? { object.get(key).and_then(fn(value) { value.as_str().ok() }) }
 required_u64: fn(object: [String:Dyn], key: String) -> U64 Err! {
     if object.get(key) == {
-        .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range") else -> .Err("browser action `{key}` must be a non-negative integer")
+        .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err(fn(_) { "browser action `{key}` is out of range" }) else -> .Err("browser action `{key}` must be a non-negative integer")
     }
 }
 required_u32: fn(object: [String:Dyn], key: String) -> U32 Err! {
-    required_u64(object, key).and_then((value) -> U32.try_from(value).map_err((_) -> "browser action `{key}` is out of range"))
+    required_u64(object, key).and_then(fn(value) { U32.try_from(value).map_err(fn(_) { "browser action `{key}` is out of range" }) })
 }
 optional_u32: fn(object: [String:Dyn], key: String) -> U32? {
-    object.get(key).and_then((value) -> if value == {
+    object.get(key).and_then(fn(value) { if value == {
         .Int(n) && n >= 0 -> U32.try_from(n).ok()
         else -> .None
-    })
+    } })
 }
 parse_placement: fn(value: Dyn) -> BrowserPlacement Err! {
     text := value.as_str() ?? return .Err("browser action placement must be a string")
@@ -1064,7 +1064,7 @@ effect_json: fn(effect_ref: BrowserHostEffect) -> String {
     output.push_str("}}"); output
 }
 dispatch_action: fn(state: BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
-    state.host.dispatch(action).map((effect_ref) -> effect_json(effect_ref))
+    state.host.dispatch(action).map(fn(effect_ref) { effect_json(effect_ref) })
 }
 render_nodes_html: fn(output: &String, panel_id: String, nodes: &[BrowserNode], selected: String?) {
     loop node in nodes {
@@ -1083,7 +1083,7 @@ render_nodes_html: fn(output: &String, panel_id: String, nodes: &[BrowserNode], 
 }
 contains_node: fn(nodes: [BrowserNode], node_id: String?) -> Bool {
     id := node_id ?? return false
-    nodes.iter().any((node) -> node.id == id || contains_node(node.children, .Val(id)))
+    nodes.iter().any(fn(node) { node.id == id || contains_node(node.children, .Val(id)) })
 }
 html_escape: fn(value: String) -> String {
     output := String.with_capacity(value.len())

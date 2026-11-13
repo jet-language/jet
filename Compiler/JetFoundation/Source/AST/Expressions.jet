@@ -349,6 +349,15 @@ LambdaBody: enum {
     Block(body: [Stmt])
 }
 
+// The span of the one expression a lambda body is: an expression body, or a
+// braced body whose only line is that expression (`fn(x) { x.left }`). None
+// otherwise.
+ast_lambda_single_expr_span: fn(body: LambdaBody) -> Span? Never! {
+    if body == .Expr(value) -> return Val(expr_span(value))
+    if body == .Block(statements) && statements.len() == 1 && statements[0] == .Expr(value) -> return Val(expr_span(value))
+    None
+}
+
 Lambda: struct {
     take_names: [NamedSpan]
     params: [LambdaParam]

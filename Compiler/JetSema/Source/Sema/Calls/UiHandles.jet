@@ -210,7 +210,7 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environm
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if sema_expression_absent_none(bound[3].expr) {
-        diagnostics.push(sema_error("E2910", span, "`button` with a shortcut or label needs its click lambda", "the shortcut and accessible label belong to the click form, whose handler is the `fn() {{ … }}` argument after them", "write `ui.button(\"Save\", shortcut: …, () -> {{ save() }})`"))
+        diagnostics.push(sema_error("E2910", span, "`button` with a shortcut or label needs its click lambda", "the shortcut and accessible label belong to the click form, whose handler is the `fn() {{ … }}` argument after them", "write `ui.button(\"Save\", shortcut: …, fn() {{ save() }})`"))
         // Check only the written arguments: the bound row's absent defaults
         // would report a follow-on untyped `None`.
         _ := sema_ui_handle_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)

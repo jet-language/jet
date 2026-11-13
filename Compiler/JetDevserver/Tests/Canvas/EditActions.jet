@@ -1,7 +1,7 @@
 use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, ident_prefix, imported_core_prefix]
 
 #Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
-    imports: core_imports("// use fake: core.fake\nuse output: core.term // alias\nuse core.math\nrun: fn() -> {{}}\n")
+    imports: core_imports("// use fake: core.fake\nuse output: core.term // alias\nuse core.math\nrun: fn() {{}}\n")
     assert(imports.len() == 2)
     assert(imports[0].module_ref == "core.term")
     assert(imports[0].alias == "output")
@@ -21,13 +21,13 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 #Test("canvas_core_import_insertion_preserves_header_and_use_block") {
     header: "// heading\n\n"
     imports: "use math: core.math\nuse term: core.term\n"
-    (point, joined): core_import_insert_point("{header}{imports}\nrun: fn() -> {{}}\n")
+    (point, joined): core_import_insert_point("{header}{imports}\nrun: fn() {{}}\n")
     assert(point == header.len() + imports.len())
     assert(joined)
-    (point, joined): core_import_insert_point("{header}run: fn() -> {{}}\n")
+    (point, joined): core_import_insert_point("{header}run: fn() {{}}\n")
     assert(point == header.len())
     assert(!joined)
-    (point, joined): core_import_insert_point("run: fn() -> {{}}\nuse term: core.term\n")
+    (point, joined): core_import_insert_point("run: fn() {{}}\nuse term: core.term\n")
     assert(point == 0)
     assert(!joined)
 }
@@ -35,7 +35,7 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
 // #6542: `alias: path` lines and `use {` block rows name core imports too,
 // and a new import goes after the block's closing brace.
 #Test("canvas_core_imports_read_alias_rows_and_use_blocks") {
-    src: "use {{\n    output: core.term // alias\n    core.math\n    // core.fake\n}}\nuse paths: core.files.path\nrun: fn() -> {{}}\n"
+    src: "use {{\n    output: core.term // alias\n    core.math\n    // core.fake\n}}\nuse paths: core.files.path\nrun: fn() {{}}\n"
     imports: core_imports(src)
     assert(imports.len() == 3)
     assert(imports[0].module_ref == "core.term")
@@ -46,7 +46,7 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
     assert(imports[2].alias == "paths")
     assert(imported_core_prefix(src, "core.files.path.join") == "paths.join")
     block: "use {{\n    m: core.math\n    term: core.term\n}}\n"
-    (point, joined): core_import_insert_point("{block}\nrun: fn() -> {{}}\n")
+    (point, joined): core_import_insert_point("{block}\nrun: fn() {{}}\n")
     assert(point == block.len())
     assert(joined)
 }

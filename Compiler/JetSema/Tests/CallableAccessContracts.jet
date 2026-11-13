@@ -70,13 +70,13 @@ CALLABLE_ACCESS_DECLS: "push_one: fn(buf: &[Int]) {{\n    buf.push(1)\n}}\nthrou
     failures := [String]{}
     // Every callable category fills a write-marked slot and writes the caller's list.
     callable_access_expect(failures, "named", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through(push_one, values)\n}}\n", [String]{})
-    callable_access_expect(failures, "marked lambda", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through((buf: &[Int]) -> buf.push(2), values)\n}}\n", [String]{})
-    callable_access_expect(failures, "unmarked lambda inherits the slot's write", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    step: 3\n    values := [Int]{{}}\n    through(buf -> buf.push(step), values)\n}}\n", [String]{})
+    callable_access_expect(failures, "marked lambda", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through(fn(buf: &[Int]) {{ buf.push(2) }}, values)\n}}\n", [String]{})
+    callable_access_expect(failures, "unmarked lambda inherits the slot's write", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    step: 3\n    values := [Int]{{}}\n    through(fn(buf) {{ buf.push(step) }}, values)\n}}\n", [String]{})
     callable_access_expect(failures, "generic", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    through_generic(push_one, values)\n}}\n", [String]{})
     callable_access_expect(failures, "wrapper", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    wrapper: Wrapper{{edit: push_one}}\n    wrapper.edit(values)\n}}\n", [String]{})
-    callable_access_expect(failures, "held value", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    wrapper: Wrapper{{edit: (buf: &[Int]) -> buf.push(4)}}\n    through(wrapper.edit, values)\n}}\n", [String]{})
+    callable_access_expect(failures, "held value", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    values := [Int]{{}}\n    wrapper: Wrapper{{edit: fn(buf: &[Int]) {{ buf.push(4) }}}}\n    through(wrapper.edit, values)\n}}\n", [String]{})
     // A value whose access differs from its slot's is rejected.
-    callable_access_expect(failures, "marked lambda in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only((buf: &[Int]) -> buf.push(5), [Int]{{}})\n}}\n", [String]{"E0113"})
+    callable_access_expect(failures, "marked lambda in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only(fn(buf: &[Int]) {{ buf.push(5) }}, [Int]{{}})\n}}\n", [String]{"E0113"})
     callable_access_expect(failures, "written function in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    read_only(push_one, [Int]{{}})\n}}\n", [String]{"E0227"})
     callable_access_expect(failures, "written value in a read slot", "{CALLABLE_ACCESS_DECLS}run: fn() {{\n    wrapper: Wrapper{{edit: push_one}}\n    read_only(wrapper.edit, [Int]{{}})\n}}\n", [String]{"E0227"})
     if failures.len() > 0 -> panic("CallableAccessContracts collected {failures.len()} failures:\n{failures.join("\n")}")

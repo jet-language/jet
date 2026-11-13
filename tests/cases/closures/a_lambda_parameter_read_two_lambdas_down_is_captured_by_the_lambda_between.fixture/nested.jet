@@ -1,0 +1,38 @@
+// A lambda parameter that only a lambda two levels down reads is captured
+// by the lambda between them too, so the innermost lambda finds it. The
+// shapes: an adapter chain, an Int parameter, a named lambda in the middle,
+// and a field read through the parameter.
+
+Adapter: struct {
+    id: String
+}
+
+Resolved: struct {
+    adapter: Adapter
+}
+
+chained: fn(owners: [String], modes: [String], items: [Int]) -> [String] {
+    owners.flat_map(fn(owner) { modes.flat_map(fn(mode) { items.map(fn(item) { "{owner}{mode}{item}" }) }) })
+}
+
+numbered: fn(counts: [Int], modes: [String], steps: [Int]) -> [String] {
+    counts.flat_map(fn(count) { modes.flat_map(fn(mode) { steps.map(fn(step) { "{mode}{count + step}" }) }) })
+}
+
+named: fn(owners: [String], items: [Int]) -> [String] {
+    owners.flat_map(fn(owner) {
+        expand: fn(mode: String) -> [String] { items.map(fn(item) { "{owner}{mode}{item}" }) }
+        expand("-")
+    })
+}
+
+keyed: fn(resolved: [Resolved], modes: [String], tasks: [String]) -> [String] {
+    resolved.flat_map(fn(r) { modes.flat_map(fn(context) { tasks.map(fn(task) { "{r.adapter.id}/{context}/{task}" }) }) })
+}
+
+run: fn() {
+    print(chained(["a", "b"], ["x", "y"], [1, 2]).join(","))
+    print(numbered([1, 2], ["p", "q"], [10]).join(","))
+    print(named(["a", "b"], [1, 2]).join(","))
+    print(keyed([Resolved{adapter: Adapter{id: "m"}}], ["capsule", "control"], ["t1", "t2"]).join(","))
+}

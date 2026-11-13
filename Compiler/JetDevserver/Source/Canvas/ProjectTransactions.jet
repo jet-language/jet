@@ -228,9 +228,9 @@ json_key_present: fn(text: String, key: String) -> Bool {
     needle: "\"{key}\""
     search_from := Usize{0}
     loop {
-        relative: text.get(search_from..).and_then((rest) -> rest.find(needle)) ?? break
+        relative: text.get(search_from..).and_then(fn(rest) { rest.find(needle) }) ?? break
         after: search_from + relative + needle.len()
-        if text.get(after..).is_some_and((rest) -> rest.trim_start().starts_with(':')) -> return true
+        if text.get(after..).is_some_and(fn(rest) { rest.trim_start().starts_with(':') }) -> return true
         search_from = after
     }
     false
@@ -266,7 +266,7 @@ json_object_body: fn(text: String, key: String) -> String? {
 validate_touched_project_files: fn(ctx: &ProjectContext, touched: [TouchedProjectFile]) Err! {
     loop file in touched {
         if file.path.contains("..") || OSPath.new(file.path).is_absolute() -> return .Err(project_edit_error("bad_request", "Canvas project file paths must stay inside the project"))
-        current: ctx.files.iter().find((f) -> f.path == file.path) ?? {
+        current: ctx.files.iter().find(fn(f) { f.path == file.path }) ?? {
             if file.revision == "missing" -> next
             return .Err(project_edit_error("not_found", "Canvas project touched file is not in the projected source truth"))
         }
@@ -279,7 +279,7 @@ validate_touched_project_files: fn(ctx: &ProjectContext, touched: [TouchedProjec
 prepare_project_rename: fn(ctx: ProjectContext, selected_path: OSPath, from: String, to: String, touched: [TouchedProjectFile]?) -> ProjectRenamePlan ProjectRenameError! {
     if ctx.authority_diagnostic == .Val(diagnostic) -> return .Err(ProjectRenameError.new("stale", diagnostic.what))
     sources: project_rename_sources(ctx)?
-    selected: sources.iter().find((source) -> source.path == selected_path) ?? return .Err(ProjectRenameError.new("not_found", "Canvas rename source is not in the projected project"))
+    selected: sources.iter().find(fn(source) { source.path == selected_path }) ?? return .Err(ProjectRenameError.new("not_found", "Canvas rename source is not in the projected project"))
     anchor: selected_rename_anchor(ctx, selected, from)?
     edits_by_source := [String:[SourceSpan]]{}
     seen := HashSet<(String, Usize, Usize)>.new() // GATE #4499
@@ -299,29 +299,29 @@ prepare_project_rename: fn(ctx: ProjectContext, selected_path: OSPath, from: Str
     keys.sort()
     loop source_id in keys {
         edits: edits_by_source.get(source_id).unwrap()
-        source: sources.iter().find((source) -> source.source_id == source_id).expect("rename edit source came from project source set")
-        text_edits: edits.iter().map((span) -> edit(span, to)).collect()
-        after: FixEngine.apply_edits(source.source, text_edits).map_err((_) -> ProjectRenameError.new("overlap", "Canvas project rename edits overlapped"))?
+        source: sources.iter().find(fn(source) { source.source_id == source_id }).expect("rename edit source came from project source set")
+        text_edits: edits.iter().map(fn(span) { edit(span, to) }).collect()
+        after: FixEngine.apply_edits(source.source, text_edits).map_err(fn(_) { ProjectRenameError.new("overlap", "Canvas project rename edits overlapped") })?
         changes.push(ProjectChange(path: source.path, rel: source.source_id, before: source.source, after: after, existed: true))
     }
-    changes.sort_by((left, right) -> left.rel.cmp(right.rel))
+    changes.sort_by(fn(left, right) { left.rel.cmp(right.rel) })
     if touched == .Val(touched) {
         loop change in changes {
-            require_touched_revision(touched, change.rel, source_revision(change.before)).map_err((error) -> ProjectRenameError.new("bad_request", error))?
+            require_touched_revision(touched, change.rel, source_revision(change.before)).map_err(fn(error) { ProjectRenameError.new("bad_request", error) })?
         }
     }
     .Ok(ProjectRenamePlan(changes: changes))
 }
 
 apply_project_rename: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
-    selected_rel: json_string_field(request, "source_id").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or_else(() -> rel_path(ctx.project_root, ctx.entry_path))
-    if !ctx.files.iter().any((file) -> file.kind == "source" && file.path == selected_rel) -> return .Err(project_edit_error("not_found", "Canvas rename source is not in the projected project"))
+    selected_rel: json_string_field(request, "source_id").map(fn(path) { clean_project_rel_path(path) }).transpose()?.unwrap_or_else(fn() { rel_path(ctx.project_root, ctx.entry_path) })
+    if !ctx.files.iter().any(fn(file) { file.kind == "source" && file.path == selected_rel }) -> return .Err(project_edit_error("not_found", "Canvas rename source is not in the projected project"))
     from: required_project_string(request, "from")?
     to: required_project_string(request, "to")?
     validate_ident_for_project(from)?
     validate_ident_for_project(to)?
     selected_path: ctx.project_root.join(selected_rel)
-    plan: prepare_project_rename(ctx, selected_path, from, to, .Some(touched)).map_err((error) -> {
+    plan: prepare_project_rename(ctx, selected_path, from, to, .Some(touched)).map_err(fn(error) {
         if error.kind == "conflict" {
             current_revision: project_context_for_entry(ctx.entry_path).project_revision
             project_edit_conflict(error.message, current_revision)
@@ -333,13 +333,13 @@ apply_project_rename: fn(ctx: ProjectContext, request: String, touched: [Touched
 
 project_rename_sources: fn(ctx: ProjectContext) -> [ProjectRenameSource] ProjectRenameError! {
     sources := [ProjectRenameSource]{}
-    loop file in ctx.files.iter().filter((file) -> file.kind == "source") {
+    loop file in ctx.files.iter().filter(fn(file) { file.kind == "source" }) {
         path: ctx.project_root.join(file.path)
-        validate_project_path(ctx.project_root, path, file.path).map_err((error) -> ProjectRenameError.new("stale", error))?
+        validate_project_path(ctx.project_root, path, file.path).map_err(fn(error) { ProjectRenameError.new("stale", error) })?
         if !ctx.parts.should_index(path) -> next
-        source: read_source_without_symlinks(path).map_err((error) -> ProjectRenameError.new("stale", "Canvas project source moved or unreadable: {error}"))?
+        source: read_source_without_symlinks(path).map_err(fn(error) { ProjectRenameError.new("stale", "Canvas project source moved or unreadable: {error}") })?
         if source_revision(source) != file.revision -> return .Err(ProjectRenameError.new("conflict", "project source changed while Canvas was preparing its rename"))
-        index: semindex.open(path).map_err((error) -> ProjectRenameError.new("check", "Canvas rename index failed: {error}"))?
+        index: semindex.open(path).map_err(fn(error) { ProjectRenameError.new("check", "Canvas rename index failed: {error}") })?
         source_id := file.path.trim_start_matches("./") // #4303
         sources.push(ProjectRenameSource(path: path, source_id: source_id.to_string(), source: source, index: index))
     }
@@ -347,10 +347,10 @@ project_rename_sources: fn(ctx: ProjectContext) -> [ProjectRenameSource] Project
 }
 
 selected_rename_anchor: fn(ctx: ProjectContext, selected: ProjectRenameSource, from: String) -> DefinitionAnchor ProjectRenameError! {
-    definitions: selected.index.definitions().iter().filter((definition) -> definition.name == from && module_belongs_to(ctx.project_root, selected.path, definition.module_path)).collect()
+    definitions: selected.index.definitions().iter().filter(fn(definition) { definition.name == from && module_belongs_to(ctx.project_root, selected.path, definition.module_path) }).collect()
     if definitions.len() == 1 -> return .Ok(DefinitionAnchor(module_path: definitions[0].module_path, kind: "", def_span: definitions[0].def_span, semantic_identity: .Some(definitions[0].identity)))
     if definitions.len() > 1 -> return .Err(ProjectRenameError.new("ambiguous", "Canvas rename needs one selected definition anchor"))
-    targets := selected.index.references().iter().filter((reference) -> reference.name == from).filter_map((reference) -> reference.target).filter((target) -> ctx.files.iter().any((file) -> file.kind == "source" && module_belongs_to(ctx.project_root, ctx.project_root.join(file.path), target.module_path))).collect()
+    targets := selected.index.references().iter().filter(fn(reference) { reference.name == from }).filter_map(fn(reference) { reference.target }).filter(fn(target) { ctx.files.iter().any(fn(file) { file.kind == "source" && module_belongs_to(ctx.project_root, ctx.project_root.join(file.path), target.module_path) }) }).collect()
     targets.sort() // GATE #4499 DefinitionAnchor ordering
     targets.dedup()
     if targets.len() == 1 -> return .Ok(targets[0])
@@ -363,7 +363,7 @@ add_project_rename_edit: fn(edits_by_source: &[String:[SourceSpan]], seen: &Hash
     edits_by_source.entry(source.source_id).or_default().push(span)
 }
 definition_matches_anchor: fn(definition: SymbolDef, anchor: DefinitionAnchor) -> Bool {
-    definition.module_path == anchor.module_path && definition.def_span == anchor.def_span && anchor.semantic_identity.is_none_or((identity) -> identity == definition.identity)
+    definition.module_path == anchor.module_path && definition.def_span == anchor.def_span && anchor.semantic_identity.is_none_or(fn(identity) { identity == definition.identity })
 }
 reference_matches_anchor: fn(reference: SymbolRef, anchor: DefinitionAnchor) -> Bool {
     target: reference.target ?? return false
@@ -376,49 +376,49 @@ reference_matches_anchor: fn(reference: SymbolRef, anchor: DefinitionAnchor) -> 
 
 apply_project_add_dependency: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)?
-    if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "add_dependency must touch the edited Package file"))
+    if !touched.iter().any(fn(f) { f.path == manifest_rel }) -> return .Err(project_edit_error("bad_request", "add_dependency must touch the edited Package file"))
     name: required_project_string(request, "name")?
     validate_ident_for_project(name)?
     spec_text: required_project_string(request, "spec")?
     spec: project_dep_spec(spec_text)?
     manifest_path: ctx.project_root.join(manifest_rel)
     validate_project_path(ctx.project_root, manifest_path, manifest_rel)?
-    before: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
+    before: read_source_without_symlinks(manifest_path).map_err(fn(e) { project_edit_error("io", e.to_string()) })?
     apply_canonical_dependency(ctx, request, manifest_rel, before, name, .Some((spec_text, spec)))
 }
 apply_project_remove_dependency: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)?
-    if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "remove_dependency must touch the edited Package file"))
+    if !touched.iter().any(fn(f) { f.path == manifest_rel }) -> return .Err(project_edit_error("bad_request", "remove_dependency must touch the edited Package file"))
     name: required_project_string(request, "name")?
     validate_ident_for_project(name)?
     manifest_path: ctx.project_root.join(manifest_rel)
     validate_project_path(ctx.project_root, manifest_path, manifest_rel)?
-    before: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
+    before: read_source_without_symlinks(manifest_path).map_err(fn(e) { project_edit_error("io", e.to_string()) })?
     apply_canonical_dependency(ctx, request, manifest_rel, before, name, .None)
 }
 apply_project_edit_pkg_field: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)?
-    if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "edit_pkg_field must touch the edited Package file"))
+    if !touched.iter().any(fn(f) { f.path == manifest_rel }) -> return .Err(project_edit_error("bad_request", "edit_pkg_field must touch the edited Package file"))
     field: required_project_string(request, "field")?
     value: required_project_string(request, "value")?
     validate_payload_field(field, value)?
     manifest_path: ctx.project_root.join(manifest_rel)
     validate_project_path(ctx.project_root, manifest_path, manifest_rel)?
-    before: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
+    before: read_source_without_symlinks(manifest_path).map_err(fn(e) { project_edit_error("io", e.to_string()) })?
     after: replace_top_level_field(before, field, "\"{manifest_string(value)}\"")
-    Package.PackageFacts.parse(after, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
+    Package.PackageFacts.parse(after, manifest_rel).map_err(fn(error) { project_edit_error("diagnostic", error.to_string()) })?
     finish_project_changes(ctx, request, "edit_pkg_field", [ProjectChange(path: manifest_path, rel: manifest_rel, before: before, after: after, existed: true)])
 }
 apply_project_add_target: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel: project_manifest_rel(ctx, request)?
-    if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "add_target must touch the edited Package file"))
+    if !touched.iter().any(fn(f) { f.path == manifest_rel }) -> return .Err(project_edit_error("bad_request", "add_target must touch the edited Package file"))
     name: required_project_string(request, "name")?
     validate_ident_for_project(name)?
     target: project_target_text(json_string_field(request, "target").unwrap_or("executable"))?
     manifest_path: ctx.project_root.join(manifest_rel)
     validate_project_path(ctx.project_root, manifest_path, manifest_rel)?
-    before: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
-    facts: Package.PackageFacts.parse(before, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
+    before: read_source_without_symlinks(manifest_path).map_err(fn(e) { project_edit_error("io", e.to_string()) })?
+    facts: Package.PackageFacts.parse(before, manifest_rel).map_err(fn(error) { project_edit_error("diagnostic", error.to_string()) })?
     if facts.outputs.contains_key(name) -> return .Err(project_edit_error("conflict", "the Package already declares this Output"))
     kind: if target is { "library" -> "Library"; "test" -> "Check"; "executable" | "example" -> "Executable"; _ -> "Executable" }
     entry: json_string_field(request, "entry").unwrap_or("run")
@@ -426,11 +426,11 @@ apply_project_add_target: fn(ctx: ProjectContext, request: String, touched: [Tou
     after := before.to_string()
     if !after.ends_with('\n') -> after.push('\n')
     after.push_str("{name}: Output.{kind}{{ name: \"{manifest_string(name)}\", entry: {entry} }}\n")
-    Package.PackageFacts.parse(after, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
+    Package.PackageFacts.parse(after, manifest_rel).map_err(fn(error) { project_edit_error("diagnostic", error.to_string()) })?
     finish_project_changes(ctx, request, "add_target", [ProjectChange(path: manifest_path, rel: manifest_rel, before: before, after: after, existed: true)])
 }
 project_manifest_rel: fn(ctx: ProjectContext, request: String) -> String Err! {
-    relative: json_string_field(request, "manifest").unwrap_or_else(() -> {
+    relative: json_string_field(request, "manifest").unwrap_or_else(fn() {
         if ctx.manifest_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
         if ctx.ecosystem_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
         Syntax.PACKAGE_FILE.to_string()
@@ -439,11 +439,11 @@ project_manifest_rel: fn(ctx: ProjectContext, request: String) -> String Err! {
 }
 
 apply_project_create_package: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
-    raw: json_string_field(request, "package_path").or_else(() -> json_string_field(request, "new_package_path")) ?? return .Err(project_edit_error("bad_request", "missing `package_path`"))
+    raw: json_string_field(request, "package_path").or_else(fn() { json_string_field(request, "new_package_path") }) ?? return .Err(project_edit_error("bad_request", "missing `package_path`"))
     package_rel: clean_project_rel_path(raw)?
-    name: json_string_field(request, "name").unwrap_or_else(() -> OSPath.new(package_rel).file_name().and_then((n) -> n.to_str()).unwrap_or("package").to_string())
+    name: json_string_field(request, "name").unwrap_or_else(fn() { OSPath.new(package_rel).file_name().and_then(fn(n) { n.to_str() }).unwrap_or("package").to_string() })
     validate_ident_for_project(name)?
-    entry_rel: json_string_field(request, "entry").map((entry) -> clean_project_rel_path(entry)).transpose()?.unwrap_or_else(() -> "{package_rel}/{Syntax.DEFAULT_ENTRY_FILE}")
+    entry_rel: json_string_field(request, "entry").map(fn(entry) { clean_project_rel_path(entry) }).transpose()?.unwrap_or_else(fn() { "{package_rel}/{Syntax.DEFAULT_ENTRY_FILE}" })
     if !entry_rel.starts_with("{package_rel}/") -> return .Err(project_edit_error("bad_request", "create_package entry must live inside the package path"))
     if !entry_rel.ends_with(".jet") -> return .Err(project_edit_error("bad_request", "create_package entry must be a .jet file"))
     target: project_target_text(json_string_field(request, "target").unwrap_or("executable"))?
@@ -457,18 +457,18 @@ apply_project_create_package: fn(ctx: ProjectContext, request: String, touched: 
     if manifest_path.exists() || entry_path.exists() -> return .Err(project_edit_error("conflict", "create_package would overwrite existing source truth"))
     output_kind: if target is { "library" -> "Library"; "test" -> "Check"; "executable" | "example" -> "Executable"; _ -> "Executable" }
     manifest: "name: \"{name}\"\nversion: \"0.1.0\"\n{name}: Output.{output_kind}{{ name: \"{name}\", entry: run }}\n"
-    Package.PackageFacts.parse(manifest, manifest_rel).map_err((e) -> project_edit_error("diagnostic", "{e}"))?
+    Package.PackageFacts.parse(manifest, manifest_rel).map_err(fn(e) { project_edit_error("diagnostic", "{e}") })?
     entry: if {
         target == "library" -> {
             "{name}_ready: fn() -> Bool {{\n    return true\n}}\n"
         }
-        else -> { "run: fn() -> {{\n    print(\"{name}\")\n}}\n" }
+        else -> { "run: fn() {{\n    print(\"{name}\")\n}}\n" }
     }
     (tokens, lex_diags): Lexer.lex(entry)
     if lex_diags.into_iter().find((d) == .Val(d) -> d.severity == Severity.Error) -> return .Err(project_edit_error("diagnostic", d.what))
-    Parser.parse_with_source(tokens, entry).map((_) -> ()).map_err((diags) -> {
+    Parser.parse_with_source(tokens, entry).map(fn(_) { () }).map_err(fn(diags) {
         diags := diags
-        what: diags.pop().map((d) -> d.what).unwrap_or("created package entry did not parse")
+        what: diags.pop().map(fn(d) { d.what }).unwrap_or("created package entry did not parse")
         project_edit_error("diagnostic", what)
     })?
     changes: [
@@ -479,7 +479,7 @@ apply_project_create_package: fn(ctx: ProjectContext, request: String, touched: 
 }
 
 apply_project_add_workspace_member: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
-    workspace_rel: json_string_field(request, "workspace").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or(Syntax.WORKSPACE_FILE)
+    workspace_rel: json_string_field(request, "workspace").map(fn(path) { clean_project_rel_path(path) }).transpose()?.unwrap_or(Syntax.WORKSPACE_FILE)
     member_path: clean_project_rel_path(required_project_string(request, "member_path")?)?
     member_dir: ctx.project_root.join(member_path)
     validate_project_path(ctx.project_root, member_dir, member_path)?
@@ -490,27 +490,27 @@ apply_project_add_workspace_member: fn(ctx: ProjectContext, request: String, tou
     validate_project_path(ctx.project_root, workspace_path, workspace_rel)?
     before: read_source_without_symlinks(workspace_path).unwrap_or_default()
     existed: workspace_path.is_file()
-    revision: if existed -> ctx.files.iter().find((file) -> file.path == workspace_rel).map((file) -> file.revision).unwrap_or("missing") else -> "missing"
+    revision: if existed -> ctx.files.iter().find(fn(file) { file.path == workspace_rel }).map(fn(file) { file.revision }).unwrap_or("missing") else -> "missing"
     require_touched_revision(touched, workspace_rel, revision)?
     after: if existed -> add_workspace_member_to_source(before, member_path)? else -> "workspace: module {{\n    members: [\"./{member_path}\"]\n}}\n"
-    WorkspaceFile.evaluate(after, ctx.project_root).map_err((d) -> project_edit_error("diagnostic", d.what))?
+    WorkspaceFile.evaluate(after, ctx.project_root).map_err(fn(d) { project_edit_error("diagnostic", d.what) })?
     change: ProjectChange(path: workspace_path, rel: workspace_rel, before: before, after: after, existed: existed)
     finish_project_changes(ctx, request, "add_workspace_member", [change])
 }
 
 apply_project_add_env_service: fn(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
-    env_rel: json_string_field(request, "env").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or(Syntax.ENV_FILE)
+    env_rel: json_string_field(request, "env").map(fn(path) { clean_project_rel_path(path) }).transpose()?.unwrap_or(Syntax.ENV_FILE)
     env_path: ctx.project_root.join(env_rel)
     validate_project_path(ctx.project_root, env_path, env_rel)?
     existed: env_path.is_file()
-    revision: if existed -> ctx.files.iter().find((file) -> file.path == env_rel).map((file) -> file.revision).unwrap_or("missing") else -> "missing"
+    revision: if existed -> ctx.files.iter().find(fn(file) { file.path == env_rel }).map(fn(file) { file.revision }).unwrap_or("missing") else -> "missing"
     require_touched_revision(touched, env_rel, revision)?
     name: required_project_string(request, "name")?
     validate_ident_for_project(name)?
     service: env_service_source(request, name)?
     before: read_source_without_symlinks(env_path).unwrap_or_default()
     after: if existed -> add_env_service_to_source(before, name, service)? else -> "env.dev: module {{\n    services: {{ {service} }}\n}}\n"
-    ModuleEval.evaluate_env(after, ctx.project_root).map_err((d) -> project_edit_error("diagnostic", d.what))?
+    ModuleEval.evaluate_env(after, ctx.project_root).map_err(fn(d) { project_edit_error("diagnostic", d.what) })?
     finish_project_changes(ctx, request, "add_env_service", [ProjectChange(path: env_path, rel: env_rel, before: before, after: after, existed: existed)])
 }
 
@@ -520,7 +520,7 @@ env_service_source: fn(request: String, name: String) -> String Err! {
     if request.contains("\"init\"") && json_string_array(request, "run").is_empty() -> return .Err(project_edit_error("bad_request", "service start commands use typed `run: [program, args…]`, not `init`"))
     run: json_string_array(request, "run")
     if !run.is_empty() {
-        rendered: run.iter().map((arg) -> "\"{manifest_string(arg)}\"").collect().join(", ")
+        rendered: run.iter().map(fn(arg) { "\"{manifest_string(arg)}\"" }).collect().join(", ")
         fields.push("run: [{rendered}]")
     }
     if json_string_field(request, "ready") == .Val(ready) -> fields.push("ready: \"{manifest_string(ready)}\"")

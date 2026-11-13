@@ -323,7 +323,7 @@ generics: fn(n: Int, r: &Seeded) -> [String:String] {
             thing_{i}_use: fn(seed: Int) -> Int {{
                 things: [Thing{i}]{{Thing{i}{{id: seed % 31, weight: {a}}}, Thing{i}{{id: seed % 17, weight: {a + 1}}}}}
                 chosen: first_or(things, Thing{i}{{id: 0, weight: 0}})
-                heavy: count_where(things, (thing) -> thing.weight > {a})
+                heavy: count_where(things, fn(thing) {{ thing.weight > {a} }})
                 slots: [Slot<Thing{i}>]{{wrap(chosen, {i % 64}), wrap(things[1], heavy)}}
                 (chosen.id + heavy + marks_of(slots)) % {M}
             }}

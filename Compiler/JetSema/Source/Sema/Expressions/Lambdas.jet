@@ -36,6 +36,7 @@ use jet_foundation.[
     ViewProvenanceMap,
     access_sigil,
     ast_empty_call_arg_flags,
+    ast_lambda_single_expr_span,
     expr_span,
     symbol_id,
     checked_symbol_local,
@@ -1314,7 +1315,15 @@ sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: I
                 }
                 if else_body != None -> sema_expression_lambda_collect_tree_statements(else_body, frame, scopes, keys)
             }
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Return(_, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+            .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) | .BreakValue(_, init, _) -> sema_expression_lambda_collect_tree_expr(init, frame, scopes, keys)
+            .Return(value, _) -> sema_expression_lambda_collect_tree_optional_expr(value, frame, scopes, keys)
+            .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+                sema_expression_lambda_collect_tree_expr(source, frame, scopes, keys)
+                sema_expression_lambda_collect_tree_expr(collection, frame, scopes, keys)
+                sema_expression_lambda_collect_tree_optional_expr(step, frame, scopes, keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
+            }
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .Continue(_, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
     }
 }
@@ -2265,7 +2274,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 // where its expression body's span ends (a call's span is its
                 // name).
                 escapes && !task_body && capture_ty == (Type.Named{name: "Group"}) -> {
-                    escape_span: if lambda.body == .Expr(body_value) -> Span{start: lambda.span.start, end: expr_span(body_value).end} else -> lambda.span
+                    escape_span: if ast_lambda_single_expr_span(lambda.body) == .Val(body_span) -> Span{start: lambda.span.start, end: body_span.end} else -> lambda.span
                     diagnostics.push(sema_error("E1110", escape_span, "`{binding.symbol.name}` is a `Group` and cannot escape in a lambda", "a task group is a scoped spawn authority that may flow only through a direct function or method parameter", "move this work to a function or method that takes `{binding.symbol.name}: Group` and call it directly"))
                 }
                 // The task's crossing prover refuses a captured Cell guard.
@@ -2369,7 +2378,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         // The inferred carrier cannot fit a plain expected return: the failure
         // has no route out of this callback (E0403).
         if lambda_work.meta.fallible_propagation && ret_ty == .Result(_, inferred_error) {
-            body_span: if lambda.body == .Expr(body_value) -> expr_span(body_value) else -> lambda.span
+            body_span: ast_lambda_single_expr_span(lambda.body) ?? lambda.span
             diagnostics.push(sema_failure_no_carrier(inferred_error, body_span, true))
             return None
         }
@@ -2395,12 +2404,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
-    // Rust `infer_lambda` (`check_aggregate_view_return`): an expression body
-    // whose result carries a view proves its owners as a `return` does, so a
-    // view into a local the enclosing function owns is E2305. The enclosing
-    // function's receiver and parameters stay stable sources; the check only
-    // reports, and leaves the lambda's recorded provenance as it was.
-    if lambda.body == .Expr(view_body) && program.registration_graph == .Val(view_graph) {
+    // Rust `infer_lambda` (`check_aggregate_view_return`): a one-expression
+    // body whose result carries a view proves its owners as a `return` does,
+    // so a view into a local the enclosing function owns is E2305. The
+    // enclosing function's receiver and parameters stay stable sources; the
+    // check only reports, and leaves the lambda's recorded provenance as it was.
+    if ast_lambda_single_expr_span(lambda.body) != None && program.registration_graph == .Val(view_graph) {
         view_seen := [String:Bool]{}
         if sema_check_type_contains_view(view_graph, environment.module_identity, ret_ty, view_seen) {
             saved_view_provenance := lambda_context.return_view_provenance.copy()
@@ -2408,7 +2417,18 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             saved_view_keys := lambda_context.return_view_parameter_keys.copy()
             if lambda_context.return_view_receiver_key == "" -> lambda_context.return_view_receiver_key = context.return_view_receiver_key.copy()
             loop key in context.return_view_parameter_keys -> lambda_context.return_view_parameter_keys.push(key.copy())
-            _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, lambda_state, lambda_context, diagnostics)
+            // The body is that one expression, either bare or the only line
+            // of a braced body.
+            if lambda.body == {
+                .Expr(view_body) -> {
+                    _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, lambda_state, lambda_context, diagnostics)
+                }
+                .Block(statements) -> {
+                    if statements[0] == .Expr(view_body) {
+                        _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, lambda_state, lambda_context, diagnostics)
+                    }
+                }
+            }
             lambda_context.return_view_provenance = saved_view_provenance
             lambda_context.return_view_receiver_key = saved_view_receiver
             lambda_context.return_view_parameter_keys = saved_view_keys

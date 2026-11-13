@@ -28,6 +28,7 @@ use {
         TLetTy,
         Type,
         ast_empty_call_arg_flags,
+        ast_lambda_single_expr_span,
         ast_visit_expr,
         diagnostic_registry_row,
         expr_source_span,
@@ -1029,7 +1030,7 @@ sema_call_argument_drop_mismatch: fn(value: Expr, diagnostic_start: Int, diagnos
 sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     value_span: expr_span(value)
     found := sema_value_mismatch_index(diagnostics, diagnostic_start, value_span)
-    if found == None && value == .Lambda(body_lambda, _) && body_lambda.body == .Expr(body) -> found = sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(body))
+    if found == None && value == .Lambda(body_lambda, _) && ast_lambda_single_expr_span(body_lambda.body) == .Val(body_span) -> found = sema_value_mismatch_index(diagnostics, diagnostic_start, body_span)
     mismatch_index: found ?? return
     probe_diagnostics := [Diagnostic]{}
     previous_lambda_escapes := context.lambda_escapes
@@ -1050,7 +1051,7 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     // Rust's lambda span ends where its expression body's span ends (a
     // call's span is its name).
     shown_span := value_span
-    if value == .Lambda(shown_lambda, _) && shown_lambda.body == .Expr(shown_body) -> shown_span = Span{start: value_span.start, end: expr_span(shown_body).end}
+    if value == .Lambda(shown_lambda, _) && ast_lambda_single_expr_span(shown_lambda.body) == .Val(shown_body_span) -> shown_span = Span{start: value_span.start, end: shown_body_span.end}
     diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, value, shown_span)
 }
 
