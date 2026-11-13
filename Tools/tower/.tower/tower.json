@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6834,
-    "rev": 101828,
+    "rev": 101831,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67850,7 +67850,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-13T23:03:52.350Z",
+      "updated": "2026-11-13T23:50:23.184Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -78808,7 +78808,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-13T23:03:53.646Z",
+      "updated": "2026-11-13T23:50:25.230Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -198572,20 +198572,20 @@
       "cardId": "c0y7zq8s",
       "group": "library",
       "title": "How the web package puts its app on a network port: one serve call in core.http, a public route table, the app kept in Core, or HTTP in the package",
-      "situation": "The web toolkit, the code behind web.app(), is moving out of Jet's built-in library into an installable package called web. A package may use only the public parts of the built-in library. Today the app builds its route table and starts its server through 15 hidden calls in the HTTP module. The build of an earlier vote, one route table on web.app(), also removes every public way to start a server. So once the move lands, the web package has no public way to listen on a port. You are asked which small public door the HTTP module keeps. We recommend A: one public call that serves a single handler, with routing kept inside the web package.",
-      "gist": "Once web.app() moves into the web package, how does that package start a server through public calls only?",
+      "situation": "The web toolkit, the code behind web.app(), is moving out of Jet's built-in library into an installable package called web. A package may use only the public parts of the built-in library. Today the app builds its route table and starts its server through 15 hidden calls in the HTTP module. The build of an earlier vote, one route table on web.app(), also removes every public way to start a server. So once the move lands, the web package has no public way to listen on a port. You are asked which small public door the HTTP module keeps. We recommend A: one call that serves one handler, a ready handler for a folder of files, and a route pattern whose match alone tags a request with its route.",
+      "gist": "Once web.app() moves into the web package, what is the best public door for that package to start a server?",
       "lesson": "A web app needs two things: a route table that picks the code for each address, and a server that listens on a port. The route table is moving into the web package. The server stays in Jet's built-in HTTP module. This vote picks the public calls that join them.",
       "explainer": "Words used here. Core is Jet's built-in library. A package, or battery, is an installable library outside Core; the web package is one. A public call is one any program may use. A private name starts with two underscores, and only Core itself may use it.\n\nA route table maps an address, like GET /hello/:name, to the code that answers it. A handler answers one request with one response; Core's handler type is HTTPHandler, and a function written where an HTTPHandler is expected becomes one. Listening means opening a network port and waiting for requests.",
-      "story": "Ana writes a small app: web.app(), one app.get route, then app.bind and serve. Under A, B and D her program is the same. Under A the web package serves her table through one Core call, server.listen. Under B it builds a public Core route table, server.mux(), which Ana could build too. Under C her routes stay the same, but her pages move to a second value, because a package cannot add methods to a Core type. Under D the package parses HTTP itself.",
-      "inWild": "// Deno: one call serves one handler; routing is a library above it.\n// https://docs.deno.com/api/deno/~/Deno.serve\nDeno.serve({ port: 8080 }, (req) => new Response(\"hi\"));\n\n// Node: createServer takes one handler; Express routes above it.\n// https://nodejs.org/api/http.html#httpcreateserveroptions-requestlistener\nhttp.createServer((req, res) => res.end(\"hi\")).listen(8080);",
-      "detail": "What this ballot decides. The public Core calls the web package uses to serve its route table once core.web leaves Core.\n\nThe gap. Card #6445 moves core.web, router included, into the web package under D-WEB-HOME1=A; core.http and core.net stay in Core. D-WEB-RUNTIME-API1=A says that package uses public Core calls only, with no new general primitive, and that its compiler rules become markers it declares. A double-underscore name is refused outside Core with E0067.\n\nD-ROUTE-ONE1=A makes web.app() own the one route table and removes server.mux(). Its build, the #6055 c2 submission, also removes server.serve, server.bind, serve_once, serve_once_listener, static_files, cors, request_id and http.serve. On dev today those are still public and take a route table.\n\nWhat the app uses on the #6055 c2 build. App holds an HTTPMux and reaches 15 private names in core.http.server. Building the table uses __mux_new, __route_add, __route_add_dynamic, __route_add_custom, __handler and __layer_add. Its options use __static_files, __cors_handler and __request_id_handler. OpenAPI uses __mux_routes, __route_parse and __route_openapi_path. Serving uses __bind, __serve_once and __server_on. __server_on is how app.serve tells a busy port from other failures before it tries the next port.\n\nD-WEB-RUNTIME-API1=A expected the battery to need none of core.http's private names once App owns its table; this ballot closes that gap. The routing code also writes two private request fields, the path values and the matched route, which request.param and server.access_log read. Route registration stops with E2804, E2805 and E2808 through core.rt.__coded_stop, which is private too.\n\nWhat stays public in core.http.server under every option. The helpers response, response_body, json, static_file, static_file_range, tls, sse, cors_policy and the access log helpers. HTTPServer with local_addr, serve, wait and shutdown(grace:). HTTPHandler with handle; a lambda written where one is expected becomes one, and the compiler checks its captures as handler captures. The #Server.Get route markers.\n\nFixed under every option. On the #6055 c2 build, http.router() and http.dispatch still build a route table in Core. D-ROUTE-ONE1=A folds every route builder into web.app(), so they fold into the app under every option, and app.dispatch(request) answers a request in process. The port fallback stop E2809 is raised by app.serve, which lives in the web package under A, B and D.\n\nIs A's server.listen a general primitive? No. D-WEB-RUNTIME-API1=A turned down process-wide shared state, a publish reachable from anywhere and the startup environment: powers that cut across modules. Its rule is that a host power stays in the Core module that owns it. Listening on a port is core.http.server's own job, which server.bind does on dev today. listen holds no route table, so it is not the second builder D-ROUTE-ONE1=A removed.\n\nSources. Deno.serve: docs.deno.com/api/deno/~/Deno.serve. Node http.createServer: nodejs.org/api/http.html. Go http.ListenAndServe with a public ServeMux: pkg.go.dev/net/http#ListenAndServe. Bun.serve: bun.sh/docs/api/http.",
+      "story": "Ana writes a small app: web.app(), one app.get route, then app.bind and serve. Under A, B and D her program is the same. Under A the web package serves her table through one Core call, server.listen. Ana can also serve a folder with no package at all: server.listen with server.static_dir(\"public\"). Under B the package wraps a public Core route table, server.mux(). Under C her pages move to a second value. Under D the package parses HTTP itself.",
+      "inWild": "// Deno: one call serves one handler; std's serveDir answers a folder.\n// https://docs.deno.com/api/deno/~/Deno.serve\nDeno.serve({ port: 8080 }, (req) => serveDir(req, { fsRoot: \"public\" }));\n\n// Go: one Handler per server; FileServer is a Handler.\n// https://pkg.go.dev/net/http#FileServer\nhttp.ListenAndServe(\":8080\", http.FileServer(http.Dir(\"public\")))",
+      "detail": "What this ballot decides. The public Core calls the web package uses to serve its route table once core.web leaves Core.\n\nThe gap. Card #6445 moves core.web, router included, into the web package under D-WEB-HOME1=A; core.http and core.net stay in Core. D-WEB-RUNTIME-API1=A says that package uses public Core calls only, with no new general primitive, and that its compiler rules become markers it declares. A double-underscore name is refused outside Core with E0067.\n\nD-ROUTE-ONE1=A makes web.app() own the one route table and removes server.mux(). Its build, the #6055 c2 submission, also removes server.serve, server.bind, serve_once, serve_once_listener, static_files, cors, request_id and http.serve. On dev today, core.http.server already has no mux, bind or serve, and HTTPServer keeps local_addr, serve, wait and shutdown(grace:).\n\nWhat the app uses today. Core/Web/Web.jet calls 15 private core.http.server names, 36 times. Building the table uses __mux_new, __route_add, __route_add_dynamic, __route_add_custom, __handler and __layer_add. Its options use __static_files, __cors_handler and __request_id_handler. OpenAPI uses __mux_routes, __route_parse and __route_openapi_path. Serving uses __bind, __serve_once and __server_on. __server_on is how app.serve tells a busy port from other failures before it tries the next port.\n\nThe routing code also writes two private request fields, the path values and the matched route, which request.param and server.access_log read. Route registration stops with E2804, E2805 and E2808 through core.rt.__coded_stop, which is private too.\n\nWhat stays public under every option. The helpers response, response_body, json, static_file, static_file_range, tls, sse, cors_policy and the access log helpers. HTTPServer with its methods. HTTPHandler with handle; a function written where one is expected becomes one, and the compiler checks its captures as handler captures. The #Server.Get route markers.\n\nHow A removes the earlier downsides. serve_once is a method on the server listen returns, as Python's handle_request is. static_dir returns a handler, as Go's FileServer and Deno's serveDir do, so a folder needs no package. Only Core's RoutePattern.match tags a request with its route, so no code can forge one. Literal routes keep E2804 at check time; only a computed pattern meets the run-time stop.\n\nIs A's server.listen a general primitive? No. D-WEB-RUNTIME-API1=A turned down process-wide shared state, a publish reachable from anywhere and the startup environment. Its rule is that a host power stays in the Core module that owns it. Listening on a port is core.http.server's own job. listen holds no route table, so it is not the second builder D-ROUTE-ONE1=A removed.\n\nSources. Deno.serve and serveDir: docs.deno.com/api/deno/~/Deno.serve, jsr.io/@std/http/doc/file-server. Go ListenAndServe, FileServer, StripPrefix and Request.SetPathValue: pkg.go.dev/net/http. Python socketserver handle_request: docs.python.org/3/library/socketserver.html. Node http.createServer: nodejs.org/api/http.html. Bun.serve: bun.sh/docs/api/http.",
       "options": [
         {
           "key": "A",
-          "name": "core.http.server serves one handler; routing, CORS, request ids and the static mount move into the web package",
-          "detail": "Core keeps a server that answers every request with one HTTPHandler. The web package owns everything about routes: the table, matching, the 404, 405 and OPTIONS answers, middleware, CORS, request ids and the static file mount. web.app() hands its table to Core as one handler. Core keeps what belongs to one request and its connection: framing and limits, TLS, WebSocket upgrade, the status for a handler error, and the safe answer for one file under a folder.\n\nBeginner path: web.app(), app.get, then app.bind or app.serve(), unchanged. Expert path: a program with no web package calls server.listen with its own handler, for a health probe or a proxy, and gets TLS and graceful shutdown the same way.",
-          "technical": "core.http.server gains three public functions and core.http gains one. Each replaces a private call.\n\nlisten: fn(on: String | TCPListener, handler: HTTPHandler, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError!\nIt replaces __bind on an address and __server_on on a bound listener. So app.serve still sees a busy port from core.net.tcp_listen and tries the next one. A bad TLS identity or a failed bind is HTTPError, as app.bind reports today.\n\nserve_once: fn(listener: TCPListener, handler: HTTPHandler) HTTPError! -[Net, FS.Read, Time]>\nIt answers the next connection, for tests, replacing __serve_once.\n\nstatic_dir: fn(request: HTTPRequest, root: String, relative: String, *, index: Bool{true}, dotfiles: Bool{false}, follow_links: Bool{false}) -[FS.Read]> HTTPResponse Never!\nIt is today's static mount answer: the dot-dot, dotfile and symlink checks, index.html, content type, ETag, 304 and byte ranges. The web package's app.static_files routes {prefix}/* to it, so the folder escape checks keep one home.\n\ncore.http.with_route: fn(request: HTTPRequest, template: String, params: [Header]) -> HTTPRequest Never!\nIt sets the path values and the matched route, as with_header sets a header, so request.param and server.access_log work on requests the package routes.\n\nHTTPHandler stays in core.http.server. The package wraps each route function in a lambda where an HTTPHandler is expected, as HTTPServerMiddleware.jet's middleware already does, so the compiler's handler capture check still applies. A handler's Err becomes a status in Core, as today: BodyTooLarge 413, InvalidFraming 400, UnsupportedEncoding 415, anything else 500. HTTPServer, shutdown(grace:) and its report are unchanged.\n\nInto the web package as its own source go HTTPMux, the route parser and matcher, and the 404, 405 with Allow, OPTIONS * and HEAD answers. Middleware layers, CORS, request ids, route input decoding and OpenAPI go with them.\n\nThe custom method check uses the public http.valid_method and http.method_parse. E2804, E2805 and E2808 at check time stay compiler checks keyed on #RouteTable. A route added with a run-time pattern that clashes or does not parse stops at registration by panic, with the code and both lines in its text.",
-          "code": "use {\n    server: core.http.server\n    web\n}\n\nrun: fn() HTTPError! {\n    app: web.app()\n    app.get(\"/hello/:name\", fn(name: String) { Ok(server.response(200, \"hi {name}\")) })\n    bound: app.bind(\"127.0.0.1:8080\") ?? return\n    _: bound.serve() ?? return\n}\n// A: unchanged. Inside the web package, app.bind calls\n// server.listen(address, (request: HTTPRequest) -> table.answer(request)).\n// Expert path with no package:\n// server.listen(\"127.0.0.1:9090\", (request: HTTPRequest) -> Ok(server.response(200, \"ok\")))"
+          "name": "core.http.server serves one handler and answers a folder; routing, CORS and request ids move into the web package",
+          "detail": "Core keeps a server that answers every request with one HTTPHandler. The web package owns everything about routes: the table, matching, the 404, 405 and OPTIONS answers, middleware, CORS and request ids. web.app() hands its table to Core as one handler. Core keeps what belongs to one request and its connection: framing and limits, TLS, WebSocket upgrade, the status for a handler error, and the safe answer for files under a folder.\n\nBeginner path: web.app(), app.get, then app.bind or app.serve(), unchanged. A folder of files needs no package: server.listen(\"127.0.0.1:8080\", server.static_dir(\"public\")). Expert path: server.listen with any handler, for a health probe or a proxy, with TLS and graceful shutdown the same way.",
+          "technical": "core.http.server gains two functions, one HTTPServer method and one small type, RoutePattern. Each replaces a private call.\n\nlisten: fn(on: String | TCPListener, handler: HTTPHandler, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError!\nIt replaces __bind on an address and __server_on on a bound listener. So app.serve still sees a busy port from core.net.tcp_listen and tries the next one. A failed bind or a bad TLS identity is HTTPError, as app.bind reports today.\n\nHTTPServer.serve_once: fn(self) HTTPError! -[Net, FS.Read, Time]>\nIt answers the next connection, for tests, replacing __serve_once. It sits beside serve, wait and shutdown on the server listen returns.\n\nstatic_dir: fn(root: String, *, prefix: String{\"\"}, index: Bool{true}, dotfiles: Bool{false}, follow_links: Bool{false}) -> HTTPHandler Never!\nIts handler is today's static mount answer: the dot-dot, dotfile and symlink checks, index.html, content type, ETag, 304 and byte ranges. It drops prefix from the path first. The web package's app.static_files routes {prefix}/* to it, so the folder escape checks keep one home.\n\nRoutePattern is an opaque type with three operations.\nroute_pattern: fn(text: String) -> RoutePattern HTTPError!\nmatch: fn(self, request: HTTPRequest) -> HTTPRequest?\noverlaps: fn(self, other: RoutePattern) -> Bool.\n A pattern that does not parse is an Err worded as E2805. match returns the request tagged with the path values and the template only when the path really matches. So request.param and server.access_log work on routed requests, and no code can set a tag that did not match. overlaps is the clash test.\n\nHTTPHandler stays in core.http.server. The package wraps its table in a function written where an HTTPHandler is expected, so the compiler's handler capture check still applies. A probe stores route functions in a list and wraps them this way. A handler's Err becomes a status in Core, as today: BodyTooLarge 413, InvalidFraming 400, UnsupportedEncoding 415, anything else 500.\n\nInto the web package go HTTPMux, the table and its order, the 404, 405 with Allow, OPTIONS * and HEAD answers, middleware layers, CORS, request ids, route input decoding and OpenAPI. The one-pattern parser and matcher stay in Core behind RoutePattern, a narrow amendment to D-WEB-HOME1=A, which moves the router. The custom method check uses the public http.valid_method and http.method_parse.\n\nWhich clashes are found when. A route whose pattern is a literal or a constant gets E2804, E2805 and E2808 at check time, keyed on the #RouteTable marker the package declares. A probe shows two literal app.get rows refused with E2804. A pattern computed while the program runs is not seen by the check; the same probe with a computed pattern passes it.\n\nThat computed route is checked when it is added: overlaps finds the clash, and route_pattern's Err finds a bad pattern. The package words each through its own Diagnostic type, so the stop text carries the code, what, why and fix. The stop itself is a panic, E3001, because the coded stop is private to Core.",
+          "code": "use {\n    server: core.http.server\n    web\n}\n\nrun: fn() HTTPError! {\n    app: web.app()\n    app.get(\"/hello/:name\", fn(name: String) { Ok(server.response(200, \"hi {name}\")) })\n    bound: app.bind(\"127.0.0.1:8080\") ?? return\n    _: bound.serve() ?? return\n}\n// A: unchanged. Inside the web package, app.bind calls\n// server.listen(address, fn(request: HTTPRequest) { table.answer(request) }).\n// With no package, a folder of files:\n// server.listen(\"127.0.0.1:9090\", server.static_dir(\"public\"))"
         },
         {
           "key": "B",
@@ -198611,48 +198611,47 @@
       ],
       "comparisons": [
         {
+          "lang": "Go",
+          "note": "ListenAndServe takes one Handler. FileServer is a Handler for a folder. Request.SetPathValue (Go 1.22) lets any code tag a request; A lets only a real match do it. Its ServeMux panics on a clashing pattern at registration. Source: https://pkg.go.dev/net/http",
+          "code": "http.ListenAndServe(\":8080\", http.FileServer(http.Dir(\"public\")))"
+        },
+        {
           "lang": "Deno",
-          "note": "Deno.serve takes one handler; routers such as Hono or Oak are libraries above it. Source: https://docs.deno.com/api/deno/~/Deno.serve",
-          "code": "Deno.serve({ port: 8080 }, app.fetch);"
+          "note": "Deno.serve takes one handler; routers such as Hono are libraries above it. The std serveDir answers a folder for a request. Source: https://docs.deno.com/api/deno/~/Deno.serve",
+          "code": "Deno.serve((req) => serveDir(req, { fsRoot: \"public\" }));"
+        },
+        {
+          "lang": "Python",
+          "note": "http.server serves one handler class; socketserver's handle_request answers one request on a bound server, the shape of serve_once. Source: https://docs.python.org/3/library/socketserver.html",
+          "code": "server.handle_request()"
         },
         {
           "lang": "Node",
-          "note": "http.createServer takes one request listener; Express builds its router on top. Source: https://nodejs.org/api/http.html",
+          "note": "http.createServer takes one request listener; Express builds its router on top and adds no request id by default. Source: https://nodejs.org/api/http.html",
           "code": "http.createServer(app).listen(8080);"
-        },
-        {
-          "lang": "Go",
-          "note": "ListenAndServe takes one Handler; the standard library also ships a public ServeMux, the shape of B. Source: https://pkg.go.dev/net/http#ListenAndServe",
-          "code": "http.ListenAndServe(\":8080\", mux)"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A gives the web package one public door, the shape Deno and Node ship. Each part stays with its owner: connections, TLS and file safety in Core, routes in the package. One table holds every route, as D-ROUTE-ONE1=A asks, and the package needs no private Core call to serve.",
+        "why": "A gives the web package one public door, the shape Go, Deno, Node and Python ship. Each part stays with its owner: connections, TLS and file safety in Core, routes in the package. One table holds every route, as D-ROUTE-ONE1=A asks. The package needs no private Core call, and a folder of files needs no package at all.",
         "gains": [
           "The web package serves through public Core calls only.",
           "Route matching has one home, so E2804 sees every clash.",
-          "A program with no package can still serve one handler, with TLS and graceful shutdown.",
+          "A program with no package serves one handler or a folder, with TLS and graceful shutdown.",
           "Middleware keeps Core's HTTPHandler and the compiler's handler capture check.",
-          "The folder escape checks for static files keep one home in Core."
+          "The folder escape checks keep one home in Core.",
+          "Literal routes keep E2804 at check time; a computed route's clash still prints E2804 with its why and fix lines.",
+          "Only a real match tags a request with its route, so no code can forge path values."
         ],
         "losses": [
           {
-            "loss": "Core gains four public items: server.listen, server.serve_once, server.static_dir and http.with_route.",
-            "mitigation": "Each replaces a private call that does the same job, none holds a route table, and with_route only labels a request, as with_header does."
+            "loss": "Core gains four public items: server.listen, server.static_dir, HTTPServer.serve_once and the RoutePattern type.",
+            "mitigation": "Each replaces a private call that does the same job, and none holds a route table."
           },
           {
-            "loss": "A route added at run time with a clashing or broken pattern stops by panic, without the registry's Why and Fix lines, because the coded stop is private to Core.",
-            "mitigation": "Every literal route is still E2804, E2805 or E2808 at check time with the full text. The run-time panic names the code and both lines, and jet explain gives the rest."
-          },
-          {
-            "loss": "with_route lets any code label a request with path values it did not match.",
-            "mitigation": "The label only feeds request.param and the access log of that one request, so a handler that forges it fools only itself."
-          },
-          {
-            "loss": "A request served by a bare server.listen handler gets no generated x-request-id; only the web app adds one.",
-            "mitigation": "A request id is an app policy. An expert who wants one adds it with http.with_header in the handler, or uses web.app()."
+            "loss": "A route whose pattern is computed while the program runs and clashes stops as a panic, E3001, with E2804's text inside.",
+            "mitigation": "Literal and constant routes, the common case, are refused at check time with the full E2804 report."
           }
         ],
         "whyNot": [
@@ -198669,18 +198668,18 @@
             "reason": "D makes a socket number public for WebSocket upgrades, a general primitive D-WEB-RUNTIME-API1=A turned down, and gives HTTP/1.1 framing two homes."
           }
         ],
-        "tradeoff": "Four small public items in Core, for a web package that needs no private Core call and one route table."
+        "tradeoff": "Four small public items in Core, for a web package with no private Core call, one route table and a file server without a package."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotReview-3. Verdict holds after repair: the review read the #6055 c2 build, probed the seed, and found A needs four public items and keeps HTTPHandler in Core. It rewrote C and added D."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The reader asked that the forgeable route tag and the run-time clash be engineered away. v3 r2 mints the tag only by a real match and keeps literal clashes at check time."
       },
-      "checkInstructions": "Read the #6055 c2 build of Core/Web/Web.jet for the 15 private http_server names. App.bind calls __bind, App.serve_once calls __serve_once, and __app_listen calls __server_on.\n\nRead its Core/Http/Server.jet. __pick writes the path values and matched route. __route_stop uses core.rt.__coded_stop. __dispatch maps a handler error to 413, 400, 415 or 500. __static_target uses public core.files calls only. __serve_connection uses core.net.__tcp_fd and http.__upgrade_cell.\n\nRead Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet:1437-1462, where a lambda becomes an HTTPHandler. Read Calls/Http.jet:385-430 for the handler capture check. The spec's methods section keeps an external inherent method in its type's module. On dev, Compiler/Prelude/Core.rows line 145 lists bind, serve and mux as public.\n\nProbes on the seed. A user function with an HTTPHandler parameter accepts a lambda and runs. User code that uses http.__server_request, request.__route_template, server.__handler and core.rt.__coded_stop gets E0067 four times. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "checkInstructions": "Read Core/Web/Web.jet on dev for the 36 calls to 15 private core.http.server names. Among them are __handler, __route_add, __layer_add, __static_files, __mux_routes, __bind, __serve_once and __server_on. rt.__coded_stop raises the route stops.\n\nRead Core/Http/Server.jet. HTTPHandler is at line 154, HTTPServer at 278 with local_addr, serve, wait and shutdown(grace:). __serve_once is at 568, __static_files at 607 and __static_serve at 1832.\n\nRead Compiler/JetSema/Source/Sema/Expressions/Lambdas.jet:1474, where a function becomes an HTTPHandler, and Calls/Http.jet:400-423 for the handler capture check.\n\nProbes on the batch-8 compiler. b6445/wrap: a list of stored route functions, wrapped in a function where an HTTPHandler is expected, answers a parsed request. b6445/diag: a package-declared Diagnostic type prints E2804 with What, Why and Fix in a run-time stop.\n\nb6445/clash: two literal app.get(\"/a/:id\") rows are E2804 at check time. b6445/clash_computed: the same clash with one pattern built at run time passes the check. Validate this payload with Tools/agent/ballots/Validate.jet.",
       "surface": {
-        "gist": "How does the web package start a server once web.app() leaves Core?",
+        "gist": "What is the best public door for the web package to start a server?",
         "lesson": "A web app needs a route table and a server on a port. The table moves into the web package; the server stays in Core. This vote picks the public calls that join them.",
         "trio": {
           "current": {
@@ -198688,26 +198687,25 @@
             "code": "http_server.__bind(address, __app_table(self), tls, deadline)"
           },
           "wild": {
-            "lang": "Deno",
-            "note": "One call serves one handler; routers sit above it.",
-            "code": "Deno.serve({ port: 8080 }, app.fetch);"
+            "lang": "Go",
+            "note": "One handler per server; a folder is a handler too.",
+            "code": "http.ListenAndServe(\":8080\", http.FileServer(http.Dir(\"public\")))"
           }
         },
         "options": [
           {
             "key": "A",
             "name": "One serve call",
-            "gist": "Core serves one handler; the web package owns all routing.",
+            "gist": "Core serves one handler or a folder; the web package owns all routing.",
             "gains": [
               "One route table holds every route.",
-              "File safety and TLS stay in Core."
+              "A folder of files needs no package."
             ],
             "losses": [
-              "Four new public items in Core.",
-              "Run-time route stops lose Why and Fix."
+              "Four new public items in Core."
             ],
             "proposed": {
-              "code": "// inside the web package\nserver.listen(address, (request: HTTPRequest) -> table.answer(request))"
+              "code": "// inside the web package\nserver.listen(address, fn(request: HTTPRequest) { table.answer(request) })"
             }
           },
           {
@@ -198758,7 +198756,7 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One public door, as Deno and Node ship; routes keep one home and Core keeps connections and file safety.",
+          "why": "One public door, as Go, Deno and Node ship; routes keep one home and Core keeps connections and file safety.",
           "gains": [
             "One route table holds every route.",
             "No private Core call in the package."
@@ -198767,10 +198765,6 @@
             {
               "loss": "Four new public items in Core.",
               "mitigation": "Each replaces a private call; none holds a route table."
-            },
-            {
-              "loss": "Run-time route stops lose Why and Fix.",
-              "mitigation": "Literal routes are still checked with full text."
             }
           ],
           "whyNot": [
@@ -198787,7 +198781,7 @@
               "reason": "Needs a public socket number."
             }
           ],
-          "tradeoff": "Four small public items, for one route table and no private calls."
+          "tradeoff": "Four small public items, for one route table, no private calls and a file server without a package."
         }
       },
       "draft": false,
@@ -203390,9 +203384,11 @@
       "by": "owner",
       "kind": "question",
       "text": "is this really the best solution? engineer away downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-13T22:54:39.442Z"
+      "status": "answered",
+      "answer": "No, the old A wasn't the best: it added a second walk over the program to sum up what each function needs, and Jet already has that walk. Jet can already prove a function never uses the heap (the -[!Mem.Alloc]> mark), and a probe shows that proof already follows calls into Core. The new A runs that one proof from the program's start whenever the chip has no heap, so Core and every package are checked the same way and nothing is skipped by name. The cost is the walk Jet already does: checking with and without the proof both took about 240 ms in a measured probe. Two downsides were designed away. Each error now lands on the programmer's own call, with the full path and the exact Core or package line in the note, which also fixes today's wrong caret for that proof. The probes also found two gaps in that proof, and A closes both: a list that starts empty and then grows is now caught, and generic or trait-value calls whose targets are all heap-free, such as math.round on a Float, are no longer wrongly refused. What remains is mitigated: a package's error shows at the caller's line with the package's line in the note, and broken heap-free marks that grow lists now fail.",
+      "created": "2026-11-13T22:54:39.442Z",
+      "answeredAt": "2026-11-13",
+      "answeredBy": "Main"
     },
     {
       "id": "q0cotbvf",
@@ -203425,9 +203421,11 @@
       "by": "owner",
       "kind": "question",
       "text": "what is the BEST greenfield solution? downsides should be engineered away and it should be idiomatic and cohesive with jet and jet philosophy and be the best solution compared to all others for all other languages and ecosystems",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-13T22:58:48.349Z"
+      "status": "answered",
+      "answer": "The best design is still A: Core keeps one server that answers every request with a single handler, and the web package owns all routing. Go, Deno, Node and Python all ship this split, with routers as libraries above one serve call.\nThis rework removes or narrows the old downsides instead of only naming them.\nLiteral routes, the common case, keep their E2804 clash error at check time; only a route built while the program runs is checked when added, and its stop still prints E2804 with why and fix.\nThe one-request test call is now a method on the server listen returns, the shape of Python's handle_request, rather than a second free function.\nThe folder helper now returns a ready handler, like Go's FileServer and Deno's serveDir, so serving a folder of files needs no package at all.\nThe request id loss is gone, because request ids were always an app choice and the web package still adds them.\nOnly a real match by Core can tag a request with its route, so no code can forge path values; what remains is four small public items in Core, each replacing a private call.",
+      "created": "2026-11-13T22:58:48.349Z",
+      "answeredAt": "2026-11-13",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -204296,6 +204294,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T23:50:25.230Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q1thtqy2",
+      "note": ""
+    },
+    {
+      "at": "2026-11-13T23:50:24.182Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-HTTP-HANDLER-ENTRY1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-13T23:50:23.184Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q2h0znxo",
+      "note": ""
+    },
     {
       "at": "2026-11-13T23:32:38.231Z",
       "by": "Main",
