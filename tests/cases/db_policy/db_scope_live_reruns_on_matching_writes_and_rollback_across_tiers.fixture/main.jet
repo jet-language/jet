@@ -33,10 +33,10 @@ run: fn() {
     third: "three"
     _: alice.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {third})"}) ?? panic("insert three")
     print("after write {titles(web.state(mine))}")
-    _: alice.begin()
+    tx: alice.begin() ?? panic("begin")
     _: alice.execute(SQL{"DELETE FROM tasks"}) ?? panic("delete")
     print("in tx {titles(web.state(mine))}")
-    _: alice.rollback()
+    tx.rollback() ?? panic("rollback")
     print("after rollback {titles(web.state(mine))}")
     theirs: bob.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("bob live")
     print("bob {titles(web.state(theirs))}")

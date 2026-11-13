@@ -711,9 +711,9 @@ DBConnection: struct {
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
     }
-    begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
-    commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
-    rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
+    // Opens a transaction; the `DBTransaction` it returns has to be committed
+    // or rolled back.
+    begin: fn(self) -[DB]> DBTransaction DBError! { __db_begin(self.state, false) }
     close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
 
     // One line: where the database lives and whether it is still open.
@@ -756,10 +756,20 @@ DBScope: struct {
             Ok(Val(first))
         }
         execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { __scope_execute(self, sql, false) }
-        begin: fn(self) -[DB]> Bool Never! { __db_begin(self.state, false) }
-        commit: fn(self) -[DB]> Bool Never! { __db_commit(self.state) }
-        rollback: fn(self) -[DB]> Bool Never! { __db_rollback(self.state) }
+        begin: fn(self) -[DB]> DBTransaction DBError! { __db_begin(self.state, false) }
     }
+}
+
+// An open transaction on a connection. It is `#SingleUse`: whoever began it
+// has to `commit` or `rollback` it, on every path, before a function returns
+// with success. Either call ends the transaction, even when it fails: a commit
+// that fails is rolled back, and its error says so; the caller can't ignore it.
+#SingleUse
+DBTransaction: struct {
+    priv state: Shared<__DBState>
+
+    commit: fn(&&self) DBError! -[DB]> { __db_commit(self.state) }
+    rollback: fn(&&self) DBError! -[DB]> { __db_rollback(self.state) }
 }
 
 __db_open: fn(path: String, failure: String) -> DBConnection Never! {
@@ -769,29 +779,38 @@ __db_open: fn(path: String, failure: String) -> DBConnection Never! {
 open: fn(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 open_memory: fn() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
 
-__db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> Bool Never! {
+__db_begin: fn(state: Shared<__DBState>, immediate: Bool) -> DBTransaction DBError! {
     guard := state.guard_edit()
-    if __driver_closed(guard.value.driver) -> return false
+    if __driver_closed(guard.value.driver) -> return Err(__db_error("could not begin a transaction: the database is closed"))
     began: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
-    if began -> guard.value.written = [String]{}
-    began
+    if !began -> return Err(__db_error("could not begin a transaction: one is already open, or the database is busy"))
+    guard.value.written = [String]{}
+    Ok(DBTransaction{state: state.copy()})
 }
-__db_commit: fn(state: Shared<__DBState>) -> Bool Never! {
+// A commit that fails leaves the engine's transaction open, so it is rolled
+// back before the failure is reported: the transaction ends either way.
+__db_commit: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
-    if __driver_closed(guard.value.driver) -> return false
-    committed: __driver_commit(guard.value.driver)
-    if committed -> guard.value.written = [String]{}
-    committed
+    if __driver_closed(guard.value.driver) -> return Err(__db_error("could not commit: the database is closed"))
+    if __driver_commit(guard.value.driver) {
+        guard.value.written = [String]{}
+        return Ok()
+    }
+    _: __driver_rollback(guard.value.driver)
+    loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
+    guard.value.written = [String]{}
+    Err(__db_error("could not commit, so the transaction was rolled back"))
 }
 // A rollback undoes the writes since the last begin, so every live binding
 // over a table they touched re-runs on its next read.
-__db_rollback: fn(state: Shared<__DBState>) -> Bool Never! {
+__db_rollback: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
-    if __driver_closed(guard.value.driver) -> return false
+    if __driver_closed(guard.value.driver) -> return Err(__db_error("could not roll back: the database is closed"))
     rolled: __driver_rollback(guard.value.driver)
     loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
     guard.value.written = [String]{}
-    rolled
+    if !rolled -> return Err(__db_error("could not roll back the transaction"))
+    Ok()
 }
 __db_shutdown: fn(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
@@ -846,18 +865,21 @@ __sql_table: fn(sql: SQL) -> String? Never! {
 // ---- transactions and migrations -----------------------------------------
 
 transaction: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
-    if !__db_begin(scope.state, false) -> return Err(__db_error("could not begin transaction: {name}"))
+    tx: __db_begin(scope.state, false) ?? return Err(__db_error("could not begin transaction: {name}"))
+    done: __transaction_steps(scope, steps) ?? {
+        tx.rollback().drop("the failed step is the reported failure")
+        return Err(err)
+    }
+    tx.commit() ?? return Err(__db_error("could not commit transaction"))
+    Ok(done)
+}
+__transaction_steps: fn(scope: DBScope, steps: [SQL]) -> Int DBError! {
     done := 0
     loop sql in steps {
-        if __scope_execute(scope, sql, false) == .Err(failure) {
-            _: __db_rollback(scope.state)
-            return Err(__db_error(failure.message))
-        }
+        _: __scope_execute(scope, sql, false) ?? return Err(err)
         done += 1
     }
-    if __db_commit(scope.state) -> return Ok(done)
-    _: __db_rollback(scope.state)
-    Err(__db_error("could not commit transaction"))
+    Ok(done)
 }
 
 __ledger_schema: fn() -> String Never! {
@@ -1032,15 +1054,13 @@ __migration_apply: fn(scope: DBScope, name: String, steps: [SQL]) -> Int DBError
 
 migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
     if __migration_validate(name, steps) == .Val(failure) -> return Err(__db_error(failure.message))
-    if !__db_begin(scope.state, true) -> return Err(__db_error("could not begin migration `{name}`"))
+    tx: __db_begin(scope.state, true) ?? return Err(__db_error("could not begin migration `{name}`"))
     applied: __migration_apply(scope, name, steps) ?? {
-        _: __db_rollback(scope.state)
+        tx.rollback().drop("the failed migration step is the reported failure")
         return Err(err)
     }
-    if __db_commit(scope.state) -> return Ok(if applied < 0 -> 0 else -> applied)
-    _: __db_rollback(scope.state)
-    if applied < 0 -> return Err(__db_error("could not commit idempotent migration read"))
-    Err(__db_error("could not commit migration `{name}`"))
+    tx.commit() ?? return Err(__db_error(if applied < 0 -> "could not commit idempotent migration read" else -> "could not commit migration `{name}`"))
+    Ok(if applied < 0 -> 0 else -> applied)
 }
 
 // FNV-1a 64 identities, byte-compatible with the existing migration ledgers.

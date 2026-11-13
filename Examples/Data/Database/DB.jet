@@ -34,11 +34,12 @@ run: fn() {
         n: n_val.int() ?? panic("n is not an int")
         print("row count: {n}")
     }
-    // A transaction: an insert inside begin/rollback must not stick.
-    _begun: scoped.begin()
+    // A transaction: an insert inside begin/rollback must not stick. The
+    // transaction `begin` returns has to be committed or rolled back.
+    tx: scoped.begin() ?? panic("begin failed")
     temporary: "temporary"
     _ins3: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
-    _rolledback: scoped.rollback()
+    tx.rollback() ?? panic("rollback failed")
     after_opt: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if after_opt == .Val(after_row) {
         n_val: after_row.get("n") ?? panic("missing n")

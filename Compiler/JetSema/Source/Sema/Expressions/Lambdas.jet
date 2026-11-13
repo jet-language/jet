@@ -1875,6 +1875,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     lambda_context.autodiff_safe_panic = false
     lambda_context.autodiff_unsafe_panic = false
     frame := sema_scope_enter(lambda_scopes, lambda_state, "lambda@{lambda.span.start}")
+    // A `return` in this body leaves the lambda, not the enclosing function;
+    // an inline loop body's `return` still leaves the enclosing function.
+    if !inline_loop -> lambda_context.duty_scope_depth = lambda_state.scope_depth
     param_types := [Type]{}
     param_names := [String]{}
     param_symbols := [SymbolID]{}

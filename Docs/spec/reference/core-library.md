@@ -5757,15 +5757,22 @@ subquery from another table) is refused.
 | `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `core.web` live registry; read it with `core.web.state`. |
 
 Scoped connection and pool handles provide checked `query`, `query_one`,
-`execute`, lease, commit, rollback, and close operations. A policy expression
+`execute`, lease, `begin`, and close operations. A policy expression
 is intentionally small: the supported forms are `true` and `owner == user`
 with a table identifier. Policy text has a bounded size. Schema and transaction
 control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
 
+`begin() -[DB]> DBTransaction DBError!` opens a transaction. A
+`DBTransaction` is `#SingleUse`: every path that keeps it owes one
+`commit() DBError! -[DB]>` or `rollback() DBError! -[DB]>`, each of which
+consumes it. Dropping it, or a `return` that leaves with it still open, is
+E0140, and the result of either call is a failure the caller can't ignore.
+A commit that fails rolls the transaction back before it reports the error.
+
 `DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
-`execute`, `begin`, `commit`, `rollback`), which a generic bound names bare:
+`execute`, `begin`), which a generic bound names bare:
 `count: fn<T: Driver>(conn: T)` takes any scope and calls its methods.
 
 `DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one

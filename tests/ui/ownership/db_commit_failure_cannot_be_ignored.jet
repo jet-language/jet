@@ -1,0 +1,15 @@
+// A failed commit can't be ignored: `commit` fails with `DBError`, so a
+// function that promises it never fails can't call it without handling it.
+use db: core.db
+
+finish: fn(tx: &&DBTransaction) Never! {
+    tx.commit()
+}
+
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("item", "true") ?? panic("policy")
+    scope: conn.with_policy(policy, "owner")
+    tx: scope.begin() ?? panic("begin")
+    finish(tx)
+}

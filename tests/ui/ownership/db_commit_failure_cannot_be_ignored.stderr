@@ -1,0 +1,8 @@
+Error [jet.ErrorNotPropagatable]: `commit()` fails with `DBError`, which can't propagate into `Never` here
+  --> tests/ui/ownership/db_commit_failure_cannot_be_ignored.jet:6:8
+    |
+  6 |     tx.commit()
+    |        ^^^^^^
+ Why: `commit()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller's `explicit Never! (proven unreachable)` contract has no route from `DBError` to `Never`
+ Fix: Declare the caller with `DBError` as its failure domain, or add `impl DBError -> Never { … }`; otherwise handle `commit()` locally with `??`
+More: jet-lang.dev/e/E2404

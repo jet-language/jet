@@ -69,9 +69,16 @@ run: fn() {
     _other_closed: other_scope.close()
 
     // Nested begin: record the exact behavior.
-    print("outer begin: {scope.begin()}")
-    print("nested begin: {scope.begin()}")
-    _rolled: scope.rollback()
+    outer: scope.begin() ?? panic("outer begin")
+    print("outer begin: ok")
+    if scope.begin() == {
+        .Ok(inner) -> {
+            print("nested begin: accepted")
+            inner.rollback() ?? panic("nested rollback")
+        }
+        .Err(_) -> print("nested begin: rejected")
+    }
+    outer.rollback() ?? panic("outer rollback")
     print("rows after nested rollback: {count(scope, SQL{"SELECT COUNT(*) AS n FROM item"})}")
 
     _closed: scope.close()

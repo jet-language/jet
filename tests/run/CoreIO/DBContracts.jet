@@ -77,10 +77,10 @@ run: fn() {
 
     // Rollback: explicit and failed-transaction both leave the table as it was.
     before: count(scope)
-    print("begin: {conn.begin()}")
+    tx: conn.begin() ?? panic("begin")
     _: scope.execute(SQL{"DELETE FROM item"}) ?? panic("delete")
     print("inside the transaction: {count(scope)} rows")
-    print("rollback: {conn.rollback()}")
+    tx.rollback() ?? panic("rollback")
     print("after rollback: {count(scope)} rows, unchanged {count(scope) == before}")
     duplicate: 1
     batch: [SQL{"INSERT INTO item (id, name, price, stocked) VALUES (4, 'washer', 1.0, true)"}, SQL{"INSERT INTO item (id, name, price, stocked) VALUES ({duplicate}, 'clash', 1.0, true)"}]

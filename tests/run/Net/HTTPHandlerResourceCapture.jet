@@ -18,9 +18,10 @@ run: fn() {
     mux: server.mux()
     mux.post("/order", fn(req: HTTPRequest) {
         lease: pool.acquire(deadline: 100ms) ?? return Ok(server.response(503, "busy"))
-        opened: conn.begin()
+        tx: conn.begin() ?? panic("begin")
         lease.close() ?? panic("lease")
-        Ok(server.response(200, "began {opened}"))
+        tx.rollback() ?? panic("rollback")
+        Ok(server.response(200, "began"))
     })
     print("order route registered")
 }

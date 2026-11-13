@@ -8317,6 +8317,12 @@ sema_stmt_return_allows_empty: fn(return_type: Type?) -> Bool Never! {
     sema_stmt_return_success_type(return_type) == Type.Named{name: "Unit"}
 }
 
+// `return Err(…)`: the function leaves by its failure route.
+sema_stmt_return_is_failure: fn(value: Expr?) -> Bool Never! {
+    if value == .Val(returned) && returned == .Err(_, _, _) -> return true
+    false
+}
+
 // A Result whose failure is reachable.
 sema_stmt_type_is_fallible_result: fn(ty: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(ty) == {
@@ -8648,6 +8654,11 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         }
                     }
                 }
+                // E0140: a `#SingleUse` value still owing its job can't leave
+                // with a success `return` (the returned value was moved
+                // above). `return Err(…)` leaves by the failure route, like a
+                // propagated failure.
+                if !sema_stmt_return_is_failure(value) -> sema_single_use_check_return(state, context.duty_scope_depth, Span{start: span.start, end: span.start + "return".len()}, diagnostics)
             }
             .For(var, var_span, var2, kind, body, span, arrow_body, label, _) -> {
                 if kind == {

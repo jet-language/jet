@@ -593,6 +593,10 @@ SemaFailureRepair: struct {
 SemaCheckContext: struct {
     exact_int_reachable: Bool
     unsafe_depth: Int
+    // The scope depth of the frame a `return` here leaves: 0 for a named
+    // function, the lambda's own frame inside a lambda body. A `return` must
+    // have done the `#SingleUse` duties bound in that frame or deeper.
+    duty_scope_depth: Int{0}
     borrow_ctx: Bool
     allow_string_view_read: Bool
     // Rust `suppress_partial_move_root_read`: the expression being checked
@@ -1206,6 +1210,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
     snapshot := SemaCheckContext{
         exact_int_reachable: source.exact_int_reachable,
         unsafe_depth: source.unsafe_depth,
+        duty_scope_depth: source.duty_scope_depth,
         borrow_ctx: source.borrow_ctx,
         allow_string_view_read: source.allow_string_view_read,
         suppress_partial_move_root_read: source.suppress_partial_move_root_read,

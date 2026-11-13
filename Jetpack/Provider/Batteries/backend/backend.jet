@@ -227,10 +227,10 @@ sqlite_fixture: fn() -> MigrationReceipt {
     applied: db.migrate(scoped, migration_name, [SQL{"CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, item TEXT NOT NULL)"}]) ?? panic("db.migrate")
     item: "durable-order"
     seeded: db.transaction(scoped, "seed-order", [SQL{"INSERT INTO orders (item) VALUES ({item})"}]) ?? panic("db.transaction")
-    if !scoped.begin() -> panic("db.begin")
+    tx: scoped.begin() ?? panic("db.begin")
     transient: "rolled-back"
     _transient: scoped.execute(SQL{"INSERT INTO orders (item) VALUES ({transient})"}) ?? panic("db.execute")
-    if !scoped.rollback() -> panic("db.rollback")
+    tx.rollback() ?? panic("db.rollback")
     row: scoped.query_one(SQL{"SELECT item FROM orders ORDER BY id LIMIT 1"}) ?? panic("db.query_one")
     first_item: db.row_text(row, "item") ?? "missing"
     if !scoped.close() -> panic("db.close")

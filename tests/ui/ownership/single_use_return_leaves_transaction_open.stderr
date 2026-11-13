@@ -1,0 +1,8 @@
+Error [jet.SingleUseDropped]: `tx` still owes `consume`, but this `return` leaves with it undone
+  --> tests/ui/ownership/single_use_return_leaves_transaction_open.jet:10:16
+    |
+ 10 |     if keep -> return
+    |                ^^^^^^
+ Why: This value's type is `#SingleUse`, so its job has to be done before the function hands control back — returning here leaves the work undone (an open transaction, an unreleased lock)
+ Fix: Consume `tx` before this `return` (commit or roll back the transaction, release the lock), or return it
+More: jet-lang.dev/e/E0140

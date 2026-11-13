@@ -1,0 +1,18 @@
+// A function that can return while its transaction is still open is rejected:
+// a `return` that leaves a `#SingleUse` DBTransaction neither committed nor
+// rolled back is E0140. A failure exit (`?`, `return Err(…)`) is not this
+// `return`.
+use db: core.db
+
+archive: fn(scope: DBScope, keep: Bool) DBError! {
+    tx: scope.begin()?
+    _: scope.execute(SQL{"DELETE FROM item"})?
+    if keep -> return
+    tx.commit()?
+}
+
+run: fn() {
+    conn: db.open_memory()
+    policy: db.policy("item", "true") ?? panic("policy")
+    archive(conn.with_policy(policy, "owner"), true) ?? panic("archive")
+}

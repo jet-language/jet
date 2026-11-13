@@ -142,6 +142,22 @@ sema_single_use_check_scope_end: fn(state: SemaOwnershipState, diagnostics: &[Di
     }
 }
 
+// E0140 at a `return`: the function (or lambda) hands control back while a
+// `#SingleUse` binding it owns still owes its job. `frame_depth` is the scope
+// depth of that function's own frame, so an enclosing function's bindings,
+// seen from a lambda, are not this return's. A task still owes `join` through
+// L1101 at scope end instead. A reported duty is cleared on this path, so the
+// scope end doesn't report it again.
+sema_single_use_check_return: fn(state: &SemaOwnershipState, frame_depth: Int, span: Span, diagnostics: &[Diagnostic]) {
+    loop row in sema_ownership_single_use_rows(state) {
+        if !state.declarations[row].active || state.declarations[row].owes_join || state.declarations[row].scope_depth < frame_depth -> next
+        if sema_single_use_moved(state, state.declarations[row].key) -> next
+        diagnostics.push(sema_single_use_diag_returned(state.declarations[row].name, span))
+        sema_ownership_note_undo(state, row)
+        state.declarations[row].single_use = false
+    }
+}
+
 // Rust `pop_scope`: the scope-end duty check, then the lexical scope exit.
 sema_single_use_leave_scope: fn(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     sema_single_use_check_scope_end(state, diagnostics)
@@ -285,6 +301,10 @@ sema_single_use_diag_unconsumed: fn(name: String, span: Span) -> Diagnostic {
 
 sema_single_use_diag_discarded: fn(span: Span) -> Diagnostic {
     sema_error("E0140", span, "this value still owes `consume`", "this value's type is `#SingleUse`, so it carries a job that has to be done — discarding it into `_` skips that job before it's done", "bind it to a name, then consume it exactly once — or write `#Unsafe(\"reason\") {{ consume(...) }}` to discard it deliberately")
+}
+
+sema_single_use_diag_returned: fn(name: String, span: Span) -> Diagnostic {
+    sema_error("E0140", span, "`{name}` still owes `consume`, but this `return` leaves with it undone", "this value's type is `#SingleUse`, so its job has to be done before the function hands control back — returning here leaves the work undone (an open transaction, an unreleased lock)", "consume `{name}` before this `return` (commit or roll back the transaction, release the lock), or return it")
 }
 
 sema_single_use_diag_branch: fn(name: String, span: Span) -> Diagnostic {
