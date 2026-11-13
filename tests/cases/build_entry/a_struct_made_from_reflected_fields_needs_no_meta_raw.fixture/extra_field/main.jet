@@ -1,0 +1,15 @@
+// A computed field type that would add a second field: one type is all a
+// field's type may spell.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    spellings: [String]{"I64", "I64, extra: String"}
+    fields := [CompilerField]{}
+    loop (index, spelled) in spellings -> fields.push(CompilerField{name: "field_{index}", type: spelled})
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    print(Shape{field_0: I64{1}, field_1: I64{2}, extra: "added"}.extra)
+}

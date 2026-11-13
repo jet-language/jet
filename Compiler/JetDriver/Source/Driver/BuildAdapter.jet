@@ -8,7 +8,7 @@ use {
     build_input_crypto: core.crypto
     build_input_url: core.net.url
     jet_eval.[jet_eval_build_failed_value]
-    jet_parser.[jfmt_escape_str_lit]
+    jet_parser.[jfmt_escape_str_lit, parse_source]
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
     jet_build_session.[
         BuildSession, BuildSessionDiagnostic, BuildSessionReply, BuildSessionValue, build_session_call,
@@ -239,7 +239,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
             written: if field_name == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name") }
             spelled: if field_type == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
             if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
-            if !jet_driver_meta_type_text_plain(spelled) -> return jet_driver_build_host_failure(session, span, "`{member}` was given the type \"{spelled}\" for the field `{written}`, which is not one type's spelling")
+            if !jet_driver_meta_type_text_one(spelled) -> return jet_driver_meta_type_refusal(span, written, spelled)
             source = "{source}    {written}: {spelled}\n"
         }
         source = "{source}}}\n"
@@ -345,7 +345,7 @@ jet_driver_code_pasted: fn(session: BuildSession, args: [TComptimeValue], span: 
         marker: if args[at] == .Int(number) -> number else -> { return jet_driver_build_host_failure(session, span, "a `#code` paste lost its marker") }
         name: if args[at + 1] == .String(written) -> written.copy() else -> { return jet_driver_build_host_failure(session, span, "a `#code` paste lost its name") }
         text: if args[at + 2] == .String(written) -> written.copy() else -> { return jet_driver_build_host_failure(session, span, "`#{{{name}}}` lost its text") }
-        if !jet_driver_meta_type_text_plain(text) || text.contains("\\") -> return jet_driver_code_paste_refusal(span, name, text)
+        if !jet_driver_meta_type_text_one(text) -> return jet_driver_code_paste_refusal(span, name, text)
         source = source.replace("{marker}", text)
     }
     JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "Code", fields: [TComptimeField]{TComptimeField{name: "source", value: TComptimeValue.String{value: source}}}}}
@@ -355,7 +355,7 @@ jet_driver_code_paste_refusal: fn(span: Span, name: String, text: String) -> Jet
     JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
         code: "E0357",
         what: "`#code` pastes \"{text}\" for `#{{{name}}}`, which is not one name or type",
-        why: "A paste writes one name or type into the code a build hands the compiler, so it can't end an item, start another, or carry a block, a string or a marker",
+        why: "A paste writes one name or type into the code a build hands the compiler, so it can't end an item, start another, add a field or carry a default, a block, a string or a marker",
         fix: "Paste a String that spells one name or type",
         start: span.start,
         end: span.end,
@@ -402,16 +402,34 @@ jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: S
     })}
 }
 
-// A field's type is one type's spelling: it can't end the struct, start
-// another item, or carry a default, a block, a string or a marker, so a
-// computed type writes no code.
-jet_driver_meta_type_text_plain: fn(text: String) -> Bool Never! {
-    if text.trim() == "" -> return false
-    banned_texts: [String]{"\n", "\r", "{{", "}}", ";", "=", "#", "\"", "'", "`", "$", "//", "/*"}
-    loop banned in banned_texts {
-        if text.contains(banned) -> return false
+// A type a build computes for a `meta.add_struct` field is one type and no
+// other code: the field's whole type, with no default or second field.
+jet_driver_meta_type_refusal: fn(span: Span, field: String, spelled: String) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
+        code: "E3502",
+        what: "`meta.add_struct` was given the type \"{spelled}\" for the field `{field}`, which is not one type's spelling",
+        why: "A type a build computes becomes the type of one field of the generated struct, so it must be exactly one type and can't write a default, a second field or any other code",
+        fix: "Give the field `{field}` one type's spelling, as in `I64` or `[geo.Point]`",
+        start: span.start,
+        end: span.end,
+    })}
+}
+
+// Whether `text` is exactly one type: read as the type of a struct's one
+// field, it parses with no diagnostic, the struct is the only item and has
+// that one field and nothing else, and the field's type spans the whole
+// text, so nothing in it ends the struct, adds a field or gives a default.
+jet_driver_meta_type_text_one: fn(text: String) -> Bool Never! {
+    lead: "Probe: struct {{\n    probe: "
+    parsed: parse_source("{lead}{text}\n}}\n".bytes())
+    if parsed.diagnostics.len() != 0 || parsed.program.imports.len() != 0 || parsed.program.items.len() != 1 -> return false
+    if parsed.program.items[0] == .Struct(definition) {
+        if definition.fields.len() != 1 || definition.methods.len() != 0 || definition.trait_impls.len() != 0 || definition.state == .Val(_) -> return false
+        field: definition.fields[0]
+        if field.default == .Val(_) || field.computed == .Val(_) || field.serde_markers.len() != 0 -> return false
+        return field.name == "probe" && field.ty_span.start == lead.len() && field.ty_span.end == lead.len() + text.len()
     }
-    true
+    false
 }
 
 // Whether `text`, read as a path under the build file's directory, names a
