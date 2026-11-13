@@ -1,0 +1,30 @@
+# `tree[key] = value` writes a native Dyn object in place and reads only its
+# entries' keys, so a write costs the same whatever the object's values hold.
+# The program writes 300 keys after a 50,000-row member, rewrites keys of a
+# copy's original, writes through a `&Dyn` parameter, and builds an 800-section
+# report with its keys interleaved between 250-row members. In place, each run
+# takes about a second; converting the object to a runtime tree and back for
+# each write (400 sections took a minute) would run for many minutes, so the
+# step timeout is the check. A key write into a list stops, naming the kind.
+fixture: dyn_object_key_write_reads_only_the_keys.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = dyn_object_key_write_reads_only_the_keys.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = dyn_object_key_write_reads_only_the_keys.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = dyn_object_key_write_reads_only_the_keys.out
+step: jet run --optimize=none refuse.jet
+exit: 70
+stdout: ~ "before: 1"
+stderr: ~ "expected an object, found a list"
+step: jet run --optimize=full refuse.jet
+exit: 70
+stdout: ~ "before: 1"
+stderr: ~ "expected an object, found a list"

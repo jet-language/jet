@@ -6,6 +6,16 @@ use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuilt
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len`.
 ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, value: Int) Never! {
+    slot: ir_list_slot(m, b, list, row)
+    ir_store_at(m, p, b, slot.address, 0, value)
+    ir_list_counted(m, b, list, slot.length)
+}
+
+// The address of the element after the last of the List header at `list`
+// (element row `row`), whose buffer first grows to twice its capacity (at
+// least 4) when full, and the List's length; the caller stores the element
+// there, then counts it (ir_list_counted).
+ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: Int, length: Int) Never! {
     stride: ir_list_stride(m, row)
     width: ir_word_const(m, b, stride)
     length: ir_load_word(m, b, list, 0)
@@ -30,8 +40,11 @@ ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int,
     ir_emit(b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_end(b.f, b.line)
     elements: ir_load_word(m, b, list, 16)
-    address: ir_element_address(m, b, elements, length, stride)
-    ir_store_at(m, p, b, address, 0, value)
+    (address: ir_element_address(m, b, elements, length, stride), length: length)
+}
+
+// The List header at `list` counts the element stored after its `length`.
+ir_list_counted: fn(m: &IRModule, b: &IRBuilder, list: Int, length: Int) Never! {
     one: ir_word_const(m, b, 1)
     longer: ir_word_op(m, b, IROp.Add, length, one)
     ir_emit(b.f, IROp.Store, -1, list, 0, longer, b.line)

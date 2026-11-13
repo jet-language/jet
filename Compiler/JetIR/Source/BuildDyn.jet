@@ -2,10 +2,12 @@
 // Text read scan the borrowed native Object or Text in place; the other
 // scalar reads, At, and a field or Text read that fails cross the
 // encoding.dyn routes, whose Dyn operand ir_route converts to a runtime tree
-// for the call; a path write or a remove lends the receiver place's Dyn to
-// the runtime and stores the rebuilt tree back; `decode<T>()` calls T's
-// Decode implementation, a container's Core decode helper or the runtime's
-// scalar Decode adapter, whose String Decode reads a native Text in place.
+// for the call; a one-key write into an Object writes the receiver place's
+// native Dyn in place, and any other path write or a remove lends the
+// receiver place's Dyn to the runtime and stores the rebuilt tree back;
+// `decode<T>()` calls T's Decode implementation, a container's Core decode
+// helper or the runtime's scalar Decode adapter, whose String Decode reads a
+// native Text in place.
 
 use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, StmtKind]
 
@@ -347,12 +349,13 @@ ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, 
 // `tree.a[0].b = value` (JetRuntime jet_dyn_set_path): the steps cross as one
 // runtime Array of Text keys and Int indexes, the owned value as a runtime
 // tree the route adopts; a refused step stops with the route's "{site}: ..."
-// text at the checked location.
+// text at the checked location. A one-key path is ir_dyn_set_key.
 ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, keys: [Bool], site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
     if args.len() != keys.len() + 1 -> return ir_fail_slot(b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     value_expr: args[keys.len()]
     value_ty: ir_ty(p, b, value_expr)
     if ir_dyn_def(p, value_ty) == None -> return ir_fail_slot(b, span, "Dyn path value of type {ir_type_name(value_ty)} is not the canonical Dyn")
+    if keys.len() == 1 && keys[0] -> return ir_dyn_set_key(m, p, b, dyn_row, receiver, site_text, location, args, span)
     pointer_row: ir_pointer_row(m)
     word_row: ir_word_row(m)
     string_row: ir_string_row(m)
@@ -394,6 +397,89 @@ ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rec
     ir_end(b.f, b.line)
     ir_end(b.f, b.line)
     ir_dyn_place_close(m, p, b, dyn_row, place, span)
+    return -1
+}
+
+// `tree[key] = value`: on a native Object the receiver place's Dyn, made its
+// holder's own (as a write window's box is, ir_window_subject) with its entry
+// List, takes the value in place: the first entry named `key` drops its value
+// for it, or a new last entry holds both. The write reads only the entries'
+// keys, so it costs the same whatever the Object's values hold. Any other
+// variant stops with jet_dyn_set_path's "{site}: expected an object, found
+// ..." text, its kind named as the runtime's dyn_kind_name does.
+ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
+    layout: ir_dyn_object_layout(m, p, b, dyn_row, span) ?? return -1
+    key: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || key < 0 -> return -1
+    if ir_kind_of(m, b, key) != .String {
+        key_ty: ir_ty(p, b, args[0])
+        return ir_fail_slot(b, span, "Dyn path step 0 of type {ir_type_name(key_ty)} is neither a String key nor an Int index")
+    }
+    value: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || value < 0 -> return -1
+    owned_key: ir_own(m, p, b, key)
+    owned: ir_own(m, p, b, value)
+    if ir_failed(b) -> return -1
+    ir_close_disarm(b, owned)
+    receiver_ty: ir_ty(p, b, receiver)
+    value_row: ir_value_type(m, p, receiver_ty) ?? return ir_type_fail(b, span, receiver_ty)
+    backs := [IRWriteBack]{}
+    cell: ir_place_address(m, p, b, receiver, backs, span)
+    if ir_failed(b) || cell < 0 -> return -1
+    current: ir_temp(m, b, value_row)
+    ir_emit(b.f, IROp.Load, current, cell, 0, -1, b.line)
+    ir_box_make_unique(m, p, b, current)
+    ir_emit(b.f, IROp.Store, -1, cell, 0, current, b.line)
+    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    selector: ir_load_word(m, b, current, 0)
+    expected: ir_word_const(m, b, layout.object)
+    is_object: ir_bool_op(m, b, IROp.Eq, selector, expected)
+    zero: ir_word_const(m, b, 0)
+    ir_open_if(b.f, is_object, b.line)
+    payload: layout.payload
+    holder: if payload.boxed -> ir_load_word(m, b, current, payload.offset) else -> current
+    entries: ir_load_at(m, b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
+    ir_make_unique(m, p, b, entries)
+    hit: ir_dyn_object_find(m, b, layout, current, owned_key)
+    present: ir_bool_op(m, b, IROp.Ne, hit, zero)
+    ir_open_if(b.f, present, b.line)
+    replaced: ir_load_at(m, b, hit, layout.entry[1].offset, layout.entry[1].ty)
+    ir_emit(b.f, IROp.Drop, -1, replaced, -1, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, hit, layout.entry[1].offset, owned, b.line)
+    ir_emit(b.f, IROp.Drop, -1, owned_key, -1, -1, b.line)
+    ir_else(b.f, b.line)
+    slot: ir_list_slot(m, b, entries, layout.entry_row)
+    ir_emit(b.f, IROp.Store, -1, slot.address, layout.entry[0].offset, owned_key, b.line)
+    ir_emit(b.f, IROp.Store, -1, slot.address, layout.entry[1].offset, owned, b.line)
+    ir_list_counted(m, b, entries, slot.length)
+    ir_end(b.f, b.line)
+    ir_else(b.f, b.line)
+    word_row: ir_word_row(m)
+    string_row: ir_string_row(m)
+    detail_data: ir_temp(m, b, word_row)
+    detail_length: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Const, detail_data, 0, -1, -1, b.line)
+    ir_emit(b.f, IROp.Const, detail_length, 0, -1, -1, b.line)
+    others: [(kind: String, name: String)]{(kind: "Null", name: "Null"), (kind: "Bool", name: "Bool"), (kind: "Int", name: "Int"), (kind: "Float", name: "Float"), (kind: "number", name: "Number"), (kind: "Text", name: "Text"), (kind: "Bytes", name: "Bytes"), (kind: "DateTime", name: "DateTime"), (kind: "a list", name: "Array")}
+    loop other in others {
+        found: ir_variant_index(p, dyn_row, other.name) ?? return ir_fail_slot(b, span, "canonical Dyn has no {other.name} variant")
+        variant: ir_word_const(m, b, found)
+        same: ir_bool_op(m, b, IROp.Eq, selector, variant)
+        ir_open_if(b.f, same, b.line)
+        detail: ir_static_text(m, b, "expected an object, found {other.kind}")
+        ir_emit(b.f, IROp.Copy, detail_data, detail[0], -1, -1, b.line)
+        ir_emit(b.f, IROp.Copy, detail_length, detail[1], -1, -1, b.line)
+        ir_end(b.f, b.line)
+    }
+    ir_emit(b.f, IROp.Drop, -1, owned_key, -1, -1, b.line)
+    ir_emit(b.f, IROp.Drop, -1, owned, -1, -1, b.line)
+    site: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, site, ir_intern_text(m, site_text), -1, -1, b.line)
+    message: ir_runtime(m, b, "jet_rt_dyn_stop_message", [Int]{site, detail_data, detail_length}, string_row)
+    ir_stop(m, p, b, 2, message, zero, zero, ir_report_location(p, location))
+    ir_end(b.f, b.line)
+    b.fresh[owned_key] = false
+    b.fresh[owned] = false
     return -1
 }
 

@@ -1,0 +1,51 @@
+// `report[key] = value` on a Dyn object writes the object in place: it reads
+// only the entries' keys, never the values they hold. Converting the whole
+// object to a runtime tree and back for each write made each write cost the
+// size of the object: a report of 400 interleaved sections took a minute at
+// O0, so the 800 here and the 300 writes after a 50,000-row member would
+// take minutes each, past every step's timeout.
+use json: core.encoding.json
+
+rows: fn(first: Int, count: Int) -> Dyn {
+    items := [Dyn]{}
+    loop index in first..<first + count {
+        row := Dyn.object()
+        row["id"] = Dyn.Int(index)
+        row["name"] = Dyn.Text("row {index}")
+        items.push(row)
+    }
+    Dyn.Array(items)
+}
+
+stamp: fn(report: &Dyn, key: String, value: Int) {
+    report[key] = Dyn.Int(value)
+}
+
+run: fn() {
+    // Keys set after a large member.
+    after := Dyn.object()
+    after["rows"] = rows(0, 50000)
+    loop index in 0..<300 -> after["key{index}"] = Dyn.Int(index)
+    print("after: {after.len()} members, key299 = {after["key299"]}, {after["rows"].len()} rows")
+
+    // A key written again keeps its place and takes the new value; a copy
+    // taken before keeps the old one.
+    kept: after.copy()
+    after["key7"] = Dyn.Text("seven")
+    after.rows = Dyn.Int(0)
+    stamp(after, "key8", 80)
+    stamp(after, "stamped", 1)
+    print("rewritten: key7 = {after["key7"]}, key8 = {after["key8"]}, rows = {after["rows"]}, {after.len()} members")
+    print("copy: key7 = {kept["key7"]}, key8 = {kept["key8"]}, {kept["rows"].len()} rows, {kept.len()} members")
+    keys: after.keys()
+    print("first keys: {keys[0]}, {keys[1]}, {keys[2]}; last: {keys[keys.len() - 1]}")
+
+    // A report built with keys interleaved between large members.
+    report := Dyn.object()
+    loop section in 0..<800 {
+        report["section{section}"] = rows(section * 250, 250)
+        report["count{section}"] = Dyn.Int(250)
+    }
+    text: json.to_string(report) ?? panic("the report renders: {err}")
+    print("report: {report.len()} members, {text.len()} bytes, section799 starts at id {report["section799"][0]["id"]}")
+}
