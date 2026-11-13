@@ -3336,7 +3336,13 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
                 start: ir_args(b.f, [Int]{payload})
                 ir_emit(b.f, IROp.Call, returned, callee, start, 1, b.line)
                 ir_stop_check(m, b)
-                b.fresh[payload] = false
+                // A routine that moves its source owns the failure from here;
+                // one that borrows it (a kept From hook's) leaves it to this site.
+                if p.functions[row].params.len() == 1 && p.functions[row].params[0].convention == .Move {
+                    b.fresh[payload] = false
+                } else {
+                    ir_release(m, b, payload)
+                }
                 converted = returned
                 if ir_untag(routine_return) == .Result(_, _) {
                     target_row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
