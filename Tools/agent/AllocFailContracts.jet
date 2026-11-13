@@ -1,0 +1,960 @@
+#!/usr/bin/env jet
+// Rewrites function contracts for fallible growth (#6314 c8). Once a List,
+// Map or String growth can report `AllocError`, every function that reaches
+// one has to say what happens to that error. Each owner choice is one mode:
+//   --domains=admit    a typed domain `E!` becomes `(E | AllocError)!`
+//   --domains=convert  each domain type gets `impl AllocError -> E`. An enum
+//                      gains an `OutOfMemory` case; a struct whose one field is
+//                      `message: String` gets a fixed message. Any other type
+//                      is listed for a hand choice.
+//   --domains=mix      structs convert; enums and types not declared in the
+//                      tree (builtins) are admitted
+//   --never=drop       `Never!` comes off the function
+//   --never=handle     `Never!` stays, and each newly fallible call that is a
+//                      whole statement gets `?? panic("no memory")`
+//   --census           write nothing; print the counts each mode works from
+//   --check            write nothing; exit 1 when a file would change or a
+//                      site is left for a hand fix
+// A union domain `(A | B)!` is admitted in every domain mode. A `Err!` domain
+// already converts and an inferred contract already widens, so neither is
+// touched.
+//
+// A function reaches an allocation when its body calls a growth method
+// (GROWTH) or, by name, a function that does. Matching is by name and by
+// method name, so the set is an upper bound. A newly fallible call is a growth
+// call or a call to a function whose every declaration is allocating and
+// inferred. A site the rules can't rewrite (a call inside an expression, a
+// type declared more than once) is listed for a hand fix.
+//
+// Usage (from the repository root):
+//   jet Tools/agent/AllocFailContracts.jet --census [path...]
+//   jet Tools/agent/AllocFailContracts.jet [--check] [--domains=MODE] [--never=MODE] [path...]
+// With no path, every tracked `.jet` file is read. A second run changes
+// nothing.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+USAGE: "usage: jet Tools/agent/AllocFailContracts.jet (--census | [--check] [--domains=admit|convert|mix] [--never=drop|handle]) [path...]"
+
+// The growth methods, one space-separated word each.
+GROWTH: "push append insert extend reserve push_str add add_new setdefault update try_push try_reserve try_insert push_front push_back"
+
+// Generated output, dated records and the diagnostics fixtures, whose
+// expected output names lines and spans.
+SKIPPED: [String]{"Tools/tower/", "tests/ui/", "Docs/audits/", "Docs/research/", "Docs/proposals/"}
+
+HANDLER: " ?? panic(\"no memory\")"
+CASE: "OutOfMemory"
+MESSAGE: "memory allocation refused"
+
+#Error
+ContractError: struct {
+    message: String
+}
+
+// One function declaration with a body. `contract` is the text before the
+// `!` that closes the signature ("" when inferred), starting at
+// `contract_start`; `bang` is the `!`'s offset, or -1.
+FnDecl: struct {
+    line: Int
+    name: String
+    contract: String
+    contract_start: Int
+    bang: Int
+    open: Int
+    close: Int
+    direct: Bool
+    calls: [String]
+}
+
+// One top-level `enum` or `struct` declaration; `open` and `close` are its
+// braces.
+TypeDecl: struct {
+    name: String
+    kind: String
+    open: Int
+    close: Int
+    generic: Bool
+    message_only: Bool
+    has_case: Bool
+}
+
+Source: struct {
+    path: String
+    text: String
+    code: [U8]
+    fns: [FnDecl]
+    types: [TypeDecl]
+}
+
+Edit: struct {
+    start: Int
+    end: Int
+    text: String
+}
+
+// The rewrite of every source: its edits in offset order and the sites left
+// for a hand fix.
+Plan: struct {
+    edits: [Int: [Edit]]
+    manual: [String]
+    admitted: Int
+    converted: Int
+    dropped: Int
+    handled: Int
+}
+
+byte: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at >= bytes.len() -> return -1
+    Int.from_u8(bytes[at])
+}
+
+is_name_byte: fn(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || (code >= 48 && code <= 57)
+}
+
+is_digit: fn(code: Int) -> Bool Never! {
+    code >= 48 && code <= 57
+}
+
+is_space: fn(code: Int) -> Bool Never! {
+    code == 32 || code == 9 || code == 13
+}
+
+slice: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes_lossy(bytes[start..<end])
+}
+
+// Whether `word` starts at `at` and ends at a word boundary.
+word_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
+    want: word.bytes()
+    loop (offset, code) in want {
+        if byte(bytes, at + offset) != Int.from_u8(code) -> return false
+    }
+    !is_name_byte(byte(bytes, at + want.len()))
+}
+
+// The end of the identifier starting at `at`, or `at` when none starts there.
+name_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    first: byte(bytes, at)
+    if first < 0 || !is_name_byte(first) || is_digit(first) -> return at
+    end := at
+    loop is_name_byte(byte(bytes, end)) -> end += 1
+    end
+}
+
+// The index after the `>` that closes the `<` at `at`, on its line, or -1.
+angle_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    depth := 0
+    end := at
+    loop end < bytes.len() {
+        code: byte(bytes, end)
+        if code == {
+            10 -> return -1
+            60 -> depth += 1
+            62 -> {
+                depth -= 1
+                if depth == 0 -> return end + 1
+            }
+            else -> {}
+        }
+        end += 1
+    }
+    -1
+}
+
+// The index after the bracket that closes the one at `at`, across lines, or
+// -1. `bytes` is code with string text blanked.
+group_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    depth := 0
+    end := at
+    loop end < bytes.len() {
+        code: byte(bytes, end)
+        if code == 40 || code == 91 || code == 123 -> depth += 1
+        if code == 41 || code == 93 || code == 125 {
+            depth -= 1
+            if depth == 0 -> return end + 1
+        }
+        end += 1
+    }
+    -1
+}
+
+// The index of the bracket that opens the one closing at `at`, or -1.
+group_start: fn(bytes: [U8], at: Int) -> Int Never! {
+    depth := 0
+    start := at
+    loop start >= 0 {
+        code: byte(bytes, start)
+        if code == 41 || code == 93 || code == 125 -> depth += 1
+        if code == 40 || code == 91 || code == 123 {
+            depth -= 1
+            if depth == 0 -> return start
+        }
+        start -= 1
+    }
+    -1
+}
+
+// The last byte before `at` that is not a space, or -1.
+previous_visible: fn(bytes: [U8], at: Int) -> Int Never! {
+    index := at - 1
+    loop index >= 0 && is_space(byte(bytes, index)) -> index -= 1
+    byte(bytes, index)
+}
+
+blank: fn(bytes: &[U8], start: Int, end: Int) Never! {
+    loop index in start..<end {
+        if index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> bytes[index] = U8{32}
+    }
+}
+
+// `text`'s bytes with comments, string text and character literals blanked
+// to spaces. Newlines stay, so offsets and lines match `text`. An
+// interpolation's code stays, and a raw fence keeps its two ends as quotes.
+code_only: fn(text: String) -> [U8] {
+    out := text.bytes()
+    count: out.len()
+    // 0 code, 1 plain string, 2 triple string. `returns` holds the string
+    // mode an interpolation returns to and `depths` its brace depth.
+    mode := 0
+    returns := [Int]{}
+    depths := [Int]{}
+    depth := 0
+    at := 0
+    loop at < count {
+        code: byte(out, at)
+        if mode == 0 {
+            if code == 47 && byte(out, at + 1) == 47 {
+                start: at
+                loop at < count && byte(out, at) != 10 -> at += 1
+                blank(out, start, at)
+                next
+            }
+            if code == 47 && byte(out, at + 1) == 42 {
+                start: at
+                nesting := 0
+                loop at < count {
+                    if {
+                        byte(out, at) == 47 && byte(out, at + 1) == 42 -> {
+                            nesting += 1
+                            at += 2
+                        }
+                        byte(out, at) == 42 && byte(out, at + 1) == 47 -> {
+                            nesting -= 1
+                            at += 2
+                            if nesting == 0 -> break
+                        }
+                        else -> at += 1
+                    }
+                }
+                blank(out, start, at)
+                next
+            }
+            if code == 96 {
+                start: at
+                fence := 0
+                loop byte(out, at + fence) == 96 -> fence += 1
+                at += fence
+                loop at < count {
+                    if byte(out, at) != 96 {
+                        at += 1
+                        next
+                    }
+                    run := 0
+                    loop byte(out, at + run) == 96 -> run += 1
+                    at += run
+                    if run == fence -> break
+                }
+                blank(out, start, at)
+                out[start] = U8{34}
+                if at - 1 > start && at - 1 < count -> out[at - 1] = U8{34}
+                next
+            }
+            if code == 34 {
+                mode = if byte(out, at + 1) == 34 && byte(out, at + 2) == 34 -> 2 else -> 1
+                at += if mode == 2 -> 3 else -> 1
+                next
+            }
+            if code == 39 && byte(out, at + 2) == 39 {
+                blank(out, at, at + 3)
+                at += 3
+                next
+            }
+            if code == 123 -> depth += 1
+            if code == 125 {
+                if returns.len() > 0 && depth == depths[depths.len() - 1] {
+                    mode = returns.pop() ?? 0
+                    depth = depths.pop() ?? 0
+                    out[at] = U8{32}
+                    at += 1
+                    next
+                }
+                depth -= 1
+            }
+            at += 1
+            next
+        }
+        if code == 10 {
+            if mode == 1 {
+                mode = 0
+                returns = [Int]{}
+                depths = [Int]{}
+                depth = 0
+            }
+            at += 1
+            next
+        }
+        if code == 92 || (code == 123 && byte(out, at + 1) == 123) {
+            blank(out, at, at + 2)
+            at += 2
+            next
+        }
+        if code == 123 {
+            returns.push(mode)
+            depths.push(depth)
+            mode = 0
+            out[at] = U8{32}
+            at += 1
+            next
+        }
+        if code == 34 && (mode == 1 || (byte(out, at + 1) == 34 && byte(out, at + 2) == 34)) {
+            at += if mode == 2 -> 3 else -> 1
+            mode = 0
+            next
+        }
+        out[at] = U8{32}
+        at += 1
+    }
+    out
+}
+
+// The distinct names `code[open..<close]` calls, and whether one is a
+// growth method.
+CallNames: struct {
+    names: [String]
+    direct: Bool
+}
+
+call_names: fn(code: [U8], open: Int, close: Int, growth: [String: Bool]) -> CallNames {
+    seen := [String: Bool]{}
+    names := [String]{}
+    direct := false
+    at := open
+    loop at < close {
+        first: byte(code, at)
+        if !is_name_byte(first) {
+            at += 1
+            next
+        }
+        stop := at
+        loop is_name_byte(byte(code, stop)) -> stop += 1
+        if is_digit(first) {
+            at = stop
+            next
+        }
+        after := stop
+        if byte(code, after) == 60 {
+            closing: angle_end(code, after)
+            if closing > 0 && byte(code, closing) == 40 -> after = closing
+        }
+        if byte(code, after) == 40 {
+            name: slice(code, at, stop)
+            if byte(code, at - 1) == 46 && growth.has_key(name) -> direct = true
+            if !seen.has_key(name) {
+                seen[name.copy()] = true
+                names.push(name)
+            }
+        }
+        at = stop
+    }
+    CallNames{names: names, direct: direct}
+}
+
+// The declaration whose `fn` keyword ends at `from`, when it has a body.
+fn_decl: fn(code: [U8], line: Int, name: String, from: Int, growth: [String: Bool]) -> FnDecl? {
+    depth := 0
+    at := from
+    open := -1
+    loop at < code.len() {
+        current: byte(code, at)
+        if {
+            current == 40 || current == 91 -> depth += 1
+            current == 41 || current == 93 -> depth -= 1
+            current == 123 && depth == 0 -> {
+                open = at
+                break
+            }
+            current == 10 && depth == 0 -> {
+                // A signature goes on past a line that ends with `,`, `(` or `[`.
+                last: previous_visible(code, at)
+                if last != 44 && last != 40 && last != 91 -> return None
+            }
+        }
+        at += 1
+    }
+    if open < 0 -> return None
+    close: group_end(code, open)
+    if close < 0 -> return None
+    end := open
+    loop end > from && (is_space(byte(code, end - 1)) || byte(code, end - 1) == 10) -> end -= 1
+    contract := ""
+    contract_start := -1
+    bang := -1
+    if byte(code, end - 1) == 33 {
+        bang = end - 1
+        if {
+            byte(code, bang - 1) == 41 -> contract_start = group_start(code, bang - 1)
+            else -> {
+                start := bang
+                loop start > from && !is_space(byte(code, start - 1)) && byte(code, start - 1) != 10 && byte(code, start - 1) != 62 -> start -= 1
+                contract_start = start
+            }
+        }
+        if contract_start < 0 -> return None
+        contract = slice(code, contract_start, bang)
+    }
+    calls: call_names(code, open, close, growth)
+    Val(FnDecl{line: line, name: name, contract: contract, contract_start: contract_start, bang: bang, open: open, close: close - 1, direct: calls.direct, calls: calls.names})
+}
+
+// The type declaration whose kind word starts at `kind_at`, when a brace
+// opens it on its line; a `<` at `name_end` makes it generic.
+type_decl: fn(code: [U8], name: String, name_end: Int, kind_at: Int) -> TypeDecl? {
+    generic: byte(code, name_end) == 60
+    kind: if word_at(code, kind_at, "enum") -> "enum" else -> "struct"
+    open := kind_at
+    loop byte(code, open) != 123 {
+        if open >= code.len() || byte(code, open) == 10 -> return None
+        open += 1
+    }
+    close: group_end(code, open)
+    if close < 0 -> return None
+    fields: top_members(code, open + 1, close - 1)
+    has_case := false
+    loop field in fields {
+        if field == CASE || field.starts_with("{CASE}(") -> has_case = true
+    }
+    message_only: kind == "struct" && fields.len() == 1 && fields[0] == "message: String"
+    Val(TypeDecl{name: name, kind: kind, open: open, close: close - 1, generic: generic, message_only: message_only, has_case: has_case})
+}
+
+// The members of a declaration body `code[start..<end]` outside nested
+// braces, one per line or comma, without its `impl` blocks and attributes.
+top_members: fn(code: [U8], start: Int, end: Int) -> [String] {
+    members := [String]{}
+    depth := 0
+    from := start
+    loop at in start..<(end + 1) {
+        current: if at < end -> byte(code, at) else -> 10
+        if {
+            current == 123 -> {
+                if depth == 0 -> members.push(slice(code, from, at).trim())
+                depth += 1
+            }
+            current == 125 -> {
+                depth -= 1
+                if depth == 0 -> from = at + 1
+            }
+            depth == 0 && (current == 10 || current == 44) -> {
+                members.push(slice(code, from, at).trim())
+                from = at + 1
+            }
+        }
+    }
+    kept := [String]{}
+    loop member in members {
+        if member != "" && !member.starts_with("impl ") && !member.starts_with("#") -> kept.push(member.copy())
+    }
+    kept
+}
+
+// The declarations of one file: functions at any indent, and top-level
+// enums and structs.
+load_source: fn(path: String, text: String, growth: [String: Bool]) -> Source {
+    code: code_only(text)
+    fns := [FnDecl]{}
+    types := [TypeDecl]{}
+    line := 1
+    at := 0
+    loop at < code.len() {
+        start := at
+        loop byte(code, start) == 32 || byte(code, start) == 9 -> start += 1
+        if word_at(code, start + 1, "run") && byte(code, start) == 35 && byte(code, start + 4) == 32 -> start += 5
+        stop: name_end(code, start)
+        if stop > start {
+            after := stop
+            generic: byte(code, after) == 60
+            if generic -> after = angle_end(code, after)
+            if after > 0 && byte(code, after) == 58 && byte(code, after + 1) == 32 {
+                name: slice(code, start, stop)
+                if {
+                    word_at(code, after + 2, "fn") -> {
+                        if fn_decl(code, line, name, after + 4, growth) == .Val(decl) -> fns.push(decl)
+                    }
+                    start == at && (word_at(code, after + 2, "enum") || word_at(code, after + 2, "struct")) -> {
+                        if type_decl(code, name, stop, after + 2) == .Val(decl) -> types.push(decl)
+                    }
+                }
+            }
+        }
+        loop at < code.len() && byte(code, at) != 10 -> at += 1
+        at += 1
+        line += 1
+    }
+    Source{path: path, text: text, code: code, fns: fns, types: types}
+}
+
+// The names that reach a growth call, closed over calls by name.
+allocating_names: fn(sources: [Source]) -> [String: Bool] {
+    reached := [String: Bool]{}
+    loop source in sources {
+        loop decl in source.fns {
+            if decl.direct -> reached[decl.name.copy()] = true
+        }
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop source in sources {
+            loop decl in source.fns {
+                if reached.has_key(decl.name) -> next
+                loop name in decl.calls {
+                    if reached.has_key(name) {
+                        reached[decl.name.copy()] = true
+                        changed = true
+                        break
+                    }
+                }
+            }
+        }
+    }
+    reached
+}
+
+// The names whose every declaration allocates with an inferred contract:
+// calls to them become fallible.
+newly_fallible: fn(sources: [Source], reached: [String: Bool]) -> [String: Bool] {
+    verdict := [String: Bool]{}
+    loop source in sources {
+        loop decl in source.fns {
+            fallible: reached.has_key(decl.name) && decl.bang < 0
+            verdict[decl.name.copy()] = fallible && (verdict.get(decl.name) ?? true)
+        }
+    }
+    kept := [String: Bool]{}
+    loop (name, fallible) in verdict {
+        if fallible -> kept[name.copy()] = true
+    }
+    kept
+}
+
+// How a domain type takes an `AllocError`: "admit", "convert" or "manual".
+TypeChoice: struct {
+    how: String
+    source: Int
+    decl: Int
+}
+
+leaf: fn(name: String) -> String {
+    last := ""
+    loop part in name.split(".") -> last = part.copy()
+    last
+}
+
+type_choice: fn(contract: String, domains: String, sources: [Source], from: Int, declared: [String: [Int]]) -> TypeChoice {
+    if domains == "admit" || contract.starts_with("(") -> return TypeChoice{how: "admit", source: -1, decl: -1}
+    found: pick_decl(declared.get(leaf(contract)) ?? [Int]{}, sources, from)
+    if found.len() == 0 {
+        how: if domains == "mix" && !declared.has_key(leaf(contract)) -> "admit" else -> "manual"
+        return TypeChoice{how: how, source: -1, decl: -1}
+    }
+    decl: sources[found[0]].types[found[1]]
+    if decl.kind == "enum" && domains == "mix" -> return TypeChoice{how: "admit", source: -1, decl: -1}
+    if decl.generic || (decl.kind == "struct" && !decl.message_only) -> return TypeChoice{how: "manual", source: -1, decl: -1}
+    TypeChoice{how: "convert", source: found[0], decl: found[1]}
+}
+
+// The one declaration a domain named in `sources[from]` means, as a
+// (source, type) pair: the one in the same file, else the one in the same
+// directory, else the only one in the tree. Empty when none or ambiguous.
+// `found` holds every declaration of the name as pairs.
+pick_decl: fn(found: [Int], sources: [Source], from: Int) -> [Int] {
+    home: directory(sources[from].path)
+    same_file := [Int]{}
+    same_directory := [Int]{}
+    index := 0
+    loop index + 1 < found.len() {
+        if found[index] == from {
+            same_file.push(found[index])
+            same_file.push(found[index + 1])
+        }
+        if directory(sources[found[index]].path) == home {
+            same_directory.push(found[index])
+            same_directory.push(found[index + 1])
+        }
+        index += 2
+    }
+    if same_file.len() == 2 -> return same_file
+    if same_file.len() == 0 && same_directory.len() == 2 -> return same_directory
+    if same_file.len() == 0 && same_directory.len() == 0 && found.len() == 2 -> return found.copy()
+    [Int]{}
+}
+
+directory: fn(path: String) -> String {
+    bytes: path.bytes()
+    end := bytes.len()
+    loop end > 0 && byte(bytes, end - 1) != 47 -> end -= 1
+    slice(bytes, 0, end)
+}
+
+// Adds `edit` to `source`'s edits in offset order; an insertion at an offset
+// already edited goes after the earlier one.
+put_edit: fn(edits: &[Int: [Edit]], source: Int, edit: Edit) {
+    if !edits.has_key(source) -> edits[source] = [Edit]{}
+    index := edits[source].len()
+    loop index > 0 && edits[source][index - 1].start > edit.start -> index -= 1
+    edits[source].insert(index, Edit{start: edit.start, end: edit.end, text: edit.text.copy()})
+}
+
+// The start of the receiver chain that a call at `start` hangs off: names,
+// dots and bracketed groups.
+receiver_start: fn(code: [U8], start: Int) -> Int Never! {
+    at := start
+    loop {
+        before: byte(code, at - 1)
+        if before == 46 || is_name_byte(before) {
+            at -= 1
+            next
+        }
+        if before != 41 && before != 93 -> break
+        opening: group_start(code, at - 1)
+        if opening < 0 -> break
+        at = opening
+    }
+    at
+}
+
+// Whether the call spanning `start..<end` is a whole statement: nothing but
+// its receiver from the line start or a `-> `, and nothing after it on its
+// line.
+whole_statement: fn(code: [U8], start: Int, end: Int) -> Bool Never! {
+    after := end
+    loop is_space(byte(code, after)) -> after += 1
+    if byte(code, after) != 10 && byte(code, after) != -1 -> return false
+    at := receiver_start(code, start)
+    loop is_space(byte(code, at - 1)) -> at -= 1
+    before: byte(code, at - 1)
+    before == 10 || before == -1 || (before == 62 && byte(code, at - 2) == 45)
+}
+
+// The handler insertions in one `Never!` body, and the sites left over.
+handle_body: fn(source: Source, index: Int, decl: FnDecl, growth: [String: Bool], fallible: [String: Bool], edits: &[Int: [Edit]], manual: &[String]) -> Int {
+    code: source.code
+    handled := 0
+    at := decl.open
+    loop at < decl.close {
+        first: byte(code, at)
+        if !is_name_byte(first) {
+            at += 1
+            next
+        }
+        stop := at
+        loop is_name_byte(byte(code, stop)) -> stop += 1
+        if is_digit(first) || byte(code, stop) != 40 {
+            at = stop
+            next
+        }
+        name: slice(code, at, stop)
+        method: byte(code, at - 1) == 46
+        end: group_end(code, stop)
+        if end > 0 && ((method && growth.has_key(name)) || fallible.has_key(name)) && !already_handled(code, end) {
+            if {
+                whole_statement(code, at, end) -> {
+                    put_edit(edits, index, Edit{start: end, end: end, text: HANDLER})
+                    handled += 1
+                }
+                else -> manual.push("{source.path}:{decl.line}: `{name}(…)` in `{decl.name}` is not a whole statement; handle its AllocError by hand")
+            }
+        }
+        at = stop
+    }
+    handled
+}
+
+// Whether a `??` follows the call that ends at `end`.
+already_handled: fn(code: [U8], end: Int) -> Bool Never! {
+    after := end
+    loop is_space(byte(code, after)) -> after += 1
+    byte(code, after) == 63 && byte(code, after + 1) == 63
+}
+
+plan_edits: fn(sources: [Source], domains: String, never: String, growth: [String: Bool]) -> Plan {
+    reached: allocating_names(sources)
+    fallible: newly_fallible(sources, reached)
+    declared := [String: [Int]]{}
+    loop (index, source) in sources {
+        loop (position, decl) in source.types {
+            found := declared.get(decl.name) ?? [Int]{}
+            found.push(index)
+            found.push(position)
+            declared[decl.name.copy()] = found
+        }
+    }
+    edits := [Int: [Edit]]{}
+    manual := [String]{}
+    converted_types := [String: Bool]{}
+    admitted := 0
+    converted := 0
+    dropped := 0
+    handled := 0
+    loop (index, source) in sources {
+        loop decl in source.fns {
+            if !reached.has_key(decl.name) || decl.bang < 0 -> next
+            contract: decl.contract
+            if contract == "Never" {
+                if never == {
+                    "drop" -> {
+                        start: if byte(source.code, decl.contract_start - 1) == 32 -> decl.contract_start - 1 else -> decl.contract_start
+                        put_edit(edits, index, Edit{start: start, end: decl.bang + 1, text: ""})
+                        dropped += 1
+                    }
+                    "handle" -> handled += handle_body(source, index, decl, growth, fallible, edits, manual)
+                    else -> {}
+                }
+                next
+            }
+            if domains == "" || contract == "Err" || contract.contains("AllocError") -> next
+            choice: type_choice(contract, domains, sources, index, declared)
+            if choice.how == {
+                "admit" -> {
+                    if {
+                        contract.starts_with("(") -> put_edit(edits, index, Edit{start: decl.bang - 1, end: decl.bang - 1, text: " | AllocError"})
+                        else -> put_edit(edits, index, Edit{start: decl.contract_start, end: decl.bang, text: "({contract} | AllocError)"})
+                    }
+                    admitted += 1
+                }
+                "manual" -> manual.push("{source.path}:{decl.line}: `{decl.name}` returns `{contract}!`, which no rule converts; choose by hand")
+                else -> {
+                    domain: sources[choice.source].types[choice.decl]
+                    owner: sources[choice.source]
+                    key: "{choice.source}:{choice.decl}"
+                    if !converted_types.has_key(key) && !owner.text.contains("impl AllocError -> {domain.name} ") {
+                        converted_types[key] = true
+                        if domain.kind == "enum" && !domain.has_case {
+                            put_edit(edits, choice.source, case_edit(owner.code, domain))
+                        }
+                        body: if domain.kind == "enum" -> "{domain.name}.{CASE}" else -> "{domain.name}{{message: \"{MESSAGE}\"}}"
+                        put_edit(edits, choice.source, Edit{start: domain.close + 1, end: domain.close + 1, text: "\n\nimpl AllocError -> {domain.name} {{ {body} }}"})
+                        converted += 1
+                    }
+                }
+            }
+        }
+    }
+    Plan{edits: edits, manual: manual, admitted: admitted, converted: converted, dropped: dropped, handled: handled}
+}
+
+// The edit that adds the out-of-memory case to an enum: a new line before a
+// closing brace on its own line, else `, Case` after the last member.
+case_edit: fn(code: [U8], domain: TypeDecl) -> Edit {
+    line_start := domain.close
+    loop line_start > 0 && is_space(byte(code, line_start - 1)) -> line_start -= 1
+    if byte(code, line_start - 1) == 10 {
+        member := domain.open + 1
+        loop byte(code, member) == 10 -> member += 1
+        indent_end := member
+        loop is_space(byte(code, indent_end)) -> indent_end += 1
+        return Edit{start: line_start, end: line_start, text: "{slice(code, member, indent_end)}{CASE}\n"}
+    }
+    Edit{start: line_start, end: line_start, text: ", {CASE}"}
+}
+
+apply: fn(text: String, edits: [Edit]) -> String {
+    bytes: text.bytes()
+    parts := [String]{}
+    last := 0
+    loop edit in edits {
+        parts.push(slice(bytes, last, edit.start))
+        parts.push(edit.text.copy())
+        last = edit.end
+    }
+    parts.push(slice(bytes, last, bytes.len()))
+    parts.join("")
+}
+
+skipped: fn(path: String) -> Bool Never! {
+    loop prefix in SKIPPED {
+        if path.starts_with(prefix) -> return true
+    }
+    false
+}
+
+tracked: fn(paths: [String]) -[Exec, IO, Time.Wait]> [String] ContractError! {
+    argv := [String]{"git", "ls-files", "--"}
+    if paths.len() == 0 -> argv.push(".")
+    loop path in paths -> argv.push(path.copy())
+    receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(ContractError{message: "cannot run git ls-files: {err}"})
+    if receipt.code != 0 -> return Err(ContractError{message: "git ls-files failed ({receipt.code}): {receipt.errors}"})
+    found := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line.ends_with(".jet") && !skipped(line) -> found.push(line.copy())
+    }
+    Ok(found)
+}
+
+area: fn(path: String) -> String {
+    loop part in path.split("/") -> return part.copy()
+    ""
+}
+
+census: fn(sources: [Source], growth: [String: Bool]) -[IO]> {
+    reached: allocating_names(sources)
+    fallible: newly_fallible(sources, reached)
+    tally := [String: Int]{}
+    domains := [String: Int]{}
+    total := 0
+    allocating := 0
+    loop source in sources {
+        loop decl in source.fns {
+            total += 1
+            if !reached.has_key(decl.name) -> next
+            allocating += 1
+            kind := "typed"
+            if {
+                decl.contract == "Never" -> kind = "Never"
+                decl.bang < 0 -> kind = "inferred"
+                decl.contract == "Err" -> kind = "Err"
+                else -> {}
+            }
+            key: "{area(source.path)}\t{kind}"
+            tally[key] = (tally.get(key) ?? 0) + 1
+            if kind == "typed" -> domains[decl.contract.copy()] = (domains.get(decl.contract) ?? 0) + 1
+        }
+    }
+    print("functions\t{total}\tallocating\t{allocating}\tnewly-fallible names\t{fallible.len()}")
+    keys := [String]{}
+    loop (key, _) in tally -> keys.push(key.copy())
+    keys.sort()
+    loop key in keys -> print("{key}\t{tally.get(key) ?? 0}")
+    print("typed domains\t{domains.len()}")
+    loop domain in "admit convert mix".split(" ") {
+        plan: plan_edits(sources, domain, "", growth)
+        print("--domains={domain}\tadmitted\t{plan.admitted}\tconverted types\t{plan.converted}\thand\t{plan.manual.len()}")
+    }
+    loop never in "drop handle".split(" ") {
+        plan: plan_edits(sources, "", never, growth)
+        print("--never={never}\tdropped\t{plan.dropped}\thandled\t{plan.handled}\thand\t{plan.manual.len()}")
+    }
+}
+
+contracts_main: fn(args: [String]) -[Exec, FS, IO, Time.Wait]> Int ContractError! {
+    check := false
+    counting := false
+    domains := ""
+    never := ""
+    paths := [String]{}
+    loop arg in args {
+        if {
+            arg == "--check" -> check = true
+            arg == "--census" -> counting = true
+            arg.starts_with("--domains=") -> domains = arg.slice(10, arg.len())
+            arg.starts_with("--never=") -> never = arg.slice(8, arg.len())
+            arg.starts_with("-") -> return Err(ContractError{message: "unknown option {arg}\n{USAGE}"})
+            else -> paths.push(arg.copy())
+        }
+    }
+    if domains != "" && domains != "admit" && domains != "convert" && domains != "mix" -> return Err(ContractError{message: "unknown --domains={domains}\n{USAGE}"})
+    if never != "" && never != "drop" && never != "handle" -> return Err(ContractError{message: "unknown --never={never}\n{USAGE}"})
+    if !counting && domains == "" && never == "" -> return Err(ContractError{message: USAGE})
+    growth := [String: Bool]{}
+    loop word in GROWTH.split(" ") -> growth[word.copy()] = true
+    sources := [Source]{}
+    loop path in tracked(paths) ?? return Err(err) {
+        text: files.read(path) ?? next
+        sources.push(load_source(path, text, growth))
+    }
+    if counting {
+        census(sources, growth)
+        return Ok(0)
+    }
+    plan: plan_edits(sources, domains, never, growth)
+    changed := 0
+    loop (index, source) in sources {
+        edits: plan.edits.get(index) ?? next
+        changed += 1
+        if {
+            check -> term.eprint("{source.path}: {edits.len()} contract edit(s)")
+            else -> files.write(source.path, apply(source.text, edits)) ?? return Err(ContractError{message: "cannot write {source.path}: {err}"})
+        }
+    }
+    loop line in plan.manual -> term.eprint(line)
+    verb: if check -> "to change" else -> "changed"
+    print("alloc-fail-contracts: {changed} file(s) {verb}; admitted {plan.admitted}, converted types {plan.converted}, dropped {plan.dropped}, handled {plan.handled}, by hand {plan.manual.len()}")
+    if plan.manual.len() > 0 || (check && changed > 0) -> return Ok(1)
+    Ok(0)
+}
+
+run: fn() {
+    if contracts_main(process.args()) == {
+        .Ok(code) -> {
+            if code != 0 -> process.exit(code)
+        }
+        .Err(error) -> {
+            term.eprint("alloc-fail-contracts: {error.message}")
+            process.exit(1)
+        }
+    }
+}
+
+test_growth: fn() -> [String: Bool] {
+    growth := [String: Bool]{}
+    loop word in GROWTH.split(" ") -> growth[word.copy()] = true
+    growth
+}
+
+rewrite: fn(text: String, domains: String, never: String) -> String {
+    growth: test_growth()
+    sources: [Source]{load_source("a.jet", text, growth)}
+    plan: plan_edits(sources, domains, never, growth)
+    apply(text, plan.edits.get(0) ?? [Edit]{})
+}
+
+#Test("code_only blanks comments and string text and keeps interpolations") {
+    code: code_only("a // b\nx: \"s {{y}} t\" /* c */ z")
+    assert_eq(String.from_bytes_lossy(code), "a     \nx: \"   y   \"         z")
+}
+
+#Test("a message struct with impl blocks converts; other fields stay for a hand choice") {
+    text: "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl AllocError -> P {{ P{{message: \"memory allocation refused\"}} }}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
+    reason: "R: struct {{ reason: String }}\nf: fn(xs: &[Int]) R! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(reason, "convert", ""), reason)
+    assert_eq(rewrite(rewrite(text, "convert", ""), "convert", ""), rewrite(text, "convert", ""))
+}
+
+#Test("admit widens a typed domain that reaches growth") {
+    text: "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) -> Int E! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n"
+    assert_eq(rewrite(text, "admit", ""), "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) -> Int (E | AllocError)! {{\n    xs.push(1)\n    0\n}}\ng: fn() -> Int Never! {{ 1 }}\n")
+    union: "h: fn(xs: &[Int]) (A | B)! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(union, "convert", ""), "h: fn(xs: &[Int]) (A | B | AllocError)! {{\n    xs.push(1)\n}}\n")
+}
+
+#Test("convert adds a case and one impl per domain type") {
+    text: "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n"
+    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A\n    OutOfMemory\n}}\n\nimpl AllocError -> E {{ E.OutOfMemory }}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
+    message: "S: struct {{ message: String }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n"
+    assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl AllocError -> S {{ S{{message: \"memory allocation refused\"}} }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n")
+    assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
+}
+
+#Test("never modes drop the contract or handle each whole statement") {
+    text: "f: fn(xs: &[Int]) -> Int Never! {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n"
+    assert_eq(rewrite(text, "", "drop"), "f: fn(xs: &[Int]) -> Int {{\n    xs.push(1)\n    if true -> xs.push(2)\n    n: g(xs.push(3))\n    0\n}}\n")
+    assert_eq(rewrite(text, "", "handle"), "f: fn(xs: &[Int]) -> Int Never! {{\n    xs.push(1) ?? panic(\"no memory\")\n    if true -> xs.push(2) ?? panic(\"no memory\")\n    n: g(xs.push(3))\n    0\n}}\n")
+    handled: rewrite(text, "", "handle")
+    assert_eq(rewrite(handled, "", "handle"), handled)
+}
