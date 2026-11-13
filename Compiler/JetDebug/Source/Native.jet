@@ -90,10 +90,10 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "the program path contains a control character"})
         }
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
-        // LLDB's diagnostics share its output stream, so a refused command is
-        // read in order with the command's echo.
-        argv: [String]{"sh", "-c", "exec \"$0\" --no-lldbinit --no-use-colors \"$1\" 2>&1", lldb, binary}
-        child := native_process.cmd(argv).stdin(.Stream).stdout(.Stream).stderr(.Capture).spawn() ?? return Err(NativeDebugError{detail: "couldn't start LLDB: {err}"})
+        // LLDB's diagnostics share its output stream (`.stderr(.Stdout)`: one
+        // descriptor), so a refused command is read in order with the
+        // command's echo.
+        child := native_process.cmd([String]{lldb, "--no-lldbinit", "--no-use-colors", binary}).stdin(.Stream).stdout(.Stream).stderr(.Stdout).spawn() ?? return Err(NativeDebugError{detail: "couldn't start LLDB: {err}"})
         session := NativeSession{child: child, output_path: output_path, output_read: 0, finished: false}
         setup := NATIVE_DEBUG_SETUP.copy()
         setup.push("settings set target.output-path {native_debug_quote(output_path)}")
