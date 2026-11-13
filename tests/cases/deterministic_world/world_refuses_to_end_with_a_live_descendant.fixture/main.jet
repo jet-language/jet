@@ -1,0 +1,19 @@
+use {
+    testing: core.testing
+    time: core.time
+}
+
+nap: fn() -[Time.Wait]> { time.sleep(1h) ?? return }
+
+run: fn() {
+    print("before world")
+    testing.world(
+    world -> {
+        sleeper: task nap() ?? return
+        sleeper.detach()
+        world.wait_idle()
+        print("leaving with a sleeper")
+    },
+    )
+    print("after world")
+}

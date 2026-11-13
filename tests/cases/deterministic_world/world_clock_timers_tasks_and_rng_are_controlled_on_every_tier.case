@@ -1,0 +1,24 @@
+# Inside testing.world:
+# - the wall clock is the world's clock;
+# - tasks inherit the world, and their sleeps are world timers that only
+#   world.advance releases, in deadline order;
+# - the clock moves by exactly the advanced amount;
+# - seeded draws are the world's RNG provider, journaled in the history and
+#   equal across two worlds with the same seed.
+# The same output holds on every tier.
+fixture: world_clock_timers_tasks_and_rng_are_controlled_on_every_tier.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = world_clock_timers_tasks_and_rng_are_controlled_on_every_tier.out
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = world_clock_timers_tasks_and_rng_are_controlled_on_every_tier.out
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = world_clock_timers_tasks_and_rng_are_controlled_on_every_tier.out
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = world_clock_timers_tasks_and_rng_are_controlled_on_every_tier.out

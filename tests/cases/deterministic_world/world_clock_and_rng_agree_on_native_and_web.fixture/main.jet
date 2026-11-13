@@ -1,0 +1,34 @@
+use {
+    random: core.math.random
+    testing: core.testing
+    time: core.time
+}
+
+draws: fn() -[Rand]> [Int] {
+    out := [Int]{}
+    loop _ in 0..4 -> out.push(random.int(0, 1000))
+    out
+}
+
+run: fn() {
+    first := [Int]{}
+    second := [Int]{}
+    testing.world(
+    world -> {
+        start: world.now()
+        print("clock follows world: {time.unix_ms(time.now()) == start}")
+        print("advanced to {world.advance(30ms) - start}")
+        print("clock after: {time.unix_ms(time.now()) - start}")
+        random.seed(7)
+        first = draws()
+    },
+    )
+    testing.world(
+    world -> {
+        random.seed(7)
+        second = draws()
+        print(world.history())
+    },
+    )
+    print("same draws: {first == second} {first.len()}")
+}

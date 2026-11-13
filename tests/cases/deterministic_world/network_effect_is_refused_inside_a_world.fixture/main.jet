@@ -1,0 +1,15 @@
+use {
+    net: core.net
+    testing: core.testing
+}
+
+run: fn() {
+    print("before world")
+    testing.world(
+    world -> {
+        _ := net.tcp_connect("127.0.0.1:9") ?? return
+        print("connected inside world")
+    },
+    )
+    print("after world")
+}

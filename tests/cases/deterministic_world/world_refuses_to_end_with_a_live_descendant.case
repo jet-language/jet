@@ -1,0 +1,9 @@
+# A task spawned inside testing.world belongs to the world. Ending the world
+# while a detached task still sleeps on a world timer stops the program
+# instead of letting the task outlive its world.
+fixture: world_refuses_to_end_with_a_live_descendant.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 70
+stdout: = "before world\nleaving with a sleeper\n"
+stderr: ~ "deterministic world scope exited with live descendants; cancel and join every task" # the stop report also lists the parked sleeper (E3013) around the refusal

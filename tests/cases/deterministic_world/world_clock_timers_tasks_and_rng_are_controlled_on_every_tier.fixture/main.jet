@@ -1,0 +1,45 @@
+use {
+    random: core.math.random
+    testing: core.testing
+    time: core.time
+}
+
+nap: fn(label: String, wait: Duration) -[Time.Wait]> String {
+    time.sleep(wait) ?? return "{label} failed"
+    label.copy()
+}
+
+draws: fn() -[Rand]> [Int] {
+    out := [Int]{}
+    loop _ in 0..4 -> out.push(random.int(0, 1000))
+    out
+}
+
+run: fn() {
+    first := [Int]{}
+    second := [Int]{}
+    testing.world(
+    world -> {
+        start: world.now()
+        clock: time.unix_ms(time.now())
+        print("clock follows world: {clock == start}")
+        late: task nap("late", 50ms) ?? return
+        early: task nap("early", 20ms) ?? return
+        world.wait_idle()
+        print("advanced to {world.advance(30ms) - start}")
+        print("advanced to {world.advance(30ms) - start}")
+        print("{early.join() ?? "early lost"} then {late.join() ?? "late lost"}")
+        print("clock after: {time.unix_ms(time.now()) - start}")
+        random.seed(7)
+        first = draws()
+    },
+    )
+    testing.world(
+    world -> {
+        random.seed(7)
+        second = draws()
+        print(world.history())
+    },
+    )
+    print("same draws: {first == second} {first.len()}")
+}
