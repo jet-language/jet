@@ -9,16 +9,16 @@ exit: 0
 stdout: ~ "program source main.jet revision " # the header names the source; the revision is a content hash
 stdout: ~ ", kind marker: " # the header names the kind
 stdout: ~ " facts, complete" # the query ends complete; the count is the toolchain's
-stdout: ~ "Codable  main::Order  main::Order#marker:Codable" # Order's marker row and its stable identity
-stdout: ~ "Comparable  main::OrderID  main::OrderID#marker:Comparable" # OrderID's marker row and its stable identity
+stdout: ~ "Codable  main.Order  main.Order#marker:Codable" # Order's marker row and its stable identity
+stdout: ~ "Comparable  main.OrderID  main.OrderID#marker:Comparable" # OrderID's marker row and its stable identity
 stderr: empty
 step: jet build main.jet
 env: NO_COLOR=1
 exit: nonzero
 stdout+stderr: ~ "FACTS" # the build's error report carries the program's FACTS line
 stdout+stderr: ~ " facts: " # the build prints its count line; the count is the fixture's
-stdout+stderr: ~ "[Codable  main::Order  main::Order#marker:Codable  item Order]" # the build's row equals the command's row
-stdout+stderr: ~ "[Comparable  main::OrderID  main::OrderID#marker:Comparable  item OrderID]" # the build's row equals the command's row
+stdout+stderr: ~ "[Codable  main.Order  main.Order#marker:Codable  item Order]" # the build's row equals the command's row
+stdout+stderr: ~ "[Comparable  main.OrderID  main.OrderID#marker:Comparable  item OrderID]" # the build's row equals the command's row
 stdout+stderr: ~ "revision-matches=true" # the build's revision is the one the command printed
 step: jet inspect facts --store=program --kind=read main.jet --json
 env: NO_COLOR=1

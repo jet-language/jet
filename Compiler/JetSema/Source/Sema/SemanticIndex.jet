@@ -443,7 +443,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
         TComptimeField{name: "module", value: sema_compiler_index_string(registered_module.module_path)},
         TComptimeField{name: "span", value: sema_compiler_index_span(binding.span, registered_module.source_file)},
         TComptimeField{name: "entry", value: TComptimeValue.Struct{type_name: "CompilerOutputEntry", fields: [TComptimeField]{
-            TComptimeField{name: "identity", value: sema_compiler_index_string("{target_module.module_name}::{output.semantic_name}")},
+            TComptimeField{name: "identity", value: sema_compiler_index_string("{target_module.module_name}.{output.semantic_name}")},
             TComptimeField{name: "name", value: sema_compiler_index_string(output.source_name)},
             TComptimeField{name: "module", value: sema_compiler_index_string(output.source_path)},
             TComptimeField{name: "definition_span", value: sema_compiler_index_span(output.definition, target_module.source_file)},
@@ -1329,7 +1329,7 @@ sema_compiler_index_view_source_path: fn(path: ViewSourcePath) -> String Never! 
     source := if path.source == {
         .Receiver -> "receiver"
         .Parameter(index) -> "parameter:{index}"
-        .Static(module_path, name) -> "static:{module_path}::{name}"
+        .Static(module_path, name) -> "static:{module_path}.{name}"
     }
     projections := [String]{}
     loop projection in path.projections {

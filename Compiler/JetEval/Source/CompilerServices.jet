@@ -598,7 +598,7 @@ jet_eval_compiler_services_function_info: fn(registration: SemaRegistrationGraph
         }
     }
     arithmetic := sema_comptime_reflection_arithmetic_facts(function, registration_module.source_file)
-    identity := "{registration_module.module_name}::{function.name}"
+    identity := "{registration_module.module_name}.{function.name}"
     facts := sema_comptime_reflection_declared_function_facts(function, identity)
     TComptimeValue.Struct{type_name: "FunctionInfo", fields: [TComptimeField]{
         TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
@@ -821,8 +821,8 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                         if jet_eval_compiler_services_function_key(function, module_row) == .Val(key) -> build_keys.push(key)
                         next
                     }
-                    key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
-                    markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_identity}` has no marker registry")
+                    key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_name}.{function.name}` is not registered")
+                    markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_name}` has no marker registry")
                     value: jet_eval_compiler_services_function_info(registration, module_index, function, module_text, checked, Val(key), markers)
                     functions.push(value.copy())
                     module_functions.push(value)
@@ -830,7 +830,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
             if name == .Val(type_name) {
-                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
+                value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog, [Type]{}) ?? return .Missing(fact: "type `{module_row.module_name}.{type_name}` has no TypeInfo")
                 types.push(value.copy())
                 module_types.push(value)
             }

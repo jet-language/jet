@@ -1286,7 +1286,7 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 }
 
 // A type's TypeId. Its `identity` names each declared type by its module, as
-// TypeInfo.identity does (`shapes::Point`, `[shapes::Point]`), so two
+// TypeInfo.identity does (`shapes.Point`, `[shapes.Point]`), so two
 // reflected types are one type exactly when their identities are equal; its
 // `name` is the type as the checker prints it (`Point`, `[Point]`). `caller`
 // is the row of the module the type is written in, -1 for none.
@@ -1320,7 +1320,7 @@ sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> T
 // stays as written.
 sema_comptime_reflection_qualified_name: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> String {
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return name
-    "{graph.modules[row.module_index].module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
+    "{graph.modules[row.module_index].module_name}.{graph.modules[row.module_index].nominals[row.row].symbol.name}"
 }
 
 // `ty` with every declared type it names qualified by its module
@@ -1749,7 +1749,7 @@ sema_comptime_reflection_view_source_path: fn(source: ViewSourcePath) -> String 
     source_name: if source.source == {
         .Receiver -> "receiver"
         .Parameter(index) -> "parameter:{index}"
-        .Static(module_path, name) -> "static:{module_path}::{name}"
+        .Static(module_path, name) -> "static:{module_path}.{name}"
     }
     projections: loop projection in source.projections -> if projection == {
         .Field(name) -> "field:{name}"
@@ -2470,7 +2470,7 @@ sema_comptime_reflection_type_info: fn(
     registry: sema_scope_members_build_marker_registry(graph, module_identity, registered_module.program, catalog) ?? return None
     engine: sema_comptime_reflection_layout_engine(graph)
     // The public identity qualifies by module name, as FunctionInfo does; the internal module key is not user surface.
-    identity := "{registered_module.module_name}::{type_name}"
+    identity := "{registered_module.module_name}.{type_name}"
     // A specialization is its own instance: its identity names its arguments,
     // its fields, payloads and methods read them in place of the type
     // parameters, and its `generic_bindings` pair each parameter with one.

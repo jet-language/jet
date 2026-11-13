@@ -107,7 +107,7 @@ jet_eval_build_session_diagnostic: fn(error: BuildSessionDiagnostic) -> Diagnost
     if error.error == .Val(typed) {
         projection: build_session_error_projection(typed)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val("E3502"), message: projection.text, typed_identity: Val("BuildError::{projection.variant}"),
+            code: Val("E3502"), message: projection.text, typed_identity: Val("BuildError.{projection.variant}"),
             details: Val(DiagnosticErrorDetails{variant: projection.variant, fields: loop field in projection.fields -> DiagnosticErrorField{name: field.name, value: field.value}, source_span: Val(DiagnosticErrorSpan{start: error.start, end: error.end})}),
         }})
     }
@@ -133,7 +133,7 @@ jet_eval_build_failed_value: fn(error: BuildSessionDiagnostic) -> TComptimeValue
         {name: "source_span", value: TComptimeValue.Present{value: span}},
     }}
     metadata: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
-        {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError::{projection.variant}")}},
+        {name: "typed_identity", value: TComptimeValue.Present{value: jet_eval_build_graph_text("BuildError.{projection.variant}")}},
         {name: "context_frames", value: TComptimeValue.List{values: []}},
         {name: "conversion_history", value: TComptimeValue.List{values: []}},
         {name: "details", value: TComptimeValue.Present{value: details}},
@@ -181,7 +181,7 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         }
         details: jet_eval_build_field_present(metadata, "details") ?? return None
         variant: jet_eval_build_field_text(details, "variant") ?? return None
-        if identity != "BuildError::{variant}" -> return None
+        if identity != "BuildError.{variant}" -> return None
         message: jet_eval_build_field_text(error, "message") ?? return None
         rows_value: jet_eval_build_field(details, "fields") ?? return None
         rows: if rows_value == {
@@ -209,7 +209,7 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         }
         diagnostic := diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val(code), message: message, typed_identity: Val("BuildError::{variant}"),
+            code: Val(code), message: message, typed_identity: Val("BuildError.{variant}"),
             details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
         }})
         return Val(diagnostic)

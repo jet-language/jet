@@ -1143,7 +1143,7 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: 
             bindings = sema_comptime_reflection_specialization(registered.declaration.type_params, written)
         }
         markers: sema_comptime_reflection_written_markers(graph, registered_module.module_identity, registered_module.program, catalog, registered.declaration.markers, registry) ?? return None
-        identity: "{registered_module.module_name}::{registered.declaration.name}"
+        identity: "{registered_module.module_name}.{registered.declaration.name}"
         if bindings.len() == 0 -> return Val(sema_comptime_reflection_function_info(graph, index, registered.declaration, registered_module.module_name, identity, registered_module.package_identity, registered_module, markers, bindings))
         return Val(sema_comptime_reflection_function_info(graph, index, sema_comptime_reflection_specialize_func(registered.declaration, bindings), registered_module.module_name, sema_comptime_reflection_specialized_identity(identity, bindings), registered_module.package_identity, registered_module, markers, bindings))
     }
