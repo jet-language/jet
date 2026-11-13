@@ -1,0 +1,17 @@
+# A lambda bound to a local that only direct calls reach borrows the `:=`
+# locals it writes. A write made only through a writing method's receiver
+# (`items.push(n)`, `counter.bump()`) counts as one, so the calls change the
+# caller's list and struct instead of a copy made when the lambda was built.
+fixture: a_lambda_whose_only_write_is_a_method_call_keeps_the_write.fixture
+env: NO_COLOR=1
+step check: jet check pushes.jet
+exit: 0
+step o0: jet run --optimize=none pushes.jet
+exit: 0
+stdout: = "2|2|2/2|2\n"
+step o1: jet run --optimize=basic pushes.jet
+exit: 0
+stdout: = "2|2|2/2|2\n"
+step o2: jet run --optimize=full pushes.jet
+exit: 0
+stdout: = "2|2|2/2|2\n"

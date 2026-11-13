@@ -3674,18 +3674,20 @@ sema_ownership_note_direct_call_lambda: fn(state: &SemaOwnershipState, site: Spa
     state.direct_call_lambdas.push(site.copy())
 }
 
+// Whether the lambda at `site` is bound to a local that only direct calls reach.
+sema_ownership_is_direct_call_lambda: fn(state: SemaOwnershipState, site: Span) -> Bool Never! {
+    loop known in state.direct_call_lambdas {
+        if sema_ownership_span_same(known, site) -> return true
+    }
+    false
+}
+
 // The binding `key` holds the lambda at `site` with `captures`. When only
 // direct calls reach it, each call reads its outer bindings, whether they
 // are viewed in place or were copied at creation: a capture is shared read
 // access to its owner (spec "Captures and escaping lambdas").
 sema_ownership_bind_closure_captures: fn(state: &SemaOwnershipState, key: String, site: Span, captures: [TCapture], facts: TCaptureFacts, scopes: SemaScopeTable) Never! {
-    if facts.escapes {
-        direct := false
-        loop known in state.direct_call_lambdas {
-            if sema_ownership_span_same(known, site) -> direct = true
-        }
-        if !direct -> return
-    }
+    if facts.escapes && !sema_ownership_is_direct_call_lambda(state, site) -> return
     places := [SemaOwnershipPlace]{}
     loop capture in captures {
         name: capture.source

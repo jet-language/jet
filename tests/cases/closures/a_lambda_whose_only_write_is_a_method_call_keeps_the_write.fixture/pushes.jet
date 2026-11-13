@@ -1,0 +1,52 @@
+// A lambda that only direct calls reach, whose only write to a captured
+// local is a writing method call (`items.push(n)`, `counter.bump()`),
+// writes the caller's local, as one that also assigns a local does.
+Counter: struct {
+    count: Int
+
+    bump: fn(&self) {
+        self.count += 1
+    }
+}
+
+expression_body: fn() -> Int {
+    items := [Int]{}
+    push_it: (n: Int) -> items.push(n)
+    push_it(1)
+    push_it(2)
+    items.len()
+}
+
+block_body: fn() -> Int {
+    items := [Int]{}
+    push_it: (n: Int) -> {
+        items.push(n)
+    }
+    push_it(1)
+    push_it(2)
+    items.len()
+}
+
+block_body_with_an_assignment: fn() -> String {
+    items := [Int]{}
+    seen := 0
+    push_it: (n: Int) -> {
+        seen += 1
+        items.push(n)
+    }
+    push_it(1)
+    push_it(2)
+    "{items.len()}/{seen}"
+}
+
+struct_method: fn() -> Int {
+    counter := Counter{count: 0}
+    bump_it: () -> counter.bump()
+    bump_it()
+    bump_it()
+    counter.count
+}
+
+run: fn() {
+    print("{expression_body()}|{block_body()}|{block_body_with_an_assignment()}|{struct_method()}")
+}
