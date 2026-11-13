@@ -4013,12 +4013,11 @@ sema_registration_import_local: fn(item: ImportedItem) -> String Never! {
 
 sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: String) -> SemaRegistrationExport? {
     // The module's own declarations first: they carry the live symbol (a constant's staged type
-    // lands on it after registration), while an export row holds a registration-time copy.
-    loop index in 0..<module_row.symbols.len() {
-        if module_row.symbols[index].name == name {
-            declaration: sema_registration_declaration_for_symbol(module_row, module_row.symbols[index])
-            return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration: declaration, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
-        }
+    // lands on it after registration), while an export row holds a registration-time copy. A
+    // module's symbol names are distinct, so its position map finds the one row of `name`.
+    if sema_registration_symbol_position(module_row, name, name_rows_hash(name)) == .Val(index) {
+        declaration: sema_registration_declaration_for_symbol(module_row, module_row.symbols[index])
+        return Val(SemaRegistrationExport{name: name, symbol: module_row.symbols[index], declaration: declaration, source_module_identity: module_row.module_identity, visibility: module_row.symbols[index].visibility})
     }
     loop export in module_row.exports {
         if export.name == name -> return Val(export)

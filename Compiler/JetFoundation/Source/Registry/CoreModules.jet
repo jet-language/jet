@@ -37,15 +37,13 @@ CoreModuleDeclaration: struct {
 }
 
 core_module_export: fn(module_name: String) -> CoreModuleExportNames? {
-    core_module_export_in(CORE_MODULE_EXPORTS, module_name)
+    core_module_export_in(CORE_MODULE_EXPORTS, CORE_MODULE_EXPORT_KEYS, CORE_MODULE_EXPORT_KEY_ROWS, module_name)
 }
 
-// The table is a read parameter, so the scan reads its rows in place.
-core_module_export_in: fn(rows: [CoreModuleExportNames], module_name: String) -> CoreModuleExportNames? {
-    loop row in rows {
-        if row.module_name == module_name -> return Val(row)
-    }
-    None
+// The tables are read parameters, so the search reads their rows in place.
+core_module_export_in: fn(rows: [CoreModuleExportNames], keys: [String], key_rows: [Int], module_name: String) -> CoreModuleExportNames? {
+    row: ir_key_row(keys, key_rows, module_name) ?? return None
+    Val(rows[row])
 }
 
 core_module_export_has_name: fn(names: [String], name: String) -> Bool Never! {
@@ -90,16 +88,13 @@ core_module_type_leaf: fn(name: String) -> String Never! {
 }
 
 core_type_modules: fn(name: String) -> [String] Never! {
-    core_type_modules_in(CORE_MODULE_EXPORTS, core_module_type_leaf(name))
+    core_type_modules_in(CORE_TYPE_EXPORT_KEYS, CORE_TYPE_EXPORT_KEY_ROWS, CORE_TYPE_EXPORT_MODULES, core_module_type_leaf(name))
 }
 
-// The table is a read parameter, so the scan reads its rows in place.
-core_type_modules_in: fn(rows: [CoreModuleExportNames], leaf: String) -> [String] Never! {
-    modules := [String]{}
-    loop row in rows {
-        if core_module_export_has_name(row.type_exports, leaf) -> modules.push(row.module_name)
-    }
-    modules
+// The tables are read parameters, so the search reads their rows in place.
+core_type_modules_in: fn(keys: [String], key_rows: [Int], modules: [[String]], leaf: String) -> [String] Never! {
+    row: ir_key_row(keys, key_rows, leaf) ?? return [String]{}
+    modules[row]
 }
 
 // Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
@@ -307,10 +302,13 @@ CORE_BARE_SOURCE_MODULES: [CoreBareSourceModule]{
     {name: "Validate", module_name: "core.encoding.validate"},
 }
 core_bare_source_module: fn(name: String) -> String? Never! {
-    loop row in CORE_BARE_SOURCE_MODULES {
-        if row.name == name -> return Val(row.module_name)
-    }
-    None
+    core_bare_source_module_in(CORE_BARE_SOURCE_MODULES, CORE_BARE_SOURCE_KEYS, CORE_BARE_SOURCE_KEY_ROWS, name)
+}
+
+// The tables are read parameters, so the search reads their rows in place.
+core_bare_source_module_in: fn(rows: [CoreBareSourceModule], keys: [String], key_rows: [Int], name: String) -> String? Never! {
+    row: ir_key_row(keys, key_rows, name) ?? return None
+    Val(rows[row].module_name)
 }
 
 // `input.<method>(…)`, a method the ambient `input` (Iter<String>) lacks, is

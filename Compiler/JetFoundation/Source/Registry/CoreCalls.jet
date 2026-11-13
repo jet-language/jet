@@ -151,7 +151,14 @@ core_call_in: fn(rows: [CoreCallRecord], module_name: String, member: String) ->
 }
 
 core_call: fn(module_name: String, member: String) -> CoreCallRecord? {
-    core_call_in(CORE_CALLS, module_name, member)
+    core_call_keyed(CORE_CALLS, CORE_CALL_KEYS, CORE_CALL_KEY_ROWS, module_name, member)
+}
+
+// core_call_in over a table keyed for halving search (CORE_CALL_KEYS); the
+// tables are read parameters, so the search reads their rows in place.
+core_call_keyed: fn(rows: [CoreCallRecord], keys: [String], key_rows: [Int], module_name: String, member: String) -> CoreCallRecord? {
+    row: ir_key_row(keys, key_rows, core_call_lookup_key(module_name, member)) ?? return None
+    Val(rows[row])
 }
 
 core_receiver_method_in: fn(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
@@ -181,7 +188,12 @@ core_marker_application_in: fn(rows: [CoreCallRecord], module_name: String, memb
 }
 
 core_call_projection_in: fn(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
-    row: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
+    core_call_projection_of(core_call_in(rows, module_name, member), module_name, member, projection, actual_arity)
+}
+
+// The projection of `found`, the row of `module_name.member` if any.
+core_call_projection_of: fn(found: CoreCallRecord?, module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
+    row: found ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
     if row.symbol == CoreCallSymbol.SourceOwned && projection != CORE_CALL_COVERAGE_SEMA -> return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
     authority_boundary_form: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
@@ -192,5 +204,5 @@ core_call_projection_in: fn(rows: [CoreCallRecord], module_name: String, member:
 }
 
 core_call_projection: fn(module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
-    core_call_projection_in(CORE_CALLS, module_name, member, projection, actual_arity)
+    core_call_projection_of(core_call(module_name, member), module_name, member, projection, actual_arity)
 }

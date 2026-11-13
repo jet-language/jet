@@ -7,6 +7,88 @@ CORE_CALLS: #run core_call_rows(CORE_DECLARATIONS, CORE_CALL_EXTENSIONS)
 // Module/member/type names follow Core.rows module declaration order.
 CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
 
+// The lookup keys of the tables above and CORE_BARE_SOURCE_MODULES, frozen
+// at build time for halving search (ir_key_row), so a lookup costs a search
+// instead of a scan of every row: CORE_CALLS by core_call_lookup_key (a
+// receiver row keys ""), CORE_MODULE_EXPORTS by module name, each distinct
+// type export leaf with the modules exporting it in table order, and the
+// bare spellings by name. Each key keeps its first row, as a scan would.
+CORE_CALL_KEY_ROWS: #run ir_key_index(core_call_lookup_keys(CORE_CALLS))
+CORE_CALL_KEYS: #run ir_key_index_keys(core_call_lookup_keys(CORE_CALLS), CORE_CALL_KEY_ROWS)
+CORE_MODULE_EXPORT_KEY_ROWS: #run ir_key_index(core_module_export_names(CORE_MODULE_EXPORTS))
+CORE_MODULE_EXPORT_KEYS: #run ir_key_index_keys(core_module_export_names(CORE_MODULE_EXPORTS), CORE_MODULE_EXPORT_KEY_ROWS)
+CORE_TYPE_EXPORT_LEAVES: #run core_type_export_leaves(CORE_MODULE_EXPORTS)
+CORE_TYPE_EXPORT_MODULES: #run core_type_export_modules(CORE_MODULE_EXPORTS, CORE_TYPE_EXPORT_LEAVES)
+CORE_TYPE_EXPORT_KEY_ROWS: #run ir_key_index(CORE_TYPE_EXPORT_LEAVES)
+CORE_TYPE_EXPORT_KEYS: #run ir_key_index_keys(CORE_TYPE_EXPORT_LEAVES, CORE_TYPE_EXPORT_KEY_ROWS)
+CORE_BARE_SOURCE_KEY_ROWS: #run ir_key_index(core_bare_source_names(CORE_BARE_SOURCE_MODULES))
+CORE_BARE_SOURCE_KEYS: #run ir_key_index_keys(core_bare_source_names(CORE_BARE_SOURCE_MODULES), CORE_BARE_SOURCE_KEY_ROWS)
+
+// A non-receiver Core call's lookup key.
+core_call_lookup_key: fn(module_name: String, member: String) -> String Never! {
+    "{module_name} {member}"
+}
+
+core_call_lookup_keys: fn(rows: [CoreCallRecord]) -> [String] Never! {
+    keys := [String]{}
+    loop row in rows {
+        if {
+            core_call_is_receiver(row) -> keys.push("")
+            else -> keys.push(core_call_lookup_key(row.module_name, row.member))
+        }
+    }
+    keys
+}
+
+core_module_export_names: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
+    names := [String]{}
+    loop row in rows -> names.push(row.module_name)
+    names
+}
+
+// The distinct type export leaves of `rows`, in first-export order.
+core_type_export_leaves: fn(rows: [CoreModuleExportNames]) -> [String] Never! {
+    leaves := [String]{}
+    seen := [String:Bool]{}
+    loop row in rows {
+        loop at in 0..<row.type_exports.len() {
+            if seen.get(row.type_exports[at]) != None -> next
+            seen[row.type_exports[at]] = true
+            leaves.push(row.type_exports[at])
+        }
+    }
+    leaves
+}
+
+// Per leaf of `leaves`, the module of each row of `rows` exporting it, in
+// table order.
+core_type_export_modules: fn(rows: [CoreModuleExportNames], leaves: [String]) -> [[String]] Never! {
+    slots := [String:Int]{}
+    groups := [[String]]{}
+    // The last row that joined each leaf's modules, so a row joins once.
+    joined := [Int]{}
+    loop index in 0..<leaves.len() {
+        slots[leaves[index]] = index
+        groups.push([String]{})
+        joined.push(-1)
+    }
+    loop (row_index, row) in rows {
+        loop at in 0..<row.type_exports.len() {
+            slot: slots.get(row.type_exports[at]) ?? next
+            if joined[slot] == row_index -> next
+            joined[slot] = row_index
+            groups[slot].push(row.module_name)
+        }
+    }
+    groups
+}
+
+core_bare_source_names: fn(rows: [CoreBareSourceModule]) -> [String] Never! {
+    names := [String]{}
+    loop row in rows -> names.push(row.name)
+    names
+}
+
 core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportNames] Never! {
     rows := [CoreModuleExportNames]{}
     loop entry in declared.modules {
