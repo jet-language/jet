@@ -1,0 +1,8 @@
+Error [jet.CollectionChangedWhileRead]: While the loop is reading `names`, nothing may change it
+  --> tests/ui/list_loop_lend_for_write.jet:10:19
+    |
+ 10 |         clear_all(names)
+    |                   ^^^^^
+ Why: The loop reads `names` across its body, so lending `names` for writing to `clear_all` can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `names` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
+More: jet-lang.dev/e/E0507

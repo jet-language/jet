@@ -1,0 +1,19 @@
+// Lending another list for writing inside the loop, or the read list once the
+// loop is done, stays accepted.
+add_all: fn(into: &[String], from: [String]) {
+    loop item in from -> into.push(item.copy())
+}
+
+clear_all: fn(xs: &[String]) {
+    xs.clear()
+}
+
+run: fn() {
+    names := ["alpha", "beta"]
+    seen := [String]{}
+    loop name in names {
+        add_all(seen, [name.copy(), name.copy()])
+    }
+    clear_all(names)
+    print("{seen.len()}|{names.len()}")
+}

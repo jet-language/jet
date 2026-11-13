@@ -1,0 +1,13 @@
+// A loop reads `names` while the body lends it to a write parameter that
+// clears it, so the row the loop still reads would be gone: refused.
+clear_all: fn(xs: &[String]) {
+    xs.clear()
+}
+
+run: fn() {
+    names := ["alpha", "beta", "gamma"]
+    loop name in names {
+        clear_all(names)
+        print(name)
+    }
+}
