@@ -4295,7 +4295,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     }
                     import_visibility: graph.modules[module_index].imports[import_index].visibility
                     module_symbol: Symbol{id: symbol_id(SymbolKind.Import, source_identity, submodule, local), kind: SymbolKind.Import, name: local, module_name: submodule, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
-                    submodule_index: sema_registration_cached_module_index(graph, submodule, import_module_indices)
+                    submodule_index: sema_registration_core_unit_index(graph, submodule)
                     sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule, target_module_index: submodule_index, visibility: import_visibility})
                     next
                 }
@@ -5077,10 +5077,31 @@ sema_registration_lookup_qualified: fn(graph: SemaRegistrationGraph, module_iden
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     module_row: graph.modules[module_index]
     loop import in module_row.imports {
+        // `use core.mem` selects the Core submodule `mem` from `core`: the
+        // alias names the loaded unit its binding holds, not the import's
+        // `core` target.
+        if import.declaration.kind == .Unqualified(_, _, _, _, _) {
+            loop binding in import.bindings {
+                if binding.local != alias || binding.symbol.kind != SymbolKind.Import -> next
+                core_index: binding.target_module_index ?? next
+                resolved: sema_registration_resolve_export(graph, core_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
+                return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: graph.modules[core_index].module_identity, visibility: resolved.visibility})
+            }
+        }
         if import.declaration.alias != alias || sema_registration_file_import_taken_over(module_row, import) -> next
         target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return None
         resolved: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
         return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})
+    }
+    None
+}
+
+// The loaded unit of a Core module: the loader loads one unit per Core module
+// name (jet_driver_core_unit), and its identity is the unit's source path,
+// not the module name a namespace binding records.
+sema_registration_core_unit_index: fn(graph: SemaRegistrationGraph, module_name: String) -> Int? {
+    loop index in 0..<graph.modules.len() {
+        if graph.modules[index].module_name == module_name && graph.modules[index].module_identity.starts_with("<corelib>/") -> return Val(index)
     }
     None
 }

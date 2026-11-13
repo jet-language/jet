@@ -8,24 +8,24 @@ env: JET_STORE_DIR={work}/cache
 # null field: no null, so a literal that leaves a field out is refused
 step: jet check null_field/main.jet
 exit: 1
-stderr: ~ "[jet.InvalidConstructionField]"
-stderr: ~ "missing fields: label"
+stderr: ~ "[jet.InvalidConstructionField]" # the report goes on with its location and help
+stderr: ~ "missing fields: label" # one line of that report names the field
 # unfilled list: a slot read before any write is refused
 step: jet check unfilled_list/main.jet
 exit: 1
-stderr: ~ "[jet.UninitializedRead]"
+stderr: ~ "[jet.UninitializedRead]" # the report goes on with its location and help
 # int-to-pointer cast: an address becomes a pointer only inside #Unsafe
 step: jet check int_to_pointer/main.jet
 exit: 1
-stderr: ~ "[jet.MemoryOperationOutsideUnsafe]"
+stderr: ~ "[jet.MemoryOperationOutsideUnsafe]" # the report goes on with its location and help
 # silent overflow: I32 2147483647 + 1 stops instead of wrapping
 step: jet run overflow/main.jet
 env: JET_V_SAFETY_VALUE=2147483647
 exit: 70
 stdout: = "2147483647\n"
-stderr: ~ "Stop [E3010]"
-stderr: ~ "overflow"
+stderr: ~ "Stop [E3010]" # the stop report goes on with where it stopped
+stderr: ~ "overflow" # one line of that report names the overflow
 # mismatched C declaration: a written declaration must match the binding
 step: jet check c_declaration/main.jet
 exit: 1
-stderr: ~ "[jet.OverlayBindingConflict]"
+stderr: ~ "[jet.OverlayBindingConflict]" # the report goes on with its location and help
