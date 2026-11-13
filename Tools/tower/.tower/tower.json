@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6818,
-    "rev": 101582,
+    "rev": 101588,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58546,7 +58546,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T14:47:43.364Z",
+      "updated": "2026-11-13T15:24:08.372Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -198621,6 +198621,1097 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T13:12:20.023Z"
+    },
+    {
+      "id": "D-SPEED-DATAPAR1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "Should Jet try a fully data-parallel compiler design?",
+      "situation": "Most compilers handle code one piece at a time: look at this node, then its children. A data-parallel compiler instead runs each pass as operations over whole tables at once, like a spreadsheet formula applied to a whole column. That can use wide vector hardware, and graphics cards, which normal compilers cannot. It has been shown for small languages, not yet for a language as rich as Jet. Jet's speed plan reaches its 30-million-lines-per-second goal on ordinary processor cores, so this is about going past the goal or rescuing a step that falls short. You are asked whether, and when, to explore it. We recommend A: one bounded prototype of one pass, started once the plan meets its goal or a step stalls, with a bar it must clear.",
+      "gist": "Should Jet fund one bounded prototype of a compiler pass written as whole-array operations, and when?",
+      "lesson": "A new shape of algorithm can use hardware the usual one cannot, but it must beat the usual one on every core.",
+      "explainer": "A pass is one step of the compiler, such as name resolution. A column is a flat list of values, one per node. SIMD means one instruction working on many values at once. A GPU is a graphics card used for general computing. Wall time is the time on the clock from start to finish.",
+      "story": "Even with 32 threads, a one-node-at-a-time compiler hits a ceiling. Vector instructions handle many values per step, and a graphics card has thousands of small cores, but both help only if the work is written as whole-column operations.",
+      "inWild": "Co-dfns and Pareas are research compilers. No production compiler for a large language works this way.",
+      "detail": "Prior art: Co-dfns, Aaron Hsu's APL compiler (thesis, 2019), runs its passes as array operations on a GPU. Pareas (Voetter and others, 2022) lexes, parses and generates code on a GPU.\n\nThe plan's exit (#5479 c3, 30M lines/s) is budgeted inside 32 CPU threads: step 6 (#5479 c9) allows at most 1 µs of CPU per line. Jet has no general GPU compute path today; `GPU` is an effect root for graphics and game operations. The plan's steps 0 to 5 are staffed by one agent.\n\nUnder A, the prototype starts once #5479 c3 lands, or earlier if a plan step stalls below its gate. One pass is rewritten as array operations over #6793's flat columns: name resolution, or type propagation for a subset. It runs on CPU vector instructions, and on a GPU only if Jet has a GPU compute path by then. The bar to continue: at least 4x less wall time than the scalar pass running on all 32 threads, on the c1 corpus, with identical results and diagnostics.\n\nBelow the bar, the prototype is recorded as evidence and stopped. Under D, the same prototype starts as soon as #6793 lands.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One bounded prototype, after the plan's goal or a stall",
+          "gist": "Rewrite one pass as array operations once the 30M goal is met or a step stalls. Continue only past a 4x bar against all 32 threads.",
+          "detail": "Bounded scope, an explicit stop rule, and a start that does not compete with the planned steps.",
+          "code": "// Unchanged user code; one compiler pass runs as column operations.\nprice: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+        },
+        {
+          "key": "B",
+          "name": "No",
+          "gist": "Stay with the scalar data-oriented core and parallel pipeline.",
+          "detail": "No prototype.",
+          "code": "price: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+        },
+        {
+          "key": "C",
+          "name": "Commit to a full data-parallel compiler",
+          "gist": "Plan a full rewrite now.",
+          "detail": "All passes rewritten as array operations.",
+          "code": "price: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+        },
+        {
+          "key": "D",
+          "name": "The same prototype, right after #6793",
+          "gist": "Start the bounded prototype as soon as the flat columns land.",
+          "detail": "Same scope and bar as A, started before the plan's later steps finish.",
+          "code": "// Unchanged user code; one compiler pass runs as column operations.\nprice: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A tests the idea at bounded cost, on columns #6793 builds anyway, against the real 32-thread baseline, without delaying the planned steps.",
+        "gains": [
+          "Evidence before commitment",
+          "Reuses #6793's layout",
+          "No delay to the plan"
+        ],
+        "losses": [
+          {
+            "loss": "The prototype may not clear the bar.",
+            "mitigation": "The stop rule caps the cost, and the result is kept as evidence."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B never tests the known path past the CPU ceiling."
+          },
+          {
+            "key": "C",
+            "reason": "C commits to a full rewrite with no evidence."
+          },
+          {
+            "key": "D",
+            "reason": "D takes people from the planned steps, whose gains are measured, and measures against a scalar pass the plan is still speeding up."
+          }
+        ],
+        "tradeoff": "A small bounded research cost, started after the plan's goal, for a chance at a step change."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked #5479 c3/c9, the one-agent staffing, the census and spec.md: the 4x bar lacked a baseline, and Jet has no GPU compute path. Changed: the bar is 4x less wall time than all 32 scalar threads, GPU runs need a GPU path, A starts after c3 or a stall, and the old timing is D."
+      },
+      "checkInstructions": "Read #6793's slice plan ($JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md, S4) for the column layout. Read #5479 c3 and c9 for the goal and the CPU budget.",
+      "surface": {
+        "gist": "Should Jet fund one bounded prototype of a compiler pass written as whole-array operations, and when?",
+        "lesson": "A new shape of algorithm can use hardware the usual one cannot, but it must beat the usual one on every core.",
+        "trio": {
+          "current": {
+            "note": "Today every pass walks nodes one at a time.",
+            "code": "// Sema resolves names node by node today.\nprice: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+          },
+          "wild": {
+            "lang": "APL (Co-dfns)",
+            "note": "Co-dfns writes compiler passes as whole-array expressions.",
+            "code": "⍝ Each compiler pass is an array expression over node tables,\n⍝ run on the GPU by the Co-dfns runtime."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One bounded prototype, after the plan's goal or a stall",
+            "gist": "Rewrite one pass as array operations once the 30M goal is met or a step stalls. Continue only past a 4x bar against all 32 threads.",
+            "gains": [
+              "Tests the known path past the CPU-core ceiling",
+              "Bounded cost",
+              "Does not delay the planned steps"
+            ],
+            "losses": [
+              "Research effort that may not pay off"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; one compiler pass runs as column operations.\nprice: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "No",
+            "gist": "Stay with the scalar data-oriented core and parallel pipeline.",
+            "gains": [
+              "No research cost"
+            ],
+            "losses": [
+              "The ceiling stays where 32 cores put it"
+            ],
+            "proposed": {
+              "code": "price: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Commit to a full data-parallel compiler",
+            "gist": "Plan a full rewrite now.",
+            "gains": [
+              "Largest possible upside"
+            ],
+            "losses": [
+              "A full rewrite with no evidence yet"
+            ],
+            "proposed": {
+              "code": "price: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "The same prototype, right after #6793",
+            "gist": "Start the bounded prototype as soon as the flat columns land.",
+            "gains": [
+              "Evidence sooner"
+            ],
+            "losses": [
+              "Competes with the planned steps for the same people",
+              "Measures against a scalar pass the plan is still speeding up"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; one compiler pass runs as column operations.\nprice: fn(qty: Int, unit: Int) -> Int { qty * unit }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A tests the idea at bounded cost, on columns #6793 builds anyway, against the real 32-thread baseline, without delaying the planned steps.",
+          "gains": [
+            "Evidence before commitment",
+            "Reuses #6793's layout",
+            "No delay to the plan"
+          ],
+          "losses": [
+            {
+              "loss": "The prototype may not clear the bar.",
+              "mitigation": "The stop rule caps the cost, and the result is kept as evidence."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B never tests the known path past the CPU ceiling."
+            },
+            {
+              "key": "C",
+              "reason": "C commits to a full rewrite with no evidence."
+            },
+            {
+              "key": "D",
+              "reason": "D takes people from the planned steps, whose gains are measured, and measures against a scalar pass the plan is still speeding up."
+            }
+          ],
+          "tradeoff": "A small bounded research cost, started after the plan's goal, for a chance at a step change."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:03.248Z"
+    },
+    {
+      "id": "D-SPEED-LINEAR1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "Should 'checking time grows in step with the code' be a language rule?",
+      "situation": "Some language rules can make the compiler's work grow much faster than the code: doubling a file can quadruple, or worse, the time to check it. Swift's slow type inference on long arithmetic and Rust's trait solver on deep generic code are known examples. Jet already has a scaling test that fails when a compiler step grows too fast on its sample programs. But no language rule says every rule must keep pace, so a rule that no sample exercises can still blow up on someone's code. You are asked whether 'checking keeps pace with the code' becomes a language rule. We recommend A: adopt the rule, audit today's rules once, add a scaling sample per rule, and ballot only real language changes.",
+      "gist": "Should every language rule check in time that grows in step with the code, with one audit of today's rules?",
+      "lesson": "Compile speed is partly a language-design property: a rule that can blow up will eventually blow up on someone's code.",
+      "explainer": "'Proportional' (linear) means twice the code takes about twice the time. The rule allows a little more, N log N, the cost of sorting a list, which is what Jet's scaling test already accepts. 'Super-linear' means much more, such as four times. Type inference is the compiler working out types you did not write. A trait solver finds which implementation of an interface a call uses.",
+      "story": "A generated file has a 20,000-arm choice. If the checker's work grows with the square of the arms, the file takes minutes and gigabytes to check, and nothing warned anyone in advance.",
+      "inWild": "Go was designed for fast compiles, with simple inference and no overloading. Swift's expression type checker is known for 'expression too complex' errors. Rust's trait solver can be slow on deep generics. Zig and Jai keep inference local.",
+      "detail": "Today: Tools/perf/scaling (Tower #4319, #4601) compiles generated program shapes at growing sizes. It fails when a compiler phase or work counter grows faster than k * N log N, but it covers only the shapes it generates. #5910 c61 (open) adds one shape: a 20,000-branch chain must check with peak memory growing at most linearly from 1,000 to 20,000 branches.\n\nOne audit candidate is visible in code. The ownership last-use query reads the rest of a body's statements at a use (Compiler/JetSema/Source/Sema/Ownership/LastUse.jet). That may be quadratic in a long body with many moves; it is not measured.\n\nUnder A, the rule is written in Docs/spec: checking takes at most N log N time and memory in the program's size. Compile-time code a user writes is excluded, because it is the user's own program.\n\nOne audit in Docs/audits lists every rule whose cost can grow faster: inference, overload and trait resolution, exhaustiveness, flow typing, ownership, generic instantiation depth and compile-time evaluation. Each finding gets a shape in Tools/perf/scaling. A finding that is only slow checking code is fixed under a card like any bug. A finding that needs the language to change gets its own ballot.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Adopt the rule, audit once, give every rule a scaling shape",
+          "gist": "Checking keeps pace with the code (at most N log N). One audit lists today's exceptions; slow code is fixed as a bug, and only language changes get ballots.",
+          "detail": "The rule goes in Docs/spec. The audit is one dated report. Each finding gets a Tools/perf/scaling shape at growing sizes. Findings that need a language change each get their own ballot; the rest are fixed directly.",
+          "code": "// Unchanged user code; the scaling test checks this shape at growing\n// sizes and fails if time or memory grows faster than N log N.\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "No rule; fix slow cases as bugs when found",
+          "gist": "Keep today's practice.",
+          "detail": "The scaling test keeps its current shapes; other slow checks are treated as bugs when someone reports one.",
+          "code": "// Unchanged user code; no scaling shape for this rule.\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "No rule; a hard work limit instead",
+          "gist": "The compiler stops with an error when one check does more than a fixed amount of work.",
+          "detail": "Like Swift's 'unable to type-check this expression in reasonable time' error. A check that passes a fixed work limit is refused with an error naming the limit. Every compile ends in bounded time.",
+          "code": "// Under C, past the limit this valid code is refused:\n// Error: this choice is too large to check; split it into smaller functions\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A makes keeping pace a guarantee, reuses Jet's existing scaling test, and still gives every language change its own vote.",
+        "gains": [
+          "Predictable compile time on any code shape",
+          "No language change without its own ballot"
+        ],
+        "losses": [
+          {
+            "loss": "The audit and the new scaling shapes take work.",
+            "mitigation": "The shapes plug into the existing Tools/perf/scaling generator and gate, and the audit is one report done once."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves users to find the slow rules that no scaling shape covers."
+          },
+          {
+            "key": "C",
+            "reason": "C refuses valid programs at an arbitrary limit instead of removing the slow rule."
+          }
+        ],
+        "tradeoff": "One audit and a set of scaling shapes in exchange for a guarantee."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked Tools/perf/scaling (already gates phases at N log N), #5910 c61, Ownership/LastUse.jet and the snippets with jet check; the chain snippets and old C's `items: [Int] = []` were invalid. Changed: the rule is N log N on the existing gate, only language changes get ballots, and C is now a hard work limit, since E0501 already refuses later-statement inference."
+      },
+      "checkInstructions": "Read Tools/perf/scaling/README.md, #5910 c61, Compiler/JetSema/Source/Sema/Ownership/LastUse.jet, and the inference and resolution code in Compiler/JetSema/Source/Sema (TypeRelations.jet, Calls/Checking.jet).",
+      "surface": {
+        "gist": "Should every language rule check in time that grows in step with the code, with one audit of today's rules?",
+        "lesson": "Compile speed is partly a language-design property: a rule that can blow up will eventually blow up on someone's code.",
+        "trio": {
+          "current": {
+            "note": "Today the scaling test covers only the shapes it generates; #5910 c61 adds this one.",
+            "code": "// A generated 20,000-arm choice (#5910 c61), shown with three arms.\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Long untyped arithmetic can exceed the type checker's time limit.",
+            "code": "// Swift: may fail with 'the compiler is unable to type-check this\n// expression in reasonable time'.\nlet x = 1 + 2.0 * 3 - 4 / 5.0 + 6 * 7 - 8 + 9.0 * 10 - 11 / 12"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Adopt the rule, audit once, give every rule a scaling shape",
+            "gist": "Checking keeps pace with the code (at most N log N). One audit lists today's exceptions; slow code is fixed as a bug, and only language changes get ballots.",
+            "gains": [
+              "Slow rules are found by audit, not by users",
+              "Every language change still gets its own vote"
+            ],
+            "losses": [
+              "The audit and the new shapes are work"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; the scaling test checks this shape at growing\n// sizes and fails if time or memory grows faster than N log N.\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "No rule; fix slow cases as bugs when found",
+            "gist": "Keep today's practice.",
+            "gains": [
+              "No up-front work"
+            ],
+            "losses": [
+              "Users find the slow rules no shape covers"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; no scaling shape for this rule.\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No rule; a hard work limit instead",
+            "gist": "The compiler stops with an error when one check does more than a fixed amount of work.",
+            "gains": [
+              "Compile time is bounded on any input"
+            ],
+            "losses": [
+              "Valid programs are refused at an arbitrary limit",
+              "Generated code, the most likely to hit it, must be split by hand"
+            ],
+            "proposed": {
+              "code": "// Under C, past the limit this valid code is refused:\n// Error: this choice is too large to check; split it into smaller functions\nlabel: fn(n: Int) -> String {\n    if {\n        n == 0 -> \"zero\"\n        n == 1 -> \"one\"\n        else -> \"many\"\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes keeping pace a guarantee, reuses Jet's existing scaling test, and still gives every language change its own vote.",
+          "gains": [
+            "Predictable compile time on any code shape",
+            "No language change without its own ballot"
+          ],
+          "losses": [
+            {
+              "loss": "The audit and the new scaling shapes take work.",
+              "mitigation": "The shapes plug into the existing Tools/perf/scaling generator and gate, and the audit is one report done once."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves users to find the slow rules that no scaling shape covers."
+            },
+            {
+              "key": "C",
+              "reason": "C refuses valid programs at an arbitrary limit instead of removing the slow rule."
+            }
+          ],
+          "tradeoff": "One audit and a set of scaling shapes in exchange for a guarantee."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:04.364Z"
+    },
+    {
+      "id": "D-SPEED-NOAST1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "Should the compiler skip building a syntax tree for ordinary code?",
+      "situation": "A compiler normally reads source text into a syntax tree: an in-memory diagram of the program, one box per piece of code. The next steps walk that diagram, and it is thrown away at the end. Building and walking it costs memory and time on every line. Fast one-pass compilers such as Tiny C skip it for ordinary code. Jet's speed plan already shrinks the diagram. It also handles one function at a time, while that function's data sits in the processor's fast memory. So nobody yet knows how much the diagram will still cost. You are asked whether, and when, Jet's compiler should drop it for ordinary function bodies. We recommend A: finish the planned one-function-at-a-time pipeline, measure what the diagram still costs, and drop it only if it takes over a tenth of the time per line.",
+      "gist": "Should the compiler check ordinary function bodies straight from the parser's notes, with no syntax tree in between, and if so, when?",
+      "lesson": "A tree is a convenience, not a requirement. Measure what it still costs once the rest is fast.",
+      "explainer": "A parser reads tokens (words and symbols) and recognizes the grammar. An event is a small note the parser writes as it goes, such as 'a call with two arguments ends here'. A consumer is code that reads those notes. The checker (sema) decides whether the code is correct.\n\nGenerics (code written once for many types) and compile-time code are read more than once, so they keep a stored form. The ownership check, which decides when a value is used for the last time, also looks ahead within a function. So the checker always keeps its own record of each function body.",
+      "story": "A team's service has 200,000 lines of plain functions. Every `jet build` builds a diagram for all of it, uses it once and drops it. If that diagram is a large share of the work, removing it speeds up every build; if it is small, a big redesign buys little.",
+      "inWild": "Tiny C Compiler and Wirth's Oberon compilers generate code during parsing with no tree. rust-analyzer's parser emits events that a builder turns into a tree. Roslyn builds an immutable green tree that tools share. Go and Rust build full trees for everything.",
+      "detail": "Today: the parser (Compiler/JetParser) builds payload node enums defined in Compiler/JetFoundation/Source/AST (Expr 51 cases, Stmt 35, Item 24, per the #6793 c1 census), and sema walks them. Sema then writes each function's checked body, which the ownership checks and lowering read. The ownership last-use query reads the statements after a use (Compiler/JetSema/Source/Sema/Ownership/LastUse.jet). So a body cannot be checked in one strictly forward pass, and any replacement keeps a stored checked body per function.\n\nPlanned: #6793 S4 replaces the payload enums with flat per-file columns. #5479 c8 (plan step 4) runs parse, check, lower, select and encode per function while its data is still in cache, with no whole-program intermediate copy. After both, the syntax tree is a small per-function column set that stays in cache.\n\nUnder A, once c8 lands, the c1 throughput cell (#5479 c1) measures the CPU per line spent writing and reading the per-function syntax columns. Above 10% of the CPU per line, the parser is changed to emit events. The compiler's consumer resolves names against the declaration pass's signatures, so a body may call a function declared later. It writes the checked body directly, which ownership and lowering read as today.\n\nGeneric bodies and compile-time functions keep #6793's flat syntax columns. The formatter and the language server build their lossless tree from the same events. Diagnostics keep their spans and order, proven by byte-identical ui snapshots. Below the bar, the measurement is recorded on #5479 and the tree stays.\n\nUnder D, the same parser change is made now, before S4 and c8 land.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Per-function pipeline first; event parser only past a measured bar",
+          "gist": "Finish the planned per-function pipeline and measure what the tree still costs. Build the event parser only above 10% of the CPU per line.",
+          "detail": "Step 1 is #5479 c8 as planned. Step 2 is a measurement in the c1 cell. Step 3, only past the bar: one event parser feeding the checker and the tools, with ui snapshots byte-identical.",
+          "code": "// Unchanged user code.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// Step 1: parse -> per-function syntax columns -> check -> IR.\n// Step 3, only past the bar: parse events -> checked body -> IR;\n// jet fmt and the editor build their tree from the same events."
+        },
+        {
+          "key": "B",
+          "name": "Keep the tree; rely on the planned fused pipeline",
+          "gist": "Every body still becomes a flat tree; #5479 c8 fuses the later steps.",
+          "detail": "No change to the plan. #6793 flattens the tree and #5479 c8 fuses phases per function. Nothing measures what the tree still costs.",
+          "code": "// Unchanged user code; parse -> flat tree -> check -> IR, fused per function.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+        },
+        {
+          "key": "C",
+          "name": "No stored syntax at all, even for generics",
+          "gist": "Generic and compile-time bodies are re-read from source text for each use.",
+          "detail": "No syntax is stored after parsing. Each generic instantiation or compile-time call re-parses its body from the source text.",
+          "code": "// Unchanged user code; generic bodies are re-parsed per instantiation.\nlargest: fn<T: Comparable>(a: T, b: T) -> T { if a > b -> a else -> b }"
+        },
+        {
+          "key": "D",
+          "name": "Build the event parser now, before the fused pipeline",
+          "gist": "Switch the parser to events and the checker to read them now.",
+          "detail": "The event design of A, started before the flat columns and the per-function pipeline exist, with no measurement first.",
+          "code": "// Unchanged user code; parse events -> checked body -> IR, built now.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A removes the tree only if it still costs enough after the pipeline, so the checker is rewritten once, for a measured gain.",
+        "gains": [
+          "Redesign only for a measured gain",
+          "If built: less work per line, one parser, same diagnostics"
+        ],
+        "losses": [
+          {
+            "loss": "If the bar is met, the gain arrives after the per-function pipeline.",
+            "mitigation": "That pipeline comes first in the plan anyway, keeps the tree small and in cache, and the existing throughput test measures it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B never measures whether the tree still costs enough to remove."
+          },
+          {
+            "key": "C",
+            "reason": "C re-parses generic bodies for every use, which is slower than keeping them."
+          },
+          {
+            "key": "D",
+            "reason": "D rewrites the checker for a tree layout that S4 and c8 replace, before any measurement shows a gain."
+          }
+        ],
+        "tradeoff": "Waiting for one planned step in exchange for redesigning the checker once, and only for a measured gain."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked the census, #5479 c8, #6793 S4 and every snippet with jet check; fixed invalid option C syntax, 'macros', the Roslyn claim, and A ignoring ownership look-ahead (Ownership/LastUse.jet). Changed: A now waits for c8 and a 10% CPU-per-line bar, and the old build-now A became option D."
+      },
+      "checkInstructions": "Read the payload enums in Compiler/JetFoundation/Source/AST (Expressions.jet, Statements.jet, Items.jet). Read the #6793 census at $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md. Read the ownership last-use query in Compiler/JetSema/Source/Sema/Ownership/LastUse.jet, and #5479 c8 for the planned per-function pipeline.",
+      "surface": {
+        "gist": "Should the compiler check ordinary function bodies straight from the parser's notes, with no syntax tree in between, and if so, when?",
+        "lesson": "A tree is a convenience, not a requirement. Measure what it still costs once the rest is fast.",
+        "trio": {
+          "current": {
+            "note": "Today every function body becomes a tree, then is checked and lowered.",
+            "code": "// Any ordinary function; today it is parsed into a tree first.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+          },
+          "wild": {
+            "lang": "C (Tiny C Compiler)",
+            "note": "TCC emits machine code while parsing each statement; no tree exists.",
+            "code": "/* tcc parses this and emits code for each statement as it reads it */\nint total(int *items, int n) {\n    int sum = 0;\n    for (int i = 0; i < n; i++) sum += items[i];\n    return sum;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Per-function pipeline first; event parser only past a measured bar",
+            "gist": "Finish the planned per-function pipeline and measure what the tree still costs. Build the event parser only above 10% of the CPU per line.",
+            "gains": [
+              "Checker redesigned only for a measured gain",
+              "If built: no tree for ordinary code, one parser, same diagnostics"
+            ],
+            "losses": [
+              "If the bar is met, the gain comes after plan step 4"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// Step 1: parse -> per-function syntax columns -> check -> IR.\n// Step 3, only past the bar: parse events -> checked body -> IR;\n// jet fmt and the editor build their tree from the same events."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the tree; rely on the planned fused pipeline",
+            "gist": "Every body still becomes a flat tree; #5479 c8 fuses the later steps.",
+            "gains": [
+              "Simplest; no new design work"
+            ],
+            "losses": [
+              "Every line still pays a per-function tree, of unmeasured cost"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; parse -> flat tree -> check -> IR, fused per function.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No stored syntax at all, even for generics",
+            "gist": "Generic and compile-time bodies are re-read from source text for each use.",
+            "gains": [
+              "No stored syntax columns at all"
+            ],
+            "losses": [
+              "Generic-heavy code re-parses the same body many times, slower overall",
+              "Spans must be recomputed per instantiation"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; generic bodies are re-parsed per instantiation.\nlargest: fn<T: Comparable>(a: T, b: T) -> T { if a > b -> a else -> b }"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Build the event parser now, before the fused pipeline",
+            "gist": "Switch the parser to events and the checker to read them now.",
+            "gains": [
+              "The tree-free design exists sooner"
+            ],
+            "losses": [
+              "Rewrites the checker for a tree layout about to be replaced",
+              "No evidence that the gain is worth it"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code; parse events -> checked body -> IR, built now.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A removes the tree only if it still costs enough after the pipeline, so the checker is rewritten once, for a measured gain.",
+          "gains": [
+            "Redesign only for a measured gain",
+            "If built: less work per line, one parser, same diagnostics"
+          ],
+          "losses": [
+            {
+              "loss": "If the bar is met, the gain arrives after the per-function pipeline.",
+              "mitigation": "That pipeline comes first in the plan anyway, keeps the tree small and in cache, and the existing throughput test measures it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B never measures whether the tree still costs enough to remove."
+            },
+            {
+              "key": "C",
+              "reason": "C re-parses generic bodies for every use, which is slower than keeping them."
+            },
+            {
+              "key": "D",
+              "reason": "D rewrites the checker for a tree layout that S4 and c8 replace, before any measurement shows a gain."
+            }
+          ],
+          "tradeoff": "Waiting for one planned step in exchange for redesigning the checker once, and only for a measured gain."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:05.493Z"
+    },
+    {
+      "id": "D-SPEED-OSCOST1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "How far should the compiler go in tuning operating-system costs?",
+      "situation": "When a compiler handles a gigabyte of code per second, small operating-system costs add up. Examples are each new page of memory the system hands out, each separate file read, and each step of writing the output. These are fixed costs every compile pays. Linux offers ways to pay them in bulk; other systems offer different ones. Fast paths can also backfire: Jet's memory allocator turns large pages off today, because on a busy machine they can stall every thread. You are asked how far Jet's compiler should go. We recommend A: per-system fast paths inside the shared runtime, each kept only where a measurement shows a gain, with identical output everywhere.",
+      "gist": "Should the compiler use operating-system fast paths such as large memory pages and batched file reads, and where?",
+      "lesson": "At high speed fixed costs dominate, so pay them in bulk, but only where a busy machine measures a real win.",
+      "explainer": "A memory page is the unit the system hands out, usually 4 KB. A large page is 2 MB, so far fewer hand-outs are needed, but each is slower to set up. Pre-faulting means asking for the pages up front. io_uring is a Linux way to submit many file reads at once. An arena is a block of memory a compiler step fills and then frees all at once. The program image is the runnable machine code the compiler produces.",
+      "story": "`jet run hello.jet` compiles a tiny program, yet it still pays these fixed costs: memory handed out a page at a time, and each file read on its own. With bulk paths those costs shrink for every compile, large or small.",
+      "inWild": "The mold linker pre-sizes its output file and spreads its work over every core. Zig's compiler once never freed memory until exit and dropped that policy as compile-time work grew. Most compilers use the general allocator and plain reads.",
+      "detail": "Today: `jet run` and `jet dev` link the program image and run it from memory (jet_cli_launch in Compiler/JetCli/Source/Cli/Host.jet). They write a file under `.jet/build` only when the system refuses executable memory.\n\nThe runtime allocator deliberately keeps 4 KiB pages: alloc_region_map in Compiler/JetRuntime/Source/Alloc.jet sets MADV_NOHUGEPAGE. Its reason: a first touch of a huge page zeroes 2 MiB, and an advised huge region compacts memory on fault. That stalls every allocating thread on a loaded host. The runtime has no io_uring or other batched read path.\n\nUnder A, the compiler's phase arenas (#6793 S7) may use large pages and be pre-faulted in one call. That holds only where the size is known up front and the c1 throughput cell (#5479 c1) shows a gain on both an idle and a loaded host. The general allocator keeps its 4 KiB pages. Source files are read in one batch: io_uring on Linux, plain reads elsewhere. The runtime and precompiled Core (#6328 c22) sit at fixed places in the image, so each compile only patches its own code.\n\nAll of it lives in the shared runtime (I9) and changes timing only, never output. Each fast path has the plain path as its tested fallback. Arenas are freed in bulk at phase end, so nothing is left for process exit to clean up (I1).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Portable behavior, measured per-system fast paths in the shared runtime",
+          "gist": "Large-page arenas, batched reads and a pre-laid-out image wherever the system offers them and a measurement shows a gain; identical output everywhere.",
+          "detail": "Fast paths live only in the shared runtime; a system without one uses the plain path. Each is kept only where the c1 cell shows a gain on an idle and a loaded host. Proof: identical goldens on every system, timings reported per system.",
+          "code": "$ jet run hello.jet\nhello\n# same output on every system; faster where a fast path measured faster"
+        },
+        {
+          "key": "B",
+          "name": "Portable paths only",
+          "gist": "No system-specific fast paths.",
+          "detail": "One plain path on every system.",
+          "code": "$ jet run hello.jet\nhello\n# same speed path on every system"
+        },
+        {
+          "key": "C",
+          "name": "Linux fast paths only",
+          "gist": "Tune Linux and leave other systems on the plain path.",
+          "detail": "Fast paths on Linux only.",
+          "code": "$ jet run hello.jet   # Linux: fast path; others: plain\nhello"
+        },
+        {
+          "key": "D",
+          "name": "Never free compiler memory; let exit release it",
+          "gist": "Skip freeing during a compile and let the system reclaim everything when the compiler exits.",
+          "detail": "The compiler's own memory is never returned while it runs. Each compile saves the cost of freeing, but peak memory grows with everything the compile ever held. It needs an exception to I1, which says safe Jet cannot leak.",
+          "code": "$ jet run hello.jet\nhello\n# nothing freed until the compiler exits"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A cuts fixed per-compile cost wherever a system allows it, keeps only measured wins, and never changes output.",
+        "gains": [
+          "Lower fixed cost for every compile",
+          "No output differences",
+          "No regression on loaded machines"
+        ],
+        "losses": [
+          {
+            "loss": "More runtime code for each system's fast path.",
+            "mitigation": "Fast paths sit behind one runtime interface, the plain path is the tested fallback, and a path that measures no faster is dropped."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves fixed costs that dominate small compiles."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves other systems slower for no design reason."
+          },
+          {
+            "key": "D",
+            "reason": "D trades unbounded memory growth for a small saving that arenas freed in bulk already give."
+          }
+        ],
+        "tradeoff": "Some per-system runtime code in exchange for lower fixed cost everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked Host.jet, Alloc.jet, D-EXEC2 and AGENTS.md I1/I9: run-from-memory is Host.jet, not D-EXEC2=A, and the allocator deliberately disables huge pages, which the draft's large pages contradicted. Changed: large pages and batched reads only where measured on a loaded host, the unmeasured 20 ms and mold claims are gone, and option D (never free until exit) is added."
+      },
+      "checkInstructions": "Read alloc_region_map in Compiler/JetRuntime/Source/Alloc.jet for why pages are 4 KiB today. Read jet_cli_launch in Compiler/JetCli/Source/Cli/Host.jet for running from memory. Read #6793's arena slice S7 in $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md.",
+      "surface": {
+        "gist": "Should the compiler use operating-system fast paths such as large memory pages and batched file reads, and where?",
+        "lesson": "At high speed fixed costs dominate, so pay them in bulk, but only where a busy machine measures a real win.",
+        "trio": {
+          "current": {
+            "note": "Today memory comes in 4 KiB pages on purpose, and each file is read on its own.",
+            "code": "$ jet run hello.jet\nhello\n# pays per-page and per-file costs, however small the program"
+          },
+          "wild": {
+            "lang": "Linker (mold)",
+            "note": "mold pre-sizes its output and works on every core to cut fixed costs.",
+            "code": "$ mold -run make\n# links with a pre-sized output file, using every core"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Portable behavior, measured per-system fast paths in the shared runtime",
+            "gist": "Large-page arenas, batched reads and a pre-laid-out image wherever the system offers them and a measurement shows a gain; identical output everywhere.",
+            "gains": [
+              "Every compile pays less fixed cost",
+              "Same output everywhere",
+              "No fast path that slows a busy machine"
+            ],
+            "losses": [
+              "More runtime code per system"
+            ],
+            "proposed": {
+              "code": "$ jet run hello.jet\nhello\n# same output on every system; faster where a fast path measured faster"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Portable paths only",
+            "gist": "No system-specific fast paths.",
+            "gains": [
+              "Least code"
+            ],
+            "losses": [
+              "Fixed costs stay as they are"
+            ],
+            "proposed": {
+              "code": "$ jet run hello.jet\nhello\n# same speed path on every system"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Linux fast paths only",
+            "gist": "Tune Linux and leave other systems on the plain path.",
+            "gains": [
+              "Less code than A"
+            ],
+            "losses": [
+              "Other systems stay slower"
+            ],
+            "proposed": {
+              "code": "$ jet run hello.jet   # Linux: fast path; others: plain\nhello"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Never free compiler memory; let exit release it",
+            "gist": "Skip freeing during a compile and let the system reclaim everything when the compiler exits.",
+            "gains": [
+              "No freeing cost at all"
+            ],
+            "losses": [
+              "Peak memory grows with all work done, against #5910's 1 GB self-compile limit",
+              "Zig used this policy and dropped it as compile-time work grew"
+            ],
+            "proposed": {
+              "code": "$ jet run hello.jet\nhello\n# nothing freed until the compiler exits"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A cuts fixed per-compile cost wherever a system allows it, keeps only measured wins, and never changes output.",
+          "gains": [
+            "Lower fixed cost for every compile",
+            "No output differences",
+            "No regression on loaded machines"
+          ],
+          "losses": [
+            {
+              "loss": "More runtime code for each system's fast path.",
+              "mitigation": "Fast paths sit behind one runtime interface, the plain path is the tested fallback, and a path that measures no faster is dropped."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves fixed costs that dominate small compiles."
+            },
+            {
+              "key": "C",
+              "reason": "C leaves other systems slower for no design reason."
+            },
+            {
+              "key": "D",
+              "reason": "D trades unbounded memory growth for a small saving that arenas freed in bulk already give."
+            }
+          ],
+          "tradeoff": "Some per-system runtime code in exchange for lower fixed cost everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:06.473Z"
+    },
+    {
+      "id": "D-SPEED-PGO1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "When should the jet compiler itself be built using a record of real runs?",
+      "situation": "A compiler can make a program faster by first watching it run, then rebuilding it with that record: hot code is laid out together and branches are arranged for the common case. Jet has already decided that users' release builds may read such a record. The speed plan has no step that does this for the jet compiler itself; its last step, tuning the compiler's own machine code, waits until the language is mostly stable. You are asked whether to build the compiler with a record earlier. We recommend A: build the record-reading feature now and use it for every compiler release, with a fresh record of a fixed, broad set of runs.",
+      "gist": "Should Jet build its own compiler with a record of real runs (profile-guided optimization) now, or at its last speed step?",
+      "lesson": "The fastest code layout depends on what actually runs, and a broad, fresh record prevents tuning for one benchmark or an old compiler.",
+      "explainer": "A profile, or run record, is a list of which code ran how often. Profile-guided optimization (PGO) rebuilds a program using it. Post-link layout (BOLT) reorders the finished machine code using it.",
+      "story": "Compilers spend much of their time waiting on instruction fetches, because their code is large and jumps around. Rebuilding a compiler with a record of its own runs puts the hot paths together; the BOLT paper (CGO 2019) reports up to 20% on Clang and GCC.",
+      "inWild": "Chrome, Firefox, Clang and the Rust compiler ship builds made with profile-guided optimization, and several use BOLT. Go added profile-guided optimization in Go 1.21.",
+      "detail": "D-ADAPTIVE-TIER1 is ratified as B: a release build reads a record of real runs (its option A), plus an opt-in in-program optimizer. The record is the existing .jettrace file. A record kept in the package is used automatically. `--profile` already names build profiles, so the flag that picks another record still needs its own word. The decision lists gaps: .jettrace profile rows attribute only to `fn run`, with no stack samples, and the code generator reads no record yet.\n\n#5479's plan has no step that builds the compiler with a record. Its step 6 (#5479 c9) is the compiler compiled well: register allocation, inlining, bounds-check hoisting and SIMD selection. It starts once the language is mostly stable, so tuning is not wiped out by later changes. It requires every gain to be general, applying to all generated code (owner, 2026-10-23).\n\nUnder A, the record-reading build of D-ADAPTIVE-TIER1 is built now, as the general user feature, starting with code layout. Each release build of the compiler runs in two stages. A plain build runs the #5479 c1 corpus, Examples and the test suites to write a record, and the release build reads it.\n\nThe record is an input to the toolchain build, collected fresh per release, not a cache across compiles. Because it is re-taken every release, language changes cannot leave it stale, which is why step 6 waits. The compiler's output is byte-identical with or without the record.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Build the record feature now; every compiler release uses a fresh broad record",
+          "gist": "Start now, for users and for the compiler, with a fixed public set of recorded runs re-taken each release.",
+          "detail": "The run set is fixed and public, the record is re-taken every release, and the compiler's output is identical with or without it.",
+          "code": "# Release build of the compiler (proposed):\n$ jet build Compiler\n# 1. a plain build runs the c1 corpus, Examples and the suites,\n#    writing a record (a .jettrace file)\n# 2. the release build reads that record\n# The jet it makes compiles every program to the same bytes."
+        },
+        {
+          "key": "B",
+          "name": "Wait for plan step 6",
+          "gist": "Keep the current plan: after the language is mostly stable.",
+          "detail": "No change.",
+          "code": "$ jet build Compiler\n# no record until step 6"
+        },
+        {
+          "key": "C",
+          "name": "Never",
+          "gist": "Keep compiler builds without run records.",
+          "detail": "The compiler is never built with a record.",
+          "code": "$ jet build Compiler"
+        },
+        {
+          "key": "D",
+          "name": "Post-link layout of the jet binary only (BOLT)",
+          "gist": "Reorder the finished jet binary's machine code with an outside tool, as Clang and rustc releases do, without building the user feature.",
+          "detail": "An outside post-link optimizer (llvm-bolt) rearranges the shipped jet binary using a recorded run. Users' programs get nothing.",
+          "code": "$ jet build Compiler\n$ llvm-bolt jet -o jet.bolt -data=perf.fdata   # outside tool, Linux only"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A takes the gain before step 6, builds the decided user feature with it, and re-records every release.",
+        "gains": [
+          "Faster compiler sooner",
+          "The user feature arrives with it"
+        ],
+        "losses": [
+          {
+            "loss": "Each compiler release build takes a second build and a corpus run.",
+            "mitigation": "Only release builds pay it, and the corpus run is the c1 throughput cell the plan already runs."
+          },
+          {
+            "loss": "The record goes stale as the compiler changes.",
+            "mitigation": "Each release build re-takes it from the fixed run set, so a release never uses a stale record."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B delays a known gain."
+          },
+          {
+            "key": "C",
+            "reason": "C gives the gain up entirely."
+          },
+          {
+            "key": "D",
+            "reason": "D gives only the compiler a gain, through an outside tool, which the plan's rule that every gain is general rules out."
+          }
+        ],
+        "tradeoff": "Building a decided feature earlier, and a longer release build, in exchange for compiler speed now."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked D-ADAPTIVE-TIER1 (ratified B; record = .jettrace; flag word unchosen), #5479 c9 and cli.md; `jet build --profile dev` and A's `--record` flag were invalid or invented, and step 6 never names records. Changed: snippets and detail match the decision and step 6, the two-build release cost is a mitigated loss, the 20% figure cites the BOLT paper, and BOLT-only option D is added."
+      },
+      "checkInstructions": "Read decision D-ADAPTIVE-TIER1 on Tower (its option A, the gaps and the flag-word note) and #5479's plan, step 6 (#5479 c9).",
+      "surface": {
+        "gist": "Should Jet build its own compiler with a record of real runs (profile-guided optimization) now, or at its last speed step?",
+        "lesson": "The fastest code layout depends on what actually runs, and a broad, fresh record prevents tuning for one benchmark or an old compiler.",
+        "trio": {
+          "current": {
+            "note": "Today the compiler is built without a run record.",
+            "code": "$ jet build Compiler\n# no run record is read"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go 1.21 rebuilds with a CPU profile placed beside the main package.",
+            "code": "$ go build -pgo=default.pgo ./cmd/server"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Build the record feature now; every compiler release uses a fresh broad record",
+            "gist": "Start now, for users and for the compiler, with a fixed public set of recorded runs re-taken each release.",
+            "gains": [
+              "Compiler speed gain before step 6",
+              "Users get the same feature"
+            ],
+            "losses": [
+              "Each compiler release build runs twice plus a corpus run"
+            ],
+            "proposed": {
+              "code": "# Release build of the compiler (proposed):\n$ jet build Compiler\n# 1. a plain build runs the c1 corpus, Examples and the suites,\n#    writing a record (a .jettrace file)\n# 2. the release build reads that record\n# The jet it makes compiles every program to the same bytes."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Wait for plan step 6",
+            "gist": "Keep the current plan: after the language is mostly stable.",
+            "gains": [
+              "No work now"
+            ],
+            "losses": [
+              "The gain waits"
+            ],
+            "proposed": {
+              "code": "$ jet build Compiler\n# no record until step 6"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Never",
+            "gist": "Keep compiler builds without run records.",
+            "gains": [
+              "Simplest builds"
+            ],
+            "losses": [
+              "Leaves a known gain unused"
+            ],
+            "proposed": {
+              "code": "$ jet build Compiler"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Post-link layout of the jet binary only (BOLT)",
+            "gist": "Reorder the finished jet binary's machine code with an outside tool, as Clang and rustc releases do, without building the user feature.",
+            "gains": [
+              "A layout gain without new Jet features"
+            ],
+            "losses": [
+              "Adds an outside LLVM tool to the release build",
+              "Linux binaries only",
+              "A compiler-only gain, against the plan's rule that every gain is general"
+            ],
+            "proposed": {
+              "code": "$ jet build Compiler\n$ llvm-bolt jet -o jet.bolt -data=perf.fdata   # outside tool, Linux only"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A takes the gain before step 6, builds the decided user feature with it, and re-records every release.",
+          "gains": [
+            "Faster compiler sooner",
+            "The user feature arrives with it"
+          ],
+          "losses": [
+            {
+              "loss": "Each compiler release build takes a second build and a corpus run.",
+              "mitigation": "Only release builds pay it, and the corpus run is the c1 throughput cell the plan already runs."
+            },
+            {
+              "loss": "The record goes stale as the compiler changes.",
+              "mitigation": "Each release build re-takes it from the fixed run set, so a release never uses a stale record."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B delays a known gain."
+            },
+            {
+              "key": "C",
+              "reason": "C gives the gain up entirely."
+            },
+            {
+              "key": "D",
+              "reason": "D gives only the compiler a gain, through an outside tool, which the plan's rule that every gain is general rules out."
+            }
+          ],
+          "tradeoff": "Building a decided feature earlier, and a longer release build, in exchange for compiler speed now."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:07.418Z"
+    },
+    {
+      "id": "D-SPEED-SIMDCHECK1",
+      "cardId": "c031o59x",
+      "group": "other",
+      "title": "May some checks run as vector operations over whole columns of code?",
+      "situation": "After the data-oriented core lands, the program's tokens and nodes sit in flat lists. Some simple checks can then run over a whole list at once using vector instructions, many values per instruction. Today they run one node at a time. The risk is that error messages could change: different order, or a less exact location. You are asked whether to allow vectorized checks. We recommend A: a vector pass finds whether any error exists and the precise pass reports it, so messages stay byte-identical. A check that also computes answers is vectorized only if its answers are proven identical.",
+      "gist": "Should simple checks run as vector operations over token and node columns, with identical diagnostics and results?",
+      "lesson": "Fast path for the common case, precise path for the rare one, and the same answers either way.",
+      "explainer": "A vector instruction (SIMD) handles 16 to 64 values at once. A diagnostic is an error or warning message with its source location (span). Some checks only report errors; others also compute an answer the compiler uses later, such as which declaration a name refers to.",
+      "story": "Almost all code a compiler sees is correct. A fast pass that confirms 'no error here' over a whole column, and hands the rare error region to the precise pass, keeps messages exactly as they are today.",
+      "inWild": "simdutf validates text encoding with vector instructions and, on failure, reports the exact position of the first error. Most compilers check node by node.",
+      "detail": "Depends on #6793's flat columns (S4). The lexer's vector classifier is already planned (#5910 c6, at most 1 ns per byte). This ballot covers checks after lexing. Candidate checks are chosen by measurement.\n\nUnder A, two kinds qualify. A check whose only output is diagnostics runs as a vector pass that answers 'clean or not' per region. On 'not clean', today's scalar check runs on that region and produces the diagnostics. A check that also computes a result, such as name lookup, may be vectorized only if the vector version computes identical results, proven by running both versions over the test corpora. Proof for both: every ui snapshot is byte-identical.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Vector checks with identical diagnostics and results",
+          "gist": "Vector pass says clean or not; the precise pass reports errors; a check that computes answers must compute identical ones.",
+          "detail": "Every ui snapshot stays byte-identical, and a result-computing check is vectorized only with its results proven identical over the test corpora.",
+          "code": "// Unchanged user code and unchanged messages.\nshow: fn(name: String) { print(\"hello {name}\") }"
+        },
+        {
+          "key": "B",
+          "name": "Scalar checks only",
+          "gist": "No vectorized checks.",
+          "detail": "No change.",
+          "code": "show: fn(name: String) { print(\"hello {name}\") }"
+        },
+        {
+          "key": "C",
+          "name": "Vector checks with coarser diagnostics",
+          "gist": "Allow message order or span precision to change for speed.",
+          "detail": "Diagnostics may differ in order or span.",
+          "code": "show: fn(name: String) { print(\"hello {name}\") }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A speeds up checking of correct code, which is almost all code, and keeps every message and every result exactly as it is.",
+        "gains": [
+          "Faster checks",
+          "Identical diagnostics and results"
+        ],
+        "losses": [
+          {
+            "loss": "Each vectorized check also keeps its precise version.",
+            "mitigation": "The precise version is today's check, unchanged; only the fast pre-pass is new."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves the speedup unused."
+          },
+          {
+            "key": "C",
+            "reason": "C makes error messages worse, which Jet does not trade for speed."
+          }
+        ],
+        "tradeoff": "A small fast pre-pass beside each chosen check, in exchange for speed with no message changes."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked the #6793 census, #5910 c6 and the snippet with jet check; clean-or-not only fits diagnostic-only checks, the draft's name-lookup candidate computes results, and simdjson gives no error positions. Changed: A requires identical results for result-computing checks, the vector lexer is placed, the check cites the census, and simdutf's validate_utf8_with_errors is the outside example."
+      },
+      "checkInstructions": "Read #6793's slice plan ($JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md, S4) and #5910 c6 (the planned vector lexer).",
+      "surface": {
+        "gist": "Should simple checks run as vector operations over token and node columns, with identical diagnostics and results?",
+        "lesson": "Fast path for the common case, precise path for the rare one, and the same answers either way.",
+        "trio": {
+          "current": {
+            "note": "Today every check walks nodes one at a time.",
+            "code": "show: fn(name: String) { print(\"hello {name}\") }"
+          },
+          "wild": {
+            "lang": "C++ (simdutf)",
+            "note": "simdutf checks text with vector instructions, then gives the exact error position.",
+            "code": "// Fast vector check; on failure, r.count is where the error is.\nsimdutf::result r = simdutf::validate_utf8_with_errors(buf, len);\nif (r.error != simdutf::error_code::SUCCESS) { report(r.count); }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Vector checks with identical diagnostics and results",
+            "gist": "Vector pass says clean or not; the precise pass reports errors; a check that computes answers must compute identical ones.",
+            "gains": [
+              "Faster checking of correct code",
+              "Messages and results unchanged"
+            ],
+            "losses": [
+              "Two implementations per vectorized check"
+            ],
+            "proposed": {
+              "code": "// Unchanged user code and unchanged messages.\nshow: fn(name: String) { print(\"hello {name}\") }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Scalar checks only",
+            "gist": "No vectorized checks.",
+            "gains": [
+              "One implementation per check"
+            ],
+            "losses": [
+              "Leaves the speedup unused"
+            ],
+            "proposed": {
+              "code": "show: fn(name: String) { print(\"hello {name}\") }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Vector checks with coarser diagnostics",
+            "gist": "Allow message order or span precision to change for speed.",
+            "gains": [
+              "Simplest fast path"
+            ],
+            "losses": [
+              "Error messages get worse"
+            ],
+            "proposed": {
+              "code": "show: fn(name: String) { print(\"hello {name}\") }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A speeds up checking of correct code, which is almost all code, and keeps every message and every result exactly as it is.",
+          "gains": [
+            "Faster checks",
+            "Identical diagnostics and results"
+          ],
+          "losses": [
+            {
+              "loss": "Each vectorized check also keeps its precise version.",
+              "mitigation": "The precise version is today's check, unchanged; only the fast pre-pass is new."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B leaves the speedup unused."
+            },
+            {
+              "key": "C",
+              "reason": "C makes error messages worse, which Jet does not trade for speed."
+            }
+          ],
+          "tradeoff": "A small fast pre-pass beside each chosen check, in exchange for speed with no message changes."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T15:24:08.372Z"
     }
   ],
   "questions": [
@@ -201966,6 +203057,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T15:24:08.372Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-SIMDCHECK1",
+      "note": "May some checks run as vector operations over whole columns of code?"
+    },
+    {
+      "at": "2026-11-13T15:24:07.418Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-PGO1",
+      "note": "When should the jet compiler itself be built using a record of real runs?"
+    },
+    {
+      "at": "2026-11-13T15:24:06.473Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-OSCOST1",
+      "note": "How far should the compiler go in tuning operating-system costs?"
+    },
+    {
+      "at": "2026-11-13T15:24:05.493Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-NOAST1",
+      "note": "Should the compiler skip building a syntax tree for ordinary code?"
+    },
+    {
+      "at": "2026-11-13T15:24:04.364Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-LINEAR1",
+      "note": "Should 'checking time grows in step with the code' be a language rule?"
+    },
+    {
+      "at": "2026-11-13T15:24:03.248Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SPEED-DATAPAR1",
+      "note": "Should Jet try a fully data-parallel compiler design?"
+    },
     {
       "at": "2026-11-13T15:21:02.244Z",
       "by": "Main",
