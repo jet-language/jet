@@ -284,6 +284,15 @@ SemaEffectInstantiation: struct {
     span: Span
 }
 
+// A call site that binds callee parameter vertex `to` to a larger type
+// holding caller parameter vertex `from`: instantiation `site` of `node`.
+SemaEffectExpandingSite: struct {
+    from: Int
+    to: Int
+    node: Int
+    site: Int
+}
+
 // An implementation a caller runs through an instantiation it writes.
 SemaEffectInstanceReach: struct {
     label: String
@@ -2804,6 +2813,93 @@ sema_effect_resolve_type_params: fn(nodes: &[SemaEffectNode], calls: SemaEffectC
     }
 }
 
+// A call that binds a callee's type parameter to a larger type holding one
+// of the caller's own parameters (`Grow<[T]>` inside `Grow<T>`), and that
+// leads back to that parameter, asks for a deeper instance each time one is
+// built, so building it never ends (E0909). Only what a non-generic function
+// reaches is built, so a cycle none reaches is not reported.
+sema_effect_check_expanding_instances: fn(nodes: [SemaEffectNode], node_by_key: NameRows, inputs: [SemaEffectModuleInput], diagnostics: &[Diagnostic]) {
+    reached := (loop _ in nodes -> false)
+    queue := [Int]{}
+    loop index in 0..<nodes.len() {
+        if nodes[index].type_params.len() > 0 -> next
+        reached[index] = true
+        queue.push(index)
+    }
+    cursor := 0
+    loop cursor < queue.len() {
+        index: queue[cursor]
+        cursor += 1
+        targets := nodes[index].call_edges.copy()
+        loop edge in nodes[index].value_edges -> targets.push(edge.copy())
+        loop site in nodes[index].instantiations -> targets.push(site.callee.copy())
+        loop target in targets {
+            callee: sema_effect_node_index(node_by_key, target) ?? next
+            if reached[callee] -> next
+            reached[callee] = true
+            queue.push(callee)
+        }
+    }
+    // One vertex per type parameter of each node, from `first[node]` on.
+    first := [Int]{}
+    vertices := 0
+    loop node in nodes {
+        first.push(vertices)
+        vertices += node.type_params.len()
+    }
+    edges := (loop _ in 0..<vertices -> [Int]{})
+    expanding := [SemaEffectExpandingSite]{}
+    loop index in 0..<nodes.len() {
+        if !reached[index] || nodes[index].type_params.len() == 0 -> next
+        loop (site_row, site) in nodes[index].instantiations {
+            callee: sema_effect_node_index(node_by_key, site.callee) ?? next
+            loop (position, param) in nodes[callee].type_params {
+                bound: sema_effect_param_binding(nodes[callee], site, param) ?? next
+                loop (own, name) in nodes[index].type_params {
+                    if !sema_inference_type_mentions_param(bound, name) -> next
+                    from: first[index] + own
+                    to: first[callee] + position
+                    edges[from].push(to)
+                    same := false
+                    if bound == .Named(found) && found == name -> same = true
+                    if !same -> expanding.push(SemaEffectExpandingSite{from: from, to: to, node: index, site: site_row})
+                }
+            }
+        }
+    }
+    seen := (loop _ in 0..<vertices -> false)
+    reported := [String]{}
+    loop row in expanding {
+        key: "{row.node}:{row.site}"
+        if reported.contains(key) -> next
+        // Whether the expanding edge's target leads back to its source.
+        touched := [Int]{row.to}
+        seen[row.to] = true
+        walk := 0
+        cycle := false
+        loop walk < touched.len() && !cycle {
+            vertex: touched[walk]
+            walk += 1
+            loop next_vertex in edges[vertex] {
+                if next_vertex == row.from {
+                    cycle = true
+                    break
+                }
+                if seen[next_vertex] -> next
+                seen[next_vertex] = true
+                touched.push(next_vertex)
+            }
+        }
+        loop vertex in touched -> seen[vertex] = false
+        if !cycle -> next
+        reported.push(key)
+        site: nodes[row.node].instantiations[row.site]
+        function: sema_effect_symbol_leaf(site.callee)
+        batch := [Diagnostic]{sema_error("E0909", site.span, "Calling `{function}` through `{site.label}` here needs a deeper instance every time, so building it never ends", "Each instance of a generic function is built for its own types, and this call leads back to it with its type nested one level deeper", "Simplify the generic nesting or split the instantiation into smaller bounds.")}
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[row.node].module_index].source_segments, batch)
+    }
+}
+
 // The instance reaches of `node` with each target's solved row.
 sema_effect_instance_notes: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node: SemaEffectNode) -> [SemaEffectInstanceNote] Never! {
     notes := [SemaEffectInstanceNote]{}
@@ -4364,6 +4460,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     any_unsafe: unsafe_node || sema_effect_calls_any_unsafe_foreign(calls.modules)
     calls = sema_effect_collect_threads(modules, inputs, nodes, calls, any_unsafe, diagnostics, threads)
     sema_effect_resolve_type_params(nodes, calls)
+    sema_effect_check_expanding_instances(nodes, calls.node_by_key, inputs, diagnostics)
     callers: sema_effect_callers(nodes, calls.node_by_key)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {

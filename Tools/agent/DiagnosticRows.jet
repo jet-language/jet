@@ -27,10 +27,12 @@
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
-// The rows also give the dated safety audit under Docs/research: each active
+// The rows also give the dated safety audit under Docs/audits: each active
 // error row's `safety_class`, its reason and its expert path, and the sealed
 // floors with the first place the compiler reports each. Both modes refuse an
-// active error row in SAFETY_RANGES that states no `safety_class`.
+// active error row in SAFETY_RANGES that states no `safety_class`, and an
+// active row whose code no source line reports unless UNREPORTED_CODES, which
+// only shrinks, lists it.
 use {
     files: core.files
     process: core.process
@@ -65,8 +67,8 @@ SPEC_DIR: "Docs/spec"
 LETTER_LAW_EXCEPTIONS: [String]{"E2818", "E2930", "E2931", "E2934", "JT0101", "L1101", "W0410"}
 
 // The dated safety audit: the date --write wrote it, then AUDIT_NAME, in
-// AUDIT_DIR as its research notes are named.
-AUDIT_DIR: "Docs/research"
+// AUDIT_DIR.
+AUDIT_DIR: "Docs/audits"
 AUDIT_NAME: "-diagnostic-safety-audit.md"
 // The code ranges, as a code's first three characters, whose active error
 // rows must state a `safety_class`. The list grows until it holds every code.
@@ -76,7 +78,15 @@ SEMA_ROOT: "Compiler/JetSema/"
 // A diagnostic code in compiler source: quoted whole, as `sema_error("E0212", …)`
 // passes it, at the head of a message, as `"E2416: env var …"`, or in a runtime
 // report's brackets, as `Runtime fault [R0801]: …`.
-QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]:]"}
+QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT|L|W)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]:]"}
+// The active rows no source reports yet: the `jet os` verbs whose engine has
+// not landed, which Jetpack/JetOS refuses until it does. Every other active
+// row has a line under REPORT_ROOTS that reports its code. The list only
+// shrinks: a listed code that a line reports, or whose row is no longer
+// active, fails both modes until it is removed here, and the list may hold no
+// more than UNREPORTED_CEILING codes; lower the ceiling with each removal.
+UNREPORTED_CODES: [String]{"E1278", "E1279", "E1280", "E1281", "E1282", "E1283", "E1284", "E1285", "E1286", "E1287", "E1288", "E1289", "E1290", "E1291"}
+UNREPORTED_CEILING: 14
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
@@ -1223,6 +1233,29 @@ site_rank: fn(path: String, line: String, code: String) -> Int Never! {
     3
 }
 
+// The active rows no source line reports and `listed` does not exempt, and
+// the listed codes that no longer need it: one a line reports, or one that
+// names no active row. `listed` may hold no more than `ceiling` codes.
+unreported_problems: fn(facts: [RowFacts], sites: ReportSites, listed: [String], ceiling: Int) -> [String] Never! {
+    problems := [String]{}
+    if listed.len() > ceiling -> problems.push("UNREPORTED_CODES holds {listed.len()} codes, more than its ceiling of {ceiling}; the list only shrinks")
+    active := [String]{}
+    loop row in facts {
+        if !row.active -> next
+        active.push(row.code.copy()) // copy: the row keeps its code
+        if sites.code_sites.get(row.code) != None || listed.contains(row.code) -> next
+        problems.push("{row.code} ({row.name}) is an active row that no line under {REPORT_ROOTS.join(", ")} reports; add the check that reports it, or retire the row")
+    }
+    loop code in listed {
+        if !active.contains(code) {
+            problems.push("{code} is in UNREPORTED_CODES but names no active row; remove it from the list")
+        } else if sites.code_sites.get(code) == .Val(site) {
+            problems.push("{code} is in UNREPORTED_CODES but {site} reports it; remove it from the list")
+        }
+    }
+    problems
+}
+
 // A table cell: a `|` would end it.
 audit_cell: fn(text: String) -> String Never! { text.replace("|", "\\|") }
 
@@ -1288,7 +1321,7 @@ render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
         "",
         "## Sealed floors no source reports",
         "",
-        "These soundness rows have no expert path, but no line under {REPORT_ROOTS.join(", ")} passes or quotes their code, so no program meets them today. Each becomes a sealed floor once a report site names it, or is retired.",
+        "These soundness rows have no expert path, but no line under {REPORT_ROOTS.join(", ")} passes or quotes their code, so no program meets them today: they are the `UNREPORTED_CODES` of Tools/agent/DiagnosticRows.jet, a list that only shrinks. Each becomes a sealed floor once a report site names it, or is retired.",
         "",
         "| Code | Type | Why no expert path reaches the program |",
         "|---|---|---|",
@@ -1406,6 +1439,8 @@ diagnostic_rows_main: fn(args: [String]) -[FS, Time]> String DiagnosticRowsError
     stale: stale_pages(generated) ?? return Err(err)
     sites: report_sites(rows.facts) ?? return Err(err)
     sites_failure: "{sites.problems.len()} report sites do not render through their rows:\n{sites.problems.join("\n")}"
+    unreported: unreported_problems(rows.facts, sites, UNREPORTED_CODES, UNREPORTED_CEILING)
+    unreported_failure: "{unreported.len()} active rows or listed codes break the report-site rule:\n{unreported.join("\n")}"
     citations: spec_citations(rows.facts) ?? return Err(err)
     citations_failure: "{citations.problems.len()} spec citations name no diagnostic row:\n{citations.problems.join("\n")}"
     differing := [String]{}
@@ -1429,8 +1464,11 @@ diagnostic_rows_main: fn(args: [String]) -[FS, Time]> String DiagnosticRowsError
             if audit_at != "" && audit_at != dated -> files.remove(audit_at) ?? return Err(rows_fail("cannot remove {audit_at}: {err}"))
         }
         loop path in stale -> files.remove(path) ?? return Err(rows_fail("cannot remove {path}: {err}"))
-        if sites.problems.len() > 0 -> return Err(rows_fail(sites_failure))
-        if citations.problems.len() > 0 -> return Err(rows_fail(citations_failure))
+        written := [String]{}
+        if sites.problems.len() > 0 -> written.push(sites_failure)
+        if unreported.len() > 0 -> written.push(unreported_failure)
+        if citations.problems.len() > 0 -> written.push(citations_failure)
+        if written.len() > 0 -> return Err(rows_fail(written.join("\n")))
         return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len() + 1} in all")
     }
     loop path in stale -> differing.push("{path} (no diagnostic row owns this page)")
@@ -1444,9 +1482,10 @@ diagnostic_rows_main: fn(args: [String]) -[FS, Time]> String DiagnosticRowsError
         failures.push("{differing.len()} copies differ from {SOURCE_PATH}; run jet Tools/agent/DiagnosticRows.jet --write. First: {first.join(", ")}")
     }
     if sites.problems.len() > 0 -> failures.push(sites_failure)
+    if unreported.len() > 0 -> failures.push(unreported_failure)
     if citations.problems.len() > 0 -> failures.push(citations_failure)
     if failures.len() > 0 -> return Err(rows_fail(failures.join("\n")))
-    Ok("diagnostic rows check passed: {generated.len() + 1} copies match, the safety audit among them; {sites.files} source files read, none builds a report by hand, {sites.copies} runtime report copies match their rows, and {citations.cited} codes cited in {citations.pages} spec pages each name a row")
+    Ok("diagnostic rows check passed: {generated.len() + 1} copies match, the safety audit among them; {sites.files} source files read, none builds a report by hand, {sites.copies} runtime report copies match their rows, every active row but the {UNREPORTED_CODES.len()} listed unreported has a report site, and {citations.cited} codes cited in {citations.pages} spec pages each name a row")
 }
 
 run: fn() { print(diagnostic_rows_main(process.args()) ?? process.fail(1, err.message)) }
@@ -1616,15 +1655,30 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCli/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
     quoted := [String]{}
-    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"E2416: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    x: \"Error\" + \"E-mail\""}
+    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"E2416: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    lint(\"L0530\", span)", "    codes: [\"W0410\"]", "    x: \"Error\" + \"E-mail\""}
     loop line in lines {
         loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
     }
-    assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198")
+    assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198 L0530 W0410")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
     lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\"\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
     assert(render_audit((render_rows(row.replace("E0299", "E9999")) ?? panic(err.message)).facts, sites).contains("hold 1 active error rows with no class yet"))
+}
+
+#Test("an active row needs a report site, and the unreported codes only shrink") {
+    facts: (render_rows(MINIMAL_ROW) ?? panic(err.message)).facts
+    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{"E9999 (jet.BadPath) is an active row that no line under Compiler, Core, Jetpack reports; add the check that reports it, or retire the row"})
+    assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 1), [String]{})
+    assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 0), [String]{"UNREPORTED_CODES holds 1 codes, more than its ceiling of 0; the list only shrinks"})
+    assert_eq(unreported_problems(facts, sites, [String]{"E9999", "E8888"}, 2), [String]{"E8888 is in UNREPORTED_CODES but names no active row; remove it from the list"})
+    retired: (render_rows(MINIMAL_ROW.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .Retired\n")) ?? panic(err.message)).facts
+    assert_eq(unreported_problems(retired, sites, [String]{}, 0), [String]{})
+    sites.code_sites["E9999"] = "Compiler/JetSema/b.jet:7"
+    assert_eq(unreported_problems(facts, sites, [String]{}, 0), [String]{})
+    assert_eq(unreported_problems(facts, sites, [String]{"E9999"}, 1), [String]{"E9999 is in UNREPORTED_CODES but Compiler/JetSema/b.jet:7 reports it; remove it from the list"})
+    assert(UNREPORTED_CODES.len() <= UNREPORTED_CEILING)
 }
 
 #Test("a literal reads as the program prints it") {

@@ -1,0 +1,16 @@
+// A generic method that calls itself through a deeper instance (`Grow<[T]>`
+// inside `Grow<T>`) needs a new instance each time one is built, so a
+// reachable one never finishes building.
+Grow: struct<T: Printable> {
+    value: T
+
+    deeper: fn(self) -> Int {
+        nested := Grow<[T]>{ value: [self.value.copy()] }
+        nested.deeper()
+    }
+}
+
+run: fn() {
+    value := Grow<Int>{ value: 7 }
+    print(value.deeper())
+}

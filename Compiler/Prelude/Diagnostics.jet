@@ -8886,14 +8886,18 @@ DuplicateTraitImpl: struct {
 }
 
 InstantiationTooDeep: struct {
+    function: String
+    instance: String
+
     impl Diagnostic {
         code: "E0909"
         safety_class: .Soundness
         safety_reason: "An instantiation that keeps nesting would never finish being built."
         expert_path: "none: no opt-in builds an unbounded instantiation"
-        meaning: "Generic instantiation past the nesting limit"
-        what: fn(self) -> String { "Generic instantiation too deep" }
-        why: fn(self) -> String { "Each generic instantiation creates another, and this chain passed the compiler's nesting limit" }
+        meaning: "A generic call that needs a deeper instance of its own function every time"
+        detail: true
+        what: fn(self) -> String { "Calling `{self.function}` through `{self.instance}` here needs a deeper instance every time, so building it never ends" }
+        why: fn(self) -> String { "Each instance of a generic function is built for its own types, and this call leads back to it with its type nested one level deeper" }
         fix: fn(self) -> String { "Simplify the generic nesting or split the instantiation into smaller bounds." }
     }
 }
