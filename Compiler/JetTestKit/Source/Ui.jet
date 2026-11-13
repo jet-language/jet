@@ -16,6 +16,10 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "check_core", argv: ["check", "Core"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "cli_e2101", argv: ["bench"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        // `jet inspect target` of the named machine (E3302 when none is
+        // declared), and with a live scope it refuses (E2104).
+        {name: "inspect_target", argv: ["inspect", "target", "$arg"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        {name: "inspect_target_live", argv: ["inspect", "target", "--live", "$arg"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         // A programmable build entry's `jet build` under the invocation grants

@@ -1,6 +1,6 @@
 // The `jet inspect` group (the arms its dispatch words reach,
 // `run_build_query`/`run_compiler_api`, and crates/jet-cli
-// `parse_inspect_args`): the eight planes (`jet inspect <plane> [TARGET]
+// `parse_inspect_args`): the nine planes (`jet inspect <plane> [TARGET]
 // [--live PID | --replay ARTIFACT]`) and the `graph`, `query`, `explain-build`,
 // `compiler`, `impact`, and `provenance` actions. The other inspect actions
 // belong to InspectB.jet. A plane, scope, or action whose Jet port has not
@@ -58,10 +58,11 @@ use {
     jetpack_artifact_store.[ArtifactStore]
 }
 
-// `InspectPlane::ALL`, in order.
-JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates"}
+// `InspectPlane::ALL`, in order, then `target` (the target machine dossier).
+JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "target"}
 
-// `InspectScope`: `Target` is a source file or a package directory.
+// `InspectScope`: `Target` is a source file or a package directory (a target
+// machine name for the `target` plane).
 JetCLIInspectScope: enum {
     Package
     Target(target: String)
@@ -106,9 +107,9 @@ jet_cli_inspect_flag_takes_value: fn(argument: String) -> Bool Never! {
 
 // `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
 jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
-    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, or gates"}
+    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, or target"}
     plane: argv[1]
-    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, or gates"}
+    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, or target"}
     target := String?{None}
     live := Int?{None}
     replay := String?{None}
@@ -180,17 +181,19 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
 // `"inspect"`: parse the plane request, then run its projection.
 jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
-        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]` or `jet inspect target [machine]`", color, JET_DRIVER_EXIT_USAGE)
         .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
     }
 }
 
-// `run_inspect`: one parsed plane request. Accel routes before the scopes, then
+// `run_inspect`: one parsed plane request. The target plane reads only the
+// toolchain's machine table. Accel routes before the scopes, then
 // the live and replay scopes, the build coverage table and the Core catalog
 // before the entry, and every other plane reads the entry
 // `inspect_entry_path` resolves.
 jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     plane: request.plane
+    if plane == "target" -> return jet_cli_inspect_target(request, color: color, json: json)
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
     if request.scope == .Replay(artifact) {
         if jet_cli_inspect_entry(request.scope, plane, color) == {

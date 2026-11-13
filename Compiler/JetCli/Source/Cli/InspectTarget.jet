@@ -1,0 +1,72 @@
+// `jet inspect target [machine]`: the declared target machines, or the target
+// dossier of one, read from the toolchain's machine table. It reads no project.
+// With no name it lists every declared machine with its triple, environment
+// and tiers; `--json` prints them as the `targets` array of one
+// `inspect.target` status line. With a name, `--json` prints the dossier object
+// as the `target` field of that line; the text form names the machine, where
+// it runs, and the capabilities it provides and lacks.
+use {
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_TARGET_MACHINE_NAMES, jet_driver_target_machine_by_name]
+    jet_foundation.[TARGET_CAPABILITY_ALL, TargetMachine, jet_target_capability_name, jet_target_environment_identity, jet_target_machine_dossier_json, jet_target_machine_provides_capability, jet_target_provider_identity]
+    jet_pkg_model.[JET_VERSION]
+}
+
+jet_cli_inspect_target: fn(request: JetCLIInspectRequest, color: Bool{false}, json: Bool{false}) -> JetCLIPlan Never! {
+    fix: "run `jet inspect target <machine>` with one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}"
+    machine: if request.scope == {
+        .Target(named) -> jet_driver_target_machine_by_name(named, JET_VERSION) ?? return jet_cli_fail("E3302", "target `{named}` is not available", "the name is not a declared target machine", fix, color, JET_DRIVER_EXIT_USAGE)
+        .Package -> return jet_cli_inspect_target_list(json: json)
+        .Live(_) | .Replay(_) -> return jet_cli_fail("E2104", "`jet inspect target` reads no live process or replay", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    }
+    dossier: jet_target_machine_dossier_json(machine) ?? return jet_cli_fail("E3302", "target `{machine.name}` keeps no dossier", "its audit policy has no dossier lens", fix, color, JET_DRIVER_EXIT_USAGE)
+    if json {
+        // The dossier is already rendered JSON, carried as a pre-rendered value.
+        line: jet_cli_status_render("inspect.target", true, [JetCLIStatusField]{jet_cli_status_field("target", JetCLIStatusValue.Float{text: dossier})})
+        return JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "{line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
+    }
+    provides: loop capability in TARGET_CAPABILITY_ALL if jet_target_machine_provides_capability(machine, capability) -> jet_target_capability_name(capability)
+    lacks: loop capability in TARGET_CAPABILITY_ALL if !jet_target_machine_provides_capability(machine, capability) -> jet_target_capability_name(capability)
+    provided: if provides.len() == 0 -> "(none)" else -> provides.join(", ")
+    lacking: if lacks.len() == 0 -> "(none)" else -> lacks.join(", ")
+    out := "target {machine.name}\n"
+    out = "{out}  triple: {machine.triple}\n"
+    out = "{out}  environment: {jet_target_environment_identity(machine)}\n"
+    out = "{out}  provider identity: {jet_target_provider_identity(machine)}\n"
+    out = "{out}  runs: {jet_cli_inspect_target_runs(machine)}\n"
+    out = "{out}  provides: {provided}\n"
+    out = "{out}  lacks: {lacking}\n"
+    JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
+}
+
+// Every declared machine in table order: its name, triple, environment and
+// tiers. A name and its identity are shown whatever the machine's audit policy;
+// only the dossier needs the dossier lens.
+jet_cli_inspect_target_list: fn(json: Bool{false}) -> JetCLIPlan Never! {
+    machines := [TargetMachine]{}
+    loop name in JET_DRIVER_TARGET_MACHINE_NAMES {
+        machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? next
+        machines.push(machine)
+    }
+    if json {
+        rows: loop machine in machines -> jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(machine.name)),
+            jet_cli_status_field("triple", jet_cli_status_text(machine.triple)),
+            jet_cli_status_field("environment", jet_cli_status_text(jet_target_environment_identity(machine))),
+            jet_cli_status_field("execution", jet_cli_status_object([JetCLIStatusField]{
+                jet_cli_status_field("aot", jet_cli_status_bool(true)),
+                jet_cli_status_field("dev", jet_cli_status_bool(!machine.no_os)),
+            })),
+        })
+        line: jet_cli_status_render("inspect.target", true, [JetCLIStatusField]{jet_cli_status_field("targets", jet_cli_status_array(rows))})
+        return JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: "{line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
+    }
+    out := "target machines\n"
+    loop machine in machines -> out = "{out}  {machine.name} ({machine.triple}, {jet_target_environment_identity(machine)}): runs {jet_cli_inspect_target_runs(machine)}\n"
+    out = "{out}run `jet inspect target <machine>` for one machine's dossier\n"
+    JetCLIPlan.Done{output: JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}}
+}
+
+// The tiers a machine runs at: a machine with no OS runs only ahead-of-time.
+jet_cli_inspect_target_runs: fn(machine: TargetMachine) -> String Never! {
+    if machine.no_os -> "aot" else -> "aot, dev"
+}

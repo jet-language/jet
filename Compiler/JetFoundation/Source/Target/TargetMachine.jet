@@ -572,6 +572,39 @@ jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
     "target-providers-v1:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
 }
 
+// The target dossier: one JSON object with the machine's name, triple,
+// environment and provider identity, every policy and provider fact, and the
+// tiers it runs at. It exists only for a machine whose audit policy keeps the
+// dossier lens.
+jet_target_machine_dossier_json: fn(machine: TargetMachine) -> String? Never! {
+    if !machine.audit.dossier_lens -> return None
+    fields: [String]{
+        "\"name\":{jet_target_json_quote(machine.name)}",
+        "\"triple\":{jet_target_json_quote(machine.triple)}",
+        "\"environment\":{jet_target_json_quote(jet_target_environment_identity(machine))}",
+        "\"provider_identity\":{jet_target_json_quote(jet_target_provider_identity(machine))}",
+        "\"linker\":{jet_target_linker_json(machine.linker)}",
+        "\"allocator\":{jet_target_allocator_json(machine.allocator)}",
+        "\"panic\":{jet_target_panic_json(machine.panic)}",
+        "\"memory\":{jet_target_memory_json(machine.memory)}",
+        "\"mmio_capability\":{jet_target_mmio_json(machine.mmio)}",
+        "\"time_wall\":{jet_target_clock_json(machine.wall_clock)}",
+        "\"time_monotonic\":{jet_target_clock_json(machine.monotonic_clock)}",
+        "\"time_zone_data\":{jet_target_clock_json(machine.zone_data)}",
+        "\"time_sleep\":{jet_target_clock_json(machine.sleep)}",
+        "\"entropy\":{jet_target_entropy_json(machine.entropy)}",
+        "\"scheduler\":{jet_target_scheduler_json(machine.scheduler)}",
+        "\"byte_sink\":{jet_target_byte_sink_json(machine.byte_sink)}",
+        "\"startup\":{jet_target_startup_json(machine.startup)}",
+        "\"provider_facts\":{jet_target_provider_facts_json(machine)}",
+        "\"hardware\":{jet_target_hardware_json(machine.hardware)}",
+        "\"programmers\":{jet_target_programmers_json(machine.programmers)}",
+        "\"execution\":{{\"aot\":true,\"dev\":{jet_target_bool_json(!machine.no_os)}}}",
+        "\"audit\":{{\"build_artifact\":{jet_target_bool_json(machine.audit.build_artifact)},\"dossier_lens\":true}}",
+    }
+    Val("{{{fields.join(",")}}}")
+}
+
 jet_target_allocator_provides_heap: fn(policy: AllocatorPolicy) -> Bool Never! {
     if policy == {
         .HostedDefault | .Provider(_) | .Fixed(_, _) | .Counting(_) -> true

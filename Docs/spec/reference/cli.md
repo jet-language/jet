@@ -1423,6 +1423,22 @@ The compiler assembly includes only the trust store's read path. Gate-aware
 grant writers stay in Jetpack's existing command source alongside its selector
 and JSON writer; granting still checks policy before any store read or write.
 
+`jet inspect target [machine] [--json]` reads only the toolchain's machine
+table, never a project. With no name it lists every declared target machine
+with its triple, environment, and the tiers it runs at; `--json` prints one
+`jet.status/v1` line with action `inspect.target` whose `targets` array holds
+`name`, `triple`, `environment` and `execution` (`aot`, `dev`) per machine.
+With a name it shows that machine's target dossier (D-TARGET-AUDIT1). The text
+form names the machine, its triple, environment and provider identity, whether
+it runs ahead-of-time only or under `jet dev` as well, and the capabilities it
+provides and lacks. `--json` prints one `inspect.target` line whose `target`
+object holds `name`, `triple`, `environment`, `provider_identity`, every policy
+(`linker`, `allocator`, `panic`, `memory`, `mmio_capability`, the four time
+sources, `entropy`, `scheduler`, `byte_sink`, `startup`), `provider_facts`,
+`hardware`, `programmers`, `execution` (`aot`, `dev`) and `audit`. A machine
+whose audit policy has no dossier lens has no dossier, and an unknown name is
+refused with the list of declared machines.
+
 Build graph inspection (`inspect build`, `inspect graph`, and `inspect query
 build`) shares the driver's checked plan projection. Its `files` and
 `affected_files` fields both list the static file universe; this is distinct

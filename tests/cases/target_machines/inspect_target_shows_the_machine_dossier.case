@@ -1,0 +1,53 @@
+# `jet inspect target <machine>` shows the target dossier of one declared
+# target machine: its identity, every policy and provider fact, and the tiers it
+# runs at, from the machine table alone (no project is read). The provider
+# identity hashes the toolchain version, so the case pins its prefix and every
+# other field. With no name it lists every declared machine.
+step: jet inspect target hosted --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ '{"schema":"jet.status/v1","action":"inspect.target","ok":true,"reports":[],"target":{"name":"hosted","triple":"x86_64-unknown-linux-gnu","environment":"hosted","provider_identity":"target-providers-v1:' # the dossier opens with the machine's identity
+stdout: ~ '"linker":{"kind":"hosted-default"},"allocator":{"kind":"hosted-default"},"panic":{"kind":"hosted-default"},"memory":[],"mmio_capability":{"kind":"hosted-default"},"time_wall":{"kind":"hosted-default"},"time_monotonic":{"kind":"hosted-default"},"time_zone_data":{"kind":"hosted-default"},"time_sleep":{"kind":"hosted-default"},"entropy":{"kind":"hosted-default"},"scheduler":{"kind":"hosted-default"},"byte_sink":{"kind":"hosted-default"},"startup":{"kind":"hosted-default"},"provider_facts":[{"capability":"Target.Allocator","fact":{"kind":"hosted-default"}},{"capability":"Target.Memory","fact":[]},{"capability":"Target.Atomic64","fact":{"triple":"x86_64-unknown-linux-gnu","supported":true}},{"capability":"Target.MMIO","fact":{"kind":"hosted-default"}},{"capability":"Target.Hardware","fact":{"svd":null,"register_blocks":[],"interrupts":[],"dma_channels":[]}},{"capability":"Time.Wall","fact":{"kind":"hosted-default"}},{"capability":"Time.Monotonic","fact":{"kind":"hosted-default"}},{"capability":"Time.ZoneData","fact":{"kind":"hosted-default"}},{"capability":"Time.Sleep","fact":{"kind":"hosted-default"}},{"capability":"Rand.Entropy","fact":{"kind":"hosted-default"}},{"capability":"Target.Scheduler","fact":{"kind":"hosted-default"}},{"capability":"IO.Read","fact":{"kind":"hosted-default"}},{"capability":"IO.Write","fact":{"kind":"hosted-default"}},{"capability":"Target.Panic","fact":{"kind":"hosted-default"}},{"capability":"Panic.Report","fact":{"panic":{"kind":"hosted-default"},"sink":{"kind":"hosted-default"}}},{"capability":"Target.Startup","fact":{"policy":{"kind":"hosted-default"},"entry":"","vectors":"","abi":{"calling_convention":"C","version":"1"},"placement":""}}],"hardware":{"svd":null,"register_blocks":[],"interrupts":[],"dma_channels":[]},"programmers":[],"execution":{"aot":true,"dev":true},"audit":{"build_artifact":true,"dossier_lens":true}}}' # every hosted policy and provider fact, then the tiers and the audit policy, to the end of the line
+step: jet inspect target wasm.no-os --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ '"target":{"name":"wasm.no-os","triple":"wasm32-unknown-unknown","environment":"no-os","provider_identity":"target-providers-v1:' # a bare-metal machine's identity
+stdout: ~ '"linker":{"kind":"generated"},"allocator":{"kind":"none"},"panic":{"kind":"abort"},"memory":[{"name":"flash","origin":0,"size_bytes":16777216,"kind":"flash","access":"rx"},{"name":"ram","origin":16777216,"size_bytes":16777216,"kind":"ram","access":"rw"}],"mmio_capability":{"kind":"none"},"time_wall":{"kind":"none"},"time_monotonic":{"kind":"none"},"time_zone_data":{"kind":"none"},"time_sleep":{"kind":"none"},"entropy":{"kind":"none"},"scheduler":{"kind":"none"},"byte_sink":{"kind":"none"},"startup":{"kind":"generated","contract":{"provider":"wasm.no-os.startup","sha256":"sha256:044b58a317b6149beee34ac4fe8e2f3eeb55711f4229fa3fa2d0b6376a0253d7","provenance":"provider:wasm.no-os.startup","abi":{"calling_convention":"C","version":"1"},"limits":{"max_request_bytes":null,"max_response_bytes":null,"max_calls":null}}},"provider_facts":[{"capability":"Target.Allocator","fact":{"kind":"none"}},{"capability":"Target.Memory","fact":[{"name":"flash","origin":0,"size_bytes":16777216,"kind":"flash","access":"rx"},{"name":"ram","origin":16777216,"size_bytes":16777216,"kind":"ram","access":"rw"}]},{"capability":"Target.Atomic64","fact":{"triple":"wasm32-unknown-unknown","supported":true}},{"capability":"Target.MMIO","fact":{"kind":"none"}},{"capability":"Target.Hardware","fact":{"svd":null,"register_blocks":[],"interrupts":[],"dma_channels":[]}},{"capability":"Time.Wall","fact":{"kind":"none"}},{"capability":"Time.Monotonic","fact":{"kind":"none"}},{"capability":"Time.ZoneData","fact":{"kind":"none"}},{"capability":"Time.Sleep","fact":{"kind":"none"}},{"capability":"Rand.Entropy","fact":{"kind":"none"}},{"capability":"Target.Scheduler","fact":{"kind":"none"}},{"capability":"IO.Read","fact":{"kind":"none"}},{"capability":"IO.Write","fact":{"kind":"none"}},{"capability":"Target.Panic","fact":{"kind":"abort"}},{"capability":"Panic.Report","fact":{"panic":{"kind":"abort"},"sink":{"kind":"none"}}},{"capability":"Target.Startup","fact":{"policy":{"kind":"generated","contract":{"provider":"wasm.no-os.startup","sha256":"sha256:044b58a317b6149beee34ac4fe8e2f3eeb55711f4229fa3fa2d0b6376a0253d7","provenance":"provider:wasm.no-os.startup","abi":{"calling_convention":"C","version":"1"},"limits":{"max_request_bytes":null,"max_response_bytes":null,"max_calls":null}}},"entry":"Reset_Handler","vectors":"vectors","abi":{"calling_convention":"C","version":"1"},"placement":".vectors"}}],"hardware":{"svd":null,"register_blocks":[],"interrupts":[],"dma_channels":[]},"programmers":[],"execution":{"aot":true,"dev":false},"audit":{"build_artifact":true,"dossier_lens":true}}}' # no-OS policies and providers, and the machine runs ahead-of-time only
+step: jet inspect target hosted
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "target hosted" # the text form names the machine
+stdout: ~ "triple: x86_64-unknown-linux-gnu" # and its triple
+stdout: ~ "environment: hosted" # and its environment
+stdout: ~ "provider identity: target-providers-v1:" # and its provider identity
+stdout: ~ "runs: aot, dev" # a hosted machine runs under jet dev as well
+stdout: ~ "provides: Target.Allocator, Target.Memory, Target.Atomic64, Target.MMIO, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Target.Panic, Panic.Report, Target.Startup" # every capability a hosted machine provides, in capability order
+stdout: ~ "lacks: Target.Hardware" # a hosted machine declares no hardware facts
+step: jet inspect target wasm.no-os
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "target wasm.no-os" # the text form names the machine
+stdout: ~ "runs: aot" # a no-OS machine runs ahead-of-time
+stdout: ~ "provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup" # its declared RAM, atomics, abort panic and generated startup
+stdout: ~ "lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report" # and none of the hosted services
+stdout: !~ "runs: aot, dev" # and never under jet dev
+step: jet inspect target nowhere
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E3302" # an unknown machine is refused
+stderr: ~ "Target `nowhere` is not available" # by name
+stderr: ~ "wasm.browser" # and the fix lists the declared machines
+step: jet inspect target
+env: NO_COLOR=1
+exit: 0
+stdout: = "target machines\n  board.sensor_v1 (thumbv7em-none-eabihf, no-os): runs aot\n  board.virt_aarch64 (aarch64-unknown-none, no-os): runs aot\n  wasm.browser (wasm32-unknown-unknown, browser): runs aot, dev\n  wasm.wasi (wasm32-wasip2, wasi): runs aot, dev\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  hosted (x86_64-unknown-linux-gnu, hosted): runs aot, dev\nrun `jet inspect target <machine>` for one machine's dossier\n"
+step: jet inspect target --json
+env: NO_COLOR=1
+exit: 0
+stdout: ~ '{"schema":"jet.status/v1","action":"inspect.target","ok":true,"reports":[],"targets":[{"name":"board.sensor_v1","triple":"thumbv7em-none-eabihf","environment":"no-os","execution":{"aot":true,"dev":false}},{"name":"board.virt_aarch64","triple":"aarch64-unknown-none","environment":"no-os","execution":{"aot":true,"dev":false}},{"name":"wasm.browser","triple":"wasm32-unknown-unknown","environment":"browser","execution":{"aot":true,"dev":true}},' # the listing opens with the boards and the browser, in table order
+stdout: ~ '{"name":"wasm.wasi","triple":"wasm32-wasip2","environment":"wasi","execution":{"aot":true,"dev":true}},{"name":"wasm.no-os","triple":"wasm32-unknown-unknown","environment":"no-os","execution":{"aot":true,"dev":false}},{"name":"hosted","triple":"x86_64-unknown-linux-gnu","environment":"hosted","execution":{"aot":true,"dev":true}}]}' # and ends with WASI, no-OS WebAssembly and the host
+step: jet inspect target --live 1
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # a live scope is a usage error
+stderr: ~ "reads no live process or replay" # that says the target plane reads only the machine table
