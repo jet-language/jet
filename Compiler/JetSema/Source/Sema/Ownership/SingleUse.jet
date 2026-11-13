@@ -277,6 +277,8 @@ sema_single_use_check_consume: fn(call: Call, environment: SemaScopeEnvironment,
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Drop{value: value}, call.name_span))}
 }
 
+// Every diagnostic about a value's debt has one shape: "`name` still owes
+// `consume`" (or `join`, or a use), then how this site falls short.
 sema_single_use_diag_unconsumed: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0140", span, "`{name}` still owes `consume`", "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)", "consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe(\"reason\") {{ consume({name}) }}` to discard it deliberately")
 }
@@ -286,15 +288,15 @@ sema_single_use_diag_discarded: fn(span: Span) -> Diagnostic {
 }
 
 sema_single_use_diag_branch: fn(name: String, span: Span) -> Diagnostic {
-    sema_error("E0141", span, "`{name}` must be used exactly once, but one path through this `if` leaves it unused", "a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job", "use `{name}` exactly once on every branch: consume it in the missing arm, or move it out before the `if`")
+    sema_error("E0141", span, "`{name}` still owes `consume` on one path through this `if`", "a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job", "use `{name}` exactly once on every branch: consume it in the missing arm, or move it out before the `if`")
 }
 
 sema_single_use_diag_aliased: fn(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0142", span, "`{name}` can't be shared — it must be used exactly once", "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{callee}` would borrow or copy it, and a `#SingleUse` value has no second use to give", "give it away with `{name}.move()`, or rework `{callee}` so it takes ownership with a `&&` parameter")
+    sema_error("E0142", span, "`{name}` still owes `consume`, so it can't be shared", "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{callee}` would borrow or copy it, and a `#SingleUse` value has no second use to give", "give it away with `{name}.move()`, or rework `{callee}` so it takes ownership with a `&&` parameter")
 }
 
 sema_single_use_diag_unaudited: fn(name: String, span: Span) -> Diagnostic {
-    sema_error("E0143", span, "`{name}` is `#SingleUse` — discarding it with `consume` needs an audited reason", "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down", "wrap it in an audited region: `#Unsafe(\"why discarding this is fine\") {{ consume({name}) }}`")
+    sema_error("E0143", span, "`{name}` still owes `consume`, and discarding it needs an audited reason", "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down", "wrap it in an audited region: `#Unsafe(\"why discarding this is fine\") {{ consume({name}) }}`")
 }
 
 // (Rust `l1101_unjoined_task`): one duty voice

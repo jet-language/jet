@@ -84,5 +84,5 @@ sema_must_use_check_statement: fn(expr: Expr, ty: Type, span: Span, environment:
         target = Val(type_name(ty))
     }
     shown: target ?? return
-    diagnostics.push(sema_error("E0419", span, "`{shown}` must be used — it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`n: …`) and use it, or discard it on purpose with `.drop(\"reason\")`"))
+    diagnostics.push(sema_error("E0419", span, "`{shown}` still owes a use, but it was dropped as a bare statement", "a `#MustUse` result carries work or a resource that is lost when nothing checks it", "bind it (`n: …`) and use it, or discard it on purpose with `.drop(\"reason\")`"))
 }
