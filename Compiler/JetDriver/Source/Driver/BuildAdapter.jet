@@ -244,11 +244,18 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
             source = "{source}    {written}: {spelled}\n"
         }
         source = "{source}}}\n"
+        home_module: if args[3] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument") }
         scope: jet_eval_build_session_input(args[3]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument")
         producer: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
         authority: jet_eval_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
         reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer, authority}, Val(source), false, span.start, span.end)
-        return jet_driver_compiler_reply(session, reply, span)
+        if reply != .Value(_) -> return jet_driver_compiler_reply(session, reply, span)
+        // The new struct's `TypeId`: declared as `name` in the generated
+        // module `module`, which shares the package's namespace.
+        return JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
+            TComptimeField{name: "identity", value: TComptimeValue.String{value: "{home_module}.{name}"}},
+            TComptimeField{name: "name", value: TComptimeValue.String{value: name}},
+        }}}
     }
     // `meta.report(finding, at: c)` sends the finding's code, tier and texts
     // (sema sema_call_try_compiler_report), the file and span of the call

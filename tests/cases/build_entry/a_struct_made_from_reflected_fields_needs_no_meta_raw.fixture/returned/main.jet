@@ -1,0 +1,24 @@
+// `meta.add_struct` returns the new struct's `TypeId`, so a second struct
+// can hold the first.
+Seed: struct {
+    x: I64
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop field in Seed.reflect().fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    point: meta.add_struct("Point", fields, scope: "point")
+    if point.identity != "point.Point" || point.name != "Point" -> panic("`meta.add_struct` returned {point.identity}")
+    meta.add_struct("Pin", [CompilerField]{CompilerField{name: "at", type: point}}, scope: "pin")
+    b.default(app)
+}
+
+PIN_AT: #run Pin.reflect().fields[0].type.identity
+
+run: fn() {
+    pin: Pin{at: Point{x: I64{9}}}
+    print(PIN_AT)
+    print(pin.at.x)
+}

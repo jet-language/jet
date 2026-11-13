@@ -407,7 +407,8 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
 // the type from values. A `TypeId` is only ever made by the compiler, and
 // the build host checks every name (one identifier in its kind's casing),
 // so no code a build computes is written: it uses `Meta.Generate` and
-// `Meta.Types`, never `Meta.Raw`.
+// `Meta.Types`, never `Meta.Raw`. The call's value is the new struct's
+// `TypeId`, so a later struct can hold it.
 sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     shape: "meta.add_struct(\"Name\", fields, scope: \"name\")"
@@ -461,7 +462,7 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
     // build's provenance records.
     values.push(sema_call_compiler_producer(environment, program, scopes, span))
     values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: performed.join(", ")}}}, span))
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "add_struct", args: values}}, span)
+    value: sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "add_struct", args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

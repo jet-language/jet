@@ -7,9 +7,11 @@
 # `Meta.Generate` and `Meta.Types` but not `Meta.Raw`. None, basic and full
 # optimization give the same identity, size, alignment and offsets, and a
 # second build gives them again. A row that denies `Meta.Raw` still builds
-# it; one that denies `Meta.Types` refuses it. Beside it, the same `Shape`
-# joined into source text under the `Meta.Raw` denial is refused. A
-# computed name that is not one identifier is refused when the build runs.
+# it; one that denies `Meta.Types` refuses it. `meta.add_struct` returns
+# the new struct's `TypeId`, which a second struct holds as a field.
+# Beside it, the same `Shape` joined into source text under the `Meta.Raw`
+# denial is refused. A computed name that is not one identifier is refused
+# when the build runs.
 fixture: a_struct_made_from_reflected_fields_needs_no_meta_raw.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -43,6 +45,12 @@ exit: 0
 step: {work}/raw_denied/.jet/build/app
 exit: 0
 stdout: = "42\n"
+step: jet build returned/main.jet --write-generated=on
+exit: 0
+file: returned/.jet/generated/main/pin.jet ~ "    at: Point\n" # the returned TypeId is written as the checker prints it
+step: {work}/returned/.jet/build/app
+exit: 0
+stdout: = "point.Point\n9\n"
 step: jet build types_denied/main.jet
 exit: 1
 stderr: ~ "reaches the `Meta.Types` effect, which it prohibits with `-[!Meta.Types]>`" # the row's denial wins over the typed factory
