@@ -1521,6 +1521,52 @@ ir_opt_tarjan_visit: fn(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     assert_eq(f.c[below], IR_OVERFLOW_WRAP)
 }
 
+// count(n: I64) takes n - 1 under n > 0, then counts i from 0 up to n,
+// adding 2 and then 1 to i under i < n. n is unbounded, so no range proves
+// a step inline, but the comparison puts i below n and n above 0: the
+// steps by 1 stay inside I64 and wrap, the step by 2 keeps its test.
+#Test("A word step by 1 toward a value it is compared past wraps") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    g := ir_function_new("count", "test:count.jet::count", "", "count.jet", 1)
+    n: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    i: ir_slot(g, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    zero: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    one: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    two: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    positive: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    less: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    skip: ir_slot(g, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, two, 2, -1, -1, 2)
+    _ := ir_emit(g, IROp.Gt, positive, n, zero, -1, 2)
+    _ := ir_open_if(g, positive, 2)
+    down: ir_emit(g, IROp.Sub, less, n, one, IR_OVERFLOW_TRAP, 2)
+    ir_end(g, 2)
+    _ := ir_emit(g, IROp.Const, i, 0, -1, -1, 3)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Ge, done, i, n, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    far: ir_emit(g, IROp.Add, skip, i, two, IR_OVERFLOW_TRAP, 4)
+    step: ir_emit(g, IROp.Add, i, i, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, -1, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    _ := ir_optimize_module(m, ir_opt_options(0), compiler_threads_single())
+    f: m.functions[0]
+    assert_eq(f.c[down], IR_OVERFLOW_WRAP)
+    assert_eq(f.c[step], IR_OVERFLOW_WRAP)
+    assert_eq(f.c[far], IR_OVERFLOW_TRAP)
+}
+
 // parse (the generated CLI parser) calls unknown, shared and callback, and
 // takes callback's address; unknown calls usage; run calls shared. The
 // parser, unknown and usage (only cold callers) are cold; shared (run calls

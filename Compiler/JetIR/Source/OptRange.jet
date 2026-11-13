@@ -44,6 +44,9 @@
 // nothing can reach now, goes); an Int Add, Sub or Mul whose operands and
 // result are inline, a word Add, Sub or Mul whose operands and result are
 // inline and inside the word's type (an unsigned word's all nonnegative), a
+// word `x + 1` or `x - 1` whose x the comparisons dominating it put
+// strictly below or above another value of its type (`i += 1` under
+// `i < n`, whatever n is), a
 // Div, Rem, FloorDiv or Mod of inline Int operands by a positive divisor,
 // an Int BitAnd, BitOr or BitXor of inline operands (its result is inline
 // too), a word Shl or Shr whose count lies inside 0..<bits, and an Int
@@ -923,6 +926,12 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
             if r.exact[left] != r.exact[right] -> next
             a: ir_range_at(f, s, r, left, block)
             b: ir_range_at(f, s, r, right, block)
+            if !r.exact[left] && ir_range_steps_inside(f, s, r, op, left, right, a, b, block) {
+                f.c[at] = IR_OVERFLOW_WRAP
+                rewritten += 1
+                ir_range_drop_point(f, trap, at + 1)
+                next
+            }
             result: ir_range_binary(op, a, b)
             if !ir_range_inline(a) || !ir_range_inline(b) {
                 // One exact operand proven inline: its test goes.
@@ -1058,6 +1067,54 @@ ir_range_rewrite: fn(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int
 ir_range_word_fits: fn(r: IRRanges, left: Int, a: IRRange, b: IRRange, result: IRRange) -> Bool Never! {
     if result.lo < r.cap_lo[left] || result.hi > r.cap_hi[left] -> return false
     !r.unsigned[left] || (a.lo >= 0 && b.lo >= 0 && result.lo >= 0)
+}
+
+// Whether word Add or Sub `left op right` (ranges `a` and `b` in `block`)
+// steps a value by 1 toward another value of its type that the decided
+// branches dominating `block` put it strictly before: `x + 1` (or `1 + x`)
+// below `x < y`, `x - 1` below `x > y`. In the type's own order x is then
+// not its largest (smallest) value, so the step stays inside the type
+// whatever bounds x has: a loop's `i += 1` under `i < n` for an
+// unbounded `n`.
+ir_range_steps_inside: fn(f: IRFunction, s: IRSsa, r: IRRanges, op: IROp, left: Int, right: Int, a: IRRange, b: IRRange, block: Int) -> Bool Never! {
+    one_right: b.known && b.lo == 1 && b.hi == 1
+    if op == .Add && one_right -> return ir_range_strictly(f, s, r, left, IROp.Lt, block)
+    if op == .Add && a.known && a.lo == 1 && a.hi == 1 -> return ir_range_strictly(f, s, r, right, IROp.Lt, block)
+    op == .Sub && one_right && ir_range_strictly(f, s, r, left, IROp.Gt, block)
+}
+
+// Whether a decided branch dominating `block` (ir_range_implied's walk)
+// gives `value rel y` (`rel` Lt or Gt) for some y of `value`'s type.
+ir_range_strictly: fn(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, rel: IROp, block: Int) -> Bool Never! {
+    if block <= 0 -> return false
+    at := r.up[block]
+    steps := 0
+    loop at > 0 && steps < IR_RANGE_DEPTH {
+        if ir_range_strictly_by(f, s, value, rel, r.cond[at], r.holds[at]) -> return true
+        at = if s.idom[at] >= 0 && s.idom[at] < at -> r.up[s.idom[at]] else -> -1
+        steps += 1
+    }
+    false
+}
+
+// Whether condition `cond` holding or not (through its Nots) is a
+// comparison of `value` and a value of the same type giving `value rel`
+// the other.
+ir_range_strictly_by: fn(f: IRFunction, s: IRSsa, value: Int, rel: IROp, cond_in: Int, holds_in: Bool) -> Bool Never! {
+    if cond_in < 0 -> return false
+    cond := cond_in
+    holds := holds_in
+    loop s.val_kind[cond] == .Def && f.op[s.val_at[cond]] == .Not && s.use_a[s.val_at[cond]] >= 0 {
+        cond = ir_ssa_find(s, s.use_a[s.val_at[cond]])
+        holds = !holds
+    }
+    if s.val_kind[cond] != .Def -> return false
+    at: s.val_at[cond]
+    if !ir_range_is_compare(f.op[at]) || s.use_a[at] < 0 || s.use_b[at] < 0 -> return false
+    if f.a[at] < 0 || f.b[at] < 0 || f.slot_type[f.a[at]] != f.slot_type[f.b[at]] -> return false
+    given: if holds -> f.op[at] else -> ir_range_negate(f.op[at])
+    if ir_ssa_find(s, s.use_a[at]) == value -> return given == rel
+    ir_ssa_find(s, s.use_b[at]) == value && ir_range_swap(given) == rel
 }
 
 // Per value, the first load of the same word of a parameter aggregate whose
