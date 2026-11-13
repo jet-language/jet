@@ -1,0 +1,13 @@
+// A planted bug: the raw write lands one Int past the only allocation.
+use core.mem
+
+run: fn() {
+    arena := mem.Arena.new()
+    #Unsafe("writes the one Int the arena allocated") {
+        cell: arena.alloc(7)
+        address: mem.address_of(cell.*)
+        past: mem.Ptr<Int>.from_addr(address + 8)
+        mem.volatile_write(past, 9)
+    }
+    print("written")
+}

@@ -1,0 +1,68 @@
+# A planted out-of-bounds raw read (read/read.jet) and raw write (write/write.jet), each one Int
+# past the only arena allocation inside an #Unsafe gate. The hardened profile stops both with R0801
+# and the gate's source location at O0, O1 and O2; a plain release build carries no sentry call (its
+# O2 IR dump names none) and runs both to the end.
+fixture: hardened_profile_stops_an_out_of_bounds_raw_access_at_every_level.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --profile=release read.jet
+cwd: read
+exit: 0
+stderr: !~ "Runtime fault" # a plain release build runs no sentry
+step: jet run --profile=release write.jet
+cwd: write
+exit: 0
+stdout: = "written\n"
+stderr: !~ "Runtime fault" # a plain release build runs no sentry
+step: jet inspect decisions --release read.jet
+cwd: read
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # the release build's O2 passes
+stdout: count "jet_rt_sentry" = 0 # no sentry call before or after the passes
+step: jet inspect decisions --release write.jet
+cwd: write
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # the release build's O2 passes
+stdout: count "jet_rt_sentry" = 0 # no sentry call before or after the passes
+step: jet inspect decisions --profile=hardened read.jet
+cwd: read
+env: JET_OPT_DUMP=run
+exit: 0
+stdout: ~ "O2:" # the hardened build keeps release optimization
+stdout: ~ "jet_rt_sentry_read" # the raw read stays checked after the O2 passes
+step: jet run --profile=hardened --optimize=none read.jet
+cwd: read
+exit: 70
+stderr: ~ "Runtime fault [R0801]" # O0: the read past the allocation stops
+stderr: ~ "read.jet:6, in #Unsafe gate" # the gate's source location
+step: jet run --profile=hardened --optimize=basic read.jet
+cwd: read
+exit: 70
+stderr: ~ "Runtime fault [R0801]" # O1: the read past the allocation stops
+stderr: ~ "read.jet:6, in #Unsafe gate" # the gate's source location
+step: jet run --profile=hardened read.jet
+cwd: read
+exit: 70
+stderr: ~ "Runtime fault [R0801]" # O2: the read past the allocation stops
+stderr: ~ "read.jet:6, in #Unsafe gate" # the gate's source location
+step: jet run --profile=hardened --optimize=none write.jet
+cwd: write
+exit: 70
+stdout: !~ "written" # the write stops before the print
+stderr: ~ "Runtime fault [R0801]: raw `volatile_write`" # O0: the write past the allocation stops
+stderr: ~ "write.jet:6, in #Unsafe gate" # the gate's source location
+step: jet run --profile=hardened --optimize=basic write.jet
+cwd: write
+exit: 70
+stdout: !~ "written" # the write stops before the print
+stderr: ~ "Runtime fault [R0801]: raw `volatile_write`" # O1: the write past the allocation stops
+stderr: ~ "write.jet:6, in #Unsafe gate" # the gate's source location
+step: jet run --profile=hardened write.jet
+cwd: write
+exit: 70
+stdout: !~ "written" # the write stops before the print
+stderr: ~ "Runtime fault [R0801]: raw `volatile_write`" # O2: the write past the allocation stops
+stderr: ~ "write.jet:6, in #Unsafe gate" # the gate's source location
