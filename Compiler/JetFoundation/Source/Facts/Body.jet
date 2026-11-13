@@ -188,50 +188,6 @@ BodyTaskGroupArgs: struct {
     stack: Int?
 }
 
-StmtKind: enum {
-    Contract(contract: BodyContract)
-    ContractScope(pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span)
-    Let(local: TLocal, let_ty: TLetTy, init: Int, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
-    RefutableBind(pattern: BodyPattern, init: Int, fallback: [Int], span: Span)
-    TupleDestructure(temp: TLocal, init: Int, move_fields: Bool, binds: [TDestructureBinding], span: Span)
-    StructDestructure(temp: TLocal, init: Int, move_fields: Bool, binds: [TDestructureBinding], span: Span)
-    ListDestructure(temp: TLocal, init: Int, count: Int, line: Int, elements: [TLocal], span: Span)
-    Assign(place: BodyPlace, op: TBinaryOp?, value: Int, line: Int, span: Span)
-    CountedLoop(label: String?, init: Int, condition: Int, step: Int?, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
-    ForRange(label: String?, local: TLocal, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], vectorization: AutoVectorizationFacts?, span: Span)
-    Range(label: String?, variable: TLocal, source: Int?, start: Int, end: Int, step: Int?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
-    ExprStmt(value: Int, span: Span)
-    Return(value: Int?, span: Span)
-    TaskGroup(group: TLocal, args: BodyTaskGroupArgs, body: [Int], span: Span)
-    DeferClose(close: Int, resource: SymbolID, span: Span)
-    If(condition: BodyIfCond, then_body: [Int], else_body: [Int]?, else_is_elseif: Bool, span: Span)
-    Loop(label: String?, body: [Int], span: Span)
-    While(label: String?, condition: Int, body: [Int], span: Span)
-    Break(label: String?, span: Span)
-    BreakValue(label: String?, value: Int, span: Span)
-    Continue(label: String?, span: Span)
-    Match(subject: Int, arms: [BodyMatchArm], exhaustive: Bool, span: Span)
-    EnumMatch(scrutinee: Int, arms: [BodyMatchArm], else_body: [Int]?, fallthrough: Bool, span: Span)
-    RangeSwitch(subject: Int, arms: [BodyRangeArm], else_body: [Int], span: Span)
-    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: Int, collection: Int, step: Int?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [Int], span: Span)
-    Inline(body: [Int], span: Span)
-    DebugOnly(body: [Int], span: Span)
-    MixedSwitch(subject: Int, class: TBranchClass, arms: [BodyMixedArm], else_body: [Int]?, span: Span)
-    Unsafe(gate: TUnsafeGate, body: [Int])
-    UnsafeBlock(gate: TUnsafeGate, body: [Int], span: Span)
-    SentryPolicy(enabled: Bool, body: [Int], span: Span)
-    Impure(body: [Int], span: Span)
-    Reactive(executable: BodyLambda, span: Span)
-    Region(body: [Int], span: Span)
-    Layout(handle: TLocal, label: String, body: [Int], span: Span)
-    ContextBlock(guards: [BodyContextGuard], body: [Int], span: Span)
-    Live(body: [Int], span: Span)
-    Shield(body: [Int], span: Span)
-    ScopeMember(kind: BodyScopeMemberKind, body: [Int], span: Span)
-    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [Int], span: Span)
-    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: Int?, statement: Int, span: Span)
-}
-
 BodyRangeArm: struct {
     lo: Int
     hi: Int

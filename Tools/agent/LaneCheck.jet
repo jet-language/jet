@@ -120,7 +120,7 @@ run: fn() {
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
-    body_host_call_rows(repo)
+    body_tree_rows(repo)
     diagnostic_census(repo)
     compiler_data(repo)
     script_pairing(repo)
@@ -178,12 +178,12 @@ vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     check_refused(process.combined_output(rows).trim_end(), "a generated Source/Vocabulary.jet differs from its Vocabulary.tsv (see above; regenerate with jet Tools/agent/VocabularyRows.jet --write)")
 }
 
-// The BodyHostCall rows check with $JET, else the `jet` on PATH; it never writes.
-body_host_call_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
+// The flat body's enum rows check with $JET, else the `jet` on PATH; it never writes.
+body_tree_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
-    rows: process.cmd([String]{jet, "Tools/agent/BodyHostCallRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyHostCallRows.jet: {err}")
+    rows: process.cmd([String]{jet, "Tools/agent/BodyTreeRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyTreeRows.jet: {err}")
     if rows.code == 0 && rows.signal == None -> return
-    check_refused(process.combined_output(rows).trim_end(), "Compiler/JetFoundation/Source/Facts/BodyHostCall.jet differs from THostCall (see above; regenerate with jet Tools/agent/BodyHostCallRows.jet --write)")
+    check_refused(process.combined_output(rows).trim_end(), "a generated flat-body enum in Compiler/JetFoundation/Source/Facts differs from its declaration in Compiler/JetSema/Source/Sema/Tree.jet (see above; regenerate with jet Tools/agent/BodyTreeRows.jet --write)")
 }
 
 // The diagnostic census check with $JET, else the `jet` on PATH; it never writes.
