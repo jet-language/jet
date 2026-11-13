@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6785,
-    "rev": 101428,
+    "nextNum": 6786,
+    "rev": 101430,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95139,6 +95139,47 @@
       "needsAcceptance": false,
       "created": "2026-11-13T11:38:32.483Z",
       "updated": "2026-11-13T11:38:37.736Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0ipht83",
+      "num": 6785,
+      "title": "A build that reflects over a program with a user E0956 now ends in an internal compiler error",
+      "body": "Found by G11Speed-5 on 2026-11-13. dev d19cdb77fd (G6Meta-ice2, \"A build that fails internally is an internal compiler error, not a staged report\") made BuildQueries raise an ICE when the keep-going staging compile fails internally. A program whose own derive has an E0956 binding (an incomplete registration) now reaches the program reflection with an incomplete registration graph, and the build ends in the ICE \"reflection snapshot is incomplete: the registration graph is incomplete\" instead of the user error E0956. That breaks I2: a user error must stay a user diagnostic. It reproduces in Examples Reflect.jet at O1 and O2 with any jet that has d19cdb77fd (the g11-core-a jet included), and in a 20-line repro: a build: fn reading b.program plus a derive with an E0956 binding. The g5-fold6 jet (base fca00acc6d) prints E0956.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A program whose own code has a user error that leaves the registration graph incomplete (such as E0956) gets that user diagnostic, with exit code 1 and no ICE, when a build: fn reflects over the program. A real internal failure of the build still reports as an ICE with exit 101, as d19cdb77fd intended. Proof: a ui snapshot of the 20-line repro, the Reflect.jet golden at O1 and O2 matching its O0 output, and the InspectBuild test from d19cdb77fd still passing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T11:55:28.554Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T11:55:27.408Z",
+      "updated": "2026-11-13T11:55:28.554Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -199522,6 +199563,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T11:55:28.554Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ipht83",
+      "note": "#1 A program whose own code has a user error that leaves the re"
+    },
+    {
+      "at": "2026-11-13T11:55:27.409Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ipht83",
+      "note": "A build that reflects over a program with a user E0956 now ends in an internal compiler error"
+    },
     {
       "at": "2026-11-13T11:54:44.567Z",
       "by": "Main",
