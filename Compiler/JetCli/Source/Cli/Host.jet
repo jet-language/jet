@@ -780,12 +780,28 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // closure thread reads the pack that collection needs.
     decided: rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 && (jet_cli_native_c_linked(foreign_link) || foreign_link.inline_c.len() > 0)
     first_facts: if decided -> jet_driver_foreign_link_empty() else -> foreign_link.copy()
-    task.group native_foreign {
-        realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, base == LINK_RUN_BASE && !decided)
-        object: jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
-        if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
-        objects.push(object)
-        closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
+    bind: base == LINK_RUN_BASE && !decided
+    // With no C closure to build and the prelinked runtime image to bind (a
+    // Jet-only `jet run`), the realize is one read of the image's few hundred
+    // KB (jet_cli_native_c_inputs returns at once), cheaper than a thread's
+    // start and join: it runs here, before the object. Otherwise the closure
+    // thread realizes it while the object builds.
+    if {
+        bind && !jet_cli_native_c_linked(first_facts) && first_facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 -> {
+            closures.push(jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind))
+            object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
+            if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
+            objects.push(object)
+        }
+        else -> {
+            task.group native_foreign {
+                realizing: task jet_cli_native_foreign_realize(first_facts, rust_helper, sources.copy(), runtime_dir.copy(), runtime_key, bind)
+                object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
+                if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
+                objects.push(object)
+                closures.push(realizing.join() ?? panic(compiler_threads_failure_text(err)))
+            }
+        }
     }
     built := objects.pop() ?? panic("the native route lost its object")
     if built.failure == .Val(failure) -> return JetCLINativeLinked.Failed{failure: failure}

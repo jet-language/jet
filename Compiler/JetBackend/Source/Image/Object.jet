@@ -703,9 +703,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     dwarf: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
         text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS, functions: function_symbols,
     }, threads, debug_info)
-    // The functions, their debug rows and the module are read no more: they
-    // drop on a thread of their own while the file is assembled.
+    // The functions, their debug rows and the module are read no more. When
+    // the `.text` step admitted threads (`workers`) they drop on a thread of
+    // their own while the file is assembled; a smaller object assembles its
+    // file first and they drop as this returns.
     x64_object_text_release(inputs)
+    if workers <= 1 -> return X64ExecutableResult{bytes: x64_object_file(dwarf, text, text_align, data, data_align, rodata, rodata_align, rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, own), errors: [String]{}}
     released: Shared{X64ObjectReleased{functions: [X64CompiledFunction]{}, debug: [X64FunctionDebug]{}, programs: [X64ObjectModule]{}}}
     x64_object_release_fill(released, program, functions, debug)
     files := [[U8]]{}

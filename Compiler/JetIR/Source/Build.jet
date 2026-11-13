@@ -466,6 +466,11 @@ IRSourceIndex: struct {
     rows: [String:Int]
 }
 
+// The source bytes (all files) worth indexing on a thread of their own
+// (ir_program_new): the index is one scan and copy of each byte, the work
+// the driver keeps on its thread below JET_DRIVER_INLINE_SCAN_MIN_BYTES.
+IR_SOURCE_INDEX_MIN_BYTES: 262144
+
 ir_source_index: fn(sources: [String:String]) -> IRSourceIndex Never! {
     index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, rows: [String:Int]{}}
     loop (path, text) in sources {
@@ -560,7 +565,19 @@ IRCaptureSlot: struct {
 ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
     owned_sources: sources.move()
     programs := [IRProgram]{}
-    // The sources are indexed on their own thread while the declarations bind.
+    // Past IR_SOURCE_INDEX_MIN_BYTES the sources are indexed on their own
+    // thread while the declarations bind; fewer are indexed here first.
+    total := 0
+    loop (_, text) in owned_sources -> total += text.count_bytes()
+    if total < IR_SOURCE_INDEX_MIN_BYTES {
+        index := ir_source_index(owned_sources)
+        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions)
+        ir_program_bind(p, functions, decls)
+        p.source_bytes = index.bytes.move()
+        p.source_lines = index.lines.move()
+        p.source_rows = index.rows.move()
+        return p
+    }
     task.group ir_program_sources {
         indexing: task ir_source_index(owned_sources)
         p := ir_program_declared(type_defs, impl_defs, constant_defs, functions)

@@ -1,0 +1,10 @@
+# Claim: `jet run` of a small program builds its IR, merges it, selects it, writes its object and reads the runtime image on the compile thread; none of those steps starts a thread of its own, and the run prints what it always did
+requires: os-name:linux
+requires: tool:strace
+fixture: jet_run_of_a_small_program_starts_only_the_compile_thread.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: strace -f -qq -e trace=clone,clone3 -o {work}/run.trace {jet} run main.jet
+exit: 0
+stdout: = "hello\n"
+file.filter(where ~ "CLONE_THREAD"): run.trace lines = 1 # only thread starts count; the one left is the compile worker's (JET_CLI_COMPILE_STACK_BYTES)
