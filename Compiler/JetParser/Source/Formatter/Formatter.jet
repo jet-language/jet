@@ -131,6 +131,11 @@ JetFmt: struct {
     // the printed precedence does not need are left out, their spans kept.
     drop_grouping: Bool{false}
     dropped_grouping: [Span]{[Span]{}}
+    // The source edits that spell each `place = place op value` the
+    // formatter printed as `place op= value` the same way
+    // (jfmt_fmt_expanded_compound), for the check that a format keeps
+    // meaning.
+    compound_rewrites: [TextEdit]{[TextEdit]{}}
     // The index of the `}` token that closes each `{` token of
     // `source_toks`, -1 for any other token (jfmt_brace_closes).
     brace_closes: [Int]{[Int]{}}
@@ -1677,6 +1682,29 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
 
 // ---- source edits ----
 
+// Whether a source comment lies within [start, end).
+jfmt_comment_between: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
+    loop comment in f.comments {
+        if comment.span.start >= start && comment.span.start < end -> return true
+    }
+    false
+}
+
+// Records the source edit that writes `place = place op right` as
+// `place op= right`: the operator through the left operand becomes `op= `.
+// Grouping around the whole value keeps its parentheses, opened again before
+// the right operand (`n = (n + 1)` reads as `n += (1)`, the same program). A
+// layout tried and rolled back prints the same assignment again, so each is
+// recorded once.
+jfmt_note_compound_rewrite: fn(f: &JetFmt, op_start: Int, right_start: Int, grouping: Int, spelled: String) Never! {
+    loop edit in f.compound_rewrites {
+        if edit.span.start == op_start -> return
+    }
+    text := "{spelled} "
+    loop _ in 0..<grouping -> text = "{text}("
+    f.compound_rewrites.push(TextEdit{span: Span{start: op_start, end: right_start}, new_text: text})
+}
+
 jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     source: src.bytes()
     ordered := edits
@@ -2109,12 +2137,16 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
     prog := parsed.program
     // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
-    text: jfmt_format_program_with_tokens(prog, src, lexed.tokens, simplify)
+    f := jfmt_new(prog, src, lexed.tokens, simplify)
+    text: jfmt_format_program_with(f, prog)
     // Without simplify, a format changes layout only: the text must parse to
     // the same program. A source the parser had to recover is repaired on
     // purpose, so only a clean parse is compared.
     if !simplify_requested && text != src && jfmt_structure_clean(parsed.diagnostics) {
-        source_program: if library -> parse_generated_source(source).program else -> parse_source(source).program
+        // The source with its expanded assignments written as the compound
+        // assignments the format printed.
+        compared: jfmt_apply_source_edits(src, f.compound_rewrites) ?? src
+        source_program: if library -> parse_generated_source(compared.bytes()).program else -> parse_source(compared.bytes()).program
         reparsed: if library -> parse_generated_source(text.bytes()) else -> parse_source(text.bytes())
         if jfmt_structure_change(source_program, reparsed.program, reparsed.diagnostics) == .Val(change) {
             return JetFormatResult{ok: false, text: "", diagnostics: [Diagnostic]{}, structure_change: Val(change)}

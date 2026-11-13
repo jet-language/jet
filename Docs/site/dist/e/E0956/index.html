@@ -36,24 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Report this unsupported construct as a compiler bug</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0956</code>: <code>tests/ui/compiler_api/compiler_query_phase_boundary_is_preserved_for_aliases.stderr</code>.</p>
-<pre class="diag">Error [jet.ComptimeConstructNotSupported]: `core.compiler.lex` is compile-time only
-  --&gt; tests/ui/compiler_api/compiler_query_phase_boundary_is_preserved_for_aliases.jet:2:22
+<p>First UI snapshot mentioning <code>E0956</code>: <code>tests/ui/build_reflects_a_program_whose_derive_is_refused.stderr</code>.</p>
+<pre class="diag">Error [jet.ComptimeConstructNotSupported]: A derive template binding is not a known-time value
+  --&gt; tests/ui/build_reflects_a_program_whose_derive_is_refused.jet:20:13
     |
-  2 | run: fn() { compiler.lex(`run: fn() {}`) }
-    |                      ^^^
- Why: The compiler API exposes read-only front-end facts to build and comptime code; it is not a runtime service
- Fix: Move this call into `build: fn` or a `#run` binding
+ 20 |             effects: info.methods[0].reflect().effects.values.len()
+    |             ^^^^^^^
+ Why: A template binding names a reflected fact or literal the expansion reads directly
+ Fix: Bind a reflected fact such as `T.reflect().fields` or a literal
 More: jet-lang.dev/e/E0956
 
-Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `CompilerError` into `Err` — no declared conversion exists
-  --&gt; tests/ui/compiler_api/compiler_query_phase_boundary_is_preserved_for_aliases.jet:2:22
-    |
-  2 | run: fn() { compiler.lex(`run: fn() {}`) }
-    |                      ^^^
- Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl CompilerError -&gt; Err`
- Fix: Handle this call locally with `??`, add `impl CompilerError -&gt; Err { … }`, or change the return type
-More: jet-lang.dev/e/E2402
+1 problem found
+run `jet explain E0956` to learn more
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

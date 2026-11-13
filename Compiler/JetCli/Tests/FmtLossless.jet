@@ -31,9 +31,9 @@ use {
         STRING_PART_BYTE, STRING_PART_INTERPOLATION, STRING_PART_TEXT, StringPart, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_BLOCK_COMMENT, TOKEN_OR_OR,
         TOKEN_CHAR, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_EOF, TOKEN_EQ, TOKEN_EQ_EQ, TOKEN_FLOAT,
         TOKEN_GE, TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_INT, TOKEN_KW_ELSE, TOKEN_KW_ENUM, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_KW_IMPL, TOKEN_KW_LOOP, TOKEN_KW_PUB,
-        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LE, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_NOT_EQ, TOKEN_NULL,
-        TOKEN_PIPE, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_SLASH, TOKEN_STAR, TOKEN_STRING,
-        TOKEN_UNIFIED_ARROW, TOKEN_UNIT_NUMBER, Token, TokenTables, lex, token_decoded, token_string_parts,
+        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LE, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_MINUS_EQ, TOKEN_NOT_EQ, TOKEN_NULL,
+        TOKEN_PIPE, TOKEN_PLUS, TOKEN_PLUS_EQ, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SELF, TOKEN_SEMI, TOKEN_SLASH,
+        TOKEN_SLASH_EQ, TOKEN_STAR, TOKEN_STAR_EQ, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_UNIT_NUMBER, Token, TokenTables, lex, token_decoded, token_string_parts,
     ]
     jet_parser.[jfmt_check_parse_accepts, jfmt_is_teaching_parse_diag, parse_source]
 }
@@ -273,7 +273,7 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
         canonical.push(kept[index])
         index += 1
     }
-    fl_drop_and_groups_in_or(fl_flatten_use_groups(canonical))
+    fl_expand_compound_assignments(fl_drop_and_groups_in_or(fl_flatten_use_groups(canonical)))
 }
 
 // `&&` binds tighter than `||`, so parentheses around an `&&` chain that is a
@@ -324,6 +324,90 @@ fl_logic_operand_right_edge: fn(tokens: [FmtTok], index: Int) -> Bool {
     kind: fl_kind(tokens, index)
     if kind == TOKEN_IDENT -> return tokens[index].text != FL_KW_AS
     kind == TOKEN_OR_OR || kind == TOKEN_AND_AND || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_EOF || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN
+}
+
+// A compound assignment is its expanded form, the form `jet fmt` writes
+// compound: `place op= value` is `place = place op value` for a name or field
+// place (`n`, `p.hp`, `self.x`) and `+`, `-`, `*` or `/`, and parentheses
+// around such a value group nothing (`n = (n + 1)` is `n = n + 1`).
+fl_expand_compound_assignments: fn(tokens: [FmtTok]) -> [FmtTok] {
+    dropped := [Bool]{}
+    loop _ in 0..<tokens.len() -> dropped.push(false)
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_EQ -> next
+        place_start: fl_place_start(tokens, index)
+        if place_start < 0 -> next
+        opens := 0
+        loop fl_kind(tokens, index + 1 + opens) == TOKEN_LPAREN -> opens += 1
+        if opens == 0 -> next
+        left: index + 1 + opens
+        width: index - place_start
+        if !fl_same_run(tokens, place_start, left, width) || fl_compound_text(fl_kind(tokens, left + width)) == "" -> next
+        loop open in index + 1..<left {
+            close: fl_matching(tokens, open, TOKEN_LPAREN, TOKEN_RPAREN)
+            if close < 0 -> next
+            dropped[open] = true
+            dropped[close] = true
+        }
+    }
+    out := [FmtTok]{}
+    loop index in 0..<tokens.len() {
+        if dropped[index] -> next
+        binary: fl_compound_binary(tokens[index].kind)
+        place_start: fl_place_start(out, out.len())
+        if binary < 0 || place_start < 0 {
+            out.push(tokens[index])
+            next
+        }
+        place_end: out.len()
+        out.push(fl_synthetic(TOKEN_EQ, "="))
+        loop cursor in place_start..<place_end {
+            // copy: the place's tokens are written a second time, after the `=`
+            token: out[cursor].copy()
+            out.push(token)
+        }
+        out.push(fl_synthetic(binary, fl_compound_text(binary)))
+    }
+    out
+}
+
+// The first token of the name or field path that ends before `end`, or -1.
+fl_place_start: fn(tokens: [FmtTok], end: Int) -> Int {
+    start := end - 1
+    if !fl_place_name(fl_kind(tokens, start)) -> return -1
+    loop fl_kind(tokens, start - 1) == TOKEN_DOT && fl_place_name(fl_kind(tokens, start - 2)) -> start -= 2
+    if fl_kind(tokens, start - 1) == TOKEN_DOT -> return -1
+    start
+}
+
+fl_place_name: fn(kind: Int) -> Bool { kind == TOKEN_IDENT || kind == TOKEN_SELF }
+
+// The `width` tokens at `left` and at `right` are equal.
+fl_same_run: fn(tokens: [FmtTok], left: Int, right: Int, width: Int) -> Bool {
+    if right + width > tokens.len() -> return false
+    loop offset in 0..<width {
+        if !fl_tokens_equal(tokens[left + offset], tokens[right + offset]) -> return false
+    }
+    true
+}
+
+// The binary operator a compound assignment token applies, or -1.
+fl_compound_binary: fn(kind: Int) -> Int {
+    if kind == TOKEN_PLUS_EQ -> return TOKEN_PLUS
+    if kind == TOKEN_MINUS_EQ -> return TOKEN_MINUS
+    if kind == TOKEN_STAR_EQ -> return TOKEN_STAR
+    if kind == TOKEN_SLASH_EQ -> return TOKEN_SLASH
+    return -1
+}
+
+// The spelling of a binary operator with a compound form `jet fmt` writes,
+// or "".
+fl_compound_text: fn(kind: Int) -> String {
+    if kind == TOKEN_PLUS -> return "+"
+    if kind == TOKEN_MINUS -> return "-"
+    if kind == TOKEN_STAR -> return "*"
+    if kind == TOKEN_SLASH -> return "/"
+    ""
 }
 
 // A `use { … }` group and one `use` per row parse to the same imports: each
@@ -1685,6 +1769,8 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"pattern field shorthand", "run: fn() {{ if e == .Named{{z: z}} -> print(z) }}\n", "run: fn() {{ if e == .Named{{z}} -> print(z) }}\n"},
         {"parameter names before an effect arrow", "close: fn(&&handle: Handle) -[FFI.Java]> {{}}\n", "close: fn(handle: &&Handle) -[FFI.Java]> {{}}\n"},
         {"foreign return without an arrow", "#Import c.m: module {{\n    get: fn(a: Int) Int = \"get\"\n}}\n", "#Import c.m: module {{\n    get: fn(a: Int) -> Int = \"get\"\n}}\n"},
+        {"compound assignment", "run: fn() {{\n    n = n + 1\n    p.hp = p.hp - d\n    self.x = self.x * 2\n}}\n", "run: fn() {{\n    n += 1\n    p.hp -= d\n    self.x *= 2\n}}\n"},
+        {"grouped compound assignment value", "run: fn() {{\n    n = ((n / 2))\n}}\n", "run: fn() {{\n    n /= 2\n}}\n"},
     }
     loop case in allowed {
         diff: fl_ordered_sources_diff(case[1], case[2])
@@ -1739,6 +1825,11 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"late-effect-row rule keeps the row", "store: fn(g: fn() -> Int -[IO]>) {{}}\n", "store: fn(g: fn() -[FS]> Int) {{}}\n"},
         {"pattern shorthand rule keeps a renamed binding", "run: fn() {{ if e == .Named{{z: y}} -> print(y) }}\n", "run: fn() {{ if e == .Named{{z}} -> print(y) }}\n"},
         {"foreign-return rule keeps a function type parameter", "run: fn(cb: fn(Int) Int) {{}}\n", "run: fn(cb: fn(Int) -> Int) {{}}\n"},
+        {"compound rule keeps the place", "run: fn() {{\n    n = m + 1\n}}\n", "run: fn() {{\n    n += 1\n}}\n"},
+        {"compound rule requires the place as the left operand", "run: fn() {{\n    n = 1 - n\n}}\n", "run: fn() {{\n    n -= 1\n}}\n"},
+        {"compound rule leaves an indexed place", "run: fn() {{\n    xs[0] = xs[0] + 1\n}}\n", "run: fn() {{\n    xs[0] += 1\n}}\n"},
+        {"compound rule leaves an Int-only operator", "run: fn() {{\n    n = n % 2\n}}\n", "run: fn() {{\n    n %= 2\n}}\n"},
+        {"compound rule keeps the operator", "run: fn() {{\n    n = n + 1\n}}\n", "run: fn() {{\n    n -= 1\n}}\n"},
     }
     loop case in paired_forbidden {
         assert(fl_ordered_sources_diff(case[1], case[2]) != "", "paired forbidden neighbor was accepted: {case[0]}")

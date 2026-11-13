@@ -1,0 +1,10 @@
+# `jet fmt` writes `place = place op value` as `place op= value` for a name or
+# field place and `+`, `-`, `*` or `/`, grouped or not. It leaves an indexed
+# place (a call or index would run twice; the compound is E0164), a place that
+# is not the left operand, an Int-only operator (`%`), and a text operand
+# (`s + "b"` is E0109 while `s += "b"` appends). A second run changes nothing.
+fixture: expanded_assignment_becomes_compound/input
+step: jet fmt run.jet
+file: run.jet = expanded_assignment_becomes_compound/formatted.out
+step: jet fmt run.jet
+file: run.jet = expanded_assignment_becomes_compound/formatted.out

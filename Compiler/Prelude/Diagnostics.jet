@@ -4387,24 +4387,6 @@ FloatComparison: struct {
     }
 }
 
-CompoundAssignment: struct {
-    place: String
-    op: String
-
-    impl Diagnostic {
-        code: "L0503"
-        severity: .Lint
-        lint_name: "compound_assignment"
-        meaning: "Prefer compound assignment (`+=`/`-=`/…) over repeating the left side"
-        detail: true
-        no_fix: .Behavior
-        fix_next: "Write the update in the supported `place op ...` form."
-        what: fn(self) -> String { "Prefer `{self.place} {self.op} …` instead of repeating the left side" }
-        why: fn(self) -> String { "Compound assignment updates a place in one step without restating it" }
-        fix: fn(self) -> String { "Write `{self.place} {self.op} …`" }
-    }
-}
-
 FloatMoney: struct {
     impl Diagnostic {
         code: "L0504"
