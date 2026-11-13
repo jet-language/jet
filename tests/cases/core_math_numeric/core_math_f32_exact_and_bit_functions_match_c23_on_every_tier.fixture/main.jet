@@ -1,0 +1,222 @@
+// Every corpus row is an all-F32 call of one exact or bit-level core.math
+// function: its argument words, then the C23 binary32 function's result,
+// computed offline. A binary32 value is its 8 hex digit bit pattern, an
+// exponent its 32-bit two's-complement word, a predicate 1 or 0, and
+// "--------" is none. The program prints one line per function with the rows
+// it checked and how many results differ, plus the first differing rows.
+// Where a NaN result's bits are not the function's to choose (an arithmetic
+// NaN), any NaN matches any NaN; the sign-bit, payload and signaling
+// operations must match bit for bit.
+use {
+    math: core.math
+}
+
+CANONICALIZE: #run embed_file("corpus/canonicalize.txt")
+CEIL: #run embed_file("corpus/ceil.txt")
+COPYSIGN: #run embed_file("corpus/copysign.txt")
+FABS: #run embed_file("corpus/fabs.txt")
+FDIM: #run embed_file("corpus/fdim.txt")
+FLOOR: #run embed_file("corpus/floor.txt")
+FMOD: #run embed_file("corpus/fmod.txt")
+GET_PAYLOAD: #run embed_file("corpus/get_payload.txt")
+IS_NORMAL: #run embed_file("corpus/is_normal.txt")
+IS_SIGNALING: #run embed_file("corpus/is_signaling.txt")
+IS_SUBNORMAL: #run embed_file("corpus/is_subnormal.txt")
+LDEXP: #run embed_file("corpus/ldexp.txt")
+LOGB: #run embed_file("corpus/logb.txt")
+MAX_FLOAT: #run embed_file("corpus/max_float.txt")
+MAXIMUM: #run embed_file("corpus/maximum.txt")
+MAXIMUM_MAG: #run embed_file("corpus/maximum_mag.txt")
+MAXIMUM_MAG_NUM: #run embed_file("corpus/maximum_mag_num.txt")
+MAXIMUM_NUM: #run embed_file("corpus/maximum_num.txt")
+MIN_FLOAT: #run embed_file("corpus/min_float.txt")
+MINIMUM: #run embed_file("corpus/minimum.txt")
+MINIMUM_MAG: #run embed_file("corpus/minimum_mag.txt")
+MINIMUM_MAG_NUM: #run embed_file("corpus/minimum_mag_num.txt")
+MINIMUM_NUM: #run embed_file("corpus/minimum_num.txt")
+NEXT_AFTER: #run embed_file("corpus/next_after.txt")
+NEXT_DOWN: #run embed_file("corpus/next_down.txt")
+NEXT_UP: #run embed_file("corpus/next_up.txt")
+REMAINDER: #run embed_file("corpus/remainder.txt")
+ROUND_EVEN: #run embed_file("corpus/round_even.txt")
+SET_PAYLOAD: #run embed_file("corpus/set_payload.txt")
+SET_PAYLOAD_SIGNALING: #run embed_file("corpus/set_payload_signaling.txt")
+TOTAL_ORDER: #run embed_file("corpus/total_order.txt")
+TOTAL_ORDER_MAG: #run embed_file("corpus/total_order_mag.txt")
+TRUNC: #run embed_file("corpus/trunc.txt")
+
+hex_value: fn(b: U8) -> Int {
+    n: Int.from_u8(b)
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The 8 hex digit word at `at`; -1 for "--------".
+word_at: fn(raw: [U8], at: Int) -> Int {
+    if raw[at] == (U8{45}) -> return -1
+    n := 0
+    loop i in 0..<8 -> n = n * 16 + hex_value(raw[at + i])
+    n
+}
+
+hex_word: fn(word: Int) -> String {
+    if word < 0 -> return "--------"
+    digits: "0123456789abcdef".bytes()
+    n := word
+    out := [U8]{}
+    loop _ in 0..<8 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+is_nan_word: fn(word: Int) -> Bool { word >= 0 && word.bit_and(0x7FFF_FFFF) > 0x7F80_0000 }
+
+// The binary32 value of `bits`, negated for a set sign bit.
+f32_of: fn(bits: Int) -> F32 {
+    value: f32_magnitude(bits.bit_and(0x7FFF_FFFF))
+    if bits >= 0x8000_0000 -> return -value
+    value
+}
+
+// A finite magnitude is exact as a Float, the infinity comes from F32
+// division, and a NaN is the C23 payload call that makes it, quiet or
+// signaling.
+f32_magnitude: fn(magnitude: Int) -> F32 {
+    if magnitude == 0x7F80_0000 -> return F32{1.0} / F32{0.0}
+    if magnitude > 0x7F80_0000 {
+        payload: F32{Float{magnitude.bit_and(0x3F_FFFF)}}
+        made: if magnitude.bit_and(0x40_0000) != 0 -> math.set_payload(payload) else -> math.set_payload_signaling(payload)
+        return made ?? panic("no NaN of payload {magnitude.bit_and(0x3F_FFFF)}")
+    }
+    exponent: magnitude >> 23
+    fraction: magnitude.bit_and(0x7F_FFFF)
+    if exponent == 0 -> return F32{math.ldexp(Float{fraction}, -149)}
+    F32{math.ldexp(Float{fraction + 0x80_0000}, exponent - 150)}
+}
+
+bits: fn(x: F32) -> Int { math.to_bits(x) }
+flag: fn(b: Bool) -> Int { if b -> 1 else -> 0 }
+maybe: fn(x: F32?) -> Int {
+    value: x ?? return -1
+    math.to_bits(value)
+}
+// The exponent word as a whole number.
+exponent_of: fn(word: Int) -> Int { if word >= 0x8000_0000 -> word - 0x1_0000_0000 else -> word }
+
+// The result word of `name` on argument words `w`.
+value: fn(name: String, w: [Int]) -> Int {
+    a: f32_of(w[0])
+    if name == "fabs" -> return bits(math.fabs(a))
+    if name == "canonicalize" -> return bits(math.canonicalize(a))
+    if name == "get_payload" -> return maybe(math.get_payload(a))
+    if name == "set_payload" -> return maybe(math.set_payload(a))
+    if name == "set_payload_signaling" -> return maybe(math.set_payload_signaling(a))
+    if name == "is_signaling" -> return flag(math.is_signaling(a))
+    if name == "is_normal" -> return flag(math.is_normal(a))
+    if name == "is_subnormal" -> return flag(math.is_subnormal(a))
+    if name == "round_even" -> return bits(math.round_even(a))
+    if name == "floor" -> return bits(math.floor(a))
+    if name == "ceil" -> return bits(math.ceil(a))
+    if name == "trunc" -> return bits(math.trunc(a))
+    if name == "logb" -> return bits(math.logb(a))
+    if name == "next_up" -> return bits(math.next_up(a))
+    if name == "next_down" -> return bits(math.next_down(a))
+    if name == "ldexp" -> return bits(math.ldexp(a, exponent_of(w[1])))
+    b: f32_of(w[1])
+    if name == "copysign" -> return bits(math.copysign(a, b))
+    if name == "total_order" -> return flag(math.total_order(a, b))
+    if name == "total_order_mag" -> return flag(math.total_order_mag(a, b))
+    if name == "fmod" -> return bits(math.fmod(a, b))
+    if name == "remainder" -> return bits(math.remainder(a, b))
+    if name == "fdim" -> return bits(math.fdim(a, b))
+    if name == "max_float" -> return bits(math.max_float(a, b))
+    if name == "min_float" -> return bits(math.min_float(a, b))
+    if name == "maximum" -> return bits(math.maximum(a, b))
+    if name == "minimum" -> return bits(math.minimum(a, b))
+    if name == "maximum_mag" -> return bits(math.maximum_mag(a, b))
+    if name == "minimum_mag" -> return bits(math.minimum_mag(a, b))
+    if name == "maximum_num" -> return bits(math.maximum_num(a, b))
+    if name == "minimum_num" -> return bits(math.minimum_num(a, b))
+    if name == "maximum_mag_num" -> return bits(math.maximum_mag_num(a, b))
+    if name == "minimum_mag_num" -> return bits(math.minimum_mag_num(a, b))
+    if name == "next_after" -> return bits(math.next_after(a, b))
+    panic("no corpus function {name}")
+}
+
+// Whether `name` chooses its NaN result's bits: a sign-bit, payload or
+// signaling operation.
+exact_nan: fn(name: String) -> Bool {
+    name == "fabs" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling"
+}
+
+check: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        // The row's words: its arguments, then the result.
+        words := [Int]{}
+        loop {
+            words.push(word_at(raw, at))
+            at = at + 9
+            if raw[at - 1] == (U8{10}) -> break
+        }
+        want: words[words.len() - 1]
+        got: value(name, words)
+        rows = rows + 1
+        if got != want && (exact_nan(name) || !(is_nan_word(got) && is_nan_word(want))) {
+            wrong = wrong + 1
+            if wrong <= 3 {
+                shown := [String]{}
+                loop i in 0..<(words.len() - 1) -> shown.push(hex_word(words[i]))
+                print("{name}({shown.join(", ")}) = {hex_word(got)}, C23 {hex_word(want)}")
+            }
+        }
+    }
+    print("{name}: {rows} rows, {wrong} differ")
+}
+
+run: fn() {
+    check("fabs", FABS)
+    check("copysign", COPYSIGN)
+    check("canonicalize", CANONICALIZE)
+    check("get_payload", GET_PAYLOAD)
+    check("set_payload", SET_PAYLOAD)
+    check("set_payload_signaling", SET_PAYLOAD_SIGNALING)
+    check("is_signaling", IS_SIGNALING)
+    check("is_normal", IS_NORMAL)
+    check("is_subnormal", IS_SUBNORMAL)
+    check("total_order", TOTAL_ORDER)
+    check("total_order_mag", TOTAL_ORDER_MAG)
+    check("fmod", FMOD)
+    check("remainder", REMAINDER)
+    check("fdim", FDIM)
+    check("max_float", MAX_FLOAT)
+    check("min_float", MIN_FLOAT)
+    check("maximum", MAXIMUM)
+    check("minimum", MINIMUM)
+    check("maximum_mag", MAXIMUM_MAG)
+    check("minimum_mag", MINIMUM_MAG)
+    check("maximum_num", MAXIMUM_NUM)
+    check("minimum_num", MINIMUM_NUM)
+    check("maximum_mag_num", MAXIMUM_MAG_NUM)
+    check("minimum_mag_num", MINIMUM_MAG_NUM)
+    check("round_even", ROUND_EVEN)
+    check("floor", FLOOR)
+    check("ceil", CEIL)
+    check("trunc", TRUNC)
+    check("logb", LOGB)
+    check("ldexp", LDEXP)
+    check("next_up", NEXT_UP)
+    check("next_down", NEXT_DOWN)
+    check("next_after", NEXT_AFTER)
+}

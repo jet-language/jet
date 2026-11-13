@@ -3011,7 +3011,19 @@ An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
 returns the correctly rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
-`Int`.
+`Int`. An all-F32 call of an exact function (`fmod`, `remainder`, `fdim`,
+`max_float`, `min_float`, `maximum`, `minimum`, `maximum_mag`,
+`minimum_mag`, `maximum_num`, `minimum_num`, `maximum_mag_num`,
+`minimum_mag_num`, `round_even`, `floor`, `ceil`, `trunc`, `logb`, `ldexp`,
+`scaleb`) returns the exact `F32` result, and `next_up`, `next_down` and
+`next_after` step by one binary32 unit (C23 `fmodf`, `fmaximumf`,
+`nextupf` and the rest); the exponent of `ldexp` and `scaleb` stays an
+`Int`. The bit-level calls `fabs`, `copysign`, `canonicalize`,
+`is_signaling`, `is_normal`, `is_subnormal`, `total_order`,
+`total_order_mag`, `get_payload`, `set_payload` and `set_payload_signaling`
+read an F32 argument's binary32 bits as they are, so a signaling NaN and its
+payload survive; `is_normal` and `is_subnormal` use the binary32 bound
+2^-126, and the payload calls take and return `F32` payloads below 2^22.
 
 | Function | Returns | Description |
 | --- | --- | --- |

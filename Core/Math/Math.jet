@@ -13896,6 +13896,12 @@ __abs_f32: fn(n: F32) -> F32 Never! {
     if to_bits(Float.from_f32(n)) < 0 -> return -n
     n
 }
+// The F32 fabs and copysign (an all-F32 call): sign-bit operations on the
+// binary32 bits, which keep a signaling NaN and its payload.
+__fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n).bit_and(0x7FFF_FFFF)) }
+__copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
+    __from_bits_f32(__to_bits_f32(value).bit_and(0x7FFF_FFFF).bit_or(__to_bits_f32(sign_value).bit_and(0x8000_0000)))
+}
 __abs_i64: fn(n: I64) -> I64 Never! {
     zero: I64{0}
     if n < zero -> return -n
@@ -13920,6 +13926,16 @@ is_normal: fn(n: Float) -> Bool Never! {
 is_subnormal: fn(n: Float) -> Bool Never! {
     magnitude: fabs(n)
     magnitude > 0.0 && magnitude < 2.2250738585072014e-308
+}
+// The F32 forms (an all-F32 call): the widening of a binary32 subnormal is a
+// normal Float, so the bound is the binary32 one, 2^-126.
+__is_normal_f32: fn(n: F32) -> Bool Never! {
+    magnitude: fabs(Float.from_f32(n))
+    magnitude >= 1.1754943508222875e-38 && magnitude < INFINITY
+}
+__is_subnormal_f32: fn(n: F32) -> Bool Never! {
+    magnitude: fabs(Float.from_f32(n))
+    magnitude > 0.0 && magnitude < 1.1754943508222875e-38
 }
 is_canonical: fn(n: Float) -> Bool Never! { is_finite(n) || is_nan(n) }
 is_signed: fn(n: Float) -> Bool Never! { sign_bit(n) }
@@ -13951,6 +13967,31 @@ next_after: fn(n: Float, toward: Float) -> Float Never! {
     from_bits(ux + 1)
 }
 nextafter: fn(n: Float, toward: Float) -> Float Never! { next_after(n, toward) }
+// The F32 forms of next_up, next_down and next_after (an all-F32 call): one
+// step of the binary32 bit pattern, on the exactly widened arguments, as
+// musl's nextafterf steps it.
+__next_up_f32: fn(n: Float) -> Float Never! {
+    if is_nan(n) || n == INFINITY -> return n
+    __next_after_f32(n, INFINITY)
+}
+__next_down_f32: fn(n: Float) -> Float Never! {
+    if is_nan(n) || n == -INFINITY -> return n
+    __next_after_f32(n, -INFINITY)
+}
+__next_after_f32: fn(n: Float, toward: Float) -> Float Never! {
+    if is_nan(n) || is_nan(toward) -> return __nan_pair(n, toward)
+    if n == toward -> return toward
+    // The smallest binary32 subnormal signed as `toward`, and from an
+    // infinity the largest finite binary32.
+    if n == (Float{0.0}) -> return copysign(ldexp(Float{1.0}, -149), toward)
+    if is_inf(n) -> return copysign(Float{3.4028234663852886e38}, n)
+    bits: __to_bits_f32(F32{n})
+    // The binary32 pattern is sign and magnitude: a step away from zero adds
+    // one to it whatever the sign, and a step toward zero takes one off.
+    away: (toward > n) == (n > Float{0.0})
+    Float.from_f32(__from_bits_f32(if away -> bits + 1 else -> bits - 1))
+}
+__nextafter_f32: fn(n: Float, toward: Float) -> Float Never! { __next_after_f32(n, toward) }
 significand: fn(n: Float) -> Float Never! {
     if n == 0.0 || !is_finite(n) -> return n
     bits: to_bits(n)
@@ -14613,6 +14654,73 @@ set_payload_signaling: fn(payload: Float) -> Float? Never! {
 __payload_bits: fn(payload: Float) -> Int? Never! {
     if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || trunc(payload) != payload -> return None
     Val(Int.from_float(payload) ?? 0)
+}
+// The F32 forms (an all-F32 call) of the bit operations above, on the
+// binary32 bits themselves: widening would quiet a signaling NaN and move a
+// payload 29 bits up.
+__is_signaling_f32: fn(n: F32) -> Bool Never! {
+    bits: __to_bits_f32(n).bit_and(0x7FFF_FFFF)
+    bits > 0x7F80_0000 && bits < 0x7FC0_0000
+}
+__canonicalize_f32: fn(n: F32) -> F32 Never! {
+    if __is_signaling_f32(n) -> return __from_bits_f32(__to_bits_f32(n).bit_or(0x40_0000))
+    n
+}
+// The binary32 bits as an Int that orders as totalOrder: a negative
+// pattern's magnitude, negated and less one, sorts below every positive
+// pattern, so -0 precedes +0.
+__total_order_key_f32: fn(n: F32) -> Int Never! {
+    bits: __to_bits_f32(n)
+    if bits >= 0x8000_0000 -> return 0x7FFF_FFFF - bits
+    bits
+}
+__total_order_f32: fn(a: F32, b: F32) -> Bool Never! { __total_order_key_f32(a) <= __total_order_key_f32(b) }
+__total_order_mag_f32: fn(a: F32, b: F32) -> Bool Never! {
+    __to_bits_f32(a).bit_and(0x7FFF_FFFF) <= __to_bits_f32(b).bit_and(0x7FFF_FFFF)
+}
+__get_payload_f32: fn(n: F32) -> F32? Never! {
+    if n == n -> return None
+    Val(F32{Float{__to_bits_f32(n).bit_and(0x3F_FFFF)}})
+}
+__set_payload_f32: fn(payload: F32) -> F32? Never! {
+    bits: __payload_bits_f32(payload) ?? return None
+    Val(__from_bits_f32(bits.bit_or(0x7FC0_0000)))
+}
+__set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
+    bits: __payload_bits_f32(payload) ?? return None
+    if bits == 0 -> return None
+    Val(__from_bits_f32(bits.bit_or(0x7F80_0000)))
+}
+// A binary32 payload's integer, when it is +0 or whole and below 2^22.
+__payload_bits_f32: fn(payload: F32) -> Int? Never! {
+    wide: Float.from_f32(payload)
+    if sign_bit(wide) || !(wide < Float{4194304.0}) || trunc(wide) != wide -> return None
+    Val(Int.from_float(wide) ?? 0)
+}
+
+#Test("math F32 forms step and read the binary32 bits") {
+    assert_eq(__next_up_f32(1.0), 1.0000001192092896)
+    assert_eq(__next_down_f32(1.0), 0.9999999403953552)
+    assert_eq(__next_after_f32(0.0, -1.0), -1.401298464324817e-45)
+    assert_eq(__next_after_f32(-1.401298464324817e-45, 1.0), -0.0)
+    assert(sign_bit(__next_after_f32(-1.401298464324817e-45, 1.0)))
+    assert_eq(__next_after_f32(INFINITY, 0.0), 3.4028234663852886e38)
+    assert_eq(__next_up_f32(3.4028234663852886e38), INFINITY)
+    signaling: __set_payload_signaling_f32(F32{1.0}) ?? F32{0.0}
+    assert(__is_signaling_f32(signaling))
+    assert_eq(__to_bits_f32(signaling), 0x7F80_0001)
+    assert_eq(__to_bits_f32(__canonicalize_f32(signaling)), 0x7FC0_0001)
+    assert_eq(__to_bits_f32(__fabs_f32(-signaling)), 0x7F80_0001)
+    assert_eq(__to_bits_f32(__copysign_f32(signaling, F32{-1.0})), 0xFF80_0001)
+    assert_eq(__get_payload_f32(signaling) ?? F32{0.0}, F32{1.0})
+    assert(__get_payload_f32(F32{1.0}) == None)
+    assert(__set_payload_f32(F32{4194304.0}) == None)
+    assert(__set_payload_signaling_f32(F32{0.0}) == None)
+    assert(__total_order_f32(F32{-0.0}, F32{0.0}))
+    assert(!__total_order_f32(F32{0.0}, F32{-0.0}))
+    assert(__total_order_mag_f32(F32{-1.0}, F32{2.0}))
+    assert(__is_subnormal_f32(F32{1.0e-40}))
+    assert(!__is_normal_f32(F32{1.0e-40}))
 }
 
 #Test("math scalar composition preserves IEEE boundaries") {
