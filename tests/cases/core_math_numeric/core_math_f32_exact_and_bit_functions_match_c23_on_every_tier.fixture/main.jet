@@ -111,6 +111,7 @@ exponent_of: fn(word: Int) -> Int { if word >= 0x8000_0000 -> word - 0x1_0000_00
 value: fn(name: String, w: [Int]) -> Int {
     a: f32_of(w[0])
     if name == "fabs" -> return bits(math.fabs(a))
+    if name == "abs_float" -> return bits(math.abs_float(a))
     if name == "canonicalize" -> return bits(math.canonicalize(a))
     if name == "get_payload" -> return maybe(math.get_payload(a))
     if name == "set_payload" -> return maybe(math.set_payload(a))
@@ -122,6 +123,7 @@ value: fn(name: String, w: [Int]) -> Int {
     if name == "floor" -> return bits(math.floor(a))
     if name == "ceil" -> return bits(math.ceil(a))
     if name == "trunc" -> return bits(math.trunc(a))
+    if name == "truncate" -> return bits(math.truncate(a))
     if name == "logb" -> return bits(math.logb(a))
     if name == "next_up" -> return bits(math.next_up(a))
     if name == "next_down" -> return bits(math.next_down(a))
@@ -160,7 +162,28 @@ results: fn(name: String, w: [Int]) -> [Int] {
 // Whether `name` chooses its NaN result's bits: a sign-bit, payload or
 // signaling operation.
 exact_nan: fn(name: String) -> Bool {
-    name == "fabs" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling"
+    name == "fabs" || name == "abs_float" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling"
+}
+
+// The C spellings expm1 and log1p are exp_m1's and ln_1p's F32 forms: the
+// same F32 bits on every argument of `corpus`.
+same: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        comment: raw[at] == (U8{35})
+        x: f32_of(if comment -> 0 else -> word_at(raw, at))
+        loop raw[at] != (U8{10}) -> at = at + 1
+        at = at + 1
+        if comment -> next
+        got: if name == "expm1" -> bits(math.expm1(x)) else -> bits(math.log1p(x))
+        want: if name == "expm1" -> bits(math.exp_m1(x)) else -> bits(math.ln_1p(x))
+        rows = rows + 1
+        if got != want && !(is_nan_word(got) && is_nan_word(want)) -> wrong = wrong + 1
+    }
+    print("{name}: {rows} rows, {wrong} differ from its member")
 }
 
 check: fn(name: String, corpus: String) {
@@ -207,6 +230,7 @@ check: fn(name: String, corpus: String) {
 
 run: fn() {
     check("fabs", FABS)
+    check("abs_float", FABS)
     check("copysign", COPYSIGN)
     check("canonicalize", CANONICALIZE)
     check("get_payload", GET_PAYLOAD)
@@ -235,9 +259,12 @@ run: fn() {
     check("floor", FLOOR)
     check("ceil", CEIL)
     check("trunc", TRUNC)
+    check("truncate", TRUNC)
     check("logb", LOGB)
     check("ldexp", LDEXP)
     check("next_up", NEXT_UP)
     check("next_down", NEXT_DOWN)
     check("next_after", NEXT_AFTER)
+    same("expm1", FABS)
+    same("log1p", FABS)
 }

@@ -3026,6 +3026,9 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 read an F32 argument's binary32 bits as they are, so a signaling NaN and its
 payload survive; `is_normal` and `is_subnormal` use the binary32 bound
 2^-126, and the payload calls take and return `F32` payloads below 2^22.
+The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
+`abs_float` give their members' `F32` results (`exp_m1`, `ln_1p`, `trunc`,
+`next_after` and `fabs`).
 
 | Function | Returns | Description |
 | --- | --- | --- |

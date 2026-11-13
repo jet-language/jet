@@ -880,7 +880,7 @@ sema_call_core_math_f32_kept: fn(member: String) -> Type? Never! {
     if member == {
         "to_bits" -> Val(Type.Int)
         "is_signaling" | "is_normal" | "is_subnormal" | "total_order" | "total_order_mag" -> Val(Type.Bool)
-        "canonicalize" | "fabs" | "copysign" -> Val(Type.Float32)
+        "canonicalize" | "fabs" | "abs_float" | "copysign" -> Val(Type.Float32)
         "get_payload" | "set_payload" | "set_payload_signaling" -> Val(Type.Option{inner: Type.Float32})
         "rem_quo" -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "rem", ty: Type.Float32}, TypeTupleField{name: "quo", ty: Type.Int}}})
         else -> None
@@ -898,9 +898,11 @@ sema_call_core_math_round_f32: fn(wide: TExpr, span: Span) -> TExpr Never! {
 // The core.math functions of Float arguments with a Float result that an
 // all-F32 call computes at F32 width (sqrt keeps its own record rule). The
 // exact ones (fmod through scaleb) are exact on the widened arguments too.
+// The other spellings (expm1, truncate, log1p, nextafter, abs_float) are
+// their members' F32 forms.
 sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
     if member == {
-        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "degrees" | "radians" | "log" | "floor" | "ceil" | "trunc" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
+        "tan" | "asin" | "cosh" | "tanh" | "exp" | "log2" | "atanh" | "cbrt" | "exp10" | "exp_m1" | "expm1" | "degrees" | "radians" | "log" | "floor" | "ceil" | "trunc" | "truncate" | "fract" | "lerp" | "rsqrt" | "exp2_m1" | "sin_pi" | "cos_pi" | "tan_pi" | "asin_pi" | "acos_pi" -> true
         "fmod" | "remainder" | "round_even" | "fdim" | "max_float" | "min_float" | "maximum" | "minimum" | "maximum_mag" | "minimum_mag" | "maximum_num" | "minimum_num" | "maximum_mag_num" | "minimum_mag_num" | "logb" | "ldexp" | "scaleb" -> true
         else -> sema_call_core_math_f32_own(member)
     }
@@ -912,7 +914,7 @@ sema_call_core_math_f32_member: fn(member: String) -> Bool Never! {
 // Float next_up would step by a binary64 unit.
 sema_call_core_math_f32_own: fn(member: String) -> Bool Never! {
     if member == {
-        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" | "erf" | "erfc" | "gamma" | "lgamma" | "fma" | "muladd" -> true
+        "pow_n" | "pow_r" | "root_n" | "compound_n" | "atan2_pi" | "atan_pi" | "exp10_m1" | "log2_1p" | "log10_1p" | "exp2" | "ln" | "log10" | "ln_1p" | "log1p" | "sin" | "cos" | "acos" | "atan" | "atan2" | "sinh" | "asinh" | "acosh" | "hypot" | "erf" | "erfc" | "gamma" | "lgamma" | "fma" | "muladd" -> true
         "next_up" | "next_down" | "next_after" | "nextafter" -> true
         else -> false
     }

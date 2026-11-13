@@ -5188,6 +5188,7 @@ __exp2_f32: fn(x: Float) -> Float Never! { __f32_listed(x, exp2(x), __EXP2_F32) 
 __ln_f32: fn(x: Float) -> Float Never! { __f32_listed(x, ln(x), __LN_F32) }
 __log10_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log10(x), __LOG10_F32) }
 __ln_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, ln_1p(x), __LN1P_F32) }
+__log1p_f32: fn(x: Float) -> Float Never! { __ln_1p_f32(x) }
 __atan_pi_f32: fn(x: Float) -> Float Never! { __f32_listed(x, atan_pi(x), __ATANPI_F32) }
 __exp10_m1_f32: fn(x: Float) -> Float Never! { __f32_listed(x, exp10_m1(x), __EXP10M1_F32) }
 __log2_1p_f32: fn(x: Float) -> Float Never! { __f32_listed(x, log2_1p(x), __LOG2P1_F32) }
@@ -13902,6 +13903,8 @@ __fabs_f32: fn(n: F32) -> F32 Never! { __from_bits_f32(__to_bits_f32(n).bit_and(
 __copysign_f32: fn(value: F32, sign_value: F32) -> F32 Never! {
     __from_bits_f32(__to_bits_f32(value).bit_and(0x7FFF_FFFF).bit_or(__to_bits_f32(sign_value).bit_and(0x8000_0000)))
 }
+// abs_float is fabs, at F32 width too.
+__abs_float_f32: fn(n: F32) -> F32 Never! { __fabs_f32(n) }
 __abs_i64: fn(n: I64) -> I64 Never! {
     zero: I64{0}
     if n < zero -> return -n
