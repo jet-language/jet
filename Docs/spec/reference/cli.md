@@ -203,67 +203,71 @@ unknown-command E2101.
 
 The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order of each command row's
-`frequency_rank` in the compiler's command registry (`jet
-Tools/cli-census/Census.jet --check` keeps the ranks numbering the commands 1
-to N); `jet help --sort az` lists the same commands A to Z and `jet help --sort
-za` Z to A:
+`frequency_rank` in the compiler's command registry; `jet help --sort az`
+lists the same commands A to Z and `jet help --sort za` Z to A. `jet
+Tools/cli-census/Census.jet --write` writes the index from the command rows,
+and its `--check` (a landing ratchet) fails when the index differs from them
+or the ranks don't number the commands 1 to N:
 
+<!-- BEGIN GENERATED CLI COMMAND INDEX: jet Tools/cli-census/Census.jet --write -->
 ```text
 jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
 jet build [<file.jet|dir>]           Create a native executable
 jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
 jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--docs] [-u] Run tests
+jet fmt [args]                       Format Jet and configured project files
 jet explain <CODE|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
 jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
-jet self <command>                   Manage the Jet installation and editor tools
 jet repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
-jet fmt [args]                       Format Jet and configured project files
-jet os <command>                     Manage Jetos machines and images
+jet self <command>                   Manage the Jet installation and editor tools
 jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
+jet os <command>                     Manage Jetos machines and images
 jet prove [args]                     Create a proof report for code and tests
 jet fetch [args]                     Download locked dependencies
 jet debug [<file.jet>]               Debug a program from Jet source
-jet registry <command>               Publish and manage packages
-jet env <command>                    Open the project development shell
 jet new <name> [--template cli|ui|web|overrides] Create a Jet project
-jet budget [args]                    Check performance limits or update baselines
+jet registry <command>               Publish and manage packages
+jet perf <command>                   Collect and inspect performance traces
 jet help [<command>] [--sort frequency|az|za] Show command help
-jet update [args]                    Update dependency or toolchain pins
+jet budget [args]                    Check performance limits or update baselines
+jet env <command>                    Open the project development shell
 jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
 jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
-jet init [args]                      Create package settings in this directory
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
-jet image [args]                     Build a declared container image
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
-jet jobs [<name>]                    List named project jobs or show one
-jet gc <command>                     Show values moved into automatic memory management
-jet clean [args]                     Remove unused package-store data
-jet merge [args]                     Merge Jet programs without losing code structure
-jet add [args]                       Add and download a dependency
-jet status [<file.jet|dir>]          Show what the project has proved
-jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
+jet update [args]                    Update dependency or toolchain pins
 jet emit [args]                      Print generated build output
-jet lint --a11y|--complexity <file.jet> Run optional code-quality checks
-jet version [args]                   Show the Jet version
-jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
+jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
+jet init [args]                      Create package settings in this directory
+jet add [args]                       Add and download a dependency
+jet jobs [<name>]                    List named project jobs or show one
 jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
+jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
+jet lint --a11y|--complexity <file.jet> Run optional code-quality checks
+jet image [args]                     Build a declared container image
+jet status [<file.jet|dir>]          Show what the project has proved
+jet gc <command>                     Show values moved into automatic memory management
+jet merge [args]                     Merge Jet programs without losing code structure
+jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
+jet version [args]                   Show the Jet version
 jet diff [args]                      Compare two Jet programs by meaning
+jet fold [args]                      Reverse a recorded Package source transition
 jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>] Find code by type, effect, or example
 jet trust [args]                     Review or change trusted authority
-jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
-jet search <query>                   Search the local package catalog
-jet fold [args]                      Reverse a recorded Package source transition
+jet clean [args]                     Remove unused package-store data
 jet split [args]                     Extract closed Package facts into Configs or members
 jet cache <command>                  Manage the machine-wide artifact store
 jet project <command>                Inspect project files and modules
-jet remote [args]                    Manage host-owned remote builders
+jet search <query>                   Search the local package catalog
+jet crash < <report.txt>             Name the functions and lines of a release crash report
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
-jet fill <file.jet[:line]>           Propose checked code for typed goals
+jet remote [args]                    Manage host-owned remote builders
 jet remove [args]                    Remove a dependency
 jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
-jet crash < <report.txt>             Name the functions and lines of a release crash report
+jet fill <file.jet[:line]>           Propose checked code for typed goals
 ```
+<!-- END GENERATED CLI COMMAND INDEX -->
 
 One table, the command model (`JET_CLI_FORMS` in
 `Compiler/JetFoundation/Source/Registry/CLICommands.jet`), says which `jet`

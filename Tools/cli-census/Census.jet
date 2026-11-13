@@ -1,5 +1,6 @@
 #!/usr/bin/env jet
-// Command-order check for `jet help` (#3724).
+// Command-order check for `jet help`, and the writer of the root command
+// index in Docs/spec/reference/cli.md.
 //
 // Each command row in Compiler/JetFoundation/Source/Registry/CLICommands.jet
 // carries its `frequency_rank`: its place in `jet help`, most-used first. The
@@ -8,9 +9,17 @@
 // examples or tests never changes the compiler. `jet help --sort az|za`
 // lists the commands alphabetically instead.
 //
-// usage: jet Tools/cli-census/Census.jet [--check]   (from the repository root)
+// The root index in cli.md is the usage rows `jet help` prints, written
+// between its BEGIN and END markers from the same rows: each command in rank
+// order, its usage (or `<name> <command>` for a group, `<name> [args]` for
+// a command without one) and its summary, leaving out a command the command
+// model (JET_CLI_FORMS) marks not built.
+//
+// usage: jet Tools/cli-census/Census.jet [--check|--write]   (from the repository root)
 //   (no flag) print the commands in rank order
-//   --check    also exit 1 unless the ranks number the rows 1 to N, once each
+//   --check    also exit 1 unless the ranks number the rows 1 to N, once each,
+//              and cli.md's root index is the one the rows give
+//   --write    rewrite cli.md's root index from the rows
 use {
     files: core.files
     process: core.process
@@ -35,11 +44,22 @@ command_table: fn() -> CommandTable Never! {
     }
 }
 
-// One top-level command row: its name and `frequency_rank`.
+// One top-level command row: its name, `frequency_rank`, summary, usage
+// shape (None when the row has none) and whether it groups actions.
 CommandRow: struct {
     name: String
     rank: Int
+    summary: String
+    usage: String?
+    group: Bool
 }
+
+// The page holding the root command index, and the lines around the index.
+DOC_PATH: "Docs/spec/reference/cli.md"
+INDEX_BEGIN: "<!-- BEGIN GENERATED CLI COMMAND INDEX: jet Tools/cli-census/Census.jet --write -->\n"
+INDEX_END: "<!-- END GENERATED CLI COMMAND INDEX -->\n"
+// The column a usage row's summary starts after, as `jet help` pads it.
+USAGE_WIDTH: 36
 
 #Error
 CensusError: struct {
@@ -125,6 +145,51 @@ row_name: fn(line: String, source: String) -> String? Never! {
     None
 }
 
+// The text a Jet quoted literal `"…"` holds: `\"`, `\\`, `\n` and `\t` are
+// their characters and `{{`/`}}` one brace. None for anything else, or for a
+// literal with a hole or an escape this table never uses.
+quoted_text: fn(value: String) -> String? Never! {
+    bytes: value.bytes()
+    if bytes.len() < 2 || bytes[0] != (U8{34}) || bytes[bytes.len() - 1] != (U8{34}) -> return None
+    out := [U8]{}
+    index := 1
+    loop index < bytes.len() - 1 {
+        byte: Int.from_u8(bytes[index])
+        next_byte: if index + 1 < bytes.len() - 1 -> Int.from_u8(bytes[index + 1]) else -> -1
+        if byte == 92 {
+            if next_byte == {
+                34 | 92 -> out.push(bytes[index + 1])
+                110 -> out.push(U8{10})
+                116 -> out.push(U8{9})
+                else -> return None
+            }
+            index += 2
+            next
+        }
+        if byte == 123 || byte == 125 {
+            if next_byte != byte -> return None
+            out.push(bytes[index])
+            index += 2
+            next
+        }
+        if byte == 34 -> return None
+        out.push(bytes[index])
+        index += 1
+    }
+    Val(String.from_bytes(out) ?? return None)
+}
+
+// `<prefix>"text",` -> the text.
+row_text: fn(line: String, prefix: String) -> String? Never! {
+    if !line.starts_with(prefix) || !line.ends_with(",") -> return None
+    quoted_text(byte_slice(line, byte_len(prefix), byte_len(line) - 1))
+}
+
+// Does `line` open one of a row's actions?
+action_line: fn(line: String) -> Bool Never! {
+    line.starts_with("            {{name: \"") || line.starts_with("            JetCLIActionSpec{{")
+}
+
 // The top-level rows of `body`: an opener line through the first following
 // line that is exactly `    }` or `    },`.
 table_rows: fn(body: String, source: String, row_openers: [String]) -> [CommandRow] CensusError! {
@@ -151,15 +216,24 @@ table_rows: fn(body: String, source: String, row_openers: [String]) -> [CommandR
         }
         name := String?{None}
         rank := Int?{None}
+        summary := String?{None}
+        usage := String?{None}
+        group := false
         loop row_line in index + 1..<closing + 1 {
             line: byte_slice(body, spans[row_line].start, spans[row_line].end)
             if name == None -> name = row_name(line, source)
             if rank == None -> rank = rank_value(line)
+            if summary == None -> summary = row_text(line, "        summary: ")
+            if usage == None && line.starts_with("        usage: Val(") && line.ends_with("),") {
+                usage = quoted_text(byte_slice(line, byte_len("        usage: Val("), byte_len(line) - 2))
+            }
+            if action_line(line) -> group = true
         }
-        row_text: byte_slice(body, spans[index].start, spans[closing].end)
-        found: name ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{row_text}"))
-        found_rank: rank ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{row_text}"))
-        rows.push(CommandRow{name: found, rank: found_rank})
+        shown: byte_slice(body, spans[index].start, spans[closing].end)
+        found: name ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{shown}"))
+        found_rank: rank ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{shown}"))
+        found_summary: summary ?? return Err(census_fail("census: command row lacks a plain quoted summary:\n{shown}"))
+        rows.push(CommandRow{name: found, rank: found_rank, summary: found_summary, usage: usage, group: group})
         index = closing + 1
     }
     Ok(rows)
@@ -211,21 +285,74 @@ ranking_lines: fn(rows: [CommandRow]) -> [String] Never! {
     lines
 }
 
+// The command-model forms (JET_CLI_FORMS rows in `source`) marked not built.
+unbuilt_forms: fn(source: String) -> [String] Never! {
+    prefix: "{{form: \""
+    forms := [String]{}
+    loop span in line_spans(source) {
+        line: byte_slice(source, span.start, span.end).trim()
+        if !line.starts_with(prefix) || !line.contains("ported: false") -> next
+        rest: byte_slice(line, byte_len(prefix), byte_len(line))
+        close: rest.find("\"")
+        if close > 0 -> forms.push(byte_slice(rest, 0, close))
+    }
+    forms
+}
+
+// `text` padded with spaces to `width` characters.
+padded: fn(text: String, width: Int) -> String Never! {
+    if text.len() >= width -> return text.copy()
+    "{text}{" ".repeat(width - text.len())}"
+}
+
+// The root index `jet help` prints, one usage row per built command in rank
+// order: its usage padded to USAGE_WIDTH, then its summary.
+index_lines: fn(rows: [CommandRow], unbuilt: [String]) -> [String] Never! {
+    ordered := rows.copy()
+    ordered.sort_by((left: CommandRow, right: CommandRow) -> (left.rank <=> right.rank).then(left.name <=> right.name))
+    lines := [String]{}
+    loop row in ordered {
+        if unbuilt.contains(row.name) -> next
+        shape: row.usage ?? (if row.group -> "{row.name} <command>" else -> "{row.name} [args]")
+        lines.push("{padded("jet {shape}", USAGE_WIDTH)} {row.summary}")
+    }
+    lines
+}
+
+// `doc` with the text between its index markers replaced by `lines` as one
+// text block.
+doc_with_index: fn(doc: String, lines: [String]) -> String CensusError! {
+    begin: doc.find(INDEX_BEGIN)
+    if begin < 0 -> return Err(census_fail("census: {DOC_PATH} has no line `{INDEX_BEGIN.trim()}`"))
+    body_start: begin + byte_len(INDEX_BEGIN)
+    end: byte_slice(doc, body_start, byte_len(doc)).find(INDEX_END)
+    if end < 0 -> return Err(census_fail("census: {DOC_PATH} has no line `{INDEX_END.trim()}` after its index"))
+    fence: "```"
+    Ok("{byte_slice(doc, 0, body_start)}{fence}text\n{lines.join("\n")}\n{fence}\n{byte_slice(doc, body_start + end, byte_len(doc))}")
+}
+
 census_main: fn(args: [String]) -[FS, IO]> Int CensusError! {
-    check := false
+    mode := ""
     loop arg in args {
-        if arg == "--check" {
-            check = true
+        if (arg == "--check" || arg == "--write") && mode == "" {
+            mode = arg.copy()
             next
         }
-        return Err(CensusError{message: "census: unknown argument {arg}; usage: Census.jet [--check]", code: 64})
+        return Err(CensusError{message: "census: unexpected argument {arg}; usage: Census.jet [--check|--write]", code: 64})
     }
     table: command_table()
     source: files.read(table.path) ?? return Err(census_fail("census: cannot read {table.path}: {err}"))
     rows: source_rows(table, source) ?? return Err(err)
     loop line in ranking_lines(rows) -> print(line)
-    if !check -> return Ok(0)
-    problems: rank_problems(rows, table.path)
+    if mode == "" -> return Ok(0)
+    problems := rank_problems(rows, table.path)
+    doc: files.read(DOC_PATH) ?? return Err(census_fail("census: cannot read {DOC_PATH}: {err}"))
+    indexed: doc_with_index(doc, index_lines(rows, unbuilt_forms(source))) ?? return Err(err)
+    if mode == "--write" && indexed != doc {
+        files.write(DOC_PATH, indexed) ?? return Err(census_fail("census: cannot write {DOC_PATH}: {err}"))
+        print("census: wrote the root command index of {DOC_PATH}")
+    }
+    if mode == "--check" && indexed != doc -> problems.push("census: the root command index of {DOC_PATH} differs from the command rows; run jet Tools/cli-census/Census.jet --write")
     if problems.len() == 0 -> return Ok(0)
     loop line in problems -> term.eprint(line)
     Ok(1)
@@ -242,7 +369,7 @@ rows_of: fn(source: String) -> [CommandRow] Never! {
 }
 
 #Test("rows are read from opener to closer, a constant name through its value") {
-    rows: rows_of("pub const JOBS: &str = \"jobs\";\nT: [\n    CommandSpec {{\n        name: \"run\",\n        nested: {{\n        }},\n        frequency_rank: 2,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        frequency_rank: 1,\n    }}\n];\n")
+    rows: rows_of("pub const JOBS: &str = \"jobs\";\nT: [\n    CommandSpec {{\n        name: \"run\",\n        summary: \"Run\",\n        nested: {{\n        }},\n        frequency_rank: 2,\n    }},\n    CommandSpec {{\n        name: JOBS,\n        summary: \"Jobs\",\n        frequency_rank: 1,\n    }}\n];\n")
     assert_eq(rows.len(), 2)
     assert_eq(rows[0].name, "run")
     assert_eq(rows[0].rank, 2)
@@ -252,9 +379,26 @@ rows_of: fn(source: String) -> [CommandRow] Never! {
     assert_eq(ranking_lines(rows).join("\n"), "  1 jobs\n  2 run")
 }
 
+#Test("the root index lists each built command's usage row in rank order") {
+    rows: rows_of("T: [\n    CommandSpec {{\n        name: \"self\",\n        summary: \"Manage {{{{it}}}}\",\n        frequency_rank: 3,\n        usage: None,\n        actions: [JetCLIActionSpec]{{\n            {{name: \"lsp\", usage: \"lsp\"}},\n        }},\n    }},\n    CommandSpec {{\n        name: \"run\",\n        summary: \"Run a \\\"program\\\"\",\n        frequency_rank: 1,\n        usage: Val(\"run [<file.jet>]\"),\n        actions: [JetCLIActionSpec]{{}},\n    }},\n    CommandSpec {{\n        name: \"fmt\",\n        summary: \"Format\",\n        frequency_rank: 2,\n        usage: None,\n        actions: [JetCLIActionSpec]{{}},\n    }},\n    CommandSpec {{\n        name: \"db\",\n        summary: \"Database\",\n        frequency_rank: 4,\n        usage: None,\n        actions: [JetCLIActionSpec]{{}},\n    }}\n];\n")
+    forms: unbuilt_forms("    {{form: \"db\", ported: false, card: 1}},\n    {{form: \"fmt --x\", ported: false, card: 1}},\n    {{form: \"run\", ported: true, card: 1}},\n")
+    assert_eq(forms, [String]{"db", "fmt --x"})
+    lines: index_lines(rows, forms)
+    assert_eq(lines, [String]{
+        "jet run [<file.jet>]                 Run a \"program\"",
+        "jet fmt [args]                       Format",
+        "jet self <command>                   Manage {{it}}",
+    })
+    doc: "intro\n{INDEX_BEGIN}```text\nold\n```\n{INDEX_END}after\n"
+    written: doc_with_index(doc, lines) ?? panic(err.message)
+    assert_eq(written, "intro\n{INDEX_BEGIN}```text\n{lines.join("\n")}\n```\n{INDEX_END}after\n")
+    assert_eq(doc_with_index(written, lines) ?? panic(err.message), written)
+    assert(doc_with_index("no markers\n", lines) == .Err(_))
+}
+
 #Test("ranks must number the rows 1 to N once each") {
-    shared: [CommandRow]{CommandRow{name: "run", rank: 1}, CommandRow{name: "test", rank: 1}}
+    shared: [CommandRow]{CommandRow{name: "run", rank: 1, summary: "", usage: None, group: false}, CommandRow{name: "test", rank: 1, summary: "", usage: None, group: false}}
     assert_eq(rank_problems(shared, "t"), [String]{"census: test and run share frequency_rank 1 in t"})
-    gap: [CommandRow]{CommandRow{name: "run", rank: 1}, CommandRow{name: "test", rank: 3}}
+    gap: [CommandRow]{CommandRow{name: "run", rank: 1, summary: "", usage: None, group: false}, CommandRow{name: "test", rank: 3, summary: "", usage: None, group: false}}
     assert_eq(rank_problems(gap, "t"), [String]{"census: test has frequency_rank 3 in t; the 2 commands take ranks 1 to 2"})
 }
