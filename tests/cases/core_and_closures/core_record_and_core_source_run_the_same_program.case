@@ -1,0 +1,40 @@
+# Claim (#6328 c22 S5.11): a program compiled against the precompiled Core record runs as it does against Core checked from source, at O0, O1 and O2.
+# The program instantiates Core's generic sort with a user type, passes it a user closure, and the closure's failure reaches the caller's row through the Core body.
+# The `source` steps read Core from the toolchain tree, so every Core body is checked from source; the `record` steps run without one, so jet takes Core from its built-in record.
+# JET_PHASE_COUNTERS prints the finalization counters: no step changes a Core slot taken from the record (`seeded_writes`), and only the record steps take Core bodies (`core_taken`).
+fixture: core_record_and_core_source_run_the_same_program/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PHASE_COUNTERS=1
+step source_o0: jet run --optimize=none --trace=source_o0.json run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # source Core takes no record body
+step record_o0: jet run --optimize=none --trace=record_o0.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":" # the record's Core bodies are taken; their number follows Core
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # and it is never none
+step source_o1: jet run --optimize=basic --trace=source_o1.json run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+step record_o1: jet run --optimize=basic --trace=record_o1.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # the record's Core bodies are taken
+step source_o2: jet run --optimize=full --trace=source_o2.json run.jet
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+step record_o2: jet run --optimize=full --trace=record_o2.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab\nE_POINT:negative z\nezd after ez, recovered true\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"seeded_writes\":0}" # stderr holds every phase counter; this one is the finalization's
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # the record's Core bodies are taken

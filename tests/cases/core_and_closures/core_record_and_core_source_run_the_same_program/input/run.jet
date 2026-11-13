@@ -1,0 +1,40 @@
+// A user type through Core's generic sort, keyed by a user closure whose
+// failure reaches the caller's row.
+Point: struct {
+    x: Int
+    name: String
+}
+
+point_key: fn(p: Point, seen: &String) -> Int Err! {
+    seen += p.name
+    if p.x < 0 { return Err("negative {p.name}", code: "E_POINT") }
+    return p.x
+}
+
+names: fn(points: [Point]) -> String Never! {
+    out := ""
+    loop p in points -> out += p.name
+    out
+}
+
+unit: fn() {}
+
+run: fn() {
+    points := [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
+    seen := ""
+    points.sort_by((p: Point) -> point_key(p, seen)) ?? {
+        print("unexpected {err.code}")
+        unit()
+    }
+    print("{names(points)} after {seen}")
+
+    stopped := [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
+    tried := ""
+    recovered := false
+    stopped.sort_by((p: Point) -> point_key(p, tried)) ?? {
+        print("{err.code}:{err.message}")
+        recovered = true
+        unit()
+    }
+    print("{names(stopped)} after {tried}, recovered {recovered}")
+}
