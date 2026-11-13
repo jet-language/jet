@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0743 — Jet diagnostic</title>
-<meta name="description" content="Dynamic call `{trait_name}::{method}` has no effect bound.">
+<meta name="description" content="Dynamic call `{trait_name}.{method}` has no effect bound.">
 <meta property="og:title" content="E0743 — Jet diagnostic">
-<meta property="og:description" content="Dynamic call `{trait_name}::{method}` has no effect bound.">
+<meta property="og:description" content="Dynamic call `{trait_name}.{method}` has no effect bound.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0743</h1>
-<p>Dynamic call `{trait_name}::{method}` has no effect bound.</p>
+<p>Dynamic call `{trait_name}.{method}` has no effect bound.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Dynamic call `{trait_name}::{method}` has no effect bound.</p>
+<p class="diag-copy what" data-registry-field="what">Dynamic call `{trait_name}.{method}` has no effect bound.</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method&#39;s declared row or a ceiling in the trait&#39;s `#FX(…)` cap.</p>
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare an effect row on the trait method, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move the dynamic call outside the bounded function.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0743</code>: <code>tests/ui/crypto_expert_nonce_trait_dispatch_precedence.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingDynamicEffectBound]: Dynamic call `Shape::area` has no effect bound
+<pre class="diag">Error [jet.MissingDynamicEffectBound]: Dynamic call `Shape.area` has no effect bound
   --&gt; tests/ui/crypto_expert_nonce_trait_dispatch_precedence.jet:12:18
     |
  12 |     return shape.area()
     |                  ^^^^
  Why: A trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method&#39;s declared row or a ceiling in the trait&#39;s `#FX(…)` cap
- Fix: Declare an effect row on `Shape::area`, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function
+ Fix: Declare an effect row on `Shape.area`, such as `-[]&gt;` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function
 More: jet-lang.dev/e/E0743
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

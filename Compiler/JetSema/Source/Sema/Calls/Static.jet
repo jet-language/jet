@@ -1060,7 +1060,7 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
         listed := [Type]{}
         loop element in elements {
             written: sema_call_static_reflect_type_arg(element, environment, graph) ?? {
-                diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Box<Int>`, or `[Int]` for a list"))
+                diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Set<Int>`, or `[Int]` for a list"))
                 return Val(SemaMethodSpecialCheck{handled: true, value: None})
             }
             listed.push(written)

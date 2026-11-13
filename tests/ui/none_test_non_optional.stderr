@@ -1,8 +1,8 @@
-Error [jet.PatternTypeMismatch]: This pattern belongs to an optional value, not `String`
-  --> none_test_non_optional.jet:3:13
+Error [jet.OperatorTypeMismatch]: Only an optional value can be compared with `None`, but this is String (text)
+  --> none_test_non_optional.jet:3:8
     |
   3 |     if s == None {
-    |             ^^^^
- Why: Absent patterns work on Option values
- Fix: Match an optional value or use its enum pattern
-More: jet-lang.dev/e/E0305
+    |        ^^^^^^^^^
+ Why: A value whose type isn't optional is never None, so this comparison is always false
+ Fix: Remove the comparison, or give the value an optional type such as `String?` if it can be missing
+More: jet-lang.dev/e/E0109

@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">`` `{name}` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage ``.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`).</p>
+<p class="diag-copy fix" data-registry-field="fix">Assign `{name}` on every path before reading it; a fixed list needs every slot assigned.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0420</code>: <code>tests/ui/arena/erased_initialization_does_not_leak_past_scope/stderr</code>.</p>
 <pre class="diag">Error [jet.UninitializedRead]: `value` may be read before it is given a value
@@ -43,7 +43,7 @@
   9 |     print(value)
     |           ^^^^^
  Why: `value` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
- Fix: Write to `value` on every path before reading it (e.g. fill it via `mut value`)
+ Fix: Assign `value` on every path before reading it; a fixed list needs every slot assigned
 More: jet-lang.dev/e/E0420
 
 Error [jet.UninitializedRead]: `value` may be read before it is given a value
@@ -52,7 +52,7 @@ Error [jet.UninitializedRead]: `value` may be read before it is given a value
  17 |     print(value)
     |           ^^^^^
  Why: `value` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
- Fix: Write to `value` on every path before reading it (e.g. fill it via `mut value`)
+ Fix: Assign `value` on every path before reading it; a fixed list needs every slot assigned
 More: jet-lang.dev/e/E0420
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

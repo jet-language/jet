@@ -3417,8 +3417,10 @@ sema_effect_secret_diagnostic: fn(node: SemaEffectNode) -> Diagnostic {
     sema_error("E1264", node.row_span ?? node.name_span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other effects, there is no silently-inferred default here, so a function must opt in even with no other explicit effect row at all.", "add `-[Secret]>` to `{node.name}`'s signature (or widen an existing effect row to cover it)")
 }
 
+// The dispatch key `Trait::method` reads as the source spelling `Trait.method`.
 sema_effect_unbounded_dispatch_diagnostic: fn(dispatch: TEffectSpan) -> Diagnostic {
-    sema_error("E0743", dispatch.span, "dynamic call `{dispatch.name}` has no effect bound", "a trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap", "declare an effect row on `{dispatch.name}`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function")
+    method: dispatch.name.replace("::", ".")
+    sema_error("E0743", dispatch.span, "dynamic call `{method}` has no effect bound", "a trait value can select any implementation at runtime, and the program holds none of this method to bound the call, so an enclosing effect ceiling needs the trait method's declared row or a ceiling in the trait's `#FX(…)` cap", "declare an effect row on `{method}`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function")
 }
 
 sema_effect_locate_dispatch: fn(site: SemaEffectDispatchSite, inputs: [SemaEffectModuleInput]) -> Diagnostic Never! {

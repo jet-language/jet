@@ -1,9 +1,9 @@
 # tests/ownership.rs::open_dynamic_trait_view_dispatch_is_rejected, migrated to the implicit-copy ownership model
-# (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): the open dynamic call `Select::select` inside the pure
+# (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): the open dynamic call `Select.select` inside the pure
 # `wrapper` is rejected before its returned view is judged: the trait method declares no effect bound and the
 # program holds no implementation of it.
 fixture: open_dynamic_trait_view_dispatch_is_rejected/input
 step: jet check run.jet
 exit: nonzero # tests/ownership.rs:6199 expect_err
 stderr: ~ "[jet.MissingDynamicEffectBound]" # the registered diagnostic
-stderr: ~ "Fix: Declare an effect row on `Select::select`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function" # and its fix
+stderr: ~ "Fix: Declare an effect row on `Select.select`, such as `-[]>` for pure dispatch, put an `#FX(…)` ceiling above the trait, or move this dynamic call outside the bounded function" # and its fix

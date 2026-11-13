@@ -1120,6 +1120,16 @@ sema_expr_never_none: fn(ty: Type) -> Bool Never! {
     }
 }
 
+// The refusal of `value == None` or `value != None` (`equal` tells which)
+// when `ty` is never None: the comparison answers the same every time. One
+// E0109 for both spellings, whether `== None` reached sema as a pattern test
+// or as a comparison.
+sema_expr_none_comparison_refused: fn(ty: Type, equal: Bool, span: Span) -> Diagnostic? {
+    if !sema_expr_never_none(ty) -> return None
+    answer: if equal -> "false" else -> "true"
+    Val(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(ty)}?` if it can be missing"))
+}
+
 // The optional type a value of type `offered` lifts to under `required`, or
 // None when it does not lift. Decided from the types alone, so an owning
 // caller moves its value into the lift.
@@ -4413,7 +4423,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     // E0420: a `Type{ uninit }` binding read before
     // every path wrote it reports once, then the read resolves as usual.
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].symbol.id.key) != None {
-        diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
+        diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "assign `{name}` on every path before reading it; a fixed list needs every slot assigned"))
     }
     // The ambient `input`, when no binding shadows it: the program's lines.
     if unresolved_index == None && name == "input" -> return sema_call_check_ambient_input(span, expected, environment, program, scopes, context, diagnostics)
@@ -5315,9 +5325,8 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
             else -> Type?{None}
         }
         if compared == .Val(value_ty) {
-            if sema_expr_never_none(value_ty) {
-                answer: if op == BinOp.Eq -> "false" else -> "true"
-                diagnostics.push(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(value_ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(value_ty)}?` if it can be missing"))
+            if sema_expr_none_comparison_refused(value_ty, op == BinOp.Eq, span) == .Val(refused) {
+                diagnostics.push(refused)
                 return None
             }
             // An optional compared with `None` is the presence test
@@ -6642,6 +6651,12 @@ sema_expr_check_pattern_test: fn(subject: Expr, pattern: Pattern, span: Span, ex
     subject_value: if sema_pattern_consumes_result_carrier(pattern) -> sema_check_expression_carrier(subject, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(subject, None, environment, program, scopes, state, tail_store, context, diagnostics)
     checked_subject: subject_value ?? return None
     if sema_pattern_test_reused_payload_name(pattern, scopes, diagnostics) -> return None
+    if sema_pattern_tests_absence(pattern) {
+        if sema_expr_none_comparison_refused(checked_subject.ty, true, span) == .Val(refused) {
+            diagnostics.push(refused)
+            return None
+        }
+    }
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, scopes, state, tail_store, context, diagnostics)
     checked: checked_pattern.checked ?? return None
     sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, diagnostics)

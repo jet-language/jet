@@ -65,7 +65,7 @@ sema_call_shared_access_forbidden_diagnostic: fn(method: String, span: Span) -> 
 
 sema_call_distinct_raw_finish: fn(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     base: sema_expr_distinct_facts(receiver_value.ty, environment, program, scopes)?.base ?? sema_expr_quantity_raw_base(receiver_value.ty, environment, program, scopes) ?? {
-        diagnostics.push(sema_error("E0311", span, "`.raw()` is only valid on a distinct type value", "`.raw()` unwraps a distinct type to its base representation", "only call `.raw()` on a value whose type was declared with `:: distinct`"))
+        diagnostics.push(sema_error("E0311", span, "`.raw()` is only valid on a distinct type value", "`.raw()` unwraps a distinct type to its base representation", "only call `.raw()` on a value whose type was declared as `Name: distinct BaseType`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() > 0 {

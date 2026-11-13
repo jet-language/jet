@@ -2051,6 +2051,12 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
         sema_pattern_test_binding_names(pattern, names)
         return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), environment))
     }
+    if sema_pattern_tests_absence(pattern) {
+        if sema_expr_none_comparison_refused(checked_subject.ty, true, span) == .Val(refused) {
+            diagnostics.push(refused)
+            return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings([BindName]{}, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), environment))
+        }
+    }
     source: sema_expression_window_source(subject, scopes)
     window_names := [String]{}
     if source != None -> sema_expression_window_names(pattern, window_names)

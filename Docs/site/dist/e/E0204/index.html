@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0204 — Jet diagnostic</title>
-<meta name="description" content="Same value used while `mut` is active in one call">
+<meta name="description" content="Same value used while a write parameter holds it in one call">
 <meta property="og:title" content="E0204 — Jet diagnostic">
-<meta property="og:description" content="Same value used while `mut` is active in one call">
+<meta property="og:description" content="Same value used while a write parameter holds it in one call">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,16 +25,16 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0204</h1>
-<p>Same value used while `mut` is active in one call</p>
+<p>Same value used while a write parameter holds it in one call</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Same value used while `mut` is active in one call</p>
+<p class="diag-copy what" data-registry-field="what">Same value used while a write parameter holds it in one call</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
+<p class="diag-copy why" data-registry-field="why">While something is being changed through a write parameter, nobody else may be looking at it</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">End the active `mut` borrow before using the value again.</p>
+<p class="diag-copy fix" data-registry-field="fix">Pass the value only once, or copy it first with `.copy()`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0204</code>: <code>tests/ui/E0204_call_arg_lent_and_moved.stderr</code>.</p>
 <pre class="diag">Error [jet.UseWhileWriteActive]: `t` is already lent to this call, so `pair` can&#39;t take it here too

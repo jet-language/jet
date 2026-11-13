@@ -1077,6 +1077,14 @@ sema_pattern_normalize_nested: fn(slot: PatSlot, payload_ty: Type, env: SemaScop
     }
 }
 
+// A test that a value is missing: the absent pattern, or the bare `None` that
+// `x == None` writes, which normalizes to it whatever the subject's type.
+sema_pattern_tests_absence: fn(pattern: Pattern) -> Bool Never! {
+    if pattern == .Absent(_) -> return true
+    if pattern == .Variant(variant, slots, leading_dot, _) -> return variant == "None" && slots.len() == 0 && !leading_dot
+    false
+}
+
 sema_pattern_normalize_contextual: fn(pattern: Pattern, subject_ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables) -> Pattern Never! {
     if pattern == {
         .Or(alternatives, span) -> {
