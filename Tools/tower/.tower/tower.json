@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6780,
-    "rev": 101347,
+    "nextNum": 6781,
+    "rev": 101350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -94688,6 +94688,56 @@
       "updated": "2026-11-13T09:31:07.800Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c08zzpo5",
+      "num": 6780,
+      "title": "A lambda that moves a capture runs the move on every call",
+      "body": "Found by G9Web-1-2 (#6779 work, dev 46855ae09a, seed-b14). Sema accepts a lambda whose body moves a captured owner, even when the lambda is passed to a per-item callback. `[1,2,3].map(x -> consume(s.move()) + x).sum()` prints 33 and fold prints 27: the same owner is moved three times, a use after move (I1). Probe: $JET_SCRATCH_ROOT/lanes/G9Web/probe6779/mapmove/main.jet. The safe fix needs no new syntax: refuse the move. A call-at-most-once parameter mark that would allow it for one-shot callbacks is a language choice and goes to a ballot.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Sema refuses moving a captured owner inside a lambda body whenever the lambda may run more than once (any lambda that escapes into a call or a binding), with a registered code, what/why/fix text (copy, clone or move the value in as a parameter) and a UI snapshot of the probe. The rule is swept over Core, Compiler, Jetpack, Tools, Examples and every tests/ tree first, and every hit is fixed in the same batch.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T09:48:14.437Z"
+        },
+        {
+          "n": 2,
+          "text": "If a one-shot callback needs to move a capture, a ballot offers a call-at-most-once parameter mark with same-program alternatives. The refusal in c1 lands first and does not wait for the ballot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T09:48:15.365Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T09:48:08.492Z",
+      "updated": "2026-11-13T09:48:15.366Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -198983,6 +199033,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T09:48:15.366Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08zzpo5",
+      "note": "#2 If a one-shot callback needs to move a capture, a ballot off"
+    },
+    {
+      "at": "2026-11-13T09:48:14.437Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08zzpo5",
+      "note": "#1 Sema refuses moving a captured owner inside a lambda body wh"
+    },
+    {
+      "at": "2026-11-13T09:48:08.492Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c08zzpo5",
+      "note": "A lambda that moves a capture runs the move on every call"
+    },
     {
       "at": "2026-11-13T09:34:04.195Z",
       "by": "Main",
