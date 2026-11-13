@@ -3847,8 +3847,11 @@ Text never implicitly decodes as an integer, float, or Boolean, except in
 text-native sources: environment variables, CSV cells, route and query
 parameters. `Dyn.Int` owns its exact integer even beyond machine range.
 `Dyn.Number` retains a parsed number's spelling; `.int()`, `.float()` and
-typed decoding check the destination range when reading it. There is no
-public typed-text carrier.
+typed decoding check the destination range when reading it. `==` compares two
+`Dyn.Number` spellings exactly, while `equal_unordered` compares them by exact
+decimal value at any precision, never through binary64, so `1.0` equals
+`1.00`, `1e400` equals `10e399` and `-0.0` equals `0.0`, and a `Number` never
+equals an `Int` or a `Float`. There is no public typed-text carrier.
 `#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).

@@ -352,11 +352,91 @@ dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     }
     dyn_scalar_error(rt_static_text("expected float, got "), tree, err, err_len)
 }
+// A validated Number lexeme as sign, significant digits and decimal scale: its
+// value is the digits from `first` to `last` (skipping a point; leading and
+// trailing zeros dropped) times ten to the explicit exponent plus `adjust`.
+// The exponent span, with its sign, is empty when the lexeme has none.
+DynNumberParts: struct { negative: Bool, first: I64, last: I64, digits: I64, adjust: I64, exponent_at: I64, exponent_len: I64 }
+dyn_number_parts: fn(data: I64, len: I64) -> DynNumberParts {
+    parts := DynNumberParts{negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, adjust: I64{0}, exponent_at: len, exponent_len: I64{0}}
+    at := I64{0}
+    if (len > I64{0} && rt_text_byte(data) == I64{45}) {
+        parts.negative = true
+        at = I64{1}
+    }
+    point := false
+    leading := true
+    trailing := I64{0}
+    loop at < len {
+        byte: rt_text_byte(wrapping(data + at))
+        if (byte == I64{101} || byte == I64{69}) {
+            parts.exponent_at = at + I64{1}
+            parts.exponent_len = len - at - I64{1}
+            break
+        }
+        if (byte == I64{46}) {
+            point = true
+        } else {
+            if point { parts.adjust -= I64{1} }
+            if (byte != I64{48}) {
+                if leading { parts.first = at }
+                leading = false
+                parts.last = at + I64{1}
+                trailing = I64{0}
+            } else if !leading { trailing += I64{1} }
+            if !leading { parts.digits += I64{1} }
+        }
+        at += I64{1}
+    }
+    parts.digits -= trailing
+    parts.adjust += trailing
+    parts
+}
+// Two Number lexemes are equal when they spell the same decimal value: the
+// same sign and significant digits at the same scale, or both zero. Exact at
+// any length (the scale is an Int), and never through binary64.
+dyn_number_equal: fn(left: I64, right: I64) -> Bool {
+    a_data: rt_text_data(left)
+    b_data: rt_text_data(right)
+    a: dyn_number_parts(a_data, rt_text_len(left))
+    b: dyn_number_parts(b_data, rt_text_len(right))
+    if (a.digits == I64{0} || b.digits == I64{0}) -> return a.digits == b.digits
+    if (a.negative != b.negative || a.digits != b.digits) -> return false
+    left_at := a.first
+    right_at := b.first
+    loop left_at < a.last {
+        left_byte: rt_text_byte(wrapping(a_data + left_at))
+        right_byte: rt_text_byte(wrapping(b_data + right_at))
+        if (left_byte == I64{46}) {
+            left_at += I64{1}
+        } else if (right_byte == I64{46}) {
+            right_at += I64{1}
+        } else {
+            if (left_byte != right_byte) -> return false
+            left_at += I64{1}
+            right_at += I64{1}
+        }
+    }
+    // The lexeme was validated, so its exponent span is an optional sign and
+    // decimal digits.
+    left_exponent: jet_rt_int_from_static(wrapping(a_data + a.exponent_at), a.exponent_len)
+    right_exponent: jet_rt_int_from_static(wrapping(b_data + b.exponent_at), b.exponent_len)
+    left_scale: jet_int_add(left_exponent, a.adjust)
+    right_scale: jet_int_add(right_exponent, b.adjust)
+    same: jet_int_compare(left_scale, right_scale) == I64{0}
+    jet_rt_int_drop(left_exponent)
+    jet_rt_int_drop(right_exponent)
+    jet_rt_int_drop(left_scale)
+    jet_rt_int_drop(right_scale)
+    same
+}
 // JetDynAccess::equal_unordered: structural equality where an Object's entries
-// match in any order (each right entry used once) and NaN equals nothing.
+// match in any order (each right entry used once), NaN equals nothing, and two
+// Number lexemes compare by decimal value.
 #Export(c) jet_dyn_equal_unordered: fn(left: I64, right: I64) -> Bool {
     kind: dyn_word(wrapping(left + DYN_TAG))
     if kind != dyn_word(wrapping(right + DYN_TAG)) -> return false
+    if kind == DYN_NUMBER -> return dyn_number_equal(dyn_word(wrapping(left + DYN_PAYLOAD)), dyn_word(wrapping(right + DYN_PAYLOAD)))
     if kind != DYN_ARRAY && kind != DYN_OBJECT -> return jet_rt_handle_eq_dyn(left, right)
     a: dyn_word(wrapping(left + DYN_PAYLOAD))
     b: dyn_word(wrapping(right + DYN_PAYLOAD))

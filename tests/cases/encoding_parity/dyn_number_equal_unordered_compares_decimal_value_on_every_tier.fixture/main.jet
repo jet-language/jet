@@ -1,0 +1,64 @@
+// `equal_unordered` compares two `Dyn.Number` lexemes by exact decimal value
+// at any precision, and `testing.compare` decides each case by that canonical
+// comparison: NaN never matches, signed zeros and reordered objects do, and
+// Int, Float and Number stay distinct. The same holds at build time in `#run`.
+use {
+    testing: core.testing
+    core.encoding.json
+}
+
+number: fn(left: String, right: String) {
+    a: json.parse(left) ?? panic("left {left}")
+    b: json.parse(right) ?? panic("right {right}")
+    print("{left} vs {right}: {a.equal_unordered(b)}")
+}
+
+lexeme_equal: fn(left: String, right: String) -> Bool {
+    a: json.parse(left) ?? panic("left {left}")
+    b: json.parse(right) ?? panic("right {right}")
+    a.equal_unordered(b)
+}
+
+compare_status: fn(reference: Dyn, candidate: Dyn) -> String {
+    expected: reference.copy()
+    actual: candidate.copy()
+    testing.compare([Dyn.Int(0)], (input: Dyn) -> expected.copy(), (input: Dyn) -> actual.copy(), "typed_equality").status
+}
+
+verdict: fn(name: String, reference: Dyn, candidate: Dyn) {
+    print("{name}: {compare_status(reference, candidate)}")
+}
+
+BUILD_ZERO: #run lexeme_equal("-0.0", "0.0")
+
+BUILD_PRECISION: #run lexeme_equal("1e400", "10e399")
+
+BUILD_NAN: #run compare_status(Dyn.Float(Float.NAN), Dyn.Float(Float.NAN))
+
+BUILD_ORDER: #run compare_status(json.parse("{{\"a\":1.50,\"b\":[-0.0]}}") ?? panic("build left"), json.parse("{{\"b\":[0],\"a\":1.5}}") ?? panic("build right"))
+
+run: fn() {
+    number("-0.0", "0.0")
+    number("1.0", "1.00")
+    number("1e2", "100.0")
+    number("1e400", "10e399")
+    number("1e400", "1e401")
+    number("0.1", "0.10000000000000001")
+    number("123456789012345678901234567890", "1.2345678901234567890123456789e29")
+    number("0.0120", "1.2e-2")
+    number("-1", "1")
+    number("12.5", "12.5")
+    nested_left: json.parse("{{\"a\":1.50,\"b\":[2,-0.0]}}") ?? panic("nested left")
+    nested_right: json.parse("{{\"b\":[2e0,0],\"a\":1.5}}") ?? panic("nested right")
+    print("nested: {nested_left.equal_unordered(nested_right)}")
+    lexeme: json.parse("1") ?? panic("lexeme")
+    print("number vs int: {lexeme.equal_unordered(Dyn.Int(1))}, number vs float: {lexeme.equal_unordered(Dyn.Float(1.0))}")
+
+    verdict("nan", Dyn.Float(Float.NAN), Dyn.Float(Float.NAN))
+    verdict("signed zero float", Dyn.Float(-0.0), Dyn.Float(0.0))
+    verdict("signed zero lexeme", json.parse("-0.0") ?? panic("negative zero"), json.parse("0.0") ?? panic("zero"))
+    verdict("object order", nested_left, nested_right)
+    verdict("int vs float", Dyn.Int(1), Dyn.Float(1.0))
+    verdict("array order", json.parse("[1,2]") ?? panic("ascending"), json.parse("[2,1]") ?? panic("descending"))
+    print("build time: zero {BUILD_ZERO}, precision {BUILD_PRECISION}, nan {BUILD_NAN}, object order {BUILD_ORDER}")
+}

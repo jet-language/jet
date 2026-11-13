@@ -1,0 +1,16 @@
+# Dyn.equal_unordered compares two Number lexemes by exact decimal value at any
+# precision, and core.testing.compare decides each case by that comparison:
+# NaN never matches, signed zeros and reordered objects do, on O0, O1 and O2
+# and at build time in #run.
+fixture: dyn_number_equal_unordered_compares_decimal_value_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run main.jet
+exit: 0
+stdout: = "-0.0 vs 0.0: true\n1.0 vs 1.00: true\n1e2 vs 100.0: true\n1e400 vs 10e399: true\n1e400 vs 1e401: false\n0.1 vs 0.10000000000000001: false\n123456789012345678901234567890 vs 1.2345678901234567890123456789e29: true\n0.0120 vs 1.2e-2: true\n-1 vs 1: false\n12.5 vs 12.5: true\nnested: true\nnumber vs int: false, number vs float: false\nnan: mismatch\nsigned zero float: matched\nsigned zero lexeme: matched\nobject order: matched\nint vs float: mismatch\narray order: mismatch\nbuild time: zero true, precision true, nan mismatch, object order matched\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: == default
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == default
