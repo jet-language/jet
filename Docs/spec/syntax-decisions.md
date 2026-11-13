@@ -2681,9 +2681,8 @@ statement in every build, emits in debug/dev builds, and is erased in release
 builds. Both attach to statements only; item position is E0355 (the marker's
 registered sites are `Statement` and `Block`), expression position is E0343,
 and two `#Off` forms on one statement are E0344.
-Names introduced inside the marker body do not escape. Bare `#build.profile` is
-not a user-typeable comptime value; the registered fact spelling is
-`$build.profile` (D-BUILD-FACT3=A).
+Names introduced inside the marker body do not escape. The build's profile is
+the fact `#build.profile`.
 
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
@@ -4509,7 +4508,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `comptime if $build.os ==` /
+Target variants select via the existing `#if #build.target.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -5707,19 +5706,19 @@ page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
 **D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
-the surviving OS-gated impl through a comptime dispatch on `$build.os` — a
+the surviving OS-gated impl through a comptime dispatch on `#build.target.os` — a
 compiler-known comptime value matched with `.Linux`/`.MacOS`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
-@build.os { … }` (now `$build.os`, D-BUILD-FACT3=A); reconciled to Jet's one
+@build.os { … }` (now `#build.target.os`); reconciled to Jet's one
 canonical branching form (D-IF1/D-IF3 `if subject == { }` if-table) with the
 `comptime if` lead (D-WHEN1, respelled from `@if` by card #3662) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 run: fn() {
-    comptime if $build.os == {
+    #if #build.target.os == {
         .Linux   -> { b: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b: WinBackend{ name: "win32" }    print(b.label()) }
@@ -5728,7 +5727,7 @@ run: fn() {
 }
 ```
 
-`$build.os` resolves to the build's OS: the `--target=<triple>` OS bucket, the
+`#build.target.os` resolves to the build's OS: the `--target=<triple>` OS bucket, the
 host OS when omitted, `.Web` for a web build, `.Wasm` for a Wasm target and
 `.Freestanding` for a machine with no OS (owner ruling on #6206, which replaced
 the fall-back to the host for those targets). Sema desugars the dispatch into a `comptime if` chain
@@ -5740,11 +5739,10 @@ inside the taken arm is legal and dead arms never trip
 set must cover every OS of the one OS list (`.Linux`, `.MacOS`, `.Windows`,
 `.Web`, `.Wasm`, `.Freestanding`), or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
-compiles or fails identically on every platform). A non-`$build.os` subject is
+compiles or fails identically on every platform). A non-`#build.target.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
-`$build.os` is meaningful *only* as this dispatch's subject — `build` is not a
-reserved word, so anywhere else it is an ordinary identifier (undefined at
-runtime → E0107), never a magic runtime value.
+Anywhere else `#build.target.os` is an ordinary fact read: the target OS's
+name as a `String` (`print(#build.target.os)`).
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)** *(retired, owner
 decision, card #6701)*: Phase 8 brought `gtk4` + `pkg-config` into the
 devShell for a `core.ui.gtk_backend()` over libgtk-4. The owner deleted the
