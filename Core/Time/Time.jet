@@ -1360,12 +1360,14 @@ civil_two_digits: fn(raw: [U8], at: Int) -> Int Never! {
 // `YYYY-MM-DDTHH:MM:SS[.F{1,9}](Z|±HH:MM)` with every field in range and no
 // leap second, read from one byte copy. That is exactly the set of values
 // the general path below accepts in this shape, with the same fields, so
-// None (any other shape, a field out of range, a leap second) hands the
-// value to the general path for its result or its error.
-civil_rfc3339_fixed: fn(value: String) -> DateTime? Never! {
+// a miss (any other shape, a field out of range, a leap second) hands the
+// value to the general path for its result or its error. A miss is
+// civil_rfc3339_miss's negative nanos, not None: the DateTime then comes
+// back in the caller's storage, with no Option box to allocate and copy.
+civil_rfc3339_fixed: fn(value: String) -> DateTime Never! {
     raw: value.bytes()
     n: raw.len()
-    if n < 20 || raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[10] != (U8{84}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return None
+    if n < 20 || raw[4] != (U8{45}) || raw[7] != (U8{45}) || raw[10] != (U8{84}) || raw[13] != (U8{58}) || raw[16] != (U8{58}) -> return civil_rfc3339_miss()
     century: civil_two_digits(raw, 0)
     year_low: civil_two_digits(raw, 2)
     month: civil_two_digits(raw, 5)
@@ -1373,21 +1375,21 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime? Never! {
     hour: civil_two_digits(raw, 11)
     minute: civil_two_digits(raw, 14)
     second: civil_two_digits(raw, 17)
-    if century < 0 || year_low < 0 -> return None
+    if century < 0 || year_low < 0 -> return civil_rfc3339_miss()
     year: century * 100 + year_low
-    if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return None
+    if month < 1 || month > 12 || day < 1 || day > days_in_month(year, month) || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 -> return civil_rfc3339_miss()
     at := 19
     nanos := 0
     if raw[at] == (U8{46}) {
         at += 1
         digits := 0
         loop at < n && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) {
-            if digits == 9 -> return None
+            if digits == 9 -> return civil_rfc3339_miss()
             nanos = nanos * 10 + Int.from_u8(raw[at]) - 48
             digits += 1
             at += 1
         }
-        if digits == 0 -> return None
+        if digits == 0 -> return civil_rfc3339_miss()
         loop digits < 9 {
             nanos = nanos * 10
             digits += 1
@@ -1399,11 +1401,11 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime? Never! {
     } else if n - at == 6 && (raw[at] == (U8{43}) || raw[at] == (U8{45})) && raw[at + 3] == (U8{58}) {
         offset_hour: civil_two_digits(raw, at + 1)
         offset_minute: civil_two_digits(raw, at + 4)
-        if offset_hour < 0 || offset_hour > 23 || offset_minute < 0 || offset_minute > 59 -> return None
+        if offset_hour < 0 || offset_hour > 23 || offset_minute < 0 || offset_minute > 59 -> return civil_rfc3339_miss()
         offset = offset_hour * 3600 + offset_minute * 60
         if raw[at] == (U8{45}) -> offset = -offset
     } else {
-        return None
+        return civil_rfc3339_miss()
     }
     // Every field is in range here, so new and civil_time would clamp
     // nothing, and the nanos are below 10^9, so civil_timestamp's floor is 0.
@@ -1411,10 +1413,13 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime? Never! {
     // inside time_int_near, so civil_utc's civil_i64, saturating_sub_ns and
     // civil_timestamp's civil_i64 return their operands unchanged.
     seconds: (civil_day(LocalDate{date_y: year, date_m: month, date_d: day}) - 719162) * 86400 + hour * 3600 + minute * 60 + second - offset
-    Val(DateTime{secs: seconds, nanos: nanos, leap_second: false})
+    DateTime{secs: seconds, nanos: nanos, leap_second: false}
 }
+// civil_rfc3339_fixed's miss: no DateTime it accepts has negative nanos.
+civil_rfc3339_miss: fn() -> DateTime Never! { DateTime{secs: 0, nanos: -1, leap_second: false} }
 parse_rfc3339: fn(value: String) -> DateTime TimeError! {
-    if civil_rfc3339_fixed(value) == .Val(fixed) -> return Ok(fixed)
+    fixed: civil_rfc3339_fixed(value)
+    if fixed.nanos >= 0 -> return Ok(fixed)
     parts: civil_split(value, "T") ?? return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     if !civil_ascii(parts.tail) -> return Err(TimeError{reason: "invalid RFC3339 datetime: {value}"})
     date: parse(parts.head)
@@ -2185,6 +2190,22 @@ civil_dyn_datetime: fn(text: String) -> ZonedDateTime? Never! {
     offset: parse_rfc3339("2024-03-01T12:00:00+02:30") ?? panic("offset")
     assert_eq(offset.format_rfc3339(), "2024-03-01T09:30:00Z")
     assert_eq(datetime(2024, 2, 29, 12, 34, 56).round("minute").minute(), 35)
+}
+
+#Test("The fixed RFC 3339 path reads in-shape values and misses every other one") {
+    hit: civil_rfc3339_fixed("2024-03-01T12:00:00.5-02:30")
+    assert_eq(hit.nanos, 500000000)
+    assert_eq(hit.format_rfc3339(), "2024-03-01T14:30:00.500000000Z")
+    assert_eq(civil_rfc3339_fixed("1970-01-01T00:00:00Z").secs, 0)
+    assert(civil_rfc3339_miss().nanos < 0)
+    loop text in ["2016-12-31T23:59:60Z", "2023-02-29T00:00:00Z", "2024-03-01T12:00:00", "2024-03-01T12:00:00.Z", "2024-03-01T12:00:00.1234567891Z", "2024-03-01T12:00:00+24:00", "2024-03-01 12:00:00Z", "2024-3-01T12:00:00Z"] {
+        assert(civil_rfc3339_fixed(text).nanos < 0)
+    }
+    assert_eq((parse_rfc3339("2016-12-31T23:59:60Z") ?? panic("leap second")).second(), 60)
+    if parse_rfc3339("2023-02-29T00:00:00Z") == {
+        .Err(error) -> assert(error.reason.len() > 0)
+        .Ok(_) -> assert(false)
+    }
 }
 
 #Test("Period totals and local-time rounding keep calendar and duration units distinct") {
