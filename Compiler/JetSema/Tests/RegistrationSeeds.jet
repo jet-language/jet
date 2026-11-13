@@ -4,7 +4,8 @@
 // them register against them. A check that reports on a module's own
 // declarations doesn't report on a seeded one again, and a seeded module that
 // comes with its finalized result is taken as it is: finalization checks none
-// of its bodies and writes none of its slot.
+// of its bodies and writes none of its slot. A finalized row splits into
+// the Core record's body packets, which take back to the same row.
 use {
     jet_parser.[parse_source]
     jet_sema.[
@@ -14,12 +15,13 @@ use {
         SemaRegistrationHostHooks, SemaRegistrationImportEdge,
         SemaRegistrationModule, SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
-        sema_collect_comptime_declarations, sema_finalize_graph,
-        sema_graph_trail_init, sema_marker_rules_check_inline_always,
+        sema_collect_comptime_declarations, sema_core_body_packet_take,
+        sema_core_body_packets, sema_finalize_graph, sema_graph_trail_init,
+        sema_marker_rules_check_inline_always,
         sema_registration_module_index, sema_registration_prepare_graph,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Diagnostic, Span, compiler_threads_single, jet_target_machine_hosted]
+    jet_foundation.[Diagnostic, FnBody, Span, compiler_threads_single, jet_target_machine_hosted]
 }
 
 SEEDS_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
@@ -187,4 +189,47 @@ registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&
     assert(checked.seeded_writes > 0)
     // The slot stays as it was given.
     assert_eq("{checked.modules[0].functions:Debug}", "{stale.functions:Debug}")
+}
+
+// `texts` sorted: two lists of the same item texts in any order compare equal.
+registration_seeds_sorted: fn(texts: &&[String]) -> [String] {
+    owned := texts.move()
+    owned.sort()
+    owned
+}
+
+#Test("a finalized module row splits into body packets that take back to the same row") {
+    seeds := [SemaRegistrationModule]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds)
+    whole := module_result.copy()
+    bodies := whole.functions.move()
+    whole.functions = [FnBody]{}
+    keys := loop function in bodies -> function.key.copy()
+    assert(keys.len() >= 2)
+    packets := [SemaComptimeFunctionResult]{}
+    row := sema_core_body_packets(whole, bodies, packets)
+    assert_eq(packets.len(), keys.len())
+    assert_eq(row.functions.len(), 0)
+    // Each packet holds its own body and the call facts it recorded; the
+    // row keeps none of a body's.
+    with_calls := 0
+    loop (index, packet) in packets {
+        assert_eq(packet.function_key, keys[index])
+        assert(packet.function != None)
+        loop fact in packet.call_facts -> assert_eq(fact.caller_key, packet.function_key)
+        if packet.call_facts.len() > 0 -> with_calls += 1
+    }
+    assert(with_calls > 0)
+    loop fact in row.call_facts -> assert(!keys.contains(fact.caller_key))
+    loop packets.len() > 0 {
+        packet := packets.pop() ?? break
+        sema_core_body_packet_take(row, packet)
+    }
+    assert_eq(registration_seeds_sorted(loop item in row.functions -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.functions -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.call_facts -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.call_facts -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.name_references -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.name_references -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.failure_facts -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.failure_facts -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.compute_facts -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.compute_facts -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.copy_events -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.copy_events -> "{item:Debug}"))
+    assert_eq(registration_seeds_sorted(loop item in row.comptime_requests -> "{item:Debug}"), registration_seeds_sorted(loop item in module_result.comptime_requests -> "{item:Debug}"))
 }

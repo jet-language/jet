@@ -1,0 +1,148 @@
+// The Core record's body packets (its section 5, schema `jet.core/v2`). The
+// record is written from a finalized Core check, whose module rows hold every
+// checked body with the facts all of them recorded, merged. At write time
+// each row is split: every body becomes one packet, a
+// SemaComptimeFunctionResult (the row a checked body travels in) that holds
+// the body and the facts its own check recorded, and the row keeps only what
+// belongs to no body. A compile that takes a recorded body takes its packet
+// back into the seeded module's row (sema_core_body_packet_take), so that row
+// grows by exactly the bodies the compile demands and their facts.
+//
+// A fact belongs to the body that recorded it: a call-site fact by its
+// caller key; a failure row, a compute row and a comptime body source by
+// function key; a comptime request, a name reference and a copy event by
+// span, to the innermost body whose source span holds it. The hardware-use
+// rows name no body and stay with the module.
+use jet_foundation.[FnBody, Span]
+
+// `moved` split into one packet per body of `bodies` (the module's checked
+// bodies, moved in), pushed to `packets` in their order. The row comes back
+// with the facts no body owns and no function. The packets are complete: the
+// record holds only a clean check.
+sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], packets: &[SemaComptimeFunctionResult]) -> SemaGraphModuleResult Never! {
+    row := moved.move()
+    owned := bodies.move()
+    first: packets.len()
+    at := [String:Int]{}
+    spans := [Span]{}
+    loop function in owned {
+        at[function.key.copy()] = packets.len()
+        spans.push(function.source_span.copy())
+        packets.push(SemaComptimeFunctionResult{
+            module_identity: row.module_identity.copy(),
+            function_key: function.key.copy(),
+            function: None,
+            waiting_dependencies: [String]{},
+            calls: [SemaComptimeRequest]{},
+            reachable_function_keys: [String]{},
+            call_facts: [SemaCallSiteFact]{},
+            hardware_use: sema_hardware_empty_use(),
+            name_references: [SemaNameReferenceFact]{},
+            comptime_body_sources: [SemaComptimeBodySource]{},
+            compute_facts: SemaComputeFunctionFacts{function_key: function.key.copy(), compute_calls: [SemaComputeCallFact]{}, autodiff_obligations: [SemaAutodiffObligation]{}, autodiff_safe_panic: false, autodiff_unsafe_panic: false},
+            diagnostics: [Diagnostic]{},
+            exact_int_reachable: row.exact_int_reachable,
+            copy_events: [SemaCopyEvent]{},
+            complete: true,
+        })
+    }
+    loop owned.len() > 0 {
+        function := owned.pop() ?? break
+        position: at[function.key]
+        packets[position].function = Val(function)
+    }
+    row.functions = [FnBody]{}
+    call_facts := row.call_facts.move()
+    row.call_facts = [SemaCallSiteFact]{}
+    loop fact in call_facts {
+        if at.get(fact.caller_key) == .Val(position) {
+            packets[position].call_facts.push(fact)
+            next
+        }
+        row.call_facts.push(fact)
+    }
+    failure_facts := row.failure_facts.move()
+    row.failure_facts = [SemaFunctionFailureFacts]{}
+    loop facts in failure_facts {
+        if at.get(facts.function_key) == .Val(position) {
+            packets[position].failure = Val(facts)
+            next
+        }
+        row.failure_facts.push(facts)
+    }
+    compute_facts := row.compute_facts.move()
+    row.compute_facts = [SemaComputeFunctionFacts]{}
+    loop facts in compute_facts {
+        if at.get(facts.function_key) == .Val(position) {
+            packets[position].compute_facts = facts
+            next
+        }
+        row.compute_facts.push(facts)
+    }
+    sources := row.comptime_body_sources.move()
+    row.comptime_body_sources = [SemaComptimeBodySource]{}
+    loop source in sources {
+        if at.get(source.function_key) == .Val(position) {
+            packets[position].comptime_body_sources.push(source)
+            next
+        }
+        row.comptime_body_sources.push(source)
+    }
+    requests := row.comptime_requests.move()
+    row.comptime_requests = [SemaComptimeRequest]{}
+    loop request in requests {
+        if sema_core_body_owner(spans, request.span) == .Val(position) {
+            packets[first + position].calls.push(request)
+            next
+        }
+        row.comptime_requests.push(request)
+    }
+    references := row.name_references.move()
+    row.name_references = [SemaNameReferenceFact]{}
+    loop reference in references {
+        if sema_core_body_owner(spans, reference.span) == .Val(position) {
+            packets[first + position].name_references.push(reference)
+            next
+        }
+        row.name_references.push(reference)
+    }
+    events := row.copy_events.move()
+    row.copy_events = [SemaCopyEvent]{}
+    loop event in events {
+        if sema_core_body_owner(spans, event.span) == .Val(position) {
+            packets[first + position].copy_events.push(event)
+            next
+        }
+        row.copy_events.push(event)
+    }
+    row
+}
+
+// The position in `spans` of the innermost body source span that holds
+// `span`; None when none does.
+sema_core_body_owner: fn(spans: [Span], span: Span) -> Int? Never! {
+    owner := -1
+    loop (index, body) in spans {
+        if span.start < body.start || span.end > body.end -> next
+        if owner < 0 || body.end - body.start < spans[owner].end - spans[owner].start -> owner = index
+    }
+    if owner < 0 -> return None
+    Val(owner)
+}
+
+// `packet`'s body and facts appended to `row`, as the body pass appends a
+// body it checked (sema_comptime_append_checked_function).
+sema_core_body_packet_take: fn(row: &SemaGraphModuleResult, packet: &&SemaComptimeFunctionResult) Never! {
+    owned := packet.move()
+    _: sema_append_function(row.functions, owned.function.move())
+    row.call_facts.extend(owned.call_facts.move())
+    row.comptime_requests.extend(owned.calls.move())
+    row.name_references.extend(owned.name_references.move())
+    row.comptime_body_sources.extend(owned.comptime_body_sources.move())
+    row.copy_events.extend(owned.copy_events.move())
+    row.compute_facts.push(owned.compute_facts.move())
+    failure := owned.failure.move()
+    owned.failure = None
+    if failure == .Val(facts) -> row.failure_facts.push(facts)
+    row.exact_int_reachable = row.exact_int_reachable || owned.exact_int_reachable
+}
