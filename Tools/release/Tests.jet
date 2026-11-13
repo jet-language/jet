@@ -892,7 +892,43 @@ boot_seeds: fn(label: String) -[FS, Env]> String Never! {
     assert_eq(column.jet_sha, sha256_file(files.join(seeds, "a0.0.25/jet")))
     assert_eq(column.identity, "jet@a0.0.25#{column.jet_sha}")
     assert_eq(column.commit, COMMIT)
-    assert_eq(column_text(column.name, column.identity, column.jet_sha, column.commit), "a0.0.25 ({column.identity}), jet {column.jet_sha}, tree {COMMIT}")
+    assert_eq(column_text(column.name, column.identity, column.jet, column.jet_sha, column.commit), "a0.0.25 ({column.identity}), compiler {column.jet} (sha256 {column.jet_sha}), tree {COMMIT}")
+}
+
+// A released jet that reads Core from JET_TOOLCHAIN_ROOT and fails as a
+// compiler that can't read it does, with E2105, when the tree lacks Core.
+CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ]; then\n  echo \"error[E2105]: Can't read Core/Core.jet\" >&2\n  exit 1\nfi\necho preflight probe\n"
+
+#Test("an admit whose release column's compiler can't read its tree's Core is refused at preflight, with no gains or losses") {
+    seeds: files.mkdtemp("jet-release-preflight-") ?? panic("scratch: {err}")
+    put_seed(files.join(seeds, "a0.0.25"), CORE_READING_JET, "a0.0.25")
+    files.set_mode(files.join(seeds, "a0.0.25/jet"), 493) ?? panic("chmod jet: {err}")
+    files.symlink("a0.0.25", files.join(seeds, "current")) ?? panic("current: {err}")
+    release: release_info(seeds)
+    column: baseline_info(seeds, release)
+    assert_eq(column.error, "")
+    work_root: files.mkdtemp("jet-release-preflight-work-") ?? panic("scratch: {err}")
+    pre: Pre{errors: [String]{}, root: seeds.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
+    // A release tree with Core: the column's compiler passes and the run goes on.
+    whole := new_ctx(parse_admit_args([String]{COMMIT}), pre, files.join(work_root, "whole"))
+    put(files.join(whole.release_tree, "Core/Core.jet"), "\n")
+    assert_eq(gate_preflight(whole), None)
+    assert_eq((loop found in whole.rows -> "{found.check} {found.status}"), [String]{"preflight:release PASS"})
+    // The same compiler on a tree it can't read Core from: refused before any stage.
+    work: files.join(work_root, "broken")
+    broken := new_ctx(parse_admit_args([String]{COMMIT}), pre, work)
+    files.create_dir_all(broken.release_tree) ?? panic("tree: {err}")
+    refused: gate_preflight(broken) ?? panic("a compiler that can't read its tree's Core passed preflight")
+    assert(refused.starts_with("the release column's compiler {column.jet} ({column.identity}) cannot check a one-line program against the Core of its tree {COMMIT.slice(0..<10)} (rc=1)"))
+    assert(refused.contains("E2105"))
+    assert_eq((loop found in broken.rows -> "{found.check} {found.status}"), [String]{"preflight:release FAIL"})
+    assert_eq(broken.suites.len(), 0)
+    assert_eq(broken.jetpack_fixed.len(), 0)
+    report: files.read(files.join(work, "REPORT.md")) ?? panic("REPORT.md: {err}")
+    assert(report.contains("Verdict: REFUSED at preflight"))
+    assert(report.contains("Release column: a0.0.25 ({column.identity}), compiler {column.jet} (sha256 {column.jet_sha}), tree {COMMIT}"))
+    assert(report.contains("no gains and no losses"))
+    assert(!report.contains("Gains:"))
 }
 
 #Test("a run is refused when neither the current release nor the one it names has its released jet") {
