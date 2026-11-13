@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1428,
+  "total": 1430,
   "counts": {
-    "Compiler": 751,
+    "Compiler": 753,
     "Core": 170,
     "Docs": 8,
     "Examples": 41,
@@ -1866,6 +1866,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 149,
       "column": 5,
       "reason": "page is a fresh private page: the path, then the [type, value] pairs read into it"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
+      "line": 238,
+      "column": 5,
+      "reason": "AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/CompilerHost.jet",
+      "line": 264,
+      "column": 5,
+      "reason": "note is a mapped part note host_image_part found; its first word holds the descriptor size"
     },
     {
       "package": "Compiler",
@@ -10226,14 +10240,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 751 |
+| Compiler | 753 |
 | Core | 170 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 443 |
-| **total** | **1428** |
+| **total** | **1430** |
 
 ### Regions
 
@@ -10474,6 +10488,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 9:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 128:5 | "startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL" |
 | Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 149:5 | "page is a fresh private page: the path, then the [type, value] pairs read into it" |
+| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 238:5 | "AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound" |
+| Compiler | Compiler/JetRuntime/Source/CompilerHost.jet | 264:5 | "note is a mapped part note host_image_part found; its first word holds the descriptor size" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 12:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/CompilerMapped.jet | 115:13 | "the owned readable file lends its descriptor; mmap creates exactly length read-only private bytes; the map owner alone unmaps them" |
 | Compiler | Compiler/JetRuntime/Source/Comptime.jet | 14:5 | "runtime-init runs before any other thread exists" |
