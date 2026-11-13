@@ -1,0 +1,17 @@
+// A misspelled type is refused where it is written, when the build file
+// is checked.
+Spot: struct {
+    x: Int
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields: [CompilerField]{CompilerField{name: "spot", type: Spto}}
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    print(Spot{x: 4}.x)
+}

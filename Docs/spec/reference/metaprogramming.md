@@ -703,8 +703,11 @@ of `fields`, a list of `CompilerField{name:, type:}` values, as the
 generated module `name`, and returns the new struct's TypeId. A field's
 name may be computed, and the build host refuses one that is not one
 snake_case identifier (E0357). Its type is a TypeId, which only the
-compiler makes: a reflected field's `type`, the TypeId an earlier
-`meta.add_struct` returned, or one `meta.find_type` found. The generated
+compiler makes: a type the build file sees written as a value, bare
+(`type: I64`, `type: [String]`, `type: geo.Point`) or as `TypeId{Point}`
+and checked where it is written, a reflected field's `type`, the TypeId an
+earlier `meta.add_struct` returned, or one `meta.find_type` found. A
+String there is a mismatch (E0108). The generated
 module shares the root module's namespace and imports nothing, so the
 field is written with the bare name each type has there: a type of the
 root module or its namespace, one the prelude names, or a struct this

@@ -1059,7 +1059,7 @@ sema_call_static_reflect_function: fn(name: String, args: [CallArg], span: Span,
     if args.len() == 1 && args[0].expr == .ListLit(elements, _, _) {
         listed := [Type]{}
         loop element in elements {
-            written: sema_call_static_reflect_type_arg(element, environment, graph) ?? {
+            written: sema_call_type_written_as_value(element, environment, graph) ?? {
                 diagnostics.push(sema_error("E0119", expr_span(element), "`types:` lists the type arguments of `{name}`, and this is not a type", "`{name}.reflect(types: [...])` reflects one specialization of a generic function, so each element is a type written where a value goes", "write a type name such as `Int`, a generic type such as `Set<Int>`, or `[Int]` for a list"))
                 return Val(SemaMethodSpecialCheck{handled: true, value: None})
             }
@@ -1083,15 +1083,17 @@ sema_call_static_reflect_is_types_arg: fn(arg: CallArg) -> Bool Never! {
     false
 }
 
-// The type a `types:` element writes where a value goes: a builtin or
-// declared type name (`Int`, `Shelf`), a generic type (`Shelf<Int>`), or a
-// one-element list (`[Int]`, a list of that type). None for any other value.
-sema_call_static_reflect_type_arg: fn(element: Expr, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Type? {
+// The type written where a value goes (a `types:` element, or a value
+// where a `TypeId` is expected): a builtin or declared type name (`Int`,
+// `Shelf`), a declared type through its module's import (`geo.Point`), a
+// generic type (`Shelf<Int>`), or a one-element list (`[Int]`, a list of
+// that type). None for any other value.
+sema_call_type_written_as_value: fn(element: Expr, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Type? {
     // copy: the specialization owns its argument type; the call keeps its tree.
     if element == .TypeValue(ty, _, _) -> return Val(ty.copy())
     if element == .ListLit(inner, _, _) {
         if inner.len() != 1 -> return None
-        item: sema_call_static_reflect_type_arg(inner[0], environment, graph) ?? return None
+        item: sema_call_type_written_as_value(inner[0], environment, graph) ?? return None
         return Val(Type.List{element: item})
     }
     if element == .Ident(name, _, _) {
@@ -1101,6 +1103,12 @@ sema_call_static_reflect_type_arg: fn(element: Expr, environment: SemaScopeEnvir
             if sema_resolved_symbol(graph, symbol).kind != SymbolKind.Type -> return None
         }
         return Val(named)
+    }
+    if element == .Field(.Ident(alias, _, _), member, _, _) {
+        qualified: "{alias}.{member}"
+        symbol: sema_type_graph_lookup_symbol(graph, environment.module_identity, qualified) ?? return None
+        if sema_resolved_symbol(graph, symbol).kind != SymbolKind.Type -> return None
+        return Val(Type.Named{name: qualified})
     }
     None
 }

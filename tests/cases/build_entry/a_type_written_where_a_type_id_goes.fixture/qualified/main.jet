@@ -1,0 +1,15 @@
+// A type written through the root's import passes the check where it is
+// written; the generated module, which imports nothing, can't see it.
+use geo
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields: [CompilerField]{CompilerField{name: "at", type: geo.Point}}
+    meta.add_struct("Pin", fields, scope: "pin")
+    b.default(app)
+}
+
+run: fn() {
+    print(geo.Point{x: 9}.x)
+}

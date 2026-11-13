@@ -6782,6 +6782,27 @@ sema_expr_check_bare_member_chain: fn(expr: Expr, expected: Type?, environment: 
     SemaMethodSpecialCheck{handled: true, value: None}
 }
 
+// The TypeId of a type the module sees, written where a `TypeId` is
+// expected: bare (`I64`, `geo.Point`, `[Point]`) or as `TypeId{…}` (whose
+// one name, `TypeId{Point}`, reads as a shorthand field). It is made here,
+// with the identity reflection gives the same type. None for any other
+// value, which checks as it is written, and for a program's own `TypeId`.
+sema_expr_type_id_written: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_row(environment, graph)
+    if sema_type_resolve_nominal_row_at(graph, Type.Named{name: "TypeId"}, caller) != None -> return None
+    written := expr
+    if expr == .TypedLit(head, body, _, _) && head == .Val(.Named(owner)) && owner == "TypeId" {
+        written = if body == {
+            .Value(value) -> value
+            .Fields(fields) -> if fields.len() == 1 && fields[0].value == .Ident(name, _, _) && name == fields[0].name -> fields[0].value else -> return None
+            .Elements(_) | .Entries(_) | .ByteText(_) | .Empty -> return None
+        }
+    }
+    ty: sema_call_type_written_as_value(written, environment, graph) ?? return None
+    Val(sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.CtLit{value: sema_comptime_reflection_type_id(graph, caller, ty)}, expr_span(expr)))
+}
+
 sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_taskgroup_check_scoped_loan_read(context, expr, scopes, state, diagnostics)
     if context.lending_view_parameter_keys.len() > 0 {
@@ -6813,6 +6834,10 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     // position, materializes one owned copy.
     if expected == .Val(destination) && expr == .Ident(view_name, view_span, _) {
         if sema_read_view_owning_read(view_name, destination, scopes, context) || (!context.borrow_ctx && sema_string_view_owning_read(expr, destination, scopes)) -> return sema_check_expression_recorded(expr, sema_string_view_materialize(view_name, view_span, expected, environment, program, scopes, state, context, diagnostics), context)
+    }
+    // A type written where a `TypeId` is expected is that type's TypeId.
+    if expected == .Val(.Named(wanted)) && wanted == "TypeId" {
+        if sema_expr_type_id_written(expr, environment, program) == .Val(found) -> return sema_check_expression_recorded(expr, sema_expr_expected(found, expected, environment, program, diagnostics), context)
     }
     // Only a bare member chain can be handled there; testing that here keeps
     // the chain check's frame off every other expression level.

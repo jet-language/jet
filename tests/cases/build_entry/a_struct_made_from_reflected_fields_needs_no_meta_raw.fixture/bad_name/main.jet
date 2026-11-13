@@ -1,15 +1,10 @@
 // A computed field name that would write a second field.
-Seed: struct {
-    id: I64
-}
-
 build: fn(b: Build) {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     names: [String]{"id", "count: I64\n    extra"}
-    typed: Seed.reflect().fields[0].type.copy()
     fields := [CompilerField]{}
-    loop name in names -> fields.push(CompilerField{name: name, type: typed.copy()})
+    loop name in names -> fields.push(CompilerField{name: name, type: I64})
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)
 }

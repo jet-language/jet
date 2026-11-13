@@ -1,0 +1,32 @@
+// Types written where a `TypeId` goes: a builtin, a list of one, the
+// root's own type, and the same type as `TypeId{…}`. Each is the TypeId
+// reflection gives that type.
+Spot: struct {
+    x: Int
+}
+
+Carrier: struct {
+    spot: Spot
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields: [CompilerField]{
+        CompilerField{name: "count", type: I64},
+        CompilerField{name: "tags", type: [String]},
+        CompilerField{name: "spot", type: Spot},
+        CompilerField{name: "again", type: TypeId{Spot}},
+    }
+    reflected: Carrier.reflect().fields[0].type.copy()
+    if fields[2].type.identity != reflected.identity || fields[3].type.identity != reflected.identity -> panic("a written type is not the reflected one")
+    meta.add_struct("Shape", fields, scope: "shape")
+    b.default(app)
+}
+
+run: fn() {
+    shape: Shape{count: I64{3}, tags: [String]{"a", "b"}, spot: Spot{x: 4}, again: Spot{x: 5}}
+    print(shape.count)
+    print(shape.tags.len())
+    print(shape.spot.x + shape.again.x)
+}

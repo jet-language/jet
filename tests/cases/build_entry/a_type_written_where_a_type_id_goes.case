@@ -1,0 +1,25 @@
+# A type written where a `TypeId` goes. A type the build file sees is
+# written bare, as `I64`, `[String]` or the root's own `Spot`, or as
+# `TypeId{Spot}`, and each is the TypeId reflection gives that type, so
+# `meta.add_struct` declares the struct from them and the program runs. A
+# misspelled type is refused where it is written, before the build runs.
+# `geo.Point`, written through the root's import, passes that check and
+# is refused when the build runs, since the generated module can't see it.
+fixture: a_type_written_where_a_type_id_goes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build written/main.jet --write-generated=on
+exit: 0
+file: written/.jet/generated/main/shape.jet ~ "    count: I64\n    tags: [String]\n    spot: Spot\n    again: Spot\n" # each written type, as the generated module names it
+step: {work}/written/.jet/build/app
+exit: 0
+stdout: = "3\n2\n9\n"
+step: jet build misspelled/main.jet
+exit: 1
+stderr: ~ "Spto" # the misspelled type, refused where it is written
+stderr: !~ "E3502" # refused by the checker, not the build host
+file: misspelled/.jet/build/app absent
+step: jet build qualified/main.jet
+exit: 1
+stderr: ~ "`meta.add_struct` was given the type `geo.Point` for the field `at`, which the generated module can't see" # checked where written, refused when the build runs
+file: qualified/.jet/build/app absent
