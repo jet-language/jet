@@ -16,7 +16,9 @@ run: fn() {
     if protocol.frame_view_at(view, U64{1}, first) != 0 -> panic("Frame view read failed")
 
     next := [U8]{40, 50}
-    if protocol.frame_document_replace(owner, next, U64{2}) != 0 -> panic("Frame replacement failed")
+    if protocol.frame_document_replace(owner, next, U64{2}) != 0 {
+        panic("Frame replacement failed")
+    }
     stale := U8{0}
     stale_status: protocol.frame_view_at(view, U64{1}, stale)
     if stale_status != 1 -> panic("stale Frame view was not expired")

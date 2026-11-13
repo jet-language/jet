@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
+
 // A field write on a `Shared<T>` handle is one locked edit
 // of the cell. The edit returns nothing, so it is kept for what it does to
 // the cell: every write below must be visible to the next read, whether it
@@ -13,9 +14,7 @@ Counter: struct {
     label: String
 }
 
-bump: fn(counter: Shared<Counter>, by: Int) {
-    counter.hits += by
-}
+bump: fn(counter: Shared<Counter>, by: Int) { counter.hits += by }
 
 run: fn() {
     counter: Shared{Counter{hits: 0, label: "start"}}
@@ -27,9 +26,7 @@ run: fn() {
     print("text: {counter.label}")
     bump(counter, 10)
     print("through a handle: {counter.hits}")
-    loop i in 0..<4 {
-        counter.hits += i
-    }
+    loop i in 0..<4 -> counter.hits += i
     print("loop: {counter.hits}")
     step: Shared{Counter{hits: 100, label: "step"}}
     counter.hits += step.hits

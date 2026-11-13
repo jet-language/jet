@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
+
 // A field read through a `Shared<T>` handle reads the value the cell holds,
 // and the cell runs the value's user Close exactly once, when its last
 // handle goes away at the end of the scope (#4883).
@@ -15,9 +16,7 @@ Res: struct {
     }
 }
 
-label: fn(state: Shared<Res>) -> String {
-    "{state.name}#{state.id}"
-}
+label: fn(state: Shared<Res>) -> String { "{state.name}#{state.id}" }
 
 scoped: fn() {
     state: Shared{Res{id: 7, name: "seven"}}

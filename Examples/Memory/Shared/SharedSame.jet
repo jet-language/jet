@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc] }
 }
+
 // `a.same(b)` asks whether two Shared handles name one cell. It compares
 // identity only, like Rust's `Rc::ptr_eq`. `==` on `Shared<T>` stays an
 // error: two cells that hold equal values are still two cells.
@@ -10,9 +11,7 @@ Counter: struct {
     hits: Int
 }
 
-same_cell: fn(left: Shared<Counter>, right: Shared<Counter>) -> Bool {
-    return left.same(right)
-}
+same_cell: fn(left: Shared<Counter>, right: Shared<Counter>) -> Bool { return left.same(right) }
 
 run: fn() {
     first: Shared{Counter{hits: 0}}

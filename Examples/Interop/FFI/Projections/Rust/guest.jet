@@ -3,6 +3,7 @@ ProjectionRecord: struct {
     priv count: Int
     priv label: String
 }
+
 #Codable
 ProjectionError: enum {
     Closed
@@ -11,8 +12,11 @@ ProjectionError: enum {
 }
 
 #Export(c) add: fn(value: Int) -> Int { value + 1 }
+
 #Export(c) label: fn(value: String) -> String { value }
+
 #Export(c) project: fn(value: ProjectionRecord) -> ProjectionRecord { value }
+
 #Codable
 ProjectionDocument: struct {
     priv bytes: [Int]
@@ -42,6 +46,4 @@ ProjectionDocument: struct {
     return Ok(ProjectionDocument{bytes: input, generation: owner.generation + 1, closed: false})
 }
 
-#Export(c) document_close: fn(owner: &&ProjectionDocument) -> Unit? ProjectionError! {
-    return Ok()
-}
+#Export(c) document_close: fn(owner: &&ProjectionDocument) -> ()? ProjectionError! { return Ok() }

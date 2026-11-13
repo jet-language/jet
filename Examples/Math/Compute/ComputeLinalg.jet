@@ -7,7 +7,7 @@ package: {
 // Dense linalg + DFT on the Tensor CPU oracle.
 use {
     compute: core.compute
-    solve: core.compute.solve
+    core.compute.solve
 }
 
 run: fn() {
@@ -41,7 +41,7 @@ run: fn() {
     compute.set(singular, [1, 0], 2.0) ?? panic("set")
     compute.set(singular, [1, 1], 4.0) ?? panic("set")
     if solve.dense(singular, b) == {
-        .Ok(_) -> panic("singular accepted")
+        .Ok(_) -> { panic("singular accepted") }
         .Err(_) -> print("singular:checked")
     }
 

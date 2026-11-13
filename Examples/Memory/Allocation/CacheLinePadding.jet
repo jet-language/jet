@@ -3,8 +3,7 @@
 // target. Aligning a hot struct to the line keeps two of them from sharing
 // one line, so threads that write neighbouring counters stop slowing each
 // other down (false sharing).
-#Layout(c, align(#build.cpu.cache_line))
-PaddedCounter: struct {
+#Layout(c, align(#build.cpu.cache_line)) PaddedCounter: struct {
     hits: Int
 }
 
@@ -13,8 +12,11 @@ Counter: struct {
 }
 
 PADDED_ALIGN: #run { PaddedCounter.reflect().layout.alignment ?? -1 }
+
 PADDED_SIZE: #run { PaddedCounter.reflect().layout.size ?? -1 }
+
 PLAIN_ALIGN: #run { Counter.reflect().layout.alignment ?? -1 }
+
 PLAIN_SIZE: #run { Counter.reflect().layout.size ?? -1 }
 
 run: fn() {

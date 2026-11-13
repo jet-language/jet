@@ -1,6 +1,7 @@
 // core.math constants: PI, E, TAU, INFINITY and NAN are comptime values,
 // read as `math.PI`, never called. `circle` reads them from another module.
 use math: core.math
+
 circle: module
 
 // A comptime block can read them like any other constant.
@@ -9,9 +10,7 @@ EULER_SQUARED: #run { math.E * math.E }
 // A generic call in a comptime block infers its type argument from them too.
 LARGER: #run larger(math.PI, math.E)
 
-larger: fn<T: Comparable>(first: T, second: T) -> T {
-    if first > second -> first else -> second
-}
+larger: fn<T: Comparable>(first: T, second: T) -> T { if first > second -> first else -> second }
 
 run: fn() {
     print(math.PI)

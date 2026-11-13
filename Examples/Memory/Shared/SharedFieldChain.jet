@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
+
 // A field read through a `Shared<T>` handle that is itself a struct field
 // (`graph.hooks.name`) is one locked read, the same as through a local handle.
 Hooks: struct {
@@ -18,9 +19,7 @@ via_local: fn(graph: Graph) -> String {
     hooks.name
 }
 
-via_field: fn(graph: Graph) -> String {
-    graph.hooks.name
-}
+via_field: fn(graph: Graph) -> String { graph.hooks.name }
 
 via_binding: fn(graph: Graph) -> String {
     name: graph.hooks.name

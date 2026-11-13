@@ -1,3 +1,5 @@
+use abi: c.jet_java_counter
+
 #Import c.jet_java_counter: module {
     new: fn(arg0: Int) -> Int = "jet_java_counter_new"
     take_error: fn() -> Int = "jet_java_counter_take_error"
@@ -6,7 +8,6 @@
     explode: fn(handle: Int, arg0: Int) -> Int = "jet_java_counter_explode"
     twice: fn(arg0: Float) -> Float = "jet_java_counter_twice"
 }
-use abi: c.jet_java_counter
 
 Handle: struct {
     priv value: Int
@@ -15,31 +16,33 @@ Handle: struct {
         close: fn(&&self) { abi.close(self.value) }
     }
 }
-JavaError: enum { Exception }
+
+JavaError: enum {
+    Exception
+}
 
 new: fn(arg0: Int) -[FFI.Java]> Handle JavaError! {
     value: abi.new(arg0)
-    if abi.take_error() != 0 { return Err(JavaError.Exception) }
-    return Ok(Handle{ value: value })
+    if abi.take_error() != 0 -> return Err(JavaError.Exception)
+    return Ok(Handle{value: value})
 }
 
-close: fn(&&handle: Handle) -[FFI.Java]> {}
+close: fn(handle: &&Handle) -[FFI.Java]> {}
 
 add: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
     value: abi.add(handle.value, arg0)
-    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    if abi.take_error() != 0 -> return Err(JavaError.Exception)
     return Ok(value)
 }
 
 explode: fn(handle: Handle, arg0: Int) -[FFI.Java]> Int JavaError! {
     value: abi.explode(handle.value, arg0)
-    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    if abi.take_error() != 0 -> return Err(JavaError.Exception)
     return Ok(value)
 }
 
 twice: fn(arg0: Float) -[FFI.Java]> Float JavaError! {
     value: abi.twice(arg0)
-    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    if abi.take_error() != 0 -> return Err(JavaError.Exception)
     return Ok(value)
 }
-
