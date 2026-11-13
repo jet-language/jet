@@ -1,11 +1,22 @@
 #!/usr/bin/env jet
 // Native test-suite inventory, sharded across CI jobs.
 // Usage: jet Tools/ci/TestShards.jet SHARD_INDEX SHARD_COUNT
+//        jet Tools/ci/TestShards.jet --check
 //
 // The complete native suite set is fixed here: golden, ui, cases, registries.
 // Each suite is one row of the inventory; the runner that executes a suite owns
 // its contents. A new suite must be added to SUITES, the single place that
-// decides what CI can shard.
+// decides what CI can shard and what a full run covers. Its readers take it
+// from here: Tools/agent/VerifyFull.jet runs this script, and the release gate
+// (Tools/release/Admit.jet) reads the one-line SUITES declaration of the
+// commit it admits.
+//
+// `--check` (a Tools/agent/Land.jet ratchet) holds SUITES to those readers:
+// SUITES is declared on one line; every suite is a test profile of PACKAGE;
+// REGISTRY_SUITE is the one Tools/agent/CompilerRegistries.jet runs; every
+// other suite is a suite of the testkit (`kit_suites` in KIT), whose rows
+// name it, and their profiles' test suites are exactly those of
+// CORPORA_PROFILE, the kit pool the release gate runs them in.
 //
 // Assignment is weighted longest-processing-time first: rows sorted by weight
 // (heaviest first, then by name), each given to the currently lightest shard.
@@ -15,11 +26,21 @@
 // Output: the selected shard's suite IDs, one per line, sorted (a set, kept
 // diffable). Standard error reports the predicted load and spread.
 use {
+    files: core.files
     process: core.process
+    sys: core.sys
     term: core.term
 }
 
 SUITES: [String]{"golden", "ui", "cases", "registries"}
+
+SELF: "Tools/ci/TestShards.jet"
+PACKAGE: "Compiler/package.jet"
+REGISTRY_SUITE: "registries"
+CORPORA_PROFILE: "corpora"
+// The testkit's suites: the corpus kinds `jet test` discovers and runs.
+KIT: "Compiler/JetTestKit/Source/Kit.jet"
+KIT_SUITES_DECL: "kit_suites: fn() -> [String] {{"
 
 // Seconds charged to a suite with no measured cost.
 DEFAULT_WEIGHT: 30
@@ -113,9 +134,89 @@ shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
 }
 
 run: fn() {
-    plan: shard_plan(process.args()) ?? process.fail(err.code, err.message)
+    args: process.args()
+    if args.len() == 1 && args[0] == "--check" {
+        // The checkout: two up from Tools/ci, which holds this program.
+        root: files.normalize("{sys.executable()}/../../..")
+        package: files.read(files.join(root, PACKAGE)) ?? process.fail(1, "cannot read {PACKAGE}: {err}")
+        self_text: files.read(files.join(root, SELF)) ?? process.fail(1, "cannot read {SELF}: {err}")
+        kit: files.read(files.join(root, KIT)) ?? process.fail(1, "cannot read {KIT}: {err}")
+        problems: suite_problems(package, self_text, kit)
+        if problems.len() > 0 -> process.fail(1, "{SELF}: {problems.len()} problem(s) with SUITES:\n{problems.join("\n")}")
+        print("{SELF}: SUITES ({SUITES.join(", ")}) are {PACKAGE} test profiles; the others than {REGISTRY_SUITE} are the testkit's suites and hold exactly the `{CORPORA_PROFILE}` profile")
+        return
+    }
+    plan: shard_plan(args) ?? process.fail(err.code, err.message)
     term.eprint(plan.summary)
     loop suite in plan.selected -> print(suite)
+}
+
+// The test profiles of a package manifest's text: each
+// `NAME: TestProfile{ suites: [A, B], ... }` line, by name.
+test_profiles: fn(text: String) -> [String: [String]] Never! {
+    out := [String: [String]]{}
+    loop line in text.split("\n").to_list() {
+        parts: line.trim().split(": TestProfile{{").to_list()
+        if parts.len() != 2 -> next
+        opened: parts[1].split("suites: [").to_list()
+        if opened.len() < 2 -> next
+        closed: opened[1].split("]").to_list()
+        suites := [String]{}
+        loop part in closed[0].split(",").to_list() {
+            if part.trim() != "" -> suites.push(part.trim().copy())
+        }
+        out[parts[0].copy()] = suites
+    }
+    out
+}
+
+// The suites the testkit's `kit_suites` (in KIT's text) names, in order.
+kit_suite_names: fn(text: String) -> [String] Never! {
+    loop line in text.split("\n").to_list() {
+        if !line.starts_with(KIT_SUITES_DECL) -> next
+        names := [String]{}
+        loop (index, part) in line.split("\"").to_list() {
+            if index % 2 == 1 -> names.push(part.copy())
+        }
+        return names
+    }
+    [String]{}
+}
+
+// Why SUITES and its readers disagree (`--check`): `package` is PACKAGE's
+// text, `self_text` this script's, `kit` KIT's.
+suite_problems: fn(package: String, self_text: String, kit: String) -> [String] Never! {
+    problems := [String]{}
+    quoted := [String]{}
+    loop suite in SUITES -> quoted.push("\"{suite}\"")
+    open: "SUITES: [String]{{"
+    close: "}}"
+    decl: "{open}{quoted.join(", ")}{close}"
+    if !self_text.split("\n").to_list().contains(decl) -> problems.push("{SELF} must declare SUITES on one line, `{decl}`: the release gate reads that line")
+    profiles: test_profiles(package)
+    kit_names: kit_suite_names(kit)
+    corpora: profiles.get(CORPORA_PROFILE) ?? [String]{}
+    if corpora.len() == 0 -> problems.push("{PACKAGE} declares no `{CORPORA_PROFILE}` test profile with suites")
+    covered := [String]{}
+    loop suite in SUITES {
+        held: profiles.get(suite) ?? {
+            problems.push("native suite `{suite}` is no test profile of {PACKAGE}")
+            next
+        }
+        if suite == REGISTRY_SUITE -> next
+        if !kit_names.contains(suite) -> problems.push("native suite `{suite}` is no suite of the testkit's kit_suites ({KIT}), whose rows name their suite")
+        loop part in held {
+            if !corpora.contains(part) -> problems.push("native suite `{suite}` runs `{part}`, which the `{CORPORA_PROFILE}` profile lacks")
+            covered.push(part.copy())
+        }
+    }
+    loop name in kit_names {
+        if name == REGISTRY_SUITE || !SUITES.contains(name) -> problems.push("the testkit's kit_suites ({KIT}) runs `{name}`, which is no kit suite of SUITES")
+    }
+    loop part in corpora {
+        if !covered.contains(part) -> problems.push("the `{CORPORA_PROFILE}` profile runs `{part}`, which no native suite's profile runs")
+    }
+    problems
 }
 
 plan_text: fn(args: [String]) -> String Never! {
@@ -137,4 +238,27 @@ plan_text: fn(args: [String]) -> String Never! {
     assert_eq(plan_text([String]{"-1", "2"}), "64: error: SHARD_INDEX must be a non-negative integer, got '-1'")
     assert_eq(plan_text([String]{"0"}), "64: usage: TestShards.jet SHARD_INDEX SHARD_COUNT")
     assert_eq(plan_text([String]{"01", "02"}), "golden,ui | weighted-shards: shard 01/02 selected 2 of 4 items, predicted 60s (shard loads: 60 60; spread 60s/60s = 1.00x)")
+}
+
+// The declarations of SUITES, the test profiles and kit_suites the way
+// SELF, PACKAGE and KIT spell them.
+SELF_FIXTURE: "use {{\n}}\n\nSUITES: [String]{{\"golden\", \"ui\", \"cases\", \"registries\"}}\n"
+PROFILES_FIXTURE: "    golden: TestProfile{{ suites: [golden, run], baseline: \"../tests/known-failing.tsv\" }},\n    ui: TestProfile{{ suites: [ui, ui_lint] }},\n    cases: TestProfile{{ suites: [cases] }},\n    registries: TestProfile{{ suites: [cases], opt_in: true }},\n    corpora: TestProfile{{ suites: [golden, run, ui, ui_lint, cases] }},\n"
+KIT_FIXTURE: "}}\n\nkit_suites: fn() -> [String] {{ [\"golden\", \"ui\", \"cases\"] }}\n\n"
+
+#Test("the check holds SUITES to the Compiler profiles, the testkit's suites and the release gate's corpora pool") {
+    assert_eq(test_profiles(PROFILES_FIXTURE).get("ui") ?? [String]{}, [String]{"ui", "ui_lint"})
+    assert_eq(kit_suite_names(KIT_FIXTURE), [String]{"golden", "ui", "cases"})
+    assert_eq(suite_problems(PROFILES_FIXTURE, SELF_FIXTURE, KIT_FIXTURE), [String]{})
+    // A corpus the pool runs that no suite owns, and a suite with no profile.
+    wider: PROFILES_FIXTURE.replace("[golden, run, ui, ui_lint, cases]", "[golden, run, ui, ui_lint, cases, perf]")
+    assert_eq(suite_problems(wider, SELF_FIXTURE, KIT_FIXTURE), [String]{"the `corpora` profile runs `perf`, which no native suite's profile runs"})
+    unlisted: PROFILES_FIXTURE.replace("    cases: TestProfile{{ suites: [cases] }},\n", "")
+    assert_eq(suite_problems(unlisted, SELF_FIXTURE, KIT_FIXTURE), [String]{"native suite `cases` is no test profile of Compiler/package.jet", "the `corpora` profile runs `cases`, which no native suite's profile runs"})
+    // A testkit suite SUITES lacks, and a native suite the testkit lacks.
+    renamed: KIT_FIXTURE.replace("\"cases\"", "\"corpus\"")
+    assert_eq(suite_problems(PROFILES_FIXTURE, SELF_FIXTURE, renamed), [String]{"native suite `cases` is no suite of the testkit's kit_suites (Compiler/JetTestKit/Source/Kit.jet), whose rows name their suite", "the testkit's kit_suites (Compiler/JetTestKit/Source/Kit.jet) runs `corpus`, which is no kit suite of SUITES"})
+    // SUITES spread over lines is a list the release gate cannot read.
+    split: SELF_FIXTURE.replace("\"ui\", ", "\n    \"ui\", ")
+    assert_eq(suite_problems(PROFILES_FIXTURE, split, KIT_FIXTURE).len(), 1)
 }

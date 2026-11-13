@@ -908,7 +908,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     column: baseline_info(seeds, release)
     assert_eq(column.error, "")
     work_root: files.mkdtemp("jet-release-preflight-work-") ?? panic("scratch: {err}")
-    pre: Pre{errors: [String]{}, root: seeds.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
+    pre: Pre{errors: [String]{}, root: seeds.copy(), seeds: seeds.copy(), work_root: work_root.copy(), sha: COMMIT, release: release.copy(), baseline: column.copy(), native: [String]{"golden", "ui", "cases", "registries"}, dispositions: [Disposition]{}, admission: Admission{admitted: true, text: ""}}
     // A release tree with Core: the column's compiler passes and the run goes on.
     whole := new_ctx(parse_admit_args([String]{COMMIT}), pre, files.join(work_root, "whole"))
     put(files.join(whole.release_tree, "Core/Core.jet"), "\n")
@@ -1027,14 +1027,39 @@ row_file_verdict: fn(text: String) -> String Never! {
     assert(row_file_verdict("{{").starts_with("refused: not JSON: "))
 }
 
-#Test("reused rows must come from the commit's compiler source and hold every suite") {
+#Test("reused rows must come from the commit's compiler source and hold every kit suite") {
+    kit: kit_suites([String]{"cases", "golden", "registries", "ui"})
+    assert_eq(kit, [String]{"cases", "golden", "ui"})
     rows: [SuiteRow]{suite_kit_row("golden", "tests/golden/a/run.jet", "PASS"), suite_kit_row("ui", "tests/ui/b.jet", "PASS"), suite_kit_row("cases", "tests/cases/c.case", "PASS")}
     file: RowFile{commit: COMMIT, source: "jet@a0.0.45#src", compiler: "jet@a0.0.45#bin", rows: rows}
-    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#src"), [String]{})
-    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#other"), [String]{"rows.json holds the rows of compiler source jet@a0.0.45#src, not jet@a0.0.45#other"})
-    assert_eq(row_file_problems(file, "rows.json", ""), [String]{"this run could not read the compiler source identity of COMMIT, so no rows can match it"})
+    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#src", kit), [String]{})
+    assert_eq(row_file_problems(file, "rows.json", "jet@a0.0.45#other", kit), [String]{"rows.json holds the rows of compiler source jet@a0.0.45#src, not jet@a0.0.45#other"})
+    assert_eq(row_file_problems(file, "rows.json", "", kit), [String]{"this run could not read the compiler source identity of COMMIT, so no rows can match it"})
     partial: RowFile{commit: COMMIT, source: "", compiler: "", rows: [SuiteRow]{rows[1].copy()}}
-    assert_eq(row_file_problems(partial, "rows.json", "jet@a0.0.45#src"), [String]{"rows.json holds the rows of compiler source (none named), not jet@a0.0.45#src", "rows.json holds no golden rows", "rows.json holds no cases rows"})
+    assert_eq(row_file_problems(partial, "rows.json", "jet@a0.0.45#src", kit), [String]{"rows.json holds the rows of compiler source (none named), not jet@a0.0.45#src", "rows.json holds no cases rows", "rows.json holds no golden rows"})
+}
+
+#Test("the gate's native suites are the one-line SUITES list of Tools/ci/TestShards.jet") {
+    shards: "use {{\n    term: core.term\n}}\n\nSUITES: [String]{{\"cases\", \"golden\", \"registries\", \"ui\"}}\nDEFAULT_WEIGHT: 30\n"
+    assert_eq(native_suites_of(shards), [String]{"cases", "golden", "registries", "ui"})
+    assert_eq(native_suites_of("SUITES: [String]{{\n    \"cases\",\n}}\n"), [String]{})
+    assert_eq(native_suites_of("SUITES: [String]{{\"cases\", golden}}\n"), [String]{})
+    assert_eq(native_suites_of("    SUITES: [String]{{\"cases\"}}\n"), [String]{})
+    assert_eq(native_suites_of(""), [String]{})
+}
+
+#Test("the registries suite passes only on a receipt of the commit whose every entry passed") {
+    entries: "[{{\"id\":\"a\",\"status\":\"PASS\"}},{{\"id\":\"b\",\"status\":\"PASS\"}}]"
+    whole: "{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":2,\"passed\":2,\"failed\":0,\"blocked\":0,\"entries\":{entries}}}"
+    passing: registries_verdict(whole, COMMIT)
+    assert_eq("{passing.status}: {passing.detail}", "PASS: 2 registry entries pass")
+    failed: "{{\"head\":\"{COMMIT}\",\"status\":\"FAIL\",\"total\":2,\"passed\":1,\"failed\":1,\"blocked\":0,\"entries\":[{{\"id\":\"a\",\"status\":\"PASS\"}},{{\"id\":\"b\",\"status\":\"FAIL\"}}]}}"
+    failing: registries_verdict(failed, COMMIT)
+    assert_eq("{failing.status}: {failing.detail}", "FAIL: 1 of 2 registry entries pass (2 listed, status FAIL); not passing: b FAIL")
+    other: "{{\"head\":\"0000000000000000000000000000000000000000\",\"status\":\"PASS\",\"total\":2,\"passed\":2,\"entries\":{entries}}}"
+    assert_eq(registries_verdict(other, COMMIT).detail, "the registry receipt pins 0000000000000000000000000000000000000000, not {COMMIT}")
+    assert_eq(registries_verdict("{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":0,\"passed\":0,\"entries\":[]}}", COMMIT).status, "FAIL")
+    assert(registries_verdict("", COMMIT).detail.starts_with("no registry receipt: "))
 }
 
 #Test("a carried release row goes stale only when a change since its run reaches it or its ledger line changed") {
@@ -1128,10 +1153,11 @@ row_file_verdict: fn(text: String) -> String Never! {
 }
 
 #Test("a disposition names a card and matches a tier or every tier") {
-    parsed: parse_dispositions("# comment\nui\tb.jet\t*\t#6001\tthe fixture tests a removed form\ncases\tx\to0\t6002\tno hash\n")
+    parsed: parse_dispositions("# comment\nui\tb.jet\t*\t#6001\tthe fixture tests a removed form\ncases\tx\to0\t6002\tno hash\nregistries\tx\t-\t#6003\tnot a kit suite\n", kit_suites([String]{"golden", "ui", "cases", "registries"}))
     assert_eq(parsed.rows.len(), 1)
-    assert_eq(parsed.errors.len(), 1)
+    assert_eq(parsed.errors.len(), 2)
     assert(parsed.errors[0].starts_with("dispositions line 3: "))
+    assert(parsed.errors[1].starts_with("dispositions line 4: "))
     result: compare_suites([SuiteRow]{kit_row("b.jet", "o2", "PASS")}, [SuiteRow]{kit_row("b.jet", "o2", "FAIL")}, [SuiteRow]{}, parsed.rows)
     assert_eq(result.lost[0].disposition.card, "#6001")
 }

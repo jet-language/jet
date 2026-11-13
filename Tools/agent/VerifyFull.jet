@@ -1,6 +1,6 @@
 #!/usr/bin/env jet
 // Full native gate: the Tools/agent ratchets plus the complete native suites
-// (golden, ui, cases, registries) of this shard, run with an already-built
+// of this shard (Tools/ci/TestShards.jet's inventory), run with an already-built
 // admitted compiler. It never builds Jet itself. Independent failures
 // accumulate; no skip, blessing or reference oracle can close a suite.
 // Usage (from the repository root):
@@ -31,7 +31,6 @@ use {
     time: core.time
 }
 
-SUITES: [String]{"golden", "ui", "cases", "registries"}
 SOURCE_SCHEMA: "jet-proof-source/v1"
 DEFAULT_TIMEOUT_MS: 3600000
 
@@ -290,7 +289,9 @@ pin_source: fn(state: &Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> Bool Never
     passed
 }
 
-// The suites of this shard, from Tools/ci/TestShards.jet.
+// The suites of this shard, from Tools/ci/TestShards.jet, the one list of
+// native suites: `registries` runs Tools/agent/CompilerRegistries.jet, and any
+// other suite is a Compiler test profile of that name.
 shard_suites: fn(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Never! {
     spec := process.cmd([String]{state.binary, "{state.repo}/Tools/ci/TestShards.jet", state.shard_index, state.shard_count}).cwd(state.repo)
     loop setting in state.env -> spec = spec.env(setting.name, setting.value)
@@ -299,7 +300,7 @@ shard_suites: fn(state: Verify) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] 
     suites := [String]{}
     loop line in receipt.output.split("\n") {
         if line == "" -> next
-        if !SUITES.contains(line) || suites.contains(line) -> return abort("verify-full: invalid native suite inventory row `{line}`")
+        if line.starts_with("-") || line.contains(" ") || suites.contains(line) -> return abort("verify-full: invalid native suite inventory row `{line}`")
         suites.push(line.copy())
     }
     if suites.len() == 0 -> return abort("verify-full: empty native suite inventory")

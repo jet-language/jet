@@ -35,9 +35,13 @@
 //             row the release column showed (recorded when it was cut, else rerun on its own
 //             tree), and must finish if the release's census did; `Check.jet --hosted` builds
 //             the jetpack engine that ships beside jet.
-//   suites    the golden, ui and cases test profiles (each side runs them in one kit pool,
+//   suites    every native suite of COMMIT's Tools/ci/TestShards.jet (SUITES, the one list a
+//             full run covers). The registries suite: Tools/agent/CompilerRegistries.jet pins
+//             COMMIT's registry manifest and runs every entry with s2, and every entry must
+//             pass, as in a full run (Tools/agent/VerifyFull.jet). Every other suite is a test profile
+//             (golden, ui, cases) that each side runs in one kit pool,
 //             `jet test Compiler --profile corpora`, run by s2 with `--compiler` naming s2,
-//             then the release column's jet) on COMMIT's fixtures, compared per (suite, case,
+//             then the release column's jet, on COMMIT's fixtures, compared per (suite, case,
 //             tier). Every candidate row runs. The release column runs the rows that can
 //             differ from s2's (release_picks): those s2 fails, those a known-failing line
 //             owns (s2's or the release's ledger), and those whose files changed since the
@@ -54,10 +58,11 @@
 //             as untracked. A disposition that tracks no row is a WARN row.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
-// The candidate's suite rows need the jetpack engine that serves them, so they start once
+// The candidate's kit suite rows need the jetpack engine that serves them, so they start once
 // the chain, cc-pack and jetpack-engine checks pass, and run beside pack and jetpack; a
 // check that fails then waits for them to end and blocks the suites. The release column's
-// rows follow, picked from the candidate's.
+// rows follow, picked from the candidate's, then the registries suite. A --reuse run takes
+// only kit rows; the registries suite runs in full on every unfiltered run.
 //
 // Pass: assembles SEEDS/a0.0.N (the next number) with jet (its Core sources built in),
 // jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<sha256 of jet>`), RELEASE, VERSION
@@ -120,7 +125,15 @@ use {
     jetpack_publication.[publication_key_paths]
 }
 
-SUITES: [String]{"golden", "ui", "cases"}
+// The native suites a full run covers have one home, SUITES of
+// NATIVE_SUITES_SOURCE; the gate reads COMMIT's (native_suites).
+// REGISTRY_SUITE runs through Tools/agent/CompilerRegistries.jet
+// (registries_stage); every other is a Compiler test profile whose rows the
+// CORPORA_PROFILE kit pool runs, which `Tools/ci/TestShards.jet --check`
+// holds.
+NATIVE_SUITES_SOURCE: "Tools/ci/TestShards.jet"
+NATIVE_SUITES_DECL: "SUITES: [String]{{"
+REGISTRY_SUITE: "registries"
 ADMIT_USAGE: "usage: jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse ROWS] [--seeds DIR] [--work DIR] [--check-gate]\n       jet run Tools/release/Main.jet -- rows COMMIT --source IDENTITY --compiler IDENTITY --out FILE RESULTS..."
 // The jet sources that embed each pinned release asset (file, SHA-256, size):
 // the C toolchain pack of each host in CC_PACK_ASSETS, the sandbox's
@@ -267,21 +280,60 @@ is_card: fn(text: String) -> Bool Never! {
     text.starts_with("#") && is_count(text.slice(1..<text.len()))
 }
 
-// Disposition lines: suite TAB case TAB tier|* TAB #card TAB reason. A line
-// starting with `#` is a comment.
-parse_dispositions: fn(text: String) -> Dispositions Never! {
+// Disposition lines: suite TAB case TAB tier|* TAB #card TAB reason, the
+// suite one of `suites`. A line starting with `#` is a comment.
+parse_dispositions: fn(text: String, suites: [String]) -> Dispositions Never! {
     out := Dispositions{rows: [Disposition]{}, errors: [String]{}}
     lines: text.split("\n").to_list()
     loop (index, line) in lines {
         if line.trim() == "" || line.starts_with("#") -> next
         cells: line.split("\t").to_list()
         why: if cells.len() > 4 -> cells[4..<cells.len()].join("\t").trim().copy() else -> ""
-        if cells.len() < 5 || !SUITES.contains(cells[0]) || cells[1] == "" || cells[2] == "" || !is_card(cells[3]) || why == "" {
+        if cells.len() < 5 || !suites.contains(cells[0]) || cells[1] == "" || cells[2] == "" || !is_card(cells[3]) || why == "" {
             shown: json.dumps(Dyn.Text(line.copy())) ?? line.copy()
             out.errors.push("dispositions line {index + 1}: want suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason, got {shown}")
             next
         }
         out.rows.push(Disposition{suite: cells[0].copy(), id: cells[1].copy(), tier: cells[2].copy(), card: cells[3].copy(), reason: why})
+    }
+    out
+}
+
+// The suites of NATIVE_SUITES_SOURCE's text: its one-line SUITES
+// declaration, each quoted name in order; none when it has no such line or
+// a name is not a plain quoted one.
+native_suites_of: fn(text: String) -> [String] Never! {
+    loop line in text.split("\n").to_list() {
+        decl: line.trim()
+        if !line.starts_with(NATIVE_SUITES_DECL) || !decl.ends_with("}}") -> next
+        out := [String]{}
+        loop part in decl.slice(NATIVE_SUITES_DECL.len()..<decl.len() - 1).split(",").to_list() {
+            quoted: part.trim()
+            if quoted.len() < 3 || !quoted.starts_with("\"") || !quoted.ends_with("\"") -> return [String]{}
+            name: quoted.slice(1..<quoted.len() - 1)
+            if name.contains("\"") || name.contains(" ") -> return [String]{}
+            out.push(name.copy())
+        }
+        return out
+    }
+    [String]{}
+}
+
+// COMMIT `sha`'s native suites (native_suites_of its NATIVE_SUITES_SOURCE in
+// `repo`), or why there are none.
+native_suites: fn(repo: String, sha: String) -[Exec, Time.Wait]> (suites: [String], error: String) Never! {
+    shown: git_in(repo, [String]{"show", "{sha}:{NATIVE_SUITES_SOURCE}"})
+    if shown.rc != 0 -> return (suites: [String]{}, error: "git show {short(sha, 10)}:{NATIVE_SUITES_SOURCE} failed: {shown.err}")
+    suites: native_suites_of(shown.out)
+    if suites.len() == 0 -> return (suites: suites, error: "{short(sha, 10)}:{NATIVE_SUITES_SOURCE} declares no one-line `{NATIVE_SUITES_DECL}...}}` of quoted suite names")
+    (suites: suites, error: "")
+}
+
+// The native suites the kit pool runs: every one but REGISTRY_SUITE.
+kit_suites: fn(native: [String]) -> [String] Never! {
+    out := [String]{}
+    loop suite in native {
+        if suite != REGISTRY_SUITE -> out.push(suite.copy())
     }
     out
 }
@@ -667,6 +719,8 @@ Pre: struct {
     sha: String
     release: SeedRelease
     baseline: SeedRelease
+    // COMMIT's native suites (native_suites).
+    native: [String]
     dispositions: [Disposition]
     admission: Admission
 }
@@ -680,6 +734,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     seeds: absolute_or(if options.seeds != "" -> options.seeds else -> seeds_root())
     work_root: absolute_or(if options.work != "" -> options.work else -> process.env_nonempty("JET_RELEASE_WORK") ?? files.join(state_root(), "release"))
     sha := ""
+    native := [String]{}
     if options.commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{options.commit}^{{commit}}"})
         if parsed.rc != 0 {
@@ -687,6 +742,9 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
         } else {
             sha = parsed.out.copy()
             if git_in(root, [String]{"merge-base", "--is-ancestor", sha, "refs/heads/dev"}).rc != 0 -> errors.push("{short(sha, 10)} is not on dev")
+            listed: native_suites(root, sha)
+            if listed.error != "" -> errors.push(listed.error.copy())
+            native = listed.suites.copy()
         }
     }
     release: release_info(seeds)
@@ -699,7 +757,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     if options.dispositions != "" {
         if files.read(options.dispositions) == {
             .Ok(text) -> {
-                parsed: parse_dispositions(text)
+                parsed: parse_dispositions(text, kit_suites(native))
                 errors.extend(parsed.errors.copy())
                 dispositions = parsed.rows.copy()
             }
@@ -710,7 +768,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     // The preflight gate, once the run could otherwise start: COMMIT's
     // receipt from a census by the current release.
     admission: if errors.len() > 0 -> Admission{admitted: false, text: ""} else -> preflight_gate("release-compiler", root, release.dir, sha)
-    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, baseline: baseline, dispositions: dispositions, admission: admission}
+    Pre{errors: errors, root: root.copy(), seeds: seeds, work_root: work_root, sha: sha, release: release, baseline: baseline, native: native, dispositions: dispositions, admission: admission}
 }
 
 GateRow: struct {
@@ -750,6 +808,8 @@ Ctx: struct {
     // candidate against this seed's jet on its own tree (baseline_info).
     baseline: SeedRelease
     vars: [Var]
+    // COMMIT's native suites (native_suites): the kit suites and REGISTRY_SUITE.
+    native: [String]
     dispositions: [Disposition]
     next: String
     tree: String
@@ -1213,7 +1273,7 @@ suite_vars: fn(base: [Var], tree: String, rows_tree: String, identity: String, j
     with_vars(base, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", tree), set_var("JET_TEST_TOOLCHAIN_ROOT", rows_tree), set_var("JET", jet)})
 }
 
-// Every suite of SUITES in one kit pool: Compiler/package.jet's `corpora`
+// Every kit suite (kit_suites) in one kit pool: Compiler/package.jet's `corpora`
 // profile holds the corpora of the golden (golden, run), ui (ui, ui_lint)
 // and cases profiles, and each row names its suite.
 CORPORA_PROFILE: "corpora"
@@ -1386,15 +1446,15 @@ rerun_ids: fn(rows: [SuiteRow], paths: [String]) -> [String] Never! {
 
 // Why a row file cannot stand for COMMIT's candidate rows, each problem
 // once: rows of another compiler source than COMMIT's (`source`, "" when
-// COMMIT's is unknown), and a suite with no rows.
-row_file_problems: fn(file: RowFile, path: String, source: String) -> [String] Never! {
+// COMMIT's is unknown), and a kit suite of `suites` with no rows.
+row_file_problems: fn(file: RowFile, path: String, source: String, suites: [String]) -> [String] Never! {
     problems := [String]{}
     if source == "" {
         problems.push("this run could not read the compiler source identity of COMMIT, so no rows can match it")
     } else if file.source != source {
         problems.push("{path} holds the rows of compiler source {if file.source == "" -> "(none named)" else -> file.source}, not {source}")
     }
-    loop suite in SUITES {
+    loop suite in suites {
         held := false
         loop item in file.rows {
             if item.suite == suite {
@@ -1424,7 +1484,7 @@ reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
         plan.error = "{path}: {err.text}"
         return plan
     }
-    problems := row_file_problems(file, path, ctx.source)
+    problems := row_file_problems(file, path, ctx.source, kit_suites(ctx.native))
     parsed: git_in(ctx.root, [String]{"rev-parse", "--verify", "{file.commit}^{{commit}}"})
     if parsed.rc != 0 {
         problems.push("{path} names {file.commit}, no commit of this repository")
@@ -1773,7 +1833,8 @@ judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) Never! -[Env, Exec, FS, IO, Ti
         files.write(files.join(ctx.work, "evidence/rows-candidate.json"), row_file_text(RowFile{commit: ctx.sha.copy(), source: ctx.source.copy(), compiler: ctx.candidate.identity.copy(), rows: candidate.rows.copy()})) ?? ()
     }
     release: if candidate.error == "" -> release_rows(ctx, candidate) else -> SuiteRun{rows: [SuiteRow]{}, error: "not run: the candidate's rows are incomplete"}
-    judge_suites(ctx, (loop suite in SUITES -> suite_part(release, suite)), (loop suite in SUITES -> suite_part(candidate, suite)))
+    kit: kit_suites(ctx.native)
+    judge_suites(ctx, kit, (loop suite in kit -> suite_part(release, suite)), (loop suite in kit -> suite_part(candidate, suite)))
 }
 
 // The candidate column from a row file (--reuse): its rows stand, except
@@ -1783,14 +1844,14 @@ judge_columns: fn(ctx: &Ctx, candidate: SuiteRun) Never! -[Env, Exec, FS, IO, Ti
 reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     plan: reuse_plan(ctx)
     if plan.error != "" {
-        loop suite in SUITES -> row(ctx, "suite:{suite}", "BLOCKED", "--reuse {ctx.options.reuse}: {plan.error}")
+        loop suite in kit_suites(ctx.native) -> row(ctx, "suite:{suite}", "BLOCKED", "--reuse {ctx.options.reuse}: {plan.error}")
         return
     }
     reran := [String]{}
     verified := [String]{}
     errors := [String]{}
     candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
-    loop suite in SUITES {
+    loop suite in kit_suites(ctx.native) {
         after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
         ids := rerun_ids(after, plan.paths)
         loop item in after {
@@ -1817,18 +1878,18 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     disposition_note(ctx)
 }
 
-// Each suite's verdict from both sides' rows: `release[i]` and
-// `candidate[i]` are SUITES[i]'s, the release's the rows it ran, judged as
+// Each kit suite's verdict from both sides' rows: `release[i]` and
+// `candidate[i]` are `kit[i]`'s, the release's the rows it ran, judged as
 // judged_release completes them. The retry runs every lost row and every
 // untracked timeout of every suite again on their own, in one candidate kit
 // run: a row that missed its wall-clock limit under the kit's load has not
 // failed if it passes by itself.
-judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     firsts := [Compared]{}
     judged := [[SuiteRow]]{}
     seen := [String: Bool]{}
     lines := [String]{}
-    loop (index, suite) in SUITES {
+    loop (index, suite) in kit {
         files.write(files.join(ctx.work, "evidence/kit-release-{suite}.json"), rows_json(release[index].rows)) ?? ()
         files.write(files.join(ctx.work, "evidence/kit-candidate-{suite}.json"), rows_json(candidate[index].rows)) ?? ()
         column: judged_release(release[index].rows, candidate[index].rows)
@@ -1853,7 +1914,7 @@ judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -
         files.write(ids, keys_text(lines)) ?? ()
         again = suite_run(ctx, "candidate", CORPORA_PROFILE, "retry", [String]{"--cases={ids}"})
     }
-    loop (index, suite) in SUITES {
+    loop (index, suite) in kit {
         if release[index].error != "" || candidate[index].error != "" {
             parts := [String]{}
             if release[index].error != "" -> parts.push("release: {release[index].error}")
@@ -1880,6 +1941,57 @@ judge_suites: fn(ctx: &Ctx, release: [SuiteRun], candidate: [SuiteRun]) Never! -
         untracked: untracked_row(suite, compared)
         row(ctx, untracked.check, untracked.status, untracked.detail)
     }
+}
+
+// The registries suite of COMMIT: Tools/agent/CompilerRegistries.jet, run by
+// s2 in the dev shell from this checkout (it exports COMMIT and runs the
+// export's copy), pins the manifest of every registry under Compiler/*/Tests
+// and the kit's cases entry, then runs every entry with s2. Every entry must
+// pass (registries_verdict), as in Tools/agent/VerifyFull.jet. A --filter run
+// narrows the kit suites and runs none of it.
+registries_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    check: "suite:{REGISTRY_SUITE}"
+    if ctx.options.filter != "" {
+        why: "not run: --filter {ctx.options.filter} narrows the kit suites, and a filtered run is never a release"
+        row(ctx, check, "NOTE", why)
+        return
+    }
+    dir: files.join(ctx.work, "registries")
+    manifest: files.join(dir, "manifest.json")
+    receipt: files.join(dir, "receipt.json")
+    script: files.join(ctx.root, "Tools/agent/CompilerRegistries.jet")
+    log: files.join(ctx.work, "logs/registries.log")
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
+    pinned: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), script, "manifest", ctx.sha.copy(), "--out", dir}), ctx.root, vars, log, 3600)
+    if pinned.rc != 0 {
+        why: "CompilerRegistries.jet manifest {short(ctx.sha, 10)} rc={pinned.rc}{if pinned.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 3)}"
+        row(ctx, check, "FAIL", why)
+        return
+    }
+    ran: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), script, "run", "--jet", ctx.candidate.jet.copy(), "--manifest", manifest, "--receipt", receipt}), ctx.root, vars, log, 12 * 3600, true)
+    verdict: registries_verdict(read_text(receipt) ?? "", ctx.sha)
+    row(ctx, check, verdict.status, "{verdict.detail}{if ran.timed_out -> " (timed out)" else -> ""}; log {log}")
+}
+
+// The registries row of a CompilerRegistries.jet receipt `text` for COMMIT
+// `sha`: PASS only when it pins `sha` and every one of its entries passed.
+registries_verdict: fn(text: String, sha: String) -> (status: String, detail: String) Never! {
+    receipt: json.parse(text) ?? return (status: "FAIL", detail: "no registry receipt: {err}")
+    head: text_field(receipt, "head")
+    if head != sha -> return (status: "FAIL", detail: "the registry receipt pins {if head == "" -> "no commit" else -> head}, not {sha}")
+    entries: array_field(receipt, "entries")
+    failing := [String]{}
+    loop entry in entries {
+        status: text_field(entry, "status")
+        if status != "PASS" -> failing.push("{text_field(entry, "id")} {status}")
+    }
+    total: int_field(receipt, "total") ?? -1
+    passed: int_field(receipt, "passed") ?? -1
+    if text_field(receipt, "status") == "PASS" && entries.len() > 0 && total == entries.len() && passed == total && failing.len() == 0 {
+        return (status: "PASS", detail: "{total} registry entries pass")
+    }
+    shown: if failing.len() > 6 -> "{failing[0..<6].join(" | ")} | ..." else -> failing.join(" | ")
+    (status: "FAIL", detail: "{passed} of {total} registry entries pass ({entries.len()} listed, status {text_field(receipt, "status")}){if failing.len() > 0 -> "; not passing: {shown}" else -> ""}")
 }
 
 // The dispositions that track no row, lost or carded: a typo in a case ID
@@ -2220,7 +2332,7 @@ new_ctx: fn(options: AdmitOptions, pre: Pre, work: String) -[FS]> Ctx Never! {
     Ctx{
         options: options.copy(), root: pre.root.copy(), seeds: pre.seeds.copy(), work_root: pre.work_root.copy(), work: work.copy(),
         sha: pre.sha.copy(), source: "", release: pre.release.copy(), baseline: pre.baseline.copy(),
-        vars: [Var]{set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")},
+        vars: [Var]{set_var("TMPDIR", files.join(work, "tmp")), drop_var("JET")}, native: pre.native.copy(),
         dispositions: pre.dispositions.copy(), next: next_release_name(release_names(pre.seeds)),
         tree: files.join(work, "tree"), release_tree: files.join(work, "release-tree"), log: files.join(work, "release.log"),
         built: false, candidate: Built{jet: "", runtime: "", sha: "", identity: "", jetpack: "", s2: "", s3: ""},
@@ -2292,13 +2404,17 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     loop found in ctx.rows -> preflight.push(Dyn.Object([String: Dyn]{"check": text_dyn(found.check), "status": text_dyn(found.status), "detail": text_dyn(found.detail)}))
     files.write(files.join(work, "preflight.json"), "{json.to_string_pretty(Dyn.Object([String: Dyn]{"commit": text_dyn(ctx.sha), "rows": Dyn.Array(preflight)})) ?? "{{}}"}\n") ?? ()
     if failed_rows(ctx).len() > 0 {
-        loop suite in SUITES -> row(ctx, "suite:{suite}", "BLOCKED", "{if launch -> "not judged" else -> "not launched"}: the cheap checks above are not clean (preflight.json)")
-    } else if early {
-        candidate: suite_rows(ctx, batch, finished)
-        judge_columns(ctx, candidate)
-        disposition_note(ctx)
+        loop suite in ctx.native -> row(ctx, "suite:{suite}", "BLOCKED", "{if launch -> "not judged" else -> "not launched"}: the cheap checks above are not clean (preflight.json)")
     } else {
-        reused_suites(ctx)
+        if early {
+            candidate: suite_rows(ctx, batch, finished)
+            judge_columns(ctx, candidate)
+            disposition_note(ctx)
+        } else {
+            reused_suites(ctx)
+        }
+        // Then the registries, with the slot to themselves.
+        registries_stage(ctx)
     }
     gains: gains_of(ctx)
     if failed_rows(ctx).len() == 0 -> row(ctx, "gains", if gains.total >= options.min_gains -> "PASS" else -> "FAIL", "{gains.total} gains ({gains.suites} suite rows, {gains.jetpack} Jetpack rows); --min-gains {options.min_gains}")
@@ -2434,9 +2550,15 @@ rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Neve
     if out == "" -> problems.push("--out FILE is required")
     if results.len() == 0 -> problems.push("no RESULTS file")
     full := ""
+    kit := [String]{}
     if commit != "" {
         parsed: git_in(root, [String]{"rev-parse", "--verify", "{commit}^{{commit}}"})
         if parsed.rc != 0 -> problems.push("{commit} is no commit of {root}") else -> full = parsed.out.copy()
+    }
+    if full != "" {
+        listed: native_suites(root, full)
+        if listed.error != "" -> problems.push(listed.error.copy())
+        kit = kit_suites(listed.suites)
     }
     rows := [SuiteRow]{}
     loop path in results {
@@ -2449,7 +2571,7 @@ rows_main: fn(args: [String], root: String) -[Exec, FS, IO, Time.Wait]> Int Neve
         rows.extend(found)
     }
     counts := [String]{}
-    loop suite in SUITES {
+    loop suite in kit {
         count := 0
         loop item in rows {
             if item.suite == suite -> count += 1
