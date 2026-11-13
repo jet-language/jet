@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6795,
-    "rev": 101534,
+    "rev": 101535,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95739,7 +95739,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Census (G11Speed-5, base c490f18529; commands, census.awk and per-file.tsv in $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/). Over the nine pipeline packages:\n- 1333 `[String:` maps and sets (Sema 933, Driver 143, IR 103, Foundation 86)\n- 393 `Shared<`\n- payload node enums: Expr 51, Stmt 35, Item 24, TExprKind 77, NodeKind 99/95, Type 23/17\n- peak: jet check of one Sema file is 4414 MB (seed-b14, 28 s), held across sema\n\nSlices, each a whole cutover with no second form, proved by chain fixed point plus identical goldens, ui and cases:\n- S0: census guard and ledger, plus Docs/spec/compiler-data.md\n- S1: ModuleId\n- S2: SymbolId\n- S3: Names, String maps to 0 (c2)\n- S4: flat AST (c3)\n- S5: TypeId and flat checked bodies (c4)\n- S6: IR and backend ids, no Shared\n- S7: phase arenas, no Shared in sema (c4, c5)\n\nDecisions (Main, 2026-11-13; all as proposed):\n- F1: compiler data means the nine pipeline packages (Lexer, Parser, Foundation, Sema, IR, Backend, Driver, Eval, Wasm). Tool packages read it through accessors.\n- F2: nominal type names become SymbolIds in S2; structural TypeIds come in S5, after the flat AST, so the Type tree is rewritten once.\n- F3: the split is by id space across every package, because Foundation types are shared. A package split is used only for package-private data (S3, S6).\n- F4: \"no RC\" means the only heap blocks are single-owner column buffers whose count word never moves after creation. There is no String, box, Shared or per-node block. Literal zero count words would need a language feature outside this card.\n- F5: S1 comes before S2.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -95810,7 +95810,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-13T14:47:23.831Z",
+      "updated": "2026-11-13T14:59:17.321Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -201080,6 +201080,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T14:59:17.321Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "plan"
+    },
     {
       "at": "2026-11-13T14:47:43.364Z",
       "by": "Main",
