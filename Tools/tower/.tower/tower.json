@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6793,
-    "rev": 101521,
+    "rev": 101522,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58254,6 +58254,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Speed rows (Lander5, cold, median of 3): seed-b14 (a0.0.45) against the g11-core-b1 jet on dev 3e01b4d967.\n- jetc-trace run: 2.40 s → 0.90 s (−63%)\n- check Core: 29.98 s → 9.39 s (−69%)\n- check JetSema: 31.62 s → 20.26 s (−36%)\n- Throughput: 7,602 → 8,510 lines/s (+12%)\n- hello run: unchanged at 0.02 s; peak memory −15% (46 → 39 MB)\n- RunColdContext --help: 9.74 s → 3.46 s, but it still ends in the #6791 ICE, so this is time to the ICE.\n- Peak memory is otherwise within ±1%.\nWhat the core-b1 jet carries: everything on dev since seed-b14 (lx1 lexer, ly1 lazy trait impls, the c23 calling-thread compile, zlib-a and the rest) plus core-b1's unlanded members layers-a5, tbl and t1-r2. Their replacements (a6, tbl-r2, t1-r3) wait in g11-core-d. c1land, dec1 and the c22 precompiled-Core train are not in it."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Parked profile (G11Speed-5, core-b1 jet, check RunColdContext, 2.86 s). No user-program symbol is above 2.3% self time; the top entries are graph teardown 2.3%, scope_light_copy 1.3% and name_rows_key 1.1%. The wall-time cost is structural:\n- sema.core_demand: 1.11 s, 39% of wall, in 2×24 nearly serial BFS waves (CPU about equal to wall);\n- the comptime.bodies re-finalize: 1.19 s;\n- Core parse: 0.44 s (retired by c22).\nThe next speed item when speed resumes is core_demand as one batched pass instead of 2×24 waves; c22 later removes it for Core."
         },
         {
@@ -58531,7 +58536,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T14:33:21.565Z",
+      "updated": "2026-11-13T14:40:10.209Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -200925,6 +200930,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T14:40:10.209Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T14:38:41.278Z",
       "by": "Main",
