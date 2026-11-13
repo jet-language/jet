@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101181,
+    "rev": 101185,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40701,6 +40701,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Main ruling 2026-11-12 (c6): the criterion stands. DiagnosticRows render_row falling back to What when a row has no written meaning is the defect (270 active rows lack one). Each row gets a hand-written meaning and the generator --check refuses a row without one. Owner: G5DevX-2, in family-sized SUBs."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner deconfliction 2026-11-06: respelled for D-DECL-COLON1=A."
@@ -41481,7 +41486,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-13T02:23:01.118Z",
+      "updated": "2026-11-13T02:32:51.086Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -65017,151 +65022,6 @@
       "criteriaLastN": 17
     },
     {
-      "id": "c0z3glhp",
-      "num": 6067,
-      "title": "Jet one-liners: jet -e, jet run - and input through plain Core names that beat Perl and awk",
-      "body": "Scripting audit 2026-10-28 (Docs/audits/scripting-peers-2026-10-28.md, row D03). Jet has no one-liner mode. Probes on commit 8fbf094: `echo 'fn run() { print(\"x\") }' | jet run -` gives E2105 \"Can't securely read the file `-`\"; `jet run -e 'print(1)'` gives E2105; `jet eval 1+2` gives E2104. Perl (`perl -lane`), Ruby (`ruby -ne`), awk and nushell own this use. No card covers it: #4720's `jet eval` is pure and evaluator-only.\n\nDesign that beats them. `-e CODE` is the body of `fn run`, checked by sema exactly like a file, so a typo fails before any input is read. `-n` wraps the body in `loop line in stdin.lines()`; `-p` also prints `line` after the body; `-a` binds `words: [String]` split on whitespace (`-F,` sets the separator); `--begin`/`--end` run code before and after the loop; `-i` edits named files in place. The step Perl and awk cannot take: `--csv Row` or `--json T` decodes each record into `row: Row`, a struct declared inline or in a file, so a misspelled field is a compile error, while awk and Perl print an empty string. Compiled one-liners are cached by content hash like any script, so the second run uses native code. Piped source follows #5949: never remembered, always asks.\n\nSpelling is decided by ballot D-SCRIPT-ONELINER1 (cards/DECISIONS.md). Map: #5981.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e17",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met; the last was c10, at dev c057ea659d. Closed by Main."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Lane paused by owner (4-lead cap). Unlanded: ScriptLead-14 staged (Iter count_where/max_by/indexed lowering fix + one-liner parity case vs perl/gawk; unrun). Open: c5 (Jet chars <= Perl) fails under the ratified design, 567 vs 442, so it needs an owner call (re-cut it or ballot shorter helpers). Also open: -e E0107 test, jet run - case check, docs/help snapshots, 1M-line benchmark."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08: c4, c6 and c8 re-cut to D-SCRIPT-ONELINER1=A; title updated. Note: the ballot text says input.edit(f) asks once to write; that half follows D-AUTH-DEFAULT1=A (#6614: allowed by default with the effect-change notice), as c3 already does for piped source. c9 (from #2161) is not about one-liners; it stays here until re-homed."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 05:50: c3 half proven. In the a0_037 kit, cases run_entry/run_dash_runs_the_program_piped_on_stdin PASS: `jet run -` with hello.jet on stdin prints hi with exit 0, words after - are the arguments, and a rerun reuses the stdin entry. Not covered: the clause \"Piped source follows the D-AUTH-DEFAULT1 notice rule (#6614 c3)\". The piped fixture uses only free basics, so no notice path is exercised. c3 stays open until a step pipes a program needing a non-default effect and asserts the notice/refusal exactly as for a file. c2 (jet -e) is proven by the JetCli RunEval.fixture registry row, which is outside the release kit; to be met from the c65 full-profile run."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 1 criteria from archived #2161: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-10-29",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "D-SCRIPT-ONELINER1 is ratified; the criteria below follow option A and are re-cut in the same change if another option wins.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-SCRIPT-ONELINER1 is ratified with outcome A (2026-10-29), and the criteria follow option A as written.",
-          "at": "2026-11-10T02:37:43.274Z",
-          "closure": "decision"
-        },
-        {
-          "n": 2,
-          "text": "`jet -e 'print(1 + 2)'` prints 3 and exits 0; `jet -e 'name := 1; print(nmae)'` reports E0107 and runs nothing (tests).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main 2026-11-09, admitted seed a0_042 run from dev 6a06b917cb: jet -e 'print(1 + 2)' prints 3, exit 0; jet -e 'name := 1; print(nmae)' reports E0107 (jet.UnknownName), exit 1, 0 bytes on stdout. Test row: Compiler/JetCli/Tests/RunEval.fixture.",
-          "at": "2026-11-09T19:48:40.844Z"
-        },
-        {
-          "n": 3,
-          "text": "`printf 'run: fn() { print(\"hi\") }' | jet run -` prints hi and exits 0 (case). Piped source follows the D-AUTH-DEFAULT1 notice rule (#6614 c3); the earlier prompt half is superseded.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main 2026-11-09, admitted seed a0_042 on dev 6a06b917cb: printf 'run: fn() { print(\"hi\") }' | jet run - prints hi, exit 0; jet test Compiler --profile cases --filter run_dash_runs_the_program_piped_on_stdin: PASS 1, FAIL 0 (steps piped_noticed, piped_allowed, piped_allow_all cover the notice rule).",
-          "at": "2026-11-09T19:48:44.181Z"
-        },
-        {
-          "n": 4,
-          "text": "A checked-in table of 10 classic one-liners (print field 2, sum column 3, count matching lines, unique lines in order, in-place replace through input.edit(f), number lines, longest line, swap two fields, keep lines longer than 80, sum a named CSV column through input.csv(T)) written with jet -e, input, words() and split(sep), passes with byte-identical output to the perl version on the same input.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "865d6be158 (ScriptLead-14r, on dev e4096a0f3b): tests/cases/terminal/oneliners_match_perl_and_awk_output.case PASS in the Lander's fR3 fullprof run of e4096a0f3b. The ten jet -e one-liners print the same bytes as the perl and gawk versions on the same input, and the in-place edit leaves the same file. For the misspelled field, j_typo exits 1 with empty stdout and stderr naming amonut, while p_typo and a_typo print 0 and exit 0.",
-          "at": "2026-11-10T01:43:37.961Z"
-        },
-        {
-          "n": 5,
-          "text": "A side-by-side table of the 10 one-liners in Jet, Perl and awk (text and character counts) is presented to the owner. The character total is a soft target: Jet at most Perl is the aim, and the owner reviews the side-by-sides and may override the count.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Presented to the owner as the Tower research doc Docs/research/2026-11-09-oneliners-jet-perl-awk.md (master 77b872b725): the 10 one-liners from tests/cases/terminal/oneliners_match_perl_and_awk_output with character counts, Jet 567, Perl 437, awk 379; Jet misses the soft target by 130, and the doc names what would close it (each a new syntax or API ballot). The owner may override the count.",
-          "at": "2026-11-10T01:35:15.115Z"
-        },
-        {
-          "n": 6,
-          "text": "With input.csv(Row), a misspelled field (r.nmae) is a compile error before any input is read; the test also records that the awk and Perl versions of the same typo print a wrong result (0) and exit 0, with no error.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "865d6be158 (ScriptLead-14r, on dev e4096a0f3b): tests/cases/terminal/oneliners_match_perl_and_awk_output.case PASS in the Lander's fR3 fullprof run of e4096a0f3b. The ten jet -e one-liners print the same bytes as the perl and gawk versions on the same input, and the in-place edit leaves the same file. For the misspelled field, j_typo exits 1 with empty stdout and stderr naming amonut, while p_typo and a_typo print 0 and exit 0.",
-          "at": "2026-11-10T01:43:39.210Z"
-        },
-        {
-          "n": 8,
-          "text": "Docs/spec/reference/cli.md and jet help run document -e and jet run -, and jet help input lists input, words(), split(sep), input.csv(T), input.json(T) and input.edit(f) together; UI snapshots of both helps.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On dev e4096a0f3b (6f5f5ecc4a plus earlier ScriptLead SUBs). Docs/spec/reference/cli.md lines 691+ document jet -e and jet run -. The help run snapshot tests/cases/cli_parts_surface/help_run.txt lists -e and jet run -. The help input snapshot help_input.txt lists input, words(), split(sep), input.csv, input.json and input.edit together. Both cases pass in the Lander's fR3 fullprof run: help_input_lists_every_way_a_program_reads_input and help_run_is_per_command_not_the_global_screen.",
-          "at": "2026-11-10T01:48:37.259Z"
-        },
-        {
-          "n": 10,
-          "text": "Every Iter method that jet check accepts lowers on every tier: count_where, find, each, fold, max_by, min_by, count_by, group_by and indexed on the Iter that input yields run under jet -e at O0/O1/O2 with no exit 101, and stream without collecting (find stops at the first match); one #Test per method plus a tests/cases golden (ScriptLead census 2026-11-09: BuildLazy.jet:956 lowers only the lazy adapters and any/all/position).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ce207022a3: tests/cases/terminal/iter_methods_stream_on_every_tier.case PASS (count_where, find, each, fold, max_by, min_by, count_by, group_by and indexed on O0, O1 and O2). The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:24.744Z"
-        }
-      ],
-      "refs": [
-        "#5981",
-        "#4720",
-        "#5949",
-        "#5085",
-        "#3104"
-      ],
-      "tags": [
-        "scripting",
-        "cli"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T21:05:38.566Z",
-      "updated": "2026-11-10T02:37:58.810Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G4"
-      ],
-      "criteriaLastN": 10,
-      "completedAt": "2026-11-10T02:37:58.810Z"
-    },
-    {
       "id": "c0810bga",
       "num": 6068,
       "title": "Upgrades need no hand edits: every breaking change ships a `jet fix` rewrite, and last release's code builds on the new one",
@@ -65745,20 +65605,20 @@
         {
           "n": 3,
           "text": "Setting a key on a Dyn object costs the same whatever the object already holds: `out[key] = v` does no native-to-handle round trip over the object's existing contents. Found by G4Ports-1 (2026-11-12, performance-surface twin): 30 small keys set after a 110-row array take 390 ms per 20 objects, against 12 ms when set before it (32x). Proof: a paired two-program cell (keys set before and after a large member) whose times are equal within noise, plus a second program that builds a large JSON report with interleaved keys, on O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T21:47:38.509Z"
+          "evidence": "00583d1d94: landed G11Speed-dk1c: one-key Dyn write writes the native Object in place; structural O0/O1/O2 case under a 60 s step timeout passes on the lander's proof lines (jet test Compiler --profile cases <case>), paired before/after receipt in the SUB msg",
+          "at": "2026-11-13T02:56:56.266Z"
         },
         {
           "n": 4,
           "text": "core.json tree_depth (Core/Json/Json.jet, the `value.keys()` plus `value[key]` walk) is linear in the document size, so json.patch on a large document is not quadratic. Proof: a case timing tree_depth and patch on a document and on one 4x larger, where time grows at most about 4x, on O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T21:47:39.518Z"
+          "evidence": "233209f518: landed G11Speed-jd1c: tree_depth walks object entries once (json.patch 2,000 vs 8,000 members was 439 vs 7,095 ms on seed-b13); structural O0/O1/O2 case patching a 200,000-member object under a 60 s step timeout passes on the lander's proof lines",
+          "at": "2026-11-13T02:56:57.260Z"
         }
       ],
       "refs": [
@@ -65772,7 +65632,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:12.272Z",
-      "updated": "2026-11-12T22:13:17.291Z",
+      "updated": "2026-11-13T02:56:57.260Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -89927,239 +89787,6 @@
       "completedAt": "2026-11-11T19:44:06.524Z"
     },
     {
-      "id": "c0x92nsv",
-      "num": 6689,
-      "title": "No C: threads without pthread (Thread.jet, Sync.jet)",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nThread.jet imports pthread_create, pthread_join, pthread_detach, pthread_attr_init, pthread_attr_setstacksize and pthread_attr_destroy; Sync.jet imports one more C symbol. Replace them with clone3 or clone, Jet-owned stacks and Jet's own thread control block and thread-local area, with futex join.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met: dev c057ea659d (train 2, t2c). Closed by Main."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c1 not met: programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads passes in fR3 fullprof but ICEs in the a0_043 admit of e4096a0f3b (release cases column; also in a0_042's): native.link undefined symbol _TLS_MODULE_BASE_ from libprobe.a built by the release kit's C pack with TLS descriptors. G1Lead-6689tls (StaticLink relaxes TLS descriptors and defines _TLS_MODULE_BASE_) in train 2 is the fix; meet c1 after it lands and the release column passes."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "G1Lead-25 (option E) is held until D-FFI-CARRIER1 is ratified with a clean adversarial review (owner direction 2026-11-09). c1/c2 land with raw clone carriers for pure programs only."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner direction 2026-11-09 on D-FFI-CARRIER1: option E (the initial thread is the only thread that runs C; task-side C calls are handed to it) is the beginner default, and option B (pthread carriers for C-linked programs, with parallel direct C calls) is an explicit expert opt-in. The ballot is to be completed in that shape, with the opt-in spelling as a ballot item, and given an adversarial review before it is built."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "AppReview6: D-FFI-CARRIER1/SERIAL1 v6 are not engineered away (O1-O3, O13, O15: syscall census coverage and wait classification, carrier saturation, safepoint evidence, binding-lock ownership and callback safety). The v7 drafts and audit are under '$JET_SCRATCH_ROOT/lanes/AppReview6/'."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "FFI v6 redesign (BallotLead-2; scratch, not posted). CARRIER1 A: programs that link C keep C-ready pthread workers and direct calls, and pure programs keep raw carriers. The runtime adds compensation, an open-operation rule, owner tasks for affine state, a movable host pump, and prompt cancel. SERIAL1 A: bindings guard their real state with the existing Shared guards; there is no global gate. No new syntax. On a C model (gcc -O2, 3 runs) a call costs 2.0-2.7 ns, against 6.4-8.6 us for the v5 channel executor. Compensation cuts a 51 ms starvation gap to 3-4.7 ms. Jet probes on seed a0_040 pass at none/basic/full. Six named irreducible costs; open work includes callback adapters (E2104 today) and macOS/Windows pump placement. AppReview6 is reviewing it."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "FFIReview (fresh sol-reviewer) on the rewritten D-FFI-CARRIER1 and D-FFI-SERIAL1: ENGINEERED-AWAY=no. CARRIER1 rec A FAILS as a general solution; SERIAL1 holds only within explicit limits. Downsides remaining: dispatch overhead, serialized C, UI stalls, shared TLS, thread-affinity conflicts, callback deadlocks, delayed cancellation and shutdown, and unproved ABI, signal and target behaviour. The review records 28 corrections, peer comparisons (cgo, Tokio spawn_blocking, Loom, Swift, Erlang dirty schedulers, .NET), and the exact repros for web exit 101 (#6712) and the E2104 callback refusal. Repaired drafts and audit: $JET_SCRATCH_ROOT/lanes/FFIReview/ (2026-11-09-ffi-ballots-review.md). Not posted. BallotLead-2 redesigns after D-APP1 v6, then a new fresh review."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BallotLead-2 rewrote the #6689 thread ballots ($JET_SCRATCH_ROOT/lanes/BallotLead/): D-FFI-CARRIER1.json (rec A = the old E, \"the initial thread is Jet's only C thread\"), D-FFI-SERIAL1.json (rec A = the old C+D) and DESIGN-FFI-CARRIER1.md (nine costs with size, mitigation and probe; review gaps G1-G14 mapped; build plan S0-S7). Both validate. Self-verdict ENGINEERED-AWAY=partial. Remaining costs: a 5.5-9.3 us handoff per task-side C call (against 351-371 ns direct); no parallel C from tasks (64 callers wait 254-367 us p50); a long C call stalls other C callers and the UI; a task's C call waits while run computes; a reported but unbroken gate cycle; shared C thread-locals; no C fault handler on a raw carrier; no task survival across fork; nothing changes until #6694/#6695 land. New receipts in v4/probe/ffi/: rawmusl (mode g silently overwrote errno 2 and 201 times; mode f SIGSEGV 3 of 3), setxid (11 overrides route 11 of 11, so no kernel floor), comptime (E3010 at all levels). The planned extra ballots dissolved. Next: a fresh sol-reviewer pass, as with D-APP1; build only after two clean passes. Defect found: the seed accepts FFI(c, concurrent) and ignores the unknown argument."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "SchedLead-9 (raw clone threads, c1) conflicts with CFreeLead-fork1 (#6690 c3, queued for b7). Both grow the Thread.jet registry root from 96 to 104 bytes: fork1 for its gate word @96, SchedLead-9 for its reap list @96. fork1 lands first; SchedLead-9 must be rebased to put the reap list @104 (root 112) before it is integrated."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "D-FFI-CARRIER1 and D-FFI-SERIAL1 adversarial review done (Docs/audits/2026-11-08-D-FFI-CARRIER1-review.md, dev 4c315cc06c). Neither A holds unconditionally. Carrier A is a second carrier kind (I8; this card's log says no second carrier mechanism is built), and its migration cost, C TLS, fork/exit/signal and callback claims are unproved. Channel round trips measured 5.4-6.2 us, which is not an FFI cost. Compile-time C stops with E3010 (an I9 gap). A per-library gate does not make unsafe C safe: recursive entry still corrupted scratch state in a deterministic witness. Facts confirmed: C calls run on the task fiber stack (O0/O1/O2), and a C-linking image starts through __libc_start_main. The review added carrier G (one C-compatible worker kind for native programs) and serialization D (audited wrappers over Shared.guard_edit). Both ballots validate but are not postable until a redesign closes the 14 gap lines and passes a second review."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08: C-gate redesign shelved. Decision (implementation, within card scope): c1 (raw clone carriers) lands only after #6694 and #6695 remove C from Core, because musl believes the process has one thread on raw carriers (need_locks=0), so concurrent C malloc corrupts the heap and errno/TLS alias (SchedLead probe A). No second carrier mechanism is built. SchedLead prepares the raw-clone spawn/join/detach cutover, gated off until then."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Adversarial review of the C-gate design ($JET_SCRATCH_ROOT/lanes/SchedLead/c-gate-design.md) by a fresh GPT-family reviewer: redesign needed. Findings: shared FS aliases TLS and pthread identity (probe showed kernel writes corrupting live TLS); blocking hooks miss FILE locks, PI mutexes and raw syscalls; the Jet registry misses C-created threads (setxid broadcast, quiescence); lane affinity, nested callbacks, cancellation and fork continuation underspecified. Gate stays unbuilt until a redesign passes review; SchedLead also weighs deferring clone carriers until #6694/#6695 remove the remaining C so no gate is needed."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (Q9): \"lean towards A but need downsides engineered away\". Direction: a process-wide C gate. Before building, the design must remove or mitigate each downside of A (serialized parallel TLS handshakes and blocking C calls until mbedtls is ported, user C serialized forever, reentrancy when C calls back into Jet, a blocking C call stalling every other C caller, fork) and pass an adversarial review; the redesign goes back to the owner with each remaining cost named."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "SchedLead started 2026-11-08. Scheduler c3 is paused and unlanded; notes are in the lane scratch c3-paused.md. Measured c3 state: w11 task-clock 23.8 to 19.6 ms, clones 20 to 12, RSS 4.3 MB. The Thread.jet THP stack fix folds into this card: Jet-mapped MAP_STACK stacks replace the madvise workaround (w11 RSS 13.7 to 5.5 MB, fib smoke 16.3 to 5.3 MB, measured on the unlanded patch)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: SchedLead, after its in-flight release fix; scheduler c3 pauses."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Thread.jet and Sync.jet import nothing from C, and the runtime object asks libc for no pthread symbol. A program that links C keeps today's thread behavior (its carriers come from its C closure's libc) until D-FFI-CARRIER1 is ratified and built on #6504; a case proves both link shapes at O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "958e02a744 and 868efe6ac3: the cases carriers_come_from_the_runtime_or_from_the_c_closures_libc and ffi_callbacks_tasks/programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads PASS. The static linker relaxes TLS descriptors and defines _TLS_MODULE_BASE_. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:31.773Z"
-        },
-        {
-          "n": 2,
-          "text": "Thread spawn, join, detach, stack size, thread-locals, panics in threads and the scheduler's carriers keep their behavior: the thread, task and scheduler cases pass on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Met on dev e4096a0f3b (fix train F): the Lander's fR3 fullprof cases ran PASS 3775, FAIL 0, ERROR 0, TIMEOUT 0, golden O0/O1/O2 PASS 4454 FAIL 0 TIMEOUT 0, ui FAIL 0, covering every group this criterion names (fiber_liveness tasks_under_an_address_space_cap and many_quick_tasks included); net_http_service_policy is a ledger KNOWN-FAILING row under #3595. The a0_043 admit of the same commit failed only on the #6689 c1 case.",
-          "at": "2026-11-10T01:27:51.473Z"
-        },
-        {
-          "n": 4,
-          "text": "setuid, setgid and setgroups (and initgroups, ported to Jet with /etc/group plus the nscd GETINITGR query) apply to every thread in the process through a Jet synccall over the thread registry, as POSIX and musl define. Today the raw per-thread setuid and setgid in HostProcess.jet change only the calling carrier, a privilege-drop defect. A case drops privileges with tasks on several carriers and checks every /proc/self/task/*/status.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev a796b483ee (SchedLead-6): setuid/setgid/setgroups/initgroups through a Jet synccall over the thread registry; integration b5 passes.",
-          "at": "2026-11-09T03:05:52.588Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:46:55.183Z",
-      "updated": "2026-11-10T02:37:07.448Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-10T02:37:07.448Z"
-    },
-    {
-      "id": "c03a0dhc",
-      "num": 6693,
-      "title": "No C: the runtime pack and program links drop musl, libgcc and libgcc_eh",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nOnce the math, thread, syscall, DNS and compiler-import cards land, the runtime needs nothing from libc. Remove musl's libc.a, libgcc.a and libgcc_eh.a from Tools/packaging/PrebuildRuntime.jet and from Compiler/build.jet's runtime step (JET_PACK_MUSL_LIB, PLATFORM_ARCHIVES, the nolibc section split in Image/RuntimePack.jet, and jet-runtime/foreign/platform). The runtime pack then builds with no C compiler. Programs with C interop still link their C closure; this card decides nothing about that feature.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [
-        "c0x92nsv",
-        "c0bnp1zw",
-        "c0ajhpeh"
-      ],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met, the last two at dev c057ea659d. Closed by Main."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "CFreeLead-6693a1 submitted (part of c1: musl/--musl and foreign/platform leave build.jet and the runtime pack; a C closure links the pack musl libc.a + libclang_rt.builtins.a). Stack SchedLead-6, SchedLead-9, QuickLead-3; it waits on #6689 and #6691. Gate rc=0. Disclosed open points: (Q1) the pack has no unwinder, so a Rust helper on the pack route uses the host libgcc_eh.a; (Q2) without a shared musl sysroot env var, every golden row with a C closure builds musl (~35 s) in its fresh Hangar. Neither needs an owner ballot yet: Q1 closes with #6694/#6695, and Q2 is an implementation cost to remove (share the sysroot through the existing Hangar cache) before c2 is measured."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: SpeedLead, once #6688 to #6692 land (it owns PrebuildRuntime and build.jet)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Compiler/build.jet and Compiler/Toolchain/RuntimePack.jet probe and call no cc, ar or nm (build.jet:54-56 on dev 6a06b917cb), the pack builds no vendored C, and the pack's foreign/platform directory stays gone.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "At c057ea659d, git grep -E for find_program, probe(cc/ar/nm), --cc=, --ar=, --nm=, vendored, foreign/platform, sqlite3 and mbedtls in Compiler/build.jet and Compiler/Toolchain/RuntimePack.jet finds nothing, and git ls-tree finds no Core/Vendor or Compiler/Toolchain/VendoredC.jet. This landed with d46993e917 and ebea158575. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:17.507Z"
-        },
-        {
-          "n": 2,
-          "text": "A pure-Jet hello and the w-cells link with no C archive and start without libc's startup.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The compiler was built from the t2c tree that landed as dev c057ea659d; integ-land5 checked that tree against HEAD^{tree}. It was inspected with a Node ELF64 reader ($JET_STATE_ROOT/scratch/Main/elfinfo.mjs), since the host has no binutils. A pure-Jet hello (jet build hello.jet) and all 15 ScriptBench w-cells (Tools/perf/scriptbench w01-hello through w15-sleep, built with jet build run.jet) were checked; hello prints hello with rc 0. Every one is a static EXEC with no PT_INTERP and no dynamic section, and its entry symbol is __jet_start. None has a .comment section, and none has a libc startup or C-object symbol (__libc_start_main, _init/_fini, crt*, frame_dummy, __stack_chk_fail, sqlite3_, mbedtls_). Logs are in $JET_SCRATCH_ROOT/lanes/Main/runs/wcells.2151 and g1close.2142.",
-          "at": "2026-11-10T02:53:13.686Z"
-        },
-        {
-          "n": 3,
-          "text": "The full case suite passes on the pack built without musl.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "a0_042 release admission (cut from d4d45ded4b, whose pack has no foreign/platform musl dir; nm: jet_runtime.pack.o 3293 defined, no musl/libgcc names): kit-candidate-cases.json 4781 rows, PASS 3814, FAIL 1 (process_session_resource_limits, passed on retry), 0 lost vs a0_041 (RELEASE.md: 112 gained, 0 lost). Write-up: CFreeLead3 c3-evidence.md",
-          "at": "2026-11-09T17:16:03.185Z"
-        },
-        {
-          "n": 4,
-          "text": "Every comment that names the Rust or musl toolchain matches the code once the pack's C is gone (on dev 6a06b917cb: flake.nix:102-104, Tools/agent/Chain.jet:40-41 and 1443, Tools/agent/JetEnv.jet:4-7, Tools/agent/Land.jet:979, Tools/release/Admit.jet:758-759); a git grep for musl and libgcc in comments lists only true statements (was #6714).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ab966451ca: at c057ea659d, git grep -E for the phrases \"C toolchain and static musl\", \"musl the runtime pack\", \"runtime pack links\" and \"find_folder probe\" in flake.nix, Tools/agent, Tools/release and Tools/perf finds nothing. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:19.717Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:47:10.785Z",
-      "updated": "2026-11-10T02:53:39.087Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-10T02:53:39.087Z"
-    },
-    {
       "id": "c0bnp1zw",
       "num": 6694,
       "title": "No C: port the mbedtls that Core uses to Jet (the pinned TLS 1.2 and 1.3 set, X.509, PSA crypto)",
@@ -94165,11 +93792,11 @@
         {
           "n": 1,
           "text": "A Core type that becomes an error type keeps one runtime symbol for each of its handle and record routes: codegen and the runtime derive the name from the same source (the runtime's export table, or one mangling function used by both), so no route names a symbol the runtime does not export. Proof: the 36 encoding case rows from b10 pass on the next batch compiler, TlsLead-6615s13b-h's deferred lines pass, and a #Test or case declares a second Core error type and builds a program that drops and reads it on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T04:55:22.537Z"
+          "evidence": "a0edd07a7a: jet test Compiler/JetIR/Source/BuildRoutes.jet -> 73 passed 0 failed; jet test Compiler/JetIR/Source/RuntimeRoutes.jet -> 73/0; jet test Compiler --profile cases --filter encoding -> 77 PASS 0 FAIL (10 known-failing repl rows #6418/#5454), dev 98469bf0cf, seed-b14 (Lander holdsweep $JET_SCRATCH_ROOT/lanes/Lander/holds/12-6760-c1.out)",
+          "at": "2026-11-13T02:56:54.974Z"
         },
         {
           "n": 2,
@@ -94189,7 +93816,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:55:11.076Z",
-      "updated": "2026-11-12T05:09:20.484Z",
+      "updated": "2026-11-13T02:56:54.974Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -148757,189 +148384,6 @@
       "ratifiedAt": "2026-10-29"
     },
     {
-      "id": "D-SCRIPT-ONELINER1",
-      "cardId": "c0z3glhp",
-      "group": "design",
-      "title": "One-liners: one `jet -e` flag, with input read through plain Core names and the result printed",
-      "situation": "A one-liner is a tiny program typed straight into the shell. It often reshapes lines of text. Perl, Ruby and awk own this job, using letter flags such as `-n` and `-a`. Those letters are hard to guess and hard to find, and Jet already has many flags. Jet cannot run code typed on the command line today. A user must create a file, wrap it in `fn run`, and write the loop. The vote decides how one-liners read their input and show their result: through flags, or through plain names in the code.",
-      "gist": "Should one-liners use letter flags, or one `-e` flag with plain names for reading input?",
-      "lesson": "One `-e` flag. The code reads input through plain names such as `input`, `words()` and `input.csv(T)`, which also work in scripts. The code's final value is printed, one item per line.",
-      "explainer": "",
-      "story": "Bo pipes a log into `jet -e 'input.map((l) -> l.words()[1])'` and gets each second word, one per line. Later he finds `input.csv(Sale)` in `jet help input`, next to everything else that reads input.",
-      "inWild": "Option             Second word of each line                      Like\nA -e + input       jet -e 'input.map((l) -> l.words()[1])'       Ruby ARGF, node -p\nB letter flags     jet -a -e 'print(words[1])'                   Perl, Ruby\nC implicit it      jet -e 'lines { print(it.words()[1]) }'       Kotlin\nFor scale: perl -lane 'print $F[1]' and awk '{ print $2 }'.",
-      "detail": "OWNER QUESTION (q0fpghts)\nThe earlier draft explained only three of its eleven flags, and nobody could guess that `-n` means \"loop over lines\". This redesign has no letter flags. Everything a one-liner needs is a plain Core name in the code. The names are listed together under `jet help input`, so nothing is scattered through `jet help`.\n\nWHAT WE BUILD\n- CLI: `jet -e CODE [FILES]` and `jet run -` (program from stdin). The code is the body of `fn run`, checked like a file, as a REPL adapter builds one (D-ENTRY-SCRIPT1=C). Front.jet:999 (jet_cli_run_entry) parses -e; today the code text is taken as a file name (Front.jet:674, E2105).\n\n- Result printing: if the code ends in a value, `-e` prints it, as `node -p` does. A list or line stream prints one item per line; a unit result prints nothing. So no loop or `print` is needed for the common reshape.\n- Core `input`: the lines of the files named after the code, or of stdin when none are named, like Ruby's ARGF and Python's fileinput. It is a lazy stream, so `input.map(f)` prints as lines arrive.\n\n- `input.csv(T)` and `input.json(T)` decode each record into `T`, so `r.nmae` is a compile error before any input is read. `input.edit(f)` rewrites each named file in place and asks once for permission to write.\n- `text.words()` (existing) splits on spaces; `text.split(sep)` takes a separator.\n\n- `jet help input` lists every input name with one example each. `jet help run` points to it.\n- The generated source is an overlay entry (Request.jet:1299-1367). Compiled one-liners are cached by content hash (ScriptCache.jet).\n\nWHY A HAS NO REAL LOSS\n- The old loss was length against Perl. Printing the final value removes the loop and the `print`, so a reshape is one method call on `input`.\n- The characters left are names that say what they do, which philosophy rule 2 ranks above keystrokes. The shell completes them.\n\nEVIDENCE\n- Probes (commit 8fbf094): `jet -n -e 'print(f[1])'` gives E2101; `jet run -e 'print(1)'` gives E2105.\n- A new one-line file compiles in 102 to 152 ms; warm runs take 18 to 24 ms (scripting/work/p/cold). Perl starts in 1.7 ms, Ruby in 41.0 ms.\n\nIDS\nHosts card #6067. The `-e` body is a `fn run` body, like a REPL cell under D-ENTRY-SCRIPT1=C. Named files are read under D-SCRIPT-DESIGNATE1 (a typed path grants reading it).",
-      "options": [
-        {
-          "key": "A",
-          "name": "One `-e` flag; input through plain names",
-          "detail": "`-e` runs code and prints its final value, one item per line. `input` is the lines of the named files or stdin. `words()`, `input.csv(T)` and `input.edit(f)` cover splitting, records and editing in place. Gains: nothing to memorize, since the code says what it does; the same names work in scripts; a reshape is one method call. Losses: none.",
-          "technical": "`-e CODE` is the body of `fn run`, checked like a file, and `jet run -` reads the program from stdin. If the body ends in a value, it is printed; a list or stream prints one item per line. `input` is a lazy stream of the lines of the files named after the code, or of stdin. `text.words()` splits on spaces and `split(sep)` on anything else.\n\n`input.csv(T)` and `input.json(T)` decode each record into `T`, so a wrong field fails before any input is read. `input.edit(f)` replaces each line of each named file with `f(line)`, after asking once to write. These are ordinary Core names, so a one-liner pasted into a script works unchanged. `jet help input` lists them together.",
-          "code": "$ printf 'a b\\nc d\\n' | jet -e 'input.map((l) -> l.words()[1])'\nb\nd\n$ jet -e 'input.csv(Sale).sum((s) -> s.amount)' sales.csv\n1240.50"
-        },
-        {
-          "key": "B",
-          "name": "Perl's letter flags",
-          "detail": "`-n` loops over lines as `line`, `-a` splits into `words`, and `--csv T` gives a typed `row`. Eleven flags in all. Gains: as short as Perl. Losses: letters nobody can guess; eleven flags spread through `jet help`; code that only works under the right flags.",
-          "technical": "`-n` wraps the body in a loop over input lines, named `line`. `-a` implies `-n` and splits into `words`. `-F SEP` sets the separator, `-p` prints `line` after the body, and `--begin` and `--end` run code around the loop. `-i` edits files in place. `--csv T` and `--json T` decode each record into `row: T`.",
-          "code": "$ printf 'a b\\nc d\\n' | jet -a -e 'print(words[1])'\nb\nd"
-        },
-        {
-          "key": "C",
-          "name": "A block with an implicit `it`",
-          "detail": "`-e` plus a Core `lines { }` block where `it` is the current line. Gains: short, with one idea to learn. Losses: `it` would be a new implicit name in the whole language.",
-          "technical": "A Core function `lines(body)` runs the block once per line with an implicit `it`. Jet has no implicit parameter today, so this adds one everywhere.",
-          "code": "$ printf 'a b\\nc d\\n' | jet -e 'lines { print(it.words()[1]) }'\nb"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Ruby",
-          "note": "ARGF reads the files named on the command line, or stdin. Source: https://docs.ruby-lang.org/en/master/ARGF.html",
-          "code": "# Ruby: ARGF, no letter flags needed\nruby -e 'ARGF.each_line { |l| puts l.split[1] }' log.txt"
-        },
-        {
-          "lang": "Node.js",
-          "note": "`-p` evaluates the code and prints its result. Source: https://nodejs.org/api/cli.html#-p---print-script",
-          "code": "# Node: print the value of the code\nnode -p '1 + 2'\n3"
-        },
-        {
-          "lang": "Python",
-          "note": "`-c` runs code; fileinput reads named files or stdin. Source: https://docs.python.org/3/library/fileinput.html",
-          "code": "# Python: plain names, written out\npython3 -c 'import fileinput\nfor l in fileinput.input(): print(l.split()[1])'"
-        },
-        {
-          "lang": "Perl",
-          "note": "`-n`, `-a`, `-F`, `-p`, `-i` and `-l` change what the code means. Source: https://perldoc.perl.org/perlrun",
-          "code": "# Perl: second word, then a column sum\nperl -lane 'print $F[1]'\nperl -F, -lane '$s += $F[2]; END { print $s }'"
-        },
-        {
-          "lang": "awk",
-          "note": "One pattern and action per line. A wrong field number prints empty. Source: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html",
-          "code": "# awk: fields are $1, $2, ...\nawk '{ print $2 }'\nawk -F, '{ s += $3 } END { print s }'"
-        },
-        {
-          "lang": "nushell",
-          "note": "Structured pipelines, in a second language beside scripts. Source: https://www.nushell.sh/book/pipelines.html",
-          "code": "# nushell: built-in commands in a pipe\nopen --raw log.txt | lines\n  | split column ' ' | get column2"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Every part of a one-liner is a plain name in the code, so it can be read, guessed and looked up in one place. The final value prints, so a reshape is one call. `input` is ordinary Core code that any package could have written.",
-        "tradeoff": "Nothing is given up: printing the result removes the loop, and every name says what it does.",
-        "gains": [
-          "One new flag, and no hidden names.",
-          "The same names work in one-liners and scripts.",
-          "Wrong record fields fail before input is read."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Its letters cannot be guessed and its code only works under the right flags."
-          },
-          {
-            "key": "C",
-            "reason": "It adds an implicit `it` to the whole language, not just one-liners."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the flag count, the story and the missing card. A adds eleven flags, not seven, so the loss and fix now say so; the story claimed a field-name check that `-a` cannot make, and the ballot now hosts on card #6067."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should one-liners use letter flags, or one `-e` flag with plain names for reading input?",
-        "lesson": "One `-e` flag. The code reads input through plain names like `input` and `words()`, which also work in scripts. The final value is printed.",
-        "trio": {
-          "current": {
-            "note": "Today: Jet cannot run code typed on the command line.",
-            "code": "$ jet run -e 'print(1)'\nError [E2105]: ..."
-          },
-          "wild": {
-            "lang": "Perl",
-            "note": "Perl's letters change what the code means.",
-            "code": "# -l, -a, -n are hidden loops and splits\n$ perl -lane 'print $F[1]'"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One `-e` flag; plain names",
-            "gist": "`input` is the lines of named files or stdin. The final value prints, one item per line.",
-            "gains": [
-              "Nothing to memorize; the code says what it does.",
-              "The same names work in scripts.",
-              "A reshape is one method call."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "$ jet -e 'input.map((l) -> l.words()[1])' log.txt\n$ jet -e 'input.csv(Sale).sum((s) -> s.amount)' sales.csv\n1240.50"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Perl's letter flags",
-            "gist": "`-n` loops over lines, `-a` splits into `words`, and nine more flags.",
-            "gains": [
-              "As short as Perl."
-            ],
-            "losses": [
-              "Letters nobody can guess.",
-              "Eleven flags spread through `jet help`."
-            ],
-            "proposed": {
-              "code": "$ jet -a -e 'print(words[1])'"
-            }
-          },
-          {
-            "key": "C",
-            "name": "A block with an implicit `it`",
-            "gist": "A `lines { }` block where `it` is the current line.",
-            "gains": [
-              "Short, with one idea to learn."
-            ],
-            "losses": [
-              "Adds an implicit name to the whole language."
-            ],
-            "proposed": {
-              "code": "$ jet -e 'lines { print(it.words()[1]) }'"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Every part of a one-liner is a plain name in the code, found in one help page. The final value prints, so no loop is needed.",
-          "gains": [
-            "One new flag, and no hidden names.",
-            "One-liners paste into scripts unchanged."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Its letters cannot be guessed and hide what the code means."
-            },
-            {
-              "key": "C",
-              "reason": "It adds an implicit `it` to the whole language."
-            }
-          ],
-          "tradeoff": "Nothing is given up: the result prints, and every name says what it does."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-29T01:56:13.227Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-29"
-    },
-    {
       "id": "D-SCRIPT-TOPLEVEL1",
       "cardId": "c00ys8fj",
       "group": "design",
@@ -195322,19 +194766,6 @@
       "answeredBy": "pip"
     },
     {
-      "id": "q0fpghts",
-      "cardId": "c0z3glhp",
-      "decisionId": "D-SCRIPT-ONELINER1",
-      "by": "owner",
-      "kind": "question",
-      "text": "i dont think the recommended flag letters are good and you said eleven but only explain like 2-3. also not easy to reason about, who the hell would know that n is line? and how would you find these out? we have many other flags in jet so if the jet help lists things alphabetically, these would be scattered everywhere",
-      "status": "answered",
-      "answer": "Agreed: the letters were unguessable, and the draft explained only three of eleven. The ballot now has no letter flags. There is one `-e` flag, and everything else is a plain Core name in the code: `loop l in input { ... }` reads lines from the named files or stdin, `l.words()` splits, `input.csv(T)` and `input.json(T)` give typed records, and `input.edit(f)` edits files in place. They are listed together under `jet help input`, so nothing is scattered through `jet help`, and the same names work in scripts.",
-      "created": "2026-10-29T10:19:16.684Z",
-      "answeredAt": "2026-10-29",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q2yczyk8",
       "cardId": "c08rdp62",
       "decisionId": "D-FFI-UNSAFE1",
@@ -197398,6 +196829,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:56:57.260Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hsgoa6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-13T02:56:56.267Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hsgoa6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-13T02:56:54.974Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0on083p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-13T02:32:51.086Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T02:32:34.715Z",
       "by": "Main",

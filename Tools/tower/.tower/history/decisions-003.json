@@ -17788,6 +17788,190 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-05",
       "retiredAt": "2026-11-11T09:03:08.096Z"
+    },
+    {
+      "id": "D-SCRIPT-ONELINER1",
+      "cardId": "c0z3glhp",
+      "group": "design",
+      "title": "One-liners: one `jet -e` flag, with input read through plain Core names and the result printed",
+      "situation": "A one-liner is a tiny program typed straight into the shell. It often reshapes lines of text. Perl, Ruby and awk own this job, using letter flags such as `-n` and `-a`. Those letters are hard to guess and hard to find, and Jet already has many flags. Jet cannot run code typed on the command line today. A user must create a file, wrap it in `fn run`, and write the loop. The vote decides how one-liners read their input and show their result: through flags, or through plain names in the code.",
+      "gist": "Should one-liners use letter flags, or one `-e` flag with plain names for reading input?",
+      "lesson": "One `-e` flag. The code reads input through plain names such as `input`, `words()` and `input.csv(T)`, which also work in scripts. The code's final value is printed, one item per line.",
+      "explainer": "",
+      "story": "Bo pipes a log into `jet -e 'input.map((l) -> l.words()[1])'` and gets each second word, one per line. Later he finds `input.csv(Sale)` in `jet help input`, next to everything else that reads input.",
+      "inWild": "Option             Second word of each line                      Like\nA -e + input       jet -e 'input.map((l) -> l.words()[1])'       Ruby ARGF, node -p\nB letter flags     jet -a -e 'print(words[1])'                   Perl, Ruby\nC implicit it      jet -e 'lines { print(it.words()[1]) }'       Kotlin\nFor scale: perl -lane 'print $F[1]' and awk '{ print $2 }'.",
+      "detail": "OWNER QUESTION (q0fpghts)\nThe earlier draft explained only three of its eleven flags, and nobody could guess that `-n` means \"loop over lines\". This redesign has no letter flags. Everything a one-liner needs is a plain Core name in the code. The names are listed together under `jet help input`, so nothing is scattered through `jet help`.\n\nWHAT WE BUILD\n- CLI: `jet -e CODE [FILES]` and `jet run -` (program from stdin). The code is the body of `fn run`, checked like a file, as a REPL adapter builds one (D-ENTRY-SCRIPT1=C). Front.jet:999 (jet_cli_run_entry) parses -e; today the code text is taken as a file name (Front.jet:674, E2105).\n\n- Result printing: if the code ends in a value, `-e` prints it, as `node -p` does. A list or line stream prints one item per line; a unit result prints nothing. So no loop or `print` is needed for the common reshape.\n- Core `input`: the lines of the files named after the code, or of stdin when none are named, like Ruby's ARGF and Python's fileinput. It is a lazy stream, so `input.map(f)` prints as lines arrive.\n\n- `input.csv(T)` and `input.json(T)` decode each record into `T`, so `r.nmae` is a compile error before any input is read. `input.edit(f)` rewrites each named file in place and asks once for permission to write.\n- `text.words()` (existing) splits on spaces; `text.split(sep)` takes a separator.\n\n- `jet help input` lists every input name with one example each. `jet help run` points to it.\n- The generated source is an overlay entry (Request.jet:1299-1367). Compiled one-liners are cached by content hash (ScriptCache.jet).\n\nWHY A HAS NO REAL LOSS\n- The old loss was length against Perl. Printing the final value removes the loop and the `print`, so a reshape is one method call on `input`.\n- The characters left are names that say what they do, which philosophy rule 2 ranks above keystrokes. The shell completes them.\n\nEVIDENCE\n- Probes (commit 8fbf094): `jet -n -e 'print(f[1])'` gives E2101; `jet run -e 'print(1)'` gives E2105.\n- A new one-line file compiles in 102 to 152 ms; warm runs take 18 to 24 ms (scripting/work/p/cold). Perl starts in 1.7 ms, Ruby in 41.0 ms.\n\nIDS\nHosts card #6067. The `-e` body is a `fn run` body, like a REPL cell under D-ENTRY-SCRIPT1=C. Named files are read under D-SCRIPT-DESIGNATE1 (a typed path grants reading it).",
+      "options": [
+        {
+          "key": "A",
+          "name": "One `-e` flag; input through plain names",
+          "detail": "`-e` runs code and prints its final value, one item per line. `input` is the lines of the named files or stdin. `words()`, `input.csv(T)` and `input.edit(f)` cover splitting, records and editing in place. Gains: nothing to memorize, since the code says what it does; the same names work in scripts; a reshape is one method call. Losses: none.",
+          "technical": "`-e CODE` is the body of `fn run`, checked like a file, and `jet run -` reads the program from stdin. If the body ends in a value, it is printed; a list or stream prints one item per line. `input` is a lazy stream of the lines of the files named after the code, or of stdin. `text.words()` splits on spaces and `split(sep)` on anything else.\n\n`input.csv(T)` and `input.json(T)` decode each record into `T`, so a wrong field fails before any input is read. `input.edit(f)` replaces each line of each named file with `f(line)`, after asking once to write. These are ordinary Core names, so a one-liner pasted into a script works unchanged. `jet help input` lists them together.",
+          "code": "$ printf 'a b\\nc d\\n' | jet -e 'input.map((l) -> l.words()[1])'\nb\nd\n$ jet -e 'input.csv(Sale).sum((s) -> s.amount)' sales.csv\n1240.50"
+        },
+        {
+          "key": "B",
+          "name": "Perl's letter flags",
+          "detail": "`-n` loops over lines as `line`, `-a` splits into `words`, and `--csv T` gives a typed `row`. Eleven flags in all. Gains: as short as Perl. Losses: letters nobody can guess; eleven flags spread through `jet help`; code that only works under the right flags.",
+          "technical": "`-n` wraps the body in a loop over input lines, named `line`. `-a` implies `-n` and splits into `words`. `-F SEP` sets the separator, `-p` prints `line` after the body, and `--begin` and `--end` run code around the loop. `-i` edits files in place. `--csv T` and `--json T` decode each record into `row: T`.",
+          "code": "$ printf 'a b\\nc d\\n' | jet -a -e 'print(words[1])'\nb\nd"
+        },
+        {
+          "key": "C",
+          "name": "A block with an implicit `it`",
+          "detail": "`-e` plus a Core `lines { }` block where `it` is the current line. Gains: short, with one idea to learn. Losses: `it` would be a new implicit name in the whole language.",
+          "technical": "A Core function `lines(body)` runs the block once per line with an implicit `it`. Jet has no implicit parameter today, so this adds one everywhere.",
+          "code": "$ printf 'a b\\nc d\\n' | jet -e 'lines { print(it.words()[1]) }'\nb"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Ruby",
+          "note": "ARGF reads the files named on the command line, or stdin. Source: https://docs.ruby-lang.org/en/master/ARGF.html",
+          "code": "# Ruby: ARGF, no letter flags needed\nruby -e 'ARGF.each_line { |l| puts l.split[1] }' log.txt"
+        },
+        {
+          "lang": "Node.js",
+          "note": "`-p` evaluates the code and prints its result. Source: https://nodejs.org/api/cli.html#-p---print-script",
+          "code": "# Node: print the value of the code\nnode -p '1 + 2'\n3"
+        },
+        {
+          "lang": "Python",
+          "note": "`-c` runs code; fileinput reads named files or stdin. Source: https://docs.python.org/3/library/fileinput.html",
+          "code": "# Python: plain names, written out\npython3 -c 'import fileinput\nfor l in fileinput.input(): print(l.split()[1])'"
+        },
+        {
+          "lang": "Perl",
+          "note": "`-n`, `-a`, `-F`, `-p`, `-i` and `-l` change what the code means. Source: https://perldoc.perl.org/perlrun",
+          "code": "# Perl: second word, then a column sum\nperl -lane 'print $F[1]'\nperl -F, -lane '$s += $F[2]; END { print $s }'"
+        },
+        {
+          "lang": "awk",
+          "note": "One pattern and action per line. A wrong field number prints empty. Source: https://pubs.opengroup.org/onlinepubs/9699919799/utilities/awk.html",
+          "code": "# awk: fields are $1, $2, ...\nawk '{ print $2 }'\nawk -F, '{ s += $3 } END { print s }'"
+        },
+        {
+          "lang": "nushell",
+          "note": "Structured pipelines, in a second language beside scripts. Source: https://www.nushell.sh/book/pipelines.html",
+          "code": "# nushell: built-in commands in a pipe\nopen --raw log.txt | lines\n  | split column ' ' | get column2"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Every part of a one-liner is a plain name in the code, so it can be read, guessed and looked up in one place. The final value prints, so a reshape is one call. `input` is ordinary Core code that any package could have written.",
+        "tradeoff": "Nothing is given up: printing the result removes the loop, and every name says what it does.",
+        "gains": [
+          "One new flag, and no hidden names.",
+          "The same names work in one-liners and scripts.",
+          "Wrong record fields fail before input is read."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Its letters cannot be guessed and its code only works under the right flags."
+          },
+          {
+            "key": "C",
+            "reason": "It adds an implicit `it` to the whole language, not just one-liners."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the flag count, the story and the missing card. A adds eleven flags, not seven, so the loss and fix now say so; the story claimed a field-name check that `-a` cannot make, and the ballot now hosts on card #6067."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should one-liners use letter flags, or one `-e` flag with plain names for reading input?",
+        "lesson": "One `-e` flag. The code reads input through plain names like `input` and `words()`, which also work in scripts. The final value is printed.",
+        "trio": {
+          "current": {
+            "note": "Today: Jet cannot run code typed on the command line.",
+            "code": "$ jet run -e 'print(1)'\nError [E2105]: ..."
+          },
+          "wild": {
+            "lang": "Perl",
+            "note": "Perl's letters change what the code means.",
+            "code": "# -l, -a, -n are hidden loops and splits\n$ perl -lane 'print $F[1]'"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One `-e` flag; plain names",
+            "gist": "`input` is the lines of named files or stdin. The final value prints, one item per line.",
+            "gains": [
+              "Nothing to memorize; the code says what it does.",
+              "The same names work in scripts.",
+              "A reshape is one method call."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "$ jet -e 'input.map((l) -> l.words()[1])' log.txt\n$ jet -e 'input.csv(Sale).sum((s) -> s.amount)' sales.csv\n1240.50"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Perl's letter flags",
+            "gist": "`-n` loops over lines, `-a` splits into `words`, and nine more flags.",
+            "gains": [
+              "As short as Perl."
+            ],
+            "losses": [
+              "Letters nobody can guess.",
+              "Eleven flags spread through `jet help`."
+            ],
+            "proposed": {
+              "code": "$ jet -a -e 'print(words[1])'"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A block with an implicit `it`",
+            "gist": "A `lines { }` block where `it` is the current line.",
+            "gains": [
+              "Short, with one idea to learn."
+            ],
+            "losses": [
+              "Adds an implicit name to the whole language."
+            ],
+            "proposed": {
+              "code": "$ jet -e 'lines { print(it.words()[1]) }'"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Every part of a one-liner is a plain name in the code, found in one help page. The final value prints, so no loop is needed.",
+          "gains": [
+            "One new flag, and no hidden names.",
+            "One-liners paste into scripts unchanged."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Its letters cannot be guessed and hide what the code means."
+            },
+            {
+              "key": "C",
+              "reason": "It adds an implicit `it` to the whole language."
+            }
+          ],
+          "tradeoff": "Nothing is given up: the result prints, and every name says what it does."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:56:13.227Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-13T02:56:55.127Z"
     }
   ]
 }
