@@ -10211,7 +10211,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         // Rust `Stmt::Live`: a lexical block; a no-OS target has no terminal.
         .Live(body, span) -> {
-            if sema_scope_environment_no_os(environment) {
+            if sema_scope_environment_no_os(environment, program) {
                 complete = false
                 diagnostics.push(sema_error("E3301", span, "`#Live {{ … }}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", "Terminal I/O requires an OS terminal device. Select a hosted target or declare an IO.Write provider."))
             }

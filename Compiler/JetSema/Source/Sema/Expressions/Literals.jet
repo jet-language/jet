@@ -483,7 +483,7 @@ sema_expression_list_member_spreads: fn(elements: [Expr]) -> [Expr] Never! {
 }
 
 sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_scope_environment_no_os(environment) -> diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
+    if sema_scope_environment_no_os(environment, program) -> diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
     has_spread := false
     loop element in elements {
         if element == {
@@ -605,7 +605,7 @@ sema_expression_runtime_measure_name: fn(measure: Measure, scopes: SemaScopeTabl
 }
 
 sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_scope_environment_no_os(environment) -> diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
+    if sema_scope_environment_no_os(environment, program) -> diagnostics.push(sema_error("E3303", span, "This no-OS program allocates memory but has no allocator fact.", "No-OS targets do not provide an implicit system heap.", "Select a typed allocator provider, or use heap-free Core operations."))
     expected_key := Type?{None}
     expected_value := Type?{None}
     result_ty := Type?{None}

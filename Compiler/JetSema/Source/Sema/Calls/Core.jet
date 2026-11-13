@@ -673,7 +673,7 @@ sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
 // the count against the typed row.
 sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    if sema_scope_environment_no_os(environment) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
+    if sema_scope_environment_no_os(environment, program) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
         short_name: module_name.slice(module_name.rfind(".") + 1, module_name.len())
         api: "{short_name}.{member}"
         diagnostics.push(sema_error("E3301", span, "`{api}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))

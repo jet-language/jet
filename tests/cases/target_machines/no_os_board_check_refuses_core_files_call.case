@@ -1,0 +1,15 @@
+# The selected machine reaches the body checks: `board.sensor_v1` has no OS,
+# so a `core.files` call is E3301 at the call, at check and at build for the
+# board, and the build stops at the check, before any image.
+fixture: fixtures/no_os_board_check_refuses_core_files_call
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check --target=board.sensor_v1 main.jet
+exit: 1
+stderr: ~ "`files.read` is not available on a no-OS target." # the check is for the selected machine
+stderr: ~ "main.jet:4:11" # reported at the `read` call
+step: jet build --target=board.sensor_v1 main.jet
+exit: 1
+stderr: ~ "`files.read` is not available on a no-OS target." # the build checks for the selected machine
+stderr: ~ "main.jet:4:11" # reported at the `read` call
+stderr: !~ "is not built yet" # the refusal comes from the check, before any image

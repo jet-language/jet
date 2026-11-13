@@ -542,9 +542,12 @@ SemaScopeEnvironment: struct {
 }
 
 // Core's own generic bodies are checked independently of a consumer's target.
-// User bodies consume the selected machine fact, never a host OS guess.
-sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment) -> Bool Never! {
+// User bodies consume the selected machine fact, never a host OS guess. A
+// function body is checked with the graph in the program tables; the scope
+// environment holds it only between passes.
+sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if module_is_core(environment.module_identity) -> return false
+    if program.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     false
 }
