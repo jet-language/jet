@@ -45,6 +45,9 @@ program's own call.
 | P5 | `deny_alloc_generic` | `measure<T: Sizer>(item)` called with a concrete `Box`: E0921, "cannot be proved through the open dispatch". |
 | P6 | `deny_alloc_round` | `math.round(x)` on a `Float` under `-[!Mem.Alloc]>`: E0921 open dispatch at `Math.jet`, caret at `main.jet:11:1` past the end of the file. |
 | P7 | `cost` | Checking five core.math calls six times took about 240 ms with and without the denial (236 to 325 ms with, 237 to 404 ms without). |
+| P8 | `deny_alloc_trait_free` | `measure(item: Sizer)` called with a `Box` whose only `size` is `self.n + 1`: E0921 open dispatch, though no implementation allocates. |
+| P9 | `stack_trait_seal` | The same program under `-[!Mem.Stack(above: 65536)]>`: the stack proof reports `main.measure (224 B, calls through values sealed to \`main.size\`)`, so the program-build seal already names the trait value's implementation. |
+| R4 | `Effects/Checks.jet:4490-4530`, spec "Transitive memory facts" | `sema_effect_stack_seal`: in an executable build a trait-value call already has every implementation as an edge, and a function-value call may run any function the program takes as a value. The heap proof does not use this seal. |
 
 ## Claim 1: no exception for Core
 
@@ -70,11 +73,17 @@ checking the package itself, with the same machine, reports it in place.
 ## Claim 4: only reached code is judged
 
 **Holds within stated limits.** The walk follows direct calls and functions
-passed by value (P4). It refused too much in one case: bound generic dispatch
-on a known type (P5, P6). Without the fix, a heapless program could not call
-`math.round`, which never allocates. A therefore follows the instantiation's
-bound method. Dispatch with no known target, such as a trait value, stays
-refused; the ballot names that as a loss, with the fix "seal the target set".
+passed by value (P4). It refused too much in two cases: bound generic dispatch
+on a known type (P5, P6) and a trait-value call whose implementations are all
+heap-free (P8). Without a fix, a heapless program could not call `math.round`,
+which never allocates. Jet compiles the whole program, so every
+implementation a trait value may hold is known. A therefore gives the heap
+proof the seal the stack proof already computes (R4, P9) and follows the
+instantiation's bound method. The note names the implementation that uses the
+heap. Only a library checked alone stays open, and it gets no implied denial.
+Edge found by P9: the stack seal names `main.size`, and the stack proof then
+reports that callee's body as unavailable. The build card must make the seal's
+targets resolve to their nodes before the heap proof uses them.
 
 ## Claim 5: better than Rust, Zig, Swift and C
 
@@ -101,7 +110,8 @@ refused; the ballot names that as a loss, with the fix "seal the target set".
 
 A holds, within the limits of claims 2 and 4. Gaps for the build card
 (#6144): a large-program timing of the implied denial; a test that
-`math.round` on `Float` passes on `board.sensor_v1`; a test that a trait value
-with unsealed implementations is refused with the seal fix; the list growth
-events (push, insert, append, map insertion, text building). A fresh-agent
-review of this file and of the ballot is still owed.
+`math.round` on `Float` passes on `board.sensor_v1`; a test that a trait-value
+call passes when every implementation is heap-free and is refused, naming the
+implementation, when one allocates; the seal-to-node lookup P9 shows; the list
+growth events (push, insert, append, map insertion, text building). Fresh
+agent: Main read the ballot and asked for the trait-value union, which r2 adds.

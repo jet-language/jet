@@ -20,18 +20,20 @@ A keeps a server in `core.http.server` that answers every request with one
 `HTTPHandler`, and moves the route table and everything about routes into the
 web package. Core gains four public items, each replacing a private call:
 `server.listen`, `HTTPServer.serve_once`, `server.static_dir` (returns an
-`HTTPHandler`) and `http.with_route`.
+`HTTPHandler`) and an opaque `RoutePattern` type (`route_pattern(text)`,
+`match(request)`, `overlaps(other)`).
 
 1. One serve call that takes one handler is the shape the strongest HTTP
    ecosystems ship.
 2. One route table holds every route, so the route clash check (E2804) sees
-   every clash.
+   every clash: literal routes at check time, computed ones when added.
 3. Middleware keeps Core's `HTTPHandler` and the compiler's handler capture
    check.
 4. The folder escape checks keep one home, and a folder needs no package.
 5. A run-time route clash still prints E2804 with its why and fix lines.
 6. `listen` is not a general primitive of the kind D-WEB-RUNTIME-API1=A
    turned down.
+7. No code can forge a request's route tag: only `RoutePattern.match` sets it.
 
 ## Measured facts
 
@@ -43,6 +45,9 @@ web package. Core gains four public items, each replacing a private call:
 | R4 | `Compiler/JetSema/Source/Sema/Calls/Http.jet:400-423` | The handler capture check runs on that conversion (`SemaSendCrossing.HTTPHandler`). |
 | P1 | `wrap/main.jet`, `jet run` | A list of stored route functions, wrapped in a lambda where an `HTTPHandler` is expected, answers a parsed `GET /hi` with `200`. The first two attempts were refused: E0120 (`routes` must be owned, `&&[Route]`, to be captured by a stored lambda) and E2404 (the wrapper's implicit `Err!` cannot flow into `HTTPError`; fixed with `-> HTTPHandler Never!`). |
 | P2 | `diag/main.jet`, `jet run` | A struct with `impl Diagnostic { code: "E2804" … }` words a clash; `panic` prints `Stop [E3001]: panic: error[E2804]: Two routes both match …`, then `why:` and `fix:` lines, and exits 70. |
+| P3 | `clash/main.jet`, `jet check` | Two `app.get("/a/:id", …)` rows on one `web.app()`: E2804 `Two routes both match \`GET /a/:id\``, labelled `first registered here`. |
+| P4 | `clash_computed/main.jet`, `jet check` | The same clash, with the second pattern built at run time (`pattern = "{pattern}:id"`): `ok: main.jet has no problems`. |
+| R5 | `Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:417-440` | Route registrations refuse an interpolated route literal (E2805) and check a constant pattern; a non-constant argument gets no pattern and is not checked. |
 
 ## Claim 1: one serve call is the strongest ecosystems' shape
 
@@ -81,12 +86,14 @@ address.
 
 **Holds only within stated limits.**
 
-Attack: routes added at run time with a computed pattern escape any check-time
-check. That is true under every option; A's answer is the registration stop of
-claim 5. Second attack: a program may build two `web.app()` values on two
-ports. Each table is checked on its own; a clash across them is not a clash,
-because they serve different ports. [INFERENCE] The `#RouteTable` check is per
-table value, as it is on dev.
+Measured by P3 and P4: a literal or constant pattern is checked at check time
+(R5); a pattern computed at run time is not. Under A, the package checks a
+computed route when it is added, with `RoutePattern.overlaps` against the
+table's rows, and stops (claim 5). Go has no check-time route check at all;
+its `ServeMux` panics at registration. Second attack: a program may build two
+`web.app()` values on two ports. Each table is checked on its own; a clash
+across them is not a clash, because they serve different ports. [INFERENCE]
+The `#RouteTable` check is per table value, as it is on dev.
 
 ## Claim 3: middleware keeps `HTTPHandler` and its capture check
 
@@ -111,9 +118,9 @@ test the build card must carry.
 **Holds only within stated limits**, measured by P2. The stop text carries
 E2804, its why and its fix. The stop itself is E3001, a panic, because
 `rt.__coded_stop` is private to Core (R1). Go's `ServeMux` also panics on a
-conflicting pattern at registration. The ballot names this loss, with the
-mitigation that every literal route is refused at check time with the full
-E2804 report. Gap: `jet explain` on a package-worded stop was not checked.
+conflicting pattern at registration. The limit applies only to computed
+patterns (P4); literal and constant ones keep the full check-time E2804 (P3).
+Gap: `jet explain` on a package-worded stop was not checked.
 
 ## Claim 6: `listen` is not a general primitive
 
@@ -122,10 +129,20 @@ publish reachable from anywhere and the startup environment. Listening on a
 port is `core.http.server`'s own job; `listen` holds no route table (R2: the
 server already owns `serve`, `wait` and `shutdown`).
 
+## Claim 7: the route tag cannot be forged
+
+**Holds** [INFERENCE: not built]. On dev the path values and matched template
+are private request fields written by `__pick`. Under A the only public writer
+is `RoutePattern.match`, which sets them only when the request path matches
+the pattern. Code can build its own pattern and match it, but the tag it gets
+is still true for that request. Go's `Request.SetPathValue` lets any code set
+any value; A is stricter. Cost: the one-pattern parser and matcher stay in
+Core, a narrow amendment to D-WEB-HOME1=A, which moves the router.
+
 ## Verdict
 
 A holds, within the limits of claims 2, 4 and 5. Gaps for the build card
 (#6445): the prefix-mismatch 404 test for `static_dir`; `jet explain` coverage
-for the package's run-time stops; a check that `with_route` is the only writer
-of the path values outside Core. A fresh-agent review of this file and of
-ballot v3 is still owed.
+for the package's run-time stops; a test that `RoutePattern.match` refuses a
+path that does not match. Fresh agent: Main read ballot v3 and asked for the
+route tag and the literal-route split, which r2 adds.
