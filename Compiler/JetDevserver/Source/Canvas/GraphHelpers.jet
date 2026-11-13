@@ -1,12 +1,24 @@
 use {
-    core.files.[OSPath]
     jet_foundation.[
-        BinOp, Binding, DIAGNOSTIC_LINT, Diagnostic, Expr, Func, LValue, Span, TextEdit,
-        diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
-        diagnostic_source_texts, type_name,
+        BinOp,
+        Binding,
+        DIAGNOSTIC_LINT,
+        Diagnostic,
+        Expr,
+        Func,
+        LValue,
+        Span,
+        TextEdit,
+        diagnostic_render_all,
+        diagnostic_source_column,
+        diagnostic_source_line,
+        diagnostic_source_position,
+        diagnostic_source_texts,
+        type_name,
     ]
+    jet_lsp.[LSPChecker]
     jet_parser.[jfmt_bin_op_spell, jfmt_stmt_span]
-    jet_semindex.[CallableSignatureFact, SemIndex, SourceSpan, semindex_open]
+    jet_semindex.[CallableSignatureFact, SemIndex, SourceSpan]
 }
 
 // A projection and the semantic index of one file, opened together.
@@ -21,7 +33,9 @@ graph_id: fn(module_display: String, f: Func) -> String Never! {
 }
 
 span_through_closing_parens: fn(src: String, span: Span) -> SourceSpan Never! {
-    if span.start < 0 || span.end > src.len() || span.start > span.end -> return SourceSpan{start: span.start, end: span.end}
+    if span.start < 0 || span.end > src.len() || span.start > span.end {
+        return SourceSpan{start: span.start, end: span.end}
+    }
     bytes: src.bytes()
     opens := 0
     closes := 0
@@ -182,14 +196,18 @@ op_is_bool: fn(op: BinOp) -> Bool Never! {
 
 call_ret: fn(index: SemIndex, name: String) -> String? Never! {
     loop definition in index.definitions() {
-        if definition.name == name && definition.kind == .Function(_, _, ret) && ret == .Val(value) -> return Val(value)
+        if definition.name == name && definition.kind == .Function(_, _, ret) && ret == .Val(value) {
+            return Val(value)
+        }
     }
     None
 }
 
 callable_signature_for_name: fn(index: SemIndex, function: String) -> CallableSignatureFact? Never! {
     loop definition in index.definitions() {
-        if definition.name == function && definition.kind == .Function(_, _, _) -> return definition.callable_signature
+        if definition.name == function && definition.kind == .Function(_, _, _) {
+            return definition.callable_signature
+        }
     }
     None
 }
@@ -280,9 +298,7 @@ edit: fn(span: SourceSpan, text: String) -> TextEdit Never! {
     TextEdit{span: Span{start: span.start, end: span.end}, new_text: text}
 }
 
-json_bool: fn(value: Bool) -> String Never! {
-    if value -> "true" else -> "false"
-}
+json_bool: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 edit_ok: fn(changed: Bool, path: String) -[FS]> String Never! {
     src: read_source_without_symlinks(path) ?? ""
@@ -318,10 +334,8 @@ query_result_json: fn(kind: String, title: String, symbol: String, module_path: 
     "{{\"kind\":{json_str(kind)},\"title\":{json_str(title)},\"symbol\":{json_str(symbol)},\"module_path\":{json_str(module_path)},\"graph_id\":{json_str(graph_id)},\"node_id\":{json_str(node_id)},\"node_kind\":{json_str(node_kind)},\"source_span\":{span_json(span)},\"line\":{line_number_for(src, span.start)},\"excerpt\":{json_str(source_line_for(src, span.start))}}}"
 }
 
-open_query_context: fn(path: String, src: String) -[FS, Env]> QueryContext String! {
-    projection: project_file(path) ?? return Err(query_diagnostics_error(path, src, err))
-    index: semindex_open(OSPath.from(path)) ?? return Err(query_error("check", "{err}"))
-    Ok(QueryContext{projection: projection, index: index})
+open_query_context: fn(checker: LSPChecker, path: String, src: String) -> QueryContext String! {
+    project_file_context(checker, path, None) ?? return Err(query_diagnostics_error(path, src, err.diagnostics))
 }
 
 node_for_span: fn(projection: Projection, span: SourceSpan) -> NodeQueryRef? Never! {

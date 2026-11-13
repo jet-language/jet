@@ -885,15 +885,9 @@ ProjectWriteBackup: struct { path: OSPath, before: String, after: String, existe
 project_file_kind_for_rel: fn(rel: String) -> String {
     if is_canonical_package_file(rel) { "package" } else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" } else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" } else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" } else { "source" }
 }
-diagnostic_json: fn(d: Diagnostic) -> String {
-    ReportEnvelope.new("canvas", if d.severity is { .Error -> "error"; .Lint -> "warning" }, d.code, d.what, d.why, d.fix).json()
-}
 module_belongs_to: fn(project_root: OSPath, source_path: OSPath, module_path: String) -> Bool {
     source_id := rel_path(project_root, source_path).trim_start_matches("./") // #4303
     module_path: module_path.replace('\\', "/")
     module_path == source_id || module_path == source_path.to_string_lossy().replace('\\', "/") || module_path.ends_with("/{source_id}")
-}
-rel_path: fn(root: OSPath, path: OSPath) -> String {
-    path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace(MAIN_SEPARATOR, "/")
 }
 
