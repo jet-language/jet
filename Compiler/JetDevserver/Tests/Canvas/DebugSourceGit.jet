@@ -14,15 +14,15 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
 #Test("running_state_ignores_spoofed_completion_output") {
     src: "run: fn() {{\n    print(\"program finished\")\n}}\n"
     active: debug_span_json(line_span(src, 2))
-    graph: "[{{\"node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\",\"source_span\":{active}}},{{\"wire_id\":\"fn:main.jet::run@3-6:wire:1\",\"source_span\":{active}}}]"
+    graph: "[{{\"node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\",\"source_span\":{active}}},{{\"wire_id\":\"fn:main.jet.run@3-6:wire:1\",\"source_span\":{active}}}]"
     transcript: "breakpoint hit  main.jet:2  in main()\n   2 |     print(\"program finished\")        <- here\nprogram finished\n"
     out: debug_ok(test_debug_request(src, graph, transcript, None, .Running, [String]{}))
     assert(out.contains("\"state\":\"running\""), out)
     assert(out.contains("\"debug_overlay\":\"running\""), out)
     assert(out.contains("\"active_line\":2"), out)
-    assert(out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""), out)
-    assert(out.contains("\"active_node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\""), out)
-    assert(out.contains("\"active_wire_id\":\"fn:main.jet::run@3-6:wire:1\""), out)
+    assert(out.contains("\"active_graph_id\":\"fn:main.jet.run@3-6\""), out)
+    assert(out.contains("\"active_node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\""), out)
+    assert(out.contains("\"active_wire_id\":\"fn:main.jet.run@3-6:wire:1\""), out)
     assert(out.contains("\"tier\":\"native-lldb\""), out)
 }
 

@@ -844,7 +844,7 @@ record_project_rename: fn(ctx: &ProjectContext, changes: [ProjectChange], from: 
     if source_changes.is_empty() -> return .Ok(_)
     overlays: source_changes.iter().map((change) -> (change.path, change.before)).collect()
     before_index: semindex.open_with_overlays(ctx.entry_path, overlays).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
-    targets: before_index.definition_facts().iter().filter((fact) -> fact.name == from).filter((fact) -> source_changes.iter().any((change) -> module_belongs_to(ctx.project_root, change.path, fact.module_path))).map((fact) -> "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str(format("{}::{}", fact.module_path, to))},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
+    targets: before_index.definition_facts().iter().filter((fact) -> fact.name == from).filter((fact) -> source_changes.iter().any((change) -> module_belongs_to(ctx.project_root, change.path, fact.module_path))).map((fact) -> "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}.{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
     files: source_changes.iter().map((change) -> "{{\"path\":{json_str(change.path.display().to_string())},\"before_hash\":{json_str(source_revision(change.before))},\"after_hash\":{json_str(source_revision(change.after))}}}").collect().join(",")
     op: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets}],\"files\":[{files}]}}"
     directory: ctx.project_root.join(".jet/codemods")

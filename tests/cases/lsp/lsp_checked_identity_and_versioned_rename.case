@@ -35,8 +35,8 @@ json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}
 json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].range = {"start":{"line":2,"character":3},"end":{"line":2,"character":9}} # original per-row predicate, vacuous on empty
 json: stdout doc each $.result.documentChanges[?textDocument.uri!="file://{work}/run.jet"] as r: {r}.edits[0].newText = "grade" # original per-row predicate, vacuous on empty
 json: stdout doc $.result.semantic_ops[0].targets #= 1
-json: stdout doc $.result.semantic_ops[0].targets[0].before = "fn:module:scoring::letter"
-json: stdout doc $.result.semantic_ops[0].targets[0].after = "fn:module:scoring::grade"
+json: stdout doc $.result.semantic_ops[0].targets[0].before = "fn:scoring.letter"
+json: stdout doc $.result.semantic_ops[0].targets[0].after = "fn:scoring.grade"
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"version\":3},\"contentChanges\":[{\"text\":\"// moved\\nuse grades: scoring\\nuse \\\"util\\\"\\nrun: fn() {\\n    print(\\\"🚀\\\"); print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nshadow: fn(letter: Int) { print(letter) }\\n\"}]}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"textDocument/rename\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":31},\"newName\":\"grade\"}}"
 recv lsp until $.id = 7

@@ -122,7 +122,7 @@ live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
     JetLiveSnapshot{
         protocol: "jet.live.v1", session_id: "session", source_id: "app.jet", build_id: "build-1",
         revision: "rev-1", world_id: "world-1", pid: 42, start_id: "", captured_ms: 1,
-        values: [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7"))},
+        values: [JetLiveValue]{live_inspect_value("app.counter", "Int", "kept", Val("7"))},
         tasks: [JetLiveTask]{JetLiveTask{id: 2, parent: 1, state: "blocked", wait: "channel send", deadline_ms: Val(480), cancelled: false}},
         channels: [JetLiveChannel]{JetLiveChannel{id: 1, depth: 4, capacity: Val(4), send_waiters: 1, recv_waiters: 0, closed: false}},
         effects: [String:Int]{}, resources: resources,
@@ -156,13 +156,13 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(snapshot.values[0].rendered_value == Val("7"))
     assert(snapshot.runtime == JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false})
     assert((jet_cli_live_event_render(snapshot.event_records) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
-    expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\ntask tree\n  task 2     parent 1     blocked  wait=channel send deadline=480 cancelled=false\n\nchannels\n  channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\neffects: compute=0 waiting=1 channel=1 time=0 io=0\nresources: workers=1 running=0 queued=0 cancelled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nvalues\n  app::counter type=Int kept value=7\n\nevents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
+    expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\ntask tree\n  task 2     parent 1     blocked  wait=channel send deadline=480 cancelled=false\n\nchannels\n  channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\neffects: compute=0 waiting=1 channel=1 time=0 io=0\nresources: workers=1 running=0 queued=0 cancelled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nvalues\n  app.counter type=Int kept value=7\n\nevents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
     assert(jet_cli_live_text(snapshot) == expected)
     loop plane in ([String]{"types", "rights", "claims", "shapes", "structure", "build", "gates"}) {
         json: jet_cli_live_json_report(snapshot, plane)
         assert(json.contains("\"action\":\"inspect.{plane}\""))
         assert(json.contains("\"rendered_value\":\"7\""))
-        assert(json.contains("\"shapes\":[{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\"]}}]"))
+        assert(json.contains("\"shapes\":[{{\"type_identity\":\"Int\",\"value_ids\":[\"app.counter\"]}}]"))
     }
     // The view derives order and counters from the records.
     derived := live_inspect_fixture()
@@ -194,7 +194,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(live_inspect_decoded(controls).world_id == "w 1 x ")
     // Absence is kept where the view keeps it.
     absent := live_inspect_fixture()
-    absent.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", None)}
+    absent.values = [JetLiveValue]{live_inspect_value("app.counter", "Int", "kept", None)}
     absent.tasks[0].deadline_ms = None
     absent.event_records = [JetLiveEvent]{}
     absent_view: live_inspect_decoded(absent)
@@ -241,19 +241,19 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     live_inspect_word(repeated_section, 0)
     live_inspect_rejected(repeated_section, "repeats a section")
     invented := live_inspect_fixture()
-    invented.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "invented", Val("7"))}
+    invented.values = [JetLiveValue]{live_inspect_value("app.counter", "Int", "invented", Val("7"))}
     live_inspect_rejected(live_inspect_bytes(invented), "unsupported disposition")
     many_values := live_inspect_fixture()
-    many_values.values = loop _ in 0..<4096 -> live_inspect_value("app::counter", "Int", "kept", Val("7"))
+    many_values.values = loop _ in 0..<4096 -> live_inspect_value("app.counter", "Int", "kept", Val("7"))
     assert(live_inspect_decoded(many_values).values.len() == 4096)
-    many_values.values.push(live_inspect_value("app::counter", "Int", "kept", Val("7")))
+    many_values.values.push(live_inspect_value("app.counter", "Int", "kept", Val("7")))
     live_inspect_rejected(live_inspect_bytes(many_values), "too many values")
     many_tasks := live_inspect_fixture()
     many_tasks.tasks = loop index in 0..<4097 -> JetLiveTask{id: index, parent: 0, state: "queued", wait: "", deadline_ms: None, cancelled: false}
     live_inspect_rejected(live_inspect_bytes(many_tasks), "too many tasks")
     mixed := live_inspect_fixture()
-    mixed.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("b", "Bool", "reset", None)}
-    assert(jet_cli_live_json_report(live_inspect_decoded(mixed), "shapes").contains("\"shapes\":[{{\"type_identity\":\"Bool\",\"value_ids\":[\"b\"]}},{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\",\"app::counter\"]}}]"))
+    mixed.values = [JetLiveValue]{live_inspect_value("app.counter", "Int", "kept", Val("7")), live_inspect_value("app.counter", "Int", "kept", Val("7")), live_inspect_value("b", "Bool", "reset", None)}
+    assert(jet_cli_live_json_report(live_inspect_decoded(mixed), "shapes").contains("\"shapes\":[{{\"type_identity\":\"Bool\",\"value_ids\":[\"b\"]}},{{\"type_identity\":\"Int\",\"value_ids\":[\"app.counter\",\"app.counter\"]}}]"))
     // EventObservation's closed projection.
     event := live_inspect_fixture()
     event.event_records[0].queued = -2

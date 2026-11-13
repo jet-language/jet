@@ -104,14 +104,14 @@ impact_report: fn(definitions: [SemDefinition], references: [SemRef], calls: [Se
     }
 }
 
-// Rust resolve_symbol (173–180): split at the last `::`; the first definition
+// Rust resolve_symbol (173–180): split at the last `.`; the first definition
 // whose module is that prefix, or ends with it, is the symbol. An unqualified
 // query is the first definition of that name.
 impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String? Never! {
     bytes: query.bytes()
     separator := -1
-    loop position in 0..<(bytes.len() - 1) {
-        if bytes[position] == (U8{58}) && bytes[position + 1] == (U8{58}) -> separator = position
+    loop position in 0..<bytes.len() {
+        if bytes[position] == (U8{46}) -> separator = position
     }
     if separator < 0 {
         loop definition in definitions {
@@ -120,7 +120,7 @@ impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String
         return None
     }
     module_path: String.from_bytes(bytes[0..<separator]) ?? panic("separator is an ASCII UTF-8 boundary")
-    name: String.from_bytes(bytes[(separator + 2)..<bytes.len()]) ?? panic("separator is an ASCII UTF-8 boundary")
+    name: String.from_bytes(bytes[(separator + 1)..<bytes.len()]) ?? panic("separator is an ASCII UTF-8 boundary")
     loop definition in definitions {
         if definition.def.name == name && (definition.def.module_path == module_path || definition.def.module_path.ends_with(module_path)) {
             return Val(definition.def.module_path.copy())

@@ -131,15 +131,28 @@ semindex_db: fn() -> SemDB Never! {
 // ---------------------------------------------------------------------------
 // Identities (`root_identity`. `local_identity`).
 
+// An identity is one kind prefix and a dotted path: `fn:app.run`,
+// `method:app.Point.area`, `param:app.run.count`. A definition's path extends
+// the path of the scope it is declared in.
 semindex_root_identity: fn(module_path: String) -> String Never! { "module:{module_path}" }
-semindex_module_identity: fn(scope: String, name: String) -> String Never! { "module:{scope}::{name}" }
-semindex_type_identity: fn(scope: String, name: String) -> String Never! { "type:{scope}::{name}" }
-semindex_member_identity: fn(scope: String, parent: String, kind: String, name: String) -> String Never! { "{kind}:{scope}::{parent}.{name}" }
-semindex_local_identity: fn(scope: String, kind: String, name: String) -> String Never! { "{kind}:{scope}::{name}" }
+semindex_module_identity: fn(scope: String, name: String) -> String Never! { semindex_identity("module", scope, name) }
+semindex_type_identity: fn(scope: String, name: String) -> String Never! { semindex_identity("type", scope, name) }
+semindex_member_identity: fn(scope: String, parent: String, kind: String, name: String) -> String Never! { semindex_identity(kind, scope, "{parent}.{name}") }
+semindex_local_identity: fn(scope: String, kind: String, name: String) -> String Never! { semindex_identity(kind, scope, name) }
 
 semindex_callable_identity: fn(scope: String, owner: String?, name: String) -> String Never! {
-    if owner == .Val(owner_name) -> return "method:{scope}::{owner_name}.{name}"
-    "fn:{scope}::{name}"
+    if owner == .Val(owner_name) -> return semindex_identity("method", scope, "{owner_name}.{name}")
+    semindex_identity("fn", scope, name)
+}
+
+semindex_identity: fn(kind: String, scope: String, tail: String) -> String Never! {
+    "{kind}:{semindex_identity_path(scope)}.{tail}"
+}
+
+// The dotted path of an identity: the text after its kind prefix.
+semindex_identity_path: fn(identity: String) -> String Never! {
+    rest: (identity.split_once(":") ?? return identity.copy()).after
+    rest
 }
 
 semindex_active_scope: fn(ctx: SemWalk) -> String Never! {
@@ -770,7 +783,7 @@ semindex_derive_names: fn(derives: [NamedSpan]) -> [String] Never! {
 }
 
 semindex_type_def: fn(ctx: SemWalk, name: String, span: Span, derives: [String], prefix: String) -> SemDef Never! {
-    semindex_def(ctx, "{prefix}:{ctx.scope_identity}::{name}", name, semindex_display(ctx, None, name), span, SemKind.Type{derives: derives})
+    semindex_def(ctx, semindex_identity(prefix, ctx.scope_identity, name), name, semindex_display(ctx, None, name), span, SemKind.Type{derives: derives})
 }
 
 semindex_derive_body: fn(body: [DeriveBodyItem], db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocModule]) {
@@ -824,7 +837,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
             db.defs.push(semindex_def(ctx, semindex_type_identity(ctx.scope_identity, s.name), s.name, semindex_display(ctx, None, s.name), s.name_span, SemKind.Struct{fields: fields, derives: semindex_derive_names(s.derives)}))
             if s.state == .Val(state) {
                 loop entry in state.states {
-                    identity: "state:{ctx.scope_identity}::{s.name}.State.{entry.name}"
+                    identity: semindex_identity("state", ctx.scope_identity, "{s.name}.State.{entry.name}")
                     parent: "{s.name}.State"
                     db.defs.push(semindex_def(ctx, identity, entry.name, semindex_display(ctx, Val(parent), entry.name), entry.span, SemKind.EnumVariant{parent: parent}))
                     db.members.push(semindex_member(ctx, parent, entry.name, identity, "variant", "type_body", "", "{s.name}.State.{entry.name}", entry.span))
@@ -864,7 +877,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
             db.defs.push(semindex_def(ctx, semindex_type_identity(ctx.scope_identity, t.name), t.name, semindex_display(ctx, None, t.name), t.name_span, SemKind.Trait))
             loop sig in t.methods {
                 callable: semindex_trait_callable(sig, ctx.source)
-                identity: "method:{ctx.scope_identity}::{t.name}.{sig.name}"
+                identity: semindex_identity("method", ctx.scope_identity, "{t.name}.{sig.name}")
                 db.defs.push(semindex_def(ctx, identity, sig.name, semindex_display(ctx, Val(t.name), sig.name), sig.name_span, SemKind.Function{callable: callable}))
                 return_type: failure_contract_shown_return(failure_contract_of_function(sig.return_type, None))
                 db.members.push(semindex_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, semindex_fn_signature(sig.name, callable, return_type, None), sig.name_span))
@@ -880,7 +893,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
             loop method in i.methods -> semindex_method(i.type_name, method, origin, i.trait_name ?? "", true, db, ctx, modules)
         }
         .Const(c) -> {
-            db.defs.push(semindex_def(ctx, "const:{ctx.scope_identity}::{c.name}", c.name, semindex_display(ctx, None, c.name), c.name_span, SemKind.Const))
+            db.defs.push(semindex_def(ctx, semindex_identity("const", ctx.scope_identity, c.name), c.name, semindex_display(ctx, None, c.name), c.name_span, SemKind.Const))
             saved: semindex_slot_enter(db, ctx, "value", "scalar")
             semindex_expr(c.value, db, ctx, modules)
             semindex_slot_leave(ctx, saved)
@@ -892,7 +905,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
         }
         .ExternRust(block) -> {
             loop function in block.functions {
-                db.defs.push(semindex_def(ctx, "fn:{ctx.scope_identity}::{function.name}", function.name, semindex_display(ctx, None, function.name), function.name_span, SemKind.Function{callable: SemCallable{
+                db.defs.push(semindex_def(ctx, semindex_identity("fn", ctx.scope_identity, function.name), function.name, semindex_display(ctx, None, function.name), function.name_span, SemKind.Function{callable: SemCallable{
                     params: semindex_params(function.params, ctx.source, false),
                     signature_facts_available: true,
                     return_type: function.return_type,
@@ -939,7 +952,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
         .UnitFamily(value) -> {
             db.defs.push(semindex_type_def(ctx, value.family, value.family_span, [String]{}, "type"))
             loop member in value.members {
-                db.defs.push(semindex_def(ctx, "unit:{ctx.scope_identity}::{member.name}", member.name, semindex_display(ctx, None, member.name), member.name_span, SemKind.Const))
+                db.defs.push(semindex_def(ctx, semindex_identity("unit", ctx.scope_identity, member.name), member.name, semindex_display(ctx, None, member.name), member.name_span, SemKind.Const))
             }
         }
         .ErrorConv(_) -> {}
@@ -947,7 +960,7 @@ semindex_item: fn(item: Item, db: &SemDB, ctx: &SemWalk, modules: [JetDriverDocM
         .ProtocolDecl(value) -> {
             db.defs.push(semindex_type_def(ctx, value.name, value.name_span, [String]{}, "type"))
             loop message in value.messages {
-                db.defs.push(semindex_def(ctx, "protocol:{ctx.scope_identity}::{message.name}", message.name, semindex_display(ctx, Val(value.name), message.name), message.name_span, SemKind.EnumVariant{parent: value.name}))
+                db.defs.push(semindex_def(ctx, semindex_identity("protocol", ctx.scope_identity, message.name), message.name, semindex_display(ctx, Val(value.name), message.name), message.name_span, SemKind.EnumVariant{parent: value.name}))
             }
         }
         .TemplateLoop(value) -> {
@@ -1411,7 +1424,7 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
                 }
             }
             if !bound_elsewhere && import.alias_span.start < import.alias_span.end {
-                found.push(SemDef{identity: "import:{doc_module.path}::{import.alias_span.start}..{import.alias_span.end}", name: alias_name, qualified_name: alias_name, def_span: import.alias_span, module_path: doc_module.path, kind: SemKind.Module})
+                found.push(SemDef{identity: "import:{doc_module.path}@{import.alias_span.start}..{import.alias_span.end}", name: alias_name, qualified_name: alias_name, def_span: import.alias_span, module_path: doc_module.path, kind: SemKind.Module})
             }
             if import.kind == .Unqualified(_, _, items, _, _) {
                 loop (index, imported) in items {
@@ -1419,7 +1432,7 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
                     span: import.local_spans[index]
                     if span.start >= span.end -> next
                     local: imported.alias ?? imported.original
-                    found.push(SemDef{identity: "import:{doc_module.path}::{span.start}..{span.end}", name: local, qualified_name: local, def_span: span, module_path: doc_module.path, kind: SemKind.Module})
+                    found.push(SemDef{identity: "import:{doc_module.path}@{span.start}..{span.end}", name: local, qualified_name: local, def_span: span, module_path: doc_module.path, kind: SemKind.Module})
                 }
             }
         }
@@ -1861,9 +1874,9 @@ semindex_inferred_row: fn(definition: SemDef, doc_module: JetDriverDocModule, su
     if inline_keys.get("{definition.def_span.start}:{definition.def_span.end}") == .Val(key) {
         local_key = key
     } else if definition.identity.starts_with("method:") {
-        parts: definition.identity.split("::").to_list()
-        tail: parts[parts.len() - 1]
-        if tail.ends_with(".{definition.name}") -> local_key = tail.copy()
+        // `method:<scope path>.<Owner>.<name>`: the key is `Owner.name`.
+        parts: definition.identity.split(".").to_list()
+        if parts.len() >= 2 && parts[parts.len() - 1] == definition.name -> local_key = "{parts[parts.len() - 2]}.{definition.name}"
     }
     summary: semindex_summary(summaries, "{prefix}{local_key}") ?? return None
     rows: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
@@ -2229,7 +2242,7 @@ semindex_outputs: fn(modules: [JetDriverDocModule]) -> [SemOutput] {
                 return_type := String?{None}
                 if resolved.return_type == .Val(ty) -> return_type = Val(type_name(ty))
                 output.push(SemOutput{binding: value.name, kind: semindex_output_kind(resolved.kind), name: resolved.output_name, module_path: doc_module.path, span: value.span, entry: SemOutputEntry{
-                    identity: "{target_alias}::{resolved.semantic_name}",
+                    identity: "{target_alias}.{resolved.semantic_name}",
                     name: resolved.source_name,
                     module_path: resolved.source_path,
                     definition_span: resolved.definition,

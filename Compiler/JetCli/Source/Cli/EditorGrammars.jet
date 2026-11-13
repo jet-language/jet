@@ -317,9 +317,9 @@ jet_cli_grammar_tokens: fn(root: String, constants: [JetCLIGrammarConstant]) -[F
     head: "JET_HIGHLIGHT_TOKENS: [HighlightToken]{{"
     start := if source.starts_with(head) -> 0 else -> jet_cli_grammar_find(source, "\n{head}", 0)
     if start > 0 -> start += 1
-    if start < 0 -> return Err(jet_cli_read_error("missing {JET_CLI_GRAMMAR_HIGHLIGHTS}::JET_HIGHLIGHT_TOKENS table"))
+    if start < 0 -> return Err(jet_cli_read_error("missing the JET_HIGHLIGHT_TOKENS table in {JET_CLI_GRAMMAR_HIGHLIGHTS}"))
     close: jet_cli_grammar_find(source, "\n}}", start)
-    if close < 0 -> return Err(jet_cli_read_error("missing {JET_CLI_GRAMMAR_HIGHLIGHTS}::JET_HIGHLIGHT_TOKENS table"))
+    if close < 0 -> return Err(jet_cli_read_error("missing the JET_HIGHLIGHT_TOKENS table in {JET_CLI_GRAMMAR_HIGHLIGHTS}"))
     table: jet_cli_grammar_slice(source, start, close + 2)
     raw: table.bytes()
     tokens := [JetCLIGrammarToken]{}

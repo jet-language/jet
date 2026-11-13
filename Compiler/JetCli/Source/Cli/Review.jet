@@ -573,7 +573,7 @@ jet_cli_review_sort: fn(operations: &[JetCLIReviewOp], include_alignment: Bool) 
 // `rename_candidates`: a nonempty target identity selects by identity; only
 // an empty one falls back to the stable-id and module anchors.
 jet_cli_review_identity_matches: fn(fact: SemDefinitionFact, requested: String) -> Bool Never! {
-    requested == fact.human_identity || requested == fact.name || fact.human_identity.ends_with("::{requested}")
+    requested == fact.human_identity || requested == fact.name || fact.human_identity.ends_with(".{requested}")
 }
 
 jet_cli_review_candidates: fn(facts: [SemDefinitionFact], receipt: JetCLISemOp, requested: String?, before_side: Bool) -> [Int] Never! {
@@ -1140,7 +1140,7 @@ jet_cli_review_source_operation: fn(subject: String?, key: String, meaning: [Jet
         if operation.before_identity == .Val(identity) -> identities.push(identity.copy())
         if operation.after_identity == .Val(identity) -> identities.push(identity.copy())
         loop identity in identities {
-            if identity == named || identity.ends_with("::{named}") || key == identity || key.ends_with(identity) {
+            if identity == named || identity.ends_with(".{named}") || key == identity || key.ends_with(identity) {
                 if operation.source_operation == .Val(source) -> return Val(source.copy())
                 return Val(operation.kind.copy())
             }

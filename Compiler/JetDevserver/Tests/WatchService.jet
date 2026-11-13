@@ -96,7 +96,7 @@ tmp_dir: fn(name: String) -> OSPath {
         else -> { panic("expected Migrated") }
     }
     if store.migrate("app", "counter", "String", "\"\"") == {
-        .Rejected{reason, prior} -> { assert(reason.message().contains("migration unavailable")); assert_eq(prior.key(), "app::counter") }
+        .Rejected{reason, prior} -> { assert(reason.message().contains("migration unavailable")); assert_eq(prior.key(), "app.counter") }
         else -> { panic("expected Rejected") }
     }
     prior: SessionSnapshot.new(3, "gen-3", store).with_lineage("app", "build-3", "rev-3", "world-1")

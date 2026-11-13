@@ -10,7 +10,7 @@ use {
 impact_test_definition: fn(name: String, module_path: String) -> SemDefinition Never! {
     SemDefinition{
         def: SemDef{
-            identity: "{module_path}::{name}", name: name.copy(), qualified_name: "{module_path}::{name}",
+            identity: "const:{module_path}.{name}", name: name.copy(), qualified_name: "{module_path}.{name}",
             def_span: Span{start: 0, end: 0}, module_path: module_path.copy(), kind: SemKind.Const,
         },
         view_provenance: None, derives: [String]{}, nominal_base: None, trait_contracts: [SemTraitContract]{},
@@ -114,34 +114,34 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> SemCall Neve
 }
 
 #Test("impact_qualified_resolution_uses_last_separator_and_original_query") {
-    definitions: [SemDefinition]{impact_test_definition("target", "prefix::mód::nested"), impact_test_definition("target", "mód::nested")}
-    references: [SemRef]{impact_test_reference("target", 1), impact_test_reference("mód::nested::target", 5)}
-    calls: [SemCall]{impact_test_edge("run", "target", 9), impact_test_edge("other", "mód::nested::target", 13),
-        impact_test_edge("mód::nested::target", "leaf", 17)}
-    qualified: impact_report(definitions, references, calls, "mód::nested::target", 3)
+    definitions: [SemDefinition]{impact_test_definition("target", "prefix.mód.nested"), impact_test_definition("target", "mód.nested")}
+    references: [SemRef]{impact_test_reference("target", 1), impact_test_reference("mód.nested.target", 5)}
+    calls: [SemCall]{impact_test_edge("run", "target", 9), impact_test_edge("other", "mód.nested.target", 13),
+        impact_test_edge("mód.nested.target", "leaf", 17)}
+    qualified: impact_report(definitions, references, calls, "mód.nested.target", 3)
     assert(qualified.found)
-    assert_eq(qualified.definition_module, Val("prefix::mód::nested"))
+    assert_eq(qualified.definition_module, Val("prefix.mód.nested"))
     assert_eq(qualified.references.len(), 1)
-    assert_eq(qualified.references[0].name, "mód::nested::target")
+    assert_eq(qualified.references[0].name, "mód.nested.target")
     assert_eq(qualified.call_sites.len(), 1)
     assert_eq(qualified.call_sites[0].caller, "other")
     assert_eq(qualified.upstream_callers[0].caller, "other")
     assert_eq(qualified.downstream_callees[0].callee, "leaf")
     plain: impact_report(definitions, references, calls, "target", 3)
-    assert_eq(plain.definition_module, Val("prefix::mód::nested"))
+    assert_eq(plain.definition_module, Val("prefix.mód.nested"))
     assert_eq(plain.references[0].name, "target")
     assert_eq(plain.call_sites[0].caller, "run")
     assert_eq(plain.downstream_callees.len(), 0)
-    assert(!impact_report(definitions, references, calls, "wrong::target", 3).found)
+    assert(!impact_report(definitions, references, calls, "wrong.target", 3).found)
 }
 
 #Test("impact_qualified_suffix_is_not_a_component_boundary_match") {
     definitions: [SemDefinition]{impact_test_definition("target", "prefixmodule")}
-    assert(impact_report(definitions, [SemRef]{}, [SemCall]{}, "module::target", 1).found)
-    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, "prefix::module::target", 1).found)
+    assert(impact_report(definitions, [SemRef]{}, [SemCall]{}, "module.target", 1).found)
+    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, "prefix.module.target", 1).found)
     assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, "", 1).found)
-    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, ":", 1).found)
-    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, "module::", 1).found)
+    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, ".", 1).found)
+    assert(!impact_report(definitions, [SemRef]{}, [SemCall]{}, "module.", 1).found)
 }
 
 #Test("impact_json_escapes_rust_control_set_and_retains_unicode") {

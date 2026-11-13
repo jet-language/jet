@@ -251,7 +251,7 @@ jet_cli_try_semantic_ops: fn(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -
         index: jet_cli_try_index(plan.entry, baseline)
         targets := [JetCLISemOpTarget]{}
         loop fact in index.definition_facts {
-            if fact.name == from -> targets.push(JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: "{fact.module_path}::{to}", kind: fact.kind, module_path: jet_cli_try_module_file(baseline, fact.module_path)})
+            if fact.name == from -> targets.push(JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: jet_cli_codemod_renamed_identity(fact, to), kind: fact.kind, module_path: jet_cli_try_module_file(baseline, fact.module_path)})
         }
         return Ok([JetCLISemOp]{JetCLISemOp{kind: "rename", rule_id: Val(plan.name), from: Val(from), to: Val(to), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}}})
     }

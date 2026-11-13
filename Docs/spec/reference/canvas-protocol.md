@@ -311,7 +311,7 @@ Requests carry:
 A running response projects one bounded runtime snapshot:
 
 ```json
-{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet::run@1-20","active_node_id":"fn:main.jet::run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":[],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
+{"protocol":"jet.canvas.debug","schema_version":1,"ok":true,"source_id":"main.jet","revision":"sha256-...","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","persistence":"local-source-span","source_id":"main.jet","revision":"sha256-..."},"overlay":{"debug_overlay":"running","runtime_state":"live","source_id":"main.jet","revision":"sha256-...","active_line":12,"active_span":{"start":240,"end":258},"active_graph_id":"fn:main.jet.run@1-20","active_node_id":"fn:main.jet.run@1-20:stmt:7","active_wire_id":"","wire_path":[],"breakpoints":[{"line":12,"source_span":{"start":240,"end":258},"state":"valid"}],"locals":[{"name":"total","type":"Int","value":"6"}],"watches":[],"call_stack":["#0 run() at main.jet:12"],"trace":[],"limits":{"locals_truncated":false,"watches_truncated":false,"call_stack_truncated":false,"trace_truncated":false,"wire_path_truncated":false}}}
 ```
 
 The first request creates a source- and revision-bound session. `runtime_state:
@@ -448,7 +448,7 @@ An action descriptor and preview look like:
 ```
 
 ```json
-{"schema_version":1,"op":"preview_canvas_action","revision":"sha256-...","graph_id":"fn:main.jet::run@0-3","action_id":"canvas.action:main.jet:square","callee":"square","args":["1"]}
+{"schema_version":1,"op":"preview_canvas_action","revision":"sha256-...","graph_id":"fn:main.jet.run@0-3","action_id":"canvas.action:main.jet:square","callee":"square","args":["1"]}
 ```
 
 The preview server checks that `callee` exactly matches the descriptor encoded by
@@ -517,7 +517,7 @@ Function edits are ordinary source transactions:
 
 ```json
 [
-  {"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet::on_start@25-33","signature":"on_start: fn(limit: Int{1}) -> Int"},
+  {"schema_version":1,"op":"edit_function_signature","revision":"sha256-...","graph_id":"fn:main.jet.on_start@25-33","signature":"on_start: fn(limit: Int{1}) -> Int"},
   {"schema_version":1,"op":"rename_function","revision":"sha256-...","from":"on_start","to":"on_begin"},
   {"schema_version":1,"op":"create_function","revision":"sha256-...","name":"helper","params":"value: Int","ret_type":"Int"}
 ]

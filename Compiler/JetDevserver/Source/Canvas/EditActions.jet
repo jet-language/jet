@@ -281,7 +281,7 @@ record_canvas_rename: fn(path: &OSPath, before: String, after: String, from: Str
     before_hash: sha256_hex(before.as_bytes())
     after_hash: sha256_hex(after.as_bytes())
     targets: index.definition_facts().iter().filter((fact) -> fact.name == from).map((fact) ->
-        "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}::{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
+        "{{\"stable_id\":{json_str(fact.stable_id)},\"before\":{json_str(fact.human_identity)},\"after\":{json_str("{fact.module_path}.{to}")},\"kind\":{json_str(fact.kind)},\"module_path\":{json_str(fact.module_path)}}}").collect().join(",")
     file: "{{\"path\":{json_str(path.display().to_string())},\"before_hash\":{json_str(before_hash)},\"after_hash\":{json_str(after_hash)}}}"
     op: "{{\"kind\":\"rename\",\"from\":{json_str(from)},\"to\":{json_str(to)},\"targets\":[{targets}],\"files\":[{file}]}}"
     hash_prefix := after_hash[0..<12] // #4303

@@ -131,7 +131,7 @@ jet_cli_shape_type_label: fn(ty: JetCLIShapeType) -> String Never! {
         .Bytes -> "Bytes"
         .Array(inner) -> "[{jet_cli_shape_type_label(inner)}]"
         .Optional(inner) -> "{jet_cli_shape_type_label(inner)}?"
-        .Object(source, name) -> "Object({source}::{name})"
+        .Object(source, name) -> "Object({source}.{name})"
         .Unknown(name) -> "Unknown({name})"
     }
 }
@@ -405,7 +405,7 @@ jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! 
         [JetCLIStatusField]{
             jet_cli_status_field("source", jet_cli_status_text(fact.source)),
             jet_cli_status_field("type", jet_cli_status_text(fact.type_name)),
-            jet_cli_status_field("key", jet_cli_status_text("{fact.source}::{fact.type_name}")),
+            jet_cli_status_field("key", jet_cli_status_text("{fact.source}.{fact.type_name}")),
         },
         ),
         ),
@@ -448,7 +448,7 @@ jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! 
 jet_cli_shape_name_text: fn(value: String?) -> String Never! { value ?? "ignored" }
 
 jet_cli_shape_fact_text: fn(fact: JetCLIShapeFact) -> String Never! {
-    out := "shape {fact.source}::{fact.type_name} (encoding=Object, layout={fact.layout})\n  dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
+    out := "shape {fact.source}.{fact.type_name} (encoding=Object, layout={fact.layout})\n  dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
     projected := 0
     loop field in fact.fields {
         if !field.skip -> projected += 1

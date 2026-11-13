@@ -104,8 +104,8 @@ jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: St
     loop (row, candidate) in built.program.functions {
         if function == .Val(name) {
             // The function's own name or the last segment of its key
-            // (`Type:method`, `module::function`).
-            if candidate.name != name && !candidate.key.ends_with("::{name}") && !candidate.key.ends_with(":{name}") -> next
+            // (`Type:method`, `module:function`).
+            if candidate.name != name && !candidate.key.ends_with(":{name}") -> next
         }
         if candidate.key.starts_with(prefix) -> selected.push(row) else -> others.push(row)
     }

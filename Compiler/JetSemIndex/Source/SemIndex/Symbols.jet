@@ -336,7 +336,7 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
             summary = "Validates {conversion.source} through {owner}.CheckedText."
         }
         symbols.push(SemSymbol{
-            identity: "source:method:{scope_identity}:{qualified_name}",
+            identity: semindex_identity("conversion", scope_identity, qualified_name),
             name: conversion.method,
             qualified_name: qualified_name,
             owner: Val(owner),
@@ -363,7 +363,7 @@ semindex_symbol_module_def: fn(index: SemIndex, module_path: String, name_span: 
 
 // `inline_module_scope`: the lexical scope of an inline module.
 semindex_symbol_module_scope: fn(index: SemIndex, module_path: String, name: String, name_span: Span, span: Span, parent_identity: String, parent_scope: SemSymbolScope?) -> SemSymbolScope Never! {
-    identity: semindex_symbol_module_def(index, module_path, name_span) ?? "module:{parent_identity}::{name}"
+    identity: semindex_symbol_module_def(index, module_path, name_span) ?? semindex_module_identity(parent_identity, name)
     structural_parent := 0
     loop node in index.nodes {
         if node.module_path == module_path && node.span.start == span.start && node.span.end == span.end && node.class == "item" {
@@ -688,15 +688,15 @@ semindex_symbol_source_docs: fn(source: String, def_start: Int) -> SemDocComment
 }
 
 semindex_symbol_import_identity: fn(module_path: String, scope: SemSymbolScope?, suffix: String) -> String Never! {
-    if scope == .Val(lexical) -> return "import:{module_path}::{lexical.identity}::{suffix}"
-    "import:{module_path}::{suffix}"
+    if scope == .Val(lexical) -> return semindex_identity("import", lexical.identity, suffix)
+    "import:{module_path}.{suffix}"
 }
 
 // The name ledger's `alias_identity` for a binding declared at `span`
 // (Build.jet `semindex_import_alias_defs`).
 semindex_symbol_alias_identity: fn(module_path: String, span: Span) -> String? Never! {
     if span.start >= span.end -> return None
-    Val("import:{module_path}::{span.start}..{span.end}")
+    Val("import:{module_path}@{span.start}..{span.end}")
 }
 
 // The module an unqualified import's alias names: its `File` or `Module`
@@ -768,7 +768,7 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
                             }
                         }
                     }
-                    symbol.identity = semindex_symbol_alias_identity(doc_module.path, local_span) ?? semindex_symbol_import_identity(doc_module.path, scope, "{module_alias}.{imported_item.original}::{local}")
+                    symbol.identity = semindex_symbol_alias_identity(doc_module.path, local_span) ?? semindex_symbol_import_identity(doc_module.path, scope, "{module_alias}.{imported_item.original}.{local}")
                     symbol.name = local
                     symbol.qualified_name = local
                     symbol.owner = None

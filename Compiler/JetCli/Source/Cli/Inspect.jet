@@ -1579,8 +1579,8 @@ JetCLIImpactEdge: struct {
     span: Span
 }
 
-// Over jet-impact `ImpactReport::analyze`: the symbol's definition
-// (`module::name` matches a module suffix), its references and direct call
+// Over jet-impact `impact_report`: the symbol's definition (`module.name`
+// matches a module suffix), its references and direct call
 // sites, and the transitive callers and callees to the depth limit, each edge
 // once, breadth first. The explicit-file check result
 // (`check_result_text`/`check_result_value`) leads the report.
@@ -1588,10 +1588,10 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     symbol: job.subject ?? ""
     index: jet_cli_checked_semindex(result)
     definition_module := String?{None}
-    parts: symbol.split("::").to_list()
+    parts: symbol.split(".").to_list()
     if parts.len() > 1 {
         name: parts[parts.len() - 1]
-        module_name: symbol.slice(0..<(symbol.len() - name.len() - 2))
+        module_name: symbol.slice(0..<(symbol.len() - name.len() - 1))
         loop definition in index.definitions {
             if definition.def.name == name && (definition.def.module_path == module_name || definition.def.module_path.ends_with(module_name)) {
                 definition_module = Val(definition.def.module_path)
@@ -1751,8 +1751,8 @@ JET_CLI_EXPLICIT_FILE_PROOF_ROWS: [[String]]{
     [String]{"tier lowering", "explicit-file checks keep semantic scope and do not promise project tier lowering", "E2392"},
 }
 
-// `check_projection_with_options_and_preflight` front end.
-JET_CLI_CHECK_FRONT_END: "Driver::check_file_with_effect_facts_profile"
+// The front end an explicit-file check runs.
+JET_CLI_CHECK_FRONT_END: "jet_cli_compile_file"
 
 jet_cli_impact_edges_value: fn(edges: [JetCLIImpactEdge]) -> JetCLIStatusValue Never! {
     jet_cli_status_array(loop edge in edges -> jet_cli_status_object([JetCLIStatusField]{
