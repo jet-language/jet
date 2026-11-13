@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101700,
+    "rev": 101716,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40859,6 +40859,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T15:43:22.369Z"
+        },
+        {
+          "n": 22,
+          "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(T, db.Who, db.Store) -> db.Access): applied to every read and write, for live queries, endpoints, jobs and webhooks; a row the caller may not read is never returned; an outsider's search and my_projects in crewboard/Logic/logic_test.jet return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_guards_every_read_and_write`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:49.246Z"
+        },
+        {
+          "n": 23,
+          "text": "A client-made UUIDv7 ID lets an offline create open its row at once; Table.add refuses a taken key with DBError.Exists and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_app/offline_create_with_client_id`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:50.204Z"
+        },
+        {
+          "n": 24,
+          "text": "A caller-dependent live query (one that reads app.caller() or runs under a row policy) is not shared between callers; the cost, one re-run per subscriber per write that meets the read set, is measured under the c19 caps. Proof: `jet test Compiler --profile cases --filter web_app/caller_dependent_live_query_is_not_shared`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:51.165Z"
         }
       ],
       "refs": [
@@ -40883,12 +40910,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T15:43:22.369Z",
+      "updated": "2026-11-13T17:08:51.165Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 24
     },
     {
       "id": "c0o8f1p4",
@@ -78709,6 +78736,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T11:16:40.886Z"
+        },
+        {
+          "n": 3,
+          "text": "A method of a mounted service is reachable from app.Remote<S> only when marked #App.SignedIn or #App.Public: a client call to any other method (job, webhook, signing key, unmarked) is a compile error naming the method (Appendix A probe probes/cl1_server_only.jet). Proof: `jet test Compiler --profile cases --filter web_app/remote_has_only_marked_methods`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:44.417Z"
+        },
+        {
+          "n": 4,
+          "text": "app.caller() is accepted only on paths that start at an #App.SignedIn endpoint or a test's app.as_caller; a path from #App.Public, a webhook, a job or a schedule is a compile error naming the path; app.maybe_caller() is the Public form. Proof: `jet test Compiler --profile cases --filter web_app/caller_needs_a_signed_in_path`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:45.423Z"
+        },
+        {
+          "n": 5,
+          "text": "Each method that writes runs in one serializable transaction, retried on a serialization failure up to a cap; two concurrent move_task calls on one version give one Ok and one Conflict. Proof: `jet test Compiler --profile cases --filter web_app/write_method_is_one_serializable_transaction`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:46.406Z"
+        },
+        {
+          "n": 6,
+          "text": "Only the package that builds the shared graph calls .screen: a .screen call in an entry package (one an output names) is a compile error; push open:, mail link: and app links resolve through the one route set. Proof: `jet test Compiler --profile cases --filter web_app/entry_package_cannot_add_a_screen`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:47.355Z"
+        },
+        {
+          "n": 7,
+          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item and ui.drop_zone has type fn() app.Notice!: its error type must convert to app.Notice; the frame shows the notice beside the control, announces it, and rolls back a refused predicted write. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:48.297Z"
         }
       ],
       "refs": [],
@@ -78719,9 +78791,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-13T13:48:00.275Z",
+      "updated": "2026-11-13T17:08:48.297Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 7
     },
     {
       "id": "c0isxyo3",
@@ -96383,12 +96455,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "https://crew.example.com/tasks/42, an iOS universal link, an Android App Link and crewboard://tasks/42 all land on TaskView{id: 42} through the one route table. An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter native_app/every_link_form_lands_on_the_route_state`.",
+          "text": "https://crew.example.com/tasks/<id>, an iOS universal link, an Android App Link and crewboard://tasks/<id> all land on TaskView{id} through the one route table (task IDs are UUIDv7). An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter native_app/every_link_form_lands_on_the_route_state`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:25.731Z"
+          "at": "2026-11-13T17:09:01.782Z"
         },
         {
           "n": 2,
@@ -96417,7 +96489,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-13T16:43:27.696Z",
+      "updated": "2026-11-13T17:09:01.782Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -96911,6 +96983,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T16:43:52.455Z"
+        },
+        {
+          "n": 4,
+          "text": "A download of a stored blob runs the read policy of the row that holds its BlobID and is served with Content-Disposition: attachment and X-Content-Type-Options: nosniff. Proof: `jet test Compiler --profile cases --filter web_app/blob_download_runs_row_policy`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:54.356Z"
         }
       ],
       "refs": [],
@@ -96921,9 +97002,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-13T16:43:52.455Z",
+      "updated": "2026-11-13T17:08:54.356Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0b8qwec",
@@ -97220,6 +97301,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T15:43:29.958Z"
+        },
+        {
+          "n": 4,
+          "text": "Closure-parameter inference: `ui.style(fn(t: CrewTheme) { ... })` and `ui.drop_zone(body, label:, on_drop: fn(task: logic.Task) { ... })` infer the type parameter from the annotated closure parameter (seed-b14 gives UninferableTypeArgument, Appendix A.6 finding 3). Proof: `jet test Compiler --profile cases --filter lang/generic_inferred_from_annotated_closure_param`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:40.535Z"
+        },
+        {
+          "n": 5,
+          "text": "A closure passed where the parameter is `fn() -> R E!` infers R as Unit when its last call returns nothing (A.6 finding 3). Proof: `jet test Compiler --profile cases --filter lang/closure_ending_in_unit_call_infers_unit`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:41.561Z"
+        },
+        {
+          "n": 6,
+          "text": "L0530 jet.RedundantFinalReturn does not fire on a struct's `validate {` block, which has no return (A.6 finding 6; crewboard/Logic/model.jet). Proof: `jet test Compiler --profile cases --filter lint/redundant_final_return_skips_validate_block`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:42.513Z"
+        },
+        {
+          "n": 7,
+          "text": "An `impl A -> B` error conversion declared in package P applies in every package that depends on P, both for a fallible call in a function and inside a closure (seed-b14 gives MissingErrorConversion / ErrorNotPropagatable, A.6 finding 7). Proof: `jet test Compiler --profile cases --filter lang/error_conversion_from_dependency_propagates`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:43.482Z"
         }
       ],
       "refs": [],
@@ -97230,9 +97347,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:27.015Z",
-      "updated": "2026-11-13T15:43:29.959Z",
+      "updated": "2026-11-13T17:08:43.482Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 7
     },
     {
       "id": "c0voqhky",
@@ -97261,6 +97378,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T15:43:32.422Z"
+        },
+        {
+          "n": 2,
+          "text": "key: in #App.Webhook names the #App.SigningKey method; a name that is not one is a compile error. Proof: `jet test Compiler --profile cases --filter web_app/webhook_key_names_a_signing_key_method`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:52.299Z"
+        },
+        {
+          "n": 3,
+          "text": "With .GitHub (and .Stripe) the framework drops a delivery whose X-GitHub-Delivery (Stripe event id) it has run, recording the ID in the webhook's transaction and keeping it 30 days. Proof: `jet test Compiler --profile cases --filter web_app/webhook_redelivery_runs_once`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T17:08:53.387Z"
         }
       ],
       "refs": [],
@@ -97271,9 +97406,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-13T15:43:32.422Z",
+      "updated": "2026-11-13T17:08:53.387Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 3
     },
     {
       "id": "c00xuadc",
@@ -204132,6 +204267,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T17:09:01.782Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0unyp7q",
+      "note": "#1: r3 of #6792: task IDs are now UUIDv7, so the example uses /tasks/<id> instead of /tasks/42.; was: https://crew.example.com/tasks/42, an iOS universal link, an Android App Link and crewboard://tasks/42 all land on TaskView{id: 42} through the one route table. An unmatched path opens the not-found s"
+    },
+    {
+      "at": "2026-11-13T17:08:54.356Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pg5tj9",
+      "note": "#4 A download of a stored blob runs the read policy of the row "
+    },
+    {
+      "at": "2026-11-13T17:08:53.387Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0voqhky",
+      "note": "#3 With .GitHub (and .Stripe) the framework drops a delivery wh"
+    },
+    {
+      "at": "2026-11-13T17:08:52.299Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0voqhky",
+      "note": "#2 key: in #App.Webhook names the #App.SigningKey method; a nam"
+    },
+    {
+      "at": "2026-11-13T17:08:51.165Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#24 A caller-dependent live query (one that reads app.caller() o"
+    },
+    {
+      "at": "2026-11-13T17:08:50.204Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#23 A client-made UUIDv7 ID lets an offline create open its row "
+    },
+    {
+      "at": "2026-11-13T17:08:49.246Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#22 Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(T, d"
+    },
+    {
+      "at": "2026-11-13T17:08:48.297Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#7 A handler of kit.button, icon_button, swipe_action, file_but"
+    },
+    {
+      "at": "2026-11-13T17:08:47.355Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#6 Only the package that builds the shared graph calls .screen:"
+    },
+    {
+      "at": "2026-11-13T17:08:46.406Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#5 Each method that writes runs in one serializable transaction"
+    },
+    {
+      "at": "2026-11-13T17:08:45.423Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#4 app.caller() is accepted only on paths that start at an #App"
+    },
+    {
+      "at": "2026-11-13T17:08:44.417Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#3 A method of a mounted service is reachable from app.Remote<S"
+    },
+    {
+      "at": "2026-11-13T17:08:43.482Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ue0hua",
+      "note": "#7 An `impl A -> B` error conversion declared in package P appl"
+    },
+    {
+      "at": "2026-11-13T17:08:42.513Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ue0hua",
+      "note": "#6 L0530 jet.RedundantFinalReturn does not fire on a struct's `"
+    },
+    {
+      "at": "2026-11-13T17:08:41.561Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ue0hua",
+      "note": "#5 A closure passed where the parameter is `fn() -> R E!` infer"
+    },
+    {
+      "at": "2026-11-13T17:08:40.535Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ue0hua",
+      "note": "#4 Closure-parameter inference: `ui.style(fn(t: CrewTheme) { .."
+    },
     {
       "at": "2026-11-13T17:08:39.315Z",
       "by": "Main",
