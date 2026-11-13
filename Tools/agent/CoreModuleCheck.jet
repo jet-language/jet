@@ -5,7 +5,10 @@
 // imports it. This sweep checks each public Core module the compiler declares
 // (`$JET inspect structure --core --json`) in its own one-import probe, then every Core body,
 // called or not, as `jet check Core` (the row EVERY_BODY), and reports every
-// failing row, not the first one.
+// failing row, not the first one. Each check reads the checked tree
+// (`JET_TOOLCHAIN_ROOT`), so a module's private parts are the tree's own
+// Compiler/Prelude/CoreSourceParts.tsv rows, and a part the tree adds checks
+// on a `$JET` built before it.
 //
 // JET=/path/to/jet jet Tools/agent/CoreModuleCheck.jet [--check|--write] [--jobs N] [--only a,b] [--scratch DIR]
 // --check fails when a row outside the ratchet fails, or a ratcheted row

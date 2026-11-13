@@ -1,0 +1,24 @@
+# Docs/spec/reference/cli.md: a toolchain tree's compiler-private Core parts are its own
+# Compiler/Prelude/CoreSourceParts.tsv rows, so a part the tree adds loads on a jet built
+# before it (CoreModuleCheck --check runs jet check against the checked tree). Here the
+# tree adds the part __core_text_tree_part, which core.text imports and no jet was built
+# with: a program importing core.text checks, and the part's own #Test runs from it.
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+requires: os:unix
+fixture: tree_only_core_part_checks_and_tests_from_the_tree_rows.fixture
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+copy: tree-part.txt tree/Core/Text/TreePart.jet
+append: tree/Compiler/Prelude/CoreSourceParts.tsv "__core_text_tree_part\tcore.text\tCore/Text/TreePart.jet\t__core_text_tree_part\t\t\n"
+concat: tree/Core/Text/Text.jet tree/Core/Text/Text.jet owner-import.txt
+step check: jet check tree/app/words.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "ok: `tree/app/words.jet` has no problems\n"
+step test: jet test tree/Core/Text/TreePart.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: ~ "a part only the tree declares loads with its owner: pass" # the part's #Test ran from the tree rows
+stdout: ~ "1 passed, 0 failed, 0 skipped" # the summary follows the test lines

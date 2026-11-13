@@ -679,7 +679,9 @@ toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
 `JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
 input, so a checkout's own Core wins; with neither, `jet` compiles against the
 Core sources built into it ([`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet),
-see [Environment variables](environment.md)). A Core file's `embed_bytes` and
+see [Environment variables](environment.md)). A tree's compiler-private Core
+parts are its own `Compiler/Prelude/CoreSourceParts.tsv` rows, so a part the
+tree adds loads, checks and tests on a `jet` built before it. A Core file's `embed_bytes` and
 `embed_file` read the named file beside it in the toolchain tree, or, with no
 tree, the copy of it built into `jet`: the build embeds every file a Core
 source embeds. The compiler build reads `Compiler/Prelude/Core.rows`, the Core

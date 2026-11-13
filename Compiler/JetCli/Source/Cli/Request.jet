@@ -16,7 +16,13 @@ use {
         AppAuthorizedDirectoryEntry,
         CompilerThreads,
         CompilerTraceSink,
+        CORE_DECLARATIONS_PARTS_PATH,
         CORE_SOURCE_OWNED_ROWS,
+        CoreDeclarationError,
+        CoreDeclarationSource,
+        CoreSourceOwnedRow,
+        core_decl_fail,
+        core_decl_parts,
         compiler_take_rows,
         compiler_transfer_rows,
         foundation_json_quote,
@@ -1034,7 +1040,8 @@ jet_cli_threads_left: fn(physical: Int, logical: Int, online: Int, stat: String)
 // The Core library rows of the toolchain tree (jet_cli_toolchain_root of
 // `input`, the entry), else the Core sources built into jet
 // (jet_cli_core_source_text), or the refusal that stops the
-// request. Each body is read when the compile first schedules its row
+// request. A tree's private parts are its own CoreSourceParts.tsv rows
+// (jet_cli_tree_core_rows). Each body is read when the compile first schedules its row
 // (jet_driver_core_text_file), so a compile reads only the Core files its
 // imports reach; every tree file is checked to be present here, so a missing
 // one still refuses the request up front. Every compile also needs this
@@ -1051,7 +1058,8 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
     }
     core_sources := [JetDriverCoreSource]{}
     if jet_cli_toolchain_root(input) == .Found(toolchain) {
-        loop row in CORE_SOURCE_OWNED_ROWS {
+        rows: jet_cli_toolchain_core_rows(toolchain) ?? return JetCLICoreSources.Missing{what: err.message, fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, and keep its `{CORE_DECLARATIONS_PARTS_PATH}` rows whole"}
+        loop row in rows {
             core_path: jet_cli_authority_path(toolchain, row.path)
             if !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
             core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
@@ -1067,6 +1075,34 @@ jet_cli_core_sources: fn(input: String) -> JetCLICoreSources Never! {
     // jet whether or not a toolchain tree is present (RuntimeInterface.jet).
     core_sources.extend(jet_driver_runtime_interface_sources())
     JetCLICoreSources.Loaded{sources: core_sources}
+}
+
+// The Core rows a compile of the toolchain tree `toolchain` reads
+// (jet_cli_tree_core_rows of its CoreSourceParts.tsv).
+jet_cli_toolchain_core_rows: fn(toolchain: String) -> [CoreSourceOwnedRow] CoreDeclarationError! {
+    parts_path: jet_cli_authority_path(toolchain, CORE_DECLARATIONS_PARTS_PATH)
+    text: cli_files.read(parts_path) ?? return Err(core_decl_fail("can't read the Core source parts `{parts_path}`"))
+    parts: core_decl_parts(text) ?? return Err(err)
+    Ok(jet_cli_tree_core_rows(parts))
+}
+
+// The Core rows of a toolchain tree whose CoreSourceParts.tsv declares
+// `parts`: this jet's Core.rows source modules and runtime units, with the
+// tree's private parts in place of the parts jet was built with. A tree that
+// adds or changes a part then checks on a jet built before that part.
+jet_cli_tree_core_rows: fn(parts: [CoreDeclarationSource]) -> [CoreSourceOwnedRow] Never! {
+    rows := [CoreSourceOwnedRow]{}
+    placed := false
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.owner == "" || row.runtime {
+            rows.push(row.copy())
+            next
+        }
+        if placed -> next
+        placed = true
+        loop part in parts -> rows.push(CoreSourceOwnedRow{module_name: part.module_name.copy(), alias: part.alias.copy(), path: part.path.copy(), owner: part.owner.copy(), owned_members: part.members.copy(), type_exports: [String]{}, impl_types: part.impl_types.copy(), runtime: false})
+    }
+    rows
 }
 
 // The CLI's read of one Core file for jet_driver_core_text_file, and of the
@@ -1764,17 +1800,23 @@ jet_cli_core_test_path: fn(file: String) -[FS, Env]> String? Never! {
     prefix: "{root}/"
     if !path.starts_with(prefix) -> return None
     relative: path.removeprefix(prefix)
-    loop row in CORE_SOURCE_OWNED_ROWS {
+    rows: jet_cli_toolchain_core_rows(root) ?? return None
+    loop row in rows {
         if !row.runtime && row.path == relative -> return Val(row.path.copy())
     }
     None
 }
 
-// The entry of a `jet test` of the Core source at the row path `path`
+// The entry of a `jet test` of the Core source `file` at the row path `path`
 // (jet_cli_core_test_path): one import of the module that loads it, its
 // owner when it is a compiler-private part, under an alias no code names.
-jet_cli_core_test_source: fn(path: String) -> String Never! {
-    loop row in CORE_SOURCE_OWNED_ROWS {
+jet_cli_core_test_source: fn(file: String, path: String) -[FS, Env]> String Never! {
+    toolchain: if jet_cli_toolchain_root(file) == {
+        .Found(found) -> found
+        .Missing(_, _) -> return ""
+    }
+    rows: jet_cli_toolchain_core_rows(toolchain) ?? return ""
+    loop row in rows {
         if row.path == path -> return "use _core_test: {if row.owner != "" -> row.owner else -> row.module_name}\n"
     }
     ""
@@ -1798,7 +1840,8 @@ jet_cli_core_test_files: fn(directory: String) -[FS, Env]> JetCLICoreTestFiles? 
     if path != "{root}/Core" && !path.starts_with("{root}/Core/") -> return None
     within: "{path.removeprefix("{root}/")}/"
     found := JetCLICoreTestFiles{names: [String]{}, files: [String]{}}
-    loop row in CORE_SOURCE_OWNED_ROWS {
+    rows: jet_cli_toolchain_core_rows(root) ?? return None
+    loop row in rows {
         if !row.path.starts_with(within) || found.names.contains(row.path) -> next
         file: jet_cli_authority_path(root, row.path)
         source: cli_files.read(file) ?? next

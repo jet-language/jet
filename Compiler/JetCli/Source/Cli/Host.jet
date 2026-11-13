@@ -2479,7 +2479,7 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
 jet_cli_compile_core_test: fn(file: String, source: String, path: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     entry: "{scratch.path}/core_test.jet"
-    cli_files.write(entry, jet_cli_core_test_source(path)) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    cli_files.write(entry, jet_cli_core_test_source(file, path)) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't write the Core entry `{entry}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     doctest_file: jet_cli_doctest_file(file, path, source)
     doctests := [JetCLIDoctestFile]{}

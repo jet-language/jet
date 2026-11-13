@@ -9,7 +9,7 @@ use {
     cli_sys: core.sys
     jet_backend.[X64Executable]
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverComptimeInputRecord, JetDriverLoweringInputs, JetDriverVerbOutput]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, build_options_key, sha256_hex, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
 }
@@ -168,7 +168,8 @@ jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, s
         .Found(root) -> root
         .Missing(_, _) -> { return None }
     }
-    loop row in CORE_SOURCE_OWNED_ROWS {
+    core_rows: jet_cli_toolchain_core_rows(toolchain) ?? return None
+    loop row in core_rows {
         path: jet_cli_authority_path(toolchain, row.path)
         parts.push(row.path)
         parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
