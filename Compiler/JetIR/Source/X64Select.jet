@@ -176,6 +176,10 @@ IRX64ColdKind: enum {
     // path's start (offset `right`); else the runtime call of CallRuntime
     // instruction `left`, then back to `resume`.
     Fma
+    // The stop poll of Call instruction `left` once the runtime's armed
+    // word is set (ir_x64_stop_point): its call, then the stop point's edge
+    // (`pad`) when it reports a stop, else back to `resume`.
+    Poll
 }
 
 IRX64Cold: struct {
@@ -1046,6 +1050,15 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             .Call -> {
                 at: cold.left
                 ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: cold.symbol}, -1, f.args, f.b[at], f.c[at], f.dst[at], al.stack[at])
+                ir_x64_jump_to(e, cold.resume)
+            }
+            .Poll -> {
+                at: cold.left
+                ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
+                x64_test_rr(e.code, X64_RAX, X64_RAX)
+                stopped: x64_jcc_rel32(e.code, X64Cond.NE)
+                target: ir_x64_stop_target(e, cold, exit)
+                ir_x64_patch(e, stopped, target)
                 ir_x64_jump_to(e, cold.resume)
             }
             .Fma -> {
@@ -3355,12 +3368,14 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
 // jnz edge`. A poll that checks no call (OptStops.jet
 // ir_opt_polls_checks_call: a loop's own check, a recursive body's entry
-// check) first reads only the runtime's armed word, which stays zero until
-// a stop is published to another task, an interrupt is sent or a strong
-// pause is asked for, so a loop that calls nothing pays a load and a branch
-// per iteration and a recursion one per entry. In a loop any other poll's
-// tests run inline first (ir_x64_stop_quiet). The
-// edge goes after the epilogue (ir_x64_pads). A trap poll
+// check) reads only the runtime's armed word in its hot path, which stays
+// zero until a stop is published to another task, an interrupt is sent or
+// a strong pause is asked for, so a loop that calls nothing pays a load, a
+// test and a branch per iteration and a recursion the same per entry; the
+// poll's call is a slow path (IRX64ColdKind.Poll) that takes the edge or
+// comes back. In a loop any other poll's tests run inline first
+// (ir_x64_stop_quiet). The edge goes after the epilogue (ir_x64_pads); one
+// only slow paths enter has no hot branch of its own. A trap poll
 // keeps no hot code: the slow paths that publish a numeric stop (colds from
 // `traps` on) take the edge (IRX64Cold.pad), and after an operation
 // selected with no such slow path (a division by a constant, or one the
@@ -3389,25 +3404,33 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             // test edx, edx
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
-        } else {
+            site = x64_jcc_rel32(e.code, X64Cond.NE)
+        } else if f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
             // A poll that checks no call can observe only what another task
-            // asked for, which arms the runtime's word first. In a loop any
-            // other poll's own tests of the task control run inline first,
-            // so while no stop is asked for the hot path calls nothing.
-            if f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
-                flag: x64_load_rip(e.code, X64_RAX)
-                e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
-                x64_test_rr(e.code, X64_RAX, X64_RAX)
-                skips.push(x64_jcc_rel32(e.code, X64Cond.E))
-            } else if ir_x64_in_loop(e, f) {
+            // asked for, which arms the runtime's word first: the hot path
+            // is its load, test and branch, and the poll's call, its test
+            // and the branch to the edge are a slow path (IRX64ColdKind.Poll).
+            flag: x64_load_rip(e.code, X64_RAX)
+            e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
+            x64_test_rr(e.code, X64_RAX, X64_RAX)
+            cold := ir_x64_cold(IRX64ColdKind.Poll, [Int]{x64_jcc_rel32(e.code, X64Cond.NE)})
+            cold.resume = e.code.bytes.len()
+            cold.left = at
+            cold.pad = branch
+            e.colds.push(cold)
+        } else {
+            // In a loop any other poll's own tests of the task control run
+            // inline first, so while no stop is asked for the hot path calls
+            // nothing.
+            if ir_x64_in_loop(e, f) {
                 tests := ir_x64_stop_quiet(e.code)
                 loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
                 skips = tests.quiet.move()
             }
             ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
             x64_test_rr(e.code, X64_RAX, X64_RAX)
+            site = x64_jcc_rel32(e.code, X64Cond.NE)
         }
-        site = x64_jcc_rel32(e.code, X64Cond.NE)
         quiet: e.code.bytes.len()
         loop skip in skips -> ir_x64_patch(e, skip, quiet)
     }

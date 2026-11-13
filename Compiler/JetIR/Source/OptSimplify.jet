@@ -38,7 +38,10 @@
 //               division or remainder by a positive constant among them);
 //               the drop of an exact Int that holds an inline constant or a
 //               value masked by a nonnegative constant, and the drop of an
-//               immortal String (a no-op)
+//               immortal String (a no-op); a runtime cleanup scope with
+//               nothing in it (`t = jet_rt_cleanup_enter()` right before
+//               `jet_rt_cleanup_leave(t)`, a stop edge left with nothing
+//               to clean)
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 // The address sums below are no sweep of it: Opt.jet ir_opt_function moves
@@ -1340,6 +1343,8 @@ ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptRepo
 ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
     removed := 0
     clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2
+    enter: name_rows_value(m.name_rows, "jet_rt_cleanup_enter") ?? -2
+    leave: name_rows_value(m.name_rows, "jet_rt_cleanup_leave") ?? -2
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Drop {
@@ -1351,6 +1356,15 @@ ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never
             }
             next
         }
+        if op == .CallRuntime && f.a[at] == leave && f.c[at] == 1 {
+            opened: ir_opt_empty_cleanup(f, facts, at, enter)
+            if opened >= 0 {
+                ir_opt_kill(f, opened)
+                ir_opt_kill(f, at)
+                removed += 2
+            }
+            next
+        }
         dst: f.dst[at]
         if dst < 0 || facts.uses[dst] != 0 -> next
         if !ir_opt_removable(m, f, at) && !ir_opt_quiet_division(m, f, facts, at) -> next
@@ -1358,6 +1372,22 @@ ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never
         removed += 1
     }
     removed
+}
+
+// The `t <- jet_rt_cleanup_enter()` that the `jet_rt_cleanup_leave(t)` at
+// `at` closes with nothing but Nops between them, `t` read there alone
+// (route `enter`); else -1. Such a scope cleans nothing (a stop edge whose
+// drops the facts removed), and leaving it restores what entering it saved:
+// both calls go.
+ir_opt_empty_cleanup: fn(f: IRFunction, facts: OptFacts, at: Int, enter: Int) -> Int Never! {
+    token: f.args[f.b[at]]
+    if token < 0 || facts.uses[token] != 1 || facts.defs[token] != 1 -> return -1
+    opened := at - 1
+    loop opened >= 0 && f.op[opened] == .Nop {
+        opened -= 1
+    }
+    if opened < 0 || f.op[opened] != .CallRuntime || f.a[opened] != enter || f.dst[opened] != token -> return -1
+    opened
 }
 
 // A division or remainder of an Int or a word by a positive constant: it

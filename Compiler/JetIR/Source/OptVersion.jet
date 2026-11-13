@@ -595,8 +595,11 @@ ir_version_not_stepped: fn(reason: String) -> IRVersionStep Never! {
 // and `n` one too or a List's length (ir_version_length); a constant `s`
 // must be positive. From a start guarded before the loop the slot then
 // stays inline while `s > 0`: every pass reads it below `n` and adds `s` at
-// most once, so it stays below `n + s` (OptRange). A length bounds it
-// without a guard of its own, so it is no bound the guards copy.
+// most once, so it stays below `n + s` (OptRange). A length no guard covers
+// bounds it without a guard of its own, so it is no bound the guards copy;
+// a guarded one is: below 2^62 - 1 alone, it keeps `n + s` inline only for
+// `s <= 2`, while the copy's own slot of it, inline below its guard, keeps
+// it so for any step the guards pass.
 ir_version_step: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, others: [Int]) -> IRVersionStep Never! {
     step := -1
     loop k in (at + 1)..<end {
@@ -609,9 +612,9 @@ ir_version_step: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: I
         step = s
     }
     bound: ir_version_exit(f, facts, at, end, slot, step)
-    length: ir_version_length(m, f, facts, bound, slot)
-    if !length && !ir_version_fixed(m, f, facts, bound, slot, others) -> return ir_version_not_stepped("the Loop's head does not leave once the index reaches a bound")
-    IRVersionStep{step: step, bound: if length -> -1 else -> bound, range_head: f.op[at + 1] == .If, reason: ""}
+    fixed: ir_version_fixed(m, f, facts, bound, slot, others)
+    if !fixed && !ir_version_length(m, f, facts, bound, slot) -> return ir_version_not_stepped("the Loop's head does not leave once the index reaches a bound")
+    IRVersionStep{step: step, bound: if fixed -> bound else -> -1, range_head: f.op[at + 1] == .If, reason: ""}
 }
 
 // The add that writes `slot` at `k` in the loop `at`, else -1: `k` itself
