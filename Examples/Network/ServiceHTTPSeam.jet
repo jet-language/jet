@@ -1,0 +1,140 @@
+// One notes service behind one handler, reached two ways: in process, with
+// the raw request parsed and handed to the handler, and over loopback HTTP.
+// Each request gets the same verdict both ways. A request the policy denies,
+// or a malformed one, never reaches the service. Swapping the SQL store for
+// a fake keeps every verdict, since the policy runs before either store.
+// After shutdown nothing listens on the port, and it can be bound again.
+package: {
+    name: "service_http_seam"
+    authority: { allow: [DB, DB.Read, DB.Write, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Time] }
+}
+
+use {
+    db: core.db
+    http: core.http
+    http_server: core.http.server
+    net: core.net
+    web: core.web
+}
+
+Book: struct { notes: [String] }
+Calls: struct { count: Int }
+
+// Where the service keeps notes: the SQL database, or a fake in memory.
+NoteStore: enum {
+    Sql(db.DBScope)
+    Fake(Shared<Book>)
+}
+
+// The service: stores one note for `owner`; how many notes the owner has.
+add_note: fn(store: NoteStore, calls: Shared<Calls>, owner: String, text: String) -> Int DBError! {
+    calls.count += 1
+    if store == {
+        .Sql(scoped) -> {
+            _: scoped.execute(SQL{"INSERT INTO notes (owner, body) VALUES ({owner}, {text})"}) ?? return Err(err)
+            rows: scoped.query(SQL{"SELECT body FROM notes WHERE owner = {owner}"}) ?? return Err(err)
+            return Ok(rows.len())
+        }
+        .Fake(book) -> {
+            guard := book.guard_edit()
+            guard.value.notes.push(text.copy())
+            return Ok(guard.value.notes.len())
+        }
+    }
+}
+
+// The one handler both paths use. The policy comes first: no user is 401,
+// anyone but ana may only read (403), and an empty note is 400.
+handle: fn(request: HTTPRequest, store: NoteStore, calls: Shared<Calls>) -> HTTPResponse HTTPError! {
+    user: request.header("x-user") ?? return Ok(http_server.response(401, "who is asking?"))
+    if user != "ana" -> return Ok(http_server.response(403, "{user} may only read"))
+    text: request.text() ?? return Ok(http_server.response(400, "unreadable note"))
+    if text == "" -> return Ok(http_server.response(400, "empty note"))
+    count: add_note(store, calls, user, text) ?? return Ok(http_server.response(503, "store failed"))
+    Ok(http_server.response(201, "{user} has {count} notes"))
+}
+
+crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+// A POST of `note`, from `user` when there is one, as raw HTTP/1.1.
+note_request: fn(user: String?, note: String) -> String {
+    who: if user == {
+        .Val(name) -> "x-user: {name}{crlf()}"
+        None -> ""
+    }
+    "POST /notes HTTP/1.1{crlf()}Host: local{crlf()}{who}Content-Length: {note.bytes().len()}{crlf()}Connection: close{crlf()}{crlf()}{note}"
+}
+
+// A request whose header line has no colon: malformed before any handler.
+garbled_request: fn() -> String {
+    "POST /notes HTTP/1.1{crlf()}Host: local{crlf()}x-user ana{crlf()}Content-Length: 4{crlf()}Connection: close{crlf()}{crlf()}milk"
+}
+
+// The isolated path: the status the handler answers for `raw`, parsed in
+// process. A request that does not parse is 400 and reaches no handler.
+isolated: fn(raw: String, store: NoteStore, calls: Shared<Calls>) -> Int {
+    request: http.parse_request(raw.bytes()) ?? return 400
+    response: handle(request, store, calls) ?? return 500
+    response.status
+}
+
+// The loopback path: the status the server answers for `raw` over TCP.
+loopback: fn(addr: String, raw: String) -> Int NetError! {
+    client: net.tcp_connect(addr) ?? return Err(err)
+    client.write_all(raw.bytes()) ?? return Err(err)
+    parts := [String]{}
+    loop {
+        part: client.read_text(8192) ?? break
+        if part == "" -> break
+        parts.push(part)
+    }
+    status_line: parts.join("").split(crlf()).to_list()[0]
+    words: status_line.split(" ").to_list()
+    if words.len() < 2 -> return Ok(0)
+    Ok(Int.parse(words[1]) ?? 0)
+}
+
+// One request both ways, and how often the service ran for it.
+ask: fn(name: String, label: String, raw: String, store: NoteStore, calls: Shared<Calls>, addr: String) NetError! {
+    before: calls.count
+    alone: isolated(raw, store, calls)
+    wire: loopback(addr, raw) ?? return Err(err)
+    print("{name} {label}: isolated {alone}, loopback {wire}, same {alone == wire}, service ran {calls.count - before}")
+}
+
+// Serves `store` on a free port, asks every request both ways, then shuts
+// down and checks that nothing is left listening.
+seam: fn(name: String, store: NoteStore) (HTTPError | NetError | TaskFailure)! {
+    calls: Shared{Calls{count: 0}}
+    app: web.app().post("/notes", fn(request: HTTPRequest) { handle(request, store.copy(), calls.copy()) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task { listening.serve() ?? panic("serve") }
+    ask(name, "ana writes", note_request(Val("ana"), "milk"), store, calls, addr)
+    ask(name, "no user", note_request(None, "milk"), store, calls, addr)
+    ask(name, "bo reads only", note_request(Val("bo"), "eggs"), store, calls, addr)
+    ask(name, "empty note", note_request(Val("ana"), ""), store, calls, addr)
+    ask(name, "garbled header", garbled_request(), store, calls, addr)
+    _: listening.shutdown()
+    serving.join()
+    refused: if net.tcp_connect(addr) == {
+        .Ok(_) -> false
+        .Err(_) -> true
+    }
+    free: if net.tcp_listen(addr) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    print("{name} after shutdown: connect refused {refused}, port free {free}")
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    conn: db.open_memory()
+    scoped: conn.with_policy(db.policy("notes", "true") ?? panic("policy"), "service")
+    _: db.migrate(scoped, "notes-v1", [SQL{"CREATE TABLE notes (id INTEGER PRIMARY KEY, owner TEXT, body TEXT)"}]) ?? panic("migrate")
+    book: Shared{Book{notes: [String]{}}}
+    seam("sql", NoteStore.Sql(scoped.copy()))
+    seam("fake", NoteStore.Fake(book))
+    rows: scoped.query(SQL{"SELECT body FROM notes"}) ?? panic("query")
+    print("notes stored: sql {rows.len()}, fake {book.guard_read().value.notes.len()}")
+}

@@ -13,6 +13,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [IPSpecialProfile](IPSpecialProfile.jet) — IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.
 - [NetworkProjection](NetworkProjection.jet) — Loopback TCP/UDP, readiness, typed addresses, and DNS records.
 - [ReadInto](ReadInto.jet) — `read_into` appends each read to one buffer the caller keeps, on TCP, Unix and TLS streams and file readers.
+- [ServiceHTTPSeam](ServiceHTTPSeam.jet) — One service behind one handler, called in process and over loopback HTTP: the same verdict both ways, denied and malformed requests never reach the service, a fake store keeps every verdict, and nothing listens after shutdown.
 - [SocketAddrs](SocketAddrs.jet) — `socket_addrs` returns every address a host names, in the resolver's order; a numeric host is its one address.
 - [SocketEcho](SocketEcho.jet) — Typed addresses, TCP echo, UDP datagrams, Unix sockets.
 - [TLSPeerIdentity](TLSPeerIdentity.jet) — A real loopback TLS handshake uses only the checked-in test CA, then exposes the verified name, chain and version.
