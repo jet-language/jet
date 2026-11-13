@@ -1,0 +1,40 @@
+# A function value keeps alive what it captures, so storing one in a place of
+# function type inside a `Shared` cell can close a strong cycle the type does
+# not show. Sema refuses it (E0221), for the web target too, whether the
+# stored function is returned by a helper, written in place, or assigned to a
+# callback field. The weak-capture repair checks clean and closes the feed's
+# stream when the feed goes, on every tier; a named function and a callback a
+# writing call only runs stay accepted.
+fixture: a_closure_that_captures_its_own_cell_strongly_is_refused.fixture
+env: NO_COLOR=1
+step returned: jet check returned.jet
+exit: 1
+stderr: ~ "jet.SharedReferenceCycle" # the returned closure stored in the cell is refused (E0221)
+stderr: ~ "returned.jet:23:5" # at the store
+stderr: ~ "A function value keeps alive everything it captures" # the reason names the capture
+step inline: jet check inline.jet
+exit: 1
+stderr: ~ "jet.SharedReferenceCycle" # the closure written in place is refused (E0221)
+stderr: ~ "inline.jet:10:5" # at the write
+step assigned: jet check assigned.jet
+exit: 1
+stderr: ~ "jet.SharedReferenceCycle" # the closure assigned to the callback field is refused (E0221)
+stderr: ~ "assigned.jet:13:5" # at the assignment
+step weak: jet check weak.jet
+exit: 0
+step web: jet check returned.jet --target web
+exit: 1
+stderr: ~ "jet.SharedReferenceCycle" # refused for the web target too
+stderr: ~ "returned.jet:23:5" # at the same store
+step o0: jet run --optimize=none weak.jet
+exit: 0
+stdout: ~ "end 2 0\n" # the feed's run line
+stdout: ~ "closed 7\n" # the stream closes when the feed goes
+step o1: jet run --optimize=basic weak.jet
+exit: 0
+stdout: ~ "end 2 0\n" # the feed's run line
+stdout: ~ "closed 7\n" # the stream closes when the feed goes
+step o2: jet run --optimize=full weak.jet
+exit: 0
+stdout: ~ "end 2 0\n" # the feed's run line
+stdout: ~ "closed 7\n" # the stream closes when the feed goes

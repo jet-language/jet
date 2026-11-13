@@ -1,0 +1,15 @@
+// A callback field assigned a function that captures its own cell.
+Button: struct {
+    label: String
+    on_click: fn() -> String
+}
+
+label_reader: fn(handle: Shared<Button>) -> fn() -> String {
+    fn() { handle.label }
+}
+
+run: fn() {
+    button: Shared{Button{label: "ok", on_click: fn() { "none" }}}
+    button.on_click = label_reader(button.copy())
+    print(button.label)
+}

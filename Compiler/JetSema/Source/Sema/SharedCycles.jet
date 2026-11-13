@@ -8,14 +8,25 @@
 // value built in place (E0221): literals, new cells whose fields are built the
 // same way, values whose type cannot reach a `T`, and `:` names bound to a
 // new cell and read nowhere else since.
+//
+// A function value holds what it captures, which its type does not show, so
+// a place of function type (or a list, option or map of them) can reach a
+// cell of any type. A function stored there is built in place when it is a
+// named function, which captures nothing, or a lambda (written there, or bound
+// by a `:` name read nowhere else) whose every captured local or parameter is
+// built in place. A function held in a field of a struct the place holds is
+// not seen through: the struct's type decides, as for any other value.
 use jet_foundation.[
     CallArg,
     Diagnostic,
     EnumLitArg,
     Expr,
+    Lambda,
     LValue,
     Span,
+    SymbolKind,
     Type,
+    ast_visit_expr,
     expr_source_span,
     expr_span,
     type_name,
@@ -51,12 +62,37 @@ sema_shared_cycle_owner_key: fn(owner_ty: Type, environment: SemaScopeEnvironmen
 // True when a value of type `ty` can hold a strong `Shared` path to a cell of
 // the type registered as `owner`.
 sema_shared_cycle_reaches: fn(owner: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if sema_shared_cycle_holds_function(ty) -> return true
     if program.registration_graph == .Val(graph) {
         memo := [String:Bool]{}
         walk := SemaSharedWitnessWalk{stack: [String]{}, clear: [String:Bool]{}, met_path: false}
         return sema_checked_shared_witness(graph, owner, environment.module_identity, ty, memo, walk) != None
     }
     false
+}
+
+// True when `ty` is a function type, or an option, list, map, result, tuple or
+// union that holds one: a value that may capture any cell.
+sema_shared_cycle_holds_function: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Fn(_, _, _, _, _, _) -> true
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_shared_cycle_holds_function(inner)
+        .Map(_, _, element) -> sema_shared_cycle_holds_function(element)
+        .Result(first, second) -> sema_shared_cycle_holds_function(first) || sema_shared_cycle_holds_function(second)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_shared_cycle_holds_function(field.ty) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_shared_cycle_holds_function(member) -> return true
+            }
+            false
+        }
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
+    }
 }
 
 // The cell a write into `place` lands in and the written place's type: the
@@ -156,7 +192,8 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
         // handle its source holds, so it reaches exactly the cells its source
         // reaches.
         .Copy(inner, _, _) -> return sema_shared_cycle_fresh(inner, ty, owner, allowed, environment, program, scopes, state)
-        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Lambda(_, _) -> return true
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) -> return true
+        .Lambda(lambda, _) -> return sema_shared_cycle_lambda_fresh(value, lambda, owner, allowed, environment, program, scopes, state)
         .Present(inner, _, _) -> return sema_shared_cycle_fresh(inner, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
         .Call(call, _) -> {
             if call.name == "Val" && call.args.len() == 1 -> return sema_shared_cycle_fresh(call.args[0].expr, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
@@ -218,6 +255,8 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
         }
         .Ident(name, _, _) -> {
             if name == "None" && sema_scope_resolve_index(scopes, name) == None -> return true
+            // A named function captures nothing.
+            if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function -> return true
             if sema_shared_cycle_fresh_name(name, owner, allowed, environment, program, scopes, state) -> return true
         }
         .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
@@ -244,6 +283,28 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: String, allowed: [Span], e
     sema_shared_cycle_fresh(init, None, owner, within, environment, program, scopes, state)
 }
 
+// A lambda holds what it captures: it is new storage relative to `owner` when
+// every local or parameter of an enclosing scope it names is (a name its own
+// parameters or bindings shadow counts too, which only errs toward E0221).
+sema_shared_cycle_lambda_fresh: fn(value: Expr, lambda: Lambda, owner: String, allowed: [Span], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState) -> Bool {
+    parameters := (loop parameter in lambda.params -> parameter.name)
+    named := [Expr]{}
+    ast_visit_expr(value, fn(expression: Expr) { sema_shared_cycle_note_ident(named, expression) })
+    loop expression in named {
+        if expression == .Ident(name, _, _) {
+            if parameters.contains(name) -> next
+            symbol: sema_scope_resolve(scopes, name) ?? next
+            if symbol.kind != SymbolKind.Local && symbol.kind != SymbolKind.Parameter -> next
+            if !sema_shared_cycle_fresh(expression, None, owner, allowed, environment, program, scopes, state) -> return false
+        }
+    }
+    true
+}
+
+sema_shared_cycle_note_ident: fn(named: &[Expr], expression: Expr) {
+    if expression == .Ident(_, _, _) -> named.push(expression.copy())
+}
+
 // E0221 for storing `value` into `target`, when the place lies in a shared
 // cell and can hold a strong edge back to that cell's type. Runs after the
 // assignment is checked, so every reference it makes is recorded.
@@ -260,7 +321,7 @@ sema_shared_cycle_check_stored: fn(found: (owner: Type, place: Type)?, span: Spa
     owner: sema_shared_cycle_owner_key(cell.owner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, cell.place, environment, program) -> return
     if sema_shared_cycle_fresh(value, Val(cell.place), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
-    diagnostics.push(sema_shared_cycle_diagnostic(span, cell.owner))
+    diagnostics.push(sema_shared_cycle_diagnostic(span, cell.owner, cell.place))
 }
 
 // E0221 for a writing call on `place` (`cell.kids.push(kid)`): every argument
@@ -272,16 +333,26 @@ sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: Sema
     found: sema_shared_cycle_place(place, environment, program, scopes) ?? return
     owner: sema_shared_cycle_owner_key(found.owner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, found.place, environment, program) -> return
+    stores_functions: sema_shared_cycle_holds_function(found.place)
     // A method-call argument (`kid.copy()`) is spanned at its method name, so
     // the allowed extent starts at its receiver.
     allowed: [Span]{Span{start: expr_source_span(args[0].expr).start, end: expr_span(args[args.len() - 1].expr).end}}
     loop argument in args {
         if argument.expr == .Ident(name, _, _) && name.starts_with(SEMA_SHARED_HOISTED_RHS) -> next
+        // A place that holds no function value cannot store one: a function
+        // argument (`kids.sort_by(fn(kid) { … })`) is a callback the call runs.
+        if !stores_functions && sema_shared_cycle_function_argument(argument.expr, environment, program, scopes) -> next
         if !sema_shared_cycle_fresh(argument.expr, None, owner, allowed, environment, program, scopes, state) {
-            diagnostics.push(sema_shared_cycle_diagnostic(Span{start: sema_shared_access_place_start(place), end: expr_span(place).end}, found.owner))
+            diagnostics.push(sema_shared_cycle_diagnostic(Span{start: sema_shared_access_place_start(place), end: expr_span(place).end}, found.owner, found.place))
             return
         }
     }
+}
+
+sema_shared_cycle_function_argument: fn(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    if argument == .Lambda(_, _) -> return true
+    probed: sema_shared_access_place_type(argument, environment, program, scopes) ?? return false
+    sema_shared_cycle_holds_function(probed)
 }
 
 // E0221 for the arguments a writing call statement binds ahead of its edit
@@ -305,16 +376,27 @@ sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, enviro
     owner: sema_shared_cycle_owner_key(inner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, inner, environment, program) -> return
     if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
-    diagnostics.push(sema_shared_cycle_diagnostic(span, inner))
+    diagnostics.push(sema_shared_cycle_diagnostic(span, inner, inner))
 }
 
-sema_shared_cycle_diagnostic: fn(span: Span, owner_ty: Type) -> Diagnostic {
+// `place_ty` is the type of the place written; a place that holds function
+// values gets the closure form of the reason and the repair.
+sema_shared_cycle_diagnostic: fn(span: Span, owner_ty: Type, place_ty: Type) -> Diagnostic {
     name: type_name(owner_ty)
-    sema_error("E0221", span, "this write can close a strong `Shared` cycle through `{name}`", "the stored value may already reach this `{name}` cell through strong `Shared` handles, and reference counting never frees a strong cycle", "store a `Shared.Weak<{name}>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`Shared{{{name}{{…}}}}`)")
+    what: "this write can close a strong `Shared` cycle through `{name}`"
+    if sema_shared_cycle_holds_function(place_ty) -> return sema_error("E0221", span, what, "a function value keeps alive everything it captures, and the stored one may capture a strong handle that reaches this `{name}` cell; reference counting never frees a strong cycle", "capture a weak handle instead (`back: cell.downgrade()`, then `back.upgrade()` inside the function), or store a named function or a lambda that captures only new cells")
+    sema_error("E0221", span, what, "the stored value may already reach this `{name}` cell through strong `Shared` handles, and reference counting never frees a strong cycle", "store a `Shared.Weak<{name}>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`Shared{{{name}{{…}}}}`)")
 }
 
 // The initializer a `:` binding keeps for the checks above: one that builds a
-// new `Shared` cell (`Shared{T{…}}`, optionally wrapped in `Val`).
+// new `Shared` cell (sema_shared_cycle_cell_init) or a lambda.
+sema_shared_cycle_kept_init: fn(init: Expr) -> Bool Never! {
+    if init == .Lambda(_, _) -> return true
+    sema_shared_cycle_cell_init(init)
+}
+
+// An initializer that builds a new `Shared` cell (`Shared{T{…}}`, optionally
+// wrapped in `Val`).
 sema_shared_cycle_cell_init: fn(init: Expr) -> Bool Never! {
     if init == {
         .Paren(inner, _, _) | .Present(inner, _, _) -> return sema_shared_cycle_cell_init(inner)

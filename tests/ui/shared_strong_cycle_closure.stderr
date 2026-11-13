@@ -1,0 +1,8 @@
+Error [jet.SharedReferenceCycle]: This write can close a strong `Shared` cycle through `Feed`
+  --> tests/ui/shared_strong_cycle_closure.jet:9:5
+    |
+  9 |     feed.listeners.push(fn() { handle.strong_count() })
+    |     ^^^^^^^^^^^^^^
+ Why: A function value keeps alive everything it captures, and the stored one may capture a strong handle that reaches this `Feed` cell; reference counting never frees a strong cycle
+ Fix: Capture a weak handle instead (`back: cell.downgrade()`, then `back.upgrade()` inside the function), or store a named function or a lambda that captures only new cells
+More: jet-lang.dev/e/E0221

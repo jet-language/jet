@@ -1966,8 +1966,14 @@ same run of its scope and read nowhere else since. A writing call
 list by prepending or adding new children never closes a cycle; storing an
 existing handle does, so use a `Shared.Weak<T>` back-edge (`.downgrade()`) or an
 id. Weak back-edges do not keep a cycle alive; computed fields are not stored
-edges. A writing call on a place inside a cell (`cell.items.push(x)`) edits the
-stored value under the cell's write lock, like a field write.
+edges. A function value keeps alive what it captures, so a place of function
+type (or a list, option or map of them) can reach a cell of any type: a
+function stored there must be a named function or a lambda whose captured
+locals and parameters are themselves built in place, and a stored callback
+that needs its cell captures a weak handle (`back: cell.downgrade()`, then
+`back.upgrade()` inside it). A writing call on a place inside a cell
+(`cell.items.push(x)`) edits the stored value under the cell's write lock, like
+a field write.
 
 The complete assignment place stays under that lock: `store.items[key] = value`
 updates the stored map, and nested field or indexed-record writes update the

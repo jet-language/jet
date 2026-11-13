@@ -73,6 +73,7 @@ shared_cycle_expect: fn(failures: &[String], source: String, places: [String]) {
 
 SHARED_CYCLE_NODE: "Node: struct {{\nvalue: Int\nnext: Shared<Node>?\n}}\n"
 SHARED_CYCLE_PERSON: "Person: struct {{\nname: String\nparent: Shared.Weak<Person>?\nkids: [Shared<Person>]\n}}\n"
+SHARED_CYCLE_FEED: "Feed: struct {{\nname: String\nlisteners: [fn() -> Int]\npeers: [Shared<Feed>]\n}}\n"
 
 #Test("shared_cycle_parity") {
     failures := [String]{}
@@ -96,5 +97,13 @@ SHARED_CYCLE_PERSON: "Person: struct {{\nname: String\nparent: Shared.Weak<Perso
     // A weak back-edge and an acyclic leaf never close a cycle.
     shared_cycle_expect(failures, "Leaf: struct {{\nvalue: Int\n}}\nHolder: struct {{\nleaf: Shared<Leaf>?\n}}\nfill: fn(h: Shared<Holder>, l: Shared<Leaf>) {{\nh.leaf = Val(l)\n}}", [String]{})
     shared_cycle_expect(failures, "Back: struct {{\nnext: Shared.Weak<Back>?\n}}\nlink: fn(a: Shared<Back>, b: Shared<Back>) {{\na.next = Val(b.downgrade())\n}}", [String]{})
+    // A function value holds what it captures: storing one that may capture a
+    // strong handle to the cell closes the loop.
+    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}run: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nhandle: feed.copy()\nfeed.listeners.push(fn() {{ handle.strong_count() }})\n}}", [String]{"feed.listeners"})
+    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}watch: fn(feed: Shared<Feed>, listener: &&fn() -> Int) {{\nfeed.listeners.push(listener)\n}}", [String]{"feed.listeners"})
+    // A weak capture, a named function, and a callback a writing call only
+    // runs do not.
+    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}named: fn() -> Int {{\n1\n}}\nrun: fn() {{\nfeed: Shared{{Feed{{name: \"f\", listeners: [], peers: []}}}}\nback: feed.downgrade()\nlistener: fn() {{ if back.upgrade() == .Val(f) -> f.name.len() else -> 0 }}\nfeed.listeners.push(listener)\nfeed.listeners.push(named)\n}}", [String]{})
+    shared_cycle_expect(failures, "{SHARED_CYCLE_FEED}order: fn(feed: Shared<Feed>, other: Shared<Feed>) {{\nfeed.peers.sort_by(fn(peer) {{ peer.strong_count() + other.strong_count() }})\n}}", [String]{})
     if failures.len() > 0 -> panic("SharedCycleParity collected {failures.len()} failures:\n{failures.join("\n")}")
 }

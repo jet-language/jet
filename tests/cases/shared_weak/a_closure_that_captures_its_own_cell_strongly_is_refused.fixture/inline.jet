@@ -1,0 +1,12 @@
+// A lambda written at the write captures a strong handle to the same cell.
+Feed: struct {
+    name: String
+    listeners: [fn() -> Int]
+}
+
+run: fn() {
+    feed: Shared{Feed{name: "feed", listeners: []}}
+    handle: feed.copy()
+    feed.listeners.push(fn() { handle.strong_count() })
+    print(feed.listeners.len())
+}
