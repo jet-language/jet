@@ -1,0 +1,13 @@
+# A test that changes the process's environment or working directory runs
+# alone in its own process, never in the shared batch, so a later test of the
+# batch reads neither change: serially, where the batch would run it first,
+# and joined.
+fixture: env_and_cwd_tests_run_alone_beside_the_batch.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet test --serial --color=never case.jet
+exit: 0
+stdout: = "moves the process: pass\nsees the process unmoved: pass\n2 passed, 0 failed, 0 skipped\n"
+step: jet test --color=never case.jet
+exit: 0
+stdout: = "moves the process: pass\nsees the process unmoved: pass\n2 passed, 0 failed, 0 skipped\n"

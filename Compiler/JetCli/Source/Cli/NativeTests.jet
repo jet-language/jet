@@ -5,13 +5,15 @@
 use {
     native_test_files: core.files
     native_test_sys: core.sys
-    jet_foundation.[ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, FnBody, TTestFact]
+    jet_foundation.[ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, FnBody, NameRows, TTestFact, name_rows, name_rows_get_text, name_rows_set_first]
 }
 
 // One selected native unit test: `id` is the identity its outcome record
 // carries (`JET_NATIVE_TEST <id>`); `key` its checked function; `faults` its
-// canonical `#Test(faults: [...])` selectors.
-JetNativeTestCase: struct { id: U64, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
+// canonical `#Test(faults: [...])` selectors. An `isolated` test reaches a
+// change of the process's environment or working directory, which every test
+// beside it in the batch would read, so it runs alone in its own process.
+JetNativeTestCase: struct { id: U64, key: String, name: String, expected_failure: Bool, faults: [String]{[]}, isolated: Bool{false} }
 JetNativeTestRecord: struct { function: U64, wire: String }
 JetNativeTestCursor: struct { bytes: [U8], at: Int }
 JetNativeTestChild: struct { test: JetNativeTestCase, child: ProcessChild, path: String }
@@ -150,13 +152,49 @@ jet_native_test_shuffle_next: fn(state: &U64) -> U64 Never! {
 // The order the run sorts selected tests by: module, then source offset.
 JetNativeTestRow: struct { test: JetNativeTestCase, module_name: String, start: Int }
 
+// The Core functions that change the process's own environment or working
+// directory.
+jet_native_test_writes_process_state: fn(function: FnBody) -> Bool Never! {
+    if function.module_name != "core.sys" -> return false
+    function.name == "set" || function.name == "unset" || function.name == "set_current_dir"
+}
+
+// Which rows of `functions` reach a process-state writer through their call
+// and value edges (`by_key` holds each key's first row): the writers'
+// callers, walked backward once for every test.
+jet_native_test_isolated_rows: fn(functions: [FnBody], by_key: NameRows) -> [Bool] Never! {
+    callers := (loop _ in functions -> [Int]{})
+    pending := [Int]{}
+    loop (row, function) in functions {
+        if jet_native_test_writes_process_state(function) -> pending.push(row)
+        loop edge in function.effects.call_edges {
+            if name_rows_get_text(by_key, edge) == .Val(callee) -> callers[callee].push(row)
+        }
+        loop edge in function.effects.value_edges {
+            if name_rows_get_text(by_key, edge) == .Val(callee) -> callers[callee].push(row)
+        }
+    }
+    reaches := (loop _ in functions -> false)
+    loop pending.len() > 0 {
+        row: pending.pop() ?? break
+        if reaches[row] -> next
+        reaches[row] = true
+        loop caller in callers[row] -> pending.push(caller)
+    }
+    reaches
+}
+
 // The checked tests of the driver's plan (`tests`, in plan order; a test's
 // record identity is 1 + its plan position) the run selects: `filter` first,
 // then the canonical (module, source offset, name) order and the
-// SplitMix64/Fisher-Yates shuffle of `shuffle_seed`.
+// SplitMix64/Fisher-Yates shuffle of `shuffle_seed`. A test that reaches a
+// process-state writer is isolated.
 jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filter: String?, shuffle_seed: String?) -> [JetNativeTestCase] Err! {
     modules := [String:String]{}
     loop function in functions -> modules[function.key.copy()] = function.module_name.copy()
+    by_key := name_rows()
+    loop (row, function) in functions -> name_rows_set_first(by_key, function.key, row)
+    isolated: jet_native_test_isolated_rows(functions, by_key)
     rows := [JetNativeTestRow]{}
     // Every test the harness can't build, all at once (one ICE report).
     faults := [String]{}
@@ -167,7 +205,9 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
             next
         }
         id: U64.from_int(index + 1) ?? panic("test count fits U64")
-        rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults}, module_name: module_name, start: test.span.start})
+        row: name_rows_get_text(by_key, test.function.key) ?? -1
+        alone: row >= 0 && isolated[row]
+        rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults, isolated: alone}, module_name: module_name, start: test.span.start})
     }
     if faults.len() > 0 -> return Err(faults.join("\n"))
     rows.sort_by(fn(left: JetNativeTestRow, right: JetNativeTestRow) {
@@ -372,6 +412,15 @@ jet_native_test_settle: fn(outcomes: &[U64:String], streamed: [U64:String], id: 
     outcomes.add(id, kept).drop("only missing tests are retried")
 }
 
+// The failure text of a batch that died while running one of `running`
+// (none of which failed alone): a serial batch's first unreported test, an
+// unserial one's every unreported test.
+jet_native_test_batch_failure: fn(running: [JetNativeTestCase], errors: String) -> String Never! {
+    if running.len() == 1 -> return "the test process died while running `{running[0].name}`, which passed when run alone\n{errors}"
+    names: (loop test in running -> "`{test.name}`").join(", ")
+    "the test process died while running one of {names}, each of which passed when run alone\n{errors}"
+}
+
 // One test run again alone. Under `jet prove --capture-sensitive` it reads
 // the stdin the batch already read, then end of input, so the user is never
 // asked to type twice; the runtime journals the rerun's reads like any other.
@@ -389,7 +438,9 @@ jet_native_test_alone_run: fn(spec: ProcessSpec) -> ProcessReceipt IOError! {
 // Under a `time_limit` every test runs alone in a child stopped at the limit;
 // output checks need the batch's state, so with checks the batch still runs,
 // bounded by the limit for each test and check, and only the tests it left
-// unreported rerun alone at the limit.
+// unreported rerun alone at the limit. The batch never runs an isolated test
+// (BuildTests.jet ir_test_main): each runs alone after it, so a change it
+// makes to the environment or working directory reaches no other test.
 // A records file it can't create, write or read sets `fault`.
 jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: &JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     clean: spec.env_remove(ENV_JET_NATIVE_TEST_ID).env_remove(ENV_JET_NATIVE_TEST_REPORT_PATH).env_remove(ENV_JET_NATIVE_TEST_RECORDS_PATH)
@@ -405,6 +456,8 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     missing := [JetNativeTestCase]{}
     batch_success := true
     batch_errors := ""
+    // The tests the batch ran but reported no outcome for.
+    batch_missing := 0
     if time_limit != None && check_names.len() == 0 {
         loop test in tests -> missing.push(test.copy())
     } else {
@@ -438,15 +491,20 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         loop test in tests {
             if outcomes.get(test.id) == None -> missing.push(test.copy())
         }
-        if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
+        loop test in missing {
+            if !test.isolated -> batch_missing += 1
+        }
+        if batch_missing > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     }
     // Every outcome streamed, then the batch died: no record names the
     // culprit, so each selected test reruns alone (jet_native_test_settle).
-    exit_fatal: missing.len() == 0 && !batch_success
+    // An isolated test never ran in the batch, so its own run is its outcome.
+    exit_fatal: batch_missing == 0 && !batch_success
     streamed := [U64:String]{}
     if exit_fatal {
+        missing = [JetNativeTestCase]{}
         loop test in tests {
-            streamed.add(test.id, outcomes.get(test.id) ?? "").drop("selected test functions are unique")
+            if !test.isolated -> streamed.add(test.id, outcomes.get(test.id) ?? "").drop("selected test functions are unique")
             missing.push(test.copy())
         }
         outcomes = [U64:String]{}
@@ -467,7 +525,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
             if !receipt.success -> fatal_attributed = true
             // A fatal receipt's raw streams already live inside its failure
             // outcome. Successful tests' uncaptured streams remain separate.
-            if receipt.success && !exit_fatal {
+            if receipt.success && (!exit_fatal || test.isolated) {
                 outputs.push(receipt.output)
                 errors.push(receipt.errors)
             }
@@ -510,7 +568,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
                     next
                 }
                 if !receipt.success -> fatal_attributed = true
-                if receipt.success && !exit_fatal {
+                if receipt.success && (!exit_fatal || running.test.isolated) {
                     outputs.push(receipt.output)
                     errors.push(receipt.errors)
                 }
@@ -521,16 +579,22 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         if spawn_error == .Val(error) -> return Err(error)
         if wait_error == .Val(error) -> return Err(error)
     }
-    // A non-reproducing fatal batch cannot honestly be attributed to a test,
-    // nor converted to a successful run just because the reruns passed. One
-    // that died only after streaming every outcome keeps those outcomes and
-    // fails the run with a record of its own.
-    if !fatal_attributed && !exit_fatal -> return Err("native test batch failed fatally but no individually selected child reproduced the failure; the run is not successful")
+    // A batch that died with no rerun reproducing it cannot honestly be
+    // attributed to one test, nor converted to a successful run just because
+    // the reruns passed: the run fails with a record of the batch's own. One
+    // that died before streaming every outcome names the tests it left
+    // unreported (an isolated test never ran in it).
     wires := [String]{}
     loop test in tests -> wires.push(outcomes.get(test.id) ?? return Err("native test aggregation lost an outcome"))
-    if exit_fatal && !fatal_attributed {
-        name: "native test process exit"
-        wires.push("0 {name.bytes().len()} 0 {batch_errors.bytes().len()} -\n{name}{batch_errors}")
+    if !fatal_attributed {
+        unreported := [JetNativeTestCase]{}
+        loop test in missing {
+            if !test.isolated -> unreported.push(test.copy())
+        }
+        if serial && unreported.len() > 1 -> unreported = [JetNativeTestCase]{unreported[0].copy()}
+        name: if exit_fatal -> "native test process exit" else -> "native test batch"
+        text: if exit_fatal -> batch_errors else -> jet_native_test_batch_failure(unreported, batch_errors)
+        wires.push("0 {name.bytes().len()} 0 {text.bytes().len()} -\n{name}{text}")
     }
     if !batch_success && check_names.len() > 0 {
         report: unrun_check_report()
@@ -718,4 +782,10 @@ jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
     assert_eq(unique.len(), 3)
     assert_eq(unique[1].test, "a")
     assert_eq(unique[2].test, "b")
+}
+
+#Test("a batch that died with no rerun failing names the tests it left unreported") {
+    missing: [JetNativeTestCase]{JetNativeTestCase{id: U64{7}, key: "k7", name: "a", expected_failure: false}, JetNativeTestCase{id: U64{8}, key: "k8", name: "b", expected_failure: false}}
+    assert_eq(jet_native_test_batch_failure([JetNativeTestCase]{missing[0].copy()}, "trap\n"), "the test process died while running `a`, which passed when run alone\ntrap\n")
+    assert_eq(jet_native_test_batch_failure(missing, ""), "the test process died while running one of `a`, `b`, each of which passed when run alone\n")
 }

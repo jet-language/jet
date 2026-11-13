@@ -977,7 +977,13 @@ one killed before that leaves them, and the next `jet test` removes every
 read (a full runtime directory) is E2105 naming the file and the operating
 system's reason. After a fatal trap only unreported tests rerun individually,
 one child per core at a time (fewer when free memory can't hold 1 GiB per
-child; one at a time under `--serial`), reported in test order.
+child; one at a time under `--serial`), reported in test order. A test that
+reaches `core.sys.set`, `core.sys.unset` or `core.sys.set_current_dir`
+(`core.files.chdir`) never runs in the batch: it runs alone in a child of its
+own the same way, so a change it makes to the environment or working
+directory reaches no other test. If the batch died and no rerun fails, the
+run fails with a `native test batch` record naming the tests the batch left
+unreported (under `--serial`, the one it was running).
 Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its

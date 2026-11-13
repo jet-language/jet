@@ -25,9 +25,10 @@
 //   have written their settings) and it exits 0. Then read
 //   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), open it for the
 //   contract records (jet_rt_test_contracts_open), spawn each selected
-//   test (only `JET_NATIVE_TEST_ID`'s when set) and append its record
-//   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
-//   after spawning; then, unfiltered, run each Check Output once. A checked
+//   test (only `JET_NATIVE_TEST_ID`'s when set; unfiltered, every test but
+//   an isolated one) and append its record `JET_NATIVE_TEST <id>\n<wire>\n`,
+//   streaming each serially or joining all after spawning; then,
+//   unfiltered, run each Check Output once. A checked
 //   `#Pre`/`#Post` clause's first hold and every failure append
 //   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
 //   happen (JetRuntime TestContracts.jet).
@@ -39,8 +40,11 @@ use {
 
 // One test the harness runs: its checked function `key`, the identity `id`
 // its outcome record carries, its report name, whether it must fail and the
-// canonical `#Test(faults: [...])` selectors it runs under.
-IRTestCase: struct { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
+// canonical `#Test(faults: [...])` selectors it runs under. An `isolated`
+// test changes the process's environment or working directory, so the
+// unfiltered batch never runs it: it runs only when `JET_NATIVE_TEST_ID`
+// selects it, alone in its own process.
+IRTestCase: struct { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]}, isolated: Bool{false} }
 
 // A selected Check Output: its name and its checked zero-argument function.
 IROutputCheck: struct { name: String, key: String }
@@ -660,8 +664,9 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     ir_emit(b.f, IROp.Const, null, 0, -1, -1, b.line)
     loop (index, test) in harness.tests {
         ir_emit(b.f, IROp.Store, -1, tasks, index * 8, null, b.line)
-        // Unfiltered, every test runs; filtered, only the one named.
-        run: ir_test_bool(m, b, true)
+        // Unfiltered, every test but an isolated one runs; filtered, only
+        // the one named.
+        run: ir_test_bool(m, b, !test.isolated)
         ir_open_if(b.f, filtered, b.line)
         name: ir_test_text(m, b, "{test.id}")
         equal: ir_runtime(m, b, "jet_rt_string_eq", [Int]{selected, name}, bool_row)

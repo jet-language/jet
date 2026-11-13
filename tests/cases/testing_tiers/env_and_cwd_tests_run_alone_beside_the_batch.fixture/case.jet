@@ -1,0 +1,14 @@
+use isolation_files: core.files
+use isolation_sys: core.sys
+// The first test sets an environment variable and leaves the working
+// directory; it runs alone in its own process, so the test after it, in the
+// batch, reads neither change.
+#Test("moves the process") {
+    isolation_sys.set("ISOLATION_PROBE", "moved")
+    isolation_files.chdir("/") ?? panic("chdir: {err}")
+    if isolation_sys.get("ISOLATION_PROBE") == None -> panic("the probe was not set")
+}
+#Test("sees the process unmoved") {
+    if isolation_sys.get("ISOLATION_PROBE") != None -> panic("the probe variable leaked from another test")
+    if !isolation_files.exists("case.jet") -> panic("the working directory moved under this test")
+}

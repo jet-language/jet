@@ -2244,7 +2244,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     coverage: test_settings_on(options.settings, "coverage")
     covered: if coverage -> jet_cli_coverage_functions(file, plan.functions, plan.tests, loop check in plan.output_checks -> check.function.key.copy()) else -> [JetCLICoverageFunction]{}
     harness: IRTestHarness{
-        tests: loop test in native_tests -> IRTestCase{id: Int.from_u64(test.id), key: test.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults},
+        tests: loop test in native_tests -> IRTestCase{id: Int.from_u64(test.id), key: test.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults, isolated: test.isolated},
         checks: checks,
         serial: options.serial,
         stock: options.stock,

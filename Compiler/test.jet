@@ -371,8 +371,9 @@ jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
 
 // The Jetpack engine areas' claims, one row each, `Jetpack/<section>:
 // <claim>`: Assemble.jet joins every implementation file and the claims of
-// JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it serially (the
-// claims share process state). JET_BIN names the jet under test; process
+// JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it as one batch;
+// a claim that changes the environment or working directory runs alone in its
+// own process (JetCli NativeTests.jet). JET_BIN names the jet under test; process
 // claims run the engine named by JETPACK_BIN, the caller's, else the hosted
 // engine `prep` built; `build_failure` says why that build left no engine.
 // A unit that didn't run to its summary is the failing row `Jetpack engine`.
@@ -390,7 +391,7 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
     map: prep.map
     selected: map.claims.filter(fn(claim) { rows.selects(jetpack_claim_id(claim)) })
     if selected.len() == 0 -> return none
-    args := [String]{"test", "src/jetpack.jet", "--serial"}
+    args := [String]{"test", "src/jetpack.jet"}
     if rows.filter != "" && selected.all(fn(claim) { claim.name.contains(rows.filter) }) {
         args.push("--filter")
         args.push(rows.filter.copy())
