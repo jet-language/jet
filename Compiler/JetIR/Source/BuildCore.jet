@@ -1,0 +1,155 @@
+// The Core code library (#6328 c22 S7a): every non-generic function of the
+// Core and Prelude modules, built once when the runtime pack is made
+// (JetCli CoreLibrary.jet) into an object of its own that the runtime image
+// links beside the runtime. Each such function is a global symbol named
+// after its checked key (ir_core_symbol), so a program bound to the image
+// can call a Core function by symbol instead of building its body. The
+// build is ir_build_program's under `dead_code: keep`, with no entry: the
+// same roots (no generic function, none with owner binders, no intrinsic)
+// and the stock checks, runtime sentries and stop points of a program's
+// code, so each function's code is the code a program builds for it. With
+// no entry the optimizer keeps every function's convention (OptReturnSlot),
+// so a call by symbol passes its slots as the IR signature names them.
+//
+// A Core function's process-wide writable cells (module storage, a memo
+// store, a Shared site) are global data symbols too (ir_core_cell), so a
+// program that names one can name the very cell the library's code uses:
+// one copy per process.
+
+use {
+    jet_backend.[X64DataExport]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
+    jet_sema.[SemaCheckedForeignFunction]
+}
+
+// One global symbol of the Core object: the checked function's key, or the
+// key of a data symbol's cell in IRModule.constant_rows; the symbol; and the
+// IR signature of a function symbol (ir_core_signature), IR_CORE_DATA for a
+// data symbol.
+IRCoreExport: struct { symbol: String, key: String, signature: String }
+
+// `failures` are the Core functions the builder could not build, `errors`
+// the export problems (symbol clashes); `exports` the object's function
+// globals, `data` its data globals, `rows` both, sorted by symbol.
+IRCoreLibrary: struct {
+    program: IRModule
+    failures: [IRBuildFailure]
+    errors: [String]
+    exports: [IRLibraryExport]
+    data: [X64DataExport]
+    rows: [IRCoreExport]
+}
+
+IR_CORE_FUNCTION_PREFIX: "jet_core_fn_"
+IR_CORE_CELL_PREFIX: "jet_core_cell_"
+// The signature column of a data symbol's row.
+IR_CORE_DATA: "data"
+// The key prefixes (IRModule.constant_rows) of the writable cells a
+// function builds: module storage (BuildStatic.jet ir_storage_address), a
+// memoized function's store (BuildMemo.jet ir_memo_cell) and a Shared site
+// (BuildSharedSites.jet ir_shared_site_word).
+IR_CORE_CELL_KINDS: [String]{"storage:", "memo:", "shared-site:"}
+
+// Whether the IRModule.constant_rows key `key` names a writable cell.
+ir_core_cell_key: fn(key: String) -> Bool {
+    loop kind in IR_CORE_CELL_KINDS {
+        if key.starts_with(kind) -> return true
+    }
+    false
+}
+
+// The symbol of the Core function keyed `key`.
+ir_core_symbol: fn(key: String) -> String Never! { ir_core_symbol_in(IR_CORE_FUNCTION_PREFIX, key) }
+
+// The symbol of the Core cell keyed `key` in IRModule.constant_rows.
+ir_core_cell_symbol: fn(key: String) -> String Never! { ir_core_symbol_in(IR_CORE_CELL_PREFIX, key) }
+
+// `prefix`, then `text` made a C identifier (each byte outside [0-9A-Za-z]
+// an underscore), `_` and the first 8 hex digits of `text`'s SHA-256, which
+// tell apart two texts that make the same identifier.
+ir_core_symbol_in: fn(prefix: String, text: String) -> String Never! {
+    raw: text.bytes()
+    bytes := [U8]{}
+    loop byte in prefix.bytes() -> bytes.push(byte)
+    loop byte in raw {
+        alphanumeric: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        bytes.push(if alphanumeric -> byte else -> U8{95})
+    }
+    bytes.push(U8{95})
+    digest: sha256_hex_bytes(sha256_bytes(raw[0..<raw.len()]))
+    loop byte in digest.slice(0..<8).bytes() -> bytes.push(byte)
+    String.from_bytes(bytes) ?? panic("a Core symbol is ASCII")
+}
+
+// The IR signature of function `id`: each parameter slot's layout, then the
+// result's (ir_export_abi), as `size/align/class` words; a caller that
+// passes the same layouts calls it by its convention.
+ir_core_signature: fn(m: IRModule, id: Int) -> String Never! {
+    abi: ir_export_abi(m, id, "")
+    words: loop layout in abi.parameters -> ir_core_layout(layout)
+    result: if abi.result == .Val(layout) -> ir_core_layout(layout) else -> "void"
+    "({words.join(",")})->{result}"
+}
+
+ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{layout.align}/{layout.class}" }
+
+// Builds every non-generic function outside the module `entry_module` (the
+// Core check's entry, JetCli CoreRecordCheck.jet: every other checked module
+// is Core's or the Prelude's) and every function they reach, on up to
+// `threads` threads; the other inputs as ir_build_program's.
+ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: String, threads: CompilerThreads) -> IRCoreLibrary Never! {
+    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+    p.sentries = true
+    ir_foreign_index(p, foreign, decls)
+    roots := [IRWaveJob]{}
+    keys := [String]{}
+    loop row in 0..<p.functions.len() {
+        function: p.functions[row]
+        if function.module_identity == entry_module -> next
+        if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
+        roots.push(IRWaveJob{key: function.key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
+        keys.push(function.key.copy())
+    }
+    built := ir_build_waves(p, roots, false, threads)
+    m := built.program.move()
+    exports := [IRLibraryExport]{}
+    rows := [IRCoreExport]{}
+    errors := [String]{}
+    loop key in keys {
+        id: name_rows_get_text(m.function_rows, key) ?? {
+            errors.push("Core function {key} was rooted but not built")
+            next
+        }
+        symbol: ir_core_symbol(key)
+        exports.push(IRLibraryExport{function: id, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
+        rows.push(IRCoreExport{symbol: symbol, key: key, signature: ir_core_signature(m, id)})
+    }
+    data := [X64DataExport]{}
+    loop cell in name_rows_sorted(m.constant_rows) {
+        if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
+        symbol: ir_core_cell_symbol(cell.key)
+        data.push(X64DataExport{data: cell.local, symbol: symbol})
+        rows.push(IRCoreExport{symbol: symbol, key: cell.key, signature: IR_CORE_DATA})
+    }
+    rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
+    loop at in 1..<rows.len() {
+        if rows[at].symbol == rows[at - 1].symbol -> errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
+    }
+    IRCoreLibrary{program: m, failures: built.failures.move(), errors: errors, exports: exports, data: data, rows: rows}
+}
+
+// The Core export list (`<prefix>.exports`, JetCli CoreLibrary.jet): one
+// `symbol<TAB>key<TAB>signature` line per row, sorted by symbol.
+ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
+    lines := loop row in rows -> "{row.symbol}\t{row.key}\t{row.signature}"
+    lines.join("\n")
+}
+
+#Test("a Core symbol is a C identifier of its key that the key's hash tells apart") {
+    one: ir_core_symbol("core.text.split")
+    assert(one.starts_with("jet_core_fn_core_text_split_"), "the symbol spells the key: {one}")
+    assert_eq(one.len(), "jet_core_fn_core_text_split_".len() + 8)
+    assert(ir_core_symbol("core.text::split") != ir_core_symbol("core.text.split"), "keys that spell the same identifier get different symbols")
+    assert_eq(ir_core_symbol("core.text.split"), one)
+    assert(ir_core_cell_symbol("storage:core.log.level").starts_with("jet_core_cell_storage_core_log_level_"), "a cell's symbol spells its key")
+}

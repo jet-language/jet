@@ -375,14 +375,15 @@ ir_export_abi_json: fn(rows: [IRExportABI]) -> String Never! {
 IR_THREAD_START_SYMBOLS: [String]{"os_clone_i64", "signal", "dlopen"}
 
 // The thread receipt of a library (`<prefix>.threads`): the exports whose
-// call can reach an IR_THREAD_START_SYMBOLS call through direct calls, the
-// runtime routes the library itself defines and the function addresses it
-// takes, sorted. A lifecycle hook that can reach one runs whenever its
-// program keeps one of the hook's guards (ir_lifecycle_rows), so every
-// export that can reach a guard's storage is listed too; the receipt is
-// just "*" when such a hook has no guard, since every program that links
-// the library runs it.
-ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+// call can reach an IR_THREAD_START_SYMBOLS call, or a CallRuntime of a
+// symbol `receipt` names (the runtime's receipt, for the Core library that
+// calls into it, JetCli CoreLibrary.jet), through direct calls, the runtime routes
+// the library itself defines and the function addresses it takes, sorted.
+// A lifecycle hook that can reach one runs whenever its program keeps one
+// of the hook's guards (ir_lifecycle_rows), so every export that can reach
+// a guard's storage is listed too; the receipt is just "*" when such a hook
+// has no guard, since every program that links the library runs it.
+ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport], receipt: [String]) -> [String] Never! {
     count: m.functions.len()
     defined := [String:Int]{}
     loop row in exports -> defined[row.symbol.copy()] = row.function
@@ -400,7 +401,7 @@ ir_thread_exports: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never
             if op == .Call || op == .FunctionAddress -> callee = f.a[at]
             if op == .CallRuntime {
                 name: m.names[f.a[at]]
-                if IR_THREAD_START_SYMBOLS.contains(name) -> starts = true
+                if IR_THREAD_START_SYMBOLS.contains(name) || receipt.contains(name) -> starts = true
                 callee = defined.get(name) ?? -1
             }
             if op == .DataAddress {

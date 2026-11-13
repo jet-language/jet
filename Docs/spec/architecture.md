@@ -154,7 +154,7 @@ runtime's own calls and function addresses, one per line. A lifecycle hook
 that can reach one runs whenever the program keeps one of its guard
 storages, so the exports that can reach such a storage are listed too; the
 receipt is just `*` when such a hook has no guard. Its digest is part of the pack identity
-(`jet-native-runtime/v4`) and every pack reader verifies it. `jet build`
+(`jet-native-runtime/v5`) and every pack reader verifies it. `jet build`
 selects a program's inline RC updates without the lock prefix only when
 that receipt was read, neither the program nor its `main` calls an export it
 names, every foreign C call is a vetted libc leaf, and the program has no
@@ -191,11 +191,25 @@ over `pthread_create`, then `pthread_join` and `pthread_detach`), so every
 runtime thread of such a program is a musl thread that the linked C can run
 on; a program without C starts its threads as raw clones. Only that
 synthesized startup names musl's thread functions: the runtime object asks
-libc for none. The step installs `jet-runtime/` beside
-the compiler: `native.key`, `jet_runtime.pack.o` and `jet_runtime.image`, the pack linked
+libc for none. The same `jet doc` run then builds the Core library
+(`JetCli/Cli/CoreLibrary.jet`, `JetIR/BuildCore.jet`): the Core check the
+Core record is made from, every non-generic Core and Prelude function built
+as a program's code is (stock checks, runtime sentries and stop points, O1,
+IR Lint after the build and after the optimizer), with each function a
+global `jet_core_fn_*` symbol named after its checked key and each writable
+process cell it builds (module storage, a memo store, a Shared site) a
+global `jet_core_cell_*` data symbol, so the program and Core share one copy
+of each. `core.exports` lists each symbol with its key and IR signature (the
+slot layouts of its parameters and result); `core.threads` is its thread
+receipt, read over the runtime's receipt, since Core starts threads through
+the runtime. A Core build failure fails the step with `core.issues`. The
+step installs `jet-runtime/` beside
+the compiler: `native.key`, `jet_runtime.pack.o`, `jet_core.o` with its two
+lists, and `jet_runtime.image`, the runtime object and the Core object linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
-index of its defined global symbols. Binding a program object to that image
+index of its defined global symbols. The pack, which a full program link
+reads whole, holds the runtime alone. Binding a program object to that image
 (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
 runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
@@ -203,10 +217,10 @@ run base. `jet run` reads only the image's first page and the bytes after its
 loaded segments for that bind, and maps the segments from the file
 (`Image/Loader.jet`). The step runs no C compiler or archiver, and the pack
 packages no C platform archives, which a program with C takes from jet's C
-toolchain pack (foreign C, below). The key (`jet-native-runtime/v4`) hashes
+toolchain pack (foreign C, below). The key (`jet-native-runtime/v5`) hashes
 the source inventory, checked ABI, thread receipt, lifecycle and backend
-inputs. The accompanying `provenance.json` records each input digest, the
-pack and image digests and zero Rust or LLVM-generated Jet objects.
+inputs, and the Core object, export list and thread receipt. The accompanying `provenance.json` records each input digest, the
+pack, image and Core digests and zero Rust or LLVM-generated Jet objects.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
 lifecycle and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced

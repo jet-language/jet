@@ -1,0 +1,56 @@
+// The Core code library (#6328 c22 S7a), made under `jet doc`'s
+// runtime-library seam (Request.jet jet_cli_runtime_library) when
+// JET_FRONT_CORE_OBJECT_OUTPUT names a prefix: the Core check of the record
+// (CoreRecordCheck.jet jet_cli_core_checked) built as IR over every Core and
+// Prelude module (JetIR BuildCore.jet ir_build_core_library), checked by IR
+// Lint after the build and after the O1 optimizer as the runtime library
+// is, and written as `{prefix}.o`, `{prefix}.exports` (ir_core_exports_text:
+// each global's symbol, key and IR signature) and `{prefix}.threads`, the
+// exports whose call can start a second thread (ir_thread_exports over the
+// runtime's own receipt, since Core starts threads through the runtime). The
+// runtime image links the object beside the runtime (jet_cli_runtime_pack).
+use {
+    core_library_files: core.files
+    jet_driver.[jet_driver_checked_declarations]
+    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_transfer_rows]
+    jet_ir.[ir_build_core_library, ir_core_exports_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+}
+
+// The Core object's bytes, else the problem that stopped it; each build,
+// lint or object finding is a row of `{prefix}.issues`.
+JetCLICoreLibrary: struct { bytes: [U8], problem: String }
+
+jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads) -> JetCLICoreLibrary {
+    checked := jet_cli_core_checked(false, false)
+    inputs := if checked.move() == {
+        .Stopped(output) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
+        .Checked(found, _, _) -> found
+    }
+    declarations := jet_driver_checked_declarations(inputs)
+    library := ir_build_core_library(inputs.functions.move(), inputs.decls, declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, compiler_threads)
+    issues := compiler_take_rows<String>(library.errors)
+    loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    // The memory term is read now: the front end before this holds most of it.
+    threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    if issues.len() == 0 {
+        loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
+        _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
+        loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
+        thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
+        compiled := ir_x64_compile_module(library.program.move(), threads)
+        object := ir_x64_library_object(compiled, library.exports, library.data, true)
+        if object.errors.len() == 0 {
+            core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
+            core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
+            core_library_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core thread receipt: {err}"}
+            return JetCLICoreLibrary{bytes: object.bytes.move(), problem: ""}
+        }
+        compiler_transfer_rows<String>(issues, object.errors)
+    }
+    core_library_files.write("{prefix}.issues", issues.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core library findings: {err}"}
+    JetCLICoreLibrary{bytes: [U8]{}, problem: "Core library lowering failed; see {prefix}.issues"}
+}

@@ -14,10 +14,13 @@
 // jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
 // disagrees with the one the runtime source renders. The pack carries no C or
 // libc: a program's C closure links the musl sysroot of jet's C toolchain
-// pack (JetCli ForeignLink.jet).
+// pack (JetCli ForeignLink.jet). The Core library (jet_core.o, core.exports,
+// core.threads: jet's embedded Core as global symbols) lands beside it; the
+// runtime image links it, the pack does not.
 RUNTIME_DIR: "JetCli/.jet/build/jet-runtime"
 RUNTIME_FILES: [String]{
     "jet_runtime_jet.o", "runtime.abi.json", "runtime.exports", "runtime.threads",
+    "jet_core.o", "core.exports", "core.threads",
     "jet_runtime.pack.o", "jet_runtime.image", "jet_runtime.wasm", "jet_runtime.wasm.tsv",
     "provenance.json", "native.key",
 }

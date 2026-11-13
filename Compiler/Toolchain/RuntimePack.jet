@@ -14,8 +14,11 @@
 //
 // `pack` lowers Compiler/JetRuntime/sources.list and lifecycle.list as one
 // object with JET, the jet this build made: its native library hook writes
-// the object, the prelinked pack and image, and the web partition. Jet's
-// linker binds that object alone; the pack links no C (#6693). No Rust
+// the object, the prelinked pack and image, and the web partition, and the
+// Core library (jet_core.o, core.exports, core.threads: every non-generic
+// function of JET's embedded Core as a global symbol), which the image links
+// beside the runtime and the pack does not. Jet's linker binds those
+// objects alone; the pack links no C (#6693). No Rust
 // compiler, Rust runtime or system linker runs, and no `nm`: the step reads
 // the symbol tables of every object it makes itself and refuses
 // Rust symbols (rust_problem). The `--tree` folders are the runtime's and
@@ -232,15 +235,19 @@ pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: St
     }))
 }
 
-// The pack's content identity, native.key (format jet-native-runtime/v4).
-pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String) -> String {
+// The pack's content identity, native.key (format jet-native-runtime/v5):
+// the runtime's source, ABI, thread receipt, backend and lifecycle, and
+// `core`, the digests of the Core library's object, export list and thread
+// receipt, which the image links beside the runtime.
+pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, core: String) -> String {
     sha256_json(Dyn.Object([String: Dyn]{
-        "format": Dyn.Text("jet-native-runtime/v4"),
+        "format": Dyn.Text("jet-native-runtime/v5"),
         "source": Dyn.Text(source.copy()),
         "abi": Dyn.Text(abi.copy()),
         "threads": Dyn.Text(threads.copy()),
         "backend": Dyn.Text(backend.copy()),
         "lifecycle": Dyn.Text(lifecycle.copy()),
+        "core": Dyn.Text(core.copy()),
     }))
 }
 
@@ -382,6 +389,8 @@ keep_issues: fn(work: String, out: String) {
         path: files.join(work, "jet_runtime_jet{suffix}")
         if files.exists(path) -> files.copy(path, files.join(out, "runtime{suffix}")) ?? ()
     }
+    core_issues: files.join(work, "jet_core.issues")
+    if files.exists(core_issues) -> files.copy(core_issues, files.join(out, "core.issues")) ?? ()
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.
@@ -389,8 +398,12 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     library: files.join(work, "library")
     _ := compose_unit(tool.root, library, [String]{})
     prefix: files.join(work, "jet_runtime_jet")
+    // The Core code library (JetCli CoreLibrary.jet): every non-generic Core
+    // function as a global symbol, which the image links beside the runtime.
+    core: files.join(work, "jet_core")
     pack: files.join(work, "jet_runtime.pack.o")
-    // The pack prelinked at the run base, which `jet run` binds programs to.
+    // The runtime object and the Core object prelinked at the run base,
+    // which `jet run` binds programs to; the pack stays the runtime's alone.
     image: files.join(work, "jet_runtime.image")
     // The runtime partition of a web build (JetWeb Build.jet) and its receipt.
     web: files.join(work, "jet_runtime")
@@ -401,7 +414,8 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     // The runtime-library seam in the hosted source loader (Request.jet
     // jet_cli_compile_prepared) under `jet doc`: the checked program stopped
     // before lowering, then built as IR; under the seam `jet doc` builds no
-    // index or pages. The jet reads its own embedded Core.
+    // index or pages. The jet reads its own embedded Core, and the Core
+    // library is built from it.
     doc: process.cmd([String]{tool.jet.copy(), "doc", files.join(library, "unit.jet")}).cwd(library)
         .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
         .env_remove("JET_TOOLCHAIN_ROOT")
@@ -412,6 +426,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         .env("JET_FRONT_LIBRARY_OBJECT_OUTPUT", prefix)
         .env("JET_FRONT_LIBRARY_LIFECYCLE", at(tool.root, RUNTIME_LIFECYCLE))
         .env("JET_FRONT_RUNTIME_PACK_OUTPUT", pack)
+        .env("JET_FRONT_CORE_OBJECT_OUTPUT", core)
         .env("JET_FRONT_RUNTIME_IMAGE_OUTPUT", image)
         .env("JET_FRONT_RUNTIME_WEB_OUTPUT", web)
     if doc.run() == {
@@ -424,7 +439,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         }
         .Err(error) -> fail("Jet runtime production could not start: {error}")
     }
-    built_objects: [String]{"{prefix}.o", pack, image}
+    built_objects: [String]{"{prefix}.o", "{core}.o", pack, image}
     loop path in built_objects -> no_rust(path)
     abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
     symbols: abi_symbols(abi_text)
@@ -438,6 +453,15 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     thread_rows: threads.split("\n").to_list()
     thread_names: loop name in thread_rows if name != "" -> name.copy()
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) -> fail("runtime thread receipt names a symbol the checked exports lack")
+    // The Core export list (JetIR BuildCore.jet ir_core_exports_text:
+    // symbol, key and IR signature per line) and its thread receipt, which
+    // names Core exports, or is `*`.
+    core_text: files.read("{core}.exports") ?? fail("cannot read the Core exports: {err}")
+    core_rows: core_text.split("\n").to_list()
+    if !core_rows.any(fn(row) { row != "" }) -> fail("the Core export list is empty")
+    core_threads: files.read("{core}.threads") ?? fail("cannot read the Core thread receipt: {err}")
+    core_thread_rows: core_threads.split("\n").to_list()
+    if core_threads.trim() != "*" && core_thread_rows.any(fn(name) { name != "" && !core_rows.any(fn(row) { row.starts_with("{name}\t") }) }) -> fail("Core thread receipt names a symbol the Core exports lack")
     // The jet.runtime interface the runtime source renders (Request.jet
     // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
     // the pack with the rendered file beside the outputs.
@@ -450,13 +474,18 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
     }
     threads_sha256: sha256_file("{prefix}.threads")
-    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256)
+    // The Core object's, export list's and thread receipt's digests.
+    core_sha256: "{sha256_file("{core}.o")} {sha256_file("{core}.exports")} {sha256_file("{core}.threads")}"
+    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, core_sha256)
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
     copy_into("{prefix}.o", files.join(out, "jet_runtime_jet.o"))
     copy_into("{prefix}.abi.json", files.join(out, "runtime.abi.json"))
     copy_into("{prefix}.exports", files.join(out, "runtime.exports"))
     copy_into("{prefix}.threads", files.join(out, "runtime.threads"))
+    copy_into("{core}.o", files.join(out, "jet_core.o"))
+    copy_into("{core}.exports", files.join(out, "core.exports"))
+    copy_into("{core}.threads", files.join(out, "core.threads"))
     copy_into(pack, files.join(out, "jet_runtime.pack.o"))
     copy_into(image, files.join(out, "jet_runtime.image"))
     copy_into("{web}.wasm", files.join(out, "jet_runtime.wasm"))
@@ -472,6 +501,9 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         "llvmObjects": Dyn.Int(0),
         "abiSha256": Dyn.Text(abi_sha256.copy()),
         "threadsSha256": Dyn.Text(threads_sha256.copy()),
+        "coreObjectSha256": Dyn.Text(sha256_file("{core}.o")),
+        "coreExportsSha256": Dyn.Text(sha256_file("{core}.exports")),
+        "coreThreadsSha256": Dyn.Text(sha256_file("{core}.threads")),
         "source": inventory_value(source),
         "backendInputs": inventory_value(backend),
         "lifecycle": inventory_value(lifecycle),

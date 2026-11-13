@@ -61,10 +61,15 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
         single_thread_test_export(5, "jet_rt_handler", -1),
         single_thread_test_export(6, "jet_rt_load", -1),
     }
-    assert_eq(ir_thread_exports(m, exports), ["jet_rt_address", "jet_rt_handler", "jet_rt_load", "jet_rt_routed", "jet_rt_spawn"])
+    assert_eq(ir_thread_exports(m, exports, [String]{}), ["jet_rt_address", "jet_rt_handler", "jet_rt_load", "jet_rt_routed", "jet_rt_spawn"])
+    // A library over another (Core over the runtime) passes that one's
+    // receipt: a call of a symbol it names reaches a start too, so the
+    // unguarded hook jet_rt_plain, which calls jet_rt_alloc, now runs a
+    // thread start in every program.
+    assert_eq(ir_thread_exports(m, exports, [String]{"jet_rt_alloc"}), ["*"])
     // An unguarded lifecycle hook runs in every program that links the runtime.
     hooked: [IRLibraryExport]{single_thread_test_export(2, "jet_rt_plain", 0), single_thread_test_export(5, "jet_rt_handler", 0)}
-    assert_eq(ir_thread_exports(m, hooked), ["*"])
+    assert_eq(ir_thread_exports(m, hooked, [String]{}), ["*"])
     // A guarded one runs when the program keeps its guard storage (data row
     // 7): every export that can reach that storage is listed.
     keeper := single_thread_test_fn(m, "keeper", [String]{}, [Int]{}, [Int]{})
@@ -78,7 +83,7 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
         single_thread_test_export(7, "jet_rt_keeper", -1),
         single_thread_test_export(8, "jet_rt_other", -1),
     }
-    assert_eq(ir_thread_exports(m, guarded), ["jet_rt_handler", "jet_rt_keeper"])
+    assert_eq(ir_thread_exports(m, guarded, [String]{}), ["jet_rt_handler", "jet_rt_keeper"])
 }
 
 #Test("a program without a readable thread receipt keeps the locked RC forms") {
