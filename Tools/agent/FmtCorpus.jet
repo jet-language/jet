@@ -34,7 +34,10 @@
 // - Compiler/JetDevserver (#5931), which doesn't compile;
 // - evidence: a source a recorded run under Tools/agent-eval/ pins by line;
 //   its receipts stay as run, so their pins don't move;
-// - does not parse: a negative fixture `jet fmt` refuses, found while it runs.
+// - does not parse: a negative fixture `jet fmt` refuses, found while it runs;
+// - not stable: a source on which a second `jet fmt` pass changes the first
+//   pass's output again (UNSTABLE), a formatter defect; it stays as written
+//   until the formatter writes it in one pass.
 //
 // One bad source never stalls a run: each formatter run has a time limit
 // (FMT_LIMIT_BASE_MS, plus FMT_LIMIT_PER_SOURCE_MS per source), and a run
@@ -84,6 +87,16 @@ RULE_DEVSERVER: "Compiler/JetDevserver (#5931)"
 RULE_EVIDENCE: "evidence"
 
 RULE_UNPARSED: "does not parse"
+
+RULE_UNSTABLE: "not stable"
+
+// The sources a second `jet fmt` pass changes again. In StoreIngestLate a
+// struct literal whose last field is a multi-line lambda (`Hook{events: …,
+// react: fn(…) {…}}`) is split one field per line only on the second pass; in
+// the two web sources the first pass gives an empty lambda body (`fn(value)
+// {}`) its own lines inside a wrapped call, and the second moves the `.field`
+// read after that call onto a line of its own.
+UNSTABLE: [String]{"Jetpack/Store/Tests/StoreIngestLate.jet", "tests/conformance/corpus/core/web/forms/typed_validate_field.jet", "tests/conformance/corpus/core/web/store/subscribe_selector.jet"}
 
 // Trees the corpus leaves out whole, with their rule.
 EXCLUDED_TREES: [String]{"tests/cases/fmt", "Compiler/JetDevserver/"}
@@ -272,6 +285,7 @@ tree_rule: fn(path: String) -> String Never! {
         if path.starts_with(tree) -> return EXCLUDED_TREE_RULES[at].copy()
     }
     if base_name(path) == ADAPTATION_FILE -> return RULE_GENERATED
+    if UNSTABLE.contains(path) -> return RULE_UNSTABLE
     ""
 }
 
@@ -814,9 +828,11 @@ fmt_meaning_change: fn(errors: String) -> String? Never! {
 // `jet fmt` over `sources`. The formatter stops at the first source it
 // refuses and names it; that source is set aside, as unparsed or as one whose
 // meaning the format would change, and the sources before and after it run
-// again. A run that hangs or crashes is split in halves until the source it
-// fails on runs alone; that source is set aside as failed. Returns the number
-// of formatter runs.
+// again. A refusal that names no source (a malformed `package.jet`) stops the
+// whole run with nothing formatted or listed, so that run is split in halves
+// until the refused source runs alone, and it is set aside as unparsed. A run
+// that hangs or crashes is split the same way; the source it fails on is set
+// aside as failed. Returns the number of formatter runs.
 run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exec, Time.Wait]> Int CorpusError! {
     if sources.len() == 0 -> return Ok(0)
     checking: formatter.flags.contains("--check")
@@ -828,9 +844,10 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
     // Under `--check`, exit 1 means a source would change.
     finished: if checking -> [Int]{0, 1} else -> [Int]{0}
     failure: if receipt.timed_out -> "hang: `jet fmt` ran past {limit_ms} ms" else -> fmt_crash(receipt.signal, receipt.code, finished, receipt.errors)
-    if failure != "" {
+    unlocated: failure == "" && fmt_unlocated_refusal(receipt.errors)
+    if failure != "" || unlocated {
         if sources.len() == 1 {
-            outcome.failed.push(FmtFailure{path: sources[0].copy(), what: failure})
+            if unlocated -> outcome.unparsed.push(sources[0].copy()) else -> outcome.failed.push(FmtFailure{path: sources[0].copy(), what: failure})
             return Ok(1)
         }
         half: sources.len() /% 2
@@ -859,8 +876,19 @@ run_fmt: fn(formatter: Formatter, sources: [String], outcome: &FmtOutcome) -[Exe
 // refused.
 fmt_crash: fn(signal: Int?, code: Int, finished: [Int], errors: String) -> String Never! {
     if signal == .Val(number) -> return "crash: `jet fmt` stopped on signal {number}"
-    if finished.contains(code) || fmt_refused_source(errors) != None -> return ""
+    if finished.contains(code) || fmt_refused_source(errors) != None || fmt_unlocated_refusal(errors) -> return ""
     "crash: `jet fmt` exited {code}: {first_line(errors)}"
+}
+
+// Whether `jet fmt` refused a run with a diagnostic that names no source (a
+// malformed `package.jet`); it then formats and lists nothing, whatever its
+// exit code.
+fmt_unlocated_refusal: fn(errors: String) -> Bool Never! {
+    if fmt_refused_source(errors) != None -> return false
+    loop line in errors.lines() {
+        if line.starts_with("Error [") -> return true
+    }
+    false
 }
 
 // The first line of `text` that holds more than blank space, trimmed.
@@ -1081,6 +1109,7 @@ run: fn() {
     assert_eq(tree_rule("Compiler/JetDevserver/Source/Session.jet"), RULE_DEVSERVER)
     assert_eq(tree_rule("Tools/agent-eval/runs/a/main.jet"), "")
     assert_eq(tree_rule("tests/fixtures/ffi_adaptations/BorrowedView/after.jet"), RULE_GENERATED)
+    assert_eq(tree_rule("tests/conformance/corpus/core/web/store/subscribe_selector.jet"), RULE_UNSTABLE)
 }
 
 #Test("a generated head is a // line among the first five that says a tool generates it") {
@@ -1216,6 +1245,14 @@ run: fn() {
     assert_eq(fmt_crash(None, 1, checking, ""), "")
     assert_eq(fmt_crash(None, 1, writing, ""), "crash: `jet fmt` exited 1: (no message)")
     assert_eq(fmt_crash(None, 0, writing, ""), "")
+}
+
+#Test("a diagnostic that names no source refuses the run, and is no crash") {
+    manifest: "Error [jet.InvalidPackageManifest]: `package.jet` has a shape error\n Why: Package metadata policy is malformed\n"
+    assert(fmt_unlocated_refusal(manifest))
+    assert(!fmt_unlocated_refusal("Error [jet.InvalidStatement]: no\n  --> tests/ui/bare.jet:4:27\n"))
+    assert(!fmt_unlocated_refusal(""))
+    assert_eq(fmt_crash(None, 2, [Int]{0}, manifest), "")
 }
 
 #Test("prefixes select whole path segments") {
