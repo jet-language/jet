@@ -617,6 +617,18 @@ SemaDeferFrame: struct {
     labels: Int
 }
 
+// An `#On(.Deep)` body's frame. A deep check reads the state around it but
+// may not change it or leave it: `bindings` is the binding count when the
+// body began, so a binding below it is captured state, and `loop_depth` and
+// `labels` are the loop depth and loop label count outside the body. A lambda
+// made in the body runs on its own exits, so `exits` is false there.
+SemaDeepFrame: struct {
+    loop_depth: Int
+    labels: Int
+    bindings: Int
+    exits: Bool
+}
+
 SemaCheckContext: struct {
     exact_int_reachable: Bool
     unsafe_depth: Int
@@ -933,6 +945,8 @@ SemaScopeTable: struct {
     // parameters of the function around the site, which its compile-time
     // code can't read (SemaComptimeBodySource.runtime_locals).
     comptime_runtime_locals: [String]{[String]{}}
+    // The innermost `#On(.Deep)` body being checked (SemaDeepFrame).
+    deep_check: SemaDeepFrame?{None}
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:
@@ -1793,6 +1807,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
             writes_explicit: table.writes_explicit,
             context_allocation: table.context_allocation,
             open_marks: table.open_marks,
+            deep_check: table.deep_check,
         },
     }
     table.open_marks += 1
@@ -1833,6 +1848,7 @@ sema_scope_rollback: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.copies_explicit = saved.copies_explicit
     table.writes_explicit = saved.writes_explicit
     table.context_allocation = saved.context_allocation
+    table.deep_check = saved.deep_check
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
 }

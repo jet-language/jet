@@ -146,11 +146,14 @@ SemaEffectFunctionSource: struct {
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
-// the block span its `TStmt.Region` lowering keeps.
+// the block span its `TStmt.Region` lowering keeps. An `#On(.Deep)` body is a
+// `deep` region with no caps: it may reach only the effects that never need a
+// grant (E0713).
 SemaEffectFxRegion: struct {
     caps: [String]
     caps_span: Span
     span: Span
+    deep: Bool{false}
 }
 
 // One checked module's effect inputs. The module's functions and call facts
@@ -3629,6 +3632,25 @@ sema_effect_scope_diagnostic: fn(marker: String, over: [String], bounds: [String
     diagnostic_with_rights(diagnostic, "invocation", [String]{"#{marker}"}, [String]{"#{marker}"}, None)
 }
 
+// The effects an `#On(.Deep)` body reaches, itself or through a call, that act
+// outside the program: every one but `Panic`, `Mem.*` and `Unsafe`, which obey
+// the function's own denials. `Time.Wait` needs no grant elsewhere, but a deep
+// check may not wait either.
+sema_effect_deep_check_over: fn(inferred: [String]) -> [String] Never! {
+    result := [String]{}
+    loop name in inferred {
+        root: sema_effect_root(name)
+        if root == "Panic" || root == "Mem" || root == "Unsafe" -> next
+        sema_effect_set_add(result, name)
+    }
+    result
+}
+
+// `e0713`: the effects sema_effect_deep_check_over finds.
+sema_effect_deep_check_diagnostic: fn(over: [String], span: Span) -> Diagnostic {
+    sema_error("E0713", span, "this deep check uses the effect `{sema_effect_show(over)}`", "A deep check runs only where `--deep-checks` keeps it, so it may not act on the world outside the program, even through a call.", "Move the work that uses `{sema_effect_show(over)}` out of the `#On(.Deep)` body.")
+}
+
 // A scope cap list parsed once: the effect names it allows as a ranked set
 // and the names sema_effect_parse_name rejects, in cap order, so a cap list
 // checked against many functions (a package policy) is parsed once.
@@ -5851,8 +5873,9 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffect
         node_index: sema_effect_node_index(calls.node_by_key, function.key) ?? next
         loop region in module_row.sources[at].fx_regions {
             inferred: sema_effect_region_inferred(nodes, solved, node_index, function, region, calls, module_index)
-            over: sema_effect_uncovered(inferred, region.caps)
-            if over.len() > 0 -> region_diagnostics.push(sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
+            over: if region.deep -> sema_effect_deep_check_over(inferred) else -> sema_effect_uncovered(inferred, region.caps)
+            if over.len() == 0 -> next
+            region_diagnostics.push(if region.deep -> sema_effect_deep_check_diagnostic(over, region.caps_span) else -> sema_effect_scope_diagnostic("FX", over, region.caps, region.caps_span))
         }
     }
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, region_diagnostics)

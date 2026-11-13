@@ -5092,6 +5092,53 @@ MutableNeverReassigned: struct {
     }
 }
 
+DeepCheckLeavesItsBody: struct {
+    word: String
+
+    impl Diagnostic {
+        code: "E0515"
+        safety_class: .Soundness
+        safety_reason: "A deep check runs only where `--deep-checks` keeps it, so an exit from it would make the program take a different path with and without it."
+        expert_path: "none: take the exit out of the `#On(.Deep)` body"
+        meaning: "A deep check tries to leave its body"
+        detail: true
+        what: fn(self) -> String { "`{self.word}` can't leave a deep check" }
+        why: fn(self) -> String { "A deep check runs only where `--deep-checks` keeps it, so whether the function or loop goes on can't depend on it." }
+        fix: fn(self) -> String { "Take the `{self.word}` out of the `#On(.Deep)` body." }
+    }
+}
+
+DeepCheckPropagatesFailure: struct {
+    impl Diagnostic {
+        code: "E0516"
+        safety_class: .Soundness
+        safety_reason: "A deep check runs only where `--deep-checks` keeps it, so a failure passed out of it would make the function end differently with and without it."
+        expert_path: "none: handle the failure inside the body"
+        meaning: "A deep check passes a failure on"
+        detail: true
+        what: fn(self) -> String { "A failure can't pass out of a deep check" }
+        why: fn(self) -> String { "A deep check runs only where `--deep-checks` keeps it, so whether the function goes on can't depend on it." }
+        fix: fn(self) -> String { "Handle the failure inside the body, with `??` or `or`." }
+    }
+}
+
+DeepCheckChangesState: struct {
+    name: String
+    action: String
+
+    impl Diagnostic {
+        code: "E0517"
+        safety_class: .Soundness
+        safety_reason: "A deep check runs only where `--deep-checks` keeps it, so a change it made to the state around it would make the program compute differently with and without it."
+        expert_path: "none: change a copy the body makes itself"
+        meaning: "A deep check changes state it did not make"
+        detail: true
+        what: fn(self) -> String { "`{self.name}` can't {self.action} in a deep check" }
+        why: fn(self) -> String { "A deep check runs only where `--deep-checks` keeps it, so it may read the state around it but not change it." }
+        fix: fn(self) -> String { "Change a copy the body makes itself, or move the change out of the `#On(.Deep)` body." }
+    }
+}
+
 SliceCopyInLoop: struct {
     impl Diagnostic {
         code: "L0501"
@@ -6419,6 +6466,22 @@ EffectWithoutAuthority: struct {
         what: fn(self) -> String { "This `#FX` region uses the effect `{self.effect_name}`, which has no authority backing." }
         why: fn(self) -> String { "`#FX(…)` allows exactly the listed effects; an effect reached inside — even transitively through a call — that the list omits has no authority backing it." }
         fix: fn(self) -> String { "Add the named effect to the `#FX(…)` list, or move that work outside the region." }
+    }
+}
+
+DeepCheckReachesEffect: struct {
+    effect_name: String
+
+    impl Diagnostic {
+        code: "E0713"
+        safety_class: .Soundness
+        safety_reason: "A deep check runs only where `--deep-checks` keeps it, so an effect it reached would make the program act differently with and without it."
+        expert_path: "none: move the work out of the `#On(.Deep)` body"
+        meaning: "A deep check acts outside the program"
+        detail: true
+        what: fn(self) -> String { "This deep check uses the effect `{self.effect_name}`" }
+        why: fn(self) -> String { "A deep check runs only where `--deep-checks` keeps it, so it may not act on the world outside the program, even through a call." }
+        fix: fn(self) -> String { "Move the work that uses `{self.effect_name}` out of the `#On(.Deep)` body." }
     }
 }
 

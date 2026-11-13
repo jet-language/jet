@@ -2280,6 +2280,7 @@ sema_ownership_check_list_view_element_aliases: fn(state: &SemaOwnershipState, e
 // Open a mutable place window in one ownership transaction.  This is distinct
 // from check_write: a write borrow keeps a live loan until its lexical scope
 sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if sema_ownership_deep_check_change(expr, "be lent for writing", scopes, diagnostics) -> return false
     if sema_ownership_reject_frozen_write(state, expr, "be edited", span, scopes, diagnostics) -> return false
     if sema_ownership_report_invalidated_view(state, expr, scopes, span, diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
@@ -3005,6 +3006,20 @@ sema_ownership_binding_for_expr: fn(state: &SemaOwnershipState, expr: Expr, scop
     Val(scopes.bindings[index])
 }
 
+// A deep check reads the state around it but may not change it: a write to,
+// a write window on, or a move out of a place whose root was bound before the
+// `#On(.Deep)` body began (a local, a parameter, `self` or module state) is
+// E0517. Only what the body makes itself can change.
+sema_ownership_deep_check_change: fn(expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    deep: scopes.deep_check ?? return false
+    output_path := [String]{}
+    root: sema_ownership_named_view_root(expr, output_path) ?? return false
+    index: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
+    if index >= deep.bindings -> return false
+    diagnostics.push(sema_error("E0517", expr_span(expr), "`{root}` can't {action} in a deep check", "A deep check runs only where `--deep-checks` keeps it, so it may read the state around it but not change it.", "Change a copy the body makes itself, or move the change out of the `#On(.Deep)` body."))
+    true
+}
+
 // The first binding of the root's symbol decides. Every binding of one symbol
 // key has that symbol's kind (symbol_id spells the kind into the key), so a
 // binding found among the bindings named like the root answers without
@@ -3029,6 +3044,8 @@ sema_ownership_place_is_static: fn(place: SemaOwnershipPlace, scopes: SemaScopeT
 // and `params` describe the call that writes the place, so a changeability
 // error quotes its signature line; `callee` is empty for any other write.
 sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, receiver: AccessConvention?, params: [SemaCallParam], capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    // A `&` argument toward a parameter that does not edit changes nothing.
+    if (capability || action != "be passed with write access") && sema_ownership_deep_check_change(expr, if action == "" -> "be edited" else -> action, scopes, diagnostics) -> return false
     if sema_ownership_reject_frozen_write(state, expr, if action == "" -> "be edited" else -> action, expr_span(expr), scopes, diagnostics) -> return false
     if sema_ownership_report_invalidated_view(state, expr, scopes, expr_span(expr), diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
@@ -3303,6 +3320,7 @@ sema_ownership_mark_move_as: fn(state: &SemaOwnershipState, expr: Expr, scopes: 
             return true
         }
     }
+    if sema_ownership_deep_check_change(expr, "be moved", scopes, diagnostics) -> return false
     // (spec "Copies, moves, and owned destinations"): an
     // exact `name.move()` on storage this scope does not own has nothing to give
     // away, and lowering would copy the value instead (`jet audit copies`

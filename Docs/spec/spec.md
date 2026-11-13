@@ -5474,6 +5474,23 @@ so a cached image built with one selection never serves another; equal
 selections written in any order share it. Example:
 [`tests/ui/deep_checks_unmatched_scope`](../../tests/ui/deep_checks_unmatched_scope.jet).
 
+A deep check is type-checked in every build, kept or not, and it may only
+look. It reads the state around it but never changes it: a write to, a write
+window on, or a move out of a local, parameter, `self` or module binding made
+before the `#On(.Deep)` body is E0517, while a binding the body makes itself
+changes freely. It reaches no effect but `Panic`, `Mem.*` and `Unsafe`,
+itself or through any call, lambda or method it reaches: file, network,
+clock, randomness, logging and the rest are E0713. Those three stay under the
+function's own denials, as anywhere else. It never
+leaves its body: a `return`, or a `break` or `next` steering a loop outside
+it, is E0515, and a `?` or propagating call whose failure would pass out is
+E0516. A lambda made in the body leaves only itself, and its writes to the
+state around the check are still E0517. Examples:
+[`tests/ui/deep_check_changes_state`](../../tests/ui/deep_check_changes_state.jet),
+[`tests/ui/deep_check_effect`](../../tests/ui/deep_check_effect.jet),
+[`tests/ui/deep_check_break`](../../tests/ui/deep_check_break.jet),
+[`tests/ui/deep_check_try`](../../tests/ui/deep_check_try.jet).
+
 ### Size-oriented builds
 
 `small` (stock `false`) favors a smaller binary: with `true` the optimizer

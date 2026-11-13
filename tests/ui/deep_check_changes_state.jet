@@ -1,0 +1,13 @@
+run: fn() {
+    total := 0
+    loop item in [1, 2, 3] {
+        total += item
+        #On(.Deep) {
+            seen := 0
+            loop part in [item, total] -> seen += part
+            assert(seen > 0, "the parts add up")
+            total += 1
+        }
+    }
+    print(total)
+}

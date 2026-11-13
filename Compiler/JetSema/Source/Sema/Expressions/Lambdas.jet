@@ -2022,7 +2022,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             sema_loop_value_set_pending_type(lambda_context, SemaLoopValueKind.Result, loop_label, body_expected)
         }
     }
-    if !inline_loop -> lambda_scopes.loop_depth = 0
+    if !inline_loop {
+        lambda_scopes.loop_depth = 0
+        // A lambda made in a deep check leaves only itself; its writes to the
+        // state around the check are still checked.
+        if lambda_scopes.deep_check == .Val(deep) -> lambda_scopes.deep_check = Val(SemaDeepFrame{loop_depth: 0, labels: deep.labels, bindings: deep.bindings, exits: false})
+    }
 
     first_reference := lambda_state.references.len()
     // (Rust `record_share_site` keeps one checker-wide

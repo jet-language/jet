@@ -16,6 +16,7 @@ use jet_foundation.[
     ForKind,
     Func,
     Item,
+    MARKER_ON,
     NamedSpan,
     Span,
     Stmt,
@@ -550,10 +551,12 @@ sema_authority_region_caps_valid: fn(caps: [NamedSpan]) -> Bool Never! {
     true
 }
 
-// Every `#FX(…)` region of one body with a valid cap list. The effect
-// pass checks each lowered region (the `TStmt.Region` with the same span)
-// against its caps (E0712). A region with an invalid cap is skipped, like
-// Rust's `bad` cap set: the cap diagnostic is the real problem to fix.
+// Every `#FX(…)` region of one body with a valid cap list, and every
+// `#On(.Deep)` body as a `deep` region. The effect pass checks each lowered
+// region (the statement with the same span) against its caps (E0712), and a
+// deep check against the effects that need no grant (E0713). A region with an
+// invalid cap is skipped, like Rust's `bad` cap set: the cap diagnostic is the
+// real problem to fix.
 sema_authority_fx_regions: fn(statements: [Stmt]) -> [SemaEffectFxRegion] {
     regions := [SemaEffectFxRegion]{}
     sema_authority_collect_fx_regions(statements, regions)
@@ -567,6 +570,7 @@ sema_authority_fx_regions: fn(statements: [Stmt]) -> [SemaEffectFxRegion] {
 sema_authority_scope_regions: fn(statements: [Stmt], function_name: String) -> [BodyEffectScopeRegion] {
     frames := [BodyEffectScopeRegion]{}
     loop region in sema_authority_fx_regions(statements) {
+        if region.deep -> next
         descriptor: effect_scope_descriptor("#FX block in {function_name}", "", false, Val(region.caps))
         if descriptor != "" -> frames.push(BodyEffectScopeRegion{span: region.span, descriptor: descriptor})
     }
@@ -580,7 +584,8 @@ sema_authority_collect_fx_regions: fn(statements: [Stmt], regions: &[SemaEffectF
                 if sema_authority_region_caps_valid(caps) -> regions.push(SemaEffectFxRegion{caps: sema_authority_region_caps(caps), caps_span: caps_span, span: span})
                 sema_authority_collect_fx_regions(body, regions)
             }
-            .Switched(marker, body, _) -> {
+            .Switched(marker, body, span) -> {
+                if marker.name == MARKER_ON && sema_switch_condition(marker) == "Deep" -> regions.push(SemaEffectFxRegion{caps: [String]{}, caps_span: marker.span, span: span, deep: true})
                 if !sema_authority_switched_erased(marker.name) -> sema_authority_collect_fx_regions(body, regions)
             }
             .While(_, body, _, _, _)
