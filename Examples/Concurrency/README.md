@@ -7,6 +7,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 ## Lessons
 
 - [AllFailFast](AllFailFast.jet) — All fail-fast cancels siblings when one task panics.
+- [BusyTurns](BusyTurns.jet) — A task that never waits gives its thread to waiting tasks at its next loop iteration once its time slice is up.
 - [CancelCleanup](CancelCleanup.jet) — Cancellation is preemptive at wait points.
 - [ChannelBuiltin1560](ChannelBuiltin1560.jet) — channel<T>() is a builtin value with no import.
 - [ContextTaskInherit](ContextTaskInherit.jet)
@@ -17,7 +18,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 - [FreezeCapture](FreezeCapture.jet) — `freeze` makes one owned snapshot that any task may read.
 - [NativeResourceStreams](NativeResourceStreams.jet) — Channel, timer and file-line streams stay native.
 - [Protocol](Protocol.jet) — Declare the exchange once; compiler generates ordered Payment.Client / Payment.Server handles over #SingleUse + typestate (E0150 on out-of-order send/recv).
-- [RaceCancel](RaceCancel.jet) — Race returns first success; losers cancel at runtime.
+- [RaceCancel](RaceCancel.jet) — Race returns first success; losers cancel at runtime, a busy loser at its next loop iteration.
 - [ScopedBorrowBands](ScopedBorrowBands.jet) — A task group joins every child, so a child may borrow a place its owner still gives access.
 - [SelectChannel](SelectChannel.jet) — A readiness table waits on plain endpoints.
 - [SharedStaleRevision](SharedStaleRevision.jet) — A publication must match the committed Shared revision it observed; the older result is rejected without overwriting new.

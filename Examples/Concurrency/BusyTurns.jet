@@ -1,0 +1,36 @@
+// Busy tasks take turns. A task that has run a whole time slice while other
+// tasks wait for a thread gives its thread to them at its next loop
+// iteration and continues later. Here more tasks than the pool has threads
+// spin until the last task, queued behind them all, sets their flag: it gets
+// its turn although none of them ever waits.
+package: {
+    name: "busy_turns"
+    authority: { allow: [Env, IO, Mem.Alloc] }
+}
+
+use os: core.sys
+
+spin: fn(done: Atomic<Bool>) -> Int {
+    turns := 0
+    loop !done.load() -> turns += 1
+    turns
+}
+
+finish: fn(done: Atomic<Bool>) -> Int {
+    done.store(true)
+    1
+}
+
+run: fn() {
+    done: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    busy: os.cpu_count() * 2 + 2
+    handles := [Task<Int>]{}
+    loop _ in 0..<busy -> handles.push(task spin(done))
+    last: task finish(done)
+    print(last.join() ?? panic("the last task failed"))
+    stopped := 0
+    loop handle in handles {
+        if (handle.join() ?? -1) >= 0 -> stopped += 1
+    }
+    print(stopped == busy)
+}

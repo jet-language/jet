@@ -1,5 +1,6 @@
 // Race returns first success; losers cancel at runtime. Race and any follow
-// task completion order, not the order of the task list.
+// task completion order, not the order of the task list. A loser that never
+// waits stops at its loop's next iteration, so it cannot hold the race up.
 package: {
     name: "race_cancel"
     authority: { allow: [IO, Mem.Alloc, Time] }
@@ -14,8 +15,17 @@ slow_one: fn() -> Int {
 
 fast_seven: fn() -> Int { 7 }
 
+// Counts with no wait point: only the check each iteration starts with can
+// stop it.
+spin: fn() -> Int {
+    n := 0
+    loop n >= 0 -> n += 1
+    n
+}
+
 run: fn() {
     winner: task.race {slow_one(), fast_seven()} ?? panic("race failed")
     print(winner)
     print(task.any {slow_one(), fast_seven()} ?? panic("any failed"))
+    print(task.race {spin(), fast_seven()} ?? panic("race failed"))
 }
