@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6792,
-    "rev": 101495,
+    "rev": 101496,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58249,6 +58249,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Owner order, 2026-11-13: \"land wins wherever we can\", and fix regressions after.\nLanding rules, applied by Lander5 from now on:\n- Every fold member whose own proof lines are green lands singly, at once. A red member holds only itself and the members stacked on it.\n- A SUB with a green correctness proof and a measured win lands even if another line regresses. The regression becomes a carded top-priority follow-up for the owner.\n- A SUB that only regresses still goes back.\nFinalize regression root (G11Speed-5): a refused comptime landing builds and evaluates the comptime child, then the body pass builds it again (RunColdContext: sema.local_values_refused=148). The fix is G11Speed-c1land-fin1: the refused run is handed to the body pass, cheap refusal predicates run first, and refusals are counted by reason. Target: RunColdContext and the JetSema check no worse than dev, and jetc-trace keeps its -18%."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Step 0 measurement, g11-c1r2 (Lander5, 2026-11-13): the c1r2 jet (c1land-r2 + dec1-r3) against g6-cut3b, on the same sources, under /usr/bin/time.\n- jetc-trace: wall 2.93 -> 2.40 s (-18%), peak -17%; comptime.bodies 0.26 -> 0 s, but sema.finalize 0.18 -> 0.28 s.\n- RunColdContext: wall +17%; finalize 0.88 -> 1.30 s.\n- jet check JetSema: wall 20 -> 26.6 s (+31%).\n- jet check Core: unchanged.\n- Peak memory down 17-35% everywhere.\nNeither SUB lands from c1r2: the finalize regression goes back to its owners, and c1land-r3 is measured alone in g11-core-c.\njetc-trace bar profile (G11Speed-5, seed-b14), 1.38-1.55 s against a 53 ms bar: Core load 0.81 s (parse 0.51 s, of which 0.22 s is 12 Unicode asset files; plus 0.29 s untraced held reach), finalize 0.19 s, comptime 0.28 s.\nReuse of saved work is excluded by D-EXEC2=A and the performance gate, so the route is the precompiled Core record (1a), plus a lexer fast path for long literals."
         },
         {
@@ -58496,7 +58501,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T13:39:08.387Z",
+      "updated": "2026-11-13T13:40:53.211Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -200766,6 +200771,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T13:40:53.211Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T13:39:08.387Z",
       "by": "Main",
