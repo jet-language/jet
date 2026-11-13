@@ -1,0 +1,28 @@
+// json.patch bounds the patched document's nesting (Json.jet tree_depth) by
+// walking each object's entries once. Walking it by key, each `value[key]`
+// scanned the object again: 2,000 members took 0.4 s, so the 200,000 here
+// would take over an hour. Each patch below walks the whole document once.
+use {
+    core.encoding.[EncodingLimits]
+    json: core.encoding.json
+}
+
+document: fn(keys: Int) -> Dyn {
+    entries := [(key: String, value: Dyn)]{}
+    loop index in 0..<keys -> entries.push((key: "k{index}", value: Dyn.Array([Dyn]{Dyn.Int(index)})))
+    Dyn.Object(entries)
+}
+
+run: fn() {
+    doc: document(200000)
+    ops: json.parse("[{{\"op\": \"add\", \"path\": \"/extra\", \"value\": 1}}]") ?? panic("the patch parses: {err}")
+    patched: json.patch(doc, ops) ?? panic("the patch applies: {err}")
+    print("patched members: {patched.keys().len()}")
+    // The patched document nests 2 deep: its members are 1-element arrays.
+    two := EncodingLimits.safe()
+    two.max_depth = 2
+    if json.patch_with_limits(doc, ops, two) == .Ok(_) -> print("max_depth 2: patched")
+    one := EncodingLimits.safe()
+    one.max_depth = 1
+    if json.patch_with_limits(doc, ops, one) == .Err(refused) -> print("max_depth 1: {refused.reason}")
+}

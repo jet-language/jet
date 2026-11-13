@@ -1,0 +1,21 @@
+# json.patch bounds the patched document's nesting by walking each object's
+# entries once, so a patch is linear in the document. The program patches a
+# 200,000-member object three times, under the safe limits, a max_depth of 2
+# and a max_depth of 1, which refuses the 2-deep result. Linear, the walks
+# take milliseconds; reading each member back by key (2,000 members in
+# 0.4 s, quadratic) would take over an hour, so the step timeout is the
+# check.
+fixture: json_patch_checks_nesting_in_linear_time.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+timeout: 60s
+exit: 0
+stdout: = json_patch_checks_nesting_in_linear_time.out
+step: jet run --optimize=basic main.jet
+timeout: 60s
+exit: 0
+stdout: = json_patch_checks_nesting_in_linear_time.out
+step: jet run --optimize=full main.jet
+timeout: 60s
+exit: 0
+stdout: = json_patch_checks_nesting_in_linear_time.out

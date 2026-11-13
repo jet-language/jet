@@ -2066,9 +2066,9 @@ tree_depth: fn(value: Dyn) -> Int Never! {
             }
             return deepest + 1
         }
-        .Object(_) -> {
-            loop key in value.keys() {
-                d: tree_depth(value[key])
+        .Object(entries) -> {
+            loop entry in entries {
+                d: tree_depth(entry.value)
                 if d > deepest -> deepest = d
             }
             return deepest + 1
