@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6783,
-    "rev": 101371,
+    "rev": 101372,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60002,6 +60002,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "c34 decisions (Main, 2026-11-13, for G3Core-2): (1) D-FIXED-WRAP1 A (ratified 2026-11-04) outranks the older D-POLICY-FILE1. The block marker is #Overflow(.Stop|.Wrapping|.Saturating), which replaces #Policy(arithmetic: .Checked|.Wrapping|.Saturating), and arithmetic is no longer a #Policy setting; placement rules are unchanged. The Data/Syntax row and syntax-decisions.md change in the same SUB. (2) Seed gate: part A (the integer from_* and receiver methods retired, about 3,150 callers rewritten) is seed-safe and lands now. Step (a) makes the compiler accept #Overflow and lands now. Step (b) moves every site and deletes the #Policy(arithmetic:) parser; it needs a seed that knows #Overflow and lands right after the next admit. The gap between (a) and (b) is the bootstrap seam only, as with the @T cutover in #4500. (3) Float-to-integer conversions (from_float, from_f32, from_decimal, from_fraction) are not part of D-FIXED-WRAP1; #6313 owns them."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "c4 ruling (Main, 2026-11-13): the canonical typed comparison (equal_unordered, used by core.testing.compare and the history supplier) compares two Dyn.Number lexemes by exact decimal value, with arbitrary precision and never through binary64: \"1.0\" equals \"1.00\", \"1e2\" equals \"100.0\", \"-0.0\" equals \"0.0\", and \"1e400\" equals \"10e399\". Int, Float and Number stay distinct variants. Dyn == stays exact. Spelling preservation (encoding-decisions, JSON numbers) governs rendering only. Found by G12Docs-4 on b14, where these pairs compared unequal."
         },
         {
@@ -60505,7 +60510,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-13T06:52:17.112Z",
+      "updated": "2026-11-13T10:29:49.196Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -199144,6 +199149,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T10:29:49.196Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T10:27:18.278Z",
       "by": "Main",
