@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101175,
+    "rev": 101179,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53291,7 +53291,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-13T02:19:52.097Z",
+      "updated": "2026-11-13T02:25:58.485Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -55225,7 +55225,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-13T02:23:58.415Z",
+      "updated": "2026-11-13T02:31:52.786Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -90829,6 +90829,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 status (G1Lead-3, 2026-11-12): F32 exhaustive scan done for 26 of 36 fns, 0 misrounded (rsqrt(-0) convention aside); sinpi 189/256 chunks clean then OOM-killed at 4G and 10G with 16 parallel pipes; not run: rest of sinpi, cospi tanpi asinpi acospi atanpi exp2m1 exp10m1 log2p1 log10p1. Harness and commands: $JET_SCRATCH_ROOT/lanes/G1Lead-3/HANDOFF-6700.md. Next: find the sinpi memory hold on one chunk, then rerun with -P 4 in the heavy-job slot."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "G1Lead-22b2 landed on dev cb6e8c33f6: math.fma is IEEE fused on every tier, hardware FMA3 behind a CPUID probe (c3 progress)."
@@ -90852,11 +90857,11 @@
         {
           "n": 2,
           "text": "binary64: the same functions in F64 are correctly rounded, proven against MPFR on the CORE-MATH worst-case corpus plus at least 10^8 random inputs per function, with 0 misrounded results.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T07:23:15.802Z"
+          "evidence": "dev bcc9c4b023 (CORE-MATH ports, train 1; Core/Math fn bodies identical on 6cea1699f9 except Int abs and Decimal decode, neither scanned): MPFR 4.2.2 scan, $JET_SCRATCH_ROOT/lanes/G1Lead-3/f32mpfr ./run64.sh over 40 F64 fns (exp..atan2pi), CORE-MATH src/binary64/<fn>.wc corpus + 10^8 seeded random inputs each -> 0 misrounded finite results. Only diffs are conventions, not roundings: rsqrt(-0) = -inf (IEEE 754-2019, CORE-MATH agree; MPFR +inf) and sNaN operands to pow/hypot give qNaN (IEEE; MPFR has no sNaN). Receipt results64/SUMMARY; handoff HANDOFF-6700.md.",
+          "at": "2026-11-13T02:28:30.455Z"
         },
         {
           "n": 3,
@@ -90899,7 +90904,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-13T02:23:51.064Z",
+      "updated": "2026-11-13T02:28:31.513Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -193551,6 +193556,349 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-12T23:02:03.179Z"
+    },
+    {
+      "id": "D-CONTEXT-CALLBACK1",
+      "cardId": "c0dhc7rh",
+      "group": "effects",
+      "title": "Whether a C callback can ever read the task context",
+      "situation": "The ratified context rule says a C callback receives no context, and that reading context there is an error until the callback installs one. The adversarial review found that the second half cannot happen. The callback rule only admits a small foreign-thread-safe subset, and that subset refuses every #Context block. A foreign thread also has no context record to install into. So the clause names a form nobody can write. This vote picks one rule. Either the clause is dropped and a callback never reads context, or the callback rule gains a form that attaches a context for a callback. We recommend dropping it.",
+      "gist": "Should a C callback never read context, or gain a form that installs one first?",
+      "lesson": "A C callback runs on whatever thread the C library chooses. Jet code there has no task, so it has no task context to read. Giving it one means building a context record on a thread Jet does not own.",
+      "explainer": "",
+      "story": "A program hands a comparison function to a C sort routine. The comparison runs on the C library's thread. A helper it might call reads context.deadline to decide how long to wait. Option A refuses that read when the program is checked. Option B lets the callback open a #Context block, which builds a fresh root context for the call, so the read sees no deadline.",
+      "inWild": "Jai marks a C-callable procedure #c_call. It receives no context, and it must push one with push_context before it calls code that needs it. Go's cgo callbacks run Go code on a thread Go attaches on entry, and a callback gets no request context unless it is passed explicitly. These outside facts were not re-checked for this ballot.",
+      "detail": "D-CONTEXT-EFFECT1=F says: a C callback, like Jai's #c_call, receives no context; reading context there is a registered error until the callback installs one. D-CABI-CALLBACK1=A admits a callback only from a checked foreign-thread-safe subset. Sema checks that subset in Calls/Checking.jet, and it refuses #Context blocks. On a foreign thread the runtime has no control block, so there is no current context record.\n\nToday a context read in a callback is refused through the generic subset error, E3203. F asks for a registered error that names the context read.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A callback never reads context",
+          "detail": "Drop \"until the callback installs one\". A C callback reads no context, directly or through anything it calls. Sema refuses a read with a registered error that names the context field and the callback. The subset stays as D-CABI-CALLBACK1 ratified it. If the subset later admits calls, the same reach fact that keys #Memo also refuses a callee that reaches a read.",
+          "code": "compare: fn(a: Int, b: Int) -[]> Int {\n    // refused: a C callback reads no context\n    if context.deadline == None -> return 0\n    a - b\n}\n\nsort_values: fn(values: &[Int]) {\n    c_qsort(values, compare)\n}"
+        },
+        {
+          "key": "B",
+          "name": "A callback may install a context first",
+          "detail": "Amend D-CABI-CALLBACK1: a callback may open a #Context block as its outermost statement. Entering it attaches a fresh root context record to the foreign thread for the call, and leaving it detaches the record. Reads inside see that record: thread from the attach, deadline None unless the block sets one. Reads outside it are refused with the same registered error as A.",
+          "code": "compare: fn(a: Int, b: Int) -[]> Int {\n    #Context(deadline: 0) {\n        if context.deadline == None -> return 0\n        a - b\n    }\n}\n\nsort_values: fn(values: &[Int]) {\n    c_qsort(values, compare)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A states the rule the code already enforces, with a clearer error. B needs a context record on a thread Jet does not own, and a block form the callback subset refuses for good reasons.",
+        "tradeoff": "A callback cannot reuse code that reads context. It must take what it needs as arguments.",
+        "gains": [
+          "One rule with no new form.",
+          "The error names the context read."
+        ],
+        "losses": [
+          {
+            "loss": "Callback code cannot call helpers that read context.",
+            "mitigation": "Pass the value in an argument, or read it before handing the callback over."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a runtime attach path for one rare need and widens the callback subset."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a C callback never read context, or gain a form that installs one first?",
+        "lesson": "A C callback runs on a thread the C library picks. Jet has no task there, so there is no context to read. Giving it one means building a context on a thread Jet does not own.",
+        "trio": {
+          "current": {
+            "note": "The rule says reads are refused until the callback installs a context, but no install form exists.",
+            "code": "compare: fn(a: Int, b: Int) -[]> Int {\n    // refused today by the generic callback check (E3203)\n    if context.deadline == None -> return 0\n    a - b\n}"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "A #c_call procedure has no context and must push one before calling code that needs it.",
+            "code": "compare :: (a: *void, b: *void) -> s32 #c_call {\n    push_context my_context {\n        return compare_values(a, b);\n    }\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A callback never reads context",
+            "gist": "Drop the install clause. Any read in a callback is a named error.",
+            "gains": [
+              "Matches what the code already enforces."
+            ],
+            "losses": [
+              "Callbacks cannot call helpers that read context."
+            ],
+            "proposed": {
+              "code": "compare: fn(a: Int, b: Int) -[]> Int {\n    // error: a C callback reads no context\n    if context.deadline == None -> return 0\n    a - b\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A callback may install a context first",
+            "gist": "An outer #Context block attaches a fresh context for the call.",
+            "gains": [
+              "Callbacks can reuse code that reads context."
+            ],
+            "losses": [
+              "Adds a runtime attach path on foreign threads."
+            ],
+            "proposed": {
+              "code": "compare: fn(a: Int, b: Int) -[]> Int {\n    #Context(deadline: 0) {\n        if context.deadline == None -> return 0\n        a - b\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A callback runs on a foreign thread that has no context record. The callback subset already refuses #Context blocks, so A only states that rule.",
+          "gains": [
+            "One rule and no new form."
+          ],
+          "losses": [
+            {
+              "loss": "Callback code cannot read context through helpers.",
+              "mitigation": "Pass the needed value in as an argument."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A runtime attach path for a rare need."
+            }
+          ],
+          "tradeoff": "A helper shared with callback code must take its settings as arguments."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T02:25:58.485Z"
+    },
+    {
+      "id": "D-BROWSER-CDP-PAGE1",
+      "cardId": "c0qe89cl",
+      "group": "other",
+      "title": "How a Jet tool sends Chrome debugger commands to one page and reads where it paused",
+      "situation": "Card #5072 moves repo tooling from Node to Jet. The Jet twin of the source-map check must pause a page at a breakpoint and report the line where it stopped. Jet's browser library can send Chrome DevTools Protocol (CDP) commands, but only to the browser as a whole, never to one page. Its events keep only a name and a few network facts, so a pause carries no line. The live half of the check therefore cannot move to Jet today. This vote decides how a Jet tool reaches one page's debugger and reads where it paused. We recommend A: a CDP handle for one page, plus named debugger facts on events.",
+      "gist": "How should a Jet tool send Chrome debugger commands to one page and read where the page paused?",
+      "lesson": "A browser library can hand events to a program as raw protocol data or as a fixed set of named facts. Raw data serves every later need, but carries page content past the library's redaction. Named facts stay small and safe, but each new need is a new accessor.",
+      "explainer": "CDP is Chrome's debugging protocol. A command such as Debugger.enable goes to one target, usually a page, through that page's session. An event such as Debugger.paused comes back with JSON params. A pause lists the call frames, each with a function name and a 0-based line.\n\nJet's browser library, core.web.browser, speaks WebDriver BiDi to the browser. Chromium's BiDi server passes CDP through a command named goog:cdp.sendCommand. The library's protocol(\"cdp\") handle uses it, but sends no session, so its commands reach the browser rather than a page.\n\nThe library turns each event into a BrowserEvent. It keeps the event's kind and named facts: request id, request method, status code, and url_hash. A hash is a fixed-length fingerprint of the text, so the URL itself is not stored. A program can compare a hash with the hash of a string it already knows.\n\nThe beginner path is a test that opens a page with page.goto, finds elements with page.get_by_role and clicks them, and reads page.text(). It needs no protocol, and it is the same in every option. The expert path is a tool that needs a CDP feature the library does not wrap. Every option changes only the expert path.",
+      "story": "The source-map check serves a built web app and finds the generated app.js line that the source map assigns to a Jet statement. It sets a breakpoint there, loads the page and waits for the pause. It checks that the top frame is render, jet_main or empty. It prints the paused line plus one, and whether Chrome reported app.js.map. Each option writes that live half as one function, live(port, line). The map decoding is plain Jet in every option and is not shown.",
+      "inWild": "Puppeteer gives each page its own CDP session with page.createCDPSession(). session.send runs a command, and session.on hands raw event params to the program. Playwright's context.newCDPSession(page) works the same way, on Chromium only. Both pass raw JSON to the program and redact nothing. Selenium 4 sends CDP commands through chromedriver with execute_cdp_cmd and reads no events that way. These outside facts were not re-checked for this ballot.",
+      "detail": "Commands today. BrowserProtocol.send in Core/Web/Browser.jet (line 579) sends goog:cdp.sendCommand with a method and params and no session. The BiDi handle refuses every goog:cdp method (line 573), and so does Browser.subscribe for goog:cdp events (line 216). So no hand-built command can reach a page's debugger. That chromium-bidi takes the page session as a field beside method and params is [INFERENCE] from its schema, not run live.\n\nEvents today. __cdp_event_facts (line 1177) keeps only the request id, request method, url_hash and status. A #Test near line 1993 pins that a Debugger.paused event has every fact empty. Docs/spec/architecture.md says the trace never holds payloads and events carry named facts. Command replies are not redacted: send returns the full reply JSON (lines 575 and 580).\n\nLimits today. The event queue holds 256 events and drops the oldest first (C_EVENT_LIMIT, line 1058). The trace holds 8 KiB and also drops the oldest first. Every script the library runs in the page also fires Debugger.scriptParsed, so a long session can push out the event a tool wants.\n\nHashes today. browser.fact_hash is not public. A probe calling browser.fact_hash(\"app.js.map\") fails with E1004, core.web.browser has no item fact_hash. So no caller can compare url_hash with a known URL today. The hash is 64-bit FNV-1a. It keeps strings out of logs, but anyone who guesses a string can confirm it.\n\nNavigation. page.goto waits for the load to complete (line 339). A breakpoint that fires during the load blocks it, so goto would time out first. Every option navigates with CDP Page.navigate, which returns at once, as the original did.\n\nThe original is Tools/web-test/sourcemap.mjs before commit 70532ccd85. It used its own CDP pipe in Tools/canvas-test/driver.mjs, attached to the page with a flattened session. It printed pausedGeneratedLine and scriptParsedMapUrl. It asserted the paused line is within one of the expected line, and the function name is render, jet_main or empty.\n\nEdge cases. A closed page: the page handle in A and B checks page_live (line 1366) before every send and returns closed. A pause left open blocks the page, so each program resumes before it closes. Frames from another site in an iframe run in their own target, which the page session does not reach; this is a stated limit. Sharing the session chromedriver itself uses for the page is [INFERENCE] and is the build card's first live proof.\n\nMigration. No code uses this surface yet. The only caller is the source-map twin under card #5072. Option D restores the deleted Node file.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A CDP handle for one page, and named debugger facts on events",
+          "gist": "page.protocol(\"cdp\") sends to that page. A pause and a parsed script add named facts to the event; nothing else of the event is kept.",
+          "detail": "New public items, six in all. BrowserPage.protocol(kind) returns a BrowserProtocol for that page, and accepts only \"cdp\". \"bidi\" is refused, because BiDi commands already name their page, and a second BiDi handle would be a second way to send them (I8).\n\nOn first use the handle asks chromedriver for the page's session with goog:cdp.getSession. That method joins the protocol allowlist (C_BIDI_2024_11) behind the same CDP check as goog:cdp.sendCommand. Every send then carries the session, which never leaves Core. Its subscribe names this page, so next_event yields only this page's events.\n\nBrowserEvent gains frame_line(), frame_column() and frame_function_hash(), from the top frame of Debugger.paused. It also gains source_map_url_hash() from Debugger.scriptParsed, and url_hash() is filled from that event's url. browser.fact_hash(text) becomes public, so a program can compare any hash fact with a string it knows.\n\nThe beginner path does not change. Each further debugger fact, such as scope values or other frames, needs its own ballot.",
+          "code": "use {\n    browser: core.web.browser\n    core.web.browser.[BrowserError]\n}\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) BrowserError! {\n    b: browser.launch(\"chromium\")\n    page: b.context().page()\n    // New: a CDP handle whose commands and events belong to this page only.\n    cdp: page.protocol(\"cdp\")\n    cdp.subscribe(\"Debugger.scriptParsed\")\n    cdp.subscribe(\"Debugger.paused\")\n    _: cdp.send(\"Debugger.enable\", \"{{}}\")\n    _: cdp.send(\"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\")\n    // CDP navigation returns at once; page.goto would wait for a load the pause blocks.\n    _: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\")\n    // New: browser.fact_hash is the hash events already use for url_hash.\n    map: browser.fact_hash(\"app.js.map\")\n    names: [browser.fact_hash(\"render\"), browser.fact_hash(\"jet_main\"), browser.fact_hash(\"\")]\n    saw_map := false\n    loop {\n        event: cdp.next_event(browser.timeout(20000))\n        // New: named facts read from the event; nothing else of it is kept.\n        if event.kind() == \"Debugger.scriptParsed\" && event.source_map_url_hash() == map -> saw_map = true\n        if event.kind() != \"Debugger.paused\" -> next\n        if !names.contains(event.frame_function_hash()) -> return Err(BrowserError{kind: \"protocol\"})\n        _: cdp.send(\"Debugger.resume\", \"{{}}\")\n        b.close()\n        return Ok((paused_line: event.frame_line() + 1, saw_map: saw_map))\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "A CDP handle for one page, and the raw debugger event",
+          "gist": "page.protocol(\"cdp\") sends to that page. A debugger event carries its raw params as JSON text, which the tool decodes into its own struct.",
+          "detail": "BrowserPage.protocol(\"cdp\") is the same as in A.\n\nBrowserEvent gains payload(), the event's CDP params as JSON text. It is filled only for Debugger events and is never written to the trace. A payload over 64 KiB arrives empty, and payload_truncated() says so. The cap matters because the queue counts events, not bytes, and a pause with deep scopes can run to tens of KiB.\n\nThe tool decodes the text with json.parse and decode into structs it declares with #Rename(.Camel). That decode was probed and runs. Two accessors serve every debugger field, now and later.\n\nThe cost is the event rule: events stop being named facts for one protocol domain. A second domain that asks for raw events, such as network bodies, then has no principled refusal.",
+          "code": "use {\n    browser: core.web.browser\n    json: core.encoding.json\n    core.encoding.[EncodingError]\n    core.web.browser.[BrowserError]\n}\n\n#Rename(.Camel)\nLocation: struct { line_number: Int }\n#Rename(.Camel)\nCallFrame: struct { function_name: String, location: Location }\n#Rename(.Camel)\nPaused: struct { call_frames: [CallFrame] }\n#Rename(.Camel)\nScriptParsed: struct { source_map_url: String? }\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) (BrowserError | EncodingError | [FieldError])! {\n    b: browser.launch(\"chromium\")\n    page: b.context().page()\n    // New: a CDP handle whose commands and events belong to this page only.\n    cdp: page.protocol(\"cdp\")\n    cdp.subscribe(\"Debugger.scriptParsed\")\n    cdp.subscribe(\"Debugger.paused\")\n    _: cdp.send(\"Debugger.enable\", \"{{}}\")\n    _: cdp.send(\"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\")\n    // CDP navigation returns at once; page.goto would wait for a load the pause blocks.\n    _: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\")\n    saw_map := false\n    loop {\n        event: cdp.next_event(browser.timeout(20000))\n        // New: the raw params of a Debugger event, as JSON text, never traced.\n        if event.kind() == \"Debugger.scriptParsed\" && (json.parse(event.payload()).decode<ScriptParsed>().source_map_url ?? \"\") == \"app.js.map\" -> saw_map = true\n        if event.kind() != \"Debugger.paused\" -> next\n        top: json.parse(event.payload()).decode<Paused>().call_frames[0]\n        if ![\"render\", \"jet_main\", \"\"].contains(top.function_name) -> return Err(BrowserError{kind: \"protocol\"})\n        _: cdp.send(\"Debugger.resume\", \"{{}}\")\n        b.close()\n        return Ok((paused_line: top.location.line_number + 1, saw_map: saw_map))\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "The tool speaks CDP itself over a WebSocket",
+          "gist": "No Core change. The tool starts the pinned Chromium, connects with core.net.ws and writes its own small CDP client, as the original did in Node.",
+          "detail": "The tool finds the pinned Chromium with browser.locked(\"chromium\") and starts it with --remote-debugging-port=0. It reads the port from the DevToolsActivePort file and connects with ws.connect. It then attaches to a page and matches replies to commands by id. The whole program below type-checks today on the dev compiler.\n\nThe tool can read every field. But it is a second CDP client beside Core's checked one, and other ported tools would copy it. It skips the protocol check, the trace and the redaction. The public WsConn.recv has no timeout, so a hung browser hangs the tool. The tool must start, poll and stop Chromium itself.",
+          "code": "use {\n    browser: core.web.browser\n    files: core.files\n    json: core.encoding.json\n    process: core.process\n    time: core.time\n    ws: core.net.ws\n    core.encoding.[EncodingError]\n    core.net.ws.[WsConn, WsError]\n    core.web.browser.[BrowserError]\n}\n\n#Rename(.Camel)\nEnvelope: struct { id: Int?, method: String? }\n#Rename(.Camel)\nCreateResult: struct { target_id: String }\nCreated: struct { result: CreateResult }\n#Rename(.Camel)\nAttachResult: struct { session_id: String }\nAttached: struct { result: AttachResult }\n#Rename(.Camel)\nLocation: struct { line_number: Int }\n#Rename(.Camel)\nCallFrame: struct { function_name: String, location: Location }\n#Rename(.Camel)\nPaused: struct { call_frames: [CallFrame] }\nPausedMessage: struct { params: Paused }\n#Rename(.Camel)\nScriptParsed: struct { source_map_url: String? }\nScriptMessage: struct { params: ScriptParsed }\n\n// Sends one command and returns its reply; events that arrive first are kept in order.\ncommand: fn(conn: WsConn, call: Int, session: String, method: String, params: String, events: &[String]) -> String (WsError | EncodingError | [FieldError])! {\n    target: if session == \"\" -> \"\" else -> \",\\\"sessionId\\\":\\\"{session}\\\"\"\n    conn.send_text(\"{{\\\"id\\\":{call},\\\"method\\\":\\\"{method}\\\",\\\"params\\\":{params}{target}}}\")\n    loop {\n        text: conn.recv().text() ?? next\n        if (json.parse(text).decode<Envelope>().id ?? -1) == call -> return Ok(text)\n        events.push(text)\n    }\n}\n\n// The paused 1-based generated line, and whether a scriptParsed named app.js.map.\nlive: fn(port: Int, line: Int) -> (paused_line: Int, saw_map: Bool) (BrowserError | IOError | WsError | EncodingError | [FieldError])! {\n    // The pinned Chromium from .jet/lock, launched by the tool itself.\n    chromium: browser.locked(\"chromium\")\n    profile: files.temp_dir(\"jet-cdp-\")\n    child := process.cmd([String]{chromium.binary(), \"--headless=new\", \"--remote-debugging-port=0\", \"--user-data-dir={profile}\", \"about:blank\"}).spawn()\n    loop !files.exists(\"{profile}/DevToolsActivePort\") -> time.sleep(time.duration_ms(50))\n    listening: files.read(\"{profile}/DevToolsActivePort\").lines()\n    conn: ws.connect(\"ws://127.0.0.1:{listening[0]}{listening[1]}\")\n    events := [String]{}\n    created: json.parse(command(conn, 1, \"\", \"Target.createTarget\", \"{{\\\"url\\\":\\\"about:blank\\\"}}\", events)).decode<Created>()\n    attached: json.parse(command(conn, 2, \"\", \"Target.attachToTarget\", \"{{\\\"targetId\\\":\\\"{created.result.target_id}\\\",\\\"flatten\\\":true}}\", events)).decode<Attached>()\n    page: attached.result.session_id\n    _: command(conn, 3, page, \"Debugger.enable\", \"{{}}\", events)\n    _: command(conn, 4, page, \"Debugger.setBreakpointByUrl\", \"{{\\\"urlRegex\\\":\\\".*app\\\\\\\\.js(\\\\\\\\?.*)?$\\\",\\\"lineNumber\\\":{line},\\\"columnNumber\\\":0}}\", events)\n    _: command(conn, 5, page, \"Page.navigate\", \"{{\\\"url\\\":\\\"http://127.0.0.1:{port}/click/\\\"}}\", events)\n    saw_map := false\n    at := 0\n    loop {\n        // recv has no timeout: a hung browser hangs here.\n        if at == events.len() -> events.push(conn.recv().text() ?? \"{{}}\")\n        text: events[at].copy()\n        at += 1\n        method: json.parse(text).decode<Envelope>().method ?? \"\"\n        if method == \"Debugger.scriptParsed\" && (json.parse(text).decode<ScriptMessage>().params.source_map_url ?? \"\") == \"app.js.map\" -> saw_map = true\n        if method != \"Debugger.paused\" -> next\n        top: json.parse(text).decode<PausedMessage>().params.call_frames[0]\n        if ![\"render\", \"jet_main\", \"\"].contains(top.function_name) -> return Err(BrowserError{kind: \"protocol\"})\n        _: command(conn, 6, page, \"Debugger.resume\", \"{{}}\", events)\n        child.kill().drop(\"the check is done\")\n        return Ok((paused_line: top.location.line_number + 1, saw_map: saw_map))\n    }\n}\n\nrun: fn() {\n    found: live(8080, 12) ?? return\n    print(\"{found.paused_line} {found.saw_map}\")\n}"
+        },
+        {
+          "key": "D",
+          "name": "Defer: keep the live half in Node",
+          "gist": "No new API. Restore sourcemap.mjs for the live half; the Jet twin keeps only the static half.",
+          "detail": "The deleted Node file comes back beside Tools/web-test/SourceMap.jet. The Jet twin checks the static half: the fetches, the map decoding and the wasm section. Criterion c3 of card #5072 stays open on this ballot.\n\nA stand-in that runs page script, such as reading new Error().stack, is not an option. No page script can see a debugger pause or Chrome's scriptParsed event, so it would print the same line while testing something else.",
+          "code": "// The live half stays in Node, as Tools/web-test/sourcemap.mjs had it before 70532ccd85.\nimport { CdpDriver } from \"../canvas-test/driver.mjs\";\n\nconst driver = await new CdpDriver().launch();\ntry {\n  const session = driver.pageSession;\n  await driver.send(\"Debugger.enable\", {}, session);\n  let sawMapUrl = false;\n  const parsed = driver.waitForEvent(\"Debugger.scriptParsed\", session, 20000)\n    .then((p) => { if (p.sourceMapURL === \"app.js.map\") sawMapUrl = true; });\n  await driver.send(\"Debugger.setBreakpointByUrl\",\n    { urlRegex: \".*app\\\\.js(\\\\?.*)?$\", lineNumber: line, columnNumber: 0 }, session);\n  const pausedPromise = driver.waitForEvent(\"Debugger.paused\", session, 20000);\n  await driver.send(\"Page.navigate\", { url: `http://127.0.0.1:${port}/click/` }, session);\n  const frame = (await pausedPromise).callFrames[0];\n  await parsed;\n  if (![\"render\", \"jet_main\", \"\"].includes(frame.functionName)) throw new Error(frame.functionName);\n  await driver.send(\"Debugger.resume\", {}, session);\n  console.log(JSON.stringify({ pausedGeneratedLine: frame.location.lineNumber + 1, scriptParsedMapUrl: sawMapUrl }));\n} finally {\n  await driver.close();\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A is the only option that reaches the page through Core's one checked CDP handle while events stay named facts. The twin prints the original's two fields: the paused line from frame_line(), and the map flag by comparing hashes.",
+        "gains": [
+          "Commands reach the page, and no session id or payload reaches the caller",
+          "Events stay named facts, and the trace stays free of page content",
+          "A public fact_hash also lets programs compare the existing url_hash"
+        ],
+        "losses": [
+          {
+            "loss": "Six new public items: one method, four event accessors and fact_hash.",
+            "mitigation": "Each answers one need the original had. The accessors are documented together as the debugger group, apart from the network facts."
+          },
+          {
+            "loss": "Each further debugger fact, such as scope values or other frames, needs its own ballot.",
+            "mitigation": "Option B stays available as a later ballot if real tools need many such facts. One ballot per fact keeps each addition reviewed."
+          },
+          {
+            "loss": "fact_hash lets a program match a string, but gives no secrecy.",
+            "mitigation": "The docs say so plainly. The hash's job is keeping strings out of the trace and logs, which it still does."
+          },
+          {
+            "loss": "BrowserEvent stays one flat struct that grows a field per fact.",
+            "mitigation": "Unset facts are empty, as network facts are on a pause today. Splitting the struct would break next_event for every caller."
+          },
+          {
+            "loss": "Sharing chromedriver's own page session with the debugger is unproven.",
+            "mitigation": "The build card's first proof is a live run of A's program against the gauntlet fixture, before any other work."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B ends the rule that events carry named facts, for one domain at first. The next domain that asks for raw events then has no principled refusal."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a second CDP client that skips the protocol check, the trace and the redaction. Its recv has no timeout, and other tools would copy it."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps Node for this check and leaves card #5072's criterion open, so the move to Jet stays unfinished."
+          }
+        ],
+        "tradeoff": "Events stay named facts and the trace stays clean. In exchange, every new debugger fact is a small reviewed addition."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewAddStructType. Checked against Core/Web/Browser.jet and probes, the draft had a private fact_hash, a goto that times out mid-pause, and an asserted function name. Repairs: public fact_hash, Page.navigate, no page BiDi handle (I8), a 64 KiB cap on B, and the own-client and defer options."
+      },
+      "checkInstructions": "Read BrowserProtocol.send, subscribe and next_event, __cdp_event_facts and its #Test, and page_live in Core/Web/Browser.jet. Read the browser automation section of Docs/spec/architecture.md. Read the original with git show 70532ccd85^:Tools/web-test/sourcemap.mjs.\n\nProbes ran with $JET_SCRATCH_ROOT/lanes/Main/integ/seed-b13/jet and JET_TOOLCHAIN_ROOT set to the dev worktree .agent-worktrees/Main-dev-collectall.\n\nfact_hash: a one-file program calling browser.fact_hash(\"app.js.map\") fails with E1004.\ntoday: launch, context().page(), protocol(\"cdp\"), subscribe, send, next_event and kind all check.\ndecode: B's #Rename(.Camel) structs decode a sample Debugger.paused payload and print the line and function.\nown_cdp: option C's whole program passes jet check.\n\nA's and B's new items are proposed and unbuilt, so their programs do not check today. No live browser run was made; sharing chromedriver's page session is the build card's first proof. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "How should a Jet tool send Chrome debugger commands to one page and read where it paused?",
+        "lesson": "Events can carry raw protocol data or a fixed set of named facts. Raw data serves every later need but carries page content past redaction. Named facts stay small and safe, but each new need is a new accessor.",
+        "trio": {
+          "current": {
+            "note": "The only CDP handle belongs to the whole browser, and a pause event carries no line.",
+            "code": "b: browser.launch(\"chromium\")\npage: b.context().page()\n// The only CDP handle belongs to the whole browser; no page has one.\ncdp: b.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n// Sent with no page session, so it reaches the browser, not the page.\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// An event keeps its kind and a few network facts; a pause keeps no line.\nprint(event.kind())"
+          },
+          "wild": {
+            "lang": "JavaScript (Puppeteer)",
+            "note": "Each page gets its own CDP session, and events arrive as raw JSON.",
+            "code": "const cdp = await page.createCDPSession();\nawait cdp.send(\"Debugger.enable\");\ncdp.on(\"Debugger.paused\", (event) => {\n  const frame = event.callFrames[0];\n  console.log(frame.location.lineNumber + 1, frame.functionName);\n});\nawait cdp.send(\"Page.navigate\", { url });"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Page handle and named facts",
+            "gist": "A page's CDP handle; a pause adds its line and a hashed function name.",
+            "gains": [
+              "Events stay named facts with no page content",
+              "fact_hash also lets programs compare existing URL hashes"
+            ],
+            "losses": [
+              "Six new public items",
+              "Each further debugger fact needs its own ballot"
+            ],
+            "proposed": {
+              "code": "// New: a CDP handle for this page only.\ncdp: page.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\n_: cdp.send(\"Debugger.setBreakpointByUrl\", breakpoint)\n_: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// New: named facts from the pause; the rest of the event is dropped.\npaused_line: event.frame_line() + 1\nin_render: event.frame_function_hash() == browser.fact_hash(\"render\")\n_: cdp.send(\"Debugger.resume\", \"{{}}\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Page handle and raw event",
+            "gist": "A page's CDP handle; a debugger event carries its raw JSON.",
+            "gains": [
+              "Every debugger field, now and later, from two accessors"
+            ],
+            "losses": [
+              "Events stop being named facts for one domain",
+              "Other domains will ask for raw events too"
+            ],
+            "proposed": {
+              "code": "// New: a CDP handle for this page only.\ncdp: page.protocol(\"cdp\")\ncdp.subscribe(\"Debugger.paused\")\n_: cdp.send(\"Debugger.enable\", \"{{}}\")\n_: cdp.send(\"Debugger.setBreakpointByUrl\", breakpoint)\n_: cdp.send(\"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\")\nevent: cdp.next_event(browser.timeout(20000))\n// New: the event's raw JSON, decoded into the tool's own struct.\ntop: json.parse(event.payload()).decode<Paused>().call_frames[0]\npaused_line: top.location.line_number + 1\nin_render: top.function_name == \"render\"\n_: cdp.send(\"Debugger.resume\", \"{{}}\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The tool's own CDP client",
+            "gist": "No Core change; the tool starts Chromium and speaks CDP over a WebSocket.",
+            "gains": [
+              "No new Core API",
+              "The tool can read every field"
+            ],
+            "losses": [
+              "A second CDP client that skips checks and redaction",
+              "No receive timeout, so a hung browser hangs the tool"
+            ],
+            "proposed": {
+              "code": "// The tool starts the pinned Chromium and speaks CDP itself.\nchild := process.cmd([String]{chromium.binary(), \"--remote-debugging-port=0\", \"--user-data-dir={profile}\"}).spawn()\nconn: ws.connect(\"ws://127.0.0.1:{listening[0]}{listening[1]}\")\n// Its own helper sends {\"id\", \"method\", \"params\", \"sessionId\"} and matches replies.\n_: command(conn, 3, page, \"Debugger.enable\", \"{{}}\", events)\n_: command(conn, 4, page, \"Debugger.setBreakpointByUrl\", breakpoint, events)\n_: command(conn, 5, page, \"Page.navigate\", \"{{\\\"url\\\":\\\"{url}\\\"}}\", events)\n// recv has no timeout: a hung browser hangs the tool.\ntext: conn.recv().text() ?? \"\"\ntop: json.parse(text).decode<PausedMessage>().params.call_frames[0]\npaused_line: top.location.line_number + 1\nin_render: top.function_name == \"render\""
+            }
+          },
+          {
+            "key": "D",
+            "name": "Defer",
+            "gist": "Keep the live half in Node for now.",
+            "gains": [
+              "Nothing is built before the owner chooses"
+            ],
+            "losses": [
+              "Node stays for this check",
+              "Card #5072's criterion stays open"
+            ],
+            "proposed": {
+              "code": "// The live half stays in Node, beside the Jet static half.\nconst driver = await new CdpDriver().launch();\nconst session = driver.pageSession;\nawait driver.send(\"Debugger.enable\", {}, session);\nawait driver.send(\"Debugger.setBreakpointByUrl\", breakpoint, session);\nconst pausedPromise = driver.waitForEvent(\"Debugger.paused\", session, 20000);\nawait driver.send(\"Page.navigate\", { url }, session);\nconst frame = (await pausedPromise).callFrames[0];\nconst pausedLine = frame.location.lineNumber + 1;\nconst inRender = frame.functionName === \"render\";\nawait driver.send(\"Debugger.resume\", {}, session);"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reaches the page through Core's one checked CDP handle, and events stay named facts. The twin prints the original's paused line and map flag.",
+          "gains": [
+            "Commands reach the page",
+            "No session id or payload reaches the caller",
+            "URL hashes become comparable"
+          ],
+          "losses": [
+            {
+              "loss": "Six new public items.",
+              "mitigation": "Each answers one need the original had, and the docs group them."
+            },
+            {
+              "loss": "Each further debugger fact needs a ballot.",
+              "mitigation": "B stays open as a later ballot if many facts are needed."
+            },
+            {
+              "loss": "fact_hash matches strings but gives no secrecy.",
+              "mitigation": "The docs say so; it still keeps strings out of the trace."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Events stop being named facts, and other domains will follow."
+            },
+            {
+              "key": "C",
+              "reason": "A second CDP client that skips checks, with no receive timeout."
+            },
+            {
+              "key": "D",
+              "reason": "Node stays, and the card's criterion stays open."
+            }
+          ],
+          "tradeoff": "Events stay named facts, but each new debugger fact is a small reviewed addition."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T02:31:52.786Z"
     }
   ],
   "questions": [
@@ -196831,6 +197179,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:31:52.786Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BROWSER-CDP-PAGE1",
+      "note": "How a Jet tool sends Chrome debugger commands to one page and reads where it paused"
+    },
+    {
+      "at": "2026-11-13T02:28:31.513Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c028lxdd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T02:28:30.455Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c028lxdd",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-13T02:25:58.485Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CONTEXT-CALLBACK1",
+      "note": "Whether a C callback can ever read the task context"
+    },
     {
       "at": "2026-11-13T02:24:38.895Z",
       "by": "Main",
