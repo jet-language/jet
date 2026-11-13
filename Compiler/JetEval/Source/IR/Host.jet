@@ -424,15 +424,24 @@ jet_eval_ir_host_fill: fn(types: &IRModule, p: IRProgram, s: &JetEvalIRState, va
         return true
     }
     if checked == .List(element) {
-        items: if value == .List(values) -> values else -> {
-            jet_eval_ir_host_unwritable(s, value, checked)
-            return false
-        }
         element_row: ir_value_type(types, p, element) ?? {
             jet_eval_ir_host_unwritable(s, value, checked)
             return false
         }
         stride: ir_list_stride(types, element_row)
+        // A [U8] read back as its bytes (Values.jet) is written back as them.
+        if value == .Bytes(bytes) && stride == 1 {
+            buffer := 0
+            if bytes.len() > 0 {
+                buffer = jet_eval_native_alloc(s, bytes.len(), 8) ?? return false
+                if !jet_eval_native_put(s, buffer, bytes) -> return false
+            }
+            return jet_eval_ir_write(s, address, 8, bytes.len()) && jet_eval_ir_write(s, address + 8, 8, bytes.len()) && jet_eval_ir_write(s, address + 16, 8, buffer)
+        }
+        items: if value == .List(values) -> values else -> {
+            jet_eval_ir_host_unwritable(s, value, checked)
+            return false
+        }
         data := 0
         if items.len() > 0 -> data = jet_eval_native_alloc(s, stride * items.len(), 8) ?? return false
         loop (index, item) in items {

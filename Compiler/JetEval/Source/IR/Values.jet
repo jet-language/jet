@@ -3,7 +3,7 @@
 // checked type through the builder's layouts (JetIR Build.jet): a struct by
 // its declaration's name, an enum case by its variant name, Some/Ok as
 // Present, None as a clean failure and Err as a told one, a fixed-width
-// integer as an Int.
+// integer as an Int, and a [U8] as its bytes.
 use {
     jet_foundation.[DeclTable, IR_MARKER_ARG_VALUE, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, name_rows_value, type_name, FnBody]
     jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_foreign_index, ir_host_value_row, ir_list_stride, ir_map_row_hashed, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_static_map_order, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
@@ -202,6 +202,14 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             if checked == .List(element) {
                 element_row: ir_value_type(m, p, element) ?? return jet_eval_ir_transport_fail(s, checked)
                 length: jet_eval_ir_read(s, word, 8) ?? return None
+                // A [U8] reads back as its bytes, in one read of its buffer,
+                // not as a boxed value per byte.
+                if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) && ir_list_stride(m, element_row) == 1 {
+                    if length <= 0 -> return Val(TComptimeValue.Bytes{value: [U8]{}})
+                    buffer: jet_eval_ir_read(s, word + 16, 8) ?? return None
+                    bytes: jet_eval_ir_bytes(s, buffer, length) ?? return None
+                    return Val(TComptimeValue.Bytes{value: bytes})
+                }
                 values := [TComptimeValue]{}
                 if length > 0 {
                     data: jet_eval_ir_read(s, word + 16, 8) ?? return None

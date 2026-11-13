@@ -3843,7 +3843,9 @@ sema_checked_runtime_tvalue_supported: fn(definition: ConstDef, value: TComptime
             }
             true
         }
-        .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
+        // A computed [U8] lands as its bytes (JetEval Values.jet).
+        .Bytes(_) -> !definition.mutable
+        .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> false
     }
 }
 
