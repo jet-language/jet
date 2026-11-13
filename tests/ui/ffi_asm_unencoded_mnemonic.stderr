@@ -1,0 +1,8 @@
+Error [jet.AsmUnencodedMnemonic]: Jet's x86-64 template assembler has no encoding for `bswap`
+  --> tests/ui/ffi_asm_unencoded_mnemonic.jet:6:5
+    |
+  6 |     bswap rax ; -> return
+    |     ^^^^^
+ Why: An `#FFI(asm)` body is assembled by the compiler's own x86-64 encoder, which encodes only the instructions it lists, so this line has no bytes to emit
+ Fix: Use an instruction the template assembler encodes, or write this code in an `#FFI(c)` body
+More: jet-lang.dev/e/E3221

@@ -1,0 +1,22 @@
+# An `#FFI(asm)` body that reads the time-stamp counter lowers and runs at
+# every tier. A mnemonic the x86-64 template assembler has no encoding for
+# is E3221 from sema at its own line, one report per line, and the build
+# never reaches the backend.
+fixture: fixtures/asm_rdtsc
+env: NO_COLOR=1
+step: jet run -O0 stamp/stamp.jet
+exit: 0
+stdout: = "true\ntrue\n"
+step: jet run -O1 stamp/stamp.jet
+exit: 0
+stdout: = "true\ntrue\n"
+step: jet run -O2 stamp/stamp.jet
+exit: 0
+stdout: = "true\ntrue\n"
+step: jet build unencoded/unencoded.jet
+exit: 1
+stderr: ~ "Error [jet.AsmUnencodedMnemonic]: Jet's x86-64 template assembler has no encoding for `bswap`" # the first refused line
+stderr: ~ "unencoded.jet:15:5" # at the bswap line
+stderr: ~ "Error [jet.AsmUnencodedMnemonic]: Jet's x86-64 template assembler has no encoding for `popcnt`" # every refused line is reported
+stderr: ~ "unencoded.jet:22:5" # at the popcnt line
+stderr: !~ "internal compiler error" # sema refuses it, so the backend never sees it

@@ -5,17 +5,60 @@ use jet_foundation.[
     Diagnostic,
     Func,
     InlineAsmContract,
+    InlineForeign,
+    Span,
     inline_assembly_contract,
+    inline_assembly_x64_unencoded,
 ]
 
-sema_inline_assembly_contract: fn(function: Func, target: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
+// `source` is the module's text, which holds the body at its span.
+sema_inline_assembly_contract: fn(function: Func, target: String, source: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
+    inline: function.inline_foreign ?? return None
+    contract := InlineAsmContract?{None}
     if inline_assembly_contract(function, target) == {
         .NotAssembly -> return None
-        .Checked(contract) -> return Val(contract)
+        .Checked(checked) -> contract = Val(checked)
         .Incomplete(problem) -> {
-            inline: function.inline_foreign ?? return None
             diagnostics.push(sema_error("E3223", inline.source_span, "this inline assembly operand contract is incomplete", problem, "bind each Jet parameter as `{{name}}`, mark one result with `; -> return`, and list overwritten registers on `; clobbers …`"))
         }
     }
-    None
+    if !sema_inline_assembly_encoded(inline, target, source, diagnostics) -> return None
+    contract
+}
+
+// Whether every instruction of an x86-64 body names a mnemonic Jet's template
+// assembler encodes. E3221 lands on each word that doesn't, read from the
+// body's own text between its triple quotes in `source`, the bytes the
+// backend assembles; at the body string where that text is not at hand.
+// Only x86-64 has the template assembler.
+sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, source: String, diagnostics: &[Diagnostic]) -> Bool {
+    if target != "x86_64" && !target.starts_with("x86_64-") -> return true
+    body := inline.source
+    offset := -1
+    bytes: source.bytes()
+    span: inline.source_span
+    if span.start >= 0 && span.end >= span.start && span.end <= bytes.len() {
+        open := -1
+        at := span.start
+        loop at + 2 < span.end {
+            if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
+                if open < 0 {
+                    open = at + 3
+                    at += 3
+                    next
+                }
+                body = String.from_bytes(bytes.slice(open, at)) ?? break
+                offset = open
+                break
+            }
+            at += 1
+        }
+    }
+    encoded := true
+    loop word in inline_assembly_x64_unencoded(body) {
+        encoded = false
+        site: if offset >= 0 -> Span{start: offset + word.start, end: offset + word.end} else -> span
+        diagnostics.push(sema_error("E3221", site, "Jet's x86-64 template assembler has no encoding for `{word.mnemonic}`", "an `#FFI(asm)` body is assembled by the compiler's own x86-64 encoder, which encodes only the instructions it lists, so this line has no bytes to emit", "use an instruction the template assembler encodes, or write this code in an `#FFI(c)` body"))
+    }
+    encoded
 }

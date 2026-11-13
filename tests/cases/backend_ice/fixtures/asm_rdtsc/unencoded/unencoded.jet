@@ -1,0 +1,30 @@
+package: {
+    name: "asm_unencoded"
+    version: "0.1.0"
+    authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
+}
+use core.mem
+
+// `bswap` and `popcnt` are x86-64 instructions the template assembler
+// has no encoding for: sema reports each line, and the build never
+// reaches the backend.
+#[Unsafe("the body writes only its result register"), FFI(asm)]
+swapped: fn(value: Int) -> Int {
+    """
+    mov rax, {value}
+    bswap rax ; -> return
+    """
+}
+
+#[Unsafe("the body writes only its result register"), FFI(asm)]
+ones: fn(value: Int) -> Int {
+    """
+    popcnt rax, {value} ; -> return
+    """
+}
+
+run: fn() {
+    #Unsafe("call the leaves sema refuses") {
+        print(swapped(1) + ones(3))
+    }
+}

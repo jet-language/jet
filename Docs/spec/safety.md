@@ -211,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1430,
+  "total": 1437,
   "counts": {
     "Compiler": 753,
     "Core": 170,
@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 443
+    "tests": 450
   },
   "regions": [
     {
@@ -7161,6 +7161,48 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet",
+      "line": 8,
+      "column": 1,
+      "reason": "rdtsc writes only rax and rdx, both declared"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet",
+      "line": 19,
+      "column": 1,
+      "reason": "lfence and rdtsc write only rax and rdx, and rdx is declared"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet",
+      "line": 31,
+      "column": 5,
+      "reason": "call the audited rdtsc contracts"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet",
+      "line": 11,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet",
+      "line": 19,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "call the leaves sema refuses"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/added/main.jet",
       "line": 7,
       "column": 13,
@@ -10038,6 +10080,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/ui/ffi_asm_unencoded_mnemonic.jet",
+      "line": 3,
+      "column": 1,
+      "reason": "the body writes only its result register"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/ffi_asm_unknown_clobber.jet",
       "line": 3,
       "column": 1,
@@ -10246,8 +10295,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 443 |
-| **total** | **1430** |
+| tests | 450 |
+| **total** | **1437** |
 
 ### Regions
 
@@ -11244,6 +11293,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 36:1 | "the program claims the runtime's TLS base" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 44:5 | "call the leaf the build refuses" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 50:5 | "call the leaf the build refuses" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet | 8:1 | "rdtsc writes only rax and rdx, both declared" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet | 19:1 | "lfence and rdtsc write only rax and rdx, and rdx is declared" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/stamp/stamp.jet | 31:5 | "call the audited rdtsc contracts" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet | 11:1 | "the body writes only its result register" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet | 19:1 | "the body writes only its result register" |
+| tests | tests/cases/backend_ice/fixtures/asm_rdtsc/unencoded/unencoded.jet | 27:5 | "call the leaves sema refuses" |
 | tests | tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/added/main.jet | 7:13 | "generated" |
 | tests | tests/cases/build_entry/meta_code_never_authorizes_unsafe.fixture/rewritten/main.jet | 17:21 | "generated" |
 | tests | tests/cases/cffi/cffi_raw_status_out_pointer_reads_only_on_success.fixture/main.jet | 16:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
@@ -11655,6 +11710,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/ffi_asm_missing_return_anchor.jet | 3:1 | "cycle counter" |
 | tests | tests/ui/ffi_asm_no_mem.jet | 1:1 | "register-only increment" |
 | tests | tests/ui/ffi_asm_return_clobber.jet | 3:1 | "the result register is overwritten by the body" |
+| tests | tests/ui/ffi_asm_unencoded_mnemonic.jet | 3:1 | "the body writes only its result register" |
 | tests | tests/ui/ffi_asm_unknown_clobber.jet | 3:1 | "the body declares only audited registers" |
 | tests | tests/ui/ffi_body_not_string.jet | 1:1 | "demo" |
 | tests | tests/ui/ffi_inline_asm_call_needs_unsafe_region.jet | 3:1 | "the operands are scalar registers and r10 is a declared clobber" |

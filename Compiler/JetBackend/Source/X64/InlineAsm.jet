@@ -1,6 +1,8 @@
 // Strict Intel-template assembler for audited #FFI(asm) leaves. Never guess an
 // encoding: an unsupported form produces no executable bytes. Register binding
 // is fixed and the write mask rejects placeholders read after their input died.
+use jet_foundation.[INLINE_ASSEMBLY_X64_MNEMONICS]
+
 X64AsmResult: struct {
     code: [U8]
     regs: [Int]
@@ -185,6 +187,8 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         if token != "" -> tokens.push(token)
     }
     mnemonic := tokens[0]
+    // The line grammar's mnemonics are the shared list sema checks against.
+    if !INLINE_ASSEMBLY_X64_MNEMONICS.contains(mnemonic) -> return Val("unsupported mnemonic `{mnemonic}`")
     rest := tokens.slice(1, tokens.len()).join(" ")
     if mnemonic == "lock" {
         if rest.starts_with("cmpxchg ") {
@@ -262,6 +266,24 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         s.written[1] = true
         s.written[2] = true
         s.rbx_dirty = true
+    } else if mnemonic == "rdtsc" || mnemonic == "rdtscp" {
+        // The time-stamp counter: edx:eax receive it; rdtscp also writes
+        // the processor ID to ecx.
+        if rest != "" -> return Val("instruction takes no operands")
+        x64_byte(s.code.bytes, 0x0f)
+        if mnemonic == "rdtsc" -> x64_byte(s.code.bytes, 0x31) else {
+            x64_byte(s.code.bytes, 0x01)
+            x64_byte(s.code.bytes, 0xf9)
+            s.written[1] = true
+        }
+        s.written[0] = true
+        s.written[2] = true
+    } else if mnemonic == "lfence" || mnemonic == "mfence" || mnemonic == "sfence" {
+        // Load, full and store fences: 0F AE E8, F0 and F8.
+        if rest != "" -> return Val("instruction takes no operands")
+        x64_byte(s.code.bytes, 0x0f)
+        x64_byte(s.code.bytes, 0xae)
+        x64_byte(s.code.bytes, if mnemonic == "lfence" -> 0xe8 else if mnemonic == "mfence" -> 0xf0 else -> 0xf8)
     } else if mnemonic == "xgetbv" {
         // ecx selects the extended control register; edx:eax receive it.
         if rest != "" -> return Val("instruction takes no operands")
@@ -328,6 +350,18 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
             byte_reg: x64_asm_byte_register(second)
             x64_store_u8(s.code, mem.base, mem.disp, byte_reg)
         } else { return Val("unsupported mov operands or stale placeholder") }
+    } else if mnemonic == "shl" || mnemonic == "shr" || mnemonic == "sar" {
+        // A register shifted by an imm8 count (0 through 63) or by cl.
+        if operands.len() != 2 -> return Val("expected a register and a count")
+        dst: x64_asm_reg(s, first, true)
+        if dst < 0 -> return Val("unsupported register or stale placeholder")
+        shift: if mnemonic == "shl" -> X64Shift.Shl else if mnemonic == "shr" -> X64Shift.Shr else -> X64Shift.Sar
+        if second == "cl" -> x64_shift_cl(s.code, shift, dst) else {
+            count: Int.parse(second) ?? return Val("expected an imm8 count or cl")
+            if count < 0 || count > 63 -> return Val("shift count is outside 0 through 63")
+            x64_shift_ri(s.code, shift, dst, count)
+        }
+        written = dst
     } else if mnemonic == "add" || mnemonic == "sub" || mnemonic == "and" || mnemonic == "or" || mnemonic == "xor" {
         if operands.len() != 2 -> return Val("expected two register operands")
         dst: x64_asm_reg(s, first, true)
@@ -399,7 +433,7 @@ x64_asm_line: fn(s: &X64AsmState, line: String) -> String? Never! {
         if imm < 0 || imm > 255 -> return Val("expected a byte immediate")
         x64_sse(s.code, 0x66, false, 0x73, x64_asm_sse_shift(mnemonic), dst)
         x64_byte(s.code.bytes, imm)
-    } else { return Val("unsupported mnemonic `{mnemonic}`") }
+    } else { return Val("listed mnemonic `{mnemonic}` has no encoder") }
     if written >= 0 -> s.written[written] = true
     loop comment in parts.slice(1, parts.len()) {
         if comment.trim() == "-> return" {
@@ -436,6 +470,12 @@ X64_GS_BASE_WRITE_BYTES: [U8]{0xf3, 0x48, 0x0f, 0xae, 0xdf}
 // returns. Closed like the switch rail.
 X64_SIGNAL_RETURN: [String]{"lea rsp, [rbp + 8]", "mov eax, 15", "syscall"}
 X64_SIGNAL_RETURN_BYTES: [U8]{0x48, 0x8d, 0x65, 0x08, 0xb8, 0x0f, 0, 0, 0, 0x0f, 0x05}
+// The clone child rail: after the audited clone prologue (`mov r8, 0`,
+// `mov rax, 56`, `syscall` at template stack depth 6), the child pops its
+// entry and argument, aligns its stack, calls the entry and exits. Closed
+// like the switch rail, though any template may spell it.
+X64_CLONE_CHILD: [String]{"test rax, rax", "jnz 2f", "pop rax", "pop rdi", "and rsp, -16", "call rax", "xor edi, edi", "mov eax, 60", "syscall", "2:"}
+X64_CLONE_CHILD_BYTES: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
 
 // Whether the template's non-blank lines are exactly `rail`'s and its
 // operands exactly `operands`, in order.
@@ -485,18 +525,16 @@ x64_assemble_template: fn(template: String, names: [String], returns: Bool, rail
             // Clone's child stack is not the parent's template stack. Admit
             // only this closed, non-returning child rail, never arbitrary
             // labels/branches or frame mutations. jnz skips all 17 child bytes.
-            child: [String]{"test rax, rax", "jnz 2f", "pop rax", "pop rdi", "and rsp, -16", "call rax", "xor edi, edi", "mov eax, 60", "syscall", "2:"}
-            if i < 3 || lines[i - 3].trim() != "mov r8, 0" || lines[i - 2].trim() != "mov rax, 56" || lines[i - 1].trim() != "syscall" || s.depth != 6 || i + child.len() > lines.len() {
+            if i < 3 || lines[i - 3].trim() != "mov r8, 0" || lines[i - 2].trim() != "mov rax, 56" || lines[i - 1].trim() != "syscall" || s.depth != 6 || i + X64_CLONE_CHILD.len() > lines.len() {
                 return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: clone child rail requires the audited clone prologue")}
             }
-            loop (j, expected) in child {
+            loop (j, expected) in X64_CLONE_CHILD {
                 if lines[i + j].trim() != expected {
                     return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: unsupported clone child rail")}
                 }
             }
-            child_bytes: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
-            loop byte in child_bytes -> s.code.bytes.push(byte)
-            i += child.len()
+            loop byte in X64_CLONE_CHILD_BYTES -> s.code.bytes.push(byte)
+            i += X64_CLONE_CHILD.len()
             next
         }
         if x64_asm_line(s, raw.trim()) == .Val(reason) {

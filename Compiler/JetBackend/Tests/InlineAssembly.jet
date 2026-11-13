@@ -1,0 +1,74 @@
+// The x86-64 template assembler and sema's E3221 check read one mnemonic
+// list, so a mnemonic sema admits always reaches an encoder.
+use {
+    jet_backend.[X64_ALU_COUNT, X64_CLONE_CHILD, X64_FIBER_SWITCH, X64_GS_BASE_WRITE, X64_SHIFT_COUNT, X64_SIGNAL_RETURN, X64Alu, X64Shift, x64_alu_rr, x64_assemble_template, x64_byte, x64_code, x64_group_count, x64_mov_rr, x64_shift_ri]
+    jet_foundation.[INLINE_ASSEMBLY_X64_MNEMONICS, INLINE_ASSEMBLY_X64_RAIL_MNEMONICS, inline_assembly_x64_unencoded]
+}
+
+// The template's line-grammar problem, or "" when it assembles.
+inline_assembly_test_problem: fn(template: String, names: [String], returns: Bool) -> String {
+    x64_assemble_template(template, names, returns, false).error ?? ""
+}
+
+#Test("every listed mnemonic reaches an encoder, and an unlisted one is refused") {
+    loop mnemonic in INLINE_ASSEMBLY_X64_MNEMONICS {
+        problem: inline_assembly_test_problem(mnemonic, [String]{}, false)
+        assert(!problem.contains("unsupported mnemonic"))
+        assert(!problem.contains("has no encoder"))
+    }
+    assert(inline_assembly_test_problem("bswap rax", [String]{}, false).contains("unsupported mnemonic `bswap`"))
+    assert(inline_assembly_test_problem("wrgsbase {{base}}", [String]{"base"}, false).contains("unsupported mnemonic `wrgsbase`"))
+}
+
+#Test("the rail mnemonics are exactly the closed templates' words outside the line grammar") {
+    words := [String]{}
+    rails: [[String]]{X64_FIBER_SWITCH, X64_GS_BASE_WRITE, X64_SIGNAL_RETURN, X64_CLONE_CHILD}
+    loop rail in rails {
+        loop line in rail {
+            assert(inline_assembly_x64_unencoded(line).len() == 0)
+            word: line.split(" ").to_list()[0]
+            if !INLINE_ASSEMBLY_X64_MNEMONICS.contains(word) && !words.contains(word) -> words.push(word)
+        }
+    }
+    loop mnemonic in INLINE_ASSEMBLY_X64_RAIL_MNEMONICS {
+        assert(words.contains(mnemonic))
+    }
+    loop word in words {
+        assert(INLINE_ASSEMBLY_X64_RAIL_MNEMONICS.contains(word) || word.ends_with(":"))
+    }
+}
+
+#Test("rdtsc, a shift and an or assemble to the encoder's own bytes") {
+    template: "rdtsc\nshl rdx, 32\nor rax, rdx\nmov {{seed}}, rax ; -> return"
+    assembled: x64_assemble_template(template, [String]{"seed"}, true, false)
+    assert(assembled.error == None)
+    expected := x64_code()
+    x64_byte(expected.bytes, 0x0f)
+    x64_byte(expected.bytes, 0x31)
+    x64_shift_ri(expected, X64Shift.Shl, 2, 32)
+    x64_alu_rr(expected, X64Alu.Or, 0, 2)
+    x64_mov_rr(expected, 7, 0)
+    assert(assembled.code == expected.bytes)
+    assert(assembled.result == 7)
+}
+
+#Test("the time-stamp and fence forms take no operands") {
+    assert(x64_assemble_template("rdtscp", [String]{}, false, false).code == [U8]{0x0f, 0x01, 0xf9})
+    assert(x64_assemble_template("lfence\nmfence\nsfence", [String]{}, false, false).code == [U8]{0x0f, 0xae, 0xe8, 0x0f, 0xae, 0xf0, 0x0f, 0xae, 0xf8})
+    assert(inline_assembly_test_problem("rdtsc rax", [String]{}, false).contains("instruction takes no operands"))
+    assert(inline_assembly_test_problem("shl rax, 64", [String]{}, false).contains("shift count is outside 0 through 63"))
+}
+
+#Test("sema's scan names each unencoded word with its range in the body") {
+    found: inline_assembly_x64_unencoded("    rdtsc\n1:\n    ; clobbers rax\n    bswap rax ; -> return\n")
+    assert(found.len() == 1)
+    assert(found[0].mnemonic == "bswap")
+    assert(found[0].start == 36)
+    assert(found[0].end == 41)
+}
+
+#Test("the encoder's ALU and shift groups are checked views of the mnemonic vocabulary") {
+    assert_eq(X64_ALU_COUNT, 6)
+    assert_eq(X64_SHIFT_COUNT, 3)
+    assert_eq(x64_group_count("Group: enum {{ Add Cmp }}\n", "Group", [String]{"add", "cmp"}), 2)
+}

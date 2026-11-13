@@ -11,6 +11,28 @@
 // (x64_byte, x64_u32, x64_u64, x64_rex, x64_rex_indexed, x64_modrm_reg,
 // x64_patch_rel32, x64_nops) writes a plain byte list and logs nothing: none
 // of its forms branches or reads memory.
+//
+// The ALU and shift groups are checked views of the x86-64 mnemonic
+// vocabulary in JetFoundation's Facts/InlineAssembly.jet: while the compiler
+// builds, X64_ALU_COUNT and X64_SHIFT_COUNT check that each case, lowercased,
+// is a mnemonic there, and a stray stops the build naming it.
+use jet_foundation.[INLINE_ASSEMBLY_X64_ALU_GROUP, INLINE_ASSEMBLY_X64_MNEMONICS, effect_vocabulary_enum_cases]
+
+X64_ALU_COUNT: #run x64_group_count(embed_file("Encoder.jet"), "X64Alu", INLINE_ASSEMBLY_X64_ALU_GROUP)
+X64_SHIFT_COUNT: #run x64_group_count(embed_file("Encoder.jet"), "X64Shift", INLINE_ASSEMBLY_X64_MNEMONICS)
+
+// The number of cases of encoder group `name` in `text` (this file), once
+// each case, lowercased, is one of `vocabulary`; else the build stops naming
+// the strays.
+x64_group_count: fn(text: String, name: String, vocabulary: [String]) -> Int {
+    cases: effect_vocabulary_enum_cases(text, name) ?? panic("Encoder.jet declares no `{name}: enum {{ … }}`")
+    strays := [String]{}
+    loop case_name in cases {
+        if !vocabulary.contains(case_name.to_lower()) -> strays.push("{case_name}")
+    }
+    if strays.len() > 0 -> panic("Encoder.jet: {name} names instructions the x86-64 mnemonic vocabulary (Compiler/JetFoundation/Source/Facts/InlineAssembly.jet) does not declare: [{strays.join(", ")}]")
+    cases.len()
+}
 
 X64_RAX: 0
 X64_RCX: 1

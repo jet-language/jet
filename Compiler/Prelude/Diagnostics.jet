@@ -7913,6 +7913,21 @@ UnsupportedForeignLanguage: struct {
     }
 }
 
+AsmUnencodedMnemonic: struct {
+    mnemonic: String
+
+    impl Diagnostic {
+        code: "E3221"
+        stage: [.Sema]
+        meaning: "An x86-64 inline asm line names a mnemonic Jet's template assembler has no encoding for"
+        detail: true
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "Jet's x86-64 template assembler has no encoding for `{self.mnemonic}`" }
+        why: fn(self) -> String { "An `#FFI(asm)` body is assembled by the compiler's own x86-64 encoder, which encodes only the instructions it lists, so this line has no bytes to emit" }
+        fix: fn(self) -> String { "Use an instruction the template assembler encodes, or write this code in an `#FFI(c)` body" }
+    }
+}
+
 InlineForeignBuildFailed: struct {
     impl Diagnostic {
         code: "E3222"

@@ -4133,9 +4133,10 @@ body is exactly one triple-quoted raw foreign-source string. The Jet signature
 is the checked ABI contract. C, C++, and assembly require an enclosing
 `#Unsafe("reason")` gate; assembly also requires `use core.mem`. The checker
 validates scalar signatures, named operands, the `; -> return` anchor, clobbers,
-and the selected target before lowering. Native code is linked by the native
-build path. Compile-time code links no foreign functions, so a raw body never
-runs at compile time. See
+and the selected target before lowering. On x86-64, every instruction must name
+a mnemonic Jet's template assembler encodes; any other mnemonic is E3221 at
+that line. Native code is linked by the native build path. Compile-time code
+links no foreign functions, so a raw body never runs at compile time. See
 [`Examples/Interop/FFI/InlineC.jet`](../../Examples/Interop/FFI/InlineC.jet)
 and [`Examples/LowLevel/InlineAsm.jet`](../../Examples/LowLevel/InlineAsm.jet).
 (D-FFI-INLINE1, D-FFI-RAWBODY1, D-FFI-ASM1, D-FFI-CPP1)

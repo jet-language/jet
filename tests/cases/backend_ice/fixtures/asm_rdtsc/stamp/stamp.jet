@@ -1,0 +1,35 @@
+package: {
+    name: "asm_rdtsc"
+    version: "0.1.0"
+    authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
+}
+use core.mem
+
+#[Unsafe("rdtsc writes only rax and rdx, both declared"), FFI(asm)]
+stamp: fn(seed: Int) -> Int {
+    """
+    rdtsc
+    shl rdx, 32
+    or rax, rdx
+    mov {seed}, rax ; -> return
+    ; clobbers rax, rdx
+    """
+}
+
+#[Unsafe("lfence and rdtsc write only rax and rdx, and rdx is declared"), FFI(asm)]
+fenced: fn() -> Int {
+    """
+    lfence
+    rdtsc
+    shl rdx, 32
+    or rax, rdx ; -> return
+    ; clobbers rdx
+    """
+}
+
+run: fn() {
+    #Unsafe("call the audited rdtsc contracts") {
+        print(stamp(0) > 0)
+        print(fenced() > 0)
+    }
+}

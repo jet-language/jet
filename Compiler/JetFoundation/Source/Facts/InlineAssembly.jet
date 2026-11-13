@@ -269,3 +269,76 @@ inline_assembly_return_destination: fn(operand: String, params: [Param], target:
     if target_supported && inline_assembly_register_known(target, register) -> return Val(InlineAsmOutput.Register{name: register})
     None
 }
+
+// The mnemonics Jet's x86-64 template assembler (JetBackend X64/InlineAsm.jet)
+// encodes through its line grammar; it refuses a line whose first word is
+// none of them. `lock` and `rep` are the prefixes that grammar admits.
+// JetBackend's encoder group X64Shift is a checked subset of this list.
+INLINE_ASSEMBLY_X64_MNEMONICS: [String]{
+    "push", "pop", "call", "syscall", "pause", "cpuid", "xgetbv", "rdtsc", "rdtscp", "lfence", "mfence", "sfence",
+    "cld", "std", "rep", "lock", "mov", "movzx", "add", "sub", "and", "or", "xor", "shl", "shr", "sar",
+    "cmpxchg", "xchg", "xadd", "movups", "movaps", "paddd", "pshufd", "pshufb", "palignr", "pblendw", "pxor", "por",
+    "sha256rnds2", "sha256msg1", "sha256msg2", "aesenc", "aesenclast", "aesdec", "aesdeclast", "pclmulqdq",
+    "psrlq", "psrldq", "psllq", "pslldq",
+}
+
+// The x86-64 ALU opcode group, by its /digit order in the 0x81 and 0x83
+// encodings: the vocabulary JetBackend's encoder group X64Alu picks from
+// (X64Alu is a checked subset of it). The template grammar encodes the
+// register forms of those it lists in INLINE_ASSEMBLY_X64_MNEMONICS.
+INLINE_ASSEMBLY_X64_ALU_GROUP: [String]{"add", "or", "adc", "sbb", "and", "sub", "xor", "cmp"}
+
+// The further mnemonics the runtime's closed templates spell. The assembler
+// encodes each of those templates whole, to fixed bytes, and no other line
+// with one of these words.
+INLINE_ASSEMBLY_X64_RAIL_MNEMONICS: [String]{"lea", "ret", "wrgsbase", "test", "jnz"}
+
+// One instruction word of an x86-64 `#FFI(asm)` body that the template
+// assembler has no encoding for, and its byte range in the body.
+InlineAsmUnencoded: struct {
+    mnemonic: String
+    start: Int
+    end: Int
+}
+
+// Every instruction word of x86-64 template `body` that names no mnemonic
+// the template assembler encodes, in body order. A blank or comment-only
+// line and a numeric label such as `1:` hold no instruction.
+inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
+    found := [InlineAsmUnencoded]{}
+    bytes := body.bytes()
+    index := 0
+    loop index < bytes.len() {
+        if inline_assembly_ascii_whitespace(bytes[index]) {
+            index += 1
+            next
+        }
+        start := index
+        loop index < bytes.len() {
+            if Int.from_u8(bytes[index]) == 59 || inline_assembly_ascii_whitespace(bytes[index]) -> break
+            index += 1
+        }
+        end := index
+        loop index < bytes.len() {
+            if Int.from_u8(bytes[index]) == 10 -> break
+            index += 1
+        }
+        if end == start || inline_assembly_x64_label(bytes, start, end) -> next
+        word := String.from_bytes(bytes.slice(start, end)) ?? ""
+        if INLINE_ASSEMBLY_X64_MNEMONICS.contains(word) || INLINE_ASSEMBLY_X64_RAIL_MNEMONICS.contains(word) -> next
+        found.push(InlineAsmUnencoded{mnemonic: word, start: start, end: end})
+    }
+    found
+}
+
+// Whether `bytes[start..<end]` is a numeric label: digits, then one `:`.
+inline_assembly_x64_label: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    if end - start < 2 || Int.from_u8(bytes[end - 1]) != 58 -> return false
+    index := start
+    loop index < end - 1 {
+        code := Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return false
+        index += 1
+    }
+    true
+}
