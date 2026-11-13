@@ -25,7 +25,7 @@ use {
 // `v4.public` over the strict Ed25519 primitive. JSON goes through Jet's one
 // RFC 8259 parser and no token-controlled algorithm or purpose is dispatched.
 // Password hashes are opaque caller-supplied values compared in constant time.
-// Every session rule is Jet; the temporary host cell dies at cutover.
+// Every session rule and the session store are Jet.
 
 /// Verification failure. Every variant and payload is part of the contract.
 #Error
@@ -319,16 +319,27 @@ b64url_value: fn(b: U8) -> Int Never! {
 
 // ── Session store ───────────────────────────────────────────────────────────
 //
-// All validation, expiry, comparison and retry policy is source below.
-// Until the world Shared root/reset seam lands, only the byte-cell operation
-// remains in the existing host. The source CAS replacement is preserved in
-// commit 82149c775 and must land with that seam, never as a parallel store.
-__store_load: fn() -[DB]> [U8] Never! {
-    core.auth.__state_load()
+// Users, sessions, magic-link tokens and OAuth states live in one process
+// store: the encoded records, held by a module `Shared` cell. All validation,
+// expiry, comparison and retry policy is source below. `store_replace`
+// installs new records only while the cell still holds the bytes the caller
+// read, under one edit lock, so a concurrent change makes the caller retry
+// instead of losing an update.
+AuthStoreCell: struct {
+    bytes: [U8]
 }
 
-__store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
-    core.auth.__state_replace(expected, replacement)
+AUTH_STORE: Shared{AuthStoreCell{bytes: [U8]{}}}
+
+store_load: fn() -[DB]> [U8] Never! {
+    AUTH_STORE.bytes
+}
+
+store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
+    cell := AUTH_STORE.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
 }
 
 /// Register an identity with an already-computed password hash.
@@ -337,13 +348,13 @@ register_user: fn(user_id: String, password_hash: String) Err! -[DB]> {
     if password_hash.trim().len() == 0 || password_hash.len() > 4096 -> return Err("password hash is invalid")
     delivery: delivery_capability(user_id)
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         loop record in records {
             if record.kind == 1 && record.a == user_id -> return Err("user `{user_id}` already registered")
         }
         records.push(AuthRecord{kind: 1, a: user_id, b: password_hash, c: delivery ?? "", n: if delivery == None -> 0 else -> 1})
-        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok()
+        if store_replace(seen, encode_store(records)) -> return Ok()
     }
 }
 
@@ -351,7 +362,7 @@ register_user: fn(user_id: String, password_hash: String) Err! -[DB]> {
 password_login: fn(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
     session: new_session(user_id, now_ms, ttl_ms)
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         ok := false
         loop record in records {
@@ -359,14 +370,14 @@ password_login: fn(user_id: String, password_hash: String, now_ms: Int, ttl_ms: 
         }
         if !ok -> return Err("invalid credentials")
         records.push(session_record(session))
-        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(session)
+        if store_replace(seen, encode_store(records)) -> return Ok(session)
     }
 }
 
 /// The live session named by `session_id` at `now_ms`.
 session_validate: fn(session_id: String, now_ms: Int) -[DB]> Session Err! {
     if !valid_session_id(session_id) -> return Err("missing: session")
-    records: decode_store(core.auth.__store_load()) ?? return Err("auth store is unavailable")
+    records: decode_store(store_load()) ?? return Err("auth store is unavailable")
     loop record in records {
         if record.kind == 2 && ct_text(record.a, session_id) {
             if now_ms >= record.n -> return Err("token expired")
@@ -382,7 +393,7 @@ magic_link_issue: fn(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Str
     if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
     delivery: delivery_capability(user_id) ?? return Err("magic link requires a delivery-capable identity")
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records := decode_store(seen) ?? return Err("auth store is unavailable")
         registered := false
         loop record in records {
@@ -391,7 +402,7 @@ magic_link_issue: fn(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Str
         if !registered -> return Err("magic link requires a registered delivery identity")
         token: opaque_token("magic")
         records.push(AuthRecord{kind: 3, a: token, b: user_id, c: delivery, n: expires_at})
-        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(token)
+        if store_replace(seen, encode_store(records)) -> return Ok(token)
     }
 }
 
@@ -400,7 +411,7 @@ magic_link_consume: fn(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Ses
     _: expiry(now_ms, ttl_ms)
     if !valid_identifier(token, 256) -> return Err("token expired")
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records: decode_store(seen) ?? return Err("auth store is unavailable")
         index: find_live(records, 3, token, now_ms)
         if index < 0 -> return Err("token expired")
@@ -415,7 +426,7 @@ magic_link_consume: fn(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Ses
         session: new_session(entry.b, now_ms, ttl_ms)
         next := without_index(records, index)
         next.push(session_record(session))
-        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
+        if store_replace(seen, encode_store(next)) -> return Ok(session)
     }
 }
 
@@ -427,7 +438,7 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
     expires_at: checked_i64(now_ms + 600000) ?? return Err("OAuth state lifetime is out of range")
     state: opaque_token("oauth")
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records: decode_store(seen) ?? return Err("auth store is unavailable")
         // Drop expired states; at the cap the oldest live state gives way.
         live := 0
@@ -448,7 +459,7 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
             }
         }
         next.push(AuthRecord{kind: 4, a: state, b: provider, c: state, n: expires_at})
-        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(state)
+        if store_replace(seen, encode_store(next)) -> return Ok(state)
     }
 }
 
@@ -456,7 +467,7 @@ oauth_begin: fn(provider: String) -[DB, Env, Time, Rand]> String Err! {
 oauth_finish: fn(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
     if !valid_identifier(state, 256) || assertion.len() == 0 -> return Err("OAuth completion is invalid")
     loop {
-        seen: core.auth.__store_load()
+        seen: store_load()
         records: decode_store(seen) ?? return Err("auth store is unavailable")
         index: find_live(records, 4, state, now_ms)
         if index < 0 -> return Err("OAuth state is expired or unknown")
@@ -466,7 +477,7 @@ oauth_finish: fn(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[D
         session: new_session(subject, now_ms, ttl_ms)
         next := without_index(records, index)
         next.push(session_record(session))
-        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
+        if store_replace(seen, encode_store(next)) -> return Ok(session)
     }
 }
 

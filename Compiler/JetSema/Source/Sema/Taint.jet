@@ -327,7 +327,7 @@ sema_taint_core_effect: fn(module_name: String, method: String) -> String? Never
     if ["core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"].contains(module_name) && (method == "reader" || method == "writer") -> return Val("FS")
     if module_name == "core.compute" && method != "device_cpu" -> return Val("GPU")
     if module_name == "core.crypto" && method.starts_with("__jetc_") -> return Val("FS")
-    if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish", "__store_load", "__store_replace"].contains(method) -> return Val("DB")
+    if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish"].contains(method) -> return Val("DB")
     if module_name == "core.crypto.vault" && ["get", "current", "versions", "load", "status", "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped", "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"].contains(method) -> return Val("Secret")
     if module_name == {
         "core.files" -> Val("FS")

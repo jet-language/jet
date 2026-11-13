@@ -2036,8 +2036,11 @@ private-field correction following Measurement/LogSpan, not a plaintext
 ### `core.auth` — token verification and sessions
 
 `core.auth` verifies the closed JWT and PASETO forms and provides password,
-OAuth, magic-link, and cookie-session helpers. It is Jet source; the host keeps
-only the D-AUTH1=A byte cell that holds the session store.
+OAuth, magic-link, and cookie-session helpers. It is Jet source, the session
+store included: one process-wide module `Shared` cell holds the users,
+sessions, magic-link tokens and OAuth states. A change installs only while the
+store still holds what the change read, so concurrent changes retry rather than
+lose one another.
 
 | API | Result | Description |
 | --- | --- | --- |
