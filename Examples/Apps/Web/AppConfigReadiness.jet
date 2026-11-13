@@ -1,0 +1,32 @@
+// A web app is not ready until its settings are. `web.serve<Settings>` decodes
+// the one typed settings record from APP_ variables before any socket binds,
+// so a missing or malformed value stops the app with E2416 and exit 78: every
+// failure on its own line, naming its variable and field, a secret-named value
+// hidden, and no port opened. Good settings build the app that serves.
+package: {
+    name: "app_config_readiness"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Decode]
+Settings: struct {
+    db_url: String
+    pool_size: Int
+    // A numeric key from the payment provider; a bad one is reported hidden.
+    api_key: Int
+}
+
+build: fn(settings: Settings) -> App {
+    url: settings.db_url
+    size: settings.pool_size
+    web.app().get("/", fn() { Ok(server.response(200, "orders on {url}, pool of {size}")) })
+}
+
+run: fn() {
+    web.serve<Settings>(prefix: "APP_", build: build)
+}
