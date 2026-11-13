@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101766,
+    "rev": 101767,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26691,7 +26691,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-11-13T20:50:06.144Z",
+      "updated": "2026-11-13T20:50:21.601Z",
       "updatedBy": "Main",
       "workOrder": 87,
       "goals": [
@@ -200905,6 +200905,230 @@
       "created": "2026-11-13T18:56:10.345Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-13"
+    },
+    {
+      "id": "D-HTTP-READINESS1",
+      "cardId": "c0uasubv",
+      "group": "library",
+      "title": "How a probe reads whether a Jet HTTP server is ready: both a method and a built-in route, a method only, or a route only",
+      "situation": "Card #3078 c16 asks for readiness to be a state a probe can read through drain: not ready, ready, draining and closed. Today the server tracks its phases privately. Its only public signal is the stdout ready line. Nothing tells a draining server from a ready one, and a supervisor or load balancer can't ask. This vote picks the public shape. A gives a method on HTTPServer and a built-in probe route built on it. B gives the method only. C gives the route only. We recommend A.",
+      "gist": "Should a server's readiness be read by a method and a built-in probe route, by the method only, or by the route only?",
+      "lesson": "A readiness probe asks a running server whether to send it traffic. The answer changes while the program runs. It is no before the server serves and yes while it serves. It turns no again as soon as shutdown starts, while admitted requests still finish.",
+      "explainer": "Words used here. A probe is a check that a supervisor runs again and again against a program. Kubernetes, load balancers and systemd all run them. A readiness probe decides whether traffic is sent. A liveness probe decides whether the program is restarted.\n\nDraining is the time after shutdown starts. No new work is admitted, and requests in flight get up to a grace period to finish. Binding opens the port; serving starts taking connections from it. Between the two, the kernel queues connections but nobody answers them.",
+      "story": "Ana deploys app.serve() behind a load balancer that checks a path every 5 seconds. Under B she has no server value to ask, because serve never returns. She moves to bind, runs serve in a task, and writes a second admin server whose route calls server.readiness().\n\nUnder A and C she points the load balancer at /__jet/ready and writes nothing. On SIGTERM the route answers 503 draining until the requests in flight end. The balancer stops sending traffic before the port closes.\n\nHer colleague Raj also needs the database pool in the answer. Under A he serves a /ready route on a private admin listener. It combines server.readiness() with pool.ready(). The public balancer keeps using /__jet/ready.",
+      "inWild": "// Spring Boot: readiness is a published state that flips on shutdown,\n// and Actuator serves it as a probe route.\n// https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability\nAvailabilityChangeEvent.publish(ctx, ReadinessState.REFUSING_TRAFFIC);\n// GET /actuator/health/readiness -> {\"status\":\"OUT_OF_SERVICE\"} (503)\n\n// ASP.NET Core: health checks tagged \"ready\" back a mapped probe route.\n// https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks\napp.MapHealthChecks(\"/healthz/ready\", new() { Predicate = c => c.Tags.Contains(\"ready\") });",
+      "detail": "What this ballot decides: the public shape of #3078 c16. It builds on c1, not ready before resources are usable, and c2, shutdown stops admission before resources close. It adds no new error code.\n\nCurrent code, on the #3078 c9 stack, is in Core/Http/Server.jet. __HTTPServerState (:264-273) holds a phase and a stopping flag. Phase 0 is bound, 1 is serving and 2 is finished. serve (:297-359) moves phase 0 to 1 and accepts until stopping is set or its accept is cancelled. It then waits up to the drain budget for live connections (:348-353). Last it sets phase 2 with its report.\n\nshutdown(grace) (:367-375) sets stopping. bind (:554-577) opens the listener with the state at phase 0. None of this is public. A signal-cancelled accept drains without setting stopping (:329-330). So the private state can't yet tell draining from serving there. Every option fixes that by setting stopping when the accept loop ends.\n\nThe states, the same for every option:\n- NotReady: bound, not yet serving. The kernel queues connections, so a plain TCP probe reads ready too early.\n- Ready: serving and accepting.\n- Draining: shutdown called, or accept cancelled by a signal, with admitted requests still finishing.\n- Closed: serve has reported. Also the state when shutdown runs before serve ever starts.\n\nBind failure: bind returns Err and no HTTPServer exists. There is no state to read under any option. A probe gets connection refused, which every prober reads as not ready. A settings failure (#3078 c14) exits 78 before bind, with the same result.\n\nOut of scope: resource health after start, such as a pool going bad. c1 is met by building resources before bind (D-VERDICT-3086-1=A). A live resource check is the expert path under A and B.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Both: HTTPServer.readiness() -> HTTPReadiness, and a built-in GET /__jet/ready route that answers from it",
+          "gist": "No code for the common probe; the state is readable when a program needs more.",
+          "detail": "The method of B, plus the route of C, which answers from readiness(). It follows C's drain rule. A handler has no accessor for its own server, and A adds none. So a composed probe lives on a private admin listener, or reads a cell the program fills with the server after bind.\n\nBeginner path: as C, nothing to write. Expert path: read the state and combine it with pool.ready(). Serve that on a private admin listener, or through a cell filled after bind.\n\nGain: both paths, and the route and the method can't disagree because one reads the other. Loss: the surfaces of B and C together.",
+          "technical": "Proposed, not implemented. The work of B, then the work of C with the route handler calling readiness(). Proof: the AppLifecycle golden prints each state as the method reports it. Beside it, it prints what the route answers, through the drain.",
+          "code": "web.app().get(\"/order\", place_order).serve()   // probes use /__jet/ready\n\n// Expert: a probe that also checks the pool, on a private admin listener.\nlistening: app.bind(\"0.0.0.0:8080\") ?? return Err(err)\nadmin: web.app().get(\"/ready\", fn() {\n    ok: listening.readiness() == .Ready && (pool.ready() ?? false)\n    Ok(http_server.response(if ok -> 200 else -> 503, \"\"))\n}).bind(\"127.0.0.1:9090\") ?? return Err(err)"
+        },
+        {
+          "key": "B",
+          "name": "A method only: HTTPServer.readiness() -> HTTPReadiness { NotReady, Ready, Draining, Closed }",
+          "gist": "The program reads the state; any probe route is user code.",
+          "detail": "One public enum and one public method on HTTPServer. The method reads the private state under its lock, with no I/O. The four cases are as listed in the ballot detail.\n\nBeginner path: app.serve() never returns a server, so a beginner gets nothing here. They must switch to bind, run serve in a task, and write a probe route. A route on the same app can't see its own server, since no handler accessor exists. So the usual answer is a second admin listener, or a cell filled after bind.\n\nExpert path: full control. Combine the state with pool.ready() and serve it on a private admin port that the public balancer never sees.\n\nGain: the smallest surface, with no reserved path and no change to drain. Loss: probes need user code in every service, the Go pattern. The beginner path is the expert path.",
+          "technical": "Proposed, not implemented. Add HTTPReadiness: enum { NotReady, Ready, Draining, Closed } to core.http.server, exported in Prelude/Core.rows. Add a readiness(self) -> HTTPReadiness Never! method on HTTPServer. When serve's accept loop ends, it sets stopping before it drains, so a signal stop reads Draining.\n\nProof: the Examples/Network/AppLifecycle golden prints each state from a probe task. It reads NotReady after bind, Ready after serve starts and Draining during shutdown while a handler holds its lease. It reads Closed after the report. A case covers shutdown before serve, which reads Closed and was never Ready.",
+          "code": "listening: app.bind(\"0.0.0.0:{settings.port}\") ?? return Err(err)\nprint(listening.readiness())   // NotReady: bound, not serving\nserving: task { listening.serve() ?? panic(\"serve\") }\n// ... Ready while serving\nreport: listening.shutdown(5s) // Draining until in-flight requests end\nprint(listening.readiness())   // Closed"
+        },
+        {
+          "key": "C",
+          "name": "A route only: every served app answers GET /__jet/ready with 200 ready, or 503 draining",
+          "gist": "Probes work with no user code; the state itself stays private.",
+          "detail": "Every app served with app.serve() or app.bind() answers GET /__jet/ready. The /__jet/ prefix already holds jet dev's /__jet/reload. The answer is 200 with the body ready, or 503 with draining. The route can't show NotReady, because nothing accepts before serve starts. NotReady is visible only through a method (A, B).\n\nDuring drain, the server keeps accepting connections for the grace period. It stays within the admission limits it already enforces. A connection over those limits is refused as today. It answers /__jet/ready with 503 draining, and any other request with 503 and Connection: close.\n\nToday the listener stops accepting at once and probes get connection refused. A load balancer can't tell that from a crash. Every user path also answers 503 during drain, so a liveness probe must not use a user path. A TCP liveness check keeps passing until Closed.\n\nA user route on /__jet/ready takes the place of the built-in one, but under C it has no state to read. Beginner path: nothing to write; point the probe at /__jet/ready. Expert path: no way to read the state from code, so a custom route that adds the pool can't report draining.\n\nGain: the probe a deployment needs, with no code, from app.serve() too. Loss: one reserved path, the drain change, a wider overloaded count, and no read from code.",
+          "technical": "Proposed, not implemented. __app_table adds the route the same way the dev reload route is added (Core/Web/Web.jet:547). The serve accept loop goes on accepting during the drain budget, through the same __admit limits. It answers 503 and closes.\n\nThe ShutdownReport counts these as overloaded, not as accepted work. That widens overloaded from over the connection limits to also refused while draining. The spec text for the report changes with it. HTTPServer users who build their own HTTPMux get no route; only web.app does.\n\nProof: the AppLifecycle golden runs a probe client against /__jet/ready. It prints 200 ready, then 503 draining during the grace period, then connection refused after Closed.",
+          "code": "web.app().get(\"/order\", place_order).serve()\n// probe: GET /__jet/ready -> 200 ready\n// SIGTERM: GET /__jet/ready -> 503 draining (in-flight requests finishing)\n// after the report: connection refused"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kubernetes",
+          "note": "Readiness is a state that starts false, turns true, and turns false again on shutdown. A failing readiness probe removes the pod from its Service's endpoints. Source: https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/",
+          "code": "readinessProbe:\n  httpGet: { path: /__jet/ready, port: 8080 }"
+        },
+        {
+          "lang": "Spring Boot",
+          "note": "ApplicationAvailability publishes ReadinessState, the shape of B. Actuator serves it as /actuator/health/readiness, the shape of C. Together they are A. Source: https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability",
+          "code": "availability.getReadinessState() // ACCEPTING_TRAFFIC | REFUSING_TRAFFIC"
+        },
+        {
+          "lang": "Go net/http",
+          "note": "No readiness state. Each service writes its own handler and flips a flag before Server.Shutdown: B's expert path as the only path. Source: https://pkg.go.dev/net/http#Server.Shutdown",
+          "code": "var ready atomic.Bool\nhttp.HandleFunc(\"/ready\", func(w http.ResponseWriter, r *http.Request) { if !ready.Load() { w.WriteHeader(503) } })"
+        },
+        {
+          "lang": "systemd",
+          "note": "Type=notify: the service sends READY=1 when it can serve and STOPPING=1 when it drains. The state is pushed, not polled. Source: https://www.freedesktop.org/software/systemd/man/latest/sd_notify.html",
+          "code": "sd_notify(0, \"STOPPING=1\");"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The owner's settings ruling (D-VERDICT-3086-1=A) rejected a design in which every author must remember a step. B repeats that for probes and leaves app.serve(), the beginner path, with no probe. C gives experts no way to add the pool to the answer. A gives both from one state, so they can't disagree.",
+        "gains": [
+          "A deployed app gets a correct readiness probe, including 503 during drain, with no code.",
+          "Code can read the same state to compose its own probe.",
+          "A draining server answers 503 instead of refusing connections, so a load balancer can tell it from a crashed one."
+        ],
+        "losses": [
+          {
+            "loss": "New public names: the HTTPReadiness enum, its four cases, readiness() and the reserved /__jet/ready path.",
+            "mitigation": "The path sits under /__jet/, which jet dev already uses, and a user route replaces it."
+          },
+          {
+            "loss": "During the grace period the drain answers new connections 503 with Connection: close instead of refusing them. The report's overloaded count widens to include them.",
+            "mitigation": "Admission of work still stops at once (c2). The existing admission limits cap these connections. Only the refusal becomes a readable answer, which load balancers need."
+          },
+          {
+            "loss": "During drain every user path answers 503, so an HTTP liveness probe on a user path would restart a draining pod.",
+            "mitigation": "Point liveness at a TCP check, which passes until Closed; the guide says so."
+          },
+          {
+            "loss": "A handler can't read its own server's state.",
+            "mitigation": "A composed probe lives on an admin listener or reads a cell filled after bind. A handler accessor would be a separate ballot."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every service writes its own probe, and app.serve() users get none without moving to bind. That is the remember-a-step shape D-VERDICT-3086-1 rejected."
+          },
+          {
+            "key": "C",
+            "reason": "The state stays private, so an expert probe that adds the pool can't report draining, and NotReady is never visible."
+          }
+        ],
+        "tradeoff": "The no-code probe costs a reserved path and a drain that answers 503 instead of refusing."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G6Meta-4. The recommended option holds after five fixes: an admin-listener expert path, a TCP liveness rule, capped drain answers, a method-only NotReady and a full name count."
+      },
+      "checkInstructions": "Code reads only. No probe was run, because checks were on hold for the sweep2 A/B. Use the #3078 c9 stack tree.\n\nRead Core/Http/Server.jet. :264-273 holds __HTTPServerState, with phase and stopping. :297-359 is serve: the cancelled accept at :329-330 doesn't set stopping, the drain is at :348-353, then it finishes. :367-375 is shutdown, :396-401 is __server_request_stop and :554-577 is bind at phase 0.\n\nRead Core/Web/Web.jet:547 for the /__jet/reload route that the probe route would sit beside. Read Examples/Network/AppLifecycle.jet, from the #3078 c8 SUB. It already shuts down while a handler holds a lease, which is where c16's golden prints the states.",
+      "surface": {
+        "gist": "Should a server's readiness be read by a method and a built-in route, by the method only, or by the route only?",
+        "lesson": "A readiness probe asks whether to send traffic. The answer is no before serving, yes while serving, and no again from the start of shutdown.",
+        "trio": {
+          "current": {
+            "note": "Today the only signal is the stdout ready line; a draining server looks the same as a ready one.",
+            "code": "web.app().get(\"/order\", place_order).serve()\n// stdout: serving http://127.0.0.1:8080\n// SIGTERM: new connections are refused at once"
+          },
+          "wild": {
+            "lang": "Spring Boot",
+            "note": "A readiness state code can read, served as a probe route that turns 503 on shutdown.",
+            "code": "availability.getReadinessState() // ACCEPTING_TRAFFIC\n// GET /actuator/health/readiness -> 503 while shutting down"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Both",
+            "gist": "The route is built on the method; beginners write nothing, and experts read the state.",
+            "gains": [
+              "A probe with no code, from app.serve() too",
+              "The state is readable to compose a custom probe"
+            ],
+            "losses": [
+              "A reserved path and a drain that answers 503"
+            ],
+            "proposed": {
+              "code": "web.app().get(\"/order\", place_order).serve()\n// GET /__jet/ready -> 200 ready, 503 draining\n// code: listening.readiness() == .Ready"
+            }
+          },
+          {
+            "key": "B",
+            "name": "server.readiness()",
+            "gist": "A method returns NotReady, Ready, Draining or Closed; probe routes are user code.",
+            "gains": [
+              "The smallest surface",
+              "No change to drain"
+            ],
+            "losses": [
+              "app.serve() users get no probe without moving to bind"
+            ],
+            "proposed": {
+              "code": "listening: app.bind(\"0.0.0.0:8080\") ?? return Err(err)\nserving: task { listening.serve() ?? panic(\"serve\") }\nprint(listening.readiness()) // Ready"
+            }
+          },
+          {
+            "key": "C",
+            "name": "GET /__jet/ready",
+            "gist": "Every served app answers 200 or 503, including during drain, with no user code.",
+            "gains": [
+              "A probe with no code"
+            ],
+            "losses": [
+              "No read from code, so custom probes can't report draining"
+            ],
+            "proposed": {
+              "code": "web.app().get(\"/order\", place_order).serve()\n// GET /__jet/ready -> 200 ready, 503 draining"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "B leaves app.serve() with no probe, and C hides the state from code. A gives both from one state.",
+          "gains": [
+            "A no-code probe",
+            "A readable state"
+          ],
+          "losses": [
+            {
+              "loss": "A reserved path and a drain that answers 503.",
+              "mitigation": "Admission of work still stops at once, within the existing limits."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every service writes its own probe, the step D-VERDICT-3086-1 rejected for settings."
+            },
+            {
+              "key": "C",
+              "reason": "A custom probe can't report draining."
+            }
+          ],
+          "tradeoff": "The no-code probe costs a reserved path and a drain that answers 503."
+        }
+      },
+      "reports": [
+        {
+          "title": "Kubernetes: liveness, readiness and startup probes",
+          "url": "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/",
+          "note": "Readiness is a changing state; a TCP probe treats an open port as ready."
+        },
+        {
+          "title": "Spring Boot: application availability",
+          "url": "https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability",
+          "note": "ReadinessState flips to REFUSING_TRAFFIC on graceful shutdown; Actuator exposes it as a probe group."
+        },
+        {
+          "title": "ASP.NET Core health checks",
+          "url": "https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks",
+          "note": "Checks tagged ready back a mapped readiness route."
+        },
+        {
+          "title": "Go net/http Server.Shutdown",
+          "url": "https://pkg.go.dev/net/http#Server.Shutdown",
+          "note": "Closes listeners first, then waits for idle connections; readiness is user code."
+        },
+        {
+          "title": "sd_notify",
+          "url": "https://www.freedesktop.org/software/systemd/man/latest/sd_notify.html",
+          "note": "READY=1 and STOPPING=1 push the state to the supervisor."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T20:50:21.601Z"
     }
   ],
   "questions": [
@@ -204250,6 +204474,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T20:50:21.601Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-HTTP-READINESS1",
+      "note": "How a probe reads whether a Jet HTTP server is ready: both a method and a built-in route, a method only, or a route only"
+    },
     {
       "at": "2026-11-13T20:50:06.144Z",
       "by": "Main",
