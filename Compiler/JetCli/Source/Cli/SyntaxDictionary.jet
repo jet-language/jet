@@ -39,8 +39,8 @@ jet_cli_edit_distance: fn(left: String, right: String) -> Int Never! {
 }
 
 // An exact spelling wins before ASCII case folding: `Effect` (the type) and
-// `effect` (the keyword), or `#static` and `#Static`, are separate rows, and
-// each row's own display must find that row.
+// `effect` (the keyword), or `state` (the keyword) and `#State` (the marker),
+// are separate rows, and each row's own display must find that row.
 jet_cli_syntax_lookup: fn(query: String) -> Int? Never! {
     trimmed: query.trim()
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
@@ -57,9 +57,30 @@ jet_cli_syntax_display: fn(row: JetCLISyntaxRow) -> String Never! {
     if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
 }
 
-jet_cli_syntax_plain_text: fn(row: JetCLISyntaxRow) -> String Never! {
+// The plain meaning of a row's kind, which is all a generated keyword or
+// marker row has until prose is written for it.
+jet_cli_syntax_kind_meaning: fn(row: JetCLISyntaxRow) -> JetCLISyntaxMeaning Never! {
+    display: jet_cli_syntax_display(row)
+    text: if row.kind == {
+        .Marker -> "The marker `{display}`."
+        .Literal -> "The literal `{display}`."
+        .Keyword | .Operator | .Sigil | .Type | .Builtin -> "The Jet keyword `{display}`."
+    }
+    example: if row.kind == JetCLISyntaxKind.Literal -> display else -> "{display} …"
+    JetCLISyntaxMeaning{position: "", text: text, example: example, afterwards: "", related_codes: [String]{}}
+}
+
+// The hand-written prose of a row (JET_CLI_SYNTAX_PROSE, by token and kind).
+jet_cli_syntax_prose_index: fn(row: JetCLISyntaxRow) -> Int? Never! {
+    loop (index, prose) in JET_CLI_SYNTAX_PROSE {
+        if prose.token == row.token && prose.kind == row.kind -> return Val(index)
+    }
+    None
+}
+
+jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Never! {
     text := ""
-    loop (index, meaning) in row.meanings {
+    loop (index, meaning) in meanings {
         if index > 0 -> text = "{text}\n"
         indent := ""
         if meaning.position != "" {
@@ -74,12 +95,28 @@ jet_cli_syntax_plain_text: fn(row: JetCLISyntaxRow) -> String Never! {
     text
 }
 
+// A row's meanings: its prose, else its own, else the plain meaning of its kind.
+jet_cli_syntax_plain_text: fn(row: JetCLISyntaxRow) -> String Never! {
+    if jet_cli_syntax_prose_index(row) == .Val(found) -> return jet_cli_syntax_meanings_text(JET_CLI_SYNTAX_PROSE[found].meanings)
+    if row.meanings.len() > 0 -> return jet_cli_syntax_meanings_text(row.meanings)
+    jet_cli_syntax_meanings_text([JetCLISyntaxMeaning]{jet_cli_syntax_kind_meaning(row)})
+}
+
+// The first line of jet_cli_syntax_plain_text's meanings.
+jet_cli_syntax_first_meaning: fn(row: JetCLISyntaxRow) -> String Never! {
+    if jet_cli_syntax_prose_index(row) == .Val(found) {
+        if JET_CLI_SYNTAX_PROSE[found].meanings.len() == 0 -> return ""
+        return JET_CLI_SYNTAX_PROSE[found].meanings[0].text
+    }
+    if row.meanings.len() > 0 -> return row.meanings[0].text
+    jet_cli_syntax_kind_meaning(row).text
+}
+
 // The syntax-registry explanation of a dictionary token, or None.
 jet_cli_syntax_explanation: fn(query: String) -> DiagnosticExplanation? Never! {
     index: jet_cli_syntax_lookup(query) ?? return None
     row: JET_CLI_SYNTAX_ROWS[index]
-    meaning: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
-    Val(DiagnosticExplanation{code: query.trim(), stage: "syntax registry", meaning: meaning, what: Val(jet_cli_syntax_plain_text(row).trim_end()), why: None, fix: None, example: None})
+    Val(DiagnosticExplanation{code: query.trim(), stage: "syntax registry", meaning: jet_cli_syntax_first_meaning(row), what: Val(jet_cli_syntax_plain_text(row).trim_end()), why: None, fix: None, example: None})
 }
 
 jet_cli_syntax_ascii_alphanumeric: fn(code: Int) -> Bool Never! {

@@ -1,10 +1,10 @@
 // Offline syntax dictionary lookup, plaintext essays, and typo classification.
 use {
     jet_cli.[
-        JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, JetCLISyntaxRow, jet_cli_edit_distance, jet_cli_explain_build_fact_name,
-        jet_cli_explain_policy, jet_cli_grammar_constants, jet_cli_grammar_tokens, jet_cli_syntax_display,
-        jet_cli_syntax_lookup, jet_cli_syntax_nearest, jet_cli_syntax_plain_text, jet_cli_syntax_query,
-        jet_cli_toolchain_root,
+        JET_CLI_SYNTAX_PROSE, JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, JetCLISyntaxRow, jet_cli_edit_distance,
+        jet_cli_explain_build_fact_name, jet_cli_explain_policy, jet_cli_grammar_constants, jet_cli_grammar_tokens,
+        jet_cli_syntax_display, jet_cli_syntax_lookup, jet_cli_syntax_nearest,
+        jet_cli_syntax_plain_text, jet_cli_syntax_query, jet_cli_toolchain_root,
     ]
     cli_files: core.files
 }
@@ -30,10 +30,22 @@ use {
     if jet_cli_explain_build_fact_name("#build.target.os") != .Val("Build.OS") -> panic("build fact precedes syntax typo classification")
     if jet_cli_explain_build_fact_name("#Build.Settings.Mode") != .Val("Build.Settings.mode") -> panic("dynamic setting normalization")
     if jet_cli_explain_build_fact_name("#build.settings.") != .None || jet_cli_explain_build_fact_name("#build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
+    // The generated rows: every JET_KEYWORD_LIST word, and each Prelude marker
+    // as a marker, under its Prelude spelling, with the plain meaning of its kind.
+    yield_row: JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("yield") ?? panic("a listed keyword has a row")]
+    if yield_row.kind != JetCLISyntaxKind.Keyword || jet_cli_syntax_plain_text(yield_row) != "The Jet keyword `yield`.\nExample:\n  yield …\n" -> panic("a generated keyword row explains itself")
+    unsafe_row: JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("unsafe") ?? panic("a Prelude marker has a row")]
+    if unsafe_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(unsafe_row) != "#Unsafe" || unsafe_row.registry_name != "MARKER_SOURCE" -> panic("a keyword spelled as a marker is a marker row")
+    if jet_cli_syntax_display(JET_CLI_SYNTAX_ROWS[jet_cli_syntax_lookup("#cli") ?? panic("CLI row")]) != "#CLI" -> panic("a marker row keeps its Prelude spelling")
+    if jet_cli_syntax_lookup("#Pure") != .None -> panic("an undeclared marker has no row")
     loop row in JET_CLI_SYNTAX_ROWS {
-        if row.meanings.len() == 0 || row.registry_name == "" -> panic("every syntax row explains itself")
+        if jet_cli_syntax_plain_text(row) == "" || row.registry_name == "" -> panic("every syntax row explains itself")
         found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
+    }
+    // Written prose is keyed by a row's token and kind; prose no row has is stale.
+    loop prose in JET_CLI_SYNTAX_PROSE {
+        if !JET_CLI_SYNTAX_ROWS.any(fn(row) { row.token == prose.token && row.kind == prose.kind }) -> panic("syntax prose for `{prose.token}` names no dictionary row")
     }
 }
 
