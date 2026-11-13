@@ -1,0 +1,29 @@
+# `p.cast<U>()` names the same address as a `*U`: an Int read as its bytes and
+# back, on every tier. A cast moves no bytes and checks nothing where it is
+# made: a read through a cast pointer that is not aligned for its type is a
+# located R0803 sentry fault.
+fixture: a_raw_pointer_cast_reads_the_same_address.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "2\n1\n259\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "2\n1\n259\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "2\n1\n259\n"
+step misalignednone: jet run --optimize=none misaligned.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # the report also carries the gate and the faulting address, which varies with ASLR
+stderr: ~ "misaligned.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "is not aligned to 8 bytes." # the address before it varies with ASLR
+step misalignedfull: jet run --optimize=full misaligned.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]" # the report also carries the gate and the faulting address, which varies with ASLR
+stderr: ~ "misaligned.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "is not aligned to 8 bytes." # the address before it varies with ASLR

@@ -3928,6 +3928,8 @@ sema_expr_try_method_special_routes: fn(receiver: Expr, receiver_value: TExpr, m
     if event_handle.handled -> return event_handle
     int_abs := sema_call_try_int_abs_source(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if int_abs.handled -> return int_abs
+    pointer_cast := sema_expr_try_pointer_cast(receiver, receiver_value, method, type_args, args, span, expected, environment, program, scopes, state, context, diagnostics)
+    if pointer_cast.handled -> return pointer_cast
     // Complex is not Numeric; its magnitude is its own
     // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
     if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
@@ -6077,6 +6079,37 @@ sema_expr_check_pointer_from_address: fn(alias: String, alias_span: Span, elemen
     if forbidden -> return None
     pointer := Type.Apply{name: "Ptr", args: [Type]{element}}
     sema_expr_expected_owned(sema_tree_node(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, diagnostics)
+}
+
+// `p.cast<U>()` on a raw pointer `*T`: the same address as a `*U`, so reads
+// and writes through it see a `U`. It is E3101 outside `#Unsafe`. The checked
+// tree is the `Ptr<U>.from_addr` of the pointer's own word, which moves no
+// bytes; the sentry checks U's size and alignment where the new pointer is
+// read or written.
+sema_expr_try_pointer_cast: fn(receiver: Expr, receiver_value: TExpr, method: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if method != "cast" -> return unhandled
+    receiver_type: sema_expr_unwrap_tag(receiver_value.ty)
+    if receiver_type == .Apply(name, pointee) {
+        if name != "Ptr" || pointee.len() != 1 -> return unhandled
+    } else {
+        return unhandled
+    }
+    if !sema_expr_require_unsafe(method, span, context, diagnostics) -> return rejected
+    if type_args.len() != 1 {
+        diagnostics.push(sema_call_generic_count_diagnostic(method, 1, type_args.len(), span))
+        return rejected
+    }
+    if args.len() != 0 {
+        diagnostics.push(sema_call_arity_diagnostic(method, 0, args.len(), false, span))
+        return rejected
+    }
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return rejected
+    element: sema_expr_expected_type(type_args[0], environment, program)
+    pointer := Type.Apply{name: "Ptr", args: [Type]{element.copy()}}
+    value: sema_tree_node(pointer, TExprKind.PtrFromAddr{address: receiver_value, element: element}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(value, expected, environment, program, diagnostics)}
 }
 
 sema_expr_check_comptime_name: fn(name: String, span: Span, embedded: CtValue?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

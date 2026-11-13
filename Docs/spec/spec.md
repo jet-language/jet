@@ -3020,6 +3020,15 @@ runs past the end of a live local is a located R0801 fault. See
 `tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.case`.
 (D-RAWPTR2=A)
 
+`p.cast<U>()` is the same address as `p`, typed as a `*U`. It takes one type
+argument and no value arguments, and it is E3101 outside `#Unsafe`. A cast
+moves no bytes and checks nothing where it is made. A read or write through
+the `*U` is a raw access at `U`'s size and alignment, so under the memory
+sentry a cast pointer that is not aligned for `U` is a located R0803 fault
+where it is read. See
+`tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using
