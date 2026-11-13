@@ -1,0 +1,26 @@
+# Safe widening is one rule at every typed slot, on O0, O1 and O2:
+# Int(lo..hi) and U8 into Int, I8 into I16 and F32 into Float, passed (to a
+# function, an optional parameter and a list method), returned (a name and a
+# field read, tail and early), assigned (a local and fields) and stored (struct
+# fields, list items, map items). The other way is narrowing and stays
+# refused: an Int passed, returned or assigned where an Int(1..100) is wanted,
+# an I16 stored where an I8 is, an Int where a U8 list item is.
+fixture: safe_widening_fills_every_typed_slot_on_every_tier.fixture
+env: NO_COLOR=1
+step O0: jet run --optimize=none main.jet
+exit: 0
+stdout: = safe_widening_fills_every_typed_slot_on_every_tier.out
+step O1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = safe_widening_fills_every_typed_slot_on_every_tier.out
+step O2: jet run --optimize=full main.jet
+exit: 0
+stdout: = safe_widening_fills_every_typed_slot_on_every_tier.out
+step refused: jet check refused.jet
+exit: nonzero # every narrowing below is refused
+stderr: ~ "`ranged` wants Int (a whole number from 1 to 100) for argument 1, but this is Int (a whole number)" # an Int argument does not narrow into a range
+stderr: ~ "but `returned` returns Int(1..100)" # an Int return does not narrow into a range
+stderr: ~ "This needs Int(1..100), but the value is Int" # an Int assignment does not narrow into a range
+stderr: ~ "This needs I8, but the value is I16" # a struct field does not narrow I16 into I8
+stderr: ~ "A list item needs U8 (an 8-bit whole number, 0 to 255), but this is Int (a whole number)" # a list item does not narrow Int into U8
+stderr: ~ "5 problems found" # each narrowing is its own problem, and nothing else is reported

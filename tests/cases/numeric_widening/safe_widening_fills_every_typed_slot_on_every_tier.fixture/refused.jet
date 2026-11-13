@@ -1,0 +1,28 @@
+// The other way is narrowing, which is never implicit: an `Int` does not go
+// where an `Int(lo..hi)` or a `U8` is wanted, nor an `I16` where an `I8` is,
+// passed, returned, assigned or stored.
+Small: struct {
+    value: I8
+}
+
+ranged: fn(size: Int(1..100)) -> Int { size }
+
+passed: fn(value: Int) -> Int { ranged(value) }
+
+returned: fn(value: Int) -> Int(1..100) { value }
+
+assigned: fn(value: Int, size: Int(1..100)) -> Int {
+    slot := size
+    slot = value
+    slot
+}
+
+stored: fn(wide: I16, count: Int) -> Int {
+    small: Small{value: wide}
+    bytes: [U8]{count}
+    bytes.len()
+}
+
+run: fn() {
+    print(passed(5) + returned(5) + assigned(5, 6) + stored(I16{1}, 2))
+}

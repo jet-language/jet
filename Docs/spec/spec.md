@@ -212,6 +212,13 @@ vocabulary](vocabulary.md).
   unit types use the same source-kind names. Text interpretation is
   `Target.parse(text)`. Source-owned `to_*` conversions, casts, and a neutral
   `convert` helper are not Jet syntax (D-SHAPE-CONVERT1=A).
+- Safe integer widening is one rule at every place a value meets a declared
+  type: call and Core-call arguments, returns, local and place assignments,
+  struct-literal fields, and list and map items. A whole number passes where
+  the declared whole-number type (or the payload of a declared optional) holds
+  all of its values: `Int(1..100)` and `U8` into `Int`, `I8` into `I16`,
+  `Int(1..10)` into `Int(1..100)`. `U64` does not pass into `Int`, and
+  narrowing is never implicit; that crossing is `Target.from_int(value)`.
 - A `Duration` is a signed whole-nanosecond `i64` carrier. Construct one with
   `Duration.nanoseconds`, `.microseconds`, `.milliseconds`, `.seconds`,
   `.minutes`, or `.hours`; non-finite and out-of-range input produces

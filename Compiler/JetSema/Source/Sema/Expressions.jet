@@ -1215,6 +1215,8 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
     if sema_expr_unit_coherent_value(owned, required, environment, program) == .Val(coherent) -> return Val(coherent.move())
     compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
     if !compatible {
+        widened: sema_expr_numeric_safe_widening(owned, required, environment)
+        if widened != None -> return widened
         // `#As`: a struct whose `#As` field fills `required` passes as that field.
         if sema_expression_as_field(offered, required, owned.span, environment, program) == .Val(as_field) {
             span: owned.span
@@ -1225,6 +1227,46 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
         return None
     }
     Val(sema_expr_expected_trait_coercion(owned, required, offered, environment, program))
+}
+
+// Safe widening, the one implicit numeric crossing at a typed slot: a whole
+// number whose every value the required whole-number type holds goes in as it
+// is, so `U8` or `Int(1..100)` fills an `Int`, `I8` an `I16`, `U8` an
+// `Int(0..300)`, and any of them the payload of an optional. Narrowing (`Int`
+// into `Int(1..100)`, `I16` into `I8`) is never implicit, and neither is `U64`
+// into `Int`, which it may not fit. A float keeps its width at a slot, and a
+// tagged number keeps its tag's refusals.
+sema_expr_numeric_safe_widening: fn(value: TExpr, required: Type, environment: SemaScopeEnvironment) -> TExpr? {
+    source: sema_expr_integer_safe_range(value.ty) ?? return None
+    line: sema_source_line_at(environment.source_segments, value.span) ?? 0
+    if sema_expr_integer_safe_range(required) == .Val(target) {
+        if target.lo <= source.lo && source.hi <= target.hi -> return sema_expr_numeric_conversion(value, required, value.span, line)
+        return None
+    }
+    if sema_expr_unwrap_tag(required) == .Option(payload) {
+        target: sema_expr_integer_safe_range(payload) ?? return None
+        if source.lo < target.lo || target.hi < source.hi -> return None
+        widened: sema_expr_numeric_conversion(value, payload, value.span, line) ?? return None
+        span: widened.span
+        return Val(sema_tree_node(sema_expr_unwrap_tag(required), TExprKind.Present{value: widened}, span))
+    }
+    None
+}
+
+// The values an untagged whole-number type holds, for safe widening. `Int`
+// and `I64` hold every 64-bit signed value. `U64` has no range here: its top
+// half is past `Int`, so it neither widens nor is widened into.
+sema_expr_integer_safe_range: fn(ty: Type) -> SemaIntegerRange? {
+    if ty == {
+        .Int -> Val(SemaIntegerRange{lo: Int.MIN, hi: Int.MAX})
+        .IntN(signed, bits) -> {
+            if signed && bits >= 64 -> return Val(SemaIntegerRange{lo: Int.MIN, hi: Int.MAX})
+            if bits >= 64 -> return None
+            Val(sema_expr_integer_range(signed, bits))
+        }
+        .InlineRange(_, lo, hi) -> Val(SemaIntegerRange{lo: lo, hi: hi})
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+    }
 }
 
 // Whether sema_expr_expected(value, expected) is `value` itself, decided by

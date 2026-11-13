@@ -1,0 +1,71 @@
+// Safe widening is one rule at every typed slot: a whole number whose every
+// value the slot's type holds goes in as it is. `Int(lo..hi)` and `U8` fill an
+// `Int`, `I8` an `I16`, `U8` an `Int(0..300)`: passed, returned, assigned, as
+// a struct field, as a list or map item, and as an optional's payload.
+Ledger: struct {
+    total: Int
+    wide: I16
+    span: Int(0..300)
+}
+
+plain: fn(value: Int) -> Int { value * 2 }
+
+maybe: fn(value: Int?) -> Int { value ?? -1 }
+
+// Passed: to a function, an optional parameter and a list method.
+passed: fn(size: Int(1..1073741824), byte: U8) -> Int {
+    items := [Int]{}
+    items.push(size)
+    items.push(byte)
+    plain(size) + plain(byte) + maybe(size) + maybe(byte) + items[0] + items[1]
+}
+
+Holder: struct {
+    ranged: Int(1..100)
+    byte: U8
+}
+
+// Returned: a name and a field read, as the tail and through `return`.
+tail: fn(size: Int(1..100)) -> Int { size }
+
+field_tail: fn(holder: Holder) -> Int { holder.ranged }
+
+byte_tail: fn(holder: Holder) -> Int { holder.byte }
+
+early: fn(holder: Holder) -> Int {
+    if holder.ranged > 50 -> return holder.ranged
+    if holder.byte > 50 -> return holder.byte
+    0
+}
+
+// Assigned: to a local and to fields.
+assigned: fn(size: Int(0..255), small: I8, byte: U8) -> Ledger {
+    total := 0
+    total = size
+    ledger := Ledger{total: 0, wide: I16{0}, span: 0}
+    ledger.total = size + total
+    ledger.wide = small
+    ledger.span = byte
+    ledger
+}
+
+// Stored: as struct fields, list items and map items.
+stored: fn(size: Int(1..100), byte: U8, small: I8) -> Ledger {
+    items: [Int]{size, byte}
+    named: [String: Int]{"size": size, "byte": byte}
+    Ledger{total: items[0] + items[1] + (named["size"] ?? 0) + (named["byte"] ?? 0), wide: small, span: size}
+}
+
+run: fn() {
+    byte: U8{7}
+    print(passed(21, byte))
+    print(tail(5))
+    holder: Holder{ranged: 60, byte: U8{9}}
+    print(field_tail(holder))
+    print(byte_tail(holder))
+    print(early(holder))
+    moved: assigned(255, I8{-3}, U8{200})
+    print("{moved.total} {moved.wide} {moved.span}")
+    kept: stored(4, byte, I8{2})
+    print("{kept.total} {kept.wide} {kept.span}")
+}

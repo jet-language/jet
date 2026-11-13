@@ -426,7 +426,9 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
                     inference_failed = true
                 }
                 .Element(value) -> {
-                    can_widen: sema_expr_numeric_widening_to(item_type, inferred_element) ?? false
+                    // The join picked this type, so the item widens into it,
+                    // safely (`U8` into `U16`) or checked (`Int` into `Float`).
+                    can_widen: sema_expr_numeric_widening_to(item_type, inferred_element) != None
                     if {
                         can_widen -> {
                             line: sema_source_line_at(environment.source_segments, expr_span(elements[part_index])) ?? 0
