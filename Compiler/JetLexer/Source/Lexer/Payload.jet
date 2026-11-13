@@ -4,6 +4,8 @@
 // consulting the Rust lexer.
 use {
     jet_foundation.[
+        BLOCK_COMMENT_CLOSE,
+        BLOCK_COMMENT_OPEN,
         Diagnostic,
         DiagnosticLabel,
         Name,
@@ -537,21 +539,21 @@ interpolation_end: fn(source: [U8], start: Int, limit: Int) -> Int Never! {
     depth := 1
     loop cursor < limit {
         value: byte_at(source, cursor)
-        if value == 47 && byte_at(source, cursor + 1) == 47 {
+        if value == LINE_COMMENT_FIRST && byte_at(source, cursor + 1) == LINE_COMMENT_SECOND {
             cursor += 2
             loop cursor < limit && byte_at(source, cursor) != 10 -> cursor += utf8_width(source, cursor)
             next
         }
-        if value == 47 && byte_at(source, cursor + 1) == 42 {
+        if value == BLOCK_OPEN_FIRST && byte_at(source, cursor + 1) == BLOCK_OPEN_SECOND {
             cursor += 2
             comment_depth := 1
             loop cursor < limit && comment_depth > 0 {
                 if {
-                    byte_at(source, cursor) == 47 && byte_at(source, cursor + 1) == 42 -> {
+                    byte_at(source, cursor) == BLOCK_OPEN_FIRST && byte_at(source, cursor + 1) == BLOCK_OPEN_SECOND -> {
                         comment_depth += 1
                         cursor += 2
                     }
-                    byte_at(source, cursor) == 42 && byte_at(source, cursor + 1) == 47 -> {
+                    byte_at(source, cursor) == BLOCK_CLOSE_FIRST && byte_at(source, cursor + 1) == BLOCK_CLOSE_SECOND -> {
                         comment_depth -= 1
                         cursor += 2
                     }
@@ -1132,7 +1134,7 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
     }
     if kind == K_CHAR -> return (decoded: name_intern(tables.names, decode_char(slice_text(source, start, end), start, diagnostics)), keep: true, literal: -1)
     if kind == K_BLOCK_COMMENT && scan_block_comment_end(source, start) < 0 {
-        add_diagnostic(diagnostics, "E0002", start, end, "this `/*` comment never gets a closing `*/`", "a block comment starts with `/*` and runs until a matching `*/`", "add a `*/` to close the comment")
+        add_diagnostic(diagnostics, "E0002", start, end, "this `{BLOCK_COMMENT_OPEN}` comment never gets a closing `{BLOCK_COMMENT_CLOSE}`", "a block comment starts with `{BLOCK_COMMENT_OPEN}` and runs until a matching `{BLOCK_COMMENT_CLOSE}`", "add a `{BLOCK_COMMENT_CLOSE}` to close the comment")
     }
     (decoded: text, keep: true, literal: -1)
 }

@@ -3,7 +3,24 @@
 // The scanner emits private four-field raw-token facts consumed by both
 // payload construction and the terminator pass:
 // [kind, byte_start, byte_end, first_char_is_uppercase].
-use unicode: core.text
+use {
+    jet_foundation.[BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, COMMENT_PREFIX]
+    unicode: core.text
+}
+
+// The comment spellings of the syntax registry, as the two bytes each one is,
+// fixed when the lexer is built.
+LINE_COMMENT_FIRST: #run Int.from_u8(COMMENT_PREFIX.bytes()[0])
+
+LINE_COMMENT_SECOND: #run Int.from_u8(COMMENT_PREFIX.bytes()[1])
+
+BLOCK_OPEN_FIRST: #run Int.from_u8(BLOCK_COMMENT_OPEN.bytes()[0])
+
+BLOCK_OPEN_SECOND: #run Int.from_u8(BLOCK_COMMENT_OPEN.bytes()[1])
+
+BLOCK_CLOSE_FIRST: #run Int.from_u8(BLOCK_COMMENT_CLOSE.bytes()[0])
+
+BLOCK_CLOSE_SECOND: #run Int.from_u8(BLOCK_COMMENT_CLOSE.bytes()[1])
 
 byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
@@ -400,21 +417,21 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
             i += utf8_width(source, i)
             next
         }
-        if value == 47 && byte_at(source, i + 1) == 47 {
+        if value == LINE_COMMENT_FIRST && byte_at(source, i + 1) == LINE_COMMENT_SECOND {
             i += 2
             loop i < source.len() && byte_at(source, i) != 10 -> i += utf8_width(source, i)
             next
         }
-        if value == 47 && byte_at(source, i + 1) == 42 {
+        if value == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND {
             i += 2
             comment_depth := 1
             loop i < source.len() && comment_depth > 0 {
                 if {
-                    byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
+                    byte_at(source, i) == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND -> {
                         comment_depth += 1
                         i += 2
                     }
-                    byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
+                    byte_at(source, i) == BLOCK_CLOSE_FIRST && byte_at(source, i + 1) == BLOCK_CLOSE_SECOND -> {
                         comment_depth -= 1
                         i += 2
                     }
@@ -511,11 +528,11 @@ scan_block_comment_end: fn(source: [U8], start: Int) -> Int Never! {
     depth := 1
     loop i < source.len() && depth > 0 {
         if {
-            byte_at(source, i) == 47 && byte_at(source, i + 1) == 42 -> {
+            byte_at(source, i) == BLOCK_OPEN_FIRST && byte_at(source, i + 1) == BLOCK_OPEN_SECOND -> {
                 depth += 1
                 i += 2
             }
-            byte_at(source, i) == 42 && byte_at(source, i + 1) == 47 -> {
+            byte_at(source, i) == BLOCK_CLOSE_FIRST && byte_at(source, i + 1) == BLOCK_CLOSE_SECOND -> {
                 depth -= 1
                 i += 2
             }
@@ -590,7 +607,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             if i < source.len() -> i += 1
             next
         }
-        if value == 47 && next1 == 47 {
+        if value == LINE_COMMENT_FIRST && next1 == LINE_COMMENT_SECOND {
             if config_surface && byte_at(source, i - 1) == 58 {
                 last_code = push_code(facts, K_SLASH, i, i + 1, false)
                 last_code = push_code(facts, K_SLASH, i + 1, i + 2, false)
@@ -601,7 +618,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             emit(facts, K_LINE_COMMENT, start, i, false)
             next
         }
-        if value == 47 && next1 == 42 {
+        if value == BLOCK_OPEN_FIRST && next1 == BLOCK_OPEN_SECOND {
             end: scan_block_comment_end(source, start)
             i = if end < 0 -> -end - 1 else -> end
             emit(facts, K_BLOCK_COMMENT, start, i, false)
