@@ -1,15 +1,16 @@
-// One World-lifetime state, shared by controlled descendants. World136: refs0
+// One World-lifetime state, shared by controlled descendants. World144: refs0
 // mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40 nextSequence48 live56
 // runnable64 budget72 timers [I64]@80 (triples deadlineNs, sequence, OWNED
 // ParkSlot), history [owned E4]@104, OWNED logical environment cell@128 (0
-// until first use; LogicalEnvironment.jet). TCB104 borrows active World;112
-// flags (active1/waiting2);120 owns parked slot. Task edges never reset clocks,
-// RNG, timers, history, environment or the execution budget. Ordering reference
-// (the Rust scheduler): it releases one due timer then waits idle, finishes
-// waiting tasks before provider/world restoration, and restores provider
-// first, then the previous World.
+// until first use; LogicalEnvironment.jet), OWNED Core store list@136 (0
+// until first use; world_store_entry). TCB104 borrows active World;112 flags
+// (active1/waiting2);120 owns parked slot. Task edges never reset clocks, RNG,
+// timers, history, environment, stores or the execution budget. Ordering
+// reference (the Rust scheduler): it releases one due timer then waits idle,
+// finishes waiting tasks before provider/world restoration, and restores
+// provider first, then the previous World.
 
-WORLD_BYTES: I64{136}
+WORLD_BYTES: I64{144}
 
 world_require: fn(world: I64) {
     if (world == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
@@ -178,6 +179,7 @@ world_increment: fn(address: I64) {
     if (sync_load(wrapping(history + I64{8})) != I64{0}) -> jet_rt_free(rows, sync_load(wrapping(history + I64{8})) * I64{8}, I64{8})
     environment: sync_load(wrapping(world + I64{128}))
     if (environment != I64{0}) -> logical_environment_drop(environment)
+    world_stores_drop(sync_load(wrapping(world + I64{136})))
     jet_rt_free(world, WORLD_BYTES, I64{8})
 }
 // Save32: previous World, previous provider, flags, owned parked slot.
@@ -467,4 +469,92 @@ world_wait: fn(world: I64, accept_timer: Bool) {
     sync_store(wrapping(base + I64{112}), flags)
     sync_store(wrapping(base + I64{120}), slot)
     jet_rt_world_drop(world)
+}
+
+// A World's own cell for each Core store that keeps its state as bytes
+// (core.auth's sessions, core.web's live registry). While a World is active,
+// Core reads and replaces the World's cell instead of its process store, so
+// a World and its descendants never read or change the process store, and
+// the cells end with the World. Entry32: next0, OWNED store name8, OWNED
+// packed bytes16 (align 1), length24. The World mutex guards the list and
+// every entry.
+
+// The entry for `store`, created empty on first use. The caller holds the
+// World mutex.
+world_store_entry: fn(world: I64, store: I64) -> I64 {
+    entry := sync_load(wrapping(world + I64{136}))
+    loop entry != (I64{0}) {
+        if jet_rt_string_eq(sync_load(wrapping(entry + I64{8})), store) -> return entry
+        entry = sync_load(entry)
+    }
+    entry = jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(entry, I64{32})
+    sync_store(entry, sync_load(wrapping(world + I64{136})))
+    sync_store(wrapping(entry + I64{8}), jet_rt_string_clone(store))
+    sync_store(wrapping(world + I64{136}), entry)
+    entry
+}
+
+world_stores_drop: fn(first: I64) {
+    entry := first
+    loop entry != (I64{0}) {
+        next_entry: sync_load(entry)
+        jet_rt_string_drop(sync_load(wrapping(entry + I64{8})))
+        length: sync_load(wrapping(entry + I64{24}))
+        if (length != I64{0}) -> jet_rt_free(sync_load(wrapping(entry + I64{16})), length, I64{1})
+        jet_rt_free(entry, I64{32}, I64{8})
+        entry = next_entry
+    }
+}
+
+// The active World's bytes for `store` (empty until first replaced): a fresh
+// [U8] in data_out/length_out, presence 1. Outside a World: 0, outputs 0.
+#Export(c) jet_rt_world_store_load: fn(store: I64, data_out: I64, length_out: I64) -> I64 {
+    sync_store(data_out, I64{0})
+    sync_store(length_out, I64{0})
+    world: world_current()
+    if (world == I64{0}) -> return I64{0}
+    sync_mutex_lock(wrapping(world + I64{8}))
+    entry: world_store_entry(world, store)
+    length: packed_bytes_out(sync_load(wrapping(entry + I64{16})), sync_load(wrapping(entry + I64{24})), data_out)
+    sync_mutex_unlock(wrapping(world + I64{8}))
+    sync_store(length_out, length)
+    I64{1}
+}
+
+// Installs `next` as the active World's bytes for `store` only while they
+// still equal `expected`; whether it did goes to `some`, presence 1. Outside a
+// World nothing changes: 0.
+#Export(c) jet_rt_world_store_replace: fn(store: I64, expected: I64, expected_length: I64, next: I64, next_length: I64, some: I64) -> I64 {
+    rt_text_store(some, I64{0})
+    world: world_current()
+    if (world == I64{0}) -> return I64{0}
+    old_length: if (expected_length < I64{0} || expected == I64{0}) -> I64{0} else -> expected_length
+    new_length: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
+    sync_mutex_lock(wrapping(world + I64{8}))
+    entry: world_store_entry(world, store)
+    data: sync_load(wrapping(entry + I64{16}))
+    length: sync_load(wrapping(entry + I64{24}))
+    same := length == old_length
+    at := I64{0}
+    loop same && at < length {
+        same = rt_text_byte(wrapping(data + at)) == host_u8_get(expected, at)
+        at += I64{1}
+    }
+    if !same {
+        sync_mutex_unlock(wrapping(world + I64{8}))
+        return I64{1}
+    }
+    replacement: if (new_length == I64{0}) -> I64{0} else -> jet_rt_alloc(new_length, I64{1})
+    at = I64{0}
+    loop at < new_length {
+        rt_text_put(wrapping(replacement + at), host_u8_get(next, at))
+        at += I64{1}
+    }
+    if (length != I64{0}) -> jet_rt_free(data, length, I64{1})
+    sync_store(wrapping(entry + I64{16}), replacement)
+    sync_store(wrapping(entry + I64{24}), new_length)
+    sync_mutex_unlock(wrapping(world + I64{8}))
+    rt_text_store(some, I64{1})
+    I64{1}
 }

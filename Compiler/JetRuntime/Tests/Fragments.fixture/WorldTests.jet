@@ -87,3 +87,37 @@
     jet_rt_free(log, I64{8}, I64{8})
     I64{0}
 }
+
+// A World's store cells start empty, replace only over the expected bytes,
+// stay apart per store name, and are absent outside the World.
+#Export(c) jet_rt_world_store_fixture: fn() -> I64 {
+    world: jet_rt_world_new()
+    sessions: rt_static_text("core.auth")
+    live: rt_static_text("core.web.live")
+    data_out: jet_rt_alloc(I64{8}, I64{8})
+    length_out: jet_rt_alloc(I64{8}, I64{8})
+    bytes: jet_rt_alloc(I64{2} * RT_HOST_U8_STRIDE, I64{8})
+    host_u8_put(bytes, I64{0}, I64{7})
+    host_u8_put(bytes, I64{1}, I64{9})
+    base: thread_base()
+    previous: sync_load(base + I64{104})
+    sync_store(base + I64{104}, I64{0})
+    if (jet_rt_world_store_load(sessions, data_out, length_out) != I64{0} || jet_rt_world_store_replace(sessions, I64{0}, I64{0}, bytes, I64{2}, length_out) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(base + I64{104}, world)
+    if (jet_rt_world_store_load(sessions, data_out, length_out) != I64{1} || sync_load(length_out) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (jet_rt_world_store_replace(sessions, bytes, I64{2}, bytes, I64{2}, length_out) != I64{1} || sync_load(length_out) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (jet_rt_world_store_replace(sessions, I64{0}, I64{0}, bytes, I64{2}, length_out) != I64{1} || sync_load(length_out) != I64{1}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (jet_rt_world_store_load(sessions, data_out, length_out) != I64{1} || sync_load(length_out) != I64{2}) -> jet_rt_unreachable(I64{0}, I64{0})
+    loaded: sync_load(data_out)
+    if (host_u8_get(loaded, I64{0}) != I64{7} || host_u8_get(loaded, I64{1}) != I64{9}) -> jet_rt_unreachable(I64{0}, I64{0})
+    jet_rt_free(loaded, I64{2} * RT_HOST_U8_STRIDE, I64{8})
+    if (jet_rt_world_store_load(live, data_out, length_out) != I64{1} || sync_load(length_out) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(base + I64{104}, I64{0})
+    if (jet_rt_world_store_load(sessions, data_out, length_out) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    sync_store(base + I64{104}, previous)
+    jet_rt_free(bytes, I64{2} * RT_HOST_U8_STRIDE, I64{8})
+    jet_rt_free(length_out, I64{8}, I64{8})
+    jet_rt_free(data_out, I64{8}, I64{8})
+    jet_rt_world_drop(world)
+    I64{0}
+}

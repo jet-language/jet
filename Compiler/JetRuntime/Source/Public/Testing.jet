@@ -1,7 +1,8 @@
 // `jet.runtime.testing` (#6615): the running test's report cell and text
-// window that core.testing is built on, in Jet types. Each member is a runtime
-// binding (Guest.jet sema_guest_runtime_binding) of the runtime export that is
-// its one body (RouteTesting.jet). Each is `priv`: only Core calls them.
+// window that core.testing is built on, and a deterministic World's own store
+// cells, in Jet types. Each member is a runtime binding (Guest.jet
+// sema_guest_runtime_binding) of the runtime export that is its one body
+// (RouteTesting.jet, World.jet). Each is `priv`: only Core calls them.
 testing: module {
     // Records the running test's failure `message` with its `detail`.
     #Import(c) priv record_failure: fn(message: String, detail: String) = "jet_testing_record_failure"
@@ -17,4 +18,12 @@ testing: module {
 
     // A new Prelude `Test` holding the harness's current iteration and result.
     #Import(c) priv suite_snapshot: fn() -> Test = "jet_test_suite_new"
+
+    // The active World's bytes for the Core store named `store`, empty until
+    // first replaced; None outside a World.
+    #Import(c) priv world_store_load: fn(store: String) -> [U8]? = "jet_rt_world_store_load"
+
+    // Whether the active World's `store` still held `expected` and now holds
+    // `replacement`; None outside a World.
+    #Import(c) priv world_store_replace: fn(store: String, expected: [U8], replacement: [U8]) -> Bool? = "jet_rt_world_store_replace"
 }

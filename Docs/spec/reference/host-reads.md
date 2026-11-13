@@ -25,7 +25,8 @@ blocks every host read of the denied kind.
 
 A read that only the running program can answer is run-time only, whatever
 its row: the running task's identity and cancel state, the process id (H7),
-whether a standard stream is a terminal (H15), the UI host provider's state
+whether a standard stream is a terminal (H15), the active World's store cells
+(the stores Core keeps per World), the UI host provider's state
 (capabilities, clipboard, event queues, key claims and dialogs), and the
 platform family, module loader, OS name, path syntax and f32 SIMD width of the
 machine the program runs on.
