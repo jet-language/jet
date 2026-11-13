@@ -57,8 +57,8 @@ jet_cli_syntax_display: fn(row: JetCLISyntaxRow) -> String Never! {
     if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
 }
 
-// The plain meaning of a row's kind, which is all a generated keyword or
-// marker row has until prose is written for it.
+// The plain meaning of a row's kind, which is all a generated row has until
+// prose is written on it.
 jet_cli_syntax_kind_meaning: fn(row: JetCLISyntaxRow) -> JetCLISyntaxMeaning Never! {
     display: jet_cli_syntax_display(row)
     text: if row.kind == {
@@ -68,14 +68,6 @@ jet_cli_syntax_kind_meaning: fn(row: JetCLISyntaxRow) -> JetCLISyntaxMeaning Nev
     }
     example: if row.kind == JetCLISyntaxKind.Literal -> display else -> "{display} …"
     JetCLISyntaxMeaning{position: "", text: text, example: example, afterwards: "", related_codes: [String]{}}
-}
-
-// The hand-written prose of a row (JET_CLI_SYNTAX_PROSE, by token and kind).
-jet_cli_syntax_prose_index: fn(row: JetCLISyntaxRow) -> Int? Never! {
-    loop (index, prose) in JET_CLI_SYNTAX_PROSE {
-        if prose.token == row.token && prose.kind == row.kind -> return Val(index)
-    }
-    None
 }
 
 jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Never! {
@@ -95,19 +87,14 @@ jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Neve
     text
 }
 
-// A row's meanings: its prose, else its own, else the plain meaning of its kind.
+// A row's meanings: its own, else the plain meaning of its kind.
 jet_cli_syntax_plain_text: fn(row: JetCLISyntaxRow) -> String Never! {
-    if jet_cli_syntax_prose_index(row) == .Val(found) -> return jet_cli_syntax_meanings_text(JET_CLI_SYNTAX_PROSE[found].meanings)
     if row.meanings.len() > 0 -> return jet_cli_syntax_meanings_text(row.meanings)
     jet_cli_syntax_meanings_text([JetCLISyntaxMeaning]{jet_cli_syntax_kind_meaning(row)})
 }
 
 // The first line of jet_cli_syntax_plain_text's meanings.
 jet_cli_syntax_first_meaning: fn(row: JetCLISyntaxRow) -> String Never! {
-    if jet_cli_syntax_prose_index(row) == .Val(found) {
-        if JET_CLI_SYNTAX_PROSE[found].meanings.len() == 0 -> return ""
-        return JET_CLI_SYNTAX_PROSE[found].meanings[0].text
-    }
     if row.meanings.len() > 0 -> return row.meanings[0].text
     jet_cli_syntax_kind_meaning(row).text
 }
