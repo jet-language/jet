@@ -3042,6 +3042,19 @@ local is a located R0801 fault. See
 `tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.case`.
 (D-RAWPTR2=A)
 
+`mem.alloc_raw(size, align)` takes a byte size and a byte alignment and gives
+`mem.Ptr<U8>?`: `size` fresh, uncleared heap bytes at an `align` boundary, or
+`None` when `size` is not above zero, `align` is not a power of two, or the
+heap refuses. It is not generic; `p.cast<U>()` gives the typed view, and
+`mem.copy` over the bytes is overlap-safe (a memmove). `mem.free_raw(p)`
+releases the block. Its parameter takes the pointer (`&&mem.Ptr<U8>`), so the
+binding is gone after the call and a second release of it is E0209. Both are
+E3101 outside `#Unsafe`. Under the memory sentry the bytes are a live
+allocation until their release and are quarantined after it, so a read
+through a kept copy of the pointer is a located R0802 fault. See
+`tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using

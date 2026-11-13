@@ -222,3 +222,104 @@ ir_core_mem_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, to: Int, value: 
     ir_store_at(m, p, b, place, 0, item)
     ir_count_close(m, b, index)
 }
+
+// `core.mem.alloc_raw(size, align)`: `size` heap bytes at an `align`
+// boundary as a `mem.Ptr<U8>?`, whose None is the null word. The bytes sit
+// `head` (ir_core_raw_head) into a jet_rt_alloc_try block of `size + head`
+// bytes at `head` alignment, and the two words just before them hold `size`
+// and `align` for ir_core_free_raw. A size not above zero, an align that is
+// not a power of two, or a refused block is None. Under the sentry the bytes
+// are a live heap allocation until their release.
+ir_core_alloc_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 -> return ir_fail_slot(b, span, "core.mem.alloc_raw without its checked arguments")
+    byte_ty: Type.IntN{signed: false, bits: 8}
+    pointer_ty: Type.Apply{name: "Ptr", args: [Type]{byte_ty}}
+    result_ty: Type.Option{inner: pointer_ty}
+    row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
+    sized: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || sized < 0 -> return -1
+    aligned: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || aligned < 0 -> return -1
+    size: ir_native_index(m, b, sized, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, sized)
+    align: ir_native_index(m, b, aligned, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, aligned)
+    word_row: ir_word_row(m)
+    start: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Const, start, 0, -1, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    one: ir_word_const(m, b, 1)
+    // A power of two is above zero and shares no bit with one less.
+    below: ir_word_op(m, b, IROp.Sub, align, one)
+    common: ir_word_op(m, b, IROp.BitAnd, align, below)
+    single: ir_bool_op(m, b, IROp.Eq, common, zero)
+    positive: ir_bool_op(m, b, IROp.Lt, zero, align)
+    some: ir_bool_op(m, b, IROp.Lt, zero, size)
+    ir_open_if(b.f, some, b.line)
+    ir_open_if(b.f, positive, b.line)
+    ir_open_if(b.f, single, b.line)
+    head: ir_core_raw_head(m, b, align)
+    total: ir_word_op(m, b, IROp.Add, size, head)
+    base: ir_runtime(m, b, "jet_rt_alloc_try", [Int]{total, head}, word_row)
+    granted: ir_bool_op(m, b, IROp.Ne, base, zero)
+    ir_open_if(b.f, granted, b.line)
+    payload: ir_word_op(m, b, IROp.Add, base, head)
+    ir_emit(b.f, IROp.Copy, start, payload, -1, -1, b.line)
+    room: ir_word_const(m, b, 16)
+    header: ir_word_op(m, b, IROp.Sub, payload, room)
+    ir_emit(b.f, IROp.Store, -1, header, 0, size, b.line)
+    ir_emit(b.f, IROp.Store, -1, header, 8, align, b.line)
+    if p.sentries {
+        _: ir_runtime(m, b, "jet_rt_sentry_register_allocation", [Int]{payload, size}, -1)
+    }
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    result: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.Copy, result, start, -1, -1, b.line)
+    result
+}
+
+// `core.mem.free_raw(pointer)`: releases ir_core_alloc_raw's block by the
+// size and align in the two words before `pointer`. Under the sentry the
+// pointer must start live storage first, so a second release is R0802 and
+// a pointer from anywhere else R0801, and the bytes are then quarantined,
+// so a read through a kept copy of the pointer is R0802.
+ir_core_free_raw: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(b, span, "core.mem.free_raw without its checked argument")
+    byte_ty: Type.IntN{signed: false, bits: 8}
+    byte_row: ir_value_type(m, p, byte_ty) ?? return ir_type_fail(b, span, byte_ty)
+    pointer: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || pointer < 0 -> return -1
+    one: ir_word_const(m, b, 1)
+    start: ir_sentry_range(m, p, b, pointer, one, byte_row, "free_raw")
+    room: ir_word_const(m, b, 16)
+    header: ir_word_op(m, b, IROp.Sub, start, room)
+    size: ir_load_word(m, b, header, 0)
+    align: ir_load_word(m, b, header, 8)
+    if p.sentries {
+        _: ir_runtime(m, b, "jet_rt_sentry_quarantine", [Int]{start, size}, -1)
+    }
+    head: ir_core_raw_head(m, b, align)
+    base: ir_word_op(m, b, IROp.Sub, start, head)
+    total: ir_word_op(m, b, IROp.Add, size, head)
+    _: ir_runtime(m, b, "jet_rt_free", [Int]{base, total, head}, -1)
+    return -1
+}
+
+// The bytes ahead of a raw heap allocation's payload: its alignment, and at
+// least 16 for the size and align words, so the payload keeps the alignment.
+ir_core_raw_head: fn(m: &IRModule, b: &IRBuilder, align: Int) -> Int Never! {
+    word_row: ir_word_row(m)
+    head: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, head, align, -1, -1, b.line)
+    least: ir_word_const(m, b, 16)
+    small: ir_bool_op(m, b, IROp.Lt, align, least)
+    ir_open_if(b.f, small, b.line)
+    ir_emit(b.f, IROp.Copy, head, least, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    head
+}

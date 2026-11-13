@@ -710,6 +710,14 @@ MEM_COPY: "copy"
 /// copy of `value`. Needs `#Unsafe`.
 MEM_FILL: "fill"
 
+/// `mem.alloc_raw(size, align)` — `size` fresh heap bytes as a
+/// `mem.Ptr<U8>?`, None when refused. Needs `#Unsafe`.
+MEM_ALLOC_RAW: "alloc_raw"
+
+/// `mem.free_raw(pointer)` — releases `alloc_raw`'s storage, taking the
+/// pointer. Needs `#Unsafe`.
+MEM_FREE_RAW: "free_raw"
+
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 MEM_ADDRESS_OF: "address_of"
@@ -776,6 +784,8 @@ CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: MEM_VOLATILE_WRITE, field_1: CoreMemGate.Audit),
     (field_0: MEM_COPY, field_1: CoreMemGate.Audit),
     (field_0: MEM_FILL, field_1: CoreMemGate.Audit),
+    (field_0: MEM_ALLOC_RAW, field_1: CoreMemGate.Audit),
+    (field_0: MEM_FREE_RAW, field_1: CoreMemGate.Audit),
     (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
     (field_0: MEM_PIN, field_1: CoreMemGate.Import),
     (field_0: MEM_STREAM_STORE, field_1: CoreMemGate.Import),

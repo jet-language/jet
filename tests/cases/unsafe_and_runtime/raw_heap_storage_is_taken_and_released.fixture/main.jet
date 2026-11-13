@@ -1,0 +1,24 @@
+use core.mem
+
+run: fn() {
+    #Unsafe("each block is used only through pointers derived from it, and released once") {
+        if mem.alloc_raw(32, 8) == .Val(bytes) {
+            words: bytes.cast<Int>()
+            mem.fill(words, 7, 4)
+            mem.volatile_write(words.offset(3), 9)
+            mem.copy(words, words.offset(2), 2)
+            print("{words.*} {words.offset(1).*} {words.offset(2).*} {words.offset(3).*}")
+            mem.free_raw(bytes)
+        } else {
+            print("refused")
+        }
+        if mem.alloc_raw(24, 64) == .Val(wide) {
+            print(mem.address_of(wide.*) % 64)
+            mem.free_raw(wide)
+        } else {
+            print("refused")
+        }
+        if mem.alloc_raw(0, 8) == .Val(_) -> print("empty given") else -> print("empty refused")
+        if mem.alloc_raw(8, 3) == .Val(_) -> print("odd align given") else -> print("odd align refused")
+    }
+}

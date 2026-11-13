@@ -786,7 +786,8 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // their Jet bodies are only what a compiler without this table (the seed)
 // runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout,
 // volatile and streaming access, the raw pointer steps, and the raw block
-// copy and fill at the call's one type argument.
+// copy and fill at the call's one type argument, and the raw heap
+// allocation and release, which take none.
 IRCoreIntrinsicRow: struct { module_name: String, name: String, intrinsic: IRRuntimeIntrinsic }
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
@@ -802,6 +803,8 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__ptr_byte_offset", intrinsic: IRRuntimeIntrinsic.PtrByteOffset},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "copy", intrinsic: IRRuntimeIntrinsic.MemCopy},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "fill", intrinsic: IRRuntimeIntrinsic.MemFill},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "alloc_raw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "free_raw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
 }
 
 // The checked functions IR_CORE_INTRINSICS names, by function key, each of
@@ -818,12 +821,13 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never
 }
 
 // A bitcast reads its one scalar; a core.mem operation is generic over the
-// one type its call instantiates.
+// one type its call instantiates, but for the raw heap pair, which is not.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
         .TypeSize | .ListCapacity | .ListReserveExact | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
+        .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }

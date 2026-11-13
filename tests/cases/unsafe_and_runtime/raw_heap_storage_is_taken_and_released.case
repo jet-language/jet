@@ -1,0 +1,33 @@
+# `mem.alloc_raw(size, align)` gives `size` fresh heap bytes at an `align`
+# boundary as a `mem.Ptr<U8>?`, None for a size not above zero or an align
+# that is not a power of two, and `cast<U>` gives the typed view;
+# `mem.free_raw(p)` takes the pointer and releases the block, on every tier.
+# The released bytes are quarantined: a read through a kept copy of the
+# pointer is a located R0802 fault, and a second release of the taken
+# binding is refused before the program runs.
+fixture: raw_heap_storage_is_taken_and_released.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\nempty refused\nodd align refused\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\nempty refused\nodd align refused\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "7 9 7 9\n0\nempty refused\nodd align refused\n"
+step keptnone: jet run --optimize=none kept.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "kept.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step keptfull: jet run --optimize=full kept.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "kept.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step twice: jet check twice.jet
+exit: 1
+stderr: ~ "E0209" # the take report names both releases of the binding

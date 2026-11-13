@@ -58,6 +58,20 @@ Pin: struct<T> {}
     core.mem.fill<T>(to, value, count)
 }
 
+// `size` bytes of fresh heap storage aligned to `align`, as a byte pointer
+// (`cast<U>` gives the typed view), or None when `size` is not above zero,
+// `align` is not a power of two, or the heap refuses. The bytes are not
+// cleared. Two words before them hold the size and alignment for `free_raw`.
+#Unsafe("the storage is used only through pointers derived from the result, and `free_raw` releases it exactly once") alloc_raw: fn(size: Int, align: Int) -> mem.Ptr<U8>? Never! {
+    core.mem.alloc_raw(size, align)
+}
+
+// Releases the storage `alloc_raw` gave `pointer`; the pointer is taken, so
+// the binding is gone after the call.
+#Unsafe("`pointer` came unchanged from `alloc_raw`, is not released yet, and no copy of it is used after") free_raw: fn(pointer: &&mem.Ptr<U8>) Never! {
+    core.mem.free_raw(pointer)
+}
+
 // `dst = value`, written without filling the cache where the target has a
 // non-temporal store of the value's width (x86-64: `movnti` for four- and
 // eight-byte values), else an ordinary store. For a large output written
@@ -72,10 +86,11 @@ stream_store: fn<T>(dst: &T, value: T) Never! {
 // growing a List to exactly `len + additional` elements (false when the
 // allocation fails). Reserved `__` names, never public.
 //
-// Each operation here, and `volatile_read`, `volatile_write`, `copy`, `fill`
-// and `stream_store` above, is a compiler intrinsic: the compiler builds every
-// call inline (JetIR Build.jet IR_CORE_INTRINSICS) and never builds the body,
-// so a body names only the declaration's own operation.
+// Each operation here, and `volatile_read`, `volatile_write`, `copy`, `fill`,
+// `alloc_raw`, `free_raw` and `stream_store` above, is a compiler intrinsic:
+// the compiler builds every call inline (JetIR Build.jet IR_CORE_INTRINSICS)
+// and never builds the body, so a body names only the declaration's own
+// operation.
 __type_size: fn<T>() -> Int Never! {
     __type_size<T>()
 }
