@@ -121,6 +121,20 @@ ir_sentry_access: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, ro
     ir_runtime(m, b, "jet_rt_sentry_access", [Int]{pointer, size, align, name[0], name[1]}, pointer_row)
 }
 
+// The word address of a raw access of `bytes` bytes (a word above zero) at
+// `pointer`, aligned as row `row`: the sentry checks the whole range first
+// and stops on a fault, reporting `operation`.
+ir_sentry_range: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pointer: Int, bytes: Int, row: Int, operation: String) -> Int Never! {
+    word_row: ir_word_row(m)
+    address: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, address, pointer, -1, -1, b.line)
+    if !p.sentries -> return address
+    alignment: m.types[row].align
+    align: ir_word_const(m, b, alignment)
+    name: ir_static_text(m, b, operation)
+    ir_runtime(m, b, "jet_rt_sentry_access", [Int]{address, bytes, align, name[0], name[1]}, word_row)
+}
+
 // `core.mem.volatile_read<T>(pointer)` / `core.mem.volatile_write<T>(pointer,
 // value)`: one load or store of T at the pointer, checked under the
 // operation's own name. The written value moves into the pointee.
@@ -143,4 +157,68 @@ ir_core_volatile: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, 
     if value >= 0 && drops && !b.fresh[value] -> value = ir_clone(m, b, value, row)
     ir_store_at(m, p, b, address, 0, value)
     return -1
+}
+
+// `core.mem.copy<T>(to, from, count)` / `core.mem.fill<T>(to, value,
+// count)`: the `count` Ts at `to` become the `count` at `from`, as one move
+// of their bytes, so the two ranges may overlap (jet_rt_mem_move), or copies
+// of `value`. Nothing runs on the Ts a copy duplicates or either overwrites.
+// A count of zero or less touches nothing. Under the sentry each whole range
+// is checked first under the operation's name, so a range that runs past
+// live storage stops before any byte moves.
+ir_core_mem_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 1 || args.len() != 3 -> return ir_fail_slot(b, span, "core.mem.{member} without its checked element type and arguments")
+    element_ty: type_args[0].copy()
+    row: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
+    target: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || target < 0 -> return -1
+    second: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || second < 0 -> return -1
+    counted: ir_expr(m, p, b, args[2])
+    if ir_failed(b) || counted < 0 -> return -1
+    count: ir_native_index(m, b, counted, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, counted)
+    stride: ir_list_stride(m, row)
+    copies: member == "copy"
+    if stride > 0 {
+        zero: ir_word_const(m, b, 0)
+        any: ir_bool_op(m, b, IROp.Lt, zero, count)
+        ir_open_if(b.f, any, b.line)
+        width: ir_word_const(m, b, stride)
+        total: ir_word_op(m, b, IROp.Mul, count, width)
+        to: ir_sentry_range(m, p, b, target, total, row, member)
+        if copies {
+            from: ir_sentry_range(m, p, b, second, total, row, member)
+            _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{to, from, total}, -1)
+        } else {
+            ir_core_mem_fill(m, p, b, to, second, row, count, total)
+        }
+        ir_end(b.f, b.line)
+    }
+    if !copies -> ir_release(m, b, second)
+    return -1
+}
+
+// A fill's stores at the word address `to`: plain data (no drop, nothing
+// ir_copy_needs) as one runtime fill of the value's bytes (JetRuntime
+// Collections.jet jet_rt_mem_fill), any other value as a copy of it stored
+// in each place.
+ir_core_mem_fill: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, to: Int, value: Int, row: Int, count: Int, total: Int) Never! {
+    stride: ir_list_stride(m, row)
+    if !ir_copy_needs(m, p, row) && m.types[row].drop == "" {
+        // An aggregate's slot is its storage already; any other value is
+        // stored raw into a frame cell, which takes no ownership of it.
+        aggregate: ir_kind_of(m, b, value) == .Aggregate
+        source: if aggregate -> ir_address_at(m, b, value, 0) else -> ir_out_slot(m, b, (stride + 7) /% 8)
+        if !aggregate -> ir_emit(b.f, IROp.Store, -1, source, 0, value, b.line)
+        width: ir_word_const(m, b, stride)
+        _: ir_runtime(m, b, "jet_rt_mem_fill", [Int]{to, source, width, total}, -1)
+        return
+    }
+    index: ir_count_open(m, b, count)
+    place: ir_element_address(m, b, to, index, stride)
+    item: ir_clone(m, b, value, row)
+    ir_store_at(m, p, b, place, 0, item)
+    ir_count_close(m, b, index)
 }

@@ -1,0 +1,31 @@
+# `mem.copy(to, from, count)` moves `count` Ts as one move of their bytes, so
+# overlapping ranges copy as if through a buffer either way, and
+# `mem.fill(to, value, count)` stores a copy of `value` in each of `count`
+# places, for plain Ints and for Strings, on every tier; a count of zero
+# touches nothing. The sentry checks each whole range before any byte moves:
+# a fill one Int past its storage is a located R0801 fault.
+fixture: a_raw_block_copy_and_fill_move_whole_ranges.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "1 1 2 3 5\n1 1 2 9 9\n2 9 9 9 9\nmid mid\n"
+step pastnone: jet run --optimize=none past.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "raw `fill` outside" # the gate's audit text follows; R0801's report does not print the range detail
+step pastfull: jet run --optimize=full past.jet
+exit: 70
+stdout: = "1\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "raw `fill` outside" # the gate's audit text follows; R0801's report does not print the range detail

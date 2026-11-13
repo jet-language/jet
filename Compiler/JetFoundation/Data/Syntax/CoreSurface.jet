@@ -702,6 +702,14 @@ MEM_VOLATILE_WRITE: "volatile_write"
 /// store, else an ordinary store. Safe; no `#Unsafe`.
 MEM_STREAM_STORE: "stream_store"
 
+/// `mem.copy(to, from, count)` — `count` Ts moved from `from` to `to` as one
+/// move of their bytes, so the ranges may overlap. Needs `#Unsafe`.
+MEM_COPY: "copy"
+
+/// `mem.fill(to, value, count)` — each of the `count` Ts at `to` becomes a
+/// copy of `value`. Needs `#Unsafe`.
+MEM_FILL: "fill"
+
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 MEM_ADDRESS_OF: "address_of"
@@ -766,6 +774,8 @@ CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: MEM_FROM_ADDR, field_1: CoreMemGate.Audit),
     (field_0: MEM_VOLATILE_READ, field_1: CoreMemGate.Audit),
     (field_0: MEM_VOLATILE_WRITE, field_1: CoreMemGate.Audit),
+    (field_0: MEM_COPY, field_1: CoreMemGate.Audit),
+    (field_0: MEM_FILL, field_1: CoreMemGate.Audit),
     (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
     (field_0: MEM_PIN, field_1: CoreMemGate.Import),
     (field_0: MEM_STREAM_STORE, field_1: CoreMemGate.Import),

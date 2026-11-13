@@ -1,0 +1,21 @@
+use core.mem
+
+run: fn() {
+    values := (a: 1, b: 2, c: 3, d: 4, e: 5)
+    #Unsafe("every range stays inside the `values` tuple, which outlives each access") {
+        first: mem.Ptr<Int>.from_addr(mem.address_of(values))
+        mem.copy(first.offset(1), first, 3)
+        print("{first.*} {first.offset(1).*} {first.offset(2).*} {first.offset(3).*} {first.offset(4).*}")
+        mem.fill(first.offset(3), 9, 2)
+        print("{first.*} {first.offset(1).*} {first.offset(2).*} {first.offset(3).*} {first.offset(4).*}")
+        mem.copy(first, first.offset(2), 3)
+        mem.fill(first, 0, 0)
+        print("{first.*} {first.offset(1).*} {first.offset(2).*} {first.offset(3).*} {first.offset(4).*}")
+    }
+    names := (a: "left", b: "right")
+    #Unsafe("both Strings stay inside `names`; the static texts they replace need no drop") {
+        name: mem.Ptr<String>.from_addr(mem.address_of(names))
+        mem.fill(name, "mid", 2)
+        print("{name.*} {name.offset(1).*}")
+    }
+}

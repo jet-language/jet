@@ -3029,6 +3029,19 @@ where it is read. See
 `tests/cases/unsafe_and_runtime/a_raw_pointer_cast_reads_the_same_address.case`.
 (D-RAWPTR2=A)
 
+`mem.copy(to, from, count)` moves the bytes of `count` `T`s from `from` to
+`to` as one memmove, so the two ranges may overlap and the result is as if
+the bytes went through a buffer. The copy is bitwise: a `T` that owns a
+resource is not cloned, and the places it lands on are not dropped first.
+`mem.fill(to, value, count)` stores a copy of `value` in each of the `count`
+places at `to`, without dropping what they held, and drops `value` after.
+A `count` of zero or less touches nothing. Both are E3101 outside `#Unsafe`.
+Under the memory sentry, each whole range (`count` times `T`'s List stride
+bytes) is checked before any byte moves, so a range that runs past a live
+local is a located R0801 fault. See
+`tests/cases/unsafe_and_runtime/a_raw_block_copy_and_fill_move_whole_ranges.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using

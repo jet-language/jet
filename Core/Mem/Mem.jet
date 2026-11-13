@@ -45,6 +45,19 @@ Pin: struct<T> {}
     core.mem.volatile_write<T>(pointer, value)
 }
 
+// `count` Ts at `to` become the `count` at `from`, as one move of their bytes,
+// so the two ranges may overlap. No copy or drop runs on the Ts moved or
+// overwritten. A count of zero or less moves nothing.
+#Unsafe("`to` and `from` each name `count` live, aligned `T`s, and a T that owns a resource has one owner after the copy") copy: fn<T>(to: *T, from: *T, count: Int) Never! {
+    core.mem.copy<T>(to, from, count)
+}
+
+// Each of the `count` Ts at `to` becomes a copy of `value`; nothing runs on
+// the Ts overwritten. A count of zero or less writes nothing.
+#Unsafe("`to` names `count` live, aligned, writable `T`s that hold no value to drop") fill: fn<T>(to: *T, value: T, count: Int) Never! {
+    core.mem.fill<T>(to, value, count)
+}
+
 // `dst = value`, written without filling the cache where the target has a
 // non-temporal store of the value's width (x86-64: `movnti` for four- and
 // eight-byte values), else an ordinary store. For a large output written
@@ -59,8 +72,8 @@ stream_store: fn<T>(dst: &T, value: T) Never! {
 // growing a List to exactly `len + additional` elements (false when the
 // allocation fails). Reserved `__` names, never public.
 //
-// Each operation here, and `volatile_read`, `volatile_write` and
-// `stream_store` above, is a compiler intrinsic: the compiler builds every
+// Each operation here, and `volatile_read`, `volatile_write`, `copy`, `fill`
+// and `stream_store` above, is a compiler intrinsic: the compiler builds every
 // call inline (JetIR Build.jet IR_CORE_INTRINSICS) and never builds the body,
 // so a body names only the declaration's own operation.
 __type_size: fn<T>() -> Int Never! {

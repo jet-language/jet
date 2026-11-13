@@ -3718,10 +3718,10 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     if route_value == {
         .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
         .Source(target) -> {
-            // ("core.mem", "volatile_read" | "volatile_write"): an audited
-            // `core.mem` operation outside `#Unsafe` is E3101 at the call, before
-            // its arguments are checked.
-            if module_name == "core.mem" && (method == "volatile_read" || method == "volatile_write") {
+            // ("core.mem", "volatile_read" | "volatile_write" | "copy" |
+            // "fill"): an audited `core.mem` operation outside `#Unsafe` is
+            // E3101 at the call, before its arguments are checked.
+            if module_name == "core.mem" && (method == "volatile_read" || method == "volatile_write" || method == "copy" || method == "fill") {
                 _: sema_expr_require_unsafe(method, method_span, context, diagnostics)
             }
             math_abs: sema_call_try_core_math_abs(module_name, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

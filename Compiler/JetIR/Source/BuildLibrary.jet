@@ -55,7 +55,7 @@ IRRuntimeIntrinsic: enum {
     // Core's core.mem operations at their instance's one type argument
     // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
     // an exact List reserve, a volatile load or store, a streaming store,
-    // a raw pointer's step by elements or by bytes.
+    // a raw pointer's step by elements or by bytes, a raw block copy or fill.
     TypeSize
     ListCapacity
     ListReserveExact
@@ -64,6 +64,8 @@ IRRuntimeIntrinsic: enum {
     StreamStore
     PtrOffset
     PtrByteOffset
+    MemCopy
+    MemFill
 }
 
 IRIntrinsicShape: enum {
@@ -666,7 +668,8 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
 // intrinsic is the FunctionAddress of its export; rt_fault_print is a call of
 // the fault report the linker writes; a core.mem operation is its inline
 // lowering (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store,
-// BuildSentry.jet ir_core_volatile, BuildExpr.jet ir_core_ptr_step).
+// BuildSentry.jet ir_core_volatile and ir_core_mem_block, BuildExpr.jet
+// ir_core_ptr_step).
 ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
@@ -682,6 +685,8 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .StreamStore -> ir_core_stream_store(m, p, b, ir_intrinsic_nodes(args), type_args, span)
         .PtrOffset -> ir_core_ptr_step(m, p, b, false, ir_intrinsic_nodes(args), type_args, span)
         .PtrByteOffset -> ir_core_ptr_step(m, p, b, true, ir_intrinsic_nodes(args), type_args, span)
+        .MemCopy -> ir_core_mem_block(m, p, b, "copy", ir_intrinsic_nodes(args), type_args, span)
+        .MemFill -> ir_core_mem_block(m, p, b, "fill", ir_intrinsic_nodes(args), type_args, span)
     }
 }
 
