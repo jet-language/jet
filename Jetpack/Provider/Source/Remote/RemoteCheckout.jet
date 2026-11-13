@@ -397,7 +397,7 @@ provider_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 }
 
 // Read a whole opened file in bounded chunks.
-provider_read_all: fn(reader: FileReader) -[FS]> [U8] IOError! {
+provider_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
         chunk: reader.read(PROVIDER_READ_CHUNK_BYTES)
@@ -442,7 +442,7 @@ provider_collect_fingerprint_files: fn(directory: Directory, relative: String, o
             child: directory.open_directory(entry.name)
             provider_collect_fingerprint_files(child, child_relative, out)
         } else if info.is_file {
-            file: directory.open(entry.name)
+            file := directory.open(entry.name)
             before: file.stat()
             provider_reject_multiply_linked(before)
             bytes: provider_read_all(file)
@@ -490,7 +490,7 @@ provider_copy_tree_held: fn(source: Directory, destination: Directory) ProviderR
 // then rename it over the destination. The source must stay the same file
 // object while it is copied; neither side may be multiply linked.
 provider_copy_held_file: fn(source: Directory, source_name: String, destination: Directory, destination_name: String) IOError! -[FS, Rand]> {
-    reader: source.open(source_name)
+    reader := source.open(source_name)
     before: reader.stat()
     provider_reject_multiply_linked(before)
     if destination.entry_stat(destination_name) == {
@@ -505,7 +505,7 @@ provider_copy_held_file: fn(source: Directory, source_name: String, destination:
         }
     }
     mode: (before.mode).bit_and(0o7777)
-    temporary: provider_create_temp_file_name(destination, mode)
+    temporary := provider_create_temp_file_name(destination, mode)
     if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -530,7 +530,7 @@ provider_create_temp_file_name: fn(destination: Directory, mode: Int) -[FS, Rand
     Err(provider_io_error_exists(destination.path, "could not allocate an exclusive temporary file"))
 }
 
-provider_fill_temp_file: fn(reader: FileReader, before: Stat, destination: Directory, temporary: String, writer: FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
+provider_fill_temp_file: fn(reader: &FileReader, before: Stat, destination: Directory, temporary: String, writer: &FileWriter, mode: Int, destination_name: String) IOError! -[FS]> {
     loop {
         chunk: reader.read(PROVIDER_READ_CHUNK_BYTES)
         if chunk.len() == 0 -> break

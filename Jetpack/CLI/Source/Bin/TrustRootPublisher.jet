@@ -140,7 +140,7 @@ cli_trust_root_write_immutable: fn(path: String, body: [U8]) CLIToolError! -[FS]
         }
         .Err(error) -> {
             if !store_io_is_not_found(error) -> return Err(CLIToolError.new("inspect {path}: {error}"))
-            writer: files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
+            writer := files.create(path, if_exists: .Refuse) ?? return Err(CLIToolError.new("create {path}: {err}"))
             writer.write_all(body) ?? return Err(CLIToolError.new("write {path}: {err}"))
             writer.fsync() ?? return Err(CLIToolError.new("write {path}: {err}"))
         }

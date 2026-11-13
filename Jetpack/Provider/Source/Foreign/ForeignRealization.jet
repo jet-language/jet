@@ -193,7 +193,8 @@ provider_write_verified_file: fn(destination: String, bytes: [U8]) ProviderError
 }
 
 provider_write_synced: fn(writer: &&FileWriter, bytes: [U8]) IOError! -[FS]> {
-    writer.write_all(bytes)
-    writer.fsync()
-    close(writer)
+    held := writer
+    held.write_all(bytes)
+    held.fsync()
+    close(held)
 }

@@ -431,7 +431,7 @@ cli_nix_index_write_immutable: fn(path: String, bytes: [U8]) CLIToolError! -[FS,
 }
 
 cli_nix_index_publish_partial: fn(partial: String, path: String, bytes: [U8]) CLIToolError! -[FS]> {
-    writer: files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CLIToolError.new("write temporary output: {err}"))
+    writer := files.create(partial, if_exists: .Refuse, mode: Val(0o600)) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.write_all(bytes) ?? return Err(CLIToolError.new("write temporary output: {err}"))
     writer.fsync() ?? return Err(CLIToolError.new("sync temporary output: {err}"))
     if files.hard_link(partial, path) == {

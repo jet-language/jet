@@ -237,7 +237,7 @@ NixCacheEndpoint: struct {
 // must match the signed FileSize when the narinfo has one. A server that
 // ignores the range answers the whole object at once.
 store_nix_download: fn(endpoint: NixCacheEndpoint, url: String, signed_size: Int?, path: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> (count: Int, digest: String) NixCacheError! {
-    output: files.create(path, if_exists: .Refuse) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
+    output := files.create(path, if_exists: .Refuse) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
     hasher := crypto.Hasher.new()
     count := 0
     size := Int?{None}

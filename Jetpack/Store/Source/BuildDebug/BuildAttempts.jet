@@ -445,7 +445,7 @@ recipe_debug_write_atomic: fn(path: String, bytes: [U8]) StoreError! -[FS, Env, 
 }
 
 recipe_debug_publish_partial: fn(partial: String, path: String, bytes: [U8]) StoreError! -[FS]> {
-    out: files.create(partial, if_exists: .Refuse)
+    out := files.create(partial, if_exists: .Refuse)
     out.write_all(bytes)
     out.fsync()
     files.rename(partial, path)

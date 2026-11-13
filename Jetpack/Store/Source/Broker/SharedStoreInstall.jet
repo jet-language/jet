@@ -516,7 +516,7 @@ store_broker_atomic_write: fn(path: String, bytes: [U8]) StoreError! {
 }
 
 store_broker_write_partial: fn(partial: String, path: String, bytes: [U8]) StoreError! {
-    out: files.create(partial, if_exists: .Refuse, mode: Val(0o600))
+    out := files.create(partial, if_exists: .Refuse, mode: Val(0o600))
     out.write_all(bytes)
     out.fsync()
     files.rename(partial, path)
@@ -532,7 +532,7 @@ store_broker_discard_remove: fn(path: String) Never! {
 
 // Rust `bounded_file`: at most `limit` bytes; one more is "too large".
 store_broker_bounded_file: fn(path: String, limit: Int, label: String) -> [U8] StoreError! {
-    input: files.open(path)
+    input := files.open(path)
     bytes := [U8]{}
     loop bytes.len() <= limit {
         chunk: input.read(limit + 1 - bytes.len())

@@ -49,7 +49,7 @@ jet_cli_rust_foreign_hex: fn(value: String) -> Bool Never! {
 
 // Held, no-follow reads prevent a cache or child from substituting a symlink.
 jet_cli_rust_foreign_read: fn(directory: cli_files.Directory, name: String) -[FS]> [U8] JetDriverRustForeignError! {
-    reader: directory.open(name) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
+    reader := directory.open(name) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
     bytes := [U8]{}
     loop {
         chunk: reader.read(65536) ?? return Err(jet_cli_rust_foreign_io("couldn't read FFI input `{directory.path}/{name}`: {err}"))
@@ -66,7 +66,7 @@ jet_cli_rust_foreign_text: fn(directory: cli_files.Directory, name: String) -[FS
 // files are deleted with the workspace, so they are never flushed: an fsync
 // waits for every dirty page on the filesystem.
 jet_cli_rust_foreign_write: fn(directory: cli_files.Directory, name: String, bytes: [U8], durable: Bool, mode: Int{384}) JetDriverRustForeignError! -[FS]> {
-    writer: directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
+    writer := directory.create(name, .Replace, Val(384)) ?? return Err(jet_cli_rust_foreign_io("couldn't stage FFI input `{name}`: {err}"))
     writer.write_all(bytes) ?? return Err(jet_cli_rust_foreign_io("couldn't write FFI input `{name}`: {err}"))
     writer.set_mode(mode) ?? return Err(jet_cli_rust_foreign_io("couldn't preserve FFI output permissions: {err}"))
     if durable -> writer.fsync() ?? return Err(jet_cli_rust_foreign_io("couldn't flush FFI input `{name}`: {err}"))

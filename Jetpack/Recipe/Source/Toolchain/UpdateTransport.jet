@@ -287,7 +287,7 @@ recipe_update_read_local_file: fn(path: String, limit: Int, label: String) -[FS,
     info: files.stat(path) ?? return Err(RecipeError.Update("read {label}: {err}"))
     if info.is_symlink || !info.is_file -> return Err(RecipeError.Update("{label} is not a regular file"))
     if info.size > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
-    file: files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
+    file := files.open(path, links: .Refuse) ?? return Err(RecipeError.Update("open {label}: {err}"))
     bytes := [U8]{}
     loop {
         chunk: file.read(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
@@ -332,7 +332,7 @@ recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) RecipeE
         .Ok(_) -> { return Err(RecipeError.Update("a previous toolchain update state write is still present")) }
         .Err(error) -> { if !store_io_is_not_found(error) -> return Err(RecipeError.Update("inspect partial toolchain update state: {error}")) }
     }
-    out: files.create(partial, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage toolchain update state: {err}"))
+    out := files.create(partial, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage toolchain update state: {err}"))
     if recipe_update_write_all_synced(out, state.canonical().bytes()) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -351,7 +351,7 @@ recipe_update_write_state: fn(path: String, state: ToolchainUpdateState) RecipeE
     recipe_update_sync_parent(parent)
 }
 
-recipe_update_write_all_synced: fn(out: FileWriter, bytes: [U8]) IOError! -[FS]> {
+recipe_update_write_all_synced: fn(out: &FileWriter, bytes: [U8]) IOError! -[FS]> {
     out.write_all(bytes)
     out.fsync()
 }

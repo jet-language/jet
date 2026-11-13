@@ -104,7 +104,7 @@ OverlayAuthority: struct {
         if name == "" -> return Err(OverlayError.Patch("{label} `{relative}` has no ordinary final name"))
         path: files.join(self.resolver.root, relative)
         parent_handle: self.resolver.directory_handle(parent)
-        handle: if parent_handle.open(name) == {
+        handle := if parent_handle.open(name) == {
             .Ok(file) -> file
             .Err(error) -> {
                 if env_overlay_is_symlink(parent_handle, name) -> return Err(OverlayError.Patch("{label} `{path}` contains a symlink"))
@@ -346,7 +346,7 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
     loop _ in 0..<OVERLAY_TEMP_ATTEMPTS {
         token: random.token_hex(8) ?? return Err(env_overlay_io("could not draw an overlay temporary name"))
         temporary: ".{entry.name}.jet-overlay-{sys.pid()}-{token}"
-        file: if parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
+        file := if parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
             .Ok(created) -> created
             .Err(error) -> {
                 if error == {
@@ -378,7 +378,7 @@ env_overlay_write_atomically: fn(entry: OverlayStagedFile, root_handle: Director
 // The file is durable before publication. The directory sync after the
 // rename is best effort, so a reporting failure cannot claim a failed commit
 // after the destination already changed.
-env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
+env_overlay_publish: fn(entry: OverlayStagedFile, parent: Directory, file: &FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
     file.write_all(bytes)
     file.set_mode(entry.mode)
     file.fsync()

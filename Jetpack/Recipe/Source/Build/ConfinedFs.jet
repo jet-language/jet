@@ -124,7 +124,7 @@ PinnedRecipeDirectory: struct {
     publish_new_file: fn(self, temporary: String, final: String, bytes: [U8]) RecipeError! -[FS]> {
         recipe_validate_component(temporary)
         recipe_validate_component(final)
-        out: self.directory.create(temporary, if_exists: .Refuse)
+        out := self.directory.create(temporary, if_exists: .Refuse)
         out.write_all(bytes)
         out.fsync()
         if self.directory.rename(temporary, final) == {
@@ -376,12 +376,12 @@ recipe_sorted_names: fn(path: String) -[FS]> [String] RecipeError! {
 // links at either end and a source that changes during the copy. The copy
 // keeps the source permission bits.
 recipe_copy_regular_file_nofollow: fn(src: String, dst: String, expected: Stat) RecipeError! -[FS, Env]> {
-    source: files.open(src, links: .Refuse)
+    source := files.open(src, links: .Refuse)
     opened: source.stat()
     if !opened.is_file || opened.id != expected.id {
         return Err(RecipeError.PermissionDenied("recipe source file changed before copy `{src}`"))
     }
-    destination: files.create(dst, links: .Refuse)
+    destination := files.create(dst, links: .Refuse)
     loop {
         chunk: source.read(RECIPE_COPY_CHUNK)
         if chunk.len() == 0 -> break
@@ -406,7 +406,7 @@ recipe_read_file_nofollow: fn(path: String, limit: Int) -[FS]> [U8] RecipeError!
         return Err(RecipeError.InvalidData("recipe input is not a regular file `{path}`"))
     }
     if expected.size > limit -> return Err(RecipeError.InvalidData("recipe input exceeds its size limit `{path}`"))
-    file: files.open(path, links: .Refuse)
+    file := files.open(path, links: .Refuse)
     opened: file.stat()
     if !opened.is_file || !recipe_same_file_identity(expected, opened) {
         return Err(RecipeError.Other("recipe input changed before read `{path}`"))

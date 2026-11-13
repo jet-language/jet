@@ -178,7 +178,7 @@ store_repro_observe_node: fn(path: String, relative: String, hardlink_first: &[S
 // `sha256-<hex>` of a file read through a no-follow handle whose metadata
 // must not change while it is read.
 store_repro_read_file_digest: fn(path: String) -[FS]> String StoreError! {
-    file: files.open(path, links: .Refuse)
+    file := files.open(path, links: .Refuse)
     before: store_repro_metadata_fingerprint(file.stat())
     bytes := [U8]{}
     loop {

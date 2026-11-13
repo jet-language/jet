@@ -287,7 +287,8 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) TrustRoo
     trust_ensure_trust_dir(roots_dir)
     expected: trust_cache_key_fingerprint(key)
     if files.create(path, if_exists: .Refuse) == {
-        .Ok(writer) -> {
+        .Ok(created) -> {
+            writer := created
             writer.write_all(trust_cache_key_pin_body(key).bytes())
             writer.fsync()
         }

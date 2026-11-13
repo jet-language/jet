@@ -171,7 +171,7 @@ recipe_update_reject_existing: fn(path: String, label: String) RecipeError! -[FS
 recipe_update_stage_executable: fn(staged: String, bytes: [U8], mode: Int) RecipeError! -[FS, Env]> {
     recipe_update_reject_existing(staged, "self-update staging file")
     recipe_update_validate_no_symlink_ancestors(staged, "self-update staging file")
-    out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -366,7 +366,7 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
 
 recipe_update_stage_windows_file: fn(staged: String, bytes: [U8]) RecipeError! -[FS]> {
     recipe_update_reject_existing(staged, "self-update staging file")
-    out: files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
+    out := files.create(staged, if_exists: .Refuse) ?? return Err(RecipeError.Update("stage Jet executable: {err}"))
     if recipe_update_write_all_synced(out, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {

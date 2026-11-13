@@ -1113,7 +1113,8 @@ ArtifactStore: struct {
         retry_ms := STORE_ARTIFACT_LOCK_RETRY_MS
         loop {
             if files.create(path, if_exists: .Refuse) == {
-                .Ok(writer) -> {
+                .Ok(created) -> {
+                    writer := created
                     writer.write_all(owner_line.bytes())
                     close(writer)
                     return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})

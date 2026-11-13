@@ -21,8 +21,22 @@ use {
 // unless `style_force` is used. Width and height fall back to 80x24.
 //
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
+// The binary cursor `Reader.over(bytes)`. As the Prelude `Reader` it hands
+// out the bytes not yet read, the same ones `take` would: an empty list once
+// it is at its end.
 Reader: struct {
     fd: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! { cursor_read(self, limit) }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            bytes: cursor_read(self, limit) ?? return Err(err)
+            count: bytes.len()
+            buffer.extend(bytes)
+            Ok(count)
+        }
+    }
 }
 
 Writer: struct {
@@ -44,6 +58,22 @@ StdinHandle: struct {
     // receiver lets a temporary ask (`stdin().is_tty()`).
     is_tty: fn(self) -[IO]> Bool Never! {
         rt.terminal8_stdin_tty()
+    }
+
+    // As the Prelude `Reader`, standard input hands out up to `limit` bytes,
+    // waiting until it has them or the input ends; an empty list is the end.
+    impl Reader {
+        read: fn(&self, limit: Int) -[IO, Time.Wait]> [U8] IOError! {
+            if limit <= 0 -> return Err(terminal_invalid("the read limit must be positive"))
+            __take_bytes(limit)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -[IO, Time.Wait]> Int IOError! {
+            bytes: self.read(limit) ?? return Err(err)
+            count: bytes.len()
+            buffer.extend(bytes)
+            Ok(count)
+        }
     }
 }
 
@@ -206,6 +236,15 @@ __take_bytes: fn(n: Int) -[IO, Time.Wait]> [U8] IOError! {
     result: rt.terminal8_take(n)
     if result.read_error != None -> return Err(terminal_other(.Read, Val("stdin"), result.read_error ?? ""))
     Ok(result.bytes)
+}
+
+// Up to `limit` of the bytes the cursor has not read; a cursor at its end
+// gives none.
+cursor_read: fn(cursor: &Reader, limit: Int) -> [U8] IOError! {
+    if limit <= 0 -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("the read limit must be positive")}))
+    left: cursor.remaining()
+    bytes: cursor.take(if limit < left -> limit else -> left) ?? return Err(terminal_other(.Read, None, err))
+    Ok(bytes)
 }
 
 

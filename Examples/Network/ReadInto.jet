@@ -102,7 +102,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     // A file reader: the buffer is cleared and reused for each chunk.
     file_path: "{os.temp_dir()}/jri-{os.pid()}.txt"
     files.write(file_path, C_PAYLOAD) ?? panic("write file")
-    reader: files.open(file_path) ?? panic("open file")
+    reader := files.open(file_path) ?? panic("open file")
     chunk := [U8]{}
     chunks := [String]{}
     loop {

@@ -249,13 +249,13 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
     loop index in 0..<65536 -> chunk.push(U8{97})
     loop limit in ([Int]{PUBLICATION_TUF_MAX_METADATA_BYTES, PUBLICATION_TUF_MAX_LOG_BYTES}) {
         path: files.join(root, "bounded-{limit}")
-        writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
+        writer := files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
         loop index in 0..<(limit /% chunk.len()) -> writer.write_all(chunk) ?? panic("write bound fixture")
         writer.fsync() ?? panic("fsync bound")
         close(writer)
         text: publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") ?? panic("inclusive exact bound")
         assert_eq(text.bytes().len(), limit)
-        extra: files.append(path) ?? panic("append excess byte")
+        extra := files.append(path) ?? panic("append excess byte")
         extra.write_all([U8]{97}) ?? panic("append excess")
         close(extra)
         if publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") == {

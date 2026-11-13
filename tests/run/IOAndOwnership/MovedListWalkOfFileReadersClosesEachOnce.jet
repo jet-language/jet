@@ -33,7 +33,8 @@ first_taken: fn(paths: [String]) -[FS]> Int IOError! {
     opened := [Held]{}
     loop path in paths -> opened.push(Held{name: path, reader: files.open(path)})
     loop held in opened.move() {
-        return Ok(held.reader.read(64).len())
+        taken := held
+        return Ok(taken.reader.read(64).len())
     }
     Ok(0)
 }
@@ -46,7 +47,7 @@ run: fn() {
     files.write(a, "alpha\n")
     files.write(b, "bravo\n")
     files.write(c, "charlie\n")
-    kept: open_all([String]{a, b, c}) ?? panic("open")
-    loop held in kept -> print("{files.basename(held.name)} {(held.reader.read(64) ?? [U8]{}).len()}")
+    kept := open_all([String]{a, b, c}) ?? panic("open")
+    loop index in 0..<kept.len() -> print("{files.basename(kept[index].name)} {(kept[index].reader.read(64) ?? [U8]{}).len()}")
     print("first taken {first_taken([String]{c, a}) ?? -1}")
 }

@@ -111,7 +111,7 @@ JetCLIRootedDirectory: struct {
         }
         if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
         if info.size > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
-        reader: self.handle.open(name) ?? return Err(jet_cli_read_error("could not open `{shown}`: {jet_cli_io_error_text(err)}"))
+        reader := self.handle.open(name) ?? return Err(jet_cli_read_error("could not open `{shown}`: {jet_cli_io_error_text(err)}"))
         opened: reader.stat() ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
         if !opened.is_file || opened.id != info.id -> return Err(jet_cli_read_error("`{shown}` changed while it was read"))
         bytes := [U8]{}

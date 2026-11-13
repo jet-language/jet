@@ -1289,7 +1289,7 @@ package_authority: fn(path: String) -[Env, FS, Rand]> String ServiceError! {
 }
 
 package_authority_write: fn(path: String, authority: String) IOError! -[FS]> {
-    writer: service_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(err)
+    writer := service_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(err)
     writer.write_all(authority.bytes()) ?? return Err(err)
     writer.fsync()
 }

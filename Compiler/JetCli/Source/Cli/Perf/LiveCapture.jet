@@ -69,7 +69,7 @@ jet_cli_perf_array: fn(value: Dyn) -> [Dyn] JetCLIReadError! {
 jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wait]> [U8] JetCLIReadError! {
     entry: perf_files.lstat(path) ?? return Err(jet_cli_read_error("no live observation is available at `{path}`"))
     if !entry.is_file || entry.is_symlink -> return Err(jet_cli_read_error("observation is not a regular file"))
-    reader: perf_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open observation `{path}`"))
+    reader := perf_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open observation `{path}`"))
     before: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect observation `{path}`"))
     if before.id != entry.id -> return Err(jet_cli_read_error("observation changed before its secure open"))
     if !before.is_file || before.size > limit -> return Err(jet_cli_read_error("observation is not a bounded regular file"))
@@ -88,7 +88,7 @@ jet_cli_perf_read_private: fn(path: String, limit: Int) -[FS.Read, Env, Time.Wai
 }
 jet_cli_perf_process_stat: fn(pid: Int) -[FS.Read, Time.Wait]> String JetCLIReadError! {
     if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be a nonzero u32"))
-    reader: perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
+    reader := perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
     raw: reader.read(65537) ?? return Err(jet_cli_read_error("cannot read process identity"))
     if raw.len() > 65536 -> return Err(jet_cli_read_error("process identity exceeds its bound"))
     Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("process identity is not UTF-8")))

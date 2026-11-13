@@ -14,7 +14,7 @@ run: fn() {
     scratch: files.temp_dir("handle-io")
     path: files.join(scratch.path, "blob.bin")
 
-    writer: files.create(path, if_exists: .Refuse)
+    writer := files.create(path, if_exists: .Refuse)
     writer.write_all("hello ".bytes())
     writer.write_all("world, bytes".bytes())
     writer.fsync()
@@ -25,7 +25,7 @@ run: fn() {
     held_dir: files.open_directory(scratch.path)
     loop entry in held_dir.list() -> print("entry {entry.name} unicode={entry.name_is_unicode} raw bytes={entry.raw_name.len()} dir={entry.is_dir}")
 
-    reader: files.open(path, links: .Refuse)
+    reader := files.open(path, links: .Refuse)
     held: reader.stat()
     now: files.stat(path)
     print("same file as the path: {held.id.device == now.id.device && held.id.inode == now.id.inode}")

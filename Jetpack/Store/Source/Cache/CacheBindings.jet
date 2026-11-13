@@ -230,7 +230,7 @@ store_cache_write_new_key: fn(path: String) StoreError! {
     store_cache_ensure_parent(path)
     secret: random.bytes(32) ?? return Err(StoreError.Other("{err}"))
     if store_archive_lstat_ok(path) != None -> return
-    out: files.create(path, if_exists: .Refuse)
+    out := files.create(path, if_exists: .Refuse)
     out.write_all(secret)
     out.fsync()
     if sys.is_unix() -> files.set_mode(path, STORE_MODE_PRIVATE_FILE)
@@ -343,14 +343,14 @@ store_cache_atomic_replace: fn(path: String, bytes: [U8]) StoreError! {
         .None -> {}
     }
     partial: store_archive_with_extension(path, "partial-{process.current_pid()}-{store_archive_unique_suffix()}")
-    out: files.create(partial, if_exists: .Refuse)
+    out := files.create(partial, if_exists: .Refuse)
     store_cache_finish_replace(out, partial, path, bytes) ?? {
         files.remove(partial).drop("the failed partial is disposable")
         return Err(err)
     }
 }
 
-store_cache_finish_replace: fn(out: FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
+store_cache_finish_replace: fn(out: &FileWriter, partial: String, path: String, bytes: [U8]) StoreError! {
     out.write_all(bytes)
     out.fsync()
     if sys.is_windows() -> files.remove(path)

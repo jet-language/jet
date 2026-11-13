@@ -514,7 +514,7 @@ publication_tuf_snapshot_file: fn(repo: String, path: String) -[FS, Env]> Public
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata path is not a regular file"))
-    authority: foundation_open_file_authority(repo, files.relative(path, repo))
+    authority := foundation_open_file_authority(repo, files.relative(path, repo))
     bytes: authority.read_bounded(metadata.size)
     Ok(PublicationMetadataFileSnapshot{path: path, bytes: Val(bytes)})
 }

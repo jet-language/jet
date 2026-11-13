@@ -132,7 +132,7 @@ cli_package_dependency_add_spec: fn(raw: [String], name: String?, color: Bool, j
 }
 
 cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env]> (raw: String, authority: FoundationFileAuthority) PackageDependencyError! {
-    authority: foundation_open_file_authority(files.dirname(path), files.basename(path)) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
+    authority := foundation_open_file_authority(files.dirname(path), files.basename(path)) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     bytes: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: {err}", None, color, json))
     raw: String.from_bytes(bytes) ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
     Ok((raw: raw, authority: authority))

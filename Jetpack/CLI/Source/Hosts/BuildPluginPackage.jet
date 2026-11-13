@@ -190,7 +190,7 @@ cli_read_packaged_file_bounded: fn(path: String, label: String, limit: Int) -[FS
     linked: files.lstat(path) ?? return Err(cli_build_plugin_error("could not stat plugin {label}: {err}"))
     if linked.is_symlink || !linked.is_file -> return Err(cli_build_plugin_error("plugin {label} must be a regular non-symlink file"))
     if linked.size > limit -> return Err(cli_build_plugin_error("plugin {label} exceeds {limit} bytes"))
-    reader: files.open(path, links: .Refuse) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
+    reader := files.open(path, links: .Refuse) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
     opened: reader.stat() ?? return Err(cli_build_plugin_error("could not stat plugin {label}: {err}"))
     if !opened.is_file -> return Err(cli_build_plugin_error("plugin {label} must be a regular file"))
     bytes := [U8]{}

@@ -371,7 +371,7 @@ env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncR
     env_files_write_state_atomic(plan.state_path, plan.state_after)
 }
 
-env_files_read_all: fn(reader: FileReader) -[FS]> [U8] IOError! {
+env_files_read_all: fn(reader: &FileReader) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
         chunk: reader.read(ENV_FILES_READ_CHUNK)
@@ -385,7 +385,8 @@ env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: &[St
     object: env_files_object_path(plan.objects_dir, file.declaration, file.digest)
     mode: env_files_object_permissions(file.declaration)
     if env_files_open_existing_object(object) == {
-        .Val(reader) -> {
+        .Val(opened) -> {
+            reader := opened
             existing: env_files_read_all(reader) ?? return Err(env_files_error("couldn't read managed object `{object}`: {err}"))
             if pkg_sha256_hex(existing) != file.digest {
                 return Err(env_files_error("managed object `{object}` failed its content hash"))
@@ -394,7 +395,7 @@ env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: &[St
         }
         .None -> {
             temp: files.join(plan.objects_dir, ".{file.digest}.tmp-{sys.pid()}")
-            output: env_files_create_new_file(temp, Val(mode)) ?? return Err(env_files_error("couldn't create managed object `{object}`: {err}"))
+            output := env_files_create_new_file(temp, Val(mode)) ?? return Err(env_files_error("couldn't create managed object `{object}`: {err}"))
             output.write_all(file.bytes) ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
             output.fsync() ?? return Err(env_files_error("couldn't write managed object `{object}`: {err}"))
             output.set_mode(mode) ?? return Err(env_files_error("couldn't set permissions on `{temp}`: {err}"))
@@ -448,7 +449,7 @@ env_files_install_file: fn(file: PlannedFile, object: String) EnvironmentError! 
         }
         .Seed | .Copy -> {
             permissions: env_files_destination_permissions(file.declaration)
-            output: env_files_create_new_file(temp, permissions) ?? return Err(env_files_error("couldn't create `{file.declaration.destination}`: {err}"))
+            output := env_files_create_new_file(temp, permissions) ?? return Err(env_files_error("couldn't create `{file.declaration.destination}`: {err}"))
             output.write_all(file.bytes) ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
             output.fsync() ?? return Err(env_files_error("couldn't write `{file.declaration.destination}`: {err}"))
             if permissions == .Val(mode) {
@@ -581,7 +582,7 @@ env_files_write_state_atomic: fn(path: String, state: ManagedFileState) Environm
 
 // Stage `bytes` in a new file, sync it, and rename it over `path`.
 env_files_publish: fn(temp: String, path: String, bytes: [U8]) IOError! -[FS]> {
-    output: files.create(temp, if_exists: .Refuse)
+    output := files.create(temp, if_exists: .Refuse)
     output.write_all(bytes)
     output.fsync()
     files.rename(temp, path)

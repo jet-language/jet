@@ -912,7 +912,7 @@ store_copy_nofollow_directory: fn(source: String, destination: String, after_chi
 // Copy one regular file through a handle opened without following links,
 // re-checking the handle's identity before and after the read.
 store_copy_nofollow_file: fn(source: String, destination: String, expected: files.Stat) IngestError! -[FS]> {
-    file: files.open(source, links: .Refuse) ?? return Err(IngestError.IO("nofollow open `{source}`: {err}"))
+    file := files.open(source, links: .Refuse) ?? return Err(IngestError.IO("nofollow open `{source}`: {err}"))
     opened: file.stat()
     if store_stable_meta_identity(opened) != store_stable_meta_identity(expected) {
         return Err(IngestError.Mutated("`{source}` changed before copy"))

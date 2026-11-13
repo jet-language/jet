@@ -295,7 +295,7 @@ jet_live_snapshot_path: fn(pid: Int) -[Env]> String {
 }
 jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotError! {
     if !live_files.is_dir("/proc/{pid}") -> return Err(jet_live_error("process {pid} is no longer running"))
-    reader: live_files.open("/proc/{pid}/stat") ?? return Err(jet_live_error("cannot verify process {pid} identity"))
+    reader := live_files.open("/proc/{pid}/stat") ?? return Err(jet_live_error("cannot verify process {pid} identity"))
     bytes := [U8]{}
     loop {
         chunk: reader.read(65537 - bytes.len()) ?? return Err(jet_live_error("cannot verify process {pid} identity"))
@@ -314,7 +314,7 @@ jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetL
     if pid <= 0 || pid > 4294967295 -> return Err(jet_live_error("process id must be greater than zero and fit u32"))
     entry: live_files.stat(path) ?? return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
     if !entry.is_file || entry.is_symlink -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
-    reader: live_files.open(path, links: .Refuse) ?? return Err(jet_live_error("cannot securely open live runtime snapshot for process {pid}"))
+    reader := live_files.open(path, links: .Refuse) ?? return Err(jet_live_error("cannot securely open live runtime snapshot for process {pid}"))
     before: reader.stat() ?? return Err(jet_live_error("cannot inspect live runtime snapshot: {err}"))
     if !before.is_file -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
     if live_sys.is_unix() {

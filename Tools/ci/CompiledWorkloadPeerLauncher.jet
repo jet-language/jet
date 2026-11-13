@@ -446,7 +446,7 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     filter_path: "{invocation.root}/.compiled-workload-peer-seccomp-{stamp}"
     files.create(status_file, if_exists: .Refuse) ?? return Err(launch_error("Linux peer isolation signal status cannot be created at `{status_file}`: {err}"))
     if invocation.network == .Disabled {
-        staged: files.create(filter_path, if_exists: .Refuse) ?? {
+        staged := files.create(filter_path, if_exists: .Refuse) ?? {
             files.remove(status_file).drop("the signal status file is scratch")
             return Err(launch_error("Linux peer isolation seccomp socket filter cannot be created at `{filter_path}`: {err}"))
         }

@@ -664,7 +664,7 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
             start += 1
             name = "{start + at}-{lane}{suffix}"
         }
-        writer: files.create("{queue}/{name}.job", if_exists: .Refuse) ?? {
+        writer := files.create("{queue}/{name}.job", if_exists: .Refuse) ?? {
             term.eprint("NOT QUEUED: cannot create {queue}/{name}.job: {err}")
             return 2
         }

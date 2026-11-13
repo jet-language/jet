@@ -227,7 +227,7 @@ store_build_last_run_fill: fn(writer: &files.FileWriter, bytes: [U8]) IOError! -
 store_build_last_run: fn(root: String, program: String) -[FS, Env, Time.Wait]> String? Never! {
     held: store_build_last_run_directory(root, false) ?? return None
     name: ArtifactDigest.hash(program.bytes()).to_hex()
-    reader: held.open(name) ?? return None
+    reader := held.open(name) ?? return None
     info: reader.stat() ?? return None
     if !info.is_file || info.size > STORE_LAST_RUN_MAX_BYTES -> return None
     bytes := [U8]{}

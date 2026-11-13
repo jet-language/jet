@@ -1,0 +1,56 @@
+// core.files' FileReader and FileWriter, core.term's binary cursor and
+// standard input meet the Prelude Reader and Writer: one generic `drain` and
+// one generic `pipe` read and write all of them through the bare bounds.
+use {
+    files: core.files
+    term: core.term
+}
+
+// Reads `source` to its end, `step` bytes at a time, into one buffer.
+drain: fn<R: Reader>(&source: R, step: Int) -> [U8] IOError! {
+    out := [U8]{}
+    loop {
+        count: source.read_into(out, step) ?? return Err(err)
+        if count == 0 -> break
+    }
+    Ok(out)
+}
+
+// Copies `source` into `sink` in reads of `step` bytes; the count written.
+pipe: fn<R: Reader, W: Writer>(&source: R, &sink: W, step: Int) -> Int IOError! {
+    total := 0
+    loop {
+        chunk: source.read(step) ?? return Err(err)
+        if chunk.len() == 0 -> break
+        total += sink.write(chunk) ?? return Err(err)
+    }
+    Ok(total)
+}
+
+text: fn(bytes: [U8]) -> String { String.from_bytes(bytes) ?? "<not UTF-8>" }
+
+run: fn() {
+    files.write("in.txt", "a file of bytes") ?? panic("write in.txt")
+    reader := files.open("in.txt") ?? panic("open in.txt")
+    print("file {text(drain(reader, 4) ?? panic("drain file"))}")
+
+    source := files.open("in.txt") ?? panic("open in.txt again")
+    sink := files.create("out.txt") ?? panic("create out.txt")
+    copied: pipe(source, sink, 5) ?? panic("pipe file")
+    sink.write_all(".".bytes()) ?? panic("write_all")
+    sink.flush() ?? panic("flush")
+    print("copied {copied} {files.read("out.txt") ?? "<unread>"}")
+
+    cursor := Reader.over("cursor bytes".bytes())
+    head: cursor.read(6) ?? panic("cursor read")
+    print("cursor {text(head)}|{text(drain(cursor, 4) ?? panic("drain cursor"))}|{cursor.remaining()}")
+    refused := "accepted"
+    if cursor.read(0) == {
+        .Err(_) -> refused = "refused"
+        .Ok(_) -> {}
+    }
+    print("cursor zero limit {refused}")
+
+    input := term.stdin()
+    print("stdin {text(drain(input, 3) ?? panic("drain stdin")).trim_end()}")
+}

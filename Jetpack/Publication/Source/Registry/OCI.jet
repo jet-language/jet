@@ -230,7 +230,7 @@ publication_read_oci_file: fn(path: String, limit: Int) -[FS, Env]> [U8] IOError
     info: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(publication_invalid_oci("OCI referrer payload is not a regular file"))
     if info.size > limit -> return Err(publication_invalid_oci("OCI referrer payload exceeds its size limit"))
-    held: foundation_open_file_authority(files.dirname(path), files.basename(path))
+    held := foundation_open_file_authority(files.dirname(path), files.basename(path))
     bytes: if held.read_bounded(limit) == {
         .Ok(bytes) -> bytes
         .Err(error) -> {

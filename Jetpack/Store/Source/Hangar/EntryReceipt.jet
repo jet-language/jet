@@ -73,7 +73,7 @@ store_materialize_receipt: fn(roots: HangarRoots, entry: StoreEntry) -> (digest:
 
 // Create `path` exclusively and make its bytes durable.
 store_receipt_write_new: fn(path: String, bytes: [U8]) StoreError! {
-    file: files.create(path, if_exists: .Refuse)
+    file := files.create(path, if_exists: .Refuse)
     file.write_all(bytes)
     file.fsync()
 }

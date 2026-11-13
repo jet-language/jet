@@ -193,7 +193,7 @@ env_hook_u64_le: fn(value: Int) -> [U8] Never! {
 // Rust `SHA256::read_file_nofollow`: the bytes of a regular file opened
 // without following a final link, or None when the file exceeds `limit`.
 env_hook_read_nofollow: fn(path: String, limit: Int) -[FS]> [U8]? IOError! {
-    reader: files.open(path, links: .Refuse)
+    reader := files.open(path, links: .Refuse)
     info: reader.stat()
     if !info.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("not a regular file")}))
     if info.size > limit -> return Ok(None)

@@ -1,0 +1,22 @@
+# #6759 c11 (D-CORE-FILE-ADAPTERS1=A): core.files' FileReader and
+# FileWriter, core.term's binary cursor (`Reader.over`) and standard input
+# implement the Prelude Reader and Writer. One generic `drain` reads each to
+# its end through `read_into`, and one generic `pipe` copies a file into a
+# FileWriter through `read` and `write`. The cursor refuses a zero limit.
+# Each tier prints the same lines.
+fixture: core_byte_sources_meet_the_prelude_reader_and_writer.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out
+step: jet run --optimize=basic run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out
+step: jet run --optimize=full run.jet
+stdin: input.stdin
+exit: 0
+stdout: = core_byte_sources_meet_the_prelude_reader_and_writer.out

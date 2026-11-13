@@ -191,7 +191,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     env_overlay_test_write(files.join(source, "file.txt"), "one\n")
     workspace_authority: OverlayAuthority.open(workspace, "workspace root") ?? panic("hold the workspace")
     patch_parent: workspace_authority.resolver.checked_directory("patches") ?? panic("hold patches")
-    patch_file: workspace_authority.resolver.directory_handle(patch_parent).open("change.patch") ?? panic("open the patch")
+    patch_file := workspace_authority.resolver.directory_handle(patch_parent).open("change.patch") ?? panic("open the patch")
     files.rename(files.join(workspace, "patches"), moved) ?? panic("move patches")
     files.symlink(outside, files.join(workspace, "patches")) ?? panic("plant the symlink")
     bytes := [U8]{}

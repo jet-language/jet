@@ -482,7 +482,7 @@ pkg_validate_relative_nix_store_symlink_target: fn(target: String, parent_depth:
 // whose identity drifts before or while it is read. With `want_content`,
 // returns the hex digest of the file content; otherwise "".
 pkg_envelope_read_file_stable: fn(path: String, expected: Stat, allow_hardlink_metadata_changes: Bool, want_content: Bool, envelope_archive: &EnvelopeArchive, hook: &EnvelopeWalkHook) -[FS]> String EnvelopeError! {
-    reader: files.open(path, links: .Refuse) ?? return Err(EnvelopeError.OpenNoFollow{path: path, detail: "{err}"})
+    reader := files.open(path, links: .Refuse) ?? return Err(EnvelopeError.OpenNoFollow{path: path, detail: "{err}"})
     before: reader.stat() ?? return Err(EnvelopeError.InspectOpen{path: path, detail: "{err}"})
     if !EnvelopeStableIdentity.of(before).unchanged(EnvelopeStableIdentity.of(expected), allow_hardlink_metadata_changes) {
         return Err(EnvelopeError.ChangedBefore(path))

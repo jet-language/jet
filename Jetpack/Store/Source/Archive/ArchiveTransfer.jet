@@ -974,7 +974,7 @@ store_archive_read_bounded_limit: fn(path: String, limit: Int, label: String) ->
     if !metadata.is_file || metadata.size > limit {
         return Err(StoreError.InvalidData("{label} is not a regular file within the size limit"))
     }
-    reader: files.open(path, links: .Refuse)
+    reader := files.open(path, links: .Refuse)
     bytes := [U8]{}
     loop {
         chunk: reader.read(65536)
@@ -1005,7 +1005,7 @@ store_archive_write_atomic: fn(path: String, bytes: [U8]) StoreError! {
 }
 
 store_archive_publish_partial: fn(partial: String, path: String, bytes: [U8], mode: Int?) StoreError! {
-    out: files.create(partial, if_exists: .Refuse, mode: mode)
+    out := files.create(partial, if_exists: .Refuse, mode: mode)
     if mode == {
         .Val(private) -> {
             out.set_mode(private)

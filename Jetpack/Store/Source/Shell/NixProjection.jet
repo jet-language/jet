@@ -154,7 +154,7 @@ env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScr
         bound_logicals.push(logical)
     }
     fstab_path: env_shell_unique_tmp("jetpack-nix-fstab")
-    writer: files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    writer := files.create(fstab_path, if_exists: .Refuse) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_files.push(fstab_path.copy())
     writer.write_all(fstab.bytes()) ?? return Err(EnvironmentError.InvalidData("{err}"))
     Ok(ShellProjectionMounts{fstab_path: fstab_path, bound_logicals: bound_logicals})

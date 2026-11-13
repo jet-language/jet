@@ -317,7 +317,7 @@ provider_cc_read_bounded_file: fn(path: String, limit: Int, label: String) -[FS]
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(CcToolchainError.Invalid("{label} is not a regular file"))
     if metadata.size > limit -> return Err(CcToolchainError.Invalid("{label} exceeds its size limit"))
-    reader: files.open(path, links: .Refuse) ?? {
+    reader := files.open(path, links: .Refuse) ?? {
         return Err(CcToolchainError.Invalid("read {label}: {err}"))
     }
     bytes := [U8]{}

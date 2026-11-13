@@ -76,7 +76,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     path: files.join(root, "input.jet")
     files.write(path, "original") ?? panic("write original")
     original: files.stat(path) ?? panic("stat original")
-    source: foundation_open_file_authority(root, "input.jet") ?? panic("hold source")
+    source := foundation_open_file_authority(root, "input.jet") ?? panic("hold source")
     assert_eq(source.read_bounded(MAX_TREE_FILE_BYTES) ?? panic("read held source"), "original".bytes())
     held_root: root.copy()
     held_path: path.copy()
@@ -96,7 +96,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     root: foundation_publication_test_root("rooted-bound-kind")
     path: files.join(root, "input.jet")
     files.write(path, "original") ?? panic("write input")
-    source: foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
+    source := foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
     if source.read_bounded(7) == {
         .Ok(_) -> panic("oversize rooted read must refuse")
         .Err(error) -> foundation_publication_test_same_io_error(error, IOError.InvalidInput(IOContext{operation: .Read, resource: Val("input.jet"), os_code: None, cause: Val("file exceeds its read bound")}))
@@ -170,7 +170,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     // but refuses fsync. No fake Directory/FileWriter or error injection.
     devices: [String]{"/dev/full", "/dev/null"}
     loop device in devices {
-        writer: files.create(device) ?? panic("open kernel device")
+        writer := files.create(device) ?? panic("open kernel device")
         validate: foundation_publication_test_validator(fn() { assert(false, "validation must not run after a stage failure") })
         if foundation_stage_and_rename(directories, directories[leaf].handle, writer, ".jet-lock-write-failure", "input.jet", "edited".bytes(), Val(expected.id), validate) == {
             .Ok(_) -> panic("a failed stage must not reach rename")
@@ -381,7 +381,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     expected: files.stat(path) ?? panic("stat original")
     directories: foundation_open_root_directories(root) ?? panic("hold parent")
     leaf: directories.len() - 1
-    writer: directories[leaf].handle.create(".jet-lock-hardlinked-stage", if_exists: .Refuse, mode: Val(384)) ?? panic("create stage")
+    writer := directories[leaf].handle.create(".jet-lock-hardlinked-stage", if_exists: .Refuse, mode: Val(384)) ?? panic("create stage")
     files.hard_link(files.join(root, ".jet-lock-hardlinked-stage"), files.join(root, "stage-alias")) ?? panic("link stage")
     validate: foundation_publication_test_validator(fn() { assert(false, "hardlinked stage must be refused before validation") })
     if foundation_stage_and_rename(directories, directories[leaf].handle, writer, ".jet-lock-hardlinked-stage", "input.jet", "edited".bytes(), Val(expected.id), validate) == {
@@ -463,7 +463,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.create_dir_all(root) ?? panic("create root")
     files.write(payload, "inside\n") ?? panic("write payload")
     files.write(outside, "outside\n") ?? panic("write outside")
-    authority: foundation_open_file_authority(root, "payload.txt") ?? panic("open payload authority")
+    authority := foundation_open_file_authority(root, "payload.txt") ?? panic("open payload authority")
     files.remove(payload) ?? panic("remove payload")
     files.symlink(outside, payload) ?? panic("link payload outside")
     if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
@@ -484,7 +484,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.create_dir_all(outside) ?? panic("create outside")
     files.write(files.join(nested, "payload.txt"), "inside\n") ?? panic("write payload")
     files.write(files.join(outside, "payload.txt"), "outside\n") ?? panic("write outside")
-    authority: foundation_open_file_authority(root, "nested/payload.txt") ?? panic("open nested authority")
+    authority := foundation_open_file_authority(root, "nested/payload.txt") ?? panic("open nested authority")
     files.rename(nested, files.join(root, "nested-old")) ?? panic("move nested")
     files.symlink(outside, nested) ?? panic("link nested outside")
     if authority.read_bounded(MAX_TREE_FILE_BYTES) == {
@@ -615,7 +615,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     fixture: foundation_publication_test_root("directory-lock")
     root: files.join(fixture, "new/nested")
     authority: foundation_open_directory_authority(root, true) ?? panic("hold created chain")
-    writer: authority.create_exclusive("checkpoint.lock", 384) ?? panic("create lock")
+    writer := authority.create_exclusive("checkpoint.lock", 384) ?? panic("create lock")
     writer.write_all("lock".bytes()) ?? panic("write lock")
     writer.fsync() ?? panic("fsync lock")
     if authority.create_exclusive("checkpoint.lock", 384) == {
@@ -655,7 +655,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     relative := "payload"
     loop index in 0..<24 -> relative = "parent-{index}/{relative}"
     foundation_write_file_nofollow_at_root(root, relative, "owned chain".bytes(), None) ?? panic("publish through growing chain")
-    source: foundation_open_file_authority(root, relative) ?? panic("retain growing file chain")
+    source := foundation_open_file_authority(root, relative) ?? panic("retain growing file chain")
     assert_eq(source.read_bounded(11) ?? panic("read through all retained descriptors"), "owned chain".bytes())
     source.revalidate() ?? panic("held file chain survives vector growth")
     authority.revalidate() ?? panic("original root authority still valid")

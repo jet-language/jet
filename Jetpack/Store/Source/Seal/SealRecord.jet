@@ -196,7 +196,7 @@ store_write_seal: fn(verification: &StoreVerification, path: String, hangar: Str
 }
 
 store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreError! {
-    file: files.create(temporary, if_exists: .Refuse)
+    file := files.create(temporary, if_exists: .Refuse)
     file.write_all(bytes)
     file.fsync()
     files.rename(temporary, target)

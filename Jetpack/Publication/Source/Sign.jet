@@ -107,7 +107,7 @@ publication_sign_bytes: fn(seed: [U8], content_hash: String) -> String Publicati
     Ok(base64.encode(signature.bytes))
 }
 publication_sign: fn(seed_path: String, content_hash: String) -[FS, Env]> String PublicationDiagnosticError! {
-    held: if foundation_open_file_authority(files.dirname(seed_path), files.basename(seed_path)) == {
+    held := if foundation_open_file_authority(files.dirname(seed_path), files.basename(seed_path)) == {
         .Ok(source) -> source
         .Err(error) -> {
             return Err(publication_sign_io_error("signing key", "{error}"))

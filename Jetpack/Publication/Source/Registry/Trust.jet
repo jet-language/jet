@@ -38,7 +38,7 @@ publication_registry_root_key_is_hex: fn(public_key: String) -> Bool Never! {
 // A held authority refuses symlinks, hard links and ancestor swaps. Do not
 // fall back to files.read after its security refusal.
 publication_read_registry_root_key_at: fn(path: String) -[FS, Env]> String IOError! {
-    held: foundation_open_file_authority(files.dirname(path), files.basename(path))
+    held := foundation_open_file_authority(files.dirname(path), files.basename(path))
     bytes: held.read_bounded(4096)
     text: String.from_bytes(bytes) ?? return Err(publication_read_error(.InvalidInput, path, "registry root key is not UTF-8"))
     held.revalidate()

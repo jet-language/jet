@@ -99,7 +99,7 @@ cli_write_env_entry_receipt: fn(project_dir: String, stamp: String, secret_ident
 // `if_exists: .Refuse` is the O_EXCL create the staging
 // file needs.
 cli_publish_receipt: fn(temporary: String, path: String, text: String) CLIError! -[FS]> {
-    writer: files.create(temporary, if_exists: CreateIfExists.Refuse)
+    writer := files.create(temporary, if_exists: CreateIfExists.Refuse)
     writer.write_all(text.bytes())
     writer.fsync()
     files.rename(temporary, path)

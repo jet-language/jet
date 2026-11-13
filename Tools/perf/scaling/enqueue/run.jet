@@ -142,7 +142,7 @@ run: fn() {
         file: files.join(queue, "{job.name}.sh")
         pending: "{file}.hold"
         if files.exists(file) -> process.fail(1, "Job already exists: {file}")
-        writer: files.create(pending, if_exists: .Refuse, mode: Val(0o755)) ?? process.fail(1, "{err}")
+        writer := files.create(pending, if_exists: .Refuse, mode: Val(0o755)) ?? process.fail(1, "{err}")
         writer.write_all(script(job, repo).bytes()) ?? process.fail(1, "{err}")
         writer.flush() ?? process.fail(1, "{err}")
         // Core sets whole-second times only; touch keeps the stamp's millisecond.

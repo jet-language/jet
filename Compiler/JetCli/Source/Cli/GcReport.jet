@@ -159,7 +159,7 @@ jet_cli_gc_read: fn(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
     if !info.is_file || info.is_symlink -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
     canonical: cli_files.realpath(parent) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
     held: JetCLIRootedDirectory.open(canonical, [String]{}, false) ?? return Err(jet_cli_gc_error("unsafe", err.message))
-    reader: held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
+    reader := held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
     metadata: reader.stat() ?? return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace: {jet_cli_io_error_text(err)}"))
     if !metadata.is_file -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
     if cli_sys.is_unix() && (metadata.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_gc_error("unsafe", "GC trace permissions expose runtime state"))

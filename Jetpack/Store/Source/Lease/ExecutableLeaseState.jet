@@ -689,7 +689,7 @@ store_lease_load_or_create_key: fn(service: String) -[FS, Env, Rand]> [U8] IOErr
     token: store_lease_random_id(8)
     partial: files.join(service, ".{LEASE_AUTH_KEY_FILE}.{sys.pid()}-{token}.partial")
     secret: random.bytes(LEASE_AUTH_KEY_BYTES) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("executable lease ids require a platform CSPRNG")}))
-    file: files.create(partial, if_exists: .Refuse, mode: Val(LEASE_KEY_MODE))
+    file := files.create(partial, if_exists: .Refuse, mode: Val(LEASE_KEY_MODE))
     file.write_all(secret)
     file.fsync()
     if files.hard_link(partial, path) == {
@@ -720,7 +720,7 @@ store_lease_ensure_real_directory: fn(path: String, label: String) IOError! -[FS
 }
 
 store_lease_write_new_synced: fn(path: String, bytes: [U8]) IOError! -[FS]> {
-    file: files.create(path, if_exists: .Refuse)
+    file := files.create(path, if_exists: .Refuse)
     file.write_all(bytes)
     file.fsync()
 }
@@ -764,7 +764,7 @@ store_lease_regular_artifact_exists: fn(path: String) -[FS]> Bool IOError! {
 store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
     info: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
-    file: files.open(path, links: .Refuse)
+    file := files.open(path, links: .Refuse)
     held: file.stat()
     if !held.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
     if held.size > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))

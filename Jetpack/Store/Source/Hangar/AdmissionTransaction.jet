@@ -459,7 +459,7 @@ store_transaction_undo: fn(verification: &StoreVerification, hangar: String, pub
 
 // Exclusive-create the receipt partial, make it durable, and publish it.
 store_transaction_publish_receipt: fn(partial: String, path: String, receipts: String, receipt: AdmissionReceipt) -> Bool StoreError! {
-    file: files.create(partial, if_exists: .Refuse)
+    file := files.create(partial, if_exists: .Refuse)
     file.write_all(receipt.bytes)
     file.fsync()
     files.rename(partial, path) ?? {

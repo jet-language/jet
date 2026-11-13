@@ -250,7 +250,7 @@ run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: I
 // Copies each piece of a child's output into `log` as it arrives; a failed
 // write still drains the pipe.
 pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Time.Wait]> {
-    writer: files.append(log) ?? {
+    writer := files.append(log) ?? {
         loop _ in stream.chunks(65536) {}
         return
     }
@@ -261,7 +261,7 @@ pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Tim
 }
 
 pump_stderr: fn(stream: ProcessStderrStream, log: String) Never! -[Exec, FS, Time.Wait]> {
-    writer: files.append(log) ?? {
+    writer := files.append(log) ?? {
         loop _ in stream.chunks(65536) {}
         return
     }

@@ -56,7 +56,7 @@ PublicationRegistryPackageMetadata: struct {
 // and refuses links. Only its known semantic bound/nonregular refusals change
 // into the Rust metadata diagnostic; OS errors retain their kind and context.
 publication_read_registry_package_metadata: fn(artifact: String, expected_name: String, expected_version: String) -[FS, Env]> PublicationRegistryPackageMetadata? IOError! {
-    held: if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
+    held := if foundation_open_file_authority(artifact, PUBLICATION_REGISTRY_PACKAGE_METADATA_FILE) == {
         .Ok(source) -> source
         .Err(error) -> if error == {
             .NotFound(_) -> { return Ok(None) }

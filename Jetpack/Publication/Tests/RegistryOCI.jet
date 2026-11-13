@@ -399,7 +399,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     path: files.join(repo, "blob")
     publication_write_oci_file(path, "winner".bytes(), "OCI referrer blob") ?? panic("first")
     parent: foundation_open_directory_authority(repo)
-    held: foundation_open_file_authority(repo, "blob") ?? panic("hold original winner")
+    held := foundation_open_file_authority(repo, "blob") ?? panic("hold original winner")
     files.rename(path, files.join(repo, "detached")) ?? panic("replace winner binding")
     files.write(path, "winner") ?? panic("same bytes different file")
     parent.revalidate() ?? panic("parent remained unchanged")

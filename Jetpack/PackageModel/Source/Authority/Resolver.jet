@@ -99,7 +99,7 @@ AuthorityResolver: struct {
         if relative == "" {
             return Err(AuthorityError.WrongKind{path: full, expected: AUTHORITY_KIND_FILE, actual: AUTHORITY_KIND_DIRECTORY})
         }
-        handle: self.root_handle.open(relative) ?? return Err(pkg_authority_map_io(full, err, false))
+        handle := self.root_handle.open(relative) ?? return Err(pkg_authority_map_io(full, err, false))
         info: handle.stat() ?? return Err(AuthorityError.IO{path: full, operation: "inspect", detail: "{err}"})
         if !info.is_file {
             return Err(AuthorityError.WrongKind{path: full, expected: AUTHORITY_KIND_FILE, actual: pkg_authority_kind_name(info)})

@@ -142,7 +142,7 @@ evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, fra
 
 // The first ten bytes of the report (Rust `read_exact` into `[u8; 10]`).
 evidence_read_header: fn(path: String) -[FS.Read]> [U8] IOError! {
-    reader: evidence_files.open(path)
+    reader := evidence_files.open(path)
     header := [U8]{}
     loop header.len() < 10 {
         chunk: reader.read(10 - header.len())

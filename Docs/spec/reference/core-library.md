@@ -1088,6 +1088,16 @@ n)` grows the caller's `out` in place. An implementation must declare the
 same access for each parameter that the trait writes (`&`) or moves (`&&`);
 `read_into: fn(&self, buffer: [U8], limit: Int)` is E0907.
 
+core.files' `FileReader` implements `Reader` and its `FileWriter` implements
+`Writer`: `write` hands over every byte and returns the count, and the bytes
+stay buffered until `flush`, `fsync` or close. core.term's binary cursor
+(`Reader.over(bytes)`) and standard input (`term.stdin()`) implement
+`Reader`, and both refuse a `limit` that is not positive with
+`IOError.InvalidInput`. The cursor hands out the bytes it has not yet read.
+Because these methods write the handle (`&self`), a handle that is read or
+written lives in a mutable binding (`reader := files.open(path)`) and a helper
+that reads one takes it as `&FileReader` (E0111 and E0205 otherwise).
+
 ## Pay for what you call
 
 Core module names do not by themselves make a program depend on every helper.

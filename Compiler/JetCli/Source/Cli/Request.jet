@@ -1334,7 +1334,7 @@ JetCLIBuildInputs: struct {
             if limit < 0 || limit > 536870912 -> return Err(JetDriverBuildInputError{message: "file read bound exceeds the tree hashing bound"})
             expected: cli_files.stat(path) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             if expected.is_symlink || !expected.is_file -> return Err(JetDriverBuildInputError{message: "file is not a regular file"})
-            reader: cli_files.open(path, .Refuse) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+            reader := cli_files.open(path, .Refuse) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             opened: reader.stat() ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
             if !opened.is_file || expected.id != opened.id || expected.size != opened.size || expected.modified != opened.modified || expected.changed != opened.changed -> return Err(JetDriverBuildInputError{message: "file changed before reading"})
             if expected.size > limit -> return Err(JetDriverBuildInputError{message: "file exceeds its read bound"})
@@ -1422,7 +1422,7 @@ jet_cli_hold_root_chain: fn(root: String, directories: &[cli_files.Directory], n
 // The stat in the snapshot therefore describes exactly the bytes read.
 jet_cli_read_held_source: fn(directory: cli_files.Directory, name: String, limit: Int) -[FS.Read]> JetCLIHeldSource JetCLIReadError! {
     if limit < 0 || limit > JET_CLI_MAX_SOURCE_BYTES -> return Err(jet_cli_read_error("file read bound exceeds the tree hashing bound"))
-    reader: directory.open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
+    reader := directory.open(name) ?? return Err(jet_cli_build_rooted_open_error(err))
     expected: reader.stat() ?? return Err(jet_cli_read_error(jet_cli_io_error_text(err)))
     if !expected.is_file -> return Err(jet_cli_read_error("file authority input is not a regular file"))
     if expected.links != 1 -> return Err(jet_cli_read_error("file authority input has multiple hard links"))
@@ -1902,7 +1902,7 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
     loop overlay in overlays {
         if jet_cli_overlay_path(overlay.path) == entry_path -> return jet_cli_is_script(overlay.source)
     }
-    reader: cli_files.open(entry_path, .Refuse) ?? return false
+    reader := cli_files.open(entry_path, .Refuse) ?? return false
     head: reader.read(3) ?? return false
     head == "#!/".bytes()
 }
@@ -2571,7 +2571,7 @@ jet_cli_trace_write: fn(target: String, state: &JetCLITraceState, text: String) 
     _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the compiler trace stopped: writing `{target}` failed: {problem}\n")
 }
 
-jet_cli_trace_put: fn(writer: cli_files.FileWriter, text: String) -> String? Never! {
+jet_cli_trace_put: fn(writer: &cli_files.FileWriter, text: String) -> String? Never! {
     writer.write_all(text.bytes()) ?? return Val("{err}")
     writer.flush() ?? return Val("{err}")
     None
@@ -2582,7 +2582,7 @@ jet_cli_trace_put: fn(writer: cli_files.FileWriter, text: String) -> String? Nev
 // through an append-mode `FileWriter` (the native runtime pack exports the
 // writer routes; it has no whole-file append route).
 jet_cli_trace_append: fn(target: String, text: String) -> String? Never! {
-    writer: cli_files.append(target) ?? return Val("{err}")
+    writer := cli_files.append(target) ?? return Val("{err}")
     writer.write_all(text.bytes()) ?? return Val("{err}")
     writer.flush() ?? return Val("{err}")
     None

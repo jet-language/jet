@@ -316,7 +316,7 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
     entry: directory.entry_stat(name) ?? return Err(BuildIOError.from(err))
     if entry.is_symlink || !entry.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
     if entry.size > limit -> return Err(BuildIOError.new(.InvalidData, "cache entry exceeds its byte limit"))
-    reader: files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
+    reader := files.jet_std_files_open_reader_nonblocking(files.join(directory.path, name)) ?? return Err(BuildIOError.from(err))
     info: reader.stat() ?? return Err(BuildIOError.from(err))
     if !info.is_file -> return Err(BuildIOError.new(.PermissionDenied, "cache entry is not a regular file"))
     if info.id != entry.id -> return Err(BuildIOError.new(.PermissionDenied, "cache entry changed while it was opened"))
@@ -358,7 +358,8 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8]) BuildIOEr
         random_bytes: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))
         temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
         if directory.create(temp_name, if_exists: .Refuse, mode: Val(0o600)) == {
-            .Ok(writer) -> {
+            .Ok(created) -> {
+                writer := created
                 writer.write_all(bytes) ?? return Err(BuildIOError.from(err))
                 writer.fsync() ?? return Err(BuildIOError.from(err))
                 close(writer)
@@ -630,7 +631,7 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
     payload: "{pkg_json_render(event)}\n"
     parent: files.dirname(path)
     if parent != "" -> files.create_dir_all(parent).drop("cache observation evidence is best-effort")
-    writer: files.append(path, links: .Refuse) ?? return
+    writer := files.append(path, links: .Refuse) ?? return
     writer.write_all(payload.bytes()).drop("cache observation evidence is best-effort")
     writer.flush().drop("cache observation evidence is best-effort")
 }

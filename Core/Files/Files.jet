@@ -378,6 +378,16 @@ FileReader: struct {
     advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
         core.files.__reader_advise(self, advice_code(advice))
     }
+
+    impl Reader {
+        read: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
+            rt.reader_read(self, limit)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! {
+            rt.reader_read_into(self, buffer, limit)
+        }
+    }
 }
 
 /// An open file for writing. `write_line` and `write_all` are buffered;
@@ -407,6 +417,19 @@ FileWriter: struct {
     /// `IOError.Unsupported` reports a file system that cannot reserve.
     allocate: fn(self, size: Int) IOError! -[FS.Write]> {
         core.files.__writer_allocate(self, size)
+    }
+
+    /// `write` hands over every byte, as `write_all` does, and returns the
+    /// count; the bytes are buffered until `flush`, `fsync` or close.
+    impl Writer {
+        write: fn(&self, bytes: [U8]) -[Time.Wait]> Int IOError! {
+            rt.writer_write_all(self, bytes) ?? return Err(err)
+            Ok(bytes.len())
+        }
+
+        write_all: fn(&self, bytes: [U8]) -[Time.Wait]> IOError! {
+            rt.writer_write_all(self, bytes)
+        }
     }
 }
 

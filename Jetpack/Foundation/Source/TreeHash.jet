@@ -141,7 +141,7 @@ foundation_same_file_identity: fn(left: Stat, right: Stat) -> Bool Never! {
 // Fold one regular file into the tree hash through a no-follow handle whose
 // identity matches the walk's observation before and after reading.
 foundation_hash_regular_nofollow: fn(path: String, expected: Stat, hasher: &StreamingSHA256, total_bytes: &Int) TreeHashError! -[FS]> {
-    reader: files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
+    reader := files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened: if reader.stat() == {
         .Ok(stat) -> stat
         .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
@@ -192,7 +192,7 @@ foundation_open_regular_nofollow: fn(path: String) -[FS]> FoundationNofollowFile
 // handle and bounded by MAX_TREE_FILE_BYTES. The file must keep its
 // identity and length while it is read.
 foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
-    opened: foundation_open_regular_nofollow(path)
+    opened := foundation_open_regular_nofollow(path)
     if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file exceeds the tree hashing bound"))
     hasher := StreamingSHA256.new()
     actual_length := 0
@@ -214,7 +214,7 @@ foundation_sha256_file_hex: fn(path: String) -[FS]> String IOError! {
 // afterwards the handle and the path must still name the same unchanged file.
 foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
     if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file read bound exceeds the tree hashing bound"))
-    opened: foundation_open_regular_nofollow(path)
+    opened := foundation_open_regular_nofollow(path)
     bound_error: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file exceeds its read bound")})
     if opened.expected.size > max_bytes -> return Err(bound_error)
     content: foundation_read_handle_bounded(opened.handle, max_bytes, bound_error)
@@ -228,7 +228,7 @@ foundation_read_file_nofollow: fn(path: String, max_bytes: Int) -[FS]> [U8] IOEr
 // over-bound refusal), shared by path reads and held file authorities. Callers
 // supply the typed refusal: path reads use InvalidData, held authorities retain
 // InvalidInput (including the approved OCI size-limit mapping).
-foundation_read_handle_bounded: fn(handle: FileReader, max_bytes: Int, bound_error: IOError) -[FS]> [U8] IOError! {
+foundation_read_handle_bounded: fn(handle: &FileReader, max_bytes: Int, bound_error: IOError) -[FS]> [U8] IOError! {
     bytes := [U8]{}
     loop {
         remaining: max_bytes - bytes.len()
@@ -334,7 +334,7 @@ foundation_write_file_nofollow_at_root: fn(root: String, relative: String, conte
     loop attempt in 0..<128 {
         candidate: ".jet-lock-{pid}-{stamp}-{attempt}"
         // O_EXCL | O_NOFOLLOW, owner-only (0o600).
-        writer: directories[leaf].handle.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
+        writer := directories[leaf].handle.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
                 .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
@@ -400,7 +400,7 @@ FoundationFileAuthority: struct {
 
     // Rust Authority::read_bounded: the bytes come from the held handle, and
     // the paths and handle identity must hold before and after the read.
-    read_bounded: fn(self, max_bytes: Int) -[FS]> [U8] IOError! {
+    read_bounded: fn(&self, max_bytes: Int) -[FS]> [U8] IOError! {
         self.ensure_paths_current()
         bound_error: foundation_io_error(false, self.relative, "file exceeds its read bound")
         if self.identity.size > max_bytes -> return Err(bound_error)
@@ -554,22 +554,23 @@ FoundationDirectoryAuthority: struct {
         rows.sort_by(fn(left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) { left.relative <=> right.relative })
         hasher := StreamingSHA256.new()
         total := 0
-        loop row in rows {
-            if row.identity.size > MAX_TREE_FILE_BYTES || row.identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
-            hasher.update(row.relative.bytes())
+        // Indexed: each held reader advances, so the walk writes through the list.
+        loop index in 0..<rows.len() {
+            if rows[index].identity.size > MAX_TREE_FILE_BYTES || rows[index].identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
+            hasher.update(rows[index].relative.bytes())
             hasher.update([U8]{0})
-            length: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift).bit_and(255)}
+            length: loop shift in FOUNDATION_U64_SHIFTS -> U8{(rows[index].identity.size >> shift).bit_and(255)}
             hasher.update(length)
             actual := 0
             loop {
-                chunk: row.reader.read(FOUNDATION_READ_CHUNK)
+                chunk: rows[index].reader.read(FOUNDATION_READ_CHUNK)
                 if chunk.len() == 0 -> break
                 actual += chunk.len()
-                if actual > row.identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file grew while hashing")}))
+                if actual > rows[index].identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file grew while hashing")}))
                 hasher.update(chunk)
             }
-            after: row.reader.stat()
-            if actual != row.identity.size || !foundation_same_file_identity(row.identity, after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file changed while hashing")}))
+            after: rows[index].reader.stat()
+            if actual != rows[index].identity.size || !foundation_same_file_identity(rows[index].identity, after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(rows[index].relative), os_code: None, cause: Val("package source file changed while hashing")}))
             total += actual
         }
         self.revalidate()
@@ -658,7 +659,7 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
             child_destination: destination.open_directory(name)
             foundation_copy_held_tree(child_source, child_destination, path, reject_hardlinks)
         } else if info.is_file {
-            reader: source.open(name)
+            reader := source.open(name)
             opened: reader.stat()
             if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
             if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
@@ -672,8 +673,8 @@ foundation_copy_held_tree: fn(source: Directory, destination: Directory, relativ
     if names != foundation_held_tree_names(source) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while copying directory")}))
 }
 
-foundation_copy_held_reader: fn(reader: FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
-    writer: destination.create(name, if_exists: .Refuse, mode: Val(384))
+foundation_copy_held_reader: fn(reader: &FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
+    writer := destination.create(name, if_exists: .Refuse, mode: Val(384))
     actual := 0
     loop {
         chunk: reader.read(FOUNDATION_READ_CHUNK)
@@ -721,7 +722,7 @@ foundation_link_held_tree: fn(source: Directory, destination: Directory, relativ
             child_destination: destination.open_directory(name)
             foundation_link_held_tree(child_source, child_destination, path)
         } else if info.is_file {
-            reader: source.open(name)
+            reader := source.open(name)
             opened: reader.stat()
             if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a special entry")}))
             if foundation_source_tree_ignored(name) -> next
@@ -803,7 +804,7 @@ foundation_open_file_authority: fn(root: String, relative: String) -[FS, Env]> F
 // the held no-follow handle and bounded by `max_bytes`.
 foundation_read_file_nofollow_at_root: fn(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
     if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
-    source: foundation_open_file_authority(root, relative)
+    source := foundation_open_file_authority(root, relative)
     source.read_bounded(max_bytes)
 }
 
@@ -820,7 +821,7 @@ foundation_same_directory: fn(path_stat: Stat, held: Stat) -> Bool Never! {
 
 // One staging/rename path; the callback is fallible production validation,
 // not a notification hook. All failures here are pre-publication.
-foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
+foundation_stage_and_rename: fn(directories: [FoundationPublicationDirectory], parent: Directory, writer: &FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
     writer.write_all(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
     // #3593: permissions are applied to the HELD writer, never a pathname.
     // The stage starts owner-only even when its final public mode is 0644.

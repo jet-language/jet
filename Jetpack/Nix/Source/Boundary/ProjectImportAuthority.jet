@@ -36,7 +36,7 @@ NixProjectImportAuthority: struct {
 
 // The admitted UTF-8 text of the regular file `name` inside `parent`.
 nix_import_read_file: fn(parent: Directory, name: String) -[FS]> String NixError! {
-    file: nix_import_open_file(parent, name)
+    file := nix_import_open_file(parent, name)
     info: file.stat() ?? return Err(NixError.ImportIO("{err}"))
     NixImportMetadata{regular_file: info.is_file && !info.is_symlink, length: info.size}.admit()
     bytes := [U8]{}

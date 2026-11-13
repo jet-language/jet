@@ -118,7 +118,7 @@ jet_cli_perf_browser_request: fn(pid: Int) -[FS, Env, Time.Wait]> String JetCLIR
         .Err(.NotFound(_)) -> {}
         .Err(_) -> return Err(jet_cli_read_error("cannot replace browser trace request"))
     }
-    writer: perf_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely create browser trace request"))
+    writer := perf_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely create browser trace request"))
     writer.write_all("jet.browser.request.v1\t{pid}\t{started}\n".bytes()) ?? return Err(jet_cli_read_error("cannot write browser trace request"))
     writer.flush() ?? return Err(jet_cli_read_error("cannot flush browser trace request"))
     Ok(started)
