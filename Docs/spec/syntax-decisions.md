@@ -1425,6 +1425,11 @@ maps NaN to 0. `wrapping` is E1005 around a Float body, which has no low bits
 to keep. `math.round` stops on NaN, an infinity, or a value outside the signed
 64-bit range.
 
+`Int{x}` of an exact number, a `Decimal` or a `Fraction`, converts a whole
+value exactly; any other value stops with E3010, naming the same roundings.
+`checked(Int{x})` is `None` where it would stop. An exact value converts
+whole or not at all, so `saturating` and `wrapping` around it are E1005.
+
 **S30 — Enums**:
 
 ```jet

@@ -407,12 +407,13 @@ sema_expr_narrow_outcome: fn(word: String?) -> TNarrowOutcome Never! {
 }
 
 // Whether `converted` is a narrowing conversion: to a fixed width from Int,
-// from a fixed width that can't hold its source, or to an integer from a
-// Float.
+// from a fixed width that can't hold its source, to an integer from a Float,
+// or `checked(Int{x})` of a Decimal or Fraction (`try_int`).
 sema_expr_is_narrowing: fn(converted: TExpr) -> Bool Never! {
     if converted.kind == .NumericMethod(_, operation) {
         return operation == .CheckedIntToFixed(_, _) || operation == .FixedNarrow(_, _) || operation == .FloatExact(_, _)
     }
+    if converted.kind == .PreciseBuiltin(_, function, _) -> return function == "try_int"
     false
 }
 

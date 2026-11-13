@@ -15893,9 +15893,20 @@ __fraction_is_zero: fn(value: Fraction) -> Bool Never! { value.num_value == 0 }
 __fraction_to_float: fn(value: Fraction) -> Float Never! {
     Float{value.num_value} / Float{value.den_value}
 }
+// `Int{x}` of a Fraction (and `Int.from_fraction`): a whole value converts
+// exactly; any other stops naming the roundings. `checked(Int{x})` is the
+// `try_int` form, None instead of the stop.
 __fraction_to_int: fn(value: Fraction) -> Int Never! {
-    if value.den_value != 1 -> panic("Fraction is not an integer")
-    value.num_value.copy()
+    __fraction_try_int(value) ?? core.math.__numeric_stop(__int_exact_stop_text("Fraction"))
+}
+__fraction_try_int: fn(value: Fraction) -> Int? Never! {
+    if value.den_value != 1 -> return None
+    Val(value.num_value.copy())
+}
+// The E3010 text of `Int{x}` over an exact number that isn't whole: it names
+// every rounding that makes the value whole.
+__int_exact_stop_text: fn(source: String) -> String Never! {
+    "Int{{x}} needs a whole {source}; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"
 }
 __fraction_to_decimal: fn(value: Fraction) -> Decimal Never! {
     __decimal_try_fraction(value) ?? panic("Fraction has a repeating expansion")
@@ -16307,10 +16318,14 @@ __decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {
 __decimal_to_fraction: fn(value: Decimal) -> Fraction Never! {
     __fraction_from_parts(__decimal_signed(value), exact_power(10, value.scale))
 }
+// `Int{x}` of a Decimal (and `Int.from_decimal`), as for a Fraction.
 __decimal_to_int: fn(value: Decimal) -> Int Never! {
+    __decimal_try_int(value) ?? core.math.__numeric_stop(__int_exact_stop_text("Decimal"))
+}
+__decimal_try_int: fn(value: Decimal) -> Int? Never! {
     denominator: exact_power(10, value.scale)
-    if value.magnitude %% denominator != 0 -> panic("Decimal is not an integer")
-    __decimal_signed(value) /% denominator
+    if value.magnitude %% denominator != 0 -> return None
+    Val(__decimal_signed(value) /% denominator)
 }
 exact_bit_length: fn(value: Int) -> Int Never! {
     remaining := value
@@ -16476,6 +16491,9 @@ F64x4: struct {
 }
 #Test("Exact conversion helper policies and fixed-width SIMD bridge") {
     assert_eq(__decimal_to_int(__decimal_from_str("-2.00")), -2)
+    assert_eq(__decimal_try_int(__decimal_from_str("-2.50")), None)
+    assert_eq(__fraction_try_int(__fraction_from_parts(12, 4)), Val(3))
+    assert_eq(__fraction_try_int(__fraction_from_parts(7, 2)), None)
     assert_eq(__decimal_to_fraction(__decimal_from_str(".125")).denominator(), 8)
     assert_eq(__decimal_from_fraction(__fraction_from_parts(1, 8)).magnitude, 125)
     assert_eq(__decimal_to_float(__decimal_from_str("1.25")), 1.25)

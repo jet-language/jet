@@ -2212,6 +2212,10 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
                 return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
             }
+            if sema_expression_typed_literal_precise_source(result_head, checked.ty) == .Val(precise) {
+                exact: sema_expression_typed_literal_precise_int(precise, checked, word, expr_span(value), diagnostics) ?? return None
+                return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
+            }
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
             converted := checked
             value_span: expr_span(value)
@@ -2253,6 +2257,10 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
                 exact_line: sema_source_line_at(environment.source_segments, expr_span(value)) ?? 0
                 exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
+                return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
+            }
+            if sema_expression_typed_literal_precise_source(result_head, checked.ty) == .Val(precise) {
+                exact: sema_expression_typed_literal_precise_int(precise, checked, word, expr_span(value), diagnostics) ?? return None
                 return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
             }
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
@@ -2320,6 +2328,34 @@ sema_expression_typed_literal_float_to_integer: fn(head: Type, offered: Type, sp
 sema_expression_typed_literal_float_exact_applies: fn(head: Type, offered: Type) -> Bool Never! {
     if offered != Type.Float && offered != Type.Float32 -> return false
     head == Type.Int || head == .IntN(_, _)
+}
+
+// The exact number type (`Decimal`, `Fraction`) whose whole value `Int{x}`
+// converts (sema_expression_typed_literal_precise_int), or None.
+sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> String? Never! {
+    if head != Type.Int -> return None
+    source: sema_expr_unwrap_tag(offered)
+    if source == (Type.Named{name: "Decimal"}) -> return Val("Decimal")
+    if source == (Type.Named{name: "Fraction"}) -> return Val("Fraction")
+    None
+}
+
+// `Int{x}` over a Decimal or Fraction: a whole value converts exactly, and
+// any other stops with E3010 naming the roundings (the `to_int` helper).
+// Under `checked` it is None instead (`try_int`). An exact value converts
+// whole or not at all, so `saturating` and `wrapping` have nothing to keep.
+sema_expression_typed_literal_precise_int: fn(precise: String, checked: TExpr, word: String?, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
+    outcome: sema_expr_narrow_outcome(word)
+    absent: outcome == TNarrowOutcome.Absent
+    if word == .Val(name) {
+        if !absent {
+            diagnostics.push(sema_error("E1005", span, "`{name}` has nothing to keep from a `{precise}` that isn't whole", "an exact number converts to an Int whole or not at all; the overflow word that applies to it is `checked` (None when it isn't whole)", "write `checked(Int{{value}})`"))
+            return None
+        }
+    }
+    ty: if absent -> Type.Option{inner: Type.Int} else -> Type.Int
+    function: if absent -> "try_int" else -> "to_int"
+    Val(TExpr{ty: ty, kind: TExprKind.PreciseBuiltin{type_name: precise.copy(), function: function, args: [TExpr]{checked.copy()}}, span: span})
 }
 
 // `Int{f}`, `U8{f}` and every fixed-width head over a Float or F32 body: a
