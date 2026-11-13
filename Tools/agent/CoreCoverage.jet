@@ -41,7 +41,7 @@ LITERAL_KINDS: [String]{"core.regex.Regex", "core.process.Sh", "core.db.SQL", "c
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
 // A host literal holds a Jet program when it declares a function or imports
 // from core or app.
-EMBEDDED_PROGRAM: Regex{"\b\w+:\s*fn\b|\buse\s+(?:\{{\s*)?(?:\w+\s*:\s*)?(?:core|app)\b"}
+EMBEDDED_PROGRAM: Regex{"\b\w+:\s*fn\b|\buse\s+(?:\x7B\s*)?(?:\w+\s*:\s*)?(?:core|app)\b"}
 PRIVATE_MODULE: "priv module"
 DOCTESTS: 0
 EXAMPLES: 1
@@ -1673,6 +1673,12 @@ function_ids: fn(rows: [Function]) -> [String] Never! { rows.map(row -> row.id.c
     found := [String]{}
     loop program in programs -> found.extend(ids(program, ""))
     assert_eq(found, [String]{"core.text.trim", "core.math.trim", "core.text.split", "core.text.trim"})
+}
+
+#Test("a host literal that imports through a use block is a program") {
+    assert(EMBEDDED_PROGRAM.is_match("use {{ t: core.text }}"))
+    assert(EMBEDDED_PROGRAM.is_match("use {{core.math}}"))
+    assert(!EMBEDDED_PROGRAM.is_match("use {{ t: other.text }}"))
 }
 
 #Test("doc blocks, blank lines between doc lines and /** */ blocks hold doctests") {
