@@ -298,7 +298,7 @@ jet_cli_inspect_decisions: fn(request: JetCLIInspectRequest, color: Bool, json: 
     }
     project := true
     if request.scope == .Target(named) -> project = cli_files.is_dir(named)
-    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, build: build, scope: scope}}
+    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, build: build, scope: scope, estimate: plane == "decisions" && request.options.contains("--estimate")}}
 }
 
 // run_inspect_live: one securely retained, validated snapshot supplies the text
@@ -393,6 +393,9 @@ JetCLIInspectJob: struct {
     profile: String{"debug"}
     build: BuildOptions?{None}
     scope: String{""}
+    // `decisions --estimate`: list each large raw value with its zstd
+    // estimate (InspectDecisions.jet jet_cli_large_values).
+    estimate: Bool{false}
     // `explain-effects`: the file holding the site when it is a module the
     // compiled entry loads, and the 1-based line it names (0 for a whole file).
     site: String{""}

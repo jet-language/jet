@@ -1595,6 +1595,14 @@ report and exits with the same code as under the root. Any other program
 gets `process root:` and the first function, route or stop edge that needs
 the root.
 
+`inspect decisions --estimate` then lists each large raw value: every data
+row of at least 64 KiB the optimized program's image holds, as
+`large value "<preview>": <n> bytes stored, zstd estimate <m> bytes`. The
+preview is the row's first 16 bytes, printable ASCII as itself and any other
+byte, `"` and `\` as `.`. The stored size is the bytes the image holds for the
+value; the estimate is the length `core.archive.zstd` compresses them to, one
+frame per 64 MiB. The compression runs only under the flag.
+
 Live inspection consumes only the runtime's private snapshot. The runtime writes
 raw records: little-endian words, and texts as a byte length then the bytes.
 The reader decodes and checks them; the running program does not encode.
@@ -1617,7 +1625,7 @@ rendered values and sorted shape identities. No process memory is read.
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
 fields, the unbuilt functions, the loop proofs (`loop_proofs`) and the masked
 branches (`masked_branches`) as text rows, and the program's main (`main`) as
-text.
+text. Under `--estimate` it adds the large-value rows as `large_values`.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,
