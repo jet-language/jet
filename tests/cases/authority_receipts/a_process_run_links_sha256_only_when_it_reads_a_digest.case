@@ -1,0 +1,20 @@
+# #6328: a process plan or receipt keeps its digests' materials and hashes
+# them only when the program reads input_digest or policy_digest (JetRuntime
+# ProcessExecutionReceipt.jet process_execution_lazy_digest). `plain` runs a
+# process and reads its code, so its image links no SHA-256. `digest` reads
+# both digests, before and after a copy: it links SHA-256, and every read is
+# the same 64 hex digits.
+fixture: a_process_run_links_sha256_only_when_it_reads_a_digest.fixture
+env: NO_COLOR=1
+step: jet build plain.jet
+exit: 0
+file: .jet/build/plain !~ "jet_rt_native_sha256" # no digest is read, so nothing hashes
+step: {work}/.jet/build/plain
+exit: 0
+stdout: = "code 3\n"
+step: jet build digest.jet
+exit: 0
+file: .jet/build/digest ~ "jet_rt_native_sha256" # a digest read hashes its material
+step: {work}/.jet/build/digest
+exit: 0
+stdout: = "64 64\ntrue true\n"

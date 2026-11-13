@@ -52,7 +52,21 @@ process_execution_hash: fn(text: I64) -> I64 {
     jet_rt_free(scratch, I64{608}, I64{8})
     jet_rt_string_builder_finish(result)
 }
-process_execution_input_digest: fn(spec: I64) -> I64 {
+// The digest of the material text at `material_slot`, published once at
+// `digest_slot` (0 until a read asks for it). A plan or receipt keeps its
+// digest materials, so building one hashes nothing: only a read of its
+// `input_digest` or `policy_digest` runs, and links, SHA-256. Two readers
+// may race; one publishes its digest and the other drops its own.
+process_execution_lazy_digest: fn(material_slot: I64, digest_slot: I64) -> I64 {
+    known: atomic_word_load(digest_slot)
+    if (known != I64{0}) -> return known
+    digest: process_execution_hash(encoding_word(material_slot))
+    if atomic_word_cas(digest_slot, I64{0}, digest) -> return digest
+    jet_rt_string_drop(digest)
+    atomic_word_load(digest_slot)
+}
+// The text `input_digest` hashes: the command's words, length-prefixed.
+process_execution_input_material: fn(spec: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("jet-process-input-v1\n"))
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
@@ -65,10 +79,7 @@ process_execution_input_digest: fn(spec: I64) -> I64 {
         jet_rt_string_builder_push(text, rt_static_text("\n"))
         at += I64{1}
     }
-    material: jet_rt_string_builder_finish(text)
-    digest: process_execution_hash(material)
-    jet_rt_string_drop(material)
-    digest
+    jet_rt_string_builder_finish(text)
 }
 process_execution_mode: fn(mode: I64) -> I64 {
     if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else -> if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else -> if (mode == PROCESS_STREAM_STDOUT) -> rt_static_text("stdout") else -> rt_static_text("stream")
@@ -95,7 +106,8 @@ process_execution_limit_keys: fn() -> I64 {
     process_text_list_push(keys, rt_static_text("open-file-limit"))
     keys
 }
-process_execution_policy_digest: fn(spec: I64) -> I64 {
+// The text `policy_digest` hashes: every policy fact the spec sets.
+process_execution_policy_material: fn(spec: I64) -> I64 {
     envkeys: data_sequence_new(I64{0}, I64{8})
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
     removes: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
@@ -160,11 +172,9 @@ process_execution_policy_digest: fn(spec: I64) -> I64 {
         jet_rt_string_drop(scope)
     }
     material: jet_rt_string_builder_finish(text)
-    digest: process_execution_hash(material)
-    jet_rt_string_drop(material)
     jet_rt_string_drop(names)
     process_text_list_drop(envkeys, false)
-    digest
+    material
 }
 process_execution_limits: fn(spec: I64) -> I64 {
     list: data_sequence_new(I64{6}, I64{8})
@@ -343,8 +353,8 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     authority: process_authority_receipt_rights(spec, own_secrets)
     process_text_list_drop(own_secrets, false)
     fd_put(receipt, I64{56}, argv)
-    fd_put(receipt, I64{64}, process_execution_input_digest(spec))
-    fd_put(receipt, I64{72}, process_execution_policy_digest(spec))
+    fd_put(receipt, I64{64}, process_execution_input_material(spec))
+    fd_put(receipt, I64{72}, process_execution_policy_material(spec))
     bound: process_authority_bound(spec)
     fd_put(receipt, I64{80}, jet_rt_string_clone(if bound -> process_authority_backend_name() else -> rt_static_text("ambient")))
     fd_put(receipt, I64{88}, authority)

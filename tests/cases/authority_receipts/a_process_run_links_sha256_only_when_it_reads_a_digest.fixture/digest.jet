@@ -1,0 +1,9 @@
+// Runs a process and reads both digests, twice and through a copy.
+use process: core.process
+
+run: fn() {
+    receipt: process.cmd([String]{"/bin/sh", "-c", "exit 3"}).run() ?? panic("the run failed: {err}")
+    copied: receipt.copy()
+    print("{receipt.input_digest.len()} {receipt.policy_digest.len()}")
+    print("{copied.input_digest == receipt.input_digest} {receipt.policy_digest == copied.policy_digest}")
+}

@@ -350,8 +350,10 @@ process_authority_outputs: fn(spec: I64) -> I64 {
     jet_rt_string_drop(b)
     outputs
 }
-// ProcessPlan72 for a bound spec, after every check that refuses before
+// ProcessPlan88 for a bound spec, after every check that refuses before
 // spawn. `bwrap_out` (8 bytes, may be 0) receives the owned bubblewrap path.
+// The plan holds its digests' materials and hashes nothing, so a program
+// that never reads a digest links no SHA-256 through its launch.
 process_authority_plan: fn(spec: I64, bwrap_out: I64, err: I64) -> I64 {
     if (process_authority_cwd(spec, err) == I64{0}) -> return I64{0}
     identity: process_authority_executable(spec, err)
@@ -361,15 +363,9 @@ process_authority_plan: fn(spec: I64, bwrap_out: I64, err: I64) -> I64 {
         return I64{0}
     }
     bwrap: process_authority_backend()
-    digest: process_execution_policy_digest(spec)
     if (bwrap == I64{0}) {
         jet_rt_string_drop(identity)
-        cause: jet_rt_string_builder_new()
-        jet_rt_string_builder_push(cause, rt_static_text("authority-bound process plan refused before spawn: isolation backend unavailable (policy digest "))
-        jet_rt_string_builder_push(cause, digest)
-        jet_rt_string_builder_push(cause, rt_static_text(")"))
-        jet_rt_string_drop(digest)
-        return process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+        return process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("authority-bound process plan refused before spawn: isolation backend unavailable")), err)
     }
     if (bwrap_out != I64{0}) { fd_put(bwrap_out, I64{0}, bwrap) } else { jet_rt_string_drop(bwrap) }
     secrets: process_execution_secrets(spec)
@@ -382,11 +378,12 @@ process_authority_plan: fn(spec: I64, bwrap_out: I64, err: I64) -> I64 {
         jet_rt_string_drop(word)
         at += I64{1}
     }
-    plan: jet_rt_alloc(I64{72}, I64{8})
+    plan: jet_rt_alloc(PROCESS_PLAN_BYTES, I64{8})
+    coll_zero(plan, PROCESS_PLAN_BYTES)
     fd_put(plan, I64{0}, identity)
     fd_put(plan, I64{8}, argv)
-    fd_put(plan, I64{16}, process_execution_input_digest(spec))
-    fd_put(plan, I64{24}, digest)
+    fd_put(plan, I64{16}, process_execution_input_material(spec))
+    fd_put(plan, I64{24}, process_execution_policy_material(spec))
     fd_put(plan, I64{32}, jet_rt_string_clone(process_authority_backend_name()))
     fd_put(plan, I64{40}, process_authority_receipt_rights(spec, secrets))
     fd_put(plan, I64{48}, jet_rt_string_clone(if process_authority_detached(spec) -> rt_static_text("detached") else -> rt_static_text("contained")))
