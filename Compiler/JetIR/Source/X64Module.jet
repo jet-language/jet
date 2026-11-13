@@ -174,7 +174,6 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
         tables.lengths.push(bytes.len())
         tables.headers.push(-1)
     }
-    loop text in ir_x64_stop_texts() -> _ := ir_x64_add_text(tables, text)
     loop f in m.functions {
         _ := ir_x64_add_text(tables, f.source_file)
         if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
@@ -182,6 +181,7 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
             tables.files.push(f.source_file)
         }
         loop at in 0..<f.op.len() {
+            ir_x64_add_stop_texts(tables, m, f, at)
             if f.op[at] == .ConstText {
                 row: f.a[at]
                 if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(tables, row)

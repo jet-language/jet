@@ -855,9 +855,23 @@ ir_x64_overflow_message: fn(operation: String) -> String Never! {
 
 IR_X64_DIVIDED_BY_ZERO: "divided by zero"
 
-// The texts a numeric stop can name (IRX64Tables.texts holds each).
-ir_x64_stop_texts: fn() -> [String] Never! {
-    [String]{IR_X64_DIVIDED_BY_ZERO, ir_x64_overflow_message("add"), ir_x64_overflow_message("sub"), ir_x64_overflow_message("mul"), ir_x64_overflow_message("div")}
+// Add to `tables` the texts a numeric stop of instruction `at` can name
+// (ir_x64_stop_if): a fixed-width or wrapping operation's overflow, and a
+// division's zero divisor. A module whose code has no such stop carries none.
+ir_x64_add_stop_texts: fn(tables: &IRX64Tables, m: IRModule, f: IRFunction, at: Int) Never! {
+    op: f.op[at]
+    arithmetic: op == .Add || op == .Sub || op == .Mul || op == .Neg
+    division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
+    if (!arithmetic && !division) || f.a[at] < 0 -> return
+    kind: m.types[f.slot_type[f.a[at]]].kind
+    fixed: kind == .Word || kind == .Bool || kind == .Char || kind == .Pointer || (kind == .Int && ir_overflow_wraps(f.c[at]))
+    if !fixed -> return
+    if division {
+        _ := ir_x64_add_text(tables, IR_X64_DIVIDED_BY_ZERO)
+        _ := ir_x64_add_text(tables, ir_x64_overflow_message("div"))
+        return
+    }
+    _ := ir_x64_add_text(tables, ir_x64_overflow_message(if op == .Add -> "add" else if op == .Mul -> "mul" else -> "sub"))
 }
 
 // Lays out every slow path after the epilogue and the stop edges. In a
@@ -5131,4 +5145,36 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         loop k in 0..<4 -> value = value.bit_or(Int.from_u8(limbs[4 * index + k]) << (8 * k))
         assert_eq(value, limb)
     }
+}
+
+// sum(a, b) adds plain Ints, which never stop with a numeric text;
+// quotient(a, b) divides I64s, which stops on a zero divisor or on the
+// division's overflow. Only quotient's module carries stop texts, and only
+// those two.
+#Test("A module carries only the numeric stop texts its code can name") {
+    plain := ir_module_new()
+    int_row: ir_type_row(plain, Type.Int) ?? panic("no Int row")
+    sum := ir_function_new("sum", "test:stop.jet::sum", "", "stop.jet", 1)
+    a: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "a"), 1)
+    b: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "b"), 1)
+    sum.result = int_row
+    total: ir_slot(sum, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(sum, IROp.Add, total, a, b, IR_OVERFLOW_TRAP, 2)
+    _ := ir_emit(sum, IROp.Return, -1, total, -1, -1, 2)
+    plain.functions.push(sum)
+    none: ir_x64_tables(plain)
+    loop text in ([String]{IR_X64_DIVIDED_BY_ZERO, ir_x64_overflow_message("add"), ir_x64_overflow_message("div")}) -> assert(none.texts.get(text) == None)
+    fixed := ir_module_new()
+    word: ir_type_row(fixed, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    quotient := ir_function_new("quotient", "test:stop.jet::quotient", "", "stop.jet", 1)
+    x: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "x"), 1)
+    y: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "y"), 1)
+    quotient.result = word
+    q: ir_slot(quotient, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(quotient, IROp.Div, q, x, y, IR_OVERFLOW_TRAP, 2)
+    _ := ir_emit(quotient, IROp.Return, -1, q, -1, -1, 2)
+    fixed.functions.push(quotient)
+    named: ir_x64_tables(fixed)
+    assert(named.texts.get(IR_X64_DIVIDED_BY_ZERO) != None && named.texts.get(ir_x64_overflow_message("div")) != None)
+    assert(named.texts.get(ir_x64_overflow_message("add")) == None)
 }
