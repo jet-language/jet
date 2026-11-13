@@ -1,0 +1,239 @@
+#!/usr/bin/env jet
+// The compiler-data ratchet (#6793; the contract is Docs/spec/compiler-data.md).
+// The compile pipeline's packages move their data to id-keyed columns, so
+// each of their source files may hold no more text-keyed lookups, `Shared<`
+// cells and payload enums than its ledger row names, and a file with no row
+// holds none. A text-keyed lookup is a map, set or tally keyed by `String`,
+// or a NameRows (the String -> row map). A payload enum is an enum
+// declaration with a variant that carries a payload: each of its values is
+// a counted heap box. Counts are of the source text, comments included, so
+// a count falls only when the code changes. A count never rises: `--check`
+// refuses a file above its row, and a file below its row until the row is
+// lowered; `--write` lowers the rows to the counts and refuses a rise.
+//
+// Usage (from the repository root):
+//   jet Tools/agent/CompilerData.jet [--check]   compare the tree with the ledger
+//   jet Tools/agent/CompilerData.jet --write     lower the ledger to the tree
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+// The pipeline packages whose `Source` holds compiler data.
+COMPILER_DATA_PACKAGES: [String]{"JetLexer", "JetParser", "JetFoundation", "JetSema", "JetIR", "JetBackend", "JetDriver", "JetEval", "JetWasm"}
+COMPILER_DATA_LEDGER: "tests/compiler_data.tsv"
+COMPILER_DATA_TEXT_KEYS: [String]{"[String:", "Set<String", "Tally<String", "NameRows"}
+COMPILER_DATA_SHARED: "Shared<"
+COMPILER_DATA_ENUM_OPEN: ": enum {{"
+COMPILER_DATA_TYPE_NAME: Regex{"^[A-Z][A-Za-z0-9_]*(?:<[^>]*>)?$"}
+COMPILER_DATA_PAYLOAD_VARIANT: Regex{"^    [A-Z][A-Za-z0-9_]*\("}
+COMPILER_DATA_HEADER: "# The compiler-data ledger (Tools/agent/CompilerData.jet): each compiler-data\n# source file and the most text-keyed lookups, Shared cells and payload enums\n# it may hold. A file with no row holds none. Rows only go down.\n# path\ttext_keys\tshared\tpayload_enums"
+
+#Error
+CompilerDataError: struct {
+    message: String
+}
+
+// One file's counts.
+CompilerDataCounts: struct {
+    text_keys: Int
+    shared: Int
+    payload_enums: Int
+}
+
+compiler_data_occurrences: fn(text: String, needle: String) -> Int {
+    text.split(needle).to_list().len() - 1
+}
+
+// The enum declarations in `text` with a payload variant: from a top-level
+// `Name: enum {` line to the next line that is `}`.
+compiler_data_payload_enums: fn(text: String) -> Int {
+    count := 0
+    open := false
+    payload := false
+    loop line in text.lines() {
+        if !open {
+            if line.ends_with(COMPILER_DATA_ENUM_OPEN) && COMPILER_DATA_TYPE_NAME.is_match(line.remove_suffix(COMPILER_DATA_ENUM_OPEN)) {
+                open = true
+                payload = false
+            }
+            next
+        }
+        if line == "}}" {
+            if payload -> count += 1
+            open = false
+            next
+        }
+        if COMPILER_DATA_PAYLOAD_VARIANT.is_match(line) -> payload = true
+    }
+    count
+}
+
+compiler_data_counts: fn(text: String) -> CompilerDataCounts {
+    text_keys := 0
+    loop needle in COMPILER_DATA_TEXT_KEYS -> text_keys += compiler_data_occurrences(text, needle)
+    CompilerDataCounts{text_keys: text_keys, shared: compiler_data_occurrences(text, COMPILER_DATA_SHARED), payload_enums: compiler_data_payload_enums(text)}
+}
+
+compiler_data_empty: fn(counts: CompilerDataCounts) -> Bool {
+    counts.text_keys == 0 && counts.shared == 0 && counts.payload_enums == 0
+}
+
+// Every `.jet` file under `path` with a nonzero count.
+compiler_data_scan: fn(path: String, found: &[String:CompilerDataCounts]) -[FS]> () CompilerDataError! {
+    kind: files.stat(path) ?? return Err(CompilerDataError{message: "cannot stat {path}: {err}"})
+    if kind.is_symlink -> return Ok()
+    if kind.is_dir {
+        loop child in files.list_dir(path) ?? return Err(CompilerDataError{message: "cannot list {path}: {err}"}) {
+            if child.name.starts_with(".") -> next
+            compiler_data_scan("{path}/{child.name}", found) ?? return Err(err)
+        }
+        return Ok()
+    }
+    if !path.ends_with(".jet") -> return Ok()
+    text: files.read(path) ?? return Err(CompilerDataError{message: "cannot read {path}: {err}"})
+    counts: compiler_data_counts(text)
+    if !compiler_data_empty(counts) -> found[path] = counts
+    Ok()
+}
+
+// The ledger's rows; a malformed, repeated or zero row is a problem.
+compiler_data_rows: fn(ledger: String, problems: &[String]) -> [String:CompilerDataCounts] {
+    rows := [String:CompilerDataCounts]{}
+    loop line in ledger.lines() {
+        if line == "" || line.starts_with("#") -> next
+        cells: line.split("\t").to_list()
+        if cells.len() != 4 {
+            problems.push("malformed ledger row `{line}`: write the path and three counts, tab-separated")
+            next
+        }
+        row: CompilerDataCounts{text_keys: Int.parse(cells[1]) ?? -1, shared: Int.parse(cells[2]) ?? -1, payload_enums: Int.parse(cells[3]) ?? -1}
+        if row.text_keys < 0 || row.shared < 0 || row.payload_enums < 0 {
+            problems.push("malformed ledger row `{line}`: write the path and three counts, tab-separated")
+            next
+        }
+        if rows.get(cells[0]) != None {
+            problems.push("{cells[0]}: the ledger names it twice")
+            next
+        }
+        if compiler_data_empty(row) {
+            problems.push("{cells[0]}: an all-zero row is no row; delete it")
+            next
+        }
+        rows[cells[0]] = row
+    }
+    rows
+}
+
+// One count's comparison with its row: a rise is in `rises`, a drop in `drops`.
+compiler_data_compare_one: fn(path: String, what: String, found: Int, row: Int, rises: &[String], drops: &[String]) {
+    if found > row -> rises.push("{path}: {found} {what}, over its row's {row}; key the data by an id (Docs/spec/compiler-data.md)")
+    if found < row -> drops.push("{path}: {found} {what}, under its row's {row}; lower the row with jet Tools/agent/CompilerData.jet --write")
+}
+
+CompilerDataDiff: struct {
+    rises: [String]
+    drops: [String]
+}
+
+compiler_data_diff: fn(found: [String:CompilerDataCounts], ledger: String) -> CompilerDataDiff {
+    rises := [String]{}
+    drops := [String]{}
+    rows: compiler_data_rows(ledger, rises)
+    none: CompilerDataCounts{text_keys: 0, shared: 0, payload_enums: 0}
+    loop (path, counts) in found {
+        row: rows.get(path) ?? none
+        compiler_data_compare_one(path, "text-keyed lookups", counts.text_keys, row.text_keys, rises, drops)
+        compiler_data_compare_one(path, "Shared cells", counts.shared, row.shared, rises, drops)
+        compiler_data_compare_one(path, "payload enums", counts.payload_enums, row.payload_enums, rises, drops)
+    }
+    loop (path, _) in rows {
+        if found.get(path) == None -> drops.push("{path}: holds none; delete its row with jet Tools/agent/CompilerData.jet --write")
+    }
+    rises.sort()
+    drops.sort()
+    CompilerDataDiff{rises: rises, drops: drops}
+}
+
+// The ledger text for `found`, its rows in path order.
+compiler_data_ledger: fn(found: [String:CompilerDataCounts]) -> String {
+    paths := [String]{}
+    loop (path, _) in found -> paths.push(path.copy())
+    paths.sort()
+    lines := [String]{COMPILER_DATA_HEADER}
+    loop path in paths {
+        counts: found.get(path) ?? next
+        lines.push("{path}\t{counts.text_keys}\t{counts.shared}\t{counts.payload_enums}")
+    }
+    "{lines.join("\n")}\n"
+}
+
+compiler_data_summary: fn(found: [String:CompilerDataCounts]) -> String {
+    text_keys := 0
+    shared := 0
+    payload_enums := 0
+    loop (_, counts) in found {
+        text_keys += counts.text_keys
+        shared += counts.shared
+        payload_enums += counts.payload_enums
+    }
+    "{found.len()} files: {text_keys} text-keyed lookups, {shared} Shared cells, {payload_enums} payload enums"
+}
+
+compiler_data_main: fn(args: [String]) -[FS, IO]> Int CompilerDataError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(CompilerDataError{message: "usage: jet Tools/agent/CompilerData.jet [--check|--write]"})
+    found := [String:CompilerDataCounts]{}
+    loop package in COMPILER_DATA_PACKAGES {
+        compiler_data_scan("Compiler/{package}/Source", found) ?? return Err(err)
+    }
+    ledger: files.read(COMPILER_DATA_LEDGER) ?? return Err(CompilerDataError{message: "cannot read {COMPILER_DATA_LEDGER}: {err}"})
+    diff: compiler_data_diff(found, ledger)
+    loop line in diff.rises -> term.eprint(line)
+    if mode == "--check" {
+        loop line in diff.drops -> term.eprint(line)
+        if diff.rises.len() > 0 || diff.drops.len() > 0 {
+            term.eprint("compiler-data ratchet: {diff.rises.len()} rise(s), {diff.drops.len()} stale row(s)")
+            return Ok(1)
+        }
+        print("compiler-data ratchet: ok ({compiler_data_summary(found)})")
+        return Ok(0)
+    }
+    if diff.rises.len() > 0 {
+        term.eprint("compiler-data ratchet: {diff.rises.len()} rise(s); the ledger only goes down")
+        return Ok(1)
+    }
+    files.write(COMPILER_DATA_LEDGER, compiler_data_ledger(found)) ?? return Err(CompilerDataError{message: "cannot write {COMPILER_DATA_LEDGER}: {err}"})
+    print("compiler-data ratchet: wrote {COMPILER_DATA_LEDGER} ({compiler_data_summary(found)})")
+    Ok(0)
+}
+
+run: fn() {
+    code: compiler_data_main(process.args()) ?? process.fail(1, err.message)
+    if code != 0 -> process.exit(code)
+}
+
+#Test("the census counts text-keyed lookups, Shared cells and payload enums") {
+    text: "A: struct {{\n    by_name: [String:Int]\n    rows: NameRows\n    seen: Set<String>\n    cell: Shared<X>\n}}\nKind: enum {{\n    Plain\n    // Boxed(note)\n}}\nNode<T>: enum {{\n    Leaf\n    Pair(left: T, right: T)\n}}\n    Inner: enum {{\n    Boxed(x: Int)\n}}\n"
+    counts: compiler_data_counts(text)
+    assert_eq(counts.text_keys, 3)
+    assert_eq(counts.shared, 1)
+    assert_eq(counts.payload_enums, 1)
+}
+
+#Test("the ratchet refuses a rise, reports a drop and a stale row, and rejects bad rows") {
+    found: [String:CompilerDataCounts]{"A.jet": CompilerDataCounts{text_keys: 3, shared: 0, payload_enums: 1}, "B.jet": CompilerDataCounts{text_keys: 1, shared: 1, payload_enums: 0}}
+    ledger: "# header\nA.jet\t2\t0\t1\nB.jet\t1\t2\t0\nC.jet\t1\t0\t0\nD.jet\tx\t0\t0\nE.jet\t0\t0\t0\n"
+    diff: compiler_data_diff(found, ledger)
+    assert_eq(diff.rises, [String]{
+        "A.jet: 3 text-keyed lookups, over its row's 2; key the data by an id (Docs/spec/compiler-data.md)",
+        "E.jet: an all-zero row is no row; delete it",
+        "malformed ledger row `D.jet\tx\t0\t0`: write the path and three counts, tab-separated",
+    })
+    assert_eq(diff.drops, [String]{
+        "B.jet: 1 Shared cells, under its row's 2; lower the row with jet Tools/agent/CompilerData.jet --write",
+        "C.jet: holds none; delete its row with jet Tools/agent/CompilerData.jet --write",
+    })
+    assert_eq(compiler_data_ledger(found), "{COMPILER_DATA_HEADER}\nA.jet\t3\t0\t1\nB.jet\t1\t1\t0\n")
+}

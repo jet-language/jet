@@ -24,6 +24,7 @@ strategic guidance document.
 |---|---|
 | [Syntax decisions](spec/syntax-decisions.md) | Ratified syntax and semantics decisions and their rationale |
 | [Architecture](spec/architecture.md) | Compiler structure, execution tiers, and the self-hosting boundary |
+| [Compiler data](spec/compiler-data.md) | How the compiler holds its data: id spaces, columns, phase lifetimes, no reference counts |
 | [Safety](spec/safety.md) | The memory-safety model and audited `#Unsafe` regions |
 | [Diagnostics](spec/diagnostics.md) | What every diagnostic must contain |
 | [Standard library API laws](spec/stdlib-api-laws.md) and [native contract](spec/core-library-native-contract.md) | Rules every Core API follows |
