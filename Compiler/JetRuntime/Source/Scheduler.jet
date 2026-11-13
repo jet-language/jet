@@ -14,6 +14,21 @@ SCHEDULER_SCOPE_INHERITED_STOP: I64{8}
 SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN: I64{16}
 SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
+// Nonzero once any task's stop poll may have something to deliver that no
+// call of its own published: a stop published to another task's control, an
+// interrupt, or a strong pause. A program's loops read it (as the runtime
+// object's data symbol jet_rt_checks_armed, JetIR X64Select.jet
+// ir_x64_stop_point) before a stop poll that checks no call, and enter the
+// poll's routine only once it is set. It is never cleared, so from then on
+// those polls test the task control as every other poll does.
+scheduler_checks_armed := I64{0}
+
+scheduler_checks_arm: fn() {
+    #Unsafe("an idempotent flag: every writer stores the same 1") {
+        scheduler_checks_armed = I64{1}
+    }
+}
+
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 scheduler_text_new: fn(length: I64) -> I64 {
     capacity: (length + I64{7}).bit_and(I64{-8})
@@ -394,6 +409,7 @@ scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
         previous = sync_load(wrapping(control + I64{40}))
         sync_store(wrapping(control + I64{40}), record)
         sync_store(wrapping(control + I64{32}), kind)
+        if (control != scheduler_control_current()) -> scheduler_checks_arm()
     }
     sync_mutex_unlock(wrapping(control + I64{72}))
     if accepted -> scheduler_stop_drop(previous) else -> scheduler_stop_drop(record)
@@ -482,14 +498,12 @@ scheduler_delivered_status: fn() -> I64 {
     if (sync_swap(wrapping(control + I64{48}), I64{0}) != I64{0}) {
         _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_empty()))
     }
-    // CheckLoops pauses at Check, but ordinary Task.cancel delivers only waits.
-    if (sync_load(wrapping(control + I64{24})) == I64{1}) {
-        _ := scheduler_wait_while_paused()
-        if (!scheduler_shielded() && sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
-    }
+    scheduler_check_loops(control)
     scheduler_cleanup_mask(scheduler_control_status(control))
 }
 #Export(c) jet_scheduler_native_propagate: fn() -> I64 {
+    control: scheduler_control_current()
+    if (control != I64{0}) -> scheduler_check_loops(control)
     scheduler_delivered_status()
 }
 #Export(c) jet_rt_session_status: fn() -> I64 { jet_scheduler_native_status() }
@@ -663,10 +677,12 @@ scheduler_control_cancel_consume: fn(control: I64) {
 #Export(c) jet_rt_scheduler_control_drop: fn(control: I64) { scheduler_control_drop(control) }
 
 scheduler_control_interrupt: fn(control: I64) {
+    scheduler_checks_arm()
     sync_store(wrapping(control + I64{48}), I64{1})
     scheduler_control_cancel(control)
 }
 scheduler_control_pause: fn(control: I64, mode: I64) {
+    if (mode == I64{1}) -> scheduler_checks_arm()
     sync_store(wrapping(control + I64{24}), if (mode == I64{1}) -> I64{1} else -> I64{0})
     sync_store(wrapping(control + I64{8}), I64{1})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{3}, I64{-1})
@@ -677,9 +693,9 @@ scheduler_control_resume: fn(control: I64) {
     sync_park_wake(sync_load(wrapping(control + I64{64})))
 }
 
-scheduler_wait_while_paused: fn() -> I64 {
-    control: scheduler_control_current()
-    if (control == I64{0}) -> return I64{0}
+// Parks the current task while it is paused and not cancelled. False when
+// its deadline passed meanwhile, which delivered the deadline stop.
+scheduler_park_while_paused: fn(control: I64) -> Bool {
     loop sync_load(wrapping(control + (I64{8}))) != (I64{0}) && sync_load(wrapping(control + (I64{16}))) == (I64{0}) {
         timeout := I64{-1}
         if !scheduler_shielded() && jet_ctx_deadline_present() {
@@ -688,13 +704,31 @@ scheduler_wait_while_paused: fn() -> I64 {
                 kind: scheduler_msg_pause()
                 scheduler_deliver_deadline(kind)
                 jet_rt_string_drop(kind)
-                return jet_scheduler_native_status()
+                return false
             }
             timeout = deadline_ms_to_ns(remaining)
         }
         sync_park(sync_load(wrapping(control + I64{64})), timeout)
     }
+    true
+}
+
+scheduler_wait_while_paused: fn() -> I64 {
+    control: scheduler_control_current()
+    if (control == I64{0}) -> return I64{0}
+    if !scheduler_park_while_paused(control) -> return jet_scheduler_native_status()
     jet_scheduler_native_propagate()
+}
+
+// A strong pause (`pause(mode: .CheckLoops)`, pauseMode 1) is taken at
+// every stop poll: the check each loop iteration starts with and the poll
+// after a call (JetIR Build.jet ir_loop_check, ir_stop_check). The task
+// parks while it stays paused, and once its mode is strong a cancel of it
+// is delivered there too, so a busy loop stops. Outside a shield only.
+scheduler_check_loops: fn(control: I64) {
+    if (sync_load(wrapping(control + I64{24})) != I64{1}) || scheduler_shielded() -> return
+    if !scheduler_park_while_paused(control) -> return
+    if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
 }
 
 scheduler_wait_point_cancel_check: fn() -> I64 {

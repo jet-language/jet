@@ -1,0 +1,53 @@
+use time: core.time
+
+// A loop with no call and no wait point: only the check each iteration
+// starts with can hold or stop it.
+spin: fn(limit: Int) -> Int {
+    n := 0
+    loop n < limit {
+        n += 1
+    }
+    n
+}
+
+run: fn() {
+    print(spin(3))
+    counter: Atomic<Int>.try_new(0) ?? return
+    task.group workers {
+        spinner: task {
+            n := 0
+            loop {
+                n += 1
+                if n % 4096 == 0 -> counter.store(n)
+            }
+        }
+        tries := 0
+        loop counter.load() == 0 && tries < 2000 {
+            time.sleep(1ms)
+            tries += 1
+        }
+        // The default pause holds a task at its next wait point; this loop
+        // has none, so it keeps counting.
+        spinner.pause()
+        before: counter.load()
+        time.sleep(20ms)
+        print("pause() leaves it running: {counter.load() > before}")
+        // The strong pause holds it at its next check, within a bounded wait.
+        spinner.pause(mode: .CheckLoops)
+        held := false
+        tries = 0
+        loop !held && tries < 200 {
+            seen: counter.load()
+            time.sleep(5ms)
+            held = counter.load() == seen
+            tries += 1
+        }
+        print("pause(mode: .CheckLoops) holds it: {held}")
+        spinner.resume()
+        spinner.cancel()
+        if spinner.join() == {
+            .Ok(_) -> print("it finished")
+            .Err(_) -> print("cancel stopped it")
+        }
+    }
+}

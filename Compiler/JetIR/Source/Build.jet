@@ -2518,13 +2518,30 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
 
 // After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns
 // whether a stop was delivered (jet_rt_session_propagate when the thread's
-// task control holds one, which is zero while a cleanup or shield masks it),
-// and true takes the stop edge. The edge's own cleanup has none. The
-// selector keeps the call and a branch hot and lays the edge out cold
-// (X64Select ir_x64_stop_point).
+// task control holds one, which is zero while a cleanup or shield masks it,
+// or when the task is under a strong pause), and true takes the stop edge.
+// The edge's own cleanup has none. The selector keeps the call and a branch
+// hot and lays the edge out cold (X64Select ir_x64_stop_point).
 ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
     if !m.stop_points || b.stopping -> return
     ir_stop_point(m, b, IR_STOP_POLL_KEY)
+}
+
+// The check every user loop's iteration starts with: a stop poll
+// (IR_STOP_POLL_KEY) whether or not the body calls anything, so a task
+// paused with `pause(mode: .CheckLoops)` (JetRuntime Scheduler.jet
+// scheduler_check_loops) stops at its next iteration and a cancel of it is
+// delivered there. At the start of the body rather than at its back
+// branch, so an iteration a `next` ends early is checked too. Every loop
+// form that lowers to a Loop (BuildExpr.jet, BuildLazy.jet) emits it right
+// after pushing its IRLoopFrame. The passes treat it as any other poll: a
+// poll later in the same iteration folds it (OptStops.jet
+// ir_opt_fold_polls); the branch back to the head keeps one per iteration.
+// On x86-64, a check that follows no call reads only the runtime's armed
+// word before it calls the poll, and the poll keeps every register but rax
+// (X64Select.jet ir_x64_stop_point, ir_x64_stop_poll).
+ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
+    ir_stop_check(m, b)
 }
 
 // After instruction `at`, a user operation whose slow path can publish a

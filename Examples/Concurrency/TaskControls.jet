@@ -26,6 +26,23 @@ run: fn() {
     t.cancel()
     print(t.join() ?? panic("cancelled task"))
 
+    // A loop that never waits keeps running under `pause()`. The strong
+    // pause holds it at the check each iteration starts with, and its
+    // cancel stops the loop there.
+    spinner: task {
+        n := 0
+        loop {
+            n += 1
+        }
+    }
+    spinner.pause(mode: .CheckLoops)
+    spinner.resume()
+    spinner.cancel()
+    if spinner.join() == {
+        .Ok(_) -> print("spinner finished")
+        .Err(_) -> print("spinner stopped")
+    }
+
     print(task.any {slow_two(), 1} ?? panic("any failed"))
 
     { sender: tx, receiver: rx }: channel<Int>()

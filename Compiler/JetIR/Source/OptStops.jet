@@ -211,9 +211,15 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // at the later stop point, while every stop a call or a trap publishes is
 // still taken where it was.
 ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
+    poll := -1
+    trap := -1
+    loop id in 0..<keys.len() {
+        if keys[id] == IR_STOP_POLL_KEY -> poll = id
+        if keys[id] == IR_STOP_TRAP_KEY -> trap = id
+    }
     folded := false
     loop at in 0..<f.op.len() {
-        if !ir_opt_stops_poll(f, keys, at) || ir_opt_polls_checks_call(f, keys, at) -> next
+        if !ir_opt_stops_poll(f, keys, at) || ir_opt_polls_checks_call(f, poll, trap, at) -> next
         end: f.c[at + 1]
         if !ir_opt_polls_reach(f, keys, end + 1) -> next
         loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
@@ -223,10 +229,12 @@ ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
 }
 
 // Whether the poll at `at` checks a call: walking back to the first call
-// that is no stop point's or the first construct opened, a call met first,
-// or a construct closed on the way holding a stop edge that branches (an
-// inlined body handing its callee's stop on to the poll after it).
-ir_opt_polls_checks_call: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+// that is no stop point's (whose callee is no function `poll` or `trap`)
+// or the first construct opened, a call met first, or a construct closed
+// on the way holding a stop edge that branches (an inlined body handing
+// its callee's stop on to the poll after it). X64Select.jet
+// ir_x64_stop_point reads it too.
+ir_opt_polls_checks_call: fn(f: IRFunction, poll: Int, trap: Int, at: Int) -> Bool Never! {
     k := at - 1
     loop k >= 0 {
         op: f.op[k]
@@ -235,16 +243,11 @@ ir_opt_polls_checks_call: fn(f: IRFunction, keys: [String], at: Int) -> Bool Nev
             k = f.a[k] - 1
             next
         }
-        if (op == .Call && !ir_opt_polls_stop_call(keys, f.a[k])) || op == .CallRuntime || op == .CallIndirect -> return true
+        if (op == .Call && (f.a[k] < 0 || (f.a[k] != poll && f.a[k] != trap))) || op == .CallRuntime || op == .CallIndirect -> return true
         if op == .Block || op == .Loop || op == .If || op == .Else -> return false
         k -= 1
     }
     false
-}
-
-// Whether `callee` is a stop point's own call: the poll or the trap.
-ir_opt_polls_stop_call: fn(keys: [String], callee: Int) -> Bool Never! {
-    callee >= 0 && callee < keys.len() && (keys[callee] == IR_STOP_POLL_KEY || keys[callee] == IR_STOP_TRAP_KEY)
 }
 
 // Whether a stop edge (an If testing what a call just returned) from

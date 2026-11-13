@@ -396,8 +396,9 @@ web_leaf_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 
 // A stop poll (JetIR Build.jet ir_stop_poll): the attached thread's TCB
 // (the word WEB_GLOBAL_TLS names), its task control (word 16), the
-// control's status (word 32); with a status, jet_rt_session_propagate's
-// delivered stop as a Bool, else 0.
+// control's status (word 32); with a status, or under a strong pause
+// (pauseMode, word 24: JetRuntime Scheduler.jet scheduler_check_loops),
+// jet_rt_session_propagate's delivered stop as a Bool, else 0.
 web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     e := web_emitter(m, f)
     web_global_get(e, WEB_GLOBAL_TLS)
@@ -405,23 +406,19 @@ web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     web_mem(e, 0x29, 0)
     word: e.t0
     web_set(e, word)
-    offsets: [Int]{16, 32}
-    loop offset in offsets {
-        web_get(e, word)
-        web_op(e, 0x50)
-        web_if(e)
-        web_i64(e, 0)
-        web_op(e, 0x0f)
-        web_end(e)
-        web_at(e, word)
-        web_mem(e, 0x29, offset)
-        web_set(e, word)
-    }
-    web_get(e, word)
+    web_poll_quiet_unless(e, word)
+    web_at(e, word)
+    web_mem(e, 0x29, 16)
+    web_set(e, word)
+    web_poll_quiet_unless(e, word)
+    web_at(e, word)
+    web_mem(e, 0x29, 24)
     web_op(e, 0x50)
     web_if(e)
-    web_i64(e, 0)
-    web_op(e, 0x0f)
+    web_at(e, word)
+    web_mem(e, 0x29, 32)
+    web_set(e, word)
+    web_poll_quiet_unless(e, word)
     web_end(e)
     resolved: web_symbol(st, "jet_rt_session_propagate", ":l")
     web_call(e, resolved.callee)
@@ -429,4 +426,14 @@ web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     web_op(e, 0x52)
     web_op(e, 0xad)
     web_finish(e)
+}
+
+// `if word == 0 { return 0 }`.
+web_poll_quiet_unless: fn(e: &WebEmitter, word: Int) Never! {
+    web_get(e, word)
+    web_op(e, 0x50)
+    web_if(e)
+    web_i64(e, 0)
+    web_op(e, 0x0f)
+    web_end(e)
 }

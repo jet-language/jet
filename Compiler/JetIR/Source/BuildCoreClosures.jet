@@ -437,10 +437,12 @@ ir_task_detach: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, spa
     return -1
 }
 
-// `task.pause()`, `task.pause(mode)`, `task.resume()` and `task.cancel()`:
-// control-plane hooks over the borrowed handle (JetRuntime Task.jet
-// jet_rt_native_task_pause / _pause_with_mode / _resume / _cancel). They
-// return nothing and the caller keeps the handle.
+// `task.pause()`, `task.pause(mode: .CheckLoops)`, `task.resume()` and
+// `task.cancel()`: control-plane hooks over the borrowed handle (JetRuntime
+// Task.jet jet_rt_native_task_pause / _pause_with_mode / _resume /
+// _cancel). A `TaskPauseMode` is its tag word (WaitPoints 0, CheckLoops 1,
+// the runtime's pauseMode). They return nothing and the caller keeps the
+// handle.
 ir_task_control: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -452,13 +454,11 @@ ir_task_control: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, op
     }
     if args.len() == 1 {
         mode_ty: ir_ty(p, b, args[0])
-        if ir_untag(mode_ty) != .Int -> return ir_fail_slot(b, span, "Task.pause mode of type {ir_type_name(mode_ty)}")
+        pause_mode: Type.Named{name: "TaskPauseMode"}
+        if ir_untag(mode_ty) != pause_mode -> return ir_fail_slot(b, span, "Task.pause mode of type {ir_type_name(mode_ty)}")
         mode: ir_expr(m, p, b, args[0])
         if ir_failed(b) || mode < 0 -> return -1
-        word_row: ir_word_row(m)
-        raw: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{mode}, word_row)
-        ir_release(m, b, mode)
-        operands.push(raw)
+        operands.push(ir_enum_tag_of(m, b, mode))
         symbol = "jet_rt_native_task_pause_with_mode"
     }
     _: ir_runtime(m, b, symbol, operands, -1)

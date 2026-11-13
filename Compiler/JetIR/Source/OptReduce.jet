@@ -49,11 +49,15 @@
 // header or struct address the Loop does not change), and fault tests: an
 // If with no Else on `x >= n` (x the index or a Move or Copy of it, n the
 // bound's value or one word limit L the Loop does not change), whose body
-// ends in `unreachable`. With such an L the leaf runs
-// only when n <= L. Outside fault tests and guard exits there is no store,
-// call or drop but the total's, or the fill's Store, clone and conversion,
-// so the run reads only what the passes would read and writes only what
-// they would write. A fill reads no memory but its List's length and data
+// ends in `unreachable`, and stop points (the stop poll's call and the If
+// on what it returned, as the check every iteration starts with, Build.jet
+// ir_loop_check). With such an L the leaf runs only when n <= L. Outside
+// fault tests, guard exits and stop points there is no store, call or drop
+// but the total's, or the fill's Store, clone and conversion, so the run
+// reads only what the passes would read and writes only what they would
+// write. The leaf's run is finite, so leaving its passes unchecked only
+// delays a stop until the one pass the Loop runs after it, which checks.
+// A fill reads no memory but its List's length and data
 // words, which lie outside the elements it stores: a fill's element is at
 // most 8 bytes and holds no List, so no element holds a List header, so
 // its stores change no value it uses.
@@ -364,8 +368,12 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
         // The stop point after the checked conversion, which publishes no
         // stop for any value the leaf stores.
         converted: convert >= 0 && (k == convert + 1 || k == convert + 2) && polls.contains(convert + 2)
+        // The Loop's own check (Build.jet ir_loop_check) and any other stop
+        // point: the leaf's run is finite, and the one pass the Loop runs
+        // after it still checks.
+        checked: (f.op[k] == .Call && f.a[k] == poll && polls.contains(k + 1)) || (f.op[k] == .If && polls.contains(k))
         if fill && f.op[k] == .Load -> loads.push(k)
-        if !ir_reduce_allowed(f.op[k]) && !dropped && !inline_drop && !closes && !stored && !converted && !(f.op[k] == .If && (faults.contains(k) || guards.contains(k) || k == update.match)) -> return ir_reduce_declined(kind, "the Loop holds a {ir_op_name(f.op[k])}")
+        if !ir_reduce_allowed(f.op[k]) && !dropped && !inline_drop && !closes && !stored && !converted && !checked && !(f.op[k] == .If && (faults.contains(k) || guards.contains(k) || k == update.match)) -> return ir_reduce_declined(kind, "the Loop holds a {ir_op_name(f.op[k])}")
     }
     if f.b[access] != 0 || (kind == IR_REDUCE_SUM && m.types[f.slot_type[element]].kind != .Int) -> return ir_reduce_declined(kind, "the element is not a whole {if kind == IR_REDUCE_SUM -> "Int word" else -> "element"}")
     stride: ir_reduce_width(kind)

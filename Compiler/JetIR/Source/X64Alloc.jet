@@ -5,11 +5,12 @@
 // slot's register is callee-saved (rbx, r12-r15), or r8 or r9 (which no
 // one has to save) for a slot whose range holds no instruction that may
 // call (ir_x64_silent), which it takes first; in a leaf (a function whose
-// selection makes no call, ir_x64_leaf) every slot's range is such a one.
-// A Float slot's is one of xmm2-xmm15, which the C
+// selection makes no call but of the stop poll, ir_x64_leaf) every slot's
+// range is such a one. A Float slot's is one of xmm2-xmm15, which the C
 // ABI lets a call clobber, so around every call inside its range the slot
 // is stored to its home and loaded back (X64Select.jet ir_x64_call_out),
-// except a stop poll's, which keeps them. Selection then uses rax, rcx,
+// except a stop poll's, which keeps them and every general register but
+// rax (X64Select.jet ir_x64_stop_poll). Selection then uses rax, rcx,
 // rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as scratch inside one instruction
 // only (r8 and r9 only for a call's arguments, and xmm0-xmm7 for the Float
 // arguments of a call), and structured control never needs moves on its
@@ -240,15 +241,17 @@ ir_x64_inline_unique: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 // slow path, and leaves r8 and r9 alone: structure, a constant, a memory
 // access, a frame address or byte copy, a quiet value (ir_x64_quiet), a
 // call of an `#FFI(asm)` template selected in place that keeps r8 and r9
-// (IRAsmLeaf.quiet; X64Select.jet ir_x64_asm_inline), or a tail call
+// (IRAsmLeaf.quiet; X64Select.jet ir_x64_asm_inline), a tail call
 // (TailCalls.jet), which leaves the function: its arguments go to rdi,
 // rsi, rdx and rcx (ir_x64_tail_silent) and no value of this frame is
-// read after its jump.
+// read after its jump, or a call of the stop poll, which keeps every
+// register but rax (X64Select.jet ir_x64_stop_poll), so a loop's check
+// costs its slots no register.
 ir_x64_silent: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
     if f.op[at] == {
         .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
         .Return -> f.b[at] != IR_TAIL_JUMP || (at > 0 && ir_x64_tail_silent(m, f, at - 1))
-        .Call -> ir_x64_tail_silent(m, f, at) || ir_x64_asm_silent(m, f, at)
+        .Call -> ir_x64_tail_silent(m, f, at) || ir_x64_asm_silent(m, f, at) || ir_x64_poll_silent(m, f, at)
         .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt | .IntBig -> ir_x64_quiet(m, f, consts, values, at)
     }
 }
@@ -263,6 +266,14 @@ ir_x64_tail_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
         if ir_x64_slot_class(m, f, f.args[position]) == .General -> general += 1
     }
     general <= 4
+}
+
+// Whether `at` calls the stop poll with no argument (Build.jet
+// ir_stop_poll), not as a tail call.
+ir_x64_poll_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.a[at] < 0 || f.a[at] >= m.functions.len() || f.c[at] != 0 -> return false
+    if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return false
+    m.functions[f.a[at]].key == IR_STOP_POLL_KEY
 }
 
 // Whether Call `at` is a quiet `#FFI(asm)` template selected in place: an

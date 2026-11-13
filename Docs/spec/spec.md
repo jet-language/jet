@@ -3674,7 +3674,20 @@ running task's opaque `TaskID` (comparable, printable, unique among running
 tasks), `tasks.cpu_ns()` reads the running task's own CPU clock, and
 `sender.close()`/`receiver.close()` close channel ends. Pause holds a task at
 its next wait point until `resume()`; it is scheduler state, not a flag the
-application must poll. Task failure uses `TaskFailure` (D-COROUTINE1).
+application must poll. A task that reaches no wait point, such as a loop
+that only computes, keeps running under the default pause. Task failure uses
+`TaskFailure` (D-COROUTINE1).
+
+`pause(mode: .CheckLoops)` is the strong pause (D-TASK-PAUSE-TIER1). Its
+argument is the compiler-owned enum `TaskPauseMode`: `.WaitPoints`, the
+default, or `.CheckLoops`. A strong pause also holds the task at its next
+check. Every loop iteration starts with a check, and the return from a call
+that can stop is also a check. Once a task has been paused strongly, a later
+`cancel()` is delivered at its next check as well as at its next wait point,
+so a computing loop stops. Every engine and optimization level lowers the
+check from the same rule. Until some task is stopped from outside,
+interrupted or strongly paused, the native check that starts an iteration
+costs one load and one branch.
 
 Cancellation is preemptive at wait points: channel send and receive,
 `time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at the

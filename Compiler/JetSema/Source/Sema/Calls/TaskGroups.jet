@@ -931,10 +931,9 @@ sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, meth
 }
 
 // Rust `task_method_return` (jet-foundation): the task handle's control-plane
-// hooks over the coroutine substrate. `pause` takes an optional mode, and every
-// hook reads the handle (it is not consumed) and returns nothing. The arguments
-// carry no declared type (Rust `builtin_method_arg_types` gives Task none), so
-// they are inferred as written.
+// hooks over the coroutine substrate. `pause` takes an optional
+// `mode: TaskPauseMode` (`.WaitPoints`, the default, or `.CheckLoops`), and
+// every hook reads the handle (it is not consumed) and returns nothing.
 sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     selected: if {
         method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(THandleOp.TaskPause)
@@ -944,11 +943,11 @@ sema_taskgroup_check_task_control: fn(receiver: Expr, receiver_value: TExpr, met
     }
     operation: selected ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if sema_taskgroup_task_payload(receiver_value.ty) == None || !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    typed := [TExpr]{}
-    loop argument in args {
-        value: sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(value)
+    params := [SemaCallParam]{}
+    if args.len() == 1 {
+        params.push(SemaCallParam{label: "mode", name: "mode", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.Named{name: "TaskPauseMode"}), variadic: false})
     }
+    typed: sema_stream_handle_checked_args("Task.{method}", params, args, None, None, AccessConvention.Read, -1, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type: Type.Named{name: "Unit"}
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)

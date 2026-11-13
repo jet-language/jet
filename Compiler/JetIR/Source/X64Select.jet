@@ -1464,6 +1464,12 @@ ir_x64_alloc_entry: fn(f: IRFunction, al: IRX64Allocation, at: Int, symbol: Stri
 IR_X64_PROCESS_ENDING_STORAGE: "main_process_ending"
 IR_X64_PROCESS_ENDING_SYMBOL: "jet_rt_process_ending"
 
+// The runtime's armed word for loops' stop polls (JetRuntime Scheduler.jet
+// scheduler_checks_armed) and its data symbol (BuildLibrary.jet
+// ir_build_library).
+IR_X64_CHECKS_ARMED_STORAGE: "scheduler_checks_armed"
+IR_X64_CHECKS_ARMED_SYMBOL: "jet_rt_checks_armed"
+
 // jet_rt_block_release(block) inline: true when the caller's reference was
 // the last one and the process is not ending. A count of 1 is the caller's
 // alone (no other owner can retain it meanwhile), so it is last without a
@@ -3287,7 +3293,13 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // after a direct call of a selected body (ir_x64_reports_stop) the hot path
 // is `test edx, edx; jnz edge`: every body returns edx 0 from its epilogue
 // and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
-// jnz edge`. The edge goes after the epilogue (ir_x64_pads). A trap poll
+// jnz edge`; in a loop the poll's tests run inline first (ir_x64_stop_quiet),
+// and a poll there that checks no call (OptStops.jet
+// ir_opt_polls_checks_call: a loop's own check) first reads only the
+// runtime's armed word, which stays zero until a stop is published to
+// another task, an interrupt is sent or a strong pause is asked for, so a
+// loop that calls nothing pays a load and a branch per iteration. The
+// edge goes after the epilogue (ir_x64_pads). A trap poll
 // keeps no hot code: the slow paths that publish a numeric stop (colds from
 // `traps` on) take the edge (IRX64Cold.pad), and after an operation
 // selected with no such slow path (a division by a constant, or one the
@@ -3319,7 +3331,18 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         } else {
             // In a loop the poll's own tests of the task control run inline
             // first, so while no stop is asked for the hot path calls nothing.
-            if ir_x64_in_loop(e, f) -> skips = ir_x64_stop_quiet(e.code)
+            // A poll that checks no call can observe only what another task
+            // asked for, which arms the runtime's word first.
+            if ir_x64_in_loop(e, f) && f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
+                flag: x64_load_rip(e.code, X64_RAX)
+                e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
+                x64_test_rr(e.code, X64_RAX, X64_RAX)
+                skips.push(x64_jcc_rel32(e.code, X64Cond.E))
+            } else if ir_x64_in_loop(e, f) {
+                tests := ir_x64_stop_quiet(e.code)
+                ir_x64_patch(e, tests.enter, e.code.bytes.len())
+                skips = tests.quiet.move()
+            }
             ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
             x64_test_rr(e.code, X64_RAX, X64_RAX)
         }
@@ -3373,9 +3396,19 @@ ir_x64_in_loop: fn(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
 
 // The stop poll's tests that no stop is asked for (ir_x64_stop_poll), into
 // rax: `mov rax, gs:[0]; test rax, rax; jz quiet; mov rax, [rax + 16];
-// test rax, rax; jz quiet; mov rax, [rax + 32]; test rax, rax; jz quiet`.
-// Returns the three rel32 fields to patch to `quiet`.
-ir_x64_stop_quiet: fn(code: &X64Code) -> [Int] Never! {
+// test rax, rax; jz quiet; cmp qword [rax + 24], 0; jnz enter;
+// mov rax, [rax + 32]; test rax, rax; jz quiet`. A task under a strong
+// pause (pauseMode, control word 24) enters the poll's routine with no
+// stop asked for (JetRuntime Scheduler.jet scheduler_check_loops).
+IRX64StopQuiet: struct {
+    // The three rel32 fields to patch to `quiet`.
+    quiet: [Int]
+    // The rel32 field to patch to the end of the tests, where the routine
+    // is entered.
+    enter: Int
+}
+
+ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {
     gs: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
     x64_log(code, X64EmitKind.Memory, -1, -1, -1)
     loop byte in gs -> code.bytes.push(byte)
@@ -3385,10 +3418,12 @@ ir_x64_stop_quiet: fn(code: &X64Code) -> [Int] Never! {
     x64_load(code, X64_RAX, X64_RAX, 16)
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
+    x64_alu_mi(code, X64Alu.Cmp, X64_RAX, 24, 0)
+    enter: x64_jcc_rel32(code, X64Cond.NE)
     x64_load(code, X64_RAX, X64_RAX, 32)
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
-    sites
+    IRX64StopQuiet{quiet: sites, enter: enter}
 }
 
 // Lays out the stop edges after the epilogue, each distinct one once
@@ -3837,38 +3872,50 @@ ir_x64_log_text: fn(m: IRModule, f: IRFunction, code: X64Code) -> [String] Never
     lines
 }
 
+// The general registers a C call may clobber that the stop poll keeps:
+// rcx, rdx, rsi, rdi, r8, r9, r10 and r11.
+IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
+
 // A stop poll (Build.jet ir_stop_poll), frameless: GS:0 holds the attached
 // thread's TCB address (OS/Linux.jet os_tls_base_i64), whose word 16 is the
 // current task control, whose word 32 is its status (JetRuntime
 // Scheduler.jet scheduler_control_current); an unattached thread's GS names
 // a zero word (Thread.jet thread_base). With no stop it returns 0 from the
 // first zero word; with one, jet_rt_session_propagate's delivered status as
-// a Bool (zero while a cleanup or shield masks it). It keeps xmm2-xmm15
-// across that call, so a call of it keeps the Float slots in them in place
-// (ir_x64_call_out):
+// a Bool (zero while a cleanup or shield masks it). It keeps xmm2-xmm15 and
+// every general register but rax across that call, so a call of it keeps
+// the Float slots in place (ir_x64_call_out) and is silent to the slot
+// allocator (X64Alloc.jet ir_x64_silent): a loop's check leaves r8 and r9
+// to its slots and a leaf a leaf:
 //   mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
-//   test rax, rax; jz done; mov rax, [rax + 32]; test rax, rax; jz done;
-//   sub rsp, 232; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
-//   call jet_rt_session_propagate; movups xmm(2 + k), [rsp + 16k];
-//   add rsp, 232; test rax, rax; setne al; movzx eax, al; done: ret
+//   test rax, rax; jz done; cmp qword [rax + 24], 0; jnz enter;
+//   mov rax, [rax + 32]; test rax, rax; jz done; enter:
+//   sub rsp, 296; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
+//   mov [rsp + 224 + 8k], r for the k-th of rcx, rdx, rsi, rdi, r8-r11;
+//   call jet_rt_session_propagate; the loads back; add rsp, 296;
+//   test rax, rax; setne al; movzx eax, al; done: ret
 ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := x64_code()
-    sites := ir_x64_stop_quiet(code)
-    // The fourteen xmm registers below an 8-byte pad keep rsp 16-byte
-    // aligned at the call.
-    frame: 8 + 16 * 14
+    tests := ir_x64_stop_quiet(code)
+    x64_patch_rel32(code.bytes, tests.enter, code.bytes.len())
+    // The fourteen xmm registers and the eight general ones below an 8-byte
+    // pad keep rsp 16-byte aligned at the call.
+    kept: IR_X64_POLL_KEEPS
+    frame: 8 + 16 * 14 + 8 * kept.len()
     x64_alu_ri(code, X64Alu.Sub, X64_RSP, frame)
     framed: code.bytes.len()
     loop index in 0..<14 -> x64_vector_store(code, X64_RSP, 16 * index, 2 + index)
+    loop index in 0..<kept.len() -> x64_store(code, X64_RSP, 16 * 14 + 8 * index, kept[index])
     status_at: x64_call_rel32(code)
     loop index in 0..<14 -> x64_vector_load(code, 2 + index, X64_RSP, 16 * index)
+    loop index in 0..<kept.len() -> x64_load(code, kept[index], X64_RSP, 16 * 14 + 8 * index)
     x64_alu_ri(code, X64Alu.Add, X64_RSP, frame)
     restored: code.bytes.len()
     x64_test_rr(code, X64_RAX, X64_RAX)
     x64_setcc(code, X64Cond.NE, X64_RAX)
     x64_movzx_r8(code, X64_RAX, X64_RAX)
     done: code.bytes.len()
-    loop site in sites -> x64_patch_rel32(code.bytes, site, done)
+    loop site in tests.quiet -> x64_patch_rel32(code.bytes, site, done)
     x64_ret(code)
     // The CFA is rsp + 8, rsp + 8 + frame from the `sub` to the `add`.
     cfi := [U8]{}

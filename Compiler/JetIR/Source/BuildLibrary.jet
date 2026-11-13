@@ -301,10 +301,13 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
     abis.sort_by(fn(left: IRExportABI, right: IRExportABI) { left.symbol <=> right.symbol })
     // The process-ending flag the inline block release reads (X64Select.jet
-    // ir_x64_block_release), when this library holds it.
+    // ir_x64_block_release) and the armed word a loop's stop poll reads
+    // (X64Select.jet ir_x64_stop_point), when this library holds them.
     data := [X64DataExport]{}
     ending: ir_lifecycle_guard(m, p, IR_X64_PROCESS_ENDING_STORAGE)
     if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
+    armed: ir_lifecycle_guard(m, p, IR_X64_CHECKS_ARMED_STORAGE)
+    if armed >= 0 -> data.push(X64DataExport{data: armed, symbol: IR_X64_CHECKS_ARMED_SYMBOL})
     IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, data: data, abis: abis}
 }
 

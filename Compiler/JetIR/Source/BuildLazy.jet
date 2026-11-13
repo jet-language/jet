@@ -1359,6 +1359,7 @@ ir_text_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     step_block: ir_open(b.f, IROp.Block, b.line)
     ir_scope_open(b)
     b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len(), edge: edge})
+    ir_loop_check(m, b)
     item: ir_load_at(m, b, cell, piece_at, row)
     b.fresh[item] = false
     if variable_two == .Val(second) {
@@ -1535,6 +1536,7 @@ ir_line_next_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?,
     ir_scope_open(b)
     mark: b.bindings.len()
     b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark, guards: b.statement_guards.len(), edge: edge})
+    ir_loop_check(m, b)
     item: ir_load_at(m, b, line_slot, 0, row)
     b.fresh[item] = false
     if variable_two == .Val(second) {
@@ -1805,6 +1807,7 @@ ir_stdin_lines_walk: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
     ir_scope_open(b)
     mark: b.bindings.len()
     b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark, guards: b.statement_guards.len(), edge: edge})
+    ir_loop_check(m, b)
     item: ir_load_at(m, b, line_slot, 0, row)
     b.fresh[item] = false
     if variable_two == .Val(second) {
@@ -1888,6 +1891,7 @@ ir_lazy_walk_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String
     ir_scope_open(b)
     mark: b.bindings.len()
     b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark, guards: b.statement_guards.len(), edge: edge})
+    ir_loop_check(m, b)
     if countdown >= 0 {
         between: ir_bool_op(m, b, IROp.Ne, countdown, zero)
         ir_open_if(b.f, between, b.line)
