@@ -352,7 +352,7 @@ sema_contract_result_ident_in_stmt: fn(value: Stmt) -> Span? {
             if else_body == .Val(else_statements) -> sema_contract_result_ident_in_statements(else_statements) else -> None
         }
         .BreakValue(expression, _) | .BreakLabelValue(_, _, expression, _) -> sema_contract_result_ident_in_expr(expression)
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .Live(body, _) | .ComptimeBlock(body, _, _) -> sema_contract_result_ident_in_statements(body)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .Live(body, _) | .ComptimeBlock(body, _, _) -> sema_contract_result_ident_in_statements(body)
         .CountedLoop(init, condition, step, body, _, _, _) -> {
             found := sema_contract_result_ident_in_binding(init)
             if found != None -> return found

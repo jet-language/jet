@@ -229,6 +229,35 @@ ir_shield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
 }
 
+// `defer body`: an entry among the bindings that runs the body where it
+// would drop (ir_drop_bindings), so the body runs as its block ends, on the
+// fallthrough and on every exit through it, after the variables bound since
+// drop and before the earlier ones. Each exit builds its own copy and reads
+// the variables as they are there. The program it builds with is kept, as a
+// transaction's restores keep it.
+ir_defer: fn(p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
+    if b.program == .None -> b.program = Val(p.copy())
+    b.bindings.push(IRBinding{name: "", slot: -1, cleanup: b.defers.len()})
+    b.defers.push(body.copy())
+}
+
+// Builds `defer` body `row` here. Like a drop, it runs to its end: no stop
+// point interrupts it.
+ir_run_defer: fn(m: &IRModule, b: &IRBuilder, row: Int) Never! {
+    body: b.defers[row].copy()
+    held: b.program
+    b.program = None
+    stopping: b.stopping
+    b.stopping = true
+    if held == .Val(program) {
+        ir_scope_open(b)
+        ir_stmts(m, program, b, body)
+        if !ir_failed(b) -> ir_scope_close(m, b)
+    }
+    b.stopping = stopping
+    b.program = held
+}
+
 // `#Live { .. }`: the body runs with stdin in unbuffered, no-echo mode
 // (jet_term_mode_enter, RouteTerm.jet), entered before it and restored after
 // its bindings drop, or by an early exit (ir_tx_unwind) or a stop edge

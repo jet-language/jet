@@ -263,6 +263,7 @@ TStmt: enum {
     ContextBlock(guards: [TContextGuard], body: [TStmt], span: Span)
     Live(body: [TStmt], span: Span)
     Shield(body: [TStmt], span: Span)
+    Defer(body: [TStmt], span: Span)
     ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
     Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
     GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
@@ -1043,7 +1044,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if step == Val(nested) -> visit(nested)
             tree_each_stmt_list_child(body, visit)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> tree_each_stmt_list_child(body, visit)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> tree_each_stmt_list_child(body, visit)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             visit(subject)
             loop arm in arms {

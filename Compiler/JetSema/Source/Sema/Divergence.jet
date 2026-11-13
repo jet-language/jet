@@ -267,6 +267,8 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScop
         .Yield(value, _) -> sema_divergence_expr(graph, scope, value)
         .ScopeMember(_, _, args, _, body, _, _, _) -> sema_divergence_then(sema_divergence_exprs(graph, scope, args), sema_divergence_body(graph, scope, body))
         .DeferClose(close, _) -> sema_divergence_expr(graph, scope, close)
+        // A deferred body runs as its block ends, not here.
+        .Defer(_, _) -> sema_divergence_normal()
     }
 }
 

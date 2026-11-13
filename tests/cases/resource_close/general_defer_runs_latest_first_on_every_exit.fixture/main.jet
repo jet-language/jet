@@ -1,0 +1,53 @@
+counted: fn() -> Int {
+    n := 1
+    defer {
+        n = 2
+        print("deferred sees {n}")
+    }
+    return n
+}
+
+order: fn() {
+    defer print("first written, runs last")
+    defer {
+        print("second written, runs first")
+    }
+    print("body")
+}
+
+loops: fn() {
+    loop step in [1, 2, 3] {
+        defer print("leave step {step}")
+        if step == 2 -> next
+        if step == 3 -> break
+        print("step {step}")
+    }
+}
+
+early: fn(flag: Bool) -> String {
+    defer print("early leaves")
+    if flag -> return "returned"
+    "fell through"
+}
+
+parse: fn(text: String) -> Int {
+    defer print("parse leaves")
+    if text == "ab" -> return Err("not a number")
+    1
+}
+
+twice: fn(text: String) -> Int {
+    defer print("twice leaves")
+    parse(text) * 2
+}
+
+run: fn() {
+    print(counted())
+    order()
+    loops()
+    print(early(true))
+    print(early(false))
+    print(parse("1") ?? 0)
+    print(parse("ab") ?? 0)
+    print(twice("ab") ?? -1)
+}

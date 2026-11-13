@@ -4946,6 +4946,19 @@ CollectionChangedWhileRead: struct {
     }
 }
 
+DeferLeavesItsBlock: struct {
+    word: String
+
+    impl Diagnostic {
+        code: "E0509"
+        meaning: "A `defer` body tries to leave its block"
+        detail: true
+        what: fn(self) -> String { "`{self.word}` can't leave a `defer` body" }
+        why: fn(self) -> String { "A `defer` body runs as its block ends, after the block's own exit was chosen, so it can't choose another." }
+        fix: fn(self) -> String { "Take the `{self.word}` out of the `defer` body and choose the exit in the block itself." }
+    }
+}
+
 CryptoExpertNotAllowed: struct {
     impl Diagnostic {
         code: "E0510"
@@ -4968,6 +4981,17 @@ ExpiringForce: struct {
         what: fn(self) -> String { "`Expiring.force` bypasses fallible cache-expiry access — use `get(clock)`" }
         why: fn(self) -> String { "An expiring value can be past its time, so it is read through `get(clock)`, which reports the expiry" }
         fix: fn(self) -> String { "Use fallible `Expiring.get(clock)` instead of `Expiring.force`." }
+    }
+}
+
+DeferPropagatesFailure: struct {
+    impl Diagnostic {
+        code: "E0512"
+        meaning: "A `defer` body passes a failure on"
+        detail: true
+        what: fn(self) -> String { "A failure can't pass out of a `defer` body" }
+        why: fn(self) -> String { "A `defer` body runs as its block ends, after the block's own exit was chosen, so a failure can't leave through it." }
+        fix: fn(self) -> String { "Handle the failure inside the body, with `??` or `or`." }
     }
 }
 

@@ -282,7 +282,7 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
         .CountedLoop(_, _, _, body, _, _, _) -> execution_loop(g, src, stmt, body)
         .Switched(marker, body, _) -> if switched_off(marker.name) -> empty_flow() else -> execution_block(g, src, body)
         .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .AssumeDet(_, _, body, _) -> execution_block(g, src, body)
-        .Reactive(body, _) | .Shield(body, _) | .Live(body, _) -> execution_block(g, src, body)
+        .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Live(body, _) -> execution_block(g, src, body)
         .Region(_, _, body, _) | .Layout(_, _, body, _) | .Policy(_, body, _) | .ContextBlock(_, body, _) -> execution_block(g, src, body)
         .TaskGroup(_, _, _, body, _) | .AuthorityScope(_, _, _, body, _) -> execution_block(g, src, body)
         .ComptimeBlock(body, _, _) -> execution_block(g, src, body)

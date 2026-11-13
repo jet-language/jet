@@ -494,7 +494,7 @@ ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSi
         .Switched(marker, body, _) -> {
             if marker.name != "Off" -> ast_comptime_walk_stmts(body, calls, sites)
         }
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, sites)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, sites)
         // `#Impure` and `#AssumeDet` bodies are suppressed under PLAIN.
         .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) | .Impure(_, _, _, _) | .AssumeDet(_, _, _, _) -> {}
     }

@@ -1702,7 +1702,7 @@ sema_comptime_reflection_append_arithmetic_stmts: fn(body: [Stmt], values: &Sema
                 }
                 if else_body == .Val(nested) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             }
-            .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) | .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) | .Region(_, _, nested, _) | .TaskGroup(_, _, _, nested, _) | .Layout(_, _, nested, _) | .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) | .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) | .Transact(_, _, nested, _, _) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
+            .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) | .Reactive(nested, _) | .Shield(nested, _) | .Defer(nested, _) | .Switched(_, nested, _) | .Region(_, _, nested, _) | .TaskGroup(_, _, _, nested, _) | .Layout(_, _, nested, _) | .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) | .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) | .Transact(_, _, nested, _, _) -> sema_comptime_reflection_append_arithmetic_stmts(nested, values)
             .Policy(declarations, nested, span) -> {
                 if sema_policy_arithmetic_mode(declarations) == .Val(mode) {
                     values.scopes.push(ArithmeticPolicyFact{mode: mode, scope_span: span, operation_span: span, operation: None})

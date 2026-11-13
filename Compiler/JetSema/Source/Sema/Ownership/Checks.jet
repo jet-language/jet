@@ -2313,8 +2313,8 @@ sema_ownership_place_deferred: fn(state: &SemaOwnershipState, place: SemaOwnersh
     None
 }
 
-// The moves a `defer close(name)` just recorded from `moved_before` on happen
-// when the current scope exits.
+// The moves a `defer close(name)` or a `defer` body just recorded from
+// `moved_before` on happen when the current scope exits.
 sema_ownership_defer_moves: fn(state: &SemaOwnershipState, moved_before: Int) Never! {
     loop index in moved_before..<state.moved.len() -> state.moved[index].origin.deferred_depth = Val(state.scope_depth)
 }
@@ -4998,7 +4998,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: &SemaOwnershipState, b
                     sema_ownership_collect_evaluated_stmt_accesses(state, switched_body, mode, body_bound, nested, scopes, events, checks)
                 }
             }
-            .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Shield(inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .Transact(_, _, inner, _, _) | .AssumeDet(_, _, inner, _) | .Live(inner, _) -> {
+            .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Shield(inner, _) | .Defer(inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .Transact(_, _, inner, _, _) | .AssumeDet(_, _, inner, _) | .Live(inner, _) -> {
                 body_bound := bound.copy()
                 sema_ownership_collect_evaluated_stmt_accesses(state, inner, mode, body_bound, nested, scopes, events, checks)
             }
@@ -6333,7 +6333,7 @@ sema_ownership_check_statement: fn(state: &SemaOwnershipState, statement: Stmt, 
         .Unsafe(_, _, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
         .Impure(_, _, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
         .Reactive(body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
-        .Shield(body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
+        .Shield(body, _) | .Defer(body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
         .Switched(_, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
         .Region(_, _, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)
         .Policy(_, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)

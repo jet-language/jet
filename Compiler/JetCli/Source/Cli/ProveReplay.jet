@@ -2346,7 +2346,7 @@ jet_cli_replay_stmt: fn(statement: Stmt, aliases: [String:String], locals: [Stri
         .Unsafe(_, _, _, _) -> jet_cli_replay_boundary("#Unsafe raw boundary", sites)
         .Impure(_, _, _, _) -> jet_cli_replay_boundary("comptime impure boundary", sites)
         .Reactive(_, _) -> jet_cli_replay_boundary("task/concurrency boundary", sites)
-        .Shield(body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .Shield(body, _) | .Defer(body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
         .Switched(_, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
         .Region(_, _, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
         .Policy(_, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)

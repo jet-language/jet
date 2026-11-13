@@ -1255,6 +1255,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
         // copy: `args_span` is a payload of read parameter `stmt`, which keeps the original; field `args_span` of the new Stmt.ScopeMember owns this one
         .ScopeMember(name, name_span, args, args_span, body, dsl, dot_span, span) -> Stmt.ScopeMember{name: name, name_span: name_span, args: sema_inline_rewrite_exprs(rewrite, args), args_span: args_span.copy(), body: sema_inline_rewrite_stmts(rewrite, body), dsl: dsl, dot_span: dot_span, span: span}
         .DeferClose(close, span) -> Stmt.DeferClose{close: sema_inline_rewrite_expr(rewrite, close), span: span}
+        .Defer(body, span) -> Stmt.Defer{body: sema_inline_rewrite_stmts(rewrite, body), span: span}
         // copy: the rewrite walks the module program by borrowed payload views (Jet has no
         // consuming match), so an unchanged statement kind is copied into the rebuilt program,
         // while the caller's program keeps the original.

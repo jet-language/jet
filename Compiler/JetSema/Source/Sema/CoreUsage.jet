@@ -1238,6 +1238,7 @@ sema_core_collect_stmts: fn(statements: [Stmt], imports: [SemaCoreImport], regis
                 sema_core_note_usage(used, spans, "core.concurrency::shield", Val(span))
                 sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)
             }
+            .Defer(body, _) -> sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)
             .Reactive(body, span) -> {
                 sema_core_note_usage(used, spans, "core.reactive", Val(span))
                 sema_core_collect_stmts(body, imports, registered, used, spans, callbacks)

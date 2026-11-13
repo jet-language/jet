@@ -193,7 +193,7 @@ sema_ownership_last_use_statement: fn(statement: Stmt, name: String) -> Bool {
             if marker.name == MARKER_OFF -> return false
             return sema_ownership_last_use_statements(body, name)
         }
-        .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) -> return sema_ownership_last_use_statements(body, name)
+        .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) -> return sema_ownership_last_use_statements(body, name)
         .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
             if sema_ownership_last_use_expr(condition, name) || sema_ownership_last_use_statements(then_body, name) -> return true
             if else_body != None -> return sema_ownership_last_use_statements(else_body, name)

@@ -311,6 +311,6 @@ per suite, case and tier with its status, detail, exit and diff. Any non-pass
 exits nonzero.
 
 Compiler fixture text follows the same language rules: escape literal braces
-in quoted parser input, and use explicit filesystem cleanup rather than an
-arbitrary `defer { ... }` block. S63 permits `defer close(resource)`, not general
-deferred actions.
+in quoted parser input. A resource closes with `defer close(resource)`; other
+cleanup, such as removing a scratch file, can run from a `defer` statement or
+block.

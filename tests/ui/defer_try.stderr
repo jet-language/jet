@@ -1,0 +1,8 @@
+Error [jet.DeferPropagatesFailure]: A failure can't pass out of a `defer` body
+  --> tests/ui/defer_try.jet:8:15
+    |
+  8 |         print(parse("ab")?("reading the count"))
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A `defer` body runs as its block ends, after the block's own exit was chosen, so a failure can't leave through it.
+ Fix: Handle the failure inside the body, with `??` or `or`.
+More: jet-lang.dev/e/E0512

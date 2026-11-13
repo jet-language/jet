@@ -3353,8 +3353,8 @@ consumes when its scheduled action runs. `.drop("reason")` remains deliberate
 value discard, while protocol
 success such as `finish`, `commit`, `flush`, and `shutdown` remains an ordinary
 fallible method rather than pretending automatic cleanup succeeded.
-There is no general deferred statement or block: `defer action()` and
-`defer { ... }` are E0003. The resource expression is one directly moved local;
+General `defer` is now D-JAI-DEFER1=A, below; `defer close(resource)` keeps
+its meaning. The resource expression is one directly moved local;
 ordinary close-call resolution proves that `close(resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
 (Corrected 2026-11-10: this entry first spelled the operand `^resource`; a
@@ -3368,6 +3368,22 @@ cleanup: another local of the same nominal type still closes normally.
 Native execution implements this with the IR builder's cleanup glue.
 Its immutable cleanup facts are cached per program/type, and partial-move
 parity witnesses use owned payloads rather than Copy-only records.
+
+**D-JAI-DEFER1=A — general defer** *(ratified; reverses S63's "no general
+deferred statement or block")*: `defer statement` or `defer { block }`
+registers its body where it is written and runs it at every exit of the
+enclosing block: its normal end, `return`, `break` or `next`, a propagated
+failure, and a stop. Each block keeps one reverse-order list, so the latest
+defer runs first, after the variables bound since it drop and before the ones
+bound earlier. A returned value is computed before deferred code runs, and
+the body sees variables as they are at exit: `n := 1; defer { n = 2 }; return
+n` returns 1. A move inside the body happens when the block ends, as a
+deferred close's does. The body can't leave its block: `return`, and a `break`
+or `next` that steers a loop outside it, are E0509; a `?` or a propagated
+failure inside it is E0512, so a failing call is handled there and an exit
+never carries two failures. Like automatic cleanup, the body runs to its end:
+no stop point interrupts it. `defer close(resource)` stays the one closing
+form, and a single-statement defer is written without braces.
 
 **S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
 tasks/channels were once planned around `tasks.spawn` and handle-list

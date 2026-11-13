@@ -252,7 +252,7 @@ sema_budget_scene_attachments: fn(stmts: [Stmt], scenes: &[String]) Never! {
             .Unsafe(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
             .Impure(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
             .Reactive(body, _) -> sema_budget_scene_attachments(body, scenes)
-            .Shield(body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Shield(body, _) | .Defer(body, _) -> sema_budget_scene_attachments(body, scenes)
             .Switched(_, body, _) -> sema_budget_scene_attachments(body, scenes)
             .Region(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
             .Policy(_, body, _) -> sema_budget_scene_attachments(body, scenes)

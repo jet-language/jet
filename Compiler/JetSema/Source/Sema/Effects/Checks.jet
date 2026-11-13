@@ -481,7 +481,7 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
             .Unsafe(_, _, body, _)
             | .Impure(_, _, body, _)
             | .Reactive(body, _)
-            | .Shield(body, _)
+            | .Shield(body, _) | .Defer(body, _)
             | .Switched(_, body, _)
             | .Region(_, _, body, _)
             | .Policy(_, body, _)
@@ -3409,7 +3409,7 @@ sema_effect_check_unsafe_statements_tree: fn(nodes: &[SemaEffectNode], facts: Se
                 if step == .Val(step_value) -> sema_effect_check_unsafe_expr(nodes, facts, caller, tree, step_value, audited, diagnostics)
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
-            .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> {
+            .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> {
                 sema_effect_check_unsafe_statements_tree(nodes, facts, caller, tree, body, audited, diagnostics)
             }
             .MixedSwitch(subject, _, arms, else_body, _) -> {
@@ -5613,7 +5613,7 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
             if step == .Val(step_value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, step_value)
             sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, subject)
             loop arm in arms {

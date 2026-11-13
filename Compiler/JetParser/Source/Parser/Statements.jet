@@ -238,7 +238,7 @@ parser_statement_definitely_exits_value_block: fn(stmt: Stmt) -> Bool Never! {
         .Loop(body, _, _, _) -> !parser_loop_body_can_break(body)
         .While(cond, body, _, _, _) -> parser_expression_is_true(cond) && !parser_loop_body_can_break(body)
         .CountedLoop(_, cond, _, body, _, _, _) -> parser_expression_is_true(cond) && !parser_loop_body_can_break(body)
-        .Val(_) | .Assign(_, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
+        .Val(_) | .Assign(_, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
     }
 }
 
@@ -283,7 +283,7 @@ parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String]
             .While(_, body, _, _, label) -> parser_loop_body_can_break_inner(body, parser_loop_labels_with_current(nested_labels, label), false)
             .For(_, _, _, _, body, _, _, label, _) -> parser_loop_body_can_break_inner(body, parser_loop_labels_with_current(nested_labels, label), false)
             .CountedLoop(_, _, _, body, _, _, label) -> parser_loop_body_can_break_inner(body, parser_loop_labels_with_current(nested_labels, label), false)
-            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Continue(_) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
+            .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Continue(_) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
         }
         if can_break -> return true
         if parser_statement_definitely_exits_value_block(stmt) -> return false
@@ -1719,22 +1719,24 @@ parser_typed_literal_uninit_marker: fn(head: Type?, body: TypedLitBody) -> Span?
     None
 }
 
-// Rust `KW_DEFER`: `defer close(resource)` keeps the whole close call; any
-// other shape is fatal at the statement.
+// `defer close(resource)` closes one resource as its scope exits; any other
+// statement after `defer`, or a braced block, runs as its block ends.
 parser_parse_defer_statement: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
-    close: parser_parse_expression(state, 1, 0)
-    valid: if close.expr == {
-        .Call(call, _) -> call.name == "close" && call.args.len() == 1 && call.args[0].convention != AccessConvention.Write && call.args[0].expr == .Ident(_, _, _)
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+    if parser_current_kind(state) == TOKEN_LBRACE {
+        block: parser_parse_block(state)
+        return Stmt.Defer{body: block.statements, span: parser_cover(start.span, block.span)}
     }
-    span: parser_cover(start.span, close.span)
-    if !valid {
-        parser_add_error(state, span, "`defer` only schedules a consuming resource close", "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through `close`, which takes its resource", "write `defer close(resource)`")
-        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
-    }
-    parser_finish_statement(state)
-    Stmt.DeferClose{close: close.expr, span: span.move()}
+    statement: parser_parse_statement(state)
+    span: Span{start: start.span.start, end: parser_previous_end(state)}
+    if statement == .Expr(expression) && parser_defer_close_call(expression) -> return Stmt.DeferClose{close: expression, span: span}
+    Stmt.Defer{body: [Stmt]{statement}, span: span}
+}
+
+// Whether a deferred statement is the resource close `close(name)`.
+parser_defer_close_call: fn(expression: Expr) -> Bool Never! {
+    if expression == .Call(call, _) -> return call.name == "close" && call.args.len() == 1 && call.args[0].convention != AccessConvention.Write && call.args[0].expr == .Ident(_, _, _)
+    false
 }
 
 // Rust `KW_ASSERT`: `assert a, b` records unsafe-evidence names as the

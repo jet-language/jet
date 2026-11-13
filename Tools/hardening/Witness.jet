@@ -390,7 +390,7 @@ walk_statement: fn(statement: Stmt, chain: [String], walk: Walk, hits: &[Hit]) N
             }
             if else_body == .Val(body) -> walk_body(body, block, walk, hits)
         }
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .TaskGroup(_, _, _, body, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> walk_body(body, block, walk, hits)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .TaskGroup(_, _, _, body, _) | .ContextBlock(_, body, _) | .AssumeDet(_, _, body, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> walk_body(body, block, walk, hits)
         .CountedLoop(init, condition, step, body, _, _, _) -> {
             walk_expr(init.init, with_frame(chain, "bind:{init.name}"), walk, hits)
             walk_expr(condition, with_frame(chain, "cond:{observes(body)}"), walk, hits)

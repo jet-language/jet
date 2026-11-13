@@ -177,6 +177,10 @@ project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ord
             add_region(g, ordinal, "shield", "#Shield", span)
             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
         }
+        .Defer(body, span) -> {
+            add_region(g, ordinal, "defer", "defer", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
+        }
         .Switched(marker, body, span) -> {
             node_id: "{g.graph_id}:stmt:{ordinal}:switched"
             // A marker with arguments names the condition menu's one entry.

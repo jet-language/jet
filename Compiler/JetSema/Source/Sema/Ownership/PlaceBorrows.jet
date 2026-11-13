@@ -308,7 +308,7 @@ sema_place_borrow_census_stmt: fn(statement: TStmt, arena: BodyTree, census: &Se
             sema_place_borrow_census_list(then_body, arena, census)
             return sema_place_borrow_census_optional_list(else_body, arena, census)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_list(body, arena, census)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> return sema_place_borrow_census_list(body, arena, census)
         .While(_, condition, body, _) -> {
             sema_place_borrow_census_expr(condition, arena, census)
             return sema_place_borrow_census_list(body, arena, census)
@@ -505,7 +505,7 @@ sema_place_borrow_census_row_stmt: fn(tree: BodyTree, item: Int, census: &SemaPl
             sema_place_borrow_census_row_list(tree, then_body, census)
             return sema_place_borrow_census_row_optional_list(tree, else_body, census)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_row_list(tree, body, census)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> return sema_place_borrow_census_row_list(tree, body, census)
         .While(_, condition, body, _) -> {
             sema_place_borrow_census_row(tree, condition, census)
             return sema_place_borrow_census_row_list(tree, body, census)
@@ -677,7 +677,7 @@ sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, a
                 sema_place_borrow_statements(statements, census, arena, table)
             }
         }
-        .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        .Contract(_) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
     }
 }
 

@@ -223,7 +223,7 @@ ast_visit_statement: fn(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, 
             if else_body == .Val(body) -> ast_visit_body(body, visitor, nested_expression)
         }
         .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> ast_visit_expr(value, visitor)
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> ast_visit_body(body, visitor, nested_expression)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> ast_visit_body(body, visitor, nested_expression)
         .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
             if reason == .Val(value) -> ast_visit_expr(value, visitor)
             ast_visit_body(body, visitor, nested_expression)

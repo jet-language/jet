@@ -448,6 +448,7 @@ body_flat_stmt_kind: fn(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
         .ContextBlock(f_guards, f_body, f_span) -> StmtKind.ContextBlock{guards: body_flat_list_context_guard(f_guards, flat), body: body_flat_list_stmt(f_body, flat), span: f_span}
         .Live(f_body, f_span) -> StmtKind.Live{body: body_flat_list_stmt(f_body, flat), span: f_span}
         .Shield(f_body, f_span) -> StmtKind.Shield{body: body_flat_list_stmt(f_body, flat), span: f_span}
+        .Defer(f_body, f_span) -> StmtKind.Defer{body: body_flat_list_stmt(f_body, flat), span: f_span}
         .ScopeMember(f_kind, f_body, f_span) -> StmtKind.ScopeMember{kind: body_flat_scope_member_kind(f_kind, flat), body: body_flat_list_stmt(f_body, flat), span: f_span}
         .Transact(f_handle, f_snapshots, f_stm, f_body, f_span) -> StmtKind.Transact{handle: f_handle, snapshots: f_snapshots, stm: f_stm, body: body_flat_list_stmt(f_body, flat), span: f_span}
         .GCEdit(f_root, f_slot, f_edges, f_replace_all, f_index_temp, f_statement, f_span) -> StmtKind.GCEdit{root: f_root, slot: f_slot, edges: f_edges, replace_all: f_replace_all, index_temp: body_flat_opt_expr(f_index_temp, flat), statement: body_flat_stmt(f_statement, flat), span: f_span}
@@ -1302,6 +1303,7 @@ body_copy_stmt_kind: fn(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
         .ContextBlock(f_guards, f_body, f_span) -> StmtKind.ContextBlock{guards: body_copy_list_context_guard(f_guards, flat), body: body_copy_list_stmt(f_body, flat), span: f_span}
         .Live(f_body, f_span) -> StmtKind.Live{body: body_copy_list_stmt(f_body, flat), span: f_span}
         .Shield(f_body, f_span) -> StmtKind.Shield{body: body_copy_list_stmt(f_body, flat), span: f_span}
+        .Defer(f_body, f_span) -> StmtKind.Defer{body: body_copy_list_stmt(f_body, flat), span: f_span}
         .ScopeMember(f_kind, f_body, f_span) -> StmtKind.ScopeMember{kind: body_copy_scope_member_kind(f_kind, flat), body: body_copy_list_stmt(f_body, flat), span: f_span}
         .Transact(f_handle, f_snapshots, f_stm, f_body, f_span) -> StmtKind.Transact{handle: f_handle, snapshots: f_snapshots, stm: f_stm, body: body_copy_list_stmt(f_body, flat), span: f_span}
         .GCEdit(f_root, f_slot, f_edges, f_replace_all, f_index_temp, f_statement, f_span) -> StmtKind.GCEdit{root: f_root, slot: f_slot, edges: f_edges, replace_all: f_replace_all, index_temp: body_copy_opt_expr(f_index_temp, flat), statement: body_copy_stmt(f_statement, flat), span: f_span}

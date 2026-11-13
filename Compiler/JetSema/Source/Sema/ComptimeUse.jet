@@ -380,7 +380,7 @@ sema_comptime_use_stmt: fn(statement: Stmt, scan: &SemaComptimeUseScan) {
             if else_body == .Val(body) -> sema_comptime_use_body(body, scan)
         }
         .ComptimeBlock(_, _, _) -> {}
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> sema_comptime_use_body(body, scan)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> sema_comptime_use_body(body, scan)
         .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
             if reason == .Val(value) -> sema_comptime_use_expr(value, scan)
             sema_comptime_use_body(body, scan)

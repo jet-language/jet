@@ -38,7 +38,9 @@ IRBuildKept: struct {
 // box slot a payload binding was read from (-1: none). `live`: for an owned
 // variable some paths moved and others kept, the Bool slot that holds
 // whether it still holds its value (-1: it does wherever it owns it).
-IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1}, live: Int{-1} }
+// `cleanup`: an entry that names no variable but a `defer` body, its row in
+// IRBuilder.defers, which runs where the entry would drop (-1: none).
+IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1}, live: Int{-1}, cleanup: Int{-1} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
@@ -121,6 +123,8 @@ IRBuilder: struct {
     part_closes: [IRPartClose]
     // The open `#Transact` blocks (innermost last) an early exit unwinds.
     transactions: [IRTxFrame]
+    // The `defer` bodies built so far, by IRBinding.cleanup row.
+    defers: [[Int]]{[[Int]]{}}
     // The open contract scopes (innermost last) whose `post` clauses a
     // return checks.
     contracts: [IRContractFrame]
@@ -1819,7 +1823,9 @@ ir_failed: fn(b: IRBuilder) -> Bool Never! { b.error != "" }
 // Returns `slot` (-1: nothing) after releasing the guards the statements
 // being built hold and dropping every owned variable. Code after the
 // Return in the same block is dead, so the variables keep the ownership
-// they had: the paths that go on past the enclosing branch see it.
+// they had: the paths that go on past the enclosing branch see it. A
+// `defer` body runs among the drops and may assign the returned variable,
+// so the value leaves as the return computed it.
 ir_emit_return: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
     states: ir_own_states(b, b.bindings.len())
     if slot >= 0 {
@@ -1830,9 +1836,22 @@ ir_emit_return: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
     ir_close_disarm(b, slot)
     ir_exit_statement_guards(b, 0)
     ir_entry_ending(m, b)
+    result := slot
+    if slot >= 0 && ir_defers_open(b) {
+        result = ir_temp(m, b, b.f.slot_type[slot])
+        ir_emit(b.f, IROp.Copy, result, slot, -1, -1, b.line)
+    }
     ir_drop_bindings(m, b, 0)
-    ir_emit(b.f, IROp.Return, -1, slot, -1, -1, b.line)
+    ir_emit(b.f, IROp.Return, -1, result, -1, -1, b.line)
     ir_set_own_states(b, states)
+}
+
+// Whether a `defer` body is registered in an open block.
+ir_defers_open: fn(b: IRBuilder) -> Bool Never! {
+    loop binding in b.bindings {
+        if binding.cleanup >= 0 -> return true
+    }
+    false
 }
 
 // The program entry is about to drop its variables and return: the runtime
@@ -1880,7 +1899,8 @@ ir_statement_guard_held: fn(f: IRFunction, guard: IRStatementGuard) -> Bool Neve
 // variable that still owns a value that closes closes it first. The
 // variables a `defer close` closes close before all of them, the latest
 // defer first (ir_close_deferred). An alias of a variable (a pinned
-// argument, a place read in place) closes nothing: its variable does.
+// argument, a place read in place) closes nothing: its variable does. A
+// `defer` body runs in its entry's place among the drops (ir_run_defer).
 ir_drop_bindings: fn(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
     ir_close_deferred(b, mark)
     index := b.bindings.len() - 1
@@ -1888,6 +1908,10 @@ ir_drop_bindings: fn(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
         binding: b.bindings[index]
         alias: ir_binding_is_alias(b, index)
         index -= 1
+        if binding.cleanup >= 0 {
+            ir_run_defer(m, b, binding.cleanup)
+            next
+        }
         if binding.indirect < 0 && !alias && !ir_close_is_deferred(b, binding.slot) -> ir_close_now(b, binding.slot)
         if !binding.owned -> next
         ir_drop_binding(m, b, binding)
@@ -2178,7 +2202,7 @@ ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
 ir_set_own_state: fn(b: &IRBuilder, index: Int, state: IROwnState) Never! {
     row: b.bindings[index]
     if row.owned == state.owned && row.live == state.live -> return
-    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol.copy(), write: row.write, carrier: row.carrier, live: state.live}
+    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol.copy(), write: row.write, carrier: row.carrier, live: state.live, cleanup: row.cleanup}
 }
 
 // Restores the ownership `states` of the variables bound before it.
@@ -2699,7 +2723,7 @@ ir_stop_return: fn(m: &IRModule, b: &IRBuilder) Never! {
 ir_stop_cleans: fn(b: IRBuilder) -> Bool Never! {
     if b.transactions.len() > 0 || b.closes.len() > 0 -> return true
     loop binding in b.bindings {
-        if binding.owned -> return true
+        if binding.owned || binding.cleanup >= 0 -> return true
     }
     false
 }

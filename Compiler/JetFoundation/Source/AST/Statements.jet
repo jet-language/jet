@@ -36,6 +36,9 @@ Stmt: enum {
     Yield(value: Expr, span: Span)
     ScopeMember(name: String, name_span: Span, args: [Expr], args_span: Span?, body: [Stmt], dsl: Bool, dot_span: Span, span: Span)
     DeferClose(close: Expr, span: Span)
+    // `defer statement` or `defer { … }`: the body runs when its block ends,
+    // on every exit, latest defer first.
+    Defer(body: [Stmt], span: Span)
 }
 
 IfStmt: struct {

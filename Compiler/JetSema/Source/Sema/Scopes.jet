@@ -590,6 +590,13 @@ SemaFailureRepair: struct {
     declaration_end: Int
 }
 
+// A `defer` body's frame: the loop depth and loop label count outside it, so
+// a `break` or `next` that steers one of those loops leaves the body.
+SemaDeferFrame: struct {
+    loop_depth: Int
+    labels: Int
+}
+
 SemaCheckContext: struct {
     exact_int_reachable: Bool
     unsafe_depth: Int
@@ -678,6 +685,9 @@ SemaCheckContext: struct {
     // first propagated call. Set by Calls/Collections.jet for one argument;
     // the lambda it is set for reads and clears it on entry.
     callback_failure_open: Bool{false}
+    // The `defer` body being checked: an exit or a propagated failure in it
+    // would leave a block that is already ending.
+    defer_frame: SemaDeferFrame?{None}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // Where E2404's repair edits go: the caller's written `T E!` return and

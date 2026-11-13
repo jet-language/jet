@@ -163,7 +163,7 @@ source_spans_overlap: fn(a: SourceSpan, b: SourceSpan) -> Bool { a.start < b.end
 find_expression_selection_in_children: fn(stmt: Stmt, target: SourceSpan, src: String) -> ExpressionSelection? {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_expression_selection(body, target, src)
@@ -252,7 +252,7 @@ matching_delimiter: fn(src: String, open: USize, opening: Char, closing: Char) -
 find_exec_insertion_in_children: fn(src: String, stmt: &Stmt, node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_exec_insertion(src, body, node_span, pin_name)
@@ -461,7 +461,7 @@ find_switched_node: fn(stmts: [Stmt], node_span: SourceSpan) -> SwitchedNode? {
 find_switched_node_in_children: fn(stmt: Stmt, node_span: SourceSpan) -> SwitchedNode? {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Region { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Region { body, .. } |
         .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } |
         .ComptimeBlock { body, .. } | .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } |
         .Transact { body, .. } | .ScopeMember { body, .. } -> find_switched_node(body, node_span)
@@ -558,7 +558,7 @@ find_pattern_target: fn(src: String, stmts: &[Stmt], node_span: SourceSpan, out:
 find_pattern_target_in_children: fn(src: String, stmt: &Stmt, node_span: SourceSpan, out: &PatternTarget?) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_target(src, body, node_span, out)
@@ -601,7 +601,7 @@ find_pattern_arm_remove_span: fn(src: String, stmts: &[Stmt], pattern_span: Sour
 find_pattern_arm_remove_span_in_children: fn(src: String, stmt: &Stmt, pattern_span: SourceSpan, out: &RemoveArmInfo?) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_arm_remove_span(src, body, pattern_span, out)
@@ -640,7 +640,7 @@ find_pattern_span: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan, fou
 find_pattern_span_in_children: fn(src: String, stmt: &Stmt, pattern_span: SourceSpan, found: &Bool) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_span(src, body, pattern_span, found)
@@ -688,7 +688,7 @@ find_multi_input_in_stmt: fn(stmt: &Stmt, node_span: SourceSpan, out: &MultiInpu
             find_multi_input_target(body, node_span, out)
         }
         .Loop { body, .. } | .Unsafe { body, .. } | .Impure { body, .. } | .Reactive { body, .. } |
-        .Shield { body, .. } | .Switched { body, .. } | .Region { body, .. } | .Policy { body, .. } |
+        .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } | .Region { body, .. } | .Policy { body, .. } |
         .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } |
         .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } |
         .ScopeMember { body, .. } -> find_multi_input_target(body, node_span, out)
@@ -882,7 +882,7 @@ collect_statement_locs: fn(src: String, stmts: &[Stmt], block: &[USize], out: &[
 collect_child_statement_locs: fn(src: String, stmt: &Stmt, block: &[USize], out: &[StatementLoc]) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Switched { body, .. } |
+        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
         .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
         .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> {

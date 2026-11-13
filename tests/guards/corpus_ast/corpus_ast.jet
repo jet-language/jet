@@ -147,7 +147,7 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
                         }
                         stack.push(PolicyWalkNode.Expression{value: subject})
                     }
-                    .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) |
+                    .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) |
                     .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
                     .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) |
                     .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> policy_push_body(stack, body)
@@ -834,7 +834,7 @@ policy_is_task_statement: fn(statement: Stmt, only_all: Bool) -> Bool {
     if statement == {
         .Expr(expression) -> return policy_is_task_expression(expression, only_all)
         .Val(binding) -> return policy_is_task_expression(binding.init, only_all)
-        .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return false
+        .Assign(_, _, _, _) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> return false
     }
 }
 policy_dyn_type: fn(ty: Type) -> Bool {
@@ -853,7 +853,7 @@ policy_constant_bool_body: fn(body: [Stmt]) -> Bool {
                 if policy_without_parens(expression) == .Bool(_, _, _) -> return true
             }
         }
-        .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
+        .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
     }
     false
 }
@@ -1060,7 +1060,7 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String: String], facts: 
         }
         .While(_, nested, _, _, _) | .For(_, _, _, _, nested, _, _, _, _) |
         .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) |
-        .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) |
+        .Reactive(nested, _) | .Shield(nested, _) | .Defer(nested, _) | .Switched(_, nested, _) |
         .Region(_, _, nested, _) | .Policy(_, nested, _) | .Layout(_, _, nested, _) |
         .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) |
         .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) |

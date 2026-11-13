@@ -406,7 +406,7 @@ sema_casing_stmts: fn(statements: [Stmt], diagnostics: &[Diagnostic]) {
                 sema_casing_stmts(body, diagnostics)
             }
             .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .AssumeDet(_, _, body, _) -> sema_casing_stmts(body, diagnostics)
-            .Reactive(body, _) | .Shield(body, _) | .Live(body, _) -> sema_casing_stmts(body, diagnostics)
+            .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Live(body, _) -> sema_casing_stmts(body, diagnostics)
             .Switched(_, body, _) | .Policy(_, body, _) | .ComptimeBlock(body, _, _) -> sema_casing_stmts(body, diagnostics)
             .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> sema_casing_expr(value, diagnostics)
             .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
