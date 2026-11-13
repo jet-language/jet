@@ -1,9 +1,13 @@
 // Offline syntax dictionary lookup, plaintext essays, and typo classification.
-use jet_cli.[
-    JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_edit_distance, jet_cli_explain_build_fact_name,
-    jet_cli_explain_policy, jet_cli_syntax_display, jet_cli_syntax_lookup, jet_cli_syntax_nearest,
-    jet_cli_syntax_plain_text, jet_cli_syntax_query,
-]
+use {
+    jet_cli.[
+        JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, JetCLISyntaxRow, jet_cli_edit_distance, jet_cli_explain_build_fact_name,
+        jet_cli_explain_policy, jet_cli_grammar_constants, jet_cli_grammar_tokens, jet_cli_syntax_display,
+        jet_cli_syntax_lookup, jet_cli_syntax_nearest, jet_cli_syntax_plain_text, jet_cli_syntax_query,
+        jet_cli_toolchain_root,
+    ]
+    cli_files: core.files
+}
 
 #Test("syntax_explain") {
     keyword_index: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
@@ -31,4 +35,59 @@ use jet_cli.[
         found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
     }
+}
+
+// Whether `text` names a decision (`D-` and a capital at the start of a word,
+// as in `D-MOVE-SIGIL1`), which a reader of the dictionary can't look up.
+syntax_explain_names_decision: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
+    loop index in 0..<raw.len() {
+        if raw[index] != (U8{68}) || index + 2 >= raw.len() -> next
+        if raw[index + 1] != (U8{45}) || raw[index + 2] < (U8{65}) || raw[index + 2] > (U8{90}) -> next
+        if index == 0 -> return true
+        before: raw[index - 1]
+        letter: (before >= (U8{65}) && before <= (U8{90})) || (before >= (U8{97}) && before <= (U8{122}))
+        digit: before >= (U8{48}) && before <= (U8{57})
+        if !letter && !digit && before != (U8{95}) -> return true
+    }
+    false
+}
+
+// What is wrong with `row`'s default explanation, or "" when nothing is.
+syntax_explain_row_problem: fn(row: JetCLISyntaxRow) -> String Never! {
+    loop meaning in row.meanings {
+        if meaning.example.trim() == "" -> return "`{row.token}` has a meaning with no example"
+    }
+    essay: jet_cli_syntax_plain_text(row)
+    if essay.contains("SIGIL_") || essay.contains("OP_") -> return "`{row.token}`'s explanation names a registry constant"
+    if syntax_explain_names_decision(essay) -> return "`{row.token}`'s explanation names a decision"
+    ""
+}
+
+#Test("every registered sigil and operator explains itself with an example and in plain words") {
+    root: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+    constants: jet_cli_grammar_constants(root) ?? panic("read the syntax registry: {err.message}")
+    tokens: jet_cli_grammar_tokens(root, constants) ?? panic("read the highlight tokens: {err.message}")
+    problems := [String]{}
+    walked := 0
+    loop token in tokens {
+        if token.class != "Sigil" && token.class != "Operator" && token.class != "TakeMark" -> next
+        walked += 1
+        index: jet_cli_syntax_lookup(token.text) ?? {
+            problems.push("`{token.text}` is a registered {token.class.lower()} with no dictionary row")
+            next
+        }
+        problem: syntax_explain_row_problem(JET_CLI_SYNTAX_ROWS[index])
+        if problem != "" -> problems.push(problem)
+    }
+    loop row in JET_CLI_SYNTAX_ROWS {
+        if row.kind != JetCLISyntaxKind.Sigil && row.kind != JetCLISyntaxKind.Operator -> next
+        problem: syntax_explain_row_problem(row)
+        if problem != "" && !problems.contains(problem) -> problems.push(problem)
+    }
+    assert(walked > 40, "the highlight registry lists the sigils and operators")
+    assert_eq(problems.join("\n"), "")
 }
