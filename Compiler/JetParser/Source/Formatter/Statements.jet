@@ -1056,7 +1056,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             // A template loop prints as `#loop …`.
             if is_template_loop && body.len() == 1 {
                 jfmt_write(f, "#")
-                jfmt_fmt_stmt(f, body[0])
+                jfmt_fmt_template_loop_stmt(f, body[0])
             } else {
                 jfmt_write(f, "#run {{")
                 jfmt_newline(f)
@@ -1146,6 +1146,32 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
 }
 
 jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?) {
+    header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
+    jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+}
+
+// A template loop's body is template text, kept as written: a braced body
+// written over several lines keeps one line per statement, one written on
+// one line keeps its braces, and an arrow body stays an arrow.
+jfmt_fmt_template_loop_stmt: fn(f: &JetFmt, stmt: Stmt) {
+    if stmt == .For(var, var_span, var2, kind, body, span, arrow_body, label, _) {
+        header_end: jfmt_fmt_for_head(f, var, var_span, var2, kind, span, label)
+        if {
+            arrow_body -> jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+            jfmt_source_span_multiline(f, Span{start: header_end, end: span.end}) -> {
+                jfmt_write(f, " {{")
+                jfmt_fmt_body_expanded(f, body)
+            }
+            else -> jfmt_fmt_control_body_after_header(f, body, true)
+        }
+        return
+    }
+    jfmt_fmt_stmt(f, stmt)
+}
+
+// `loop` through the last clause of a `for` loop head; returns where the
+// head ends in the source.
+jfmt_fmt_for_head: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?, kind: ForKind, span: Span, label: NamedSpan?) -> Int {
     jfmt_fmt_loop_label(f, label)
     jfmt_write(f, "loop ")
     // The bindingless form writes its subject bare. The
@@ -1212,7 +1238,7 @@ jfmt_fmt_for_stmt: fn(f: &JetFmt, var: String, var_span: Span, var2: NamedSpan?,
             header_end = if step == .Val(value) -> expr_span(value).end else -> expr_span(collection).end
         }
     }
-    jfmt_fmt_effect_loop_body(f, body, header_end, arrow_body)
+    header_end
 }
 
 // S68 render an `if`/`while` condition without wrapping the

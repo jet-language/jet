@@ -1,0 +1,48 @@
+// A marker template is text the formatter leaves as written: the blank lines
+// between its lines stay, a braced `#loop` body written over several lines
+// keeps them, and one written on one line keeps its braces.
+Named: trait {
+    names: fn(self) -> [String] Never!
+}
+
+Stamp: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) -[Meta.Generate]> {
+            tname: target.name
+
+            impl #{tname} {
+                count: fn(self) -> Int {
+                    total := 0
+                    #loop f in target.fields {
+                        total += 1
+                    }
+                    #loop f in target.fields { total += 1 }
+                    total
+                }
+            }
+
+            impl #{tname}.Named {
+                names: fn(self) -> [String] Never! {
+                    out := [String]{}
+                    #loop f in target.fields {
+                        out.push(f.name)
+                    }
+                    out
+                }
+            }
+        }
+    }
+}
+
+#Stamp
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    point: Point{x: 1, y: 2}
+    print("{point.count()} {point.names().join(",")}")
+}

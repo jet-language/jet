@@ -859,13 +859,21 @@ jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
 }
 
 // Format typed marker and generated-source bodies through their AST.
-// These bodies share one representation, so one walk closes both.
+// These bodies share one representation, so one walk closes both. A blank
+// line written between two template lines stays, as it does between
+// statements.
 jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
+    previous_end := -1
     loop index in 0..<body.len() {
         body_item: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(f)
         item_start: jfmt_derive_body_item_start(f, body_item)
-        jfmt_emit_leading(f, item_start)
+        if previous_end >= 0 {
+            gap_start: jfmt_statement_gap_start(f, previous_end, item_start)
+            jfmt_emit_leading_statement_gap(f, gap_start, item_start)
+        } else {
+            jfmt_emit_leading(f, item_start)
+        }
         if body_item == {
             .Item(item) -> jfmt_fmt_item(f, item)
             .Stmt(stmt) -> jfmt_fmt_stmt(f, stmt)
@@ -886,6 +894,7 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
         item_end: jfmt_derive_body_item_end(f, body_item)
         jfmt_emit_trailing(f, item_end)
         if !f.at_line_start -> jfmt_newline(f)
+        previous_end = item_end
     }
 }
 
