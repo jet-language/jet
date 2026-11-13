@@ -1149,7 +1149,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1736,
+      "line": 1752,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -2185,49 +2185,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 188,
+      "line": 215,
       "column": 9,
       "reason": "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 210,
+      "line": 238,
       "column": 9,
       "reason": "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 285,
+      "line": 313,
       "column": 9,
       "reason": "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 408,
+      "line": 436,
       "column": 13,
       "reason": "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 457,
+      "line": 485,
       "column": 9,
       "reason": "a fresh private anonymous stack mapping, unreserved until touched"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 469,
+      "line": 497,
       "column": 5,
       "reason": "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fiber.jet",
-      "line": 617,
+      "line": 645,
       "column": 9,
       "reason": "sched_yield retains no memory; the firing carrier clears the word right after its wake"
     },
@@ -4229,42 +4229,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 797,
+      "line": 820,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1043,
+      "line": 1066,
       "column": 5,
       "reason": "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1076,
+      "line": 1099,
       "column": 5,
       "reason": "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1288,
+      "line": 1311,
       "column": 5,
       "reason": "gettid takes no arguments and retains nothing"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1554,
+      "line": 1577,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Scheduler.jet",
-      "line": 1596,
+      "line": 1619,
       "column": 9,
       "reason": "sched_yield retains no memory and yields this OS thread"
     },
@@ -4495,7 +4495,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Task.jet",
-      "line": 524,
+      "line": 601,
       "column": 9,
       "reason": "written once, zeroed first, under the TLS registry mutex"
     },
@@ -10385,7 +10385,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2162:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2172:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2274:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1736:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1752:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 145:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 153:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 176:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -10533,13 +10533,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 107:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 133:5 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 188:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 210:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 285:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 408:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 457:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 469:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
-| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 617:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 215:9 | "base is a live self-addressed TCB this carrier runs on until its next switch, and the kernel reported FSGSBASE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 238:9 | "the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 313:9 | "an idempotent install: every writer stores 1, and a carrier that read the old 0 left its slice unstamped, which the read below stamps" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 436:13 | "written once, under the scheduler root lock, before any fiber can wait; a reader sees 0 (no fiber waiter exists) or the lot" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 485:9 | "a fresh private anonymous stack mapping, unreserved until touched" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 497:5 | "the first page of the fresh, untouched mapping becomes the stack's guard: a guard marker, else PROT_NONE" |
+| Compiler | Compiler/JetRuntime/Source/Fiber.jet | 645:9 | "sched_yield retains no memory; the firing carrier clears the word right after its wake" |
 | Compiler | Compiler/JetRuntime/Source/FilesPathOps.jet | 35:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/FilesStreams.jet | 34:9 | "the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat" |
 | Compiler | Compiler/JetRuntime/Source/FilesWalk.jet | 36:5 | "runtime-init runs before any other thread exists" |
@@ -10825,12 +10825,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 219:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 235:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 538:9 | "an idempotent install: every writer stores the same code address" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 797:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1043:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1076:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1288:5 | "gettid takes no arguments and retains nothing" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1554:9 | "sched_yield retains no memory and yields this OS thread" |
-| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1596:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 820:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1066:5 | "clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1099:5 | "openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1311:5 | "gettid takes no arguments and retains nothing" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1577:9 | "sched_yield retains no memory and yields this OS thread" |
+| Compiler | Compiler/JetRuntime/Source/Scheduler.jet | 1619:9 | "sched_yield retains no memory and yields this OS thread" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 13:5 | "address names bytes bytes of live storage the caller owns or is freeing; effectful asm stores wipe every byte before release or reuse" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 110:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
@@ -10863,7 +10863,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 277:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 294:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 306:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
-| Compiler | Compiler/JetRuntime/Source/Task.jet | 524:9 | "written once, zeroed first, under the TLS registry mutex" |
+| Compiler | Compiler/JetRuntime/Source/Task.jet | 601:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 22:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalProcessRoutes.jet | 58:9 | "TIOCSWINSZ borrows one initialized stack winsize word; the Child104 lock prevents close/recycling until ioctl returns" |
