@@ -1,0 +1,199 @@
+use effect_name_files: core.files
+
+// The stray effect name guard. An effect exists exactly when one of the three
+// effect sources declares it (the machine effects, Core's service effects,
+// the metaprogramming effects; Foundation's Registry/EffectVocabulary.jet
+// reads the same three while the compiler builds). A literal list of names,
+// every member a capitalized name or `Root.Leaf`, more than half of them and
+// at least two declared effects, is an effect list wherever it is written in
+// the compiler, Core, Jetpack or the agent tools; each of its members must
+// be a declared root or leaf. Test sources are scanned too: a test that
+// means a stray name writes it inside a larger string, not as a list member.
+EFFECT_NAME_SOURCES: [String]{"Compiler/Prelude/Effects.jet", "Core/Effects/Effects.jet", "Core/Compiler/Meta.jet"}
+EFFECT_NAME_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools/agent"}
+
+// The members of effect-shaped lists that are no effect, as `path: Name`,
+// each with why. Every row must still be found, so the list only shrinks.
+// - Compiler/JetDevserver/Tests/Session/Capture.jet: Input. The capture
+//   source reasons Rand, Input and Net: Input is raw user input, a capture
+//   source, not an effect.
+EFFECT_NAME_NOT_EFFECTS: [String]{"Compiler/JetDevserver/Tests/Session/Capture.jet: Input"}
+
+// A declared effect list found in a source: where and its members.
+EffectNameList: struct {
+    path: String
+    line: Int
+    members: [String]
+}
+
+// The roots and leaves (`Root.Case`) the effect source `text` declares: each
+// top-level `Name: struct {` or `Name: enum {`, and each case line of an enum
+// before its first blank line or `impl`.
+effect_name_declared: fn(text: String, out: &[String]) {
+    family := ""
+    loop line in text.lines() {
+        if family != "" {
+            word: line.trim()
+            if word == "" || word.starts_with("impl ") || line == "}}" {
+                family = ""
+                next
+            }
+            if !word.starts_with("//") -> out.push("{family}.{word}")
+            next
+        }
+        if line.starts_with(" ") || !line.ends_with(" {{") -> next
+        head: line.removesuffix(" {{")
+        if head.ends_with(": struct") -> out.push(head.removesuffix(": struct"))
+        if head.ends_with(": enum") {
+            family = head.removesuffix(": enum")
+            out.push(head.removesuffix(": enum"))
+        }
+    }
+}
+
+effect_name_vocabulary: fn() -> [String] {
+    names := [String]{}
+    loop path in EFFECT_NAME_SOURCES {
+        text: effect_name_files.read(path) ?? panic("read the effect source {path}: {err}")
+        effect_name_declared(text, names)
+    }
+    names
+}
+
+// Whether `name` is a capitalized identifier, or two joined by one dot.
+effect_name_shaped: fn(name: String) -> Bool {
+    parts: name.split(".").to_list()
+    if parts.len() > 2 -> return false
+    loop part in parts {
+        bytes: part.bytes()
+        if bytes.len() == 0 || !closed_list_upper_byte(bytes[0]) -> return false
+        loop byte in bytes {
+            if !closed_list_ident_byte(byte) -> return false
+        }
+    }
+    true
+}
+
+// The string members of the literal list whose first member's opening quote
+// is at byte `start` of `text`: None when the list holds anything but plain
+// string literals (an interpolation, an expression) before it closes.
+effect_name_list_at: fn(text: String, start: Int) -> [String]? {
+    bytes: text.bytes()
+    members := [String]{}
+    at := start
+    loop {
+        if at >= bytes.len() || bytes[at] != 34 -> return None
+        end := at + 1
+        loop {
+            if end >= bytes.len() -> return None
+            if bytes[end] == 34 -> break
+            if bytes[end] == 92 || bytes[end] == 123 || bytes[end] == 10 -> return None
+            end += 1
+        }
+        members.push(policy_slice_bytes(text, at + 1, end))
+        at = end + 1
+        loop {
+            if at >= bytes.len() || (bytes[at] != 32 && bytes[at] != 10) -> break
+            at += 1
+        }
+        if at >= bytes.len() -> return None
+        if bytes[at] == 93 || bytes[at] == 125 -> return Val(members)
+        if bytes[at] != 44 -> return None
+        at += 1
+        loop {
+            if at >= bytes.len() || (bytes[at] != 32 && bytes[at] != 10) -> break
+            at += 1
+        }
+        if at < bytes.len() && (bytes[at] == 93 || bytes[at] == 125) -> return Val(members)
+    }
+}
+
+// The effect lists in `text`: each literal list opened by `[` or `{` whose
+// members are all name-shaped, more than half of them and at least two
+// declared effects.
+effect_name_lists_in: fn(path: String, text: String, vocabulary: [String], out: &[EffectNameList]) {
+    bytes: text.bytes()
+    line := 1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == 10 -> line += 1
+        if bytes[index] != 91 && bytes[index] != 123 -> next
+        first := index + 1
+        loop {
+            if first >= bytes.len() || (bytes[first] != 32 && bytes[first] != 10) -> break
+            first += 1
+        }
+        members: effect_name_list_at(text, first) ?? next
+        declared := 0
+        shaped := true
+        loop member in members {
+            if !effect_name_shaped(member) -> shaped = false
+            if vocabulary.contains(member) -> declared += 1
+        }
+        if shaped && declared >= 2 && declared * 2 > members.len() -> out.push(EffectNameList{path: path, line: line, members: members})
+    }
+}
+
+effect_name_scan: fn(path: String, vocabulary: [String], out: &[EffectNameList]) {
+    kind: effect_name_files.stat(path) ?? return
+    if kind.is_symlink -> return
+    if kind.is_dir {
+        loop child in (effect_name_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name == "Vendor" -> next
+            effect_name_scan("{path}/{child.name}", vocabulary, out)
+        }
+        return
+    }
+    if !path.ends_with(".jet") -> return
+    text: effect_name_files.read(path) ?? return
+    effect_name_lists_in(path, text, vocabulary, out)
+}
+
+// Each member of `lists` that `vocabulary` does not declare, as
+// `path:line: Name`, unless `not_effects` holds it as `path: Name`; and
+// each `not_effects` row no list holds any more, as `stale: <row>`.
+effect_name_strays: fn(lists: [EffectNameList], vocabulary: [String], not_effects: [String]) -> [String] {
+    strays := [String]{}
+    seen := [String]{}
+    loop list in lists {
+        loop member in list.members {
+            if vocabulary.contains(member) -> next
+            key: "{list.path}: {member}"
+            if not_effects.contains(key) {
+                seen.push(key)
+                next
+            }
+            strays.push("{list.path}:{list.line}: {member}")
+        }
+    }
+    loop row in not_effects {
+        if !seen.contains(row) -> strays.push("stale: {row}")
+    }
+    strays
+}
+
+#Test("every effect list names only effects the effect sources declare") {
+    guards_enter_root()
+    vocabulary: effect_name_vocabulary()
+    assert(vocabulary.contains("Net") && vocabulary.contains("FS.Read") && vocabulary.contains("DB"), "the effect sources declare no Net, FS.Read or DB")
+    lists := [EffectNameList]{}
+    loop root in EFFECT_NAME_ROOTS {
+        assert(effect_name_files.is_dir(root), "the effect name root {root} must exist")
+        effect_name_scan(root, vocabulary, lists)
+    }
+    assert(lists.len() > 0, "no effect list was found; the scanner is broken")
+    strays: effect_name_strays(lists, vocabulary, EFFECT_NAME_NOT_EFFECTS)
+    assert(strays.len() == 0, "effect lists name effects no effect source declares (declare them in {EFFECT_NAME_SOURCES.join(", ")}, or drop them):\n{strays.join("\n")}")
+}
+
+#Test("the effect name scanner reads declarations and finds a stray in a list") {
+    declared := [String]{}
+    effect_name_declared("Net: struct {{\n    impl Effect {{}}\n}}\n\nFS: enum {{\n    Read\n    Write\n\n    impl Effect {{}}\n}}\n", declared)
+    assert_eq(declared, [String]{"Net", "FS", "FS.Read", "FS.Write"})
+    lists := [EffectNameList]{}
+    effect_name_lists_in("a.jet", "x: [\"Net\", \"FS.Read\", \"Disk\"]\ny: [String]{{\n    \"Net\",\n    \"FS\",\n}}\nz: [\"Net\", \"name\"]\nw: [\"Net\", \"Disk\"]\nv: [\"Net\", \"FS\", \"URL\", \"SQL\"]\n", declared, lists)
+    assert_eq(lists.len(), 2)
+    assert_eq(effect_name_strays(lists, declared, [String]{}), [String]{"a.jet:1: Disk"})
+    assert_eq(effect_name_strays(lists, declared, [String]{"a.jet: Disk"}), [String]{})
+    assert_eq(effect_name_strays(lists, declared, [String]{"a.jet: Disk", "b.jet: Disk"}), [String]{"stale: b.jet: Disk"})
+    assert(effect_name_shaped("Time.Wait") && !effect_name_shaped("time") && !effect_name_shaped("A.B.C"))
+}
