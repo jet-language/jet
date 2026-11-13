@@ -1442,3 +1442,15 @@ sema_core_combine_module_usage: fn(modules: [SemaCoreModuleUsageResult]) -> Sema
     SemaCoreUsageResult{used_core: used, usage_spans: spans, ffi_callback_keys: callbacks, closure: used, inferred_layer: layer, modules: modules}
 }
 
+// The Core usage the program's own modules reach. A loaded Core module's body
+// may call host APIs that no program call reaches (core.files reads the
+// environment), so only the program's modules decide what a target supplies.
+sema_core_program_usage: fn(usage: SemaCoreUsageResult) -> [String] Never! {
+    used := [String]{}
+    used_seen := [String:Bool]{}
+    loop module_row in usage.modules {
+        if module_is_core(module_row.module_identity) -> next
+        loop name in module_row.used_core -> sema_core_sorted_set_add(used, used_seen, name)
+    }
+    used
+}
