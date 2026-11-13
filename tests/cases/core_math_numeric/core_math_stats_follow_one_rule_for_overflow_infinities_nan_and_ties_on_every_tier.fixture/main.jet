@@ -1,0 +1,69 @@
+package: { name: "stats_rule", authority: { allow: [Rand] } }
+// mean, sum, rank, min and max follow one rule: any NaN gives no answer, and
+// infinities are ordinary values wherever the math still has an answer. A
+// mean that fits never overflows, sum keeps its rounding errors and restarts
+// at a smaller scale when its running total overflows, rank averages ties in
+// one sort, and kde_random repeats under a fixed seed. Each Float prints as
+// its bits, so every tier must agree bit for bit.
+use {
+    math: core.math
+    random: core.math.random
+    stats: core.math.stats
+}
+
+bits: fn(value: Float) -> String Never! { "{math.to_bits(value)}" }
+
+shown: fn(value: Float?) -> String Never! {
+    if value == {
+        .Val(x) -> bits(x)
+        .None -> "None"
+    }
+}
+
+listed: fn(values: [Float]) -> String Never! {
+    out := "["
+    loop i in 0..<values.len() {
+        if i > 0 -> out = "{out}, "
+        out = "{out}{bits(values[i])}"
+    }
+    "{out}]"
+}
+
+run: fn() {
+    inf: math.INFINITY
+    nan: math.NAN
+    negative_zero: Float{0.0} * Float{-1.0}
+    print("mean [1e308, 1e308]: {shown(stats.mean([Float]{1e308, 1e308}))}")
+    print("mean [inf, 1]: {shown(stats.mean([Float]{inf, 1.0}))}")
+    print("mean [-inf, 1]: {shown(stats.mean([Float]{-inf, 1.0}))}")
+    print("mean [inf, -inf]: {shown(stats.mean([Float]{inf, -inf}))}")
+    print("mean [NaN, 1]: {shown(stats.mean([Float]{nan, 1.0}))}")
+    print("mean []: {shown(stats.mean([Float]{}))}")
+    print("sum [1e16, 1, -1e16]: {bits(stats.sum([Float]{1e16, 1.0, -1e16}))}")
+    print("sum [1e308, 1e308, -1e308]: {bits(stats.sum([Float]{1e308, 1e308, -1e308}))}")
+    print("sum [1e308, 1e308]: {bits(stats.sum([Float]{1e308, 1e308}))}")
+    print("sum [-1e308, -1e308, 1e308, 0.5]: {bits(stats.sum([Float]{-1e308, -1e308, 1e308, 0.5}))}")
+    print("sum [inf, 1]: {bits(stats.sum([Float]{inf, 1.0}))}")
+    print("sum [inf, -inf] is NaN: {math.is_nan(stats.sum([Float]{inf, -inf}))}")
+    print("sum [NaN, 1] is NaN: {math.is_nan(stats.sum([Float]{nan, 1.0}))}")
+    print("sum []: {bits(stats.sum([Float]{}))}")
+    print("rank [1, 1, 2]: {listed(stats.rank([Float]{1.0, 1.0, 2.0}))}")
+    print("rank [inf, -inf, 0, inf]: {listed(stats.rank([Float]{inf, -inf, 0.0, inf}))}")
+    print("rank [3, 1, 2, 1, 3, 3]: {listed(stats.rank([Float]{3.0, 1.0, 2.0, 1.0, 3.0, 3.0}))}")
+    print("rank [NaN, 1]: {listed(stats.rank([Float]{nan, 1.0}))}")
+    print("min [NaN, 1]: {shown(stats.min([Float]{nan, 1.0}))}")
+    print("max [1, NaN]: {shown(stats.max([Float]{1.0, nan}))}")
+    print("min []: {shown(stats.min([Float]{}))}")
+    print("max []: {shown(stats.max([Float]{}))}")
+    print("min [-inf, 1]: {shown(stats.min([Float]{-inf, 1.0}))}")
+    print("max [1, inf]: {shown(stats.max([Float]{1.0, inf}))}")
+    print("min [0, -0]: {shown(stats.min([Float]{0.0, negative_zero}))}")
+    print("min [-0, 0]: {shown(stats.min([Float]{negative_zero, 0.0}))}")
+    print("range [-inf, 1]: {shown(stats.range([Float]{-inf, 1.0}))}")
+    random.seed(7)
+    first: stats.kde_random([Float]{1.0, 2.0}, 0.5, 3)
+    random.seed(7)
+    second: stats.kde_random([Float]{1.0, 2.0}, 0.5, 3)
+    print("kde_random repeats under seed 7: {first.len() == 3 && listed(first) == listed(second)}")
+    print("kde_random [1, inf]: {listed(stats.kde_random([Float]{1.0, inf}, 0.5, 3))}")
+}

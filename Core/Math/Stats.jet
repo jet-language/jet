@@ -8,8 +8,14 @@ use {
 // Scalar statistics return `None` for empty, mismatched, non-finite, or
 // mathematically undefined inputs. Population variants divide by n; sample
 // variants divide by n - 1. Collection transforms return an empty collection
-// for invalid dimensions/parameters. Ties in mode and rank preserve the
-// first-seen order. Random KDE sampling carries the explicit Rand effect.
+// for invalid dimensions/parameters. Ties in mode preserve the first-seen
+// order. Random KDE sampling carries the explicit Rand effect.
+//
+// mean, sum, rank, min and max follow one rule: any NaN gives no answer
+// (None, an empty list, or NaN for sum), and infinities are ordinary values
+// wherever the math still has an answer. The mean of both infinities has none.
+// mean never overflows when the mean fits, and sum keeps its rounding errors
+// and overflows only when the true total is too large.
 
 SlopeIntercept: struct {
     slope: Float
@@ -66,6 +72,12 @@ invalid_sample: fn(xs: [Float]) -> Bool Never! {
     if valid_sample(xs) -> return false
     true
 }
+holds_nan: fn(xs: [Float]) -> Bool Never! {
+    loop x in xs {
+        if math.is_nan(x) -> return true
+    }
+    false
+}
 
 copy_floats: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
@@ -85,10 +97,36 @@ stable_mean: fn(xs: [Float]) -> Float? {
     Val((acc / (Float{xs.len()})) * scale)
 }
 
+// A Neumaier compensated running total: `total + correction` is the sum.
+CompensatedTotal: struct {
+    total: Float
+    correction: Float
+}
+
+compensated_add: fn(acc: CompensatedTotal, x: Float) -> CompensatedTotal Never! {
+    t: acc.total + x
+    if abs_value(acc.total) >= abs_value(x) -> return CompensatedTotal{total: t, correction: acc.correction + ((acc.total - t) + x)}
+    CompensatedTotal{total: t, correction: acc.correction + ((x - t) + acc.total)}
+}
+
+// The sum of finite values whose plain compensated total overflowed. Values of
+// magnitude at least 2^-894 are scaled by 2^-128, which is exact, and summed
+// apart from the smaller ones, so the scaled total stays below n * 2^896 and
+// only the final rescale can overflow: when the true sum is too large.
+compensated_sum_rescaled: fn(xs: [Float]) -> Float Never! {
+    threshold: math.ldexp(Float{1.0}, -894)
+    down: math.ldexp(Float{1.0}, -128)
+    big := CompensatedTotal{total: Float{0.0}, correction: Float{0.0}}
+    small := CompensatedTotal{total: Float{0.0}, correction: Float{0.0}}
+    loop x in xs {
+        if abs_value(x) >= threshold -> big = compensated_add(big, x * down) else -> small = compensated_add(small, x)
+    }
+    (big.total + big.correction) * math.ldexp(Float{1.0}, 128) + (small.total + small.correction)
+}
 
 compensated_sum: fn(xs: [Float]) -> Float Never! {
-    acc := Float{0.0}
-    correction := Float{0.0}
+    acc := CompensatedTotal{total: Float{0.0}, correction: Float{0.0}}
+    overflowed := false
     positive_inf := false
     negative_inf := false
     loop x in xs {
@@ -97,19 +135,19 @@ compensated_sum: fn(xs: [Float]) -> Float Never! {
             if x > (Float{0.0}) -> positive_inf = true else -> negative_inf = true
             next
         }
-        if math.is_inf(acc) -> next
-        t: acc + x
-        if abs_value(acc) >= abs_value(x) {
-            correction = correction + ((acc - t) + x)
-        } else {
-            correction = correction + ((x - t) + acc)
+        if overflowed -> next
+        next_acc: compensated_add(acc, x)
+        if math.is_inf(next_acc.total) {
+            overflowed = true
+            next
         }
-        acc = t
+        acc = next_acc
     }
     if positive_inf && negative_inf -> return math.NAN
     if positive_inf -> return math.INFINITY
     if negative_inf -> return -math.INFINITY
-    acc + correction
+    if overflowed -> return compensated_sum_rescaled(xs)
+    acc.total + acc.correction
 }
 
 sift_down: fn(xs: &[Float], start: Int, end: Int) Never! {
@@ -148,6 +186,55 @@ sorted: fn(xs: [Float]) -> [Float] Never! {
         sift_down(out, 0, end)
     }
     out
+}
+
+// Does position `a` sort before position `b`? By value, then by position, so
+// the order is the one a stable sort gives.
+position_before: fn(xs: [Float], a: Int, b: Int) -> Bool Never! {
+    if xs[a] < xs[b] -> return true
+    if xs[b] < xs[a] -> return false
+    a < b
+}
+
+sift_positions: fn(xs: [Float], order: &[Int], start: Int, end: Int) Never! {
+    root := start
+    loop {
+        child: root * 2 + 1
+        if child > end -> return
+        candidate := root
+        if position_before(xs, order[candidate], order[child]) -> candidate = child
+        right: child + 1
+        if right <= end && position_before(xs, order[candidate], order[right]) -> candidate = right
+        if candidate == root -> return
+        tmp: order[root]
+        order[root] = order[candidate]
+        order[candidate] = tmp
+        root = candidate
+    }
+}
+
+// The positions of NaN-free `xs`, ordered as a stable sort by value orders
+// them, in n log n time.
+sorted_positions: fn(xs: [Float]) -> [Int] Never! {
+    order := [Int]{}
+    loop i in 0..<xs.len() -> order.push(i)
+    n: order.len()
+    if n < 2 -> return order
+    start := (n - 2) /% 2
+    loop {
+        sift_positions(xs, order, start, n - 1)
+        if start == 0 -> break
+        start = start - 1
+    }
+    end := n - 1
+    loop end > 0 {
+        tmp: order[0]
+        order[0] = order[end]
+        order[end] = tmp
+        end = end - 1
+        sift_positions(xs, order, 0, end)
+    }
+    order
 }
 
 interpolate: fn(a: Float, b: Float, fraction: Float) -> Float Never! {
@@ -282,8 +369,17 @@ prod: fn(xs: [Float]) -> Float Never! {
 }
 
 mean: fn(xs: [Float]) -> Float? Never! {
-    m: stable_mean(xs) ?? return None
-    Val(m)
+    if xs.len() == 0 || holds_nan(xs) -> return None
+    positive_inf := false
+    negative_inf := false
+    loop x in xs {
+        if x == math.INFINITY -> positive_inf = true
+        if x == -math.INFINITY -> negative_inf = true
+    }
+    if positive_inf && negative_inf -> return None
+    if positive_inf -> return Val(math.INFINITY)
+    if negative_inf -> return Val(-math.INFINITY)
+    stable_mean(xs)
 }
 
 fmean: fn(xs: [Float]) -> Float? Never! { mean(xs) }
@@ -544,7 +640,7 @@ zscore: fn(xs: [Float]) -> [Float] Never! {
 }
 
 min: fn(xs: [Float]) -> Float? Never! {
-    if xs.len() == 0 || invalid_sample(xs) -> return None
+    if xs.len() == 0 || holds_nan(xs) -> return None
     m := xs[0].copy()
     loop x in xs {
         if x < m -> m = x.copy()
@@ -553,7 +649,7 @@ min: fn(xs: [Float]) -> Float? Never! {
 }
 
 max: fn(xs: [Float]) -> Float? Never! {
-    if xs.len() == 0 || invalid_sample(xs) -> return None
+    if xs.len() == 0 || holds_nan(xs) -> return None
     m := xs[0].copy()
     loop x in xs {
         if x > m -> m = x.copy()
@@ -770,18 +866,23 @@ diff: fn(xs: [Float]) -> [Float] Never! {
     out
 }
 
+// Positions are one-based in input order; ties share their average position.
+// One sort of the positions and one pass over the tie groups.
 rank: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
-    if invalid_sample(xs) -> return out
+    if holds_nan(xs) -> return out
     n: xs.len()
-    loop i in 0..<n {
-        before := 1
-        ties := 0
-        loop j in 0..<n {
-            if xs[j] < xs[i] -> before = before + 1
-            if xs[j] == xs[i] -> ties = ties + 1
+    order: sorted_positions(xs)
+    loop _ in 0..<n -> out.push(Float{0.0})
+    start := 0
+    loop start < n {
+        end := start + 1
+        loop end < n && xs[order[end]] == xs[order[start]] {
+            end = end + 1
         }
-        out.push((Float{before}) + (Float{ties - 1}) / (Float{2.0}))
+        shared: (Float{start + 1 + end}) / (Float{2.0})
+        loop k in start..<end -> out[order[k]] = shared
+        start = end
     }
     out
 }
