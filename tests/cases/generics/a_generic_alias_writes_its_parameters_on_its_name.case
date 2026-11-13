@@ -1,0 +1,18 @@
+# A generic alias writes its type parameters on its name (`Grid<T>: [[T]]`)
+# and is the same type as its target for each argument: a plain `[[Float]]`
+# passes where `Grid<Float>` is expected and back, a generic function takes
+# `Grid<T>`, and a generic alias over a union matches its cases.
+fixture: a_generic_alias_writes_its_parameters_on_its_name.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check grid.jet
+exit: 0
+step o0: jet run --optimize=none grid.jet
+exit: 0
+stdout: = "6.0\n0.75\n3 4 2\nint 3\ntext x\n"
+step o1: jet run --optimize=basic grid.jet
+exit: 0
+stdout: = "6.0\n0.75\n3 4 2\nint 3\ntext x\n"
+step o2: jet run --optimize=full grid.jet
+exit: 0
+stdout: = "6.0\n0.75\n3 4 2\nint 3\ntext x\n"
