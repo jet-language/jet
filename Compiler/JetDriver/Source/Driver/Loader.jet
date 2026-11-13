@@ -5608,7 +5608,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         if is_core -> jet_driver_owned_parts(source_units, queued, pending, generated_records, request.core_sources, unit.module_name, scoped_imports)
         loop synthetic in synthetic_imports -> program.imports.push(synthetic)
-        unit_words: words ?? JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
+        unit_words: words ?? JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
         // copy: reach admits the same rows from unit_words below.
         if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
         if reach.enabled {
@@ -5647,6 +5647,12 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             sink.progress("counters.load.core_items", reach.items.len(), -1)
             sink.progress("counters.load.core_demands", reach.demands.len(), -1)
             sink.progress("counters.load.core_demands_waiting", waiting, -1)
+            impls_reached := 0
+            loop row in reach.impls {
+                if reach.items[row.item].live -> impls_reached += 1
+            }
+            sink.progress("counters.load.core_impls", reach.impls.len(), -1)
+            sink.progress("counters.load.core_impls_reached", impls_reached, -1)
         }
     }
     // Each package's denied edges (E0619) and unused rules (L0619).

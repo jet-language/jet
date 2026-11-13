@@ -17,6 +17,16 @@
 // `core.time.X` path of core.time) waits like a private import, until reached
 // code of the module spells the word that made it.
 //
+// A Core type's implementation of a trait the program may never use is
+// reached only once both its type and its trait are
+// (jet_driver_core_impl_reached): an implementation of a codec trait
+// (`impl Decode`), and one of a trait another module declares
+// (`impl cipher.ForwardBlock`). Every other owned trait is one the compiler
+// calls without a name (an operator, `{}` interpolation, `loop`, cleanup), so
+// its implementations stay with their type. An unreached implementation
+// leaves its type, so what its body names (`core.encoding.X` in a time
+// decoder) never loads.
+//
 // Spellings are read from the unit's code tokens, a string's interpolations
 // included (its text is data), so reach is a superset of what the code
 // names. When the load is done, the imports never followed, the unreached
@@ -32,7 +42,7 @@
 // (jet_driver_reach_hold), so load time and memory follow reach, not the
 // size of the library.
 use {
-    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameTable, Span, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_intern, name_intern_bytes, name_table, name_text]
+    jet_foundation.[BUILTIN_METHOD_ROWS, CORE_CALLS, CORE_SOURCE_OWNED_ROWS, DIAGNOSTIC_LINT, Diagnostic, Func, ImportDecl, Item, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NameRows, NameTable, Span, TraitImplBlock, core_call_source_member, core_module_has_member, diagnostic_with_source_path, name_find, name_intern, name_intern_bytes, name_rows, name_rows_get_text, name_rows_set, name_table, name_text, owned_trait, owned_trait_codec]
     jet_ir.[IR_CORE_INTRINSICS, ir_core_lowered_by_name, ir_precise_source_family_owner]
     jet_lexer.[
         Lexed,
@@ -74,12 +84,15 @@ use {
 // of the method it is (or "" for a whole item), `owners` the row of the type
 // that owns the method (or -1), `names` the name that reaches it, and
 // `cascades` whether that name is the one it declares, so that leaving takes
-// the name with it. `spells` holds one row of spellings per lazy
-// declaration, then a last row for the rest of the source. A spelling is
-// `word * 4 + kind`: bit 0 of the kind is set when a `.` comes right before
-// the word, bit 1 when one comes right after it. `routed` marks a routed
-// module (JET_DRIVER_ROUTED_MODULES), and `held` lists the declarations the
-// unit's parse held (jet_driver_reach_hold), by position.
+// the name with it. A trait implementation's row (an item's block, or a
+// top-level `impl`) has its trait as written in `traits` (the other rows
+// have "") and its type's name in `names`. `spells` holds one row of
+// spellings per lazy declaration, then a last row for the rest of the
+// source. A spelling is `word * 4 + kind`: bit 0 of the kind is set when a
+// `.` comes right before the word, bit 1 when one comes right after it.
+// `routed` marks a routed module (JET_DRIVER_ROUTED_MODULES), and `held`
+// lists the declarations the unit's parse held (jet_driver_reach_hold), by
+// position.
 JetDriverUnitWords: struct {
     words: [String]
     items: [Int]
@@ -87,9 +100,42 @@ JetDriverUnitWords: struct {
     owners: [Int]
     names: [String]
     cascades: [Bool]
+    traits: [String]
     spells: [[Int]]
     routed: Bool
     held: [JetDriverReachDeclaration]
+}
+
+// One implementation of a trait for a Core type: the modules and names of
+// its type and its trait. A compiler-owned trait (Compiler/Prelude/Traits.jet)
+// has the module "", and so does a builtin type.
+JetDriverCoreImplRow: struct {
+    type_module: String
+    type_name: String
+    trait_module: String
+    trait_name: String
+}
+
+// Whether a load keeps `row`: both its type and its trait are reached.
+// `reached` holds each module whose declarations all count as reached
+// (`core.time`), each reached declaration of any other (`core.math.Vec2`),
+// and each owned trait reached code names or calls a method of (`Decode`).
+// An owned trait the compiler calls without a name (any but a codec trait)
+// is always reached.
+jet_driver_core_impl_reached: fn(row: JetDriverCoreImplRow, reached: NameRows) -> Bool Never! {
+    if row.type_module != "" && name_rows_get_text(reached, row.type_module) == None && name_rows_get_text(reached, "{row.type_module}.{row.type_name}") == None -> return false
+    if row.trait_module == "" -> return !owned_trait_codec(row.trait_name) || name_rows_get_text(reached, row.trait_name) != None
+    name_rows_get_text(reached, row.trait_module) != None || name_rows_get_text(reached, "{row.trait_module}.{row.trait_name}") != None
+}
+
+// Whether a Core implementation of `trait_name` (as written) is a lazy row:
+// a codec trait's, or one of a trait another module declares
+// (`cipher.ForwardBlock`). Any other owned trait is one the compiler calls
+// without a name, and a trait the type's own module declares is reached
+// with it.
+jet_driver_reach_lazy_trait: fn(trait_name: String) -> Bool Never! {
+    if owned_trait(trait_name) != None -> return owned_trait_codec(trait_name)
+    trait_name.contains(".")
 }
 
 // A top-level function or constant of a lazy Core unit that reach names by
@@ -317,17 +363,21 @@ jet_driver_reach_lazy_type: fn(item: Item) -> Span? Never! {
 // a lazy type by its name, each of its inherent methods outside
 // JET_DRIVER_MEMBER_ROUTES by its name once the type is, and a top-level
 // `impl` for one of its lazy types (`impl Float.Mul(Vec2)`) with that type.
+// In any lazy unit, an implementation of a lazy trait
+// (jet_driver_reach_lazy_trait) is a row reached once its type and its
+// trait are (jet_driver_core_impl_reached), and within a lazy type's row.
 JetDriverReachRows: struct {
     items: [Int]
     members: [String]
     owners: [Int]
     names: [String]
     cascades: [Bool]
+    traits: [String]
     spans: [Span]
 }
 
 jet_driver_reach_no_rows: fn() -> JetDriverReachRows Never! {
-    JetDriverReachRows{items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, spans: [Span]{}}
+    JetDriverReachRows{items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, traits: [String]{}, spans: [Span]{}}
 }
 
 // copy: the names and span stay in the unit's items, which the load keeps.
@@ -337,7 +387,36 @@ jet_driver_reach_row: fn(rows: &JetDriverReachRows, position: Int, member: Strin
     rows.owners.push(owner)
     rows.names.push(name.copy())
     rows.cascades.push(cascade)
+    rows.traits.push("")
     rows.spans.push(span.copy())
+}
+
+// The row of an implementation of `trait_name` for the type `type_name`.
+// copy: the names and span stay in the unit's items, which the load keeps.
+jet_driver_reach_impl_row: fn(rows: &JetDriverReachRows, position: Int, owner: Int, type_name: String, trait_name: String, span: Span) Never! {
+    rows.items.push(position)
+    rows.members.push("")
+    rows.owners.push(owner)
+    rows.names.push(type_name.copy())
+    rows.cascades.push(false)
+    rows.traits.push(trait_name.copy())
+    rows.spans.push(span.copy())
+}
+
+// A trait block that is a lazy row: one of a lazy trait
+// (jet_driver_reach_lazy_trait) with source and no markers, OS gate or
+// delegated body. Any other block is reached with its type.
+jet_driver_reach_lazy_block: fn(block: TraitImplBlock) -> Bool Never! {
+    block.span != None && block.markers.len() == 0 && block.os_target == None && block.delegation_field == None && !block.compiler_generated && jet_driver_reach_lazy_trait(block.trait_name)
+}
+
+// The rows of the lazy trait blocks of the type `type_name`, at `position`.
+jet_driver_reach_block_rows: fn(rows: &JetDriverReachRows, position: Int, owner: Int, type_name: String, blocks: [TraitImplBlock]) Never! {
+    loop block in blocks {
+        if !jet_driver_reach_lazy_block(block) -> next
+        span: block.span ?? next
+        jet_driver_reach_impl_row(rows, position, owner, type_name, block.trait_name, span)
+    }
 }
 
 jet_driver_reach_method_rows: fn(rows: &JetDriverReachRows, position: Int, owner: Int, methods: [Func]) Never! {
@@ -347,13 +426,15 @@ jet_driver_reach_method_rows: fn(rows: &JetDriverReachRows, position: Int, owner
     }
 }
 
-// A lazy type's row, reached by its name, and a row for each of its methods.
-jet_driver_reach_type_rows: fn(rows: &JetDriverReachRows, types: &[String:Bool], position: Int, name: String, methods: [Func], span: Span) Never! {
+// A lazy type's row, reached by its name, and a row for each of its methods
+// and each of its lazy trait blocks.
+jet_driver_reach_type_rows: fn(rows: &JetDriverReachRows, types: &[String:Bool], position: Int, name: String, methods: [Func], blocks: [TraitImplBlock], span: Span) Never! {
     // copy: the name stays in the unit's items, which the load keeps.
     types[name.copy()] = true
     owner: rows.items.len()
     jet_driver_reach_row(rows, position, "", -1, name, true, span)
     jet_driver_reach_method_rows(rows, position, owner, methods)
+    jet_driver_reach_block_rows(rows, position, owner, name, blocks)
 }
 
 // The rows of a top-level declaration reached by name: a precise family
@@ -391,25 +472,32 @@ jet_driver_reach_rows: fn(items: [Item], held: [JetDriverReachDeclaration], part
         span: jet_driver_reach_lazy_span(item, part_members, routes) ?? next
         jet_driver_reach_name_rows(rows, JetDriverReachDeclaration{position: position, name: jet_driver_reach_item_name(item), name_start: span.start, span: span, constant: item == .Const(_)}, routes)
     }
-    if !routes.routed -> return rows
     types := [String:Bool]{}
-    loop (position, item) in items {
-        span: jet_driver_reach_lazy_type(item) ?? next
-        if item == {
-            .Struct(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, span)
-            .Enum(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, span)
-            .Distinct(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, span)
-            .TypeAlias(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, span)
-            .Func(_) | .Const(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    if routes.routed {
+        loop (position, item) in items {
+            span: jet_driver_reach_lazy_type(item) ?? next
+            if item == {
+                .Struct(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, value.trait_impls, span)
+                .Enum(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, value.methods, value.trait_impls, span)
+                .Distinct(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
+                .TypeAlias(value) -> jet_driver_reach_type_rows(rows, types, position, value.name, [Func]{}, [TraitImplBlock]{}, span)
+                .Func(_) | .Const(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            }
         }
     }
     loop (position, item) in items {
-        if item == .Impl(value) {
+        if item == .Struct(value) {
+            if types.get(value.name) == None -> jet_driver_reach_block_rows(rows, position, -1, value.name, value.trait_impls)
+        } else if item == .Enum(value) {
+            if types.get(value.name) == None -> jet_driver_reach_block_rows(rows, position, -1, value.name, value.trait_impls)
+        } else if item == .Impl(value) {
             if value.markers.len() > 0 || value.is_generated_serde || value.os_target != None -> next
             if types.get(value.type_name) != None {
                 jet_driver_reach_row(rows, position, "", -1, value.type_name, false, value.span)
             } else if value.operator_rhs == .Val(rhs) && rhs == .Named(rhs_name) && types.get(rhs_name) != None {
                 jet_driver_reach_row(rows, position, "", -1, rhs_name, false, value.span)
+            } else if value.trait_name == .Val(trait_name) && value.delegation_field == None && jet_driver_reach_lazy_trait(trait_name) {
+                jet_driver_reach_impl_row(rows, position, -1, value.type_name, trait_name, value.span)
             }
         }
     }
@@ -674,10 +762,10 @@ jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], held: [Jet
     // spell the same; its spellings went to its last row.
     loop row in 1..<rows.items.len() {
         // copy: each row's reach item holds its own spellings.
-        if rows.items[row - 1] == rows.items[row] && rows.members[row - 1] == rows.members[row] -> spells[row - 1] = spells[row].copy()
+        if rows.items[row - 1] == rows.items[row] && rows.members[row - 1] == rows.members[row] && rows.traits[row - 1] == rows.traits[row] -> spells[row - 1] = spells[row].copy()
     }
     spells.push(rest)
-    JetDriverUnitWords{words: spellings.table.texts.move(), items: rows.items.move(), members: rows.members.move(), owners: rows.owners.move(), names: rows.names.move(), cascades: rows.cascades.move(), spells: spells, routed: routes.routed, held: held}
+    JetDriverUnitWords{words: spellings.table.texts.move(), items: rows.items.move(), members: rows.members.move(), owners: rows.owners.move(), names: rows.names.move(), cascades: rows.cascades.move(), traits: rows.traits.move(), spells: spells, routed: routes.routed, held: held}
 }
 
 // One lazy declaration of a reached module: its module (`unit`), position in
@@ -687,7 +775,8 @@ jet_driver_unit_words: fn(input: &&JetDriverSpellings, items: [Item], held: [Jet
 // -1): it is reached only once its type is, and `wanted` marks one whose
 // name was reached first, which its type's `children` then reach. A `held`
 // one is the stub of a declaration its unit's parse held
-// (jet_driver_reach_hold).
+// (jet_driver_reach_hold). An implementation's row has its `lazy_impl` in
+// the reach's impls (-1 for any other).
 JetDriverReachItem: struct {
     unit: Int
     item: Int
@@ -700,6 +789,19 @@ JetDriverReachItem: struct {
     spells: [Int]
     live: Bool
     held: Bool
+    lazy_impl: Int
+}
+
+// A lazy implementation of the load: its reach `item`, its row
+// (jet_driver_core_impl_reached), its trait as written
+// (`cipher.ForwardBlock`), and for an owned trait the names whose spelling
+// reaches the trait: its own, its codec method's, and its derive and bundle
+// families' (`Codable`, `CodableAsBase`).
+JetDriverReachImpl: struct {
+    item: Int
+    row: JetDriverCoreImplRow
+    written: String
+    triggers: [Int]
 }
 
 // One loaded module whose source counts toward reach, at `loaded` in the
@@ -745,15 +847,20 @@ JetDriverReachDemand: struct {
 // The load's reach: one name table for every spelling, the names reached
 // after a `.` (or anywhere in open source), the names any Core module that
 // keeps its unreached code spells after a `.` (`members`, which reach a
-// routed module's methods), and the lazy declarations by name.
+// routed module's methods), and the lazy declarations by name. `spelled`
+// holds every name reached code spells, `impls` the lazy implementations,
+// and `reached` the reach in the keys of jet_driver_core_impl_reached.
 JetDriverReach: struct {
     enabled: Bool
     names: NameTable
     global: [Bool]
     members: [Bool]
+    spelled: [Bool]
     units: [JetDriverReachUnit]
     items: [JetDriverReachItem]
     by_name: [[Int]]
+    impls: [JetDriverReachImpl]
+    reached: NameRows
     edges: [JetDriverReachEdge]
     demands: [JetDriverReachDemand]
     open_names: [String]
@@ -761,7 +868,7 @@ JetDriverReach: struct {
 }
 
 jet_driver_reach: fn(enabled: Bool) -> JetDriverReach Never! {
-    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, members: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
+    JetDriverReach{enabled: enabled, names: name_table(), global: [Bool]{}, members: [Bool]{}, spelled: [Bool]{}, units: [JetDriverReachUnit]{}, items: [JetDriverReachItem]{}, by_name: [[Int]]{}, impls: [JetDriverReachImpl]{}, reached: name_rows(), edges: [JetDriverReachEdge]{}, demands: [JetDriverReachDemand]{}, open_names: [String]{}, stack: [Int]{}}
 }
 
 jet_driver_reach_has: fn(flags: [Bool], id: Int) -> Bool Never! {
@@ -793,9 +900,17 @@ jet_driver_reach_deferrable: fn(scoped: JetDriverScopedImport, scoped_imports: [
 // unit. The names a member list selects are reached wherever it names them.
 // A Core module that keeps its unreached code may call a routed module's
 // method from it, so each name it spells after a `.` reaches such methods.
+// The module's declarations count as reached for implementations
+// (jet_driver_core_impl_reached), and each waiting implementation of a trait
+// it declares tries again.
 jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: String, words: JetDriverUnitWords, imports: [ImportDecl], open: Bool) -> Int {
     unit: reach.units.len()
     reach.units.push(JetDriverReachUnit{loaded: loaded, module_name: module_name, open: open || reach.open_names.contains(module_name), routed: words.routed, local: [Bool]{}, dotted: [Bool]{}, heads: [Bool]{}})
+    name_rows_set(reach.reached, module_name, 1)
+    loop at in 0..<reach.impls.len() {
+        index: reach.impls[at].item
+        if !reach.items[index].live && reach.impls[at].row.trait_module == module_name -> reach.stack.push(index)
+    }
     ids := [Int]{}
     loop word in words.words -> ids.push(Int.from_u32(name_intern(reach.names, word).id))
     loop declaration in imports {
@@ -818,9 +933,20 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
         loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + spell.bit_and(3))
         index: reach.items.len()
         owner: if words.owners[row] >= 0 -> base + words.owners[row] else -> -1
+        lazy_impl: if words.traits[row] == "" -> -1 else -> jet_driver_reach_impl(reach, module_name, words.names[row], words.traits[row], imports)
         // copy: the unit's words stay whole for its other rows.
-        reach.items.push(JetDriverReachItem{unit: unit, item: position, member: words.members[row].copy(), owner: owner, children: [Int]{}, wanted: false, name: name, cascade: words.cascades[row], spells: spells.move(), live: false, held: jet_driver_reach_has(held, position)})
+        reach.items.push(JetDriverReachItem{unit: unit, item: position, member: words.members[row].copy(), owner: owner, children: [Int]{}, wanted: false, name: name, cascade: words.cascades[row], spells: spells.move(), live: false, held: jet_driver_reach_has(held, position), lazy_impl: lazy_impl})
         if owner >= 0 -> reach.items[owner].children.push(index)
+        if lazy_impl >= 0 {
+            // Reached code may already spell its trait; the drain decides.
+            loop at in 0..<reach.impls[lazy_impl].triggers.len() {
+                trigger: reach.impls[lazy_impl].triggers[at]
+                loop reach.by_name.len() <= trigger -> reach.by_name.push([Int]{})
+                reach.by_name[trigger].push(index)
+            }
+            reach.stack.push(index)
+            next
+        }
         loop reach.by_name.len() <= name -> reach.by_name.push([Int]{})
         reach.by_name[name].push(index)
         if reach.units[unit].open || jet_driver_reach_has(reach.global, name) || (owner >= 0 && jet_driver_reach_has(reach.members, name)) -> reach.stack.push(index)
@@ -838,6 +964,35 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
     }
     jet_driver_reach_drain(reach)
     unit
+}
+
+// Adds the implementation of `written` (a trait as written) for the type
+// `type_name` of `module_name`, whose imports are `imports`, as the reach's
+// next item, and returns its index in the reach's impls. A trait written
+// `alias.Trait` is declared by the module the alias imports; the module of
+// any other lazy trait is "", an owned one's.
+jet_driver_reach_impl: fn(reach: &JetDriverReach, module_name: String, type_name: String, written: String, imports: [ImportDecl]) -> Int {
+    trait_module := ""
+    trait_name := written.copy()
+    triggers := [Int]{}
+    if owned_trait(written) == .Val(owned) {
+        triggers.push(jet_driver_reach_word(reach, owned.name))
+        if owned.contract == .Codec(verb) -> triggers.push(jet_driver_reach_word(reach, verb))
+        if owned.auto_derive_family == .Val(family) -> triggers.push(jet_driver_reach_word(reach, family))
+        if owned.bundle_family == .Val(family) -> triggers.push(jet_driver_reach_word(reach, family))
+    } else {
+        parts: written.partition(".")
+        trait_name = parts.tail.copy()
+        trait_module = module_name.copy()
+        loop declaration in imports {
+            if declaration.alias == parts.head {
+                trait_module = jet_driver_core_import_module(declaration) ?? module_name.copy()
+                break
+            }
+        }
+    }
+    reach.impls.push(JetDriverReachImpl{item: reach.items.len(), row: JetDriverCoreImplRow{type_module: module_name.copy(), type_name: type_name.copy(), trait_module: trait_module, trait_name: trait_name}, written: written.copy(), triggers: triggers})
+    reach.impls.len() - 1
 }
 
 // Reaches each method named `id`.
@@ -968,23 +1123,46 @@ jet_driver_reach_global: fn(reach: &JetDriverReach, id: Int) {
     loop reach.global.len() <= id -> reach.global.push(false)
     if reach.global[id] -> return
     reach.global[id] = true
+    jet_driver_reach_spelled(reach, id)
     if id >= reach.by_name.len() -> return
     loop at in 0..<reach.by_name[id].len() -> reach.stack.push(reach.by_name[id][at])
 }
 
+// A bare spelling reaches the module's own declarations, and an
+// implementation of any module whose trait it names.
 jet_driver_reach_local: fn(reach: &JetDriverReach, unit: Int, id: Int) {
     loop reach.units[unit].local.len() <= id -> reach.units[unit].local.push(false)
     if reach.units[unit].local[id] -> return
     reach.units[unit].local[id] = true
+    jet_driver_reach_spelled(reach, id)
     if id >= reach.by_name.len() -> return
     loop at in 0..<reach.by_name[id].len() {
         index: reach.by_name[id][at]
-        if reach.items[index].unit == unit -> reach.stack.push(index)
+        if reach.items[index].unit == unit || reach.items[index].lazy_impl >= 0 -> reach.stack.push(index)
     }
 }
 
+jet_driver_reach_spelled: fn(reach: &JetDriverReach, id: Int) Never! {
+    loop reach.spelled.len() <= id -> reach.spelled.push(false)
+    reach.spelled[id] = true
+}
+
+// Whether the lazy implementation `at` is reached: reached code spells one
+// of its triggers (which reaches its owned trait), and
+// jet_driver_core_impl_reached holds.
+jet_driver_reach_impl_live: fn(reach: &JetDriverReach, at: Int) -> Bool Never! {
+    loop trigger in reach.impls[at].triggers {
+        if jet_driver_reach_has(reach.spelled, trigger) {
+            name_rows_set(reach.reached, reach.impls[at].row.trait_name, 1)
+            break
+        }
+    }
+    jet_driver_core_impl_reached(reach.impls[at].row, reach.reached)
+}
+
 // Marks reached every declaration on the stack and what it spells. A method
-// whose type is not reached waits for it.
+// or an implementation whose type is not reached waits for it, and an
+// implementation of a module that isn't open waits for its trait.
 jet_driver_reach_drain: fn(reach: &JetDriverReach) {
     loop reach.stack.len() > 0 {
         index: reach.stack.pop() ?? break
@@ -994,8 +1172,9 @@ jet_driver_reach_drain: fn(reach: &JetDriverReach) {
             reach.items[index].wanted = true
             next
         }
-        reach.items[index].live = true
         unit: reach.items[index].unit
+        if reach.items[index].lazy_impl >= 0 && !reach.units[unit].open && !jet_driver_reach_impl_live(reach, reach.items[index].lazy_impl) -> next
+        reach.items[index].live = true
         loop at in 0..<reach.items[index].spells.len() -> jet_driver_reach_mark(reach, unit, reach.items[index].spells[at])
         loop at in 0..<reach.items[index].children.len() {
             child: reach.items[index].children[at]
@@ -1064,13 +1243,14 @@ jet_driver_reach_parse_held: fn(request: JetDriverCompileRequest, reach: JetDriv
 
 // The load is done: drop each never-followed import from its module, each
 // unreached constant (so comptime evaluates only constants the program can
-// name) and each unreached lazy declaration of a routed module, then every
-// unreached declaration that spells a dropped import's alias as a path head,
-// spells the word of a demand never followed (its module may not have
-// loaded), or spells a dropped declaration (bare in the same module, after a
-// `.` anywhere), until no remaining declaration names a dropped one. A
-// dropped method leaves its type; its name stays, since other types may
-// share it.
+// name), each unreached lazy implementation and each unreached lazy
+// declaration of a routed module, then every unreached declaration that
+// spells a dropped import's alias as a path head, spells the word of a
+// demand never followed (its module may not have loaded), or spells a
+// dropped declaration (bare in the same module, after a `.` anywhere), until
+// no remaining declaration names a dropped one. A dropped method or trait
+// block leaves its type; a method's name stays, since other types may share
+// it.
 jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModule]) {
     dead := [[Bool]]{}
     dead_imports := [[Span]]{}
@@ -1112,7 +1292,7 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     loop index in 0..<reach.items.len() {
         if reach.items[index].live -> next
         unit: reach.items[index].unit
-        if reach.units[unit].routed || reach.items[index].held || modules[reach.units[unit].loaded].program.items[reach.items[index].item] == .Const(_) {
+        if reach.units[unit].routed || reach.items[index].held || reach.items[index].lazy_impl >= 0 || modules[reach.units[unit].loaded].program.items[reach.items[index].item] == .Const(_) {
             any = true
             jet_driver_reach_gone(reach, index, gone, global_gone, local_gone)
         }
@@ -1140,18 +1320,26 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         }
     }
     // Per unit and program.items position: whether the item leaves, and the
-    // names of the methods that leave it.
+    // names of the methods and the traits (as written) of the blocks that
+    // leave it.
     drop := [[Bool]]{}
     cut := [[[String]]]{}
+    blocks := [[[String]]]{}
     loop _ in reach.units {
         drop.push([Bool]{})
         cut.push([[String]]{})
+        blocks.push([[String]]{})
     }
     loop index in 0..<reach.items.len() {
         if !gone[index] -> next
         unit: reach.items[index].unit
         position: reach.items[index].item
-        if reach.items[index].member == "" {
+        at: reach.items[index].lazy_impl
+        if at >= 0 && !(modules[reach.units[unit].loaded].program.items[position] == .Impl(_)) {
+            loop blocks[unit].len() <= position -> blocks[unit].push([String]{})
+            // copy: the reach keeps its impls.
+            blocks[unit][position].push(reach.impls[at].written.copy())
+        } else if reach.items[index].member == "" {
             loop drop[unit].len() <= position -> drop[unit].push(false)
             drop[unit][position] = true
         } else {
@@ -1163,7 +1351,7 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
     // A declaration with a reached row stays (a precise family member that
     // reached code calls by name, its type unreached).
     loop item in reach.items {
-        if item.live && item.member == "" && jet_driver_reach_has(drop[item.unit], item.item) -> drop[item.unit][item.item] = false
+        if item.live && item.member == "" && item.lazy_impl < 0 && jet_driver_reach_has(drop[item.unit], item.item) -> drop[item.unit][item.item] = false
     }
     loop unit in 0..<reach.units.len() {
         loaded: reach.units[unit].loaded
@@ -1174,9 +1362,12 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
             }
             modules[loaded].program.imports = imports.move()
         }
-        if drop[unit].len() == 0 && cut[unit].len() == 0 -> next
+        if drop[unit].len() == 0 && cut[unit].len() == 0 && blocks[unit].len() == 0 -> next
         loop position in 0..<cut[unit].len() {
             if cut[unit][position].len() > 0 -> jet_driver_reach_cut(modules[loaded].program.items, position, cut[unit][position])
+        }
+        loop position in 0..<blocks[unit].len() {
+            if blocks[unit][position].len() > 0 -> jet_driver_reach_cut_blocks(modules[loaded].program.items, position, blocks[unit][position])
         }
         items := [Item]{}
         loop position in 0..<modules[loaded].program.items.len() {
@@ -1205,6 +1396,29 @@ jet_driver_reach_kept_methods: fn(methods: [Func], names: [String]) -> [Func] Ne
     loop method in methods {
         // copy: the item keeps its methods until the cut item replaces it.
         if !names.contains(method.name) -> kept.push(method.copy())
+    }
+    kept
+}
+
+// Takes the lazy trait blocks (jet_driver_reach_lazy_block) whose traits
+// are written as in `traits` out of `items[position]`, a struct or enum.
+jet_driver_reach_cut_blocks: fn(items: &[Item], position: Int, traits: [String]) Never! {
+    if items[position] == .Struct(value) {
+        updated := value
+        updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
+        items[position] = Item.Struct{value: updated}
+    } else if items[position] == .Enum(value) {
+        updated := value
+        updated.trait_impls = jet_driver_reach_kept_blocks(value.trait_impls, traits)
+        items[position] = Item.Enum{value: updated}
+    }
+}
+
+jet_driver_reach_kept_blocks: fn(blocks: [TraitImplBlock], traits: [String]) -> [TraitImplBlock] Never! {
+    kept := [TraitImplBlock]{}
+    loop block in blocks {
+        // copy: the item keeps its blocks until the cut item replaces it.
+        if !jet_driver_reach_lazy_block(block) || !traits.contains(block.trait_name) -> kept.push(block.copy())
     }
     kept
 }
