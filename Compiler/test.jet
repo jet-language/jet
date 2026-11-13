@@ -735,28 +735,26 @@ core_rows: fn(rows: TestRows) {
         tested.push(path.copy())
         names.push(declared)
     }
-    candidates := [(id: String, path: String, level: String)]{}
+    // Run `ids[i]` tests the file `tested[file]` at CORE_LEVELS[level], where
+    // `at[i]` is (file, level).
     ids := [String]{}
     held := [[String]]{}
-    loop level in CORE_LEVELS {
+    at := [(file: Int, level: Int)]{}
+    loop (level, name) in CORE_LEVELS {
         loop (index, path) in tested {
-            id: "{path} [{level}]"
-            candidates.push((id: id.copy(), path: path.copy(), level: level.copy()))
-            ids.push(id)
+            ids.push("{path} [{name}]")
             held.push(names[index].copy()) // copy: each level's run holds the file's tests.
+            at.push((file: index, level: level))
         }
     }
-    selected: kit_exec_select_runs(ids, held, rows.filter)
-    runs := [(id: String, path: String, level: String)]{}
+    runs: kit_exec_select_runs(ids, held, rows.filter)
     specs := [ProcessSpec]{}
-    loop (index, run) in candidates {
-        if !selected.contains(run.id) -> next
-        args := [String]{"test", run.path, "--optimize={run.level}"}
-        if run_filter(rows, run.id, held[index]) == .Val(filter) {
+    loop run in runs {
+        args := [String]{"test", tested[at[run].file], "--optimize={CORE_LEVELS[at[run].level]}"}
+        if run_filter(rows, ids[run], held[run]) == .Val(filter) {
             args.push("--filter")
             args.push(filter)
         }
-        runs.push((id: run.id.copy(), path: run.path.copy(), level: run.level.copy()))
         specs.push(jet_command(setup, setup.jet, args))
     }
     if specs.len() == 0 -> return
@@ -766,8 +764,8 @@ core_rows: fn(rows: TestRows) {
     }
     loop (index, run) in runs {
         if results[index] == {
-            .Ok(receipt) -> { _ := package_rows(rows, run.id, receipt) }
-            .Err(error) -> rows.fail(run.id, "couldn't run `jet test {run.path} --optimize={run.level}`: {error}")
+            .Ok(receipt) -> { _ := package_rows(rows, ids[run], receipt) }
+            .Err(error) -> rows.fail(ids[run], "couldn't run `jet test {tested[at[run].file]} --optimize={CORE_LEVELS[at[run].level]}`: {error}")
         }
     }
 }

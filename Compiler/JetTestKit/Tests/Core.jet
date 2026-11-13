@@ -128,11 +128,11 @@ kit_test_core_scratch: fn(label: String) -> String {
 #Test("a filter narrows code-suite runs as it narrows corpus entries, and one matching nothing selects 0") {
     ids: ["Core/Tasks/Tasks.jet [none]", "Core/Db/Engine/Tokenize.jet [none]", "Core/Crypto/Bignum.jet [full]"]
     tests: [["spawn joins"], ["keywords"], ["Tasks are not here"]]
-    assert_eq(kit_exec_select_runs(ids, tests, ""), ids)
-    assert_eq(kit_exec_select_runs(ids, tests, "Core/Tasks"), ["Core/Tasks/Tasks.jet [none]"])
+    assert_eq(kit_exec_select_runs(ids, tests, ""), [0, 1, 2])
+    assert_eq(kit_exec_select_runs(ids, tests, "Core/Tasks"), [0])
     // A test name selects its run, as a `<run>: <test>` row id holds it.
-    assert_eq(kit_exec_select_runs(ids, tests, "keywords"), ["Core/Db/Engine/Tokenize.jet [none]"])
-    assert_eq(kit_exec_select_runs(ids, tests, "[full]: Tasks"), ["Core/Crypto/Bignum.jet [full]"])
+    assert_eq(kit_exec_select_runs(ids, tests, "keywords"), [1])
+    assert_eq(kit_exec_select_runs(ids, tests, "[full]: Tasks"), [2])
     assert_eq(kit_exec_select_runs(ids, tests, "Core/Nothing").len(), 0)
     assert_eq(kit_exec_nothing_selected("Core/Nothing"), "the filter `Core/Nothing` matches no test: 0 selected")
 }

@@ -12,17 +12,16 @@ kit_golden_tiers: fn() -> [KitTier] {
 
 // The tier named `name`; the first tier for any other name.
 kit_golden_tier: fn(name: String) -> KitTier {
-    tiers: kit_golden_tiers()
-    loop row in tiers {
-        if row.name == name -> return row.copy()
+    loop row in kit_golden_tiers() {
+        if row.name == name -> return row
     }
-    tiers[0].copy()
+    kit_golden_tiers()[0]
 }
 
 // The name of the tier that builds at optimize level `level`.
 kit_golden_tier_of_level: fn(level: String) -> String? {
     loop row in kit_golden_tiers() {
-        if row.level == level -> return Val(row.name.copy())
+        if row.level == level -> return Val(row.name)
     }
     None
 }

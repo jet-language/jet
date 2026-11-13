@@ -163,7 +163,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
         call.fetch_first = row.name == "fetched_build_locked"
         call.check_core = row.name == "check_core"
-        if call.check_core -> call.core_top = argument.copy()
+        if call.check_core -> call.core_top = argument
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed: line.trim().copy()
@@ -296,12 +296,13 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
     verdict: kit_exec_process_failure(checked) ?? kit_expect_verdict(if checked.code == 0 && kit_expect_diagnostics(checked.stderr) == 0 -> "PASS" else -> "FAIL", "fixed companion must check clean")
     if verdict.status != "PASS" -> return [KitOutcome{verdict: verdict, run: checked, tier: "fixed-check"}]
     loop tier in ctx.options.tiers {
-        row: kit_golden_tier(tier)
-        args := [String]{ctx.env.jet, if row.direct -> "run" else -> "build", fixed}
-        loop flag in row.flags -> args.push(flag.copy())
+        row := kit_golden_tier(tier)
+        direct: row.direct
+        args := [String]{ctx.env.jet, if direct -> "run" else -> "build", fixed}
+        loop flag in row.flags.move() -> args.push(flag.move())
         built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, [U8]{}, overlay)
         failure: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")
-        if failure.status != "PASS" || row.direct {
+        if failure.status != "PASS" || direct {
             outcomes.push(KitOutcome{verdict: failure, run: built, tier: tier})
             next
         }

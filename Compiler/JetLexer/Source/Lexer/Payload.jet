@@ -54,8 +54,9 @@ intern_token_source: fn(tables: &TokenTables, kind: Int, source: [U8], start: In
     text
 }
 
-literal_row: fn(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
-    tables.literals.push(literal.copy())
+// Moves `literal` into the table and returns its row.
+literal_row: fn(tables: &TokenTables, literal: &&TokenLiteral) -> Int Never! {
+    tables.literals.push(literal)
     tables.literals.len() - 1
 }
 

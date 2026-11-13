@@ -46,14 +46,14 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
     KitSelection{ids: selected, error: ""}
 }
 
-// The ids of a code suite's runs `filter` selects, as a corpus filter selects
-// entries: a run whose id holds it, or one holding a #Test whose row id
-// `<run>: <test>` holds it; every run without a filter. `tests[i]` names the
-// #Tests of the run `ids[i]`.
-kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [String] {
-    selected := [String]{}
+// The positions in `ids` of a code suite's runs `filter` selects, in order,
+// as a corpus filter selects entries: a run whose id holds it, or one holding
+// a #Test whose row id `<run>: <test>` holds it; every run without a filter.
+// `tests[i]` names the #Tests of the run `ids[i]`.
+kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [Int] {
+    selected := [Int]{}
     loop (index, id) in ids {
-        if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) -> selected.push(id.copy())
+        if filter == "" || id.contains(filter) || tests[index].any(fn(test) { "{id}: {test}".contains(filter) }) -> selected.push(index)
     }
     selected
 }

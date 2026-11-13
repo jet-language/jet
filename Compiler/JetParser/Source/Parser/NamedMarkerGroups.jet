@@ -239,15 +239,18 @@ expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, 
             if marker_token_path(code, tables, index + 1) == .Val(path) && marker_group_find(local, imported, path.name, scope.path) == .Val(group) && marker_group_expandable(group, local, imported) && (path.end >= code.len() || code[path.end].kind != TOKEN_LPAREN) {
                 span: Span{start: code[index].span.start, end: code[path.end - 1].span.end}
                 uses.push(ExpandedMarkerGroupUse{name: group.name, span: span})
+                // The `#`, `[` and `]` each read the marker's own token.
                 hash := code[index]
                 hash.span = span
-                output.push(hash.copy())
-                open := hash
+                open := code[index]
+                open.span = span
                 open.kind = TOKEN_LBRACKET
-                output.push(open.copy())
-                marker_group_push_members(output, group, span, tables)
-                close := open
+                close := code[index]
+                close.span = span
                 close.kind = TOKEN_RBRACKET
+                output.push(hash)
+                output.push(open)
+                marker_group_push_members(output, group, span, tables)
                 output.push(close)
                 index = path.end
                 next

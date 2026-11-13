@@ -72,7 +72,7 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
         diagnostics.push(finding)
     }
     fixes := jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
-    migrations: jet_cli_fix_migrations(diagnostics, source)
+    migrations: jet_cli_fix_migration_sites(diagnostics, source)
     errors := [String]{}
     failed := [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -83,9 +83,9 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
     }
     repairs := jet_cli_collect_fixes_from_diagnostics(failed, source)
     // A migration repairs the error at the retired word, so it is both.
-    loop fix in migrations {
-        fixes.push(fix.copy()) // copy: the same edit is listed as a fix and as a repair
-        repairs.push(fix.copy()) // copy: `migrations` is borrowed by the loop
+    loop site in migrations {
+        fixes.push(jet_cli_fix_retired_run(site))
+        repairs.push(jet_cli_fix_retired_run(site))
     }
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)}
 }
@@ -96,10 +96,9 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
 // so a program whose own `comptime` names something keeps it; then every such
 // word in the file is rewritten at once, so a second `jet fix` changes
 // nothing. The error itself stays the generic one and never names `#run`.
-jet_cli_fix_migrations: fn(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] {
-    fixes := [JetCLIFix]{}
+// Returns the words to rewrite (jet_cli_fix_retired_run).
+jet_cli_fix_migration_sites: fn(diagnostics: [Diagnostic], source: String) -> [Span] {
     sites: jet_cli_fix_retired_run_words(source)
-    if sites.len() == 0 -> return fixes
     reported := false
     loop diagnostic in diagnostics {
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
@@ -109,9 +108,12 @@ jet_cli_fix_migrations: fn(diagnostics: [Diagnostic], source: String) -> [JetCLI
             }
         }
     }
-    if !reported -> return fixes
-    loop site in sites -> fixes.push(JetCLIFix{title: "write the retired `comptime` block as `#run`", edit: TextEdit{span: site, new_text: "#run"}, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
-    fixes
+    if reported -> sites else -> [Span]{}
+}
+
+// The rewrite of one retired build-time word to `#run`.
+jet_cli_fix_retired_run: fn(site: Span) -> JetCLIFix {
+    JetCLIFix{title: "write the retired `comptime` block as `#run`", edit: TextEdit{span: site, new_text: "#run"}, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving}
 }
 
 // Each `comptime` word right before a `{` where a value or a statement
