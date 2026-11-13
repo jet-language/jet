@@ -1,0 +1,10 @@
+# #6005 c23: every tracked Jet source in the corpus roots is in `jet fmt` form, apart
+# from the rules Tools/agent/FmtCorpus.jet names (generated, formatter input,
+# Compiler/JetDevserver, evidence, does not parse). A failure lists each source to
+# format; `jet Tools/agent/FmtCorpus.jet --write` formats them and moves their line pins.
+# The checker finds its checkout from its own path, so no cwd override.
+env: JET={jet}
+timeout: 900s
+step: jet {root}/Tools/agent/FmtCorpus.jet --check
+exit: 0
+stdout: ~ "fmt-corpus: ok (" # every corpus source is in form
