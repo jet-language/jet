@@ -1,14 +1,24 @@
 // A script's functions may use the script's variables: each such function
 // takes the variables it reaches as extra parameters. Their types are the
 // types the script's own statements give them, which only a check of the
-// generated `run: fn` (sema_script_entry) knows.
-use jet_foundation.[Diagnostic, FnBody, Item, TFuncKind, TTypeDef, Type, body_stmt, compiler_transfer_rows]
+// generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
+// a check of the function's body finds it written.
+use jet_foundation.[AccessConvention, BodyTree, Diagnostic, FnBody, Item, TFuncKind, TLocal, TTypeDef, Type, body_node, body_stmt, compiler_transfer_rows]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
 SemaScriptVariable: struct {
     ty: Type
     mutable: Bool
+}
+
+// A check of the entry module's functions against one declaration pass,
+// whose reports are dropped.
+SemaScriptProbe: struct {
+    module_index: Int
+    environment: SemaScopeEnvironment
+    program: SemaProgramTables
+    scopes: SemaScopeTable
 }
 
 // Each script variable in `names` that the entry's top-level statements bind,
@@ -19,49 +29,80 @@ SemaScriptVariable: struct {
 // probe's own and is used up.
 sema_script_entry_local_types: fn(stage: &&SemaComptimeDeclarationStage, names: [String]) -> [String:SemaScriptVariable] {
     found := [String:SemaScriptVariable]{}
-    declarations := stage
-    taken := declarations.graph.move()
-    declarations.graph = None
-    graph := taken.move() ?? return found
-    module_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return found
-    item_index: sema_script_entry_run_item(graph.modules[module_index].program.items) ?? return found
-    types := [TTypeDef]{}
-    loop row in 0..<declarations.modules.len() -> compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
-    scope := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
-    program := SemaProgramTables{
-        registration_graph: scope.registration_graph.move(),
-        checked_types: scope.checked_types.move(),
-        checked_type_rows: scope.checked_type_rows.move(),
-        checked_type_name_slots: scope.checked_type_name_slots.move(),
-        checked_type_name_rows: scope.checked_type_name_rows.move(),
-        boxed_edges: scope.boxed_edges.move(),
-        copy_facts: scope.copy_facts.move(),
-    }
-    scope.registration_graph = None
-    scope.checked_types = [TTypeDef]{}
-    scope.checked_type_rows = [String:Int]{}
-    scope.checked_type_name_slots = [String:Int]{}
-    scope.checked_type_name_rows = [[Int]]{}
-    scope.boxed_edges = [String:[String]]{}
-    scope.copy_facts = sema_copy_facts_table_empty()
-    scopes := sema_check_module_summary_scope_init(scope, program, module_index)
-    sema_scope_environment_enter_module(scope, program, module_index, SemaComptimeBodyValues{})
-    job: SemaBodyJob.TopLevel{item_index: item_index}
-    owner_id: sema_check_registered_function_id(job, module_index, scope, program)
-    dropped := [Diagnostic]{}
-    calls := [SemaCallSiteFact]{}
-    requests := [SemaComptimeRequest]{}
-    references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_registered(job, module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, scope, program, scopes, None, dropped, calls, requests, references)
-    function: checked.value ?? return found
+    probe := sema_script_probe_open(stage) ?? return found
+    function: sema_script_probe_check(probe, "run") ?? return found
     sema_script_entry_bound_types(function, names, found)
     found
 }
 
-// The row of the generated `run: fn` among an entry file's items.
-sema_script_entry_run_item: fn(items: [Item]) -> Int? Never! {
+// For each function of the entry named in `candidates`, the extra parameters
+// among its candidates that its checked body writes. The declaration pass
+// `stage` registers each candidate as `&`, so a write checks; one the body
+// only reads becomes a read parameter. `stage` is used up.
+sema_script_helper_writes: fn(stage: &&SemaComptimeDeclarationStage, candidates: [String:[String]]) -> [String:[String]] {
+    written := [String:[String]]{}
+    probe := sema_script_probe_open(stage) ?? return written
+    loop (helper, names) in candidates {
+        function: sema_script_probe_check(probe, helper) ?? next
+        writes := [String]{}
+        loop parameter in function.params {
+            // copy: the checked body keeps its parameter's name; the answer holds its own
+            if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local) -> writes.push(parameter.name.copy())
+        }
+        // copy: `candidates` keeps its key
+        written[helper.copy()] = writes
+    }
+    written
+}
+
+sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptProbe? {
+    declarations := stage
+    taken := declarations.graph.move()
+    declarations.graph = None
+    graph := taken.move() ?? return None
+    module_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return None
+    types := [TTypeDef]{}
+    loop row in 0..<declarations.modules.len() -> compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
+    environment := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
+    program := SemaProgramTables{
+        registration_graph: environment.registration_graph.move(),
+        checked_types: environment.checked_types.move(),
+        checked_type_rows: environment.checked_type_rows.move(),
+        checked_type_name_slots: environment.checked_type_name_slots.move(),
+        checked_type_name_rows: environment.checked_type_name_rows.move(),
+        boxed_edges: environment.boxed_edges.move(),
+        copy_facts: environment.copy_facts.move(),
+    }
+    environment.registration_graph = None
+    environment.checked_types = [TTypeDef]{}
+    environment.checked_type_rows = [String:Int]{}
+    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_name_rows = [[Int]]{}
+    environment.boxed_edges = [String:[String]]{}
+    environment.copy_facts = sema_copy_facts_table_empty()
+    scopes := sema_check_module_summary_scope_init(environment, program, module_index)
+    sema_scope_environment_enter_module(environment, program, module_index, SemaComptimeBodyValues{})
+    Val(SemaScriptProbe{module_index: module_index, environment: environment, program: program, scopes: scopes})
+}
+
+// The checked body of the entry's top-level function `name`.
+sema_script_probe_check: fn(probe: &SemaScriptProbe, name: String) -> FnBody? {
+    graph: probe.program.registration_graph ?? return None
+    item_index: sema_script_entry_function_item(graph.modules[probe.module_index].program.items, name) ?? return None
+    job: SemaBodyJob.TopLevel{item_index: item_index}
+    owner_id: sema_check_registered_function_id(job, probe.module_index, probe.environment, probe.program)
+    dropped := [Diagnostic]{}
+    calls := [SemaCallSiteFact]{}
+    requests := [SemaComptimeRequest]{}
+    references := [SemaNameReferenceFact]{}
+    checked := sema_function_check_registered(job, probe.module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, dropped, calls, requests, references)
+    checked.value.move()
+}
+
+// The row of the top-level function `name` among an entry file's items.
+sema_script_entry_function_item: fn(items: [Item], name: String) -> Int? Never! {
     loop (index, item) in items {
-        if item == .Func(function) && function.name == "run" && function.external_type == None -> return Val(index)
+        if item == .Func(function) && function.name == name && function.external_type == None -> return Val(index)
     }
     None
 }
@@ -73,4 +114,49 @@ sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[St
             if names.contains(local.name) -> found[local.name] = SemaScriptVariable{ty: local.ty, mutable: local.mutable}
         }
     }
+}
+
+// Whether `tree` writes a place rooted at `parameter`: an assignment, or a
+// write borrow (a `&` argument, a changing method's receiver, a written
+// index), lambdas included.
+sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal) -> Bool Never! {
+    loop statement in tree.stmts {
+        if statement == .Assign(place, _, _, _, _) {
+            if place == {
+                .Local(local) -> if sema_script_same_local(local, parameter) -> return true
+                .Expr(value) -> if sema_script_place_rooted_at(tree, value, parameter) -> return true
+            }
+        }
+    }
+    loop node in tree.nodes {
+        if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter) -> return true
+        if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter) -> return true
+    }
+    false
+}
+
+// Whether node `id` is a place whose root local is `parameter`. A place's
+// chain is no longer than the tree.
+sema_script_place_rooted_at: fn(tree: BodyTree, id: Int, parameter: TLocal) -> Bool Never! {
+    at := id
+    loop _ in 0..<tree.nodes.len() {
+        kind: body_node(tree, at).kind
+        if kind == .Local(local) -> return sema_script_same_local(local, parameter)
+        if kind == .Field(receiver, _) {
+            at = receiver
+        } else if kind == .Index(base, _, _, _, _, _) {
+            at = base
+        } else if kind == .Borrow(place, _) {
+            at = place
+        } else {
+            return false
+        }
+    }
+    false
+}
+
+// A function's own local of a parameter's name is another binding: the
+// parameter's span is where it was declared.
+sema_script_same_local: fn(local: TLocal, parameter: TLocal) -> Bool Never! {
+    local.name == parameter.name && local.span.start == parameter.span.start && local.span.end == parameter.span.end
 }

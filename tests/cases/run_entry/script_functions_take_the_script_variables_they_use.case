@@ -1,0 +1,27 @@
+# Claim (D-SCRIPT-HELPERS1=A): a function declared in a file of top-level
+# statements may use the file's variables. The checker gives `note` one
+# label-only parameter per variable it names: `count`, which it writes, as
+# `&`, and `limit` as a read; each call in the file fills them in. The file
+# checks clean and prints the same lines on O0, O1 and O2. A method gets no
+# such parameter and keeps E0107 (tests/ui/script_local_unseen_by_function).
+fixture: script_functions_take_the_script_variables_they_use.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `main.jet` has no problems\n"
+step file_o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "1/3 apple\n2/3 pear\ndone: 2\n"
+stderr: = ""
+step file_o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step file_o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""

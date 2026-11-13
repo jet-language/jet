@@ -379,9 +379,13 @@ while building, before any call, so it reads the function's prepared `#run` loca
 run-time locals or parameters (E0640).
 In an entry file whose top level holds
 statements and no `run: fn`, every top-level line is the program's entry, in order: its statements
-run, and its bindings other than ALL_CAPS constants are locals of that entry, which the file's
-functions don't see (E0107 says to pass one as a parameter). A file with top-level statements and a
-`run: fn` is E0621.
+run, and its bindings other than ALL_CAPS constants are locals of that entry. A function declared
+in the file may use them: the checker gives it one label-only parameter per local it names, `&`
+when its body changes the local, whose default is the local itself, so each call in the file
+passes the caller's binding and a call from elsewhere, such as a `#Test`, passes it by name
+(`note("x", count: c)`). The function's own parameter or top-level local of the same spelling
+hides the file's local. A method gets no such parameter and keeps E0107. A file with top-level
+statements and a `run: fn` is E0621.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,
 described below.

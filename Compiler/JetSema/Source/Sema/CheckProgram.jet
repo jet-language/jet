@@ -2144,7 +2144,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, diagnostics) -> complete = false
         default_expr := TExpr?{None}
-        if func.params[param_index].default != None && !forward_defaults.contains(param_index) {
+        // A script variable's default names a variable of the calling script
+        // lines, which each call checks where it is made.
+        if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
             default_context := sema_check_context_init()
             default_context.unsafe_depth = context.unsafe_depth
             default_context.generic_params = generic_params

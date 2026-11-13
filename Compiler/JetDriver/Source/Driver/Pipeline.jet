@@ -3983,6 +3983,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
     target_machine: target_machine_option ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
+    // A script's functions take the script variables they name as extra
+    // parameters before anything registers them.
+    jet_driver_script_helpers(request, load, foreign_provider_inputs, target_machine)
 
     // Doc and the retained checked projection read the loaded programs again;
     // every other compile hands them to registration.

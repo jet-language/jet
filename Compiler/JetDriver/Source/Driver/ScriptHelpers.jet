@@ -1,59 +1,175 @@
 // A script's functions may use the script's variables: each such function
-// takes the variables it reaches as extra parameters, whose types come from
-// one probe check of the entry's statements before the real registration
-// (sema_script_entry_local_types).
+// takes the variables it names as extra label-only parameters, whose default
+// is the variable itself, so every call in the script passes the caller's
+// binding and a call from elsewhere, such as a `#Test`, passes it by name.
+// The types come from one probe check of the entry's statements before the
+// real registration (sema_script_entry_local_types); a variable a function
+// writes is a `&` parameter, from a second probe that checks each function
+// with its `:=` variables as `&` (sema_script_helper_writes).
 use {
-    jet_foundation.[Diagnostic, Expr, Item, TargetMachine, ast_visit_body]
-    jet_sema.[SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable, sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Func, Item, Param, ParamZone, Span, TargetMachine, ast_visit_body]
+    jet_sema.[
+        SemaComptimeDeclarationStage, SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable,
+        sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_helper_writes,
+    ]
 }
 
-// The script variables of the entry file that a body of one of its other
-// top-level functions names, in the order they are first named. The scan
-// ignores scopes, so a function's own local of the same name also counts:
-// the list only decides whether the probe runs. Empty for a file that is no
-// script or whose functions name none.
-jet_driver_script_named_variables: fn(load: JetDriverLoadResult) -> [String] Never! {
-    named := [String]{}
+// Gives each function of the entry script the parameters of the script
+// variables it names. Nothing changes for a file that is no script or whose
+// functions name none of its variables.
+jet_driver_script_helpers: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult, providers: [SemaForeignProviderInput], target_machine: TargetMachine) {
+    reach: jet_driver_script_reach(load)
+    if reach.len() == 0 -> return
+    names := [String]{}
+    loop (_, named) in reach {
+        loop name in named {
+            // copy: the reach keeps its names; the probe takes its own list
+            if !names.contains(name) -> names.push(name.copy())
+        }
+    }
+    policies: jet_driver_registration_package_policies(request, load)
+    typing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
+    variables: sema_script_entry_local_types(typing, names)
+    if variables.len() == 0 -> return
+    candidates: jet_driver_script_add_parameters(load, reach, variables)
+    if candidates.len() == 0 -> return
+    writing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
+    written: sema_script_helper_writes(writing, candidates)
+    jet_driver_script_settle_writes(load, written)
+}
+
+// For each top-level function of the entry script but `run`, the script
+// variables its body names, in the order they are first named. A function's
+// own parameter or top-level local of a variable's spelling hides the
+// variable. A method gets none. Empty for a file that is no script.
+jet_driver_script_reach: fn(load: JetDriverLoadResult) -> [String:[String]] Never! {
+    reach := [String:[String]]{}
     loop loaded_index in 0..<load.modules.len() {
         if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
         locals: load.modules[loaded_index].program.entry_locals
-        if locals.len() == 0 -> return named
+        if locals.len() == 0 -> return reach
         loop item in load.modules[loaded_index].program.items {
-            if item == .Func(function) && function.name != "run" {
-                ast_visit_body(function.body, fn(expression: Expr) { jet_driver_script_note_variable(named, locals, expression) }, true)
+            if item == .Func(function) && function.name != "run" && function.external_type == None {
+                named := [String]{}
+                ast_visit_body(function.body, fn(expression: Expr) { jet_driver_script_note_variable(named, locals, function, expression) }, true)
+                // copy: the function keeps its name; the reach holds one per function
+                if named.len() > 0 -> reach[function.name.copy()] = named
             }
         }
-        return named
+        return reach
     }
-    named
+    reach
 }
 
-jet_driver_script_note_variable: fn(named: &[String], locals: [String], expression: Expr) Never! {
+jet_driver_script_note_variable: fn(named: &[String], locals: [String], function: Func, expression: Expr) Never! {
     if expression == .Ident(name, _, _) {
         // copy: the expression keeps its name; the list owns one per variable
-        if locals.contains(name) && !named.contains(name) -> named.push(name.copy())
+        if locals.contains(name) && !named.contains(name) && !jet_driver_script_hides(function, name) -> named.push(name.copy())
     }
 }
 
-// Each script variable in `names` as the entry's own statements bind it,
-// from a probe registration and declaration pass over copies of the loaded
-// programs. `load` keeps its programs and diagnostics: the probe's reports
-// are dropped, and the real registration that follows reports every one.
-jet_driver_script_local_types: fn(
+// Whether `function` binds `name` itself, as a parameter or a local of its
+// top-level statements.
+jet_driver_script_hides: fn(function: Func, name: String) -> Bool Never! {
+    loop parameter in function.params {
+        if parameter.name == name -> return true
+    }
+    loop statement in function.body {
+        if statement == .Val(binding) && binding.name == name -> return true
+    }
+    false
+}
+
+// Appends each reached variable that the probe typed to its function as a
+// label-only parameter, `&` for a `:=` variable. Answers, per function, the
+// `&` parameters, which the write probe settles.
+jet_driver_script_add_parameters: fn(load: &JetDriverLoadResult, reach: [String:[String]], variables: [String:SemaScriptVariable]) -> [String:[String]] {
+    candidates := [String:[String]]{}
+    loop loaded_index in 0..<load.modules.len() {
+        if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
+        loop item_index in 0..<load.modules[loaded_index].program.items.len() {
+            if load.modules[loaded_index].program.items[item_index] == .Func(function) {
+                named: reach.get(function.name) ?? next
+                updated := function
+                writes := [String]{}
+                loop name in named {
+                    variable: variables.get(name) ?? next
+                    // copy: the reach keeps its names; the parameter owns its own
+                    updated.params.push(jet_driver_script_parameter(name.copy(), variable, updated.name_span))
+                    // copy: the reach keeps its names; the write probe owns its list
+                    if variable.mutable -> writes.push(name.copy())
+                }
+                // copy: the function keeps its name
+                if writes.len() > 0 -> candidates[updated.name.copy()] = writes
+                load.modules[loaded_index].program.items[item_index] = Item.Func{value: updated}
+            }
+        }
+        return candidates
+    }
+    candidates
+}
+
+// The parameter of script variable `name`: its default names the variable,
+// which each call checks where it is made.
+jet_driver_script_parameter: fn(name: String, variable: SemaScriptVariable, at: Span) -> Param Never! {
+    convention: if variable.mutable -> AccessConvention.Write else -> AccessConvention.Read
+    // copy: the parameter keeps its name; its default names the variable too
+    default: Expr.Ident{name: name.copy(), span: at, id: AST_NODE_GENERATED}
+    // copy: the probe's answer keeps its type
+    ty: variable.ty.copy()
+    Param{
+        convention: convention,
+        root: false,
+        name: name,
+        name_span: at,
+        public_label: None,
+        zone: ParamZone.LabelOnly,
+        ty: ty,
+        ty_span: at,
+        default: Val(default),
+        variadic: false,
+        variadic_bound_list: None,
+        declared_view_from_names: None,
+        declared_footprint: None,
+        script_variable: true,
+    }
+}
+
+// A `&` parameter whose function's checked body never writes it becomes a
+// read parameter. A function the probe could not check keeps its `&`.
+jet_driver_script_settle_writes: fn(load: &JetDriverLoadResult, written: [String:[String]]) {
+    loop loaded_index in 0..<load.modules.len() {
+        if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
+        loop item_index in 0..<load.modules[loaded_index].program.items.len() {
+            if load.modules[loaded_index].program.items[item_index] == .Func(function) {
+                writes: written.get(function.name) ?? next
+                updated := function
+                loop index in 0..<updated.params.len() {
+                    if updated.params[index].script_variable && !writes.contains(updated.params[index].name) -> updated.params[index].convention = AccessConvention.Read
+                }
+                load.modules[loaded_index].program.items[item_index] = Item.Func{value: updated}
+            }
+        }
+        return
+    }
+}
+
+// A registration and declaration pass over copies of the loaded programs.
+// `load` keeps its programs and diagnostics: a probe's reports are dropped,
+// and the real registration that follows reports every one.
+jet_driver_script_probe_stage: fn(
     request: JetDriverCompileRequest,
     load: &JetDriverLoadResult,
     providers: [SemaForeignProviderInput],
     target_machine: TargetMachine,
     package_policies: [SemaRegistrationPackagePolicy],
-    names: [String],
-) -> [String:SemaScriptVariable] {
-    none: [String:SemaScriptVariable]{}
+) -> SemaComptimeDeclarationStage? {
     dropped := [Diagnostic]{}
-    inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, dropped, request.core_sources, false) ?? return none
-    canonical := jet_driver_canonical_effect_module(request.canonical_effect_source) ?? return none
+    inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, dropped, request.core_sources, false) ?? return None
+    canonical := jet_driver_canonical_effect_module(request.canonical_effect_source) ?? return None
     canonical_identity := canonical.module_identity
     inputs.push(canonical)
-    graph := sema_registration_prepare_graph(inputs, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads)
-    stage := sema_collect_comptime_declarations(graph, package_policies, request.compiler_threads, None)
-    sema_script_entry_local_types(stage, names)
+    graph := sema_registration_prepare_graph(inputs, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads) ?? return None
+    stage := sema_collect_comptime_declarations(graph, package_policies, request.compiler_threads, None) ?? return None
+    Val(stage)
 }

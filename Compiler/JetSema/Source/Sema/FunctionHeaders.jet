@@ -236,6 +236,8 @@ sema_function_header_memo_stats: fn(receiver: Expr, method: String, args: [CallA
 // before its own; defaults fill left to right. `self` is not a parameter here.
 // Answers the indices of the parameters whose defaults read a later one, so
 // their defaults aren't checked again (the later name is not in scope there).
+// A script variable's default names the caller's variable of its own name,
+// not the parameter.
 sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics: &[Diagnostic]) -> [Int] {
     names := [String]{}
     loop parameter_index in 0..<function.params.len() {
@@ -245,7 +247,7 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
     index := 0
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == "self" -> next
-        if function.params[parameter_index].default == .Val(default) {
+        if !function.params[parameter_index].script_variable && function.params[parameter_index].default == .Val(default) {
             references := [Expr]{}
             sema_function_header_default_idents(default, references)
             loop reference in references {

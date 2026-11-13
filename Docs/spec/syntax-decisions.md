@@ -401,12 +401,21 @@ ruling 2026-11-09, #6281 c128; amends D-ENTRY-SCRIPT1=C)*: an entry file whose
 top level holds statements and declares no `run: fn` is a program, and every
 top-level line is its entry, in source order. Its bindings are locals of that
 entry (Main ruling 2026-11-09, option A): `total := 0` is written by a later
-top-level loop and captured by a lambda in the body, and the file's functions
-don't see it (E0107, "pass it as a parameter"). ALL_CAPS constants, `#Persist`
+top-level loop and captured by a lambda in the body; the file's functions take
+the locals they use as parameters (D-SCRIPT-HELPERS1). ALL_CAPS constants, `#Persist`
 and comptime bindings stay module declarations. A file with `run: fn` keeps the
 module rules above; a file with both is E0621; a file with neither is a library
 (E0101 on `jet run`). `jet run FILE`, `jet -e` and `jet run -` share this
 meaning on every tier.
+
+**D-SCRIPT-HELPERS1=A — a script's functions use the script's locals** *(amends
+D-ENTRY-STATEMENTS1)*: a function declared in a file of top-level statements
+may use the file's locals. The checker gives it one label-only parameter per
+local it names, `&` when its body changes the local and a read otherwise, with
+the local itself as the default: each call in the file passes the caller's
+binding, and a call from elsewhere, such as a `#Test`, passes it by name. The
+function's own parameter or top-level local of the same spelling hides the
+file's local; a method gets no such parameter and keeps E0107.
 
 **D-MODULE-BUILD1=A — module values are built, never computed at startup**
 *(owner ruling 2026-11-09, #6281 c132; amends D-MODULE-VALUE1)*: a module-level
