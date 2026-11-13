@@ -3752,6 +3752,11 @@ order. `parse`, `decode`, and `reader` reject a repeated object name with its
 path and position; `parse_allow_duplicates` is the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
+JSON text written in source reads best as backtick raw text, which has no
+escapes or interpolation: ``json.parse(`{"service":"cache","ms":2.0}`)``. A
+quoted string holds the same text with each quote escaped and each brace
+doubled: `json.parse("{{\"service\":\"cache\",\"ms\":2.0}}")`.
+
 An ordered `Dyn` object is written as a typed map literal,
 `Dyn{[String: Dyn]{"name": "jet", "sizes": [1, 2], "inner": ["ok": true]}}`:
 each value of any encodable type becomes its `Dyn`, a nested map literal
