@@ -1,0 +1,15 @@
+// Char.from_u32 is None exactly for a surrogate or a word above 0x10FFFF,
+// and U32.from_char gives each Char's scalar value back.
+show: fn(word: U32) -> String {
+    if Char.from_u32(word) == {
+        .Val(c) -> "{word} -> {U32.from_char(c)}"
+        else -> "{word} -> None"
+    }
+}
+
+run: fn() {
+    words: [U32]{U32{0}, U32{65}, U32{55295}, U32{55296}, U32{57343}, U32{57344}, U32{65534}, U32{1114111}, U32{1114112}, U32{4294967295}}
+    loop word in words -> print(show(word))
+    loop c in "a😀é".chars() -> print(U32.from_char(c))
+    print(Char.from_u32(U32{233}) ?? 'x')
+}

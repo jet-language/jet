@@ -4046,7 +4046,42 @@ ir_numeric_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         .Predicate(method) -> return ir_float_predicate(m, b, value, method, receiver_ty, span)
         .BitCount(method, width) -> return ir_bit_count(m, b, value, method, width, target, span)
         .EuclideanDiv | .EuclideanRem -> return ir_fail_slot(b, span, "numeric method {ir_numeric_op_name(operation)}")
+        .CharFromScalar -> return ir_char_from_scalar(m, p, b, value, ty, span)
     }
+}
+
+// `Char.from_u32(word)` (TNumericOp.CharFromScalar): Val of the Char whose
+// scalar value is the U32 `value`, or None for a surrogate (0xD800 through
+// 0xDFFF) or a word above 0x10FFFF. The test and the retype are inline, so
+// the conversion calls no route and allocates nothing.
+ir_char_from_scalar: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
+    inner_ty: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Char conversion to {ir_type_name(ty)}") }
+    destination: ir_value_type(m, p, inner_ty) ?? return ir_type_fail(b, span, inner_ty)
+    option_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    source: m.types[b.f.slot_type[value]]
+    if source.kind != .Word || m.types[destination].kind != .Char -> return ir_fail_slot(b, span, "Char conversion of {ir_type_name(source.ty)}")
+    word_row: ir_word_row(m)
+    word: ir_copy_word(m, b, value, word_row)
+    // Below the surrogates, or above them and at most 0x10FFFF.
+    surrogate_start: ir_const_like(m, b, word, 55296)
+    scalar: ir_bool_op(m, b, IROp.Lt, word, surrogate_start)
+    surrogate_end: ir_const_like(m, b, word, 57343)
+    above: ir_bool_op(m, b, IROp.Gt, word, surrogate_end)
+    ir_open_if(b.f, above, b.line)
+    scalar_max: ir_const_like(m, b, word, 1114111)
+    in_range: ir_bool_op(m, b, IROp.Le, word, scalar_max)
+    ir_emit(b.f, IROp.Copy, scalar, in_range, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    found: ir_fresh_temp(m, b, option_row)
+    ir_option_none(m, b, found)
+    ir_open_if(b.f, scalar, b.line)
+    converted: ir_temp(m, b, destination)
+    ir_emit(b.f, IROp.Copy, converted, word, -1, -1, b.line)
+    size: m.types[destination].size
+    made: ir_option_make(m, p, b, option_row, converted, size)
+    ir_option_set(m, b, found, made)
+    ir_end(b.f, b.line)
+    found
 }
 
 // `x.count_ones()` and the other population counts (Rust
@@ -4549,7 +4584,7 @@ ir_numeric_cast: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, targe
         ir_end(b.f, b.line)
         return result
     }
-    if source.kind == .Char && destination.kind == .Int {
+    if source.kind == .Char && (destination.kind == .Int || destination.kind == .Word) {
         result: ir_temp(m, b, target)
         ir_emit(b.f, IROp.Copy, result, value, -1, -1, b.line)
         return result

@@ -5396,6 +5396,8 @@ panic or silent truncation.
 | `String.from_bytes_lossy(bytes: [U8]) -> String` | text | Decode bytes with replacement characters. |
 | `U8.from_int(n: Int) -> U8 !String` | byte | Perform a checked integer-to-byte conversion. |
 | `Int.from_u8(b: U8) -> Int` | integer | Widen a byte to `Int`. |
+| `Char.from_u32(word: U32) -> Char?` | character | The `Char` of a Unicode scalar value: `None` for a surrogate (`0xD800` through `0xDFFF`) or a word above `0x10FFFF`; noncharacters and `0` convert. |
+| `U32.from_char(c: Char) -> U32` | scalar | The Unicode scalar value of `c`; never fails and allocates nothing. |
 | `Reader.over(bytes: [U8]) -> Reader` | reader | Wrap an in-memory byte buffer. |
 | `reader.read_u8() -> U8 !String` | byte | Read one byte. |
 | `reader.read_u16_le()` / `read_u16_be()` | `U16 !String` | Read a 16-bit unsigned value. |
