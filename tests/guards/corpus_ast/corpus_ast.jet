@@ -2327,8 +2327,8 @@ policy_api_name_only_corpus: fn(root: String) -> [String] PolicyError! {
 #Test("examples_observe_the_api_they_teach") {
     guards_enter_root()
     known := [String: [String]]{}
-    rejected: "use browser: core.web.browser\nrun: fn() {{\n    print(\"locators:get_by_role+get_by_text+click\")\n}}\n"
-    observed: "use browser: core.web.browser\nrun: fn() {{\n    profile: browser.profile(\"bidi-2025.5\") ?? panic(\"profile\")\n    print(\"profile:{{profile.name()}}\")\n    print(\"click the button, then wait\")\n}}\n"
+    rejected: "use browser: core.browser\nrun: fn() {{\n    print(\"locators:get_by_role+get_by_text+click\")\n}}\n"
+    observed: "use browser: core.browser\nrun: fn() {{\n    profile: browser.profile(\"bidi-2025.5\") ?? panic(\"profile\")\n    print(\"profile:{{profile.name()}}\")\n    print(\"click the button, then wait\")\n}}\n"
     planted: policy_api_name_only_sites("Examples/planted.jet", rejected, known) ?? panic("{err.message}")
     assert(planted.len() == 1, "an API-name-only literal must fail: {planted}")
     clean: policy_api_name_only_sites("Examples/planted.jet", observed, known) ?? panic("{err.message}")

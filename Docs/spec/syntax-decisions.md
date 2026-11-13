@@ -204,7 +204,7 @@ card #1495)*: the current tree keeps `core.files`,
 random under `core.math.random`, formatting under `core.text.fmt`, network
 leaves under `core.net`, UUID/vault/raw primitives under `core.crypto`, data
 sketches under `core.data.sketch`, solver under `core.compute.solve`, graphics
-under `core.ui` (D-RAY-API1), browser automation under `core.web.browser`, and
+under `core.ui` (D-RAY-API1), browser automation under `core.browser` (D-WEB-RUNTIME-API1), and
 gzip/zstd under `core.archive`. `core.time` is the one clock/civil-time door.
 Retired free namespaces have no aliases or re-exports, and there is no
 `core.json` short door.

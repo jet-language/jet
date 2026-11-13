@@ -128,7 +128,7 @@ sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment:
 }
 
 sema_ownership_crossing_named_builtin_problem: fn(nominal: SemaRegistrationNominal, cell_only: Bool) -> SemaSendabilityProblem? {
-    // A Core source module's symbols carry its identity (`<corelib>/core.web.browser`).
+    // A Core source module's symbols carry its identity (`<corelib>/core.browser`).
     sema_ownership_crossing_core_confined(nominal.symbol.module_name.removeprefix("<corelib>/"), nominal.symbol.name, cell_only)
 }
 
@@ -141,7 +141,7 @@ sema_ownership_crossing_core_confined: fn(module_name: String, name: String, cel
     if !cell_only && module_name == "core.mem" && (name == "Arena" || name == "Bump" || name == "Pool") {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: name}))
     }
-    if !cell_only && module_name == "core.web.browser" && (name == "Browser" || name == "BrowserContext" || name == "BrowserPage" || name == "BrowserFrame" || name == "BrowserLocator" || name == "BrowserIntercept" || name == "BrowserProtocol") {
+    if !cell_only && module_name == "core.browser" && (name == "Browser" || name == "BrowserContext" || name == "BrowserPage" || name == "BrowserFrame" || name == "BrowserLocator" || name == "BrowserIntercept" || name == "BrowserProtocol") {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ThreadConfined{name: name}))
     }
     None

@@ -1328,7 +1328,7 @@ Stable exit codes and the JSON codec live in dependency-free `JetFoundation`.
 
 ### Browser automation protocol core
 
-D-BROWSER-AUTO1=A puts the portable automation API in `core.web.browser`. The
+D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
 generated runtime uses the existing std-only WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
 facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
@@ -1412,7 +1412,7 @@ audit receipt — the same redacted fact stream as the trace, plus `isolated` an
 `user_hash()` exposes only a hashed context id for correlation.
 
 The AOT back end and default development tier use the same
-[`Browser.jet`](../../Core/Web/Browser.jet), strict-JSON behavior, and
+[`Browser.jet`](../../Core/Browser/Browser.jet), strict-JSON behavior, and
 extracted RFC6455 client source. Browser session
 handles are thread-confined. Programs that use them select the canonical
 tier-0 network host; the tier trace reports that choice and no AOT fallback is

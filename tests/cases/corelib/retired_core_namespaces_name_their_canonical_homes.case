@@ -1,9 +1,10 @@
 # Port of tests/corelib_parts/system.rs::retired_core_namespaces_name_their_canonical_homes; guest sources preserved verbatim.
 # PENDING-GRAMMAR(batch-four): first matching diagnostic.
-# Internal AST core_list_prefix assertions -> compiler-lib ledger; 27 teaching cases retained. Step 3 (`old: core.time.datetime`)
+# Internal AST core_list_prefix assertions -> compiler-lib ledger; 26 teaching cases retained. Step 3 (`old: core.time.datetime`)
 # is no longer a retired namespace: by the #6542 owner order (`double: math.double`) an alias row binds a module's item, and
 # core.time has a `datetime` item, so the import binds it and only the unused-import lint remains. Step 15 (the retired
-# renderer namespace) is gone with the renderer module it named: the renderer now lives in core.ui.
+# renderer namespace) is gone with the renderer module it named: the renderer now lives in core.ui. Step 16 (`old: core.browser`)
+# is gone too: by D-WEB-RUNTIME-API1 core.browser is browser automation's home, so the import binds it.
 fixture: fixtures/retired_core_namespaces_name_their_canonical_homes
 step: jet check 0.jet --json
 exit: nonzero
@@ -51,9 +52,6 @@ json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.crypto.uuid" # original
 step: jet check 14.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.crypto.vault" # original first E1001 fix names canonical home
-step: jet check 16.jet --json
-exit: nonzero
-json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.web.browser" # original first E1001 fix names canonical home
 step: jet check 17.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1001"][0].fix ~ "core.compute.solve" # original first E1001 fix names canonical home

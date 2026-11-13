@@ -1673,9 +1673,9 @@ fragments, missing hosts, and other schemes before the provider handshake.
 `WsError` distinguishes invalid URLs, invalid handshakes, protocol/size
 failures, timeout, cancellation, closed connections, and unsupported targets.
 
-### `core.web.browser` — WebDriver BiDi automation
+### `core.browser` — WebDriver BiDi automation
 
-`core.web.browser` is the portable browser automation home. It speaks
+`core.browser` is the portable browser automation home. It speaks
 versioned WebDriver BiDi over `core.net.ws`, with a capability-checked CDP
 expert path. Profiles are isolated by default, and receipts and traces keep
 only redacted audit facts.
@@ -1687,7 +1687,7 @@ raw WebSocket connection and timeout setup, `session.status` ready/message
 validation, then `session.new` with ordered empty `alwaysMatch` capabilities.
 The session-started fact is recorded before validating the session ID and
 capabilities. CDP requires the first `goog:cdp` field to be exactly true.
-The whole runtime is Jet source in `Core/Web/Browser.jet`: commands, event
+The whole runtime is Jet source in `Core/Browser/Browser.jet`: commands, event
 capture, trace bounds, locators, reports, and the test server run over
 `core.net.ws`, `core.process`, and `core.files`. Wire operations carry `Net`
 and `Time`, because each command measures its own deadline. A `Browser` and its
@@ -6181,7 +6181,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.units`
 - `core.watcher`
 - `core.web`
-- `core.web.browser`
+- `core.browser`
 - `core.web.devserver`
 - `core.web.forms`
 - `core.web.query`

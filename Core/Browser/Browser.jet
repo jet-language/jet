@@ -15,7 +15,7 @@ use {
     time: core.time
 }
 
-// core.web.browser — headed/headless browser control for tests.
+// core.browser — headed/headless browser control for tests.
 //
 // The WebDriver BiDi session runs in Jet over core.net.ws: one shared session
 // state per connection, ordered command/reply matching, a bounded event queue,
@@ -153,7 +153,7 @@ __BrowserState: struct {
         close: fn(&&self) {
             if self.closed || !self.session_started -> return
             id: self.next_id
-            core.web.browser.__ws_set_timeout(self.conn, self.timeout_ms) ?? return
+            core.browser.__ws_set_timeout(self.conn, self.timeout_ms) ?? return
             self.conn.send_text("{{\"id\":{id},\"method\":\"session.end\",\"params\":{{}}}}") ?? return
             loop _ in 0..<C_EVENT_LIMIT {
                 message: self.conn.recv() ?? return
@@ -1122,7 +1122,7 @@ remaining_ms: fn(started: Instant, timeout_ms: Int) -[Time]> Int BrowserError! {
 
 browser_ws_timeout: fn(browser: Browser, timeout_ms: Int) BrowserError! -[Net]> {
     state: browser.__state.guard_read()
-    core.web.browser.__ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
+    core.browser.__ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
     Ok()
 }
 

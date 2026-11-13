@@ -4476,7 +4476,7 @@ binder implementation and CLI dispatch live in
 `App`, pages, sessions, forms, and live records are Jet values. Browser-owned
 operations carry the `Browser` effect and are lowered by the web target. The
 source authority is [`Core/Web/Web.jet`](../../Core/Web/Web.jet), while the
-browser test controller is [`Core/Web/Browser.jet`](../../Core/Web/Browser.jet). (D-FLAGSHIP-WEBAPI1)
+browser test controller is [`Core/Browser/Browser.jet`](../../Core/Browser/Browser.jet). (D-FLAGSHIP-WEBAPI1)
 
 ### Browser events, values, and storage
 
