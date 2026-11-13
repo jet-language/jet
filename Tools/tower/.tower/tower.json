@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101256,
+    "rev": 101257,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88645,7 +88645,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:39:11.469Z",
-      "updated": "2026-11-13T05:56:01.775Z",
+      "updated": "2026-11-13T06:19:16.805Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -194609,6 +194609,185 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T06:10:18.821Z"
+    },
+    {
+      "id": "D-INSPECT-TARGET1",
+      "cardId": "c0kbej10",
+      "group": "tooling",
+      "title": "Where a user reads the declared target machines and their dossiers: a new `jet inspect target [machine]` view, a section of `jet self doctor --target`, or no command at all",
+      "situation": "A target machine is a named kind of computer Jet can build for, like hosted (a normal Linux PC) or wasm.no-os (WebAssembly with no operating system). Each one has a dossier, a fact sheet that says what it gives a program: a heap, a clock, random numbers, a place to print, and the ways it runs. Today no command lists the machines or shows a sheet. The compiler refuses one kind of misuse: a web build that starts other programs or calls C is stopped at the call. Nothing tells a user that wasm.no-os has no clock. This vote decides where the list and the sheets are shown. We recommend a read-only view: `jet inspect target` lists the machines, and `jet inspect target <machine>` shows one sheet.",
+      "gist": "Where should a user list the target machines and read what one provides: a new `jet inspect target` view, the `jet self doctor --target` health check, or nowhere on the command line?",
+      "lesson": "Jet can build one program for different kinds of computers. Each kind has a fact sheet that says what the program can use there, such as a clock or random numbers. This vote picks the command that lists those computers and shows a sheet.",
+      "explainer": "Words used here. A target machine is a named build destination that Jet knows: hosted, wasm.browser, wasm.wasi, wasm.no-os and two boards. A capability is one thing the machine gives a program, written like Time.Wall (the wall clock) or Rand.Entropy (random numbers). A dossier is the full fact sheet for one machine.\n\nAn effect is a kind of outside action a function performs, like Exec (starting another program). An inspect view is a read-only `jet inspect <name>` command that shows compiler facts and changes nothing. `jet self doctor` is the health check that tests whether the toolchain works on this computer.",
+      "story": "Lena writes a sensor program for a WebAssembly chip with no operating system. First she wants the exact machine name, then whether that machine has a clock.\n\nUnder A she runs `jet inspect target`, sees wasm.no-os in the list, then runs `jet inspect target wasm.no-os` and reads `lacks: ... Time.Wall ...`. Under B she runs `jet self doctor --target wasm.no-os` and finds the same line after the toolchain checks; doctor has no list. Under C she has no command. The checker only stops web builds that start programs or call C, so nothing tells her the chip has no clock.",
+      "inWild": "# Rust: list the targets, then one target's facts.\nrustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown\nrustc -Z unstable-options --print target-spec-json --target wasm32-unknown-unknown\n# Zig: every target, and the host's facts, as JSON.\nzig targets\n# Go: every OS and architecture pair as JSON.\ngo tool dist list -json",
+      "detail": "What this ballot decides. Which user command, if any, lists the declared target machines and shows one machine's dossier, and in what shape.\n\nToday's facts. The compiler holds every declared machine in its machine table (Pipeline.jet JET_DRIVER_TARGET_MACHINE_NAMES and jet_driver_target_machine_by_name). Each machine carries an audit policy. The policy's dossier lens says whether its dossier may be shown (AuditPolicy.dossier_lens). Every part of the dossier already has a Jet JSON writer in Compiler/JetFoundation/Source/Target. No command lists the machines or prints a dossier.\n\nToday's commands. `jet self doctor --target <machine>` only checks that the name is a declared machine. It prints `[ok  ] <machine>: declared target machine (<triple>)` in its `cross` section (Doctor.jet jet_cli_doctor_check_cross_target). A wrong name gets E3302 with the list of names. No `jet targets` command exists. `jet inspect build` takes `--target` only as a build flag for its gates. The other inspect views (memory, choices) each came through a ballot.\n\nWhat the checker already says. E1123 (jet.TargetDeniedEffect) is the one target refusal that runs today (Sema TargetDenials.jet). It runs in the checker when the build selects the browser machine. A `build: fn` output with `os: web` selects it (Request.jet build_os, Pipeline.jet jet_driver_selected_target_machine).\n\nE1123 in detail. The checker walks every function the entry reaches.\n\nWhere it reports. It reports E1123 where Exec or FFI.C first enters the program's own code: a use in its body, or its call into Core. Only the browser machine denies effects (jet_target_machine_denied_effects is empty for every other machine). The cases pin it at `jet build` (cross/build_fn_checks_each_target_against_its_own_row) and in the checker's ui suite (target_denied_effect_e1123). `jet check --target web` does not select the browser machine yet (known failure #5201).\n\nWhat no command says. E3311 (Target `wasm.no-os` lacks the required `Time.Wall` capability) is written and unit-tested in JetFoundation (jet_target_machine_validate). No driver or checker path calls it. So no check names a missing clock, entropy source or allocator on a no-OS machine.\n\nWhat the card asks. #6663 c1 reads: a user-visible target dossier view exists (e.g. jet inspect target <name> --json) built from AuditPolicy.dossier_lens, with a case pinning its output.\n\nThe same dossier under every option. A machine whose audit policy drops the dossier lens shows no dossier. The JSON fields are name, triple, environment, provider_identity, linker, allocator, panic, memory and mmio_capability. Then come time_wall, time_monotonic, time_zone_data, time_sleep, entropy, scheduler, byte_sink and startup. Last come provider_facts, hardware, programmers, execution {aot, dev} and audit.\n\nOther tools. rustc lists names (`--print target-list`) and prints one target's facts (`--print cfg`, and `--print target-spec-json` on nightly). zig targets prints every target and the host's facts as one JSON document. go tool dist list -json lists every OS and architecture pair. Every one of them can list all targets. The first draft of A could not, so A now lists the machines when no name is given.\n\nThe docs rule. AGENTS.md forbids hand-kept catalogs and committed generated output in docs. Reference output is generated on demand. So the docs cannot carry a per-machine capability table; they can only point at a command that prints it.\n\nA ready build exists for A. It is the held submission G5DevX-dossier5, which replaces G5DevX-dossier4. It holds jet_target_machine_dossier_json and the inspect view with its list. It adds the help and completion rows, a case that pins the list and two dossiers, and a Jet test for the dossier lens.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A new read-only view: jet inspect target [machine] [--json]",
+          "detail": "`jet inspect target` lists every declared machine, one line each, with its triple, its environment and where it runs. `jet inspect target <machine>` prints that machine's fact sheet: its triple, its environment, where it runs, and the capabilities it provides and lacks. `--json` prints the list or the whole dossier as one status line. It reads no project, so it works anywhere. A name that is not a declared machine is refused with E3302, which lists the declared machines.",
+          "technical": "Compiler/JetCli/Source/Cli/InspectTarget.jet (new). With no name, jet_cli_inspect_target_list walks JET_DRIVER_TARGET_MACHINE_NAMES in table order. `--json` prints one jet.status/v1 line, action inspect.target, whose targets array holds name, triple, environment and execution {aot, dev} per machine. With a name, the target field is jet_target_machine_dossier_json(machine).\n\nE3302 refuses an unknown name and a machine with no dossier lens. E2104 refuses `--live` and `--replay`. Inspect.jet adds `target` to JET_CLI_INSPECT_PLANES. CLICommands.jet adds the row `inspect target [MACHINE] [--json]`, so help, man and completions list it (19 goldens gain one entry). Docs/spec/reference/cli.md documents it. The case target_machines/inspect_target_shows_the_machine_dossier pins the list exactly.",
+          "code": "$ jet inspect target\ntarget machines\n  board.sensor_v1 (thumbv7em-none-eabihf, no-os): runs aot\n  board.virt_aarch64 (aarch64-unknown-none, no-os): runs aot\n  wasm.browser (wasm32-unknown-unknown, browser): runs aot, dev\n  wasm.wasi (wasm32-wasip2, wasi): runs aot, dev\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  hosted (x86_64-unknown-linux-gnu, hosted): runs aot, dev\nrun `jet inspect target <machine>` for one machine's dossier\n\n$ jet inspect target wasm.no-os\ntarget wasm.no-os\n  triple: wasm32-unknown-unknown\n  environment: no-os\n  provider identity: target-providers-v1:<hash of the toolchain version>\n  runs: aot\n  provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup\n  lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report\n\n$ jet inspect target --json\n{\"schema\":\"jet.status/v1\",\"action\":\"inspect.target\",\"ok\":true,\"reports\":[],\"targets\":[{\"name\":\"board.sensor_v1\",\"triple\":\"thumbv7em-none-eabihf\",\"environment\":\"no-os\",\"execution\":{\"aot\":true,\"dev\":false}},...]}\n\n$ jet inspect target wasm.no-os --json\n{\"schema\":\"jet.status/v1\",\"action\":\"inspect.target\",\"ok\":true,\"reports\":[],\"target\":{\"name\":\"wasm.no-os\",\"triple\":\"wasm32-unknown-unknown\",\"environment\":\"no-os\",...}}"
+        },
+        {
+          "key": "B",
+          "name": "A section of the health check: jet self doctor --target <machine>",
+          "detail": "`jet self doctor --target <machine>` already checks that the name is a declared machine. Under B its `cross` section also prints the machine's runs, provides and lacks lines, and a new `--json` flag on doctor prints the dossier. No new command, and no list: a user learns the names from the E3302 refusal of a wrong name. The fact sheet comes after the toolchain checks, which doctor runs first (the artifact store, the caches, the C toolchain, the language server).",
+          "technical": "Doctor.jet jet_cli_doctor_check_cross_target returns the existing ok line plus note lines for runs, provides and lacks. A doctor `--json` flag prints a jet.status/v1 line, action self.doctor, with the checks and a target field holding jet_target_machine_dossier_json(machine). CLICommands.jet: `self doctor` usage gains `--json`. Update cli.md and the doctor help goldens. A failed toolchain check makes doctor exit 1 with L2101, even when the target section is fine.",
+          "code": "$ jet self doctor --target wasm.no-os\njet doctor\n...the toolchain checks...\n\ncross\n  [ok  ] wasm.no-os: declared target machine (wasm32-unknown-unknown)\n  [note] runs: aot\n  [note] provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup\n  [note] lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report\n\neverything looks good."
+        },
+        {
+          "key": "C",
+          "name": "No command: the checker's refusals and a library read only",
+          "detail": "No user command lists the machines or shows a dossier. The compiler keeps jet_target_machine_dossier_json as a library function for Jet's own tools and tests. A user learns about a missing capability only when the checker refuses a use of it.\n\nToday that is E1123, for a web build that starts other programs or calls C. A missing clock, entropy source or allocator on a no-OS machine is refused by no check. The docs cannot carry a per-machine table, because AGENTS.md forbids hand-kept catalogs and committed generated output. They can only point at the machine table's source.",
+          "technical": "Keep jet_target_machine_dossier_json in Compiler/JetFoundation/Source/Target/TargetMachine.jet with its Jet test (TargetDossier.jet). Reword #6663 c1 to drop the user-visible view. To close the no-OS gap, C also needs the driver to call jet_target_machine_validate, so E3311 refuses a reached Time.Wall use on wasm.no-os. That is separate work, not built today.",
+          "code": "// a web build: `build: fn` declares an output with `os: web`\nuse process: core.process\n\nlister: fn() {\n    _: process.cmd([\"ls\"])\n}\n\nrun: fn() {\n    lister()\n}\n\n// $ jet build run.jet\n// Error [jet.TargetDeniedEffect]: `lister` uses `Exec`, which target `wasm32-unknown-unknown` denies\n//  Why: An artifact built for `wasm32-unknown-unknown` gets only the services that machine provides, and it lacks the one `Exec` needs\n//  Fix: Keep the `Exec` work out of the code this entry reaches, or build the entry for a target that provides `Exec`\n\n// the same program reading time.now() for wasm.no-os: no check names the missing clock"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "rustc lists every target name, prints one target's facts as key=value lines, and on nightly prints the full spec as JSON. A matches this split: a list, then one machine.",
+          "code": "rustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown\nrustc -Z unstable-options --print target-spec-json --target wasm32-unknown-unknown"
+        },
+        {
+          "lang": "Zig",
+          "note": "zig targets prints every target and the host's CPU and OS facts as one JSON document. A's list JSON carries each machine's identity and tiers; the full dossier comes per name.",
+          "code": "zig targets"
+        },
+        {
+          "lang": "Go",
+          "note": "go tool dist list -json lists every OS and architecture pair with its cgo support and first-class status. A's list JSON is the same shape: one object per machine.",
+          "code": "go tool dist list -json"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The machine list and the dossier are read-only compiler facts, and inspect is the family of read-only compiler facts. A needs no project and runs no checks, so it answers at once. It gives what rustc, zig and go give: a list of every target, then one target's facts. Doctor answers a different question, whether this computer's toolchain works. C leaves most gaps unspoken, because the only target refusal today covers web builds that start programs or call C.",
+        "gains": [
+          "`jet inspect target` lists every machine, as rustc, zig and go list theirs.",
+          "One short command answers what a machine provides, before any code is written.",
+          "Read-only and project-free, like the other inspect views.",
+          "Text for people, and JSON for editors and agents, from one writer."
+        ],
+        "losses": [
+          {
+            "loss": "One more inspect view in help and completions.",
+            "mitigation": "It sits beside build and gates in `jet inspect`, the place users already look for compiler facts. It adds one help line, and it is not a new top-level command."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B puts a static fact sheet behind slow, environment-dependent health checks, and it has no list. A failed language server check turns a question about the chip into an L2101 report and exit 1."
+          },
+          {
+            "key": "C",
+            "reason": "C leaves a no-OS machine's missing clock, entropy source or allocator unsaid until a check is built for them. The docs cannot fill the gap, because a hand-kept table is forbidden."
+          }
+        ],
+        "tradeoff": "One help line, in exchange for an instant list of machines and an instant answer to what each provides."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked the claims against dev code: E1123 fires only for the browser machine, and E3311 has no caller, so no-OS gaps go unreported. Option C now states the catalog cost, and A lists machines like zig and go."
+      },
+      "checkInstructions": "Today's surfaces, on origin/dev c003cb289e. Doctor.jet jet_cli_doctor_check_cross_target prints only `declared target machine (<triple>)`. CLICommands.jet has no `targets` command and no `inspect target` action. Inspect.jet JET_CLI_INSPECT_PLANES has no `target`.\n\nThe checker today. Sema TargetDenials.jet emits E1123. jet_target_machine_denied_effects (TargetMachine.jet) denies Exec and FFI.C for the browser environment only. Pipeline.jet jet_driver_selected_target_machine picks the browser machine from build_os, which Request.jet sets from a `build: fn` output's `os`. The cases are tests/ui/target_denied_effect_e1123 and tests/cases/cross/build_fn_checks_each_target_against_its_own_row.\n\nWhat is unwired. E3311 is built by jet_target_machine_error_diagnostic; jet_target_machine_validate has no caller outside JetFoundation and its tests. tests/known-failing.tsv #5201 records that `jet check --target web` does not select the browser machine. AGENTS.md lines 56-57 forbid committed generated status and duplicate catalogs in docs.\n\nOption A's build is the submission $JET_SCRATCH_ROOT/lanes/Main/inbox/G5DevX-dossier5. It replaces G5DevX-dossier4 and sits on origin/dev c003cb289e. Its case tests/cases/target_machines/inspect_target_shows_the_machine_dossier.case pins the list text exactly, the list JSON in two parts, and the hosted and wasm.no-os dossiers. The case has not yet run on a built compiler.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Where should users list target machines and read what one provides: a new inspect view, the doctor check, or nowhere?",
+        "lesson": "Jet can build for different kinds of computers. Each kind has a fact sheet: does it have a clock, a heap, random numbers? This vote picks the command that lists them and shows a sheet.",
+        "trio": {
+          "current": {
+            "note": "No command lists the machines or shows a sheet; doctor only says the name exists.",
+            "code": "$ jet self doctor --target wasm.no-os\n...\ncross\n  [ok  ] wasm.no-os: declared target machine (wasm32-unknown-unknown)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "rustc lists every target, then prints one target's facts.",
+            "code": "rustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "jet inspect target",
+            "gist": "A new read-only view lists the machines, or prints one sheet, in text or JSON.",
+            "gains": [
+              "Lists every machine, like rustc, zig and go.",
+              "Instant, needs no project."
+            ],
+            "losses": [
+              "One more help line."
+            ],
+            "proposed": {
+              "code": "$ jet inspect target\ntarget machines\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  ...\n$ jet inspect target wasm.no-os\ntarget wasm.no-os\n  runs: aot\n  lacks: ... Time.Wall ..."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Doctor section",
+            "gist": "jet self doctor --target prints the sheet after its checks.",
+            "gains": [
+              "No new command."
+            ],
+            "losses": [
+              "Slow checks run first, and there is no list.",
+              "A broken tool hides the answer behind a warning."
+            ],
+            "proposed": {
+              "code": "$ jet self doctor --target wasm.no-os\n...\n  [note] lacks: ... Time.Wall ..."
+            }
+          },
+          {
+            "key": "C",
+            "name": "No command",
+            "gist": "Only the checker's refusals; the docs may not keep a table.",
+            "gains": [
+              "Nothing to add to the CLI."
+            ],
+            "losses": [
+              "Only web builds that start programs or call C are refused.",
+              "A missing clock on a chip goes unsaid."
+            ],
+            "proposed": {
+              "code": "$ jet build run.jet\nError [jet.TargetDeniedEffect]: `lister` uses `Exec`,\n  which target `wasm32-unknown-unknown` denies"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The list and the sheets are read-only compiler facts, and inspect is where those live. Doctor checks this computer, not the target. C leaves most gaps unsaid.",
+          "gains": [
+            "A list of machines, then one sheet.",
+            "Text and JSON from one writer."
+          ],
+          "losses": [
+            {
+              "loss": "One more help line.",
+              "mitigation": "It lives inside `jet inspect`, not at the top level."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Slow checks stand in front of a static answer, and there is no list."
+            },
+            {
+              "key": "C",
+              "reason": "Only web builds are refused, and the docs may not keep a table."
+            }
+          ],
+          "tradeoff": "One help line, for an instant list and an instant answer."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T06:19:16.805Z"
     }
   ],
   "questions": [
@@ -197876,6 +198055,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T06:19:16.805Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-INSPECT-TARGET1",
+      "note": "Where a user reads the declared target machines and their dossiers: a new `jet inspect target [machine]` view, a section of `jet self doctor --target`, or no command at all"
+    },
     {
       "at": "2026-11-13T06:16:48.126Z",
       "by": "Main",
