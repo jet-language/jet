@@ -1,0 +1,29 @@
+use {
+    auth: core.auth
+    testing: core.testing
+}
+
+registered: fn(user: String) -[DB]> Bool {
+    auth.register_user(user, "password-hash") ?? return false
+    true
+}
+
+register: fn(label: String, user: String) -[DB, IO]> {
+    outcome: if registered(user) -> "registered" else -> "taken"
+    print("{label}: {user} {outcome}")
+}
+
+inside_world: fn() -[DB, IO]> {
+    register("world", "outer@example.com")
+    register("world", "inner@example.com")
+    register("world", "inner@example.com")
+}
+
+run: fn() {
+    register("process", "outer@example.com")
+    testing.world(
+    world -> inside_world(),
+    )
+    register("process", "inner@example.com")
+    register("process", "outer@example.com")
+}

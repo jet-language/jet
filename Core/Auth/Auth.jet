@@ -17,6 +17,7 @@ use {
     encoding: core.encoding
     json: core.encoding.json
     sys: core.sys
+    rt: jet.runtime.testing
     time: core.time
 }
 // core.auth — closed token verification, sessions, magic links and OAuth
@@ -324,7 +325,9 @@ b64url_value: fn(b: U8) -> Int Never! {
 // expiry, comparison and retry policy is source below. `store_replace`
 // installs new records only while the cell still holds the bytes the caller
 // read, under one edit lock, so a concurrent change makes the caller retry
-// instead of losing an update.
+// instead of losing an update. Inside a deterministic world the store is the
+// World's own cell instead, starting empty, so a world and its tasks never
+// read or change the process store.
 AuthStoreCell: struct {
     bytes: [U8]
 }
@@ -332,10 +335,12 @@ AuthStoreCell: struct {
 AUTH_STORE: Shared{AuthStoreCell{bytes: [U8]{}}}
 
 store_load: fn() -[DB]> [U8] Never! {
+    if rt.world_store_load("core.auth") == .Val(bytes) -> return bytes
     AUTH_STORE.bytes
 }
 
 store_replace: fn(expected: [U8], replacement: &&[U8]) -[DB]> Bool Never! {
+    if rt.world_store_replace("core.auth", expected, replacement) == .Val(replaced) -> return replaced
     cell := AUTH_STORE.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()

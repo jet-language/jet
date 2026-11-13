@@ -2040,7 +2040,8 @@ OAuth, magic-link, and cookie-session helpers. It is Jet source, the session
 store included: one process-wide module `Shared` cell holds the users,
 sessions, magic-link tokens and OAuth states. A change installs only while the
 store still holds what the change read, so concurrent changes retry rather than
-lose one another.
+lose one another. Inside `testing.world` the store is the world's own, starting
+empty, so a world and its tasks never read or change the process store.
 
 | API | Result | Description |
 | --- | --- | --- |
