@@ -568,19 +568,24 @@ perf_instructions: fn(text: String) -> Int {
 
 // The --budget verdict of one mode: Tools/perf/budget/check over its trace per
 // corpus line, then the build steps outside the trace against the column's
-// outside_trace.
+// outside_trace. budget.txt keeps the check's report, which names the root
+// cards of each phase over budget, and the outside steps' root when they are.
 check_budget: fn(options: Options, base: String, lines: Int, outside_ns: Int) -> String {
     budget_file: files.join(options.tree, BUDGET_FILE)
     clock: if options.budget.ends_with("-wall") -> "wall" else -> "proc_cpu"
     argv: [String]{options.tool, files.join(options.tree, "Tools/perf/budget/check"), files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
     receipt: process.cmd(argv).cwd(options.tree).output_limit(GIB).run() ?? return "error {err}"
-    files.write(files.join(base, "budget.txt"), "{receipt.output}{receipt.errors}") ?? ()
+    report := "{receipt.output}{receipt.errors}"
+    files.write(files.join(base, "budget.txt"), report) ?? ()
     if receipt.code > 1 -> return "error {receipt.code}"
     verdict := if receipt.code == 1 -> "OVER" else -> "ok"
     parsed: json.decode<BudgetFile>(files.read(budget_file) ?? "") ?? return "error {BUDGET_FILE}"
     limit: outside_limit(parsed, options.budget)
     if limit == .Val(ns_per_line) && lines > 0 && Float.from_int(outside_ns) / Float.from_int(lines) > ns_per_line {
         verdict = if verdict == "ok" -> "OUTSIDE" else -> "OVER+OUTSIDE"
+        owners: if parsed.outside_trace == .Val(outside) -> outside.owners.join(", ") else -> ""
+        report = "{report}\noutside the trace: {Float.from_int(outside_ns) / Float.from_int(lines):Fixed(1)} ns/line vs {ns_per_line:Fixed(1)} budget (root: {owners})\n"
+        files.write(files.join(base, "budget.txt"), report) ?? ()
     }
     verdict
 }

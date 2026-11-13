@@ -145,7 +145,11 @@ column, `30M-wall`, gives each phase a wall budget in ns per source line, that
 is a lines-per-second rate (1e9 over it); the phases, with the build steps
 outside the trace, sum to 33.3 ns per line, 30M lines per second end to end.
 Every row and `outside_trace` names its `owners`, the cards whose work brings
-it inside budget. A phase over its budget names them as its root.
+it inside budget. A phase over its budget names them as its root:
+`Tools/perf/budget/check` lists each phase over budget with its owner cards,
+and fails one that has none. `--budget` keeps that report in each compile's
+`budget.txt`, with the owners of `outside_trace` when the build steps outside
+the trace are over.
 
 `--against SEED` is the train speed gate: the compiler `JET` against the seed
 it was built with, each compiling the corpus in each mode, `--runs` rounds that

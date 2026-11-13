@@ -3,9 +3,10 @@
 // per-phase budget table (Tools/perf/budget/budget.json, the ns/line columns
 // of SPEED-500K.md §1) and prints, per phase, its time, its ns per source
 // line, the budget of the chosen milestone column and the ratio, then the
-// subtotal of the always-on check rows. Exits 1 when any phase is over its
-// budget, or when a full-unit trace (it has a `lower` span) lacks an always-on
-// check span.
+// root of every phase over its budget (the cards of its budget.json `owners`)
+// and the subtotal of the always-on check rows. Exits 1 when any phase is
+// over its budget, when such a phase names no owner card, or when a
+// full-unit trace (it has a `lower` span) lacks an always-on check span.
 //
 //   jet Tools/perf/budget/check <trace> [--column 225K|500K|1M]
 //        [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]
@@ -547,6 +548,23 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     out.push("")
     out.push(table([String]{"row", "phase", "seconds", "ns/line", "budget", "ratio", "status"}, cells))
 
+    // #5479 c2: a phase over its budget names its root, the cards of its
+    // budget.json `owners` (the work that brings it inside); a phase over
+    // budget with no owner card fails.
+    roots := [String]{}
+    unowned := false
+    loop at in 0..<measured.len() {
+        if cells[at][6] != "OVER" -> next
+        owners: texts(field(measured[at].row, "owners"))
+        if owners.len() == 0 -> unowned = true
+        roots.push("  {cells[at][0]} {cells[at][1]}: {if owners.len() > 0 -> owners.join(", ") else -> "no owner card"}")
+    }
+    if roots.len() > 0 {
+        out.push("")
+        out.push("roots of the phases over budget (budget.json owners):")
+        loop root in roots -> out.push(root)
+    }
+
     // D-SPEED-CHECKS1=A: the always-on checks (budget.json `always_on` rows)
     // stay in every default build, each run once, and a missed milestone
     // ships its measured number. Print their subtotal. A full-unit trace (the
@@ -657,6 +675,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     out.push("")
     reasons := [String]{}
     if failed -> reasons.push("over the {column} budget")
+    if unowned -> reasons.push("a phase over budget names no owner card")
     if missing_check -> reasons.push("an always-on check did not run")
     out.push(if reasons.len() > 0 -> "FAIL: {reasons.join("; ")}" else -> "PASS: within the {column} budget")
     Outcome{out: out, err: [String]{}, code: if reasons.len() > 0 -> 1 else -> 0}
@@ -775,7 +794,23 @@ tail: fn(cells: [String], from: Int, to: Int) -> String Never! {
     assert_eq(tail(test_row(outcome.out, "P10"), 3, 7), "10,000|1,750|5.7x|OVER")
     assert_eq(tail(test_row(outcome.out, "P11"), 3, 7), "13,000|1,750|7.4x|OVER")
     assert_eq(test_row(outcome.out, "P3")[6], "absent")
-    assert(text.contains("FAIL: over the 1M budget"))
+    // Each phase over budget names its owner cards; an absent one names none.
+    assert(text.contains("roots of the phases over budget (budget.json owners):\n  P1+P2 read + lex + intern + parse: #6328 c22, #5910 c6, #5479 c7\n"))
+    assert(text.contains("\n  P5a+P5b sema bodies + ownership (one pass; P5b is not traced apart): #5479 c6, #5479 c7\n"))
+    assert(!text.contains("\n  P3 collect"))
+    assert(text.ends_with("FAIL: over the 1M budget"))
+}
+
+#Test("a phase over budget with no owner card fails and says so") {
+    budget: json.parse("{{\"columns\":[\"1M\"],\"rows\":[{{\"id\":\"P3\",\"phase\":\"register\",\"spans\":[\"register\"],\"budget\":{{\"1M\":1}}}},{{\"id\":\"P8\",\"phase\":\"IR build\",\"owners\":[\"#5479 c8\"],\"spans\":[\"ir.build\"],\"budget\":{{\"1M\":1}}}}]}}") ?? panic("test budget")
+    events := [String]{}
+    loop event in test_span("register", 0, 1000, 2000000, "register") -> events.push(event)
+    loop event in test_span("ir.build", 1000, 2000, 2000000, "ir.build") -> events.push(event)
+    outcome: report(test_options([String]{"t", "--column", "1M", "--lines", "1000"}), budget, test_trace(events))
+    assert_eq(outcome.code, 1)
+    text: outcome.out.join("\n")
+    assert(text.contains("\n  P3 register: no owner card\n  P8 IR build: #5479 c8\n"))
+    assert(text.contains("FAIL: over the 1M budget; a phase over budget names no owner card"))
 }
 
 #Test("a trace within budget passes; absent rows fail only with --strict") {
