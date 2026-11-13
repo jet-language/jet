@@ -69,6 +69,7 @@ use {
         TOKEN_KW_IT,
         TOKEN_KW_LOOP,
         TOKEN_KW_MOVE,
+        TOKEN_KW_MUTATE,
         TOKEN_KW_PUB,
         TOKEN_KW_YIELD,
         TOKEN_LBRACE,
@@ -1825,12 +1826,12 @@ parser_report_not_a_statement: fn(state: &JetParserState, start: Token) {
     parser_add_error(state, start.span, "expected a call, binding, assignment, or `return`, found {found}", "inside a function body, write a call, binding, assignment, or `return`", "e.g. print(\"hello\") or x: 1")
 }
 
-// A name followed by another name or a declaration keyword on the same line
-// starts no Jet declaration or statement. The `task` surface before a name is
-// an expression: a spawn.
+// A name followed by another name, a declaration keyword or the reserved
+// `mut` on the same line starts no Jet declaration or statement. The `task`
+// surface before a name is an expression: a spawn.
 parser_word_follows: fn(state: &JetParserState) -> Bool Never! {
     next: parser_kind_at(state, 1)
-    if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || parser_is_item_keyword(next)) -> return false
+    if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || next == TOKEN_KW_MUTATE || parser_is_item_keyword(next)) -> return false
     if next != TOKEN_IDENT -> return true
     current: parser_current(state)
     word: parser_value(state, current)
@@ -1848,11 +1849,13 @@ parser_unknown_top_word_ahead: fn(state: &JetParserState) -> Bool Never! {
 }
 
 // The one error for a word Jet does not spell at a declaration or statement
-// start; it lists the forms the grammar accepts there and consumes the word.
+// start; it lists the forms the grammar accepts there and consumes the word,
+// with a reserved `mut` right after it, so the rest of the line parses on.
 // A declaration keyword written before its name reaches here as a word
 // (parser_colon_declarations).
 parser_report_unknown_word: fn(state: &JetParserState, top_level: Bool) {
     token: parser_bump(state)
+    if parser_current(state).kind == TOKEN_KW_MUTATE -> parser_bump(state)
     word: parser_text(state, token)
     site: if top_level -> "declaration" else -> "statement"
     keyword: token.kind != TOKEN_IDENT || [String]{"fn", "struct", "enum", "trait", "module", "tag", "effect"}.contains(word)

@@ -151,6 +151,22 @@ run: fn() {}
     assert(diagnostics[0].why.contains("`name: value`"), diagnostics[0].why)
 }
 
+#Test("a_retired_binding_word_gets_the_generic_statement_error") {
+    diagnostics: parser_test_errors(`run: fn() {
+    let total = 3
+    let mut seen = 0
+    var mut kept = 2
+}
+`)
+    words: [String]{"let", "let", "var"}
+    assert_eq(diagnostics.len(), words.len())
+    loop (index, word) in words {
+        assert_eq(diagnostics[index].code, "E0003")
+        assert_eq(diagnostics[index].what, "`{word}` is not a Jet word")
+        assert(diagnostics[index].why.contains("a binding (`name: value`)"), diagnostics[index].why)
+    }
+}
+
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
     decl: marker_test_decl(`Pre: struct {
     condition: String
