@@ -1,0 +1,21 @@
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+consume: fn(res: &&Res) -> Int {
+    res.name.len()
+}
+
+run: fn() {
+    owned := Res{name: "task"}
+    child: task &&owned {
+        consume(owned)
+    }
+    print("joined {child.join() ?? 0}")
+    print("done")
+    print(owned.name)
+}

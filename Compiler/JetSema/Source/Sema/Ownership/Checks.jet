@@ -4154,11 +4154,18 @@ sema_ownership_check_allocator_handle_call: fn(state: &SemaOwnershipState, calle
     sema_ownership_check_call_arguments_with_accesses(state, callee, params, Val(AccessConvention.Read), args, scopes, diagnostics, accesses, true, true, true, false)
 }
 
-sema_ownership_check_lambda_captures: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+// A `&&name` capture moves its name out of the enclosing body when the lambda
+// is made, before the body runs, so it is checked against the enclosing state.
+sema_ownership_check_take_captures: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop capture in lambda.take_names {
         if !sema_ownership_mark_move(state, Expr.Ident{name: capture.name, span: capture.span, id: AST_NODE_GENERATED}, scopes, "a lambda that captures it", diagnostics) -> valid = false
     }
+    valid
+}
+
+sema_ownership_check_escaping_write_captures: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
     if lambda.meta.escapes {
         loop name in lambda.meta.mut_captures {
             // A write through a captured write window names the window's
@@ -5536,7 +5543,8 @@ sema_ownership_check_expression: fn(state: &SemaOwnershipState, expr: Expr, scop
             deferred: sema_ownership_fork_path(state, fork)
             sema_ownership_fork_rollback(state, fork)
             sema_ownership_fork_close(state, fork)
-            if !sema_ownership_check_lambda_captures(state, lambda, scopes, diagnostics) -> return false
+            taken: sema_ownership_check_take_captures(state, lambda, scopes, diagnostics)
+            if !sema_ownership_check_escaping_write_captures(state, lambda, scopes, diagnostics) || !taken -> return false
             sema_ownership_merge_references(state, deferred.references)
             true
         }

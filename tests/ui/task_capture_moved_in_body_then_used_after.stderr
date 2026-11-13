@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `owned` was consumed by a lambda that captures it, so it can't be used here
+  --> tests/ui/task_capture_moved_in_body_then_used_after.jet:20:17
+    |
+ 20 |     print(owned.name)
+    |                 ^^^^
+  --> tests/ui/task_capture_moved_in_body_then_used_after.jet:15:17
+    |
+ 15 |     child: task &&owned {
+    |                 ^^^^^^^ `owned` moved to a lambda that captures it here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `owned` after the move, or give a lambda that captures it a copy with `owned.copy()` where it moved.
+More: jet-lang.dev/e/E0121

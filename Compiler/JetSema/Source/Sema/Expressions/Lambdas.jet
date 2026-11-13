@@ -1832,6 +1832,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     }
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
+    // A `&&name` capture moves when the lambda is made, before the body runs,
+    // so a move of the name inside the body is the lambda's own last use.
+    takes_valid: if inline_loop -> true else -> sema_ownership_check_take_captures(state, lambda, lambda_scopes, diagnostics)
     lambda_context := sema_check_context_snapshot(context)
     // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
     // changes the collection an enclosing loop reads is refused there too.
@@ -2259,17 +2262,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // A lambda the function hands back as its value outlives every
     // parameter lent to the call.
     returned: if context.value_tail_span == .Val(tail) -> tail.start == lambda.span.start else -> false
-    if !sema_ownership_check_lambda_captures(lambda_state, lambda_work, lambda_scopes, diagnostics) -> return None
-    // The explicit `name.move()` captures moved their names into the lambda; the
-    // enclosing body has lost them too, so a later use there is E0121.
-    loop moved in lambda_state.moved {
-        if sema_ownership_place_moved(lambda_parent_state, moved.place) != None -> next
-        taken := false
-        loop capture in lambda.take_names {
-            if capture.name == moved.place.root -> taken = true
-        }
-        if taken -> state.moved.push(moved)
-    }
+    if !sema_ownership_check_escaping_write_captures(lambda_state, lambda_work, lambda_scopes, diagnostics) || !takes_valid -> return None
 
     // The body has run its course: its windows end before the captures move in.
     sema_ownership_release_loans_from(lambda_state, lambda_parent_state.scope_depth + 1)
