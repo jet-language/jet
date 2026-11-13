@@ -66,7 +66,7 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         step = ir_opt_propagate(m, f, facts, report)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
-        step = ir_opt_addresses(f, facts)
+        step = ir_opt_addresses(m, f, facts)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
         step = ir_opt_coalesce(f, facts, report)
@@ -1052,15 +1052,18 @@ ir_opt_holds: fn(f: IRFunction, facts: OptFacts, slot: Int, twin: Int, at: Int) 
 // ---------------------------------------------------------------------------
 // Address folding. The readers keep reading the same bytes: t holds at each
 // reader the value it had at the Offset (a parameter written only at entry,
-// or its one write reaches the reader), and p is then dead.
+// or its one write reaches the reader), and p is then dead. A Load of a List
+// header's length through p is marked IR_LOAD_LENGTH first: its address no
+// longer names the List, and OptRange bounds the length by the mark.
 
-ir_opt_addresses: fn(f: &IRFunction, facts: OptFacts) -> Int Never! {
+ir_opt_addresses: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
     changed := 0
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Offset || op == .Load || op == .Store || op == .StreamStore {
             def: ir_opt_address_def(f, facts, f.a[at], at)
             if def < 0 -> next
+            if op == .Load && ir_range_length_load(m, f, at) -> f.c[at] = IR_LOAD_LENGTH
             f.b[at] = f.b[at] + f.b[def]
             f.a[at] = f.a[def]
             changed += 1

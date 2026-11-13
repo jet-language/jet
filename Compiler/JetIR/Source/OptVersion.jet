@@ -589,32 +589,57 @@ ir_version_not_stepped: fn(reason: String) -> IRVersionStep Never! {
 }
 
 // The step `s` of the Int `slot` when the loop `at` (its End `end`) writes
-// it only by `slot <- slot + s` (or `s + slot`) and its head leaves once
-// `slot` reaches a bound `n` (ir_version_exit), with `n` and `s` Int
-// constants or slots of `others` (guarded once before the loop); a
-// constant `s` must be positive. From a start guarded before the loop the
-// slot then stays inline while `s > 0`: every pass reads it below `n` and
-// adds `s` at most once, so it stays below `n + s` (OptRange).
+// it only by `slot <- slot + s` (or `s + slot`, ir_version_step_add) and
+// its head leaves once `slot` reaches a bound `n` (ir_version_exit), with
+// `s` an Int constant or a slot of `others` (guarded once before the loop)
+// and `n` one too or a List's length (ir_version_length); a constant `s`
+// must be positive. From a start guarded before the loop the slot then
+// stays inline while `s > 0`: every pass reads it below `n` and adds `s` at
+// most once, so it stays below `n + s` (OptRange). A length bounds it
+// without a guard of its own, so it is no bound the guards copy.
 ir_version_step: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, others: [Int]) -> IRVersionStep Never! {
     step := -1
     loop k in (at + 1)..<end {
         if ir_x64_write(f, k) != slot -> next
-        if step >= 0 || f.op[k] != .Add || (f.a[k] != slot && f.b[k] != slot) -> return ir_version_not_stepped("the Loop writes the index other than by one add to it")
-        s: if f.a[k] == slot -> f.b[k] else -> f.a[k]
+        add: ir_version_step_add(f, facts, at, k, slot)
+        if step >= 0 || add < 0 -> return ir_version_not_stepped("the Loop writes the index other than by one add to it")
+        s: if f.a[add] == slot -> f.b[add] else -> f.a[add]
         if !ir_version_fixed(m, f, facts, s, slot, others) -> return ir_version_not_stepped("the step is not a constant or an Int guarded before the Loop")
         if ir_version_constant(f, facts, s) && f.a[facts.def_at[s]] < 1 -> return ir_version_not_stepped("the step is not positive")
         step = s
     }
     bound: ir_version_exit(f, facts, at, end, slot, step)
-    if !ir_version_fixed(m, f, facts, bound, slot, others) -> return ir_version_not_stepped("the Loop's head does not leave once the index reaches a bound")
-    IRVersionStep{step: step, bound: bound, range_head: f.op[at + 1] == .If, reason: ""}
+    length: ir_version_length(m, f, facts, bound, slot)
+    if !length && !ir_version_fixed(m, f, facts, bound, slot, others) -> return ir_version_not_stepped("the Loop's head does not leave once the index reaches a bound")
+    IRVersionStep{step: step, bound: if length -> -1 else -> bound, range_head: f.op[at + 1] == .If, reason: ""}
+}
+
+// The add that writes `slot` at `k` in the loop `at`, else -1: `k` itself
+// when it is `slot <- slot + s` (or `s + slot`), or, when `k` is
+// `slot <- t`, the one write of `t` (read there alone) when it is
+// `t <- slot + s` with nothing but Drops of `slot` between them. That is
+// the form an add whose operand may be a big Int takes: the sum lands in a
+// temporary, the old value is dropped and the sum moves in.
+ir_version_step_add: fn(f: IRFunction, facts: OptFacts, at: Int, k: Int, slot: Int) -> Int Never! {
+    if f.op[k] == .Add -> return if f.a[k] == slot || f.b[k] == slot -> k else -> -1
+    if f.op[k] != .Move -> return -1
+    t: f.a[k]
+    if t < f.param_count || facts.defs[t] != 1 || facts.uses[t] != 1 -> return -1
+    add: facts.def_at[t]
+    if add <= at || add >= k || f.op[add] != .Add || (f.a[add] != slot && f.b[add] != slot) -> return -1
+    loop between in (add + 1)..<k {
+        if f.op[between] != .Drop || f.a[between] != slot -> return -1
+    }
+    add
 }
 
 // The bound `n` the head of the loop `at` (its End `end`) leaves at once
-// `slot` reaches it, else -1: first `br_if slot >= n` (or `slot > n`,
+// `slot` reaches it, else -1: past Loads and Offsets that read it (a List's
+// length is read again each pass), first `br_if slot >= n` (or `slot > n`,
 // `n <= slot`, `n < slot`), `br_if !(slot < n)` (or `slot <= n`,
-// `n > slot`, `n >= slot`), or a range Loop's test (BuildExpr.jet
-// ir_range_loop) whose direction is the sign of its step `step`,
+// `n > slot`, `n >= slot`), or, at the head itself, a range Loop's test
+// (BuildExpr.jet ir_range_loop) whose direction is the sign of its step
+// `step`,
 //
 //     if step > 0 -> t <- slot < n else -> t <- slot > n
 //     br_if !t
@@ -622,7 +647,10 @@ ir_version_step: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, end: I
 // (`<=` and `>=` for an inclusive range), which leaves at `slot >= n` (or
 // `slot > n`) once `step > 0`.
 ir_version_exit: fn(f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int, step: Int) -> Int Never! {
-    head: at + 1
+    head := at + 1
+    loop head < end && (f.op[head] == .Load || f.op[head] == .Offset) {
+        head += 1
+    }
     if head + 1 >= end -> return -1
     test: f.op[head]
     if test != .If {
@@ -636,7 +664,7 @@ ir_version_exit: fn(f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int
         if leaves_below && f.b[head] == slot -> return f.a[head]
         return -1
     }
-    if head + 6 >= end || step < 0 -> return -1
+    if head != at + 1 || head + 6 >= end || step < 0 -> return -1
     up: f.op[head + 1]
     if up != .Lt && up != .Le -> return -1
     down: if up == .Lt -> IROp.Gt else -> IROp.Ge
@@ -663,6 +691,15 @@ ir_version_exit: fn(f: IRFunction, facts: OptFacts, at: Int, end: Int, slot: Int
 ir_version_fixed: fn(m: IRModule, f: IRFunction, facts: OptFacts, value: Int, slot: Int, others: [Int]) -> Bool Never! {
     if value < 0 || value == slot || m.types[f.slot_type[value]].kind != .Int -> return false
     others.contains(value) || ir_version_constant(f, facts, value)
+}
+
+// Whether `value` is an Int other than `slot` written once, by a Load of a
+// List's length (OptRange.jet ir_range_length_load): below 2^62 - 1 in every
+// pass, so it bounds a stepped index as an Int guarded before the loop does
+// (ir_version_step).
+ir_version_length: fn(m: IRModule, f: IRFunction, facts: OptFacts, value: Int, slot: Int) -> Bool Never! {
+    if value < f.param_count || value == slot || m.types[f.slot_type[value]].kind != .Int -> return false
+    facts.defs[value] == 1 && facts.def_at[value] >= 0 && ir_range_length_load(m, f, facts.def_at[value])
 }
 
 // The guarded Ints of the loop `at` (its End `end`) whose guards pass
@@ -1099,6 +1136,71 @@ ir_version_name: fn(names: [Int], slot: Int) -> Int Never! {
         }
     }
     assert(guards > 0)
+    assert_eq(in_loops, 0)
+    assert(wrapped > 0)
+}
+
+// sum(h, from) counts i up from `from` while i is below h.xs.len(), the
+// length read again each pass through h's field. The address folds into
+// the Load, which keeps its mark as a length; the add lands in a temporary
+// moved into i after i is dropped. i is still a stepped index, guarded once
+// before the loop with no bound of its own, so no pass tests it and i + 1
+// wraps.
+#Test("An index stepped up to a List's length is guarded once, before its loop") {
+    m := ir_module_new()
+    exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    list: ir_intern_type(m, "test [Int]", ir_layout(IRTypeKind.Aggregate, Type.List{element: Type.Int}, 24, 8, IRClass.Pointer, false, 64, ""))
+    holder: ir_intern_type(m, "test Holder", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Holder"}, 48, 8, IRClass.Memory, false, 64, ""))
+    g := ir_function_new("sum", "test:sum.jet::sum", "", "sum.jet", 1)
+    h: ir_slot(g, holder, IRSlotKind.Param, ir_intern_name(m, "h"), 1)
+    from: ir_slot(g, exact, IRSlotKind.Param, ir_intern_name(m, "from"), 1)
+    g.result = exact
+    i: ir_slot(g, exact, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+    one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    xs: ir_slot(g, list, IRSlotKind.Temp, -1, 0)
+    n: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    below: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    done: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+    sum: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(g, IROp.Copy, i, from, -1, -1, 2)
+    _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+    _ := ir_open(g, IROp.Block, 3)
+    _ := ir_open(g, IROp.Loop, 3)
+    _ := ir_emit(g, IROp.Offset, xs, h, 24, -1, 3)
+    _ := ir_emit(g, IROp.Load, n, xs, 0, -1, 3)
+    _ := ir_emit(g, IROp.Lt, below, i, n, -1, 3)
+    _ := ir_emit(g, IROp.Not, done, below, -1, -1, 3)
+    _ := ir_emit(g, IROp.BrIf, -1, done, 1, -1, 3)
+    _ := ir_emit(g, IROp.Add, sum, i, one, IR_OVERFLOW_TRAP, 4)
+    _ := ir_emit(g, IROp.Drop, -1, i, -1, -1, 4)
+    _ := ir_emit(g, IROp.Move, i, sum, -1, -1, 4)
+    _ := ir_emit(g, IROp.Br, -1, 0, -1, -1, 4)
+    ir_end(g, 4)
+    ir_end(g, 4)
+    _ := ir_emit(g, IROp.Return, -1, i, -1, -1, 5)
+    m.entry = 0
+    name_rows_set(m.function_rows, g.key, 0)
+    m.functions.push(g)
+    options := ir_opt_options(2)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    assert_eq(report.stepped, 1)
+    assert(report.steps.contains("stepped index sum: guarded before the Loop"))
+    f: m.functions[0]
+    lengths := 0
+    in_loops := 0
+    wrapped := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Load && f.c[at] == IR_LOAD_LENGTH -> lengths += 1
+        if f.op[at] == .Add && f.c[at] == IR_OVERFLOW_WRAP -> wrapped += 1
+        if f.op[at] != .Loop -> next
+        loop k in (at + 1)..<f.a[at] {
+            if f.op[k] == .IntBig -> in_loops += 1
+        }
+    }
+    assert(lengths > 0)
     assert_eq(in_loops, 0)
     assert(wrapped > 0)
 }

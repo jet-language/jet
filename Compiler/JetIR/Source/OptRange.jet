@@ -219,10 +219,17 @@ ir_range_wanted: fn(m: IRModule, f: IRFunction) -> Bool Never! {
     false
 }
 
+// A Load's `c` once it reads a List header's length through an address
+// folded away from the List's slot (OptSimplify.jet ir_opt_addresses);
+// -1 otherwise (IR.jet).
+IR_LOAD_LENGTH: 1
+
 // Whether instruction `at` loads a List header's length: its first word,
-// through a slot of a List type.
+// through a slot of a List type, or a Load marked IR_LOAD_LENGTH.
 ir_range_length_load: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
-    if f.op[at] != .Load || f.b[at] != 0 || f.a[at] < 0 || f.a[at] >= f.slot_type.len() -> return false
+    if f.op[at] != .Load -> return false
+    if f.c[at] == IR_LOAD_LENGTH -> return true
+    if f.b[at] != 0 || f.a[at] < 0 || f.a[at] >= f.slot_type.len() -> return false
     ir_untag(m.types[f.slot_type[f.a[at]]].ty) == .List(_)
 }
 
