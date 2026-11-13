@@ -1,0 +1,20 @@
+// A web app whose port another program holds stops with E2809, which names
+// the port, says another program holds it, and says how to choose another
+// port; it is not a panic. The program holds the port itself first, so the
+// port is busy whoever else may hold it.
+package: {
+    name: "web_app_port_busy"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+use {
+    net: core.net
+    web: core.web
+}
+
+home: fn() -> WebPage { web.page("Home", "never served") }
+
+run: fn() {
+    _held: net.tcp_listen("127.0.0.1:47391") ?? panic("hold the port: {err}")
+    web.app().route("/", home).serve_on(47391)
+}
+// @run_cli

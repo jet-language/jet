@@ -54,9 +54,9 @@ trap_invalid_layout_head: fn() { trap_write_static(trap_invalid_layout_head_text
 
 trap_build_invalid_layout_head: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_invalid_layout_head_text()) }
 
-// E2804 Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.
-// Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).
-trap_footer_e2804_text: fn() -> I64 { rt_static_text(" Why: A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately.\n Fix: Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one).\nMore: jet-lang.dev/e/E2804\n") }
+// E2804 Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+// Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
+trap_footer_e2804_text: fn() -> I64 { rt_static_text(" Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.\n Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).\nMore: jet-lang.dev/e/E2804\n") }
 
 trap_footer_e2804: fn() { trap_write_static(trap_footer_e2804_text()) }
 
@@ -78,15 +78,24 @@ trap_footer_e2808: fn() { trap_write_static(trap_footer_e2808_text()) }
 
 trap_build_footer_e2808: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2808_text()) }
 
+// E2809 Why: A web app serves on one local TCP port, and only one program can listen on a port at a time, so the app can't start while another program holds it or the system refuses the port.
+// Fix: Stop the program that holds the port, or choose another port: run with `JET_APP_PORT=8081`, or pass it as `serve(8081)`. `jet dev` moves to the next free port by itself.
+trap_footer_e2809_text: fn() -> I64 { rt_static_text(" Why: A web app serves on one local TCP port, and only one program can listen on a port at a time, so the app can't start while another program holds it or the system refuses the port.\n Fix: Stop the program that holds the port, or choose another port: run with `JET_APP_PORT=8081`, or pass it as `serve(8081)`. `jet dev` moves to the next free port by itself.\nMore: jet-lang.dev/e/E2809\n") }
+
+trap_footer_e2809: fn() { trap_write_static(trap_footer_e2809_text()) }
+
+trap_build_footer_e2809: fn(builder: I64) { jet_rt_string_builder_push(builder, trap_footer_e2809_text()) }
+
 trap_coded_registered: fn(code: I64) -> Bool {
-    code == I64{224147288645} || code == I64{228442255941} || code == I64{241327157829}
+    code == I64{224147288645} || code == I64{228442255941} || code == I64{241327157829} || code == I64{245622125125}
 }
 
 trap_coded_footer: fn(code: I64) {
     if {
         (code == I64{224147288645}) -> trap_footer_e2804()
         (code == I64{228442255941}) -> trap_footer_e2805()
-        else -> trap_footer_e2808()
+        (code == I64{241327157829}) -> trap_footer_e2808()
+        else -> trap_footer_e2809()
     }
 }
 

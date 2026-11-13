@@ -1,0 +1,8 @@
+use {
+    server: core.http.server
+    web: core.web
+}
+
+home: fn() -> WebPage { web.page("Home", "body") }
+
+run: fn() { web.app().route("/health", home).get("/health", fn() { Ok(server.response(200, "ok")) }).serve() }

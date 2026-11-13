@@ -1,2 +1,13 @@
-# The run entry serves its app until stopped (canonical bundle_serves_until_stopped).
-run: none
+# The run entry parses its CLI schema and serves its app on the parsed port
+# until stopped: it prints the port, then one ready line naming the address
+# once the socket listens. The app has no routes, so its
+# root answers 404.
+host-port: 9000
+spawn server: built --port=9000
+stdout: file server.stdout
+stderr: file server.stderr
+poll ready: {jet} run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:9000 / - write until exit: 0 && stdout: ^= "HTTP/1.1 404" timeout 60s every 50ms # the app answers on the parsed port
+signal server: KILL
+wait: server
+exit: any # the example serves until stopped; the case kills it
+file: server.stdout = AppTypedArgs.out

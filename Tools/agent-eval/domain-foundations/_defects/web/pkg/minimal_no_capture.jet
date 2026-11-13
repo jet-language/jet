@@ -3,10 +3,11 @@ package: {
     authority: { allow: [Net] }
 }
 
+use web: core.web
 use server: core.http.server
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(_req: HTTPRequest) {
         return Ok(server.response(200, "ok"))
     })

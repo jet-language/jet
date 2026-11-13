@@ -3,6 +3,7 @@
 // certificate and one the RSA certificate; both answer `GET /` with "pong".
 // It prints "ready" once both listen; the case stops it.
 use {
+    web: core.web
     files: core.files
     server: core.http.server
     term: core.term
@@ -11,9 +12,9 @@ use {
 listen: fn(addr: String, cert_file: String, key_file: String) -> HTTPServer {
     cert: files.read(cert_file) ?? panic("certificate fixture {cert_file}")
     key: files.read(key_file) ?? panic("key fixture {key_file}")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "pong")) })
-    server.bind(addr, mux, tls: server.tls(cert, key)) ?? panic("bind TLS server {addr}")
+    mux.bind(addr, tls: server.tls(cert, key)) ?? panic("bind TLS server {addr}")
 }
 
 run: fn() {

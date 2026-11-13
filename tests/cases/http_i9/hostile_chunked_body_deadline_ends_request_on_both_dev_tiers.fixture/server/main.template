@@ -1,19 +1,20 @@
 
 use {
+    web: core.web
     server: core.http.server
     files: core.files
     time: core.time
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
-    mux: server.mux()
+    mux: web.app()
     mux.post("/", fn(req: HTTPRequest) {
         body: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     })
     // A short connection deadline, set as a user sets it: the subject is that a
     // trickled chunked trailer can't hold the request past it, not its length.
-    bound: server.bind("127.0.0.1:__PORT__", mux, deadline: 500ms) ?? panic("bind")
+    bound: mux.bind("127.0.0.1:__PORT__", deadline: 500ms) ?? panic("bind")
     server_task: task {
         bound.serve() ?? panic("serve")
     }

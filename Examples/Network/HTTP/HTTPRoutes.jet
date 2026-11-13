@@ -1,6 +1,6 @@
 // HTTP router — typed path inputs, 404/405.
 // Tags sit on the handlers; mount adds this struct's routes in method order.
-// serve_once_listener drives one connection at a time so golden output order
+// app.serve_once drives one connection at a time so golden output order
 // stays fixed.
 package: {
     name: "http_routes"
@@ -8,6 +8,7 @@ package: {
 }
 
 use {
+    web: core.web
     http: core.http.client
     server: core.http.server
     net: core.net
@@ -29,13 +30,13 @@ Routes: struct {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
-    mux: server.mux()
+    mux: web.app()
     mux.mount(Routes{})
     t: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
     r1: http.get("http://{addr}/") ?? panic("GET / failed")
     print(r1.body().text(8388608) ?? panic("body failed"))

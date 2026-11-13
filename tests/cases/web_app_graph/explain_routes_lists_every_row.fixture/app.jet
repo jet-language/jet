@@ -1,0 +1,37 @@
+package: {
+    name: "explain_routes"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+Orders: struct {
+    #Server.Get("/orders/:id")
+    order: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "order {id}"))
+    }
+
+    #Server.Custom("PURGE", "/orders/:id")
+    purge: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(204, "purged {id}"))
+    }
+}
+
+home: fn() -> WebPage { web.page("Shop", "welcome") }
+
+save: fn() { print("saved") }
+
+health: fn() -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+
+run: fn() {
+    app: web.app()
+        .route("/", home)
+        .action("save", save)
+        .get("/health", health)
+        .mount("/api", Orders{})
+    app.static_files("/public", "public")
+    app.serve()
+}

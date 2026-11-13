@@ -41,10 +41,11 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 - [HTTPRestService](HTTP/HTTPRestService.jet) — Realistic core.http client + server, no third-party package.
 - [HTTPRouteMarkers](HTTP/HTTPRouteMarkers.jet) — Tags expose only this explicitly mounted value.
 - [HTTPRoutes](HTTP/HTTPRoutes.jet) — HTTP router — typed path inputs, 404/405.
-- [HTTPServeEntry](HTTP/HTTPServeEntry.jet) — `http.serve(mux, deadline:)` binds a loopback server whose route deadline is a per-request #Context; `shutdown` drains it and returns the shutdown report.
-- [HTTPServer](HTTP/HTTPServer.jet) — core.http.server: function-first mux with path params, served on a loopback listener and answered for a client in the same program.
+- [HTTPServeEntry](HTTP/HTTPServeEntry.jet) — `app.bind(address, deadline:)` binds a loopback server whose route deadline is a per-request #Context; `shutdown` drains it and returns the shutdown report.
+- [HTTPServer](HTTP/HTTPServer.jet) — core.http.server: function-first routes on `web.app()` with path params, served on a loopback listener and answered for a client in the same program.
 - [HTTPServerDate](HTTP/HTTPServerDate.jet) — Every server response carries one Date header in IMF-fixdate form, read from the program clock; a handler-set Date passes through unchanged.
 - [HTTPServerLifecycle](HTTP/HTTPServerLifecycle.jet) — One bound Server owns bounded serve and graceful shutdown.
+- [HTTPServerReasons](HTTP/HTTPServerReasons.jet) — A status line takes its reason from the one registered table: 503, 429 and 422 send theirs, an unregistered code sends an empty reason, and the server's own 404 page uses the same table.
 - [HTTPServerLimits](HTTP/HTTPServerLimits.jet) — Reject ambiguous framing and oversized bodies before handlers run.
 - [HTTPServerMiddleware](HTTP/HTTPServerMiddleware.jet) — Middleware composes on the same Handler server engine.
 - [HTTPServerTrailers](HTTP/HTTPServerTrailers.jet) — Trailers live on HTTP messages, not Body.

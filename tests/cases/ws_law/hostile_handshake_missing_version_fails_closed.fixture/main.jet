@@ -1,4 +1,5 @@
 use {
+    web: core.web
     net: core.net
     ws: core.net.ws
     server: core.http.server
@@ -17,9 +18,9 @@ run: fn() {
     cr: String.from_bytes([U8]{13}) ?? panic("CR")
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/live", fn(req: HTTPRequest) { handle(req) })
-    serving: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    serving: task { mux.serve_once(listener) ?? panic("serve") }
     stream: net.tcp_connect(addr) ?? panic("connect")
     stream.write_all("GET /live HTTP/1.1{cr}\nHost: local{cr}\nUpgrade: websocket{cr}\nConnection: Upgrade{cr}\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=={cr}\n{cr}\n".bytes()) ?? panic("write")
     stream.close() ?? panic("close")

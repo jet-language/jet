@@ -1,8 +1,9 @@
+use web: core.web
 use server: core.http.server
 
 run: fn() {
     version := Cell.new(0)
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(req: HTTPRequest) {
         _value: version.get()
         return Ok(server.response(200, "ok"))

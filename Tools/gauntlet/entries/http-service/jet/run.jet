@@ -1,3 +1,4 @@
+use web: core.web
 use core.[http.server, net]
 
 ServerState: struct {
@@ -25,7 +26,7 @@ run: fn(args: Args) (HTTPError | IOError | NetError)! {
     listener: net.tcp_listen("127.0.0.1:{args.port}")
     store: Shared{[String:String]{}}
     state: Shared{ServerState{stopped: false}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/health", fn() { reply(200, "{{\"status\":\"ok\"}}") })
     mux.put("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, true) })
     mux.get("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, false) })
@@ -35,6 +36,6 @@ run: fn(args: Args) (HTTPError | IOError | NetError)! {
     })
     loop {
         if state.stopped -> break
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
 }

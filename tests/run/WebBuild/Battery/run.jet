@@ -162,20 +162,20 @@ run: fn() {
     // Each route is registered once: the tagged methods of the mounted
     // `Orders` value, plus the static assets (`public/`, relative to the
     // project directory the example runs in).
-    mux: server.mux()
+    mux: core_web.app()
     mux.mount(Orders{path: db_path, state: state})
-    server.static_files(mux, "/assets", "public")
+    mux.static_files("/assets", "public")
     task_handle: task {
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
     }
 
     home: client.get("http://{addr}/")

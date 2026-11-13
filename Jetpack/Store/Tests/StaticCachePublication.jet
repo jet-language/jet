@@ -3,9 +3,9 @@
 
 // Serve the files under `site` over loopback HTTP; absent files are 404.
 store_static_cache_serve: fn(site: String) -> StoreTestCacheServer Never! {
-    mux: http_server.mux()
-    http_server.static_files(mux, "/", site)
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind static cache")
+    mux: core_web.app()
+    mux.static_files("/", site)
+    server: mux.bind("127.0.0.1:0") ?? panic("bind static cache")
     address: server.local_addr() ?? panic("static cache address")
     serving: task {
         _: server.serve() ?? panic("serve static cache")

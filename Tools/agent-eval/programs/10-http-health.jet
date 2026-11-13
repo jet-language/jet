@@ -4,6 +4,7 @@ package: {
 }
 
 use {
+    web: core.web
     server: core.http.server
     net: core.net
     process: core.process
@@ -17,7 +18,7 @@ run: fn() (HTTPError | NetError | IOError)! {
     port: process.args().get(0) ?? "18080"
     listener: net.tcp_listen("127.0.0.1:{port}")
     state: Shared{State{done: false}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/health", fn(_req: HTTPRequest) { Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")) })
     mux.get("/hello/:name", fn(req: HTTPRequest) {
         name: req.param("name") ?? ""
@@ -29,6 +30,6 @@ run: fn() (HTTPError | NetError | IOError)! {
     })
     loop {
         if state.done -> break
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
 }

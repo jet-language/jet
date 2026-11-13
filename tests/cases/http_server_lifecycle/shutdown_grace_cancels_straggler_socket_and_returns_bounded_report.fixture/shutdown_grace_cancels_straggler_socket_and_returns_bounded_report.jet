@@ -2,6 +2,7 @@
 // PENDING-SEAM(http-server-options): workers=1, admission_queue=1,
 // read_header_timeout=1s, read_idle_timeout=1s, read_body_timeout=1s setup.
 use {
+    web: core.web
     server: core.http.server
     net: core.net
     time: core.time
@@ -9,13 +10,13 @@ use {
 
 #Test("shutdown grace cancels straggler and returns bounded report") {
     { sender: entered_tx, receiver: entered_rx }: channel<Int>()
-    mux: server.mux()
+    mux: web.app()
     mux.get("/slow", fn(_req: HTTPRequest) {
         entered_tx.send(1)
         time.sleep(250ms)
         Ok(server.response(200, "too late"))
     })
-    bound: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    bound: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: bound.local_addr() ?? panic("address")
     serving: task { bound.serve() ?? panic("server") }
     client: net.tcp_connect(addr) ?? panic("connect")

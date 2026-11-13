@@ -2,6 +2,7 @@
 // Jet TLS engine at once, each on its own runtime thread; every connection
 // owns its engine state, so every handshake completes.
 use {
+    web: core.web
     files: core.files
     server: core.http.server
     net: core.net
@@ -32,9 +33,9 @@ run: fn() {
     ca: files.read("ca.pem") ?? panic("CA fixture")
     cert: files.read("server.cert.pem") ?? panic("server certificate fixture")
     key: files.read("server.key.pem") ?? panic("server key fixture")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "ok")) })
-    listener: server.bind("127.0.0.1:0", mux, tls: server.tls(cert, key)) ?? panic("bind TLS server")
+    listener: mux.bind("127.0.0.1:0", tls: server.tls(cert, key)) ?? panic("bind TLS server")
     addr: listener.local_addr() ?? panic("server address")
     serving: task { listener.serve() ?? panic("serve TLS") }
     clients := [Task<String>]{}

@@ -1,4 +1,5 @@
 // A core.http.server program that serves plain HTTP only, so it links no C.
+use web: core.web
 use core.[files, http.server, net]
 
 // The defined symbols of this executable's `.symtab` and the ones at its
@@ -55,12 +56,12 @@ c_string: fn(b: [U8], at: Int) -> String Never! {
 health: fn() -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
 run: fn() (HTTPError | IOError | NetError)! {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/health", fn() { health() })
     // The serving path is live code; the case never creates the flag.
     if files.exists("serve.flag") {
         listener: net.tcp_listen("127.0.0.1:0")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
     print("routes ready")
     facts: link_facts()

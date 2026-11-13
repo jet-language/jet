@@ -7,6 +7,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_client: core.http.client
     http_server: core.http.server
     files: core.files
@@ -32,20 +33,20 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     files.write("/tmp/jet_http_public/.env", "TOKEN=private") ?? panic("hidden")
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: http_server.mux()
+    mux: web.app()
     // Named origins only. `.Any` with credentials is refused when the policy is
     // built, so that mistake never reaches a running server.
     policy: http_server.cors_policy(["https://app.example"]) ?? panic("cors policy")
-    http_server.cors(mux, policy)
+    mux.cors(policy)
     mux.post("/readings", fn(req: HTTPRequest) { store_reading(req) })
     // Serve a whole folder under /assets. Dot-files stay hidden, and a
     // directory request serves its index.html.
-    http_server.static_files(mux, "/assets", "/tmp/jet_http_public")
+    mux.static_files("/assets", "/tmp/jet_http_public")
     t: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     post: http_client.request("POST", "http://{addr}/readings")
     sent: post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})

@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_client: core.http.client
     http_server: core.http.server
     time: core.time
@@ -36,13 +37,13 @@ inner: fn(next: HTTPHandler) -> HTTPHandler {
 }
 
 run: fn() (HTTPError | RangeError | TaskFailure)! {
-    mux: http_server.mux()
-    http_server.request_id(mux)
+    mux: web.app()
+    mux.request_id()
     mux.middleware(outer)
     mux.middleware(inner)
     mux.get("/ok", fn() { Ok(http_server.response(200, "handler")) })
     mux.get("/blocked", fn() { Ok(http_server.response(200, "must not run")) })
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    server: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     serving: task { server.serve() ?? panic("serve") }
     time.sleep(20ms)

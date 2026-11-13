@@ -1560,17 +1560,17 @@ before returning the response.
 
 ### `core.http.server` — HTTP serving
 
-`core.http.server` builds a typed multiplexer and serves HTTP/1.1 over
-`core.net` TCP, one request per connection with `Connection: close`. `bind`
-and `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
-and `serve_once_listener` provide testable one-request entry points. A server
-given TLS material refuses to bind, because no listener TLS adapter exists yet.
-The Jet `tls(cert, key)` constructor preserves both PEM strings verbatim,
-including empty or malformed material. Loading and validating those credentials
-belongs to the listener's TLS setup, not to construction.
-
-`core.http.serve(mux, deadline)` binds `mux` on 127.0.0.1:8080 and returns the
-`HTTPServer`, panicking when the address cannot be bound.
+`core.http.server` serves HTTP/1.1 over `core.net` TCP, one request per
+connection with `Connection: close`, for the route table a `web.app()` owns
+(`core.web`): `app.bind(addr, tls:, deadline:)` binds a listener and returns
+its `HTTPServer`, and `app.serve_once(listener)` answers the one connection the
+listener accepts next, for tests and small adapters. A server given TLS
+material refuses to bind, because no listener TLS adapter exists yet. The Jet
+`tls(cert, key)` constructor preserves both PEM strings verbatim, including
+empty or malformed material. Loading and validating those credentials belongs
+to the listener's TLS setup, not to construction. A failed bind is an
+`HTTPError.IO` naming the address and the bind failure; nothing on the server
+path exits the process.
 
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
 `shutdown(grace)`, where `grace` defaults to zero, or until its accept is
@@ -1584,31 +1584,29 @@ deadline bounds each connection's reads and writes (30 seconds by default).
 
 Static files are read through `core.files` and the `Date` field comes from the
 `core.time` wall clock, so serving carries `[Net, FS.Read, Time]`:
-`serve(addr, …)`, `HTTPServer.serve`/`wait`, `serve_once` and
-`serve_once_listener` have that row. `static_file`, `static_file_range`,
-`HTTPHandler.handle`, and the mux installers `static_files`, `cors` and
-`request_id` are `[Net, FS.Read]`, and a handler closure may use `Net` and
-`FS.Read`.
+`HTTPServer.serve`/`wait` and `app.serve_once` have that row. `static_file`,
+`static_file_range` and `HTTPHandler.handle` are `[Net, FS.Read]`, and a
+handler closure may use `Net` and `FS.Read`. Registering a route, middleware,
+static files, CORS or request ids has no effect.
 
 | API | Result | Description |
 | --- | --- | --- |
-| `mux()` | `HTTPMux` | Create a router carrier. |
-| `bind(addr, mux, tls, deadline)` | `HTTPServer !HTTPError` | Bind a plaintext listener. |
-| `serve(addr, mux, tls, deadline)` | `!HTTPError` | Bind, then serve requests until the listener fails. |
-| `serve_once(addr, mux)` / `serve_once_listener(listener, mux)` | `!HTTPError` | Serve one request for tests and small adapters. |
+| `app.bind(addr, tls:, deadline:)` | `HTTPServer !HTTPError` | Bind a listener over the app's route table. |
+| `app.serve_once(listener)` | `!HTTPError` | Serve one request for tests and small adapters. |
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
 | `static_file(path, content_type)` / `static_file_range(request, path, content_type)` | `HTTPResponse !HTTPError` | Serve a file, with a range-aware form for a request. |
-| `static_files(mux, prefix, root, index:, dotfiles:, follow_links:)` | unit | Mount a directory below a route prefix; each optional `Bool` label overrides one default policy. |
+| `app.static_files(prefix, root, index:, dotfiles:, follow_links:)` | `App` | Mount a directory below a route prefix; each optional `Bool` label overrides one default policy. |
 | `tls(cert, key)` | `HTTPServerTLS` | Build explicit server TLS material. |
 | `sse(body)` | `HTTPResponse` | Build a server-sent-events response. |
-| `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
+| `cors_policy(origins)` / `app.cors(policy)` | policy/`App` | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
-| `request_id(mux)` | unit | Install request-id middleware. |
+| `app.request_id()` | `App` | Install request-id middleware. |
 
 Routes are `/`, static segments, `:name` parameters, and one final `*name`
 catch-all that may match zero segments. An invalid pattern panics with E2805
-and a second route of the same method and shape panics with E2804. Request
+and a second route of the same method and shape panics with E2804, which names
+both registrations. Request
 paths are percent-decoded per segment without `+` rewriting; an encoded `/`, a
 `.` or `..` segment, or invalid UTF-8 is `400`. A static segment outranks a
 parameter, which outranks a catch-all, segment by segment; then the shorter
@@ -1618,15 +1616,16 @@ served only for other methods is `405` with `Allow`, an unknown path `404`, and
 registered first runs outermost. Every request carries `x-request-id`: a valid
 incoming value (1–128 visible ASCII bytes) is kept, otherwise one is generated.
 
-A route registers with its method's verb, `mux.get(path, handler)` and the
-other standard methods, or with `mux.custom(token, path, handler)` for any other
+A route registers with its method's verb, `app.get(path, handler)` and the
+other standard methods, or with `app.custom(token, path, handler)` for any other
 method; `HTTPRouter` and the `#Server.Get(path)` … `#Server.Custom(token,
-path)` marks of a mounted struct take the same forms. A custom method is any
+path)` marks of a struct `app.mount(value)` or `app.mount(prefix, value)`
+mounts take the same forms. A custom method is any
 RFC 9110 token, matched in the exact case it is sent: `get` is not `GET`. Only
 a token that is exactly a standard method is refused, since that method has
 its own verb, and so is a token that is not a method; both refusals are
 E2808. One check decides both: a static token is checked while building, and a
-run-time token (a mux only) when its route registers. A route path is a
+run-time token (an App only) when its route registers. A route path is a
 `String` or a `Path`; a `Path{…}` literal hole is one percent-encoded segment,
 and a literal without holes is a static pattern like the same `String`.
 `web.openapi` lists a custom method's operation, like `CONNECT`'s, under the
@@ -5179,13 +5178,42 @@ route list.
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
-| `openapi(routes: HTTPMux or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
+| `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `auth(kind: String) -> Auth` | auth | Build an authentication carrier. |
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
 | `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
+
+`App.serve(port = 8080)` and `App.serve_on(port)` serve the app's route table on
+127.0.0.1 until the process stops, on `JET_APP_PORT` when that holds a port
+(D-WEBAPP-SERVE1=D). Once the socket listens the program prints one ready
+line, `serving http://127.0.0.1:8080`. `jet run` and `jet dev` share this
+listen step: under `jet run` a port another program holds, or one the system
+refuses, stops the program with E2809 (`jet.AppPortUnavailable`), which names
+the address and how to choose another port. `jet dev` sets `JET_DEV=1` for the
+program it runs; the app then moves past a busy port to the next free one,
+adds ` (live reload)` to the ready line, and serves live reload: every HTML
+page carries a script that reads the run's boot id from the `/__jet/reload`
+event stream, and reloads the page once `jet dev` has restarted the program
+after a change and a new run answers with another id.
+
+A `web.app()` owns one route table. Pages (`GET`), server functions (`POST
+/actions/<name>`), handler mounts, single routes (`app.get(path, handler)`,
+`app.post`, …, `app.custom(token, path, handler)`), the marked methods of
+`app.mount(value)` and `app.mount(prefix, value)`, `app.static_files` and the
+first `assets` root each register a row as their call runs, and every call
+returns the App, so registrations chain. Two rows with one method and address
+are E2804 (`jet.AmbiguousRoute`), naming both registrations: while building
+when both addresses are literal, otherwise when the later row registers.
+`app.middleware(layer)`, `app.cors(policy)` and `app.request_id()` wrap every
+row, pages included. `web.openapi(app)` documents the handler rows; pages,
+server functions and static files are not API operations. `jet explain
+--routes <file.jet>` lists every row of the entry's App in registration order
+with its method, address, what answers it, how it was registered (`page`,
+`action`, `handler`, `mount`, `marked` or `static`) and its file:line;
+`--json` gives the same rows.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
@@ -5638,9 +5666,10 @@ and decode the status line, headers, chunked/length framing, and gzip into an
 `HTTPResponse` record. `HTTPRequest`, `HTTPResponse`, and `HTTPBodyChunks` are
 Jet records in `Core/Http/Http.jet`; their accessors and builders are Jet
 methods, and `core.http.parse` reuses the Jet request parser. The HTTP server
-is Jet end to end as well: `HTTPMux`, `HTTPHandler`, `HTTPServer`, and
-`HTTPShutdownReport` are records in `Core/Http/Server.jet`, which accepts over
-`core.net` TCP, frames requests and responses, routes, and serves static files.
+is Jet end to end as well: the route table behind `web.app()`, `HTTPHandler`,
+`HTTPServer`, and `HTTPShutdownReport` are records in `Core/Http/Server.jet`,
+which accepts over `core.net` TCP, frames requests and responses, routes, and
+serves static files.
 Its only reserved leaves read the wall clock for `Date` and stat, canonicalize,
 and read files for static serving, all under the Net effect.
 HTTP router creation and dispatch, TLS byte I/O, and WebSocket connect/upgrade are also
@@ -6342,11 +6371,10 @@ and points to those files instead of duplicating their generated details.
 The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packages remain Jet source. Archive byte-format calls cross that seam only where the source implementation requires them.
 
 The overloaded Unix connect and TLS client calls retain their checked public
-argument forms before forwarding into their owning Jet entry points. HTTP
-server serve/bind and static-file mounts likewise forward normalized options;
-`HTTPMux` route and middleware registration lower to its Jet methods after the
-existing escaping-callback admission. The original effects and resource
-conventions remain in force.
+argument forms before forwarding into their owning Jet entry points. An App's
+route, mount and middleware registrations lower to its Jet `__http_*` methods
+after the existing escaping-callback admission. The original effects and
+resource conventions remain in force.
 
 ### Examples in the repository
 

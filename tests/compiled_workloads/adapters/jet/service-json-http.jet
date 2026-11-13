@@ -1,4 +1,5 @@
 use {
+    web: core.web
     fs: core.files
     http_client: core.http.client
     http_server: core.http.server
@@ -159,14 +160,14 @@ run: fn(args: WorkloadArgs) {
         panic("service controls out of range")
     }
 
-    mux: http_server.mux()
+    mux: web.app()
     ready_at: time.now() + ready_after_ms
     mux.get("/health", fn(_req: HTTPRequest) { Ok(http_server.json(200, StatusResponse{status: "ok"})) })
     mux.get("/ready", fn(req: HTTPRequest) { handle_ready(req, ready_at) })
     mux.post("/sum", fn(req: HTTPRequest) { handle_sum(req, body_limit) })
     mux.put("/unknown", fn(_req: HTTPRequest) { json_error(404, "not-found") })
 
-    server: http_server.bind(bind, mux) ?? panic("bind failed")
+    server: mux.bind(bind) ?? panic("bind failed")
     address: server.local_addr() ?? panic("local address failed")
     serving: task {
         server.serve() ?? panic("serve failed")

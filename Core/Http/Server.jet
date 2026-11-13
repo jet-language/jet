@@ -13,19 +13,16 @@ use {
 // core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
 // when bound with `tls: server.tls(cert, key)`.
 //
-// A mux holds routes and middleware layers; a server owns one listener and
-// answers one request per connection with `Connection: close`. Request
-// framing and limits, routing, CORS, request ids, static files and the Date
-// header are decided here. Static files are read through `core.files` and
-// the Date header through the `core.time` wall clock, so serving needs Net,
-// FS.Read and Time.
-//
-// Public arity/label rows keep the implicit-Optional admission: their source
-// entries receive the normalized options.
+// A route table (HTTPMux, which a `web.app()` owns) holds routes and
+// middleware layers; a server owns one listener and answers one request per
+// connection with `Connection: close`. Request framing and limits, routing,
+// CORS, request ids, static files and the Date header are decided here.
+// Static files are read through `core.files` and the Date header through the
+// `core.time` wall clock, so serving needs Net, FS.Read and Time.
 
-// Body-less route markers record route facts. Only `mux.mount(value)`
+// Body-less route markers record route facts. Only `app.mount(value)`
 // exposes the tagged methods of that value's struct. A route path is text or
-// a `Path`, as at `mux.get(path, handler)`.
+// a `Path`, as at `app.get(path, handler)`.
 Get: struct {
     path: String | Path
 
@@ -169,10 +166,12 @@ __HTTPRoute: struct {
     pattern: String
     segments: [__HTTPSegment]
     handler: HTTPHandler
-    // The compiler-checked endpoint contract a `mux.get(…)`-style
-    // registration carries ("" for Core's own static and app routes);
-    // `web.openapi(mux)` renders it.
+    // The compiler-checked endpoint contract an `app.get(…)`-style
+    // registration carries ("" for Core's own static and page routes);
+    // `web.openapi(app)` renders it.
     contract: String
+    // The registering call, which a later duplicate names.
+    at: SourceLocation
 }
 
 __HTTPParsedRoute: struct {
@@ -193,60 +192,52 @@ __HTTPMuxState: struct {
     request_seq: Int
 }
 
-/// Routes and middleware for a server. Copies share the one route table.
+/// One route table: routes and middleware layers. A `web.app()` owns one and
+/// so does an `http.router()`; copies share the one table.
 HTTPMux: struct {
     __state: Shared<__HTTPMuxState>
-
-    // `mux.get(pattern, handler)` and its sibling verbs land here with the
-    // route's checked contract when the pattern is a literal. The compiler
-    // wrote that contract complete, and `web.openapi(mux)` checks it against
-    // the route when it renders, so registration parses no JSON. `at` is the
-    // place of the registering call, so a refused route names its line.
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
-        __route_add(self, method, pattern, __handler(handler), contract, at)
-    }
-
-    // A route whose pattern is a run-time value: its contract
-    // (`"pattern":""`) gets its path inputs from the pattern registered.
-    __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
-        parsed: __route_parse(pattern)
-        if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
-        checked: __route_contract(method, pattern, parsed.segments, contract, at)
-        __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked, at)
-    }
-
-    // `mux.custom(token, pattern, handler)` whose token is a run-time value:
-    // the token passes core.http's one method token check here, at the
-    // registering line, and completes the contract (`"method":""`). A static
-    // token was checked while building and registers as any verb does.
-    __route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
-        if http.__method_token_check(method) == .Err(refused) -> __route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
-        parsed: __route_parse(pattern)
-        if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
-        checked: __route_contract(method, pattern, parsed.segments, contract, at)
-        __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked, at)
-    }
-
-    // `mux.middleware(layer)`: the first registered layer is the outermost.
-    __middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! -[Net]> {
-        guard := self.__state.guard_edit()
-        guard.value.layers.push(Shared{__HTTPLayerCell{wrap: middleware.move()}})
-    }
 }
 
+// A route whose pattern was checked while building: its contract is the one
+// the compiler wrote complete. `at` is the place of the registering call, so
+// a refused route names its line.
 __route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     parsed: __route_parse(pattern)
     if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
     __mux_register(mux, method, pattern, parsed.segments, handler, contract, at)
 }
 
+// A route whose pattern is a run-time value: its contract (`"pattern":""`)
+// gets its path inputs from the pattern registered.
+__route_add_dynamic: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    parsed: __route_parse(pattern)
+    if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+    checked: __route_contract(method, pattern, parsed.segments, contract, at)
+    __mux_register(mux, method, pattern, parsed.segments, handler, checked, at)
+}
+
+// A custom route whose method token is a run-time value: the token passes
+// core.http's one method token check here, at the registering line, and
+// completes the contract (`"method":""`). A static token was checked while
+// building and registers as any verb does.
+__route_add_custom: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
+    if http.__method_token_check(method) == .Err(refused) -> __route_stop("E2808", "HTTP route method `{method}` is refused: {refused.reason}.", at)
+    __route_add_dynamic(mux, method, pattern, handler, contract, at)
+}
+
+// A middleware layer: the first registered layer is the outermost.
+__layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.layers.push(Shared{__HTTPLayerCell{wrap: layer.move()}})
+}
+
 __mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     shape: __route_shape(segments)
     loop existing in __mux_routes(mux) {
-        if existing.method == method && __route_shape(existing.segments) == shape -> __route_stop("E2804", "Two routes both match `{method} {pattern}`.", at)
+        if existing.method == method && __route_shape(existing.segments) == shape -> __route_stop("E2804", "Two routes both match `{method} {pattern}`; the other is `{existing.pattern}` at {existing.at.file}:{existing.at.line}.", at)
     }
     guard := mux.__state.guard_edit()
-    guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract})
+    guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract, at: at})
 }
 
 // A refused registration, reported at the registering call in the stop
@@ -371,22 +362,14 @@ __accept_cancelled: fn(error: NetError) -> Bool Never! {
     }
 }
 
-mux: fn() -[Net]> HTTPMux Never! {
-    __mux_new()
-}
-
-// An empty route table: a mux's, and the one an `http.router()` routes with.
+// An empty route table: a `web.app()`'s, and the one an `http.router()`
+// routes with.
 __mux_new: fn() -> HTTPMux Never! {
     HTTPMux{__state: Shared{__HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}}
 }
 
-serve_once: fn(addr: String, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
-    listener: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
-    serve_once_listener(listener, mux) ?? return Err(err)
-    Ok()
-}
-
-serve_once_listener: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
+// Answer one connection the listener accepts (`app.serve_once(listener)`).
+__serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read, Time]> {
     stream: listener.accept(deadline: Duration{ns: C_ACCEPT_ONCE_NS}) ?? {
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
@@ -395,24 +378,25 @@ serve_once_listener: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, F
     Ok()
 }
 
-__serve_entry: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) HTTPError! -[Net, FS.Read, Time]> {
-    server: __bind_entry(addr, mux, tls, deadline) ?? return Err(err)
-    _: server.serve() ?? return Err(err)
-    Ok()
-}
-
-// (Docs/spec/syntax-decisions.md:5083, Docs/spec/spec.md:1928-1931):
-// the labelled `tls:` option serves HTTPS. Its identity is checked here, so an
-// unusable certificate or key fails the bind instead of every handshake.
-__bind_entry: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
+// `app.bind(addr, tls:, deadline:)` (Docs/spec/syntax-decisions.md:5083,
+// Docs/spec/spec.md:1928-1931): the labelled `tls:` option serves HTTPS. Its
+// identity is checked here, so an unusable certificate or key fails the bind
+// instead of every handshake.
+__bind: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
     if tls == .Val(identity) {
         ops: identity.__ops.guard_read()
         problem: ops.value.check(identity.cert_pem, identity.key_pem)
         if problem != "" -> return Err(.IO{operation: problem})
     }
     listener: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
+    Ok(__server_on(listener, mux, tls, deadline))
+}
+
+// A server over a listener its caller bound (core.web's app listen step,
+// which tells a busy port from other bind failures).
+__server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -> HTTPServer Never! {
     pair: core.tasks.__channel_bounded<Int>(1)
-    Ok(HTTPServer{
+    HTTPServer{
         __state: Shared{__HTTPServerState{phase: 0, stopping: false, report: None}},
         __listener: listener,
         __mux: mux,
@@ -420,19 +404,14 @@ __bind_entry: fn(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Dura
         __tls: tls,
         __done: pair.sender,
         __finished: pair.receiver,
-    })
+    }
 }
 
-// `core.http.serve(mux, deadline)`: the loopback server on 127.0.0.1:8080,
-// each connection's reads and writes bounded by `deadline`.
-__http_serve_entry: fn(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Never! {
-    __bind_entry("127.0.0.1:8080", mux, None, Val(deadline)) ?? panic("HTTP server bind failed: {err}")
-}
-
-__static_files_entry: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
+// `app.static_files(prefix, root)`: GET `{prefix}/*` answers from `root`.
+__static_files: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?, at: SourceLocation) Never! {
     mount: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base: __trim_trailing_slashes(prefix)
-    mux.__route("GET", "{base}/*jet_static_path", fn(request: HTTPRequest) { Ok(__static_serve(mount, request)) }, "")
+    __route_add(mux, "GET", "{base}/*jet_static_path", __handler(fn(request: HTTPRequest) { Ok(__static_serve(mount, request)) }), "", at)
 }
 
 response: fn(status: Int, body: String) -> HTTPResponse Never! {
@@ -443,8 +422,18 @@ response: fn(status: Int, body: String) -> HTTPResponse Never! {
 
 // Head policy stays in Jet: an out-of-range status is a 500.
 response_body: fn(status: Int, body: &&Body, headers: &&Headers) -> HTTPResponse Never! {
-    if status < 100 || status > 599 -> return core.http.__response(500, core.http.body_text("500 Internal Server Error"), headers)
+    if status < 100 || status > 599 -> return core.http.__response(500, core.http.body_text(__status_text(500)), headers)
     core.http.__response(status, body, headers)
+}
+
+// The server's own error page body, `404 Not Found`: the status and its
+// reason from the one table, `http.reason_phrase`, that the status line uses.
+__status_text: fn(status: Int) -> String Never! {
+    "{status} {http.reason_phrase(status)}"
+}
+
+__status_page: fn(status: Int) -> HTTPResponse Never! {
+    response(status, __status_text(status))
 }
 
 json: fn<T: Encode>(status: Int, body: T) -> HTTPResponse HTTPError! {
@@ -466,10 +455,6 @@ static_file_range: fn(request: HTTPRequest, path: String, content_type: String) 
     partial := __bytes_response(206, bytes.slice(span.start, span.end + 1), content_type)
     partial.headers = http.headers_set(partial.headers, "content-range", "bytes {span.start}-{span.end}/{bytes.len()}")
     Ok(partial)
-}
-
-static_files: fn(mux: HTTPMux, prefix: String, root: String) Never! -[Net, FS.Read]> {
-    __static_files_entry(mux, prefix, root, None, None, None)
 }
 
 tls: fn(cert: String, key: String) -> HTTPServerTLS Never! {
@@ -536,9 +521,6 @@ cors_policy: fn(origins: [String] | HTTPCorsOrigins, methods: [String]{[String]{
     }
 }
 
-cors: fn(mux: HTTPMux, policy: HTTPCorsPolicy) Never! -[Net, FS.Read]> {
-    mux.__middleware(fn(next: HTTPHandler) { __cors_handler(policy, next) })
-}
 
 access_log: fn(request: HTTPRequest, status: Int) -[Net]> String Never! {
     template: access_log_template(request)
@@ -562,9 +544,6 @@ access_log_path: fn(path: String) -> String Never! {
     String.from_bytes(raw.slice(0, end)) ?? panic("query separator is not a UTF-8 boundary")
 }
 
-request_id: fn(mux: HTTPMux) Never! -[Net, FS.Read]> {
-    mux.__middleware(fn(next: HTTPHandler) { __request_id_handler(next) })
-}
 
 cors_join: fn(values: [String], fallback: &&String) -> String Never! {
     if values.len() == 0 -> return fallback
@@ -671,7 +650,7 @@ __error_response: fn(error: HTTPError) -> HTTPResponse Never! {
         .BodyTooLarge(_) -> __empty_response(413)
         .InvalidFraming -> __empty_response(400)
         .UnsupportedEncoding -> __empty_response(415)
-        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> response(500, "500 Internal Server Error")
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> __status_page(500)
     }
 }
 
@@ -721,7 +700,7 @@ __pick: fn(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
         allowed.headers = http.headers_set(allowed.headers, "Allow", __allow_value(everything))
         return __HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
     }
-    segments: __path_segments(access_log_path(request.path)) ?? return __HTTPPick{answer: Val(response(400, "400 Bad Request")), index: -1, request: request, routes: routes}
+    segments: __path_segments(access_log_path(request.path)) ?? return __HTTPPick{answer: Val(__status_page(400)), index: -1, request: request, routes: routes}
     best := -1
     matched := [String]{}
     loop index in 0..<routes.len() {
@@ -732,8 +711,8 @@ __pick: fn(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
         if best < 0 || __route_better(route.segments, routes[best].segments) -> best = index
     }
     if best < 0 {
-        if matched.len() == 0 -> return __HTTPPick{answer: Val(response(404, "404 Not Found")), index: -1, request: request, routes: routes}
-        refused := response(405, "405 Method Not Allowed")
+        if matched.len() == 0 -> return __HTTPPick{answer: Val(__status_page(404)), index: -1, request: request, routes: routes}
+        refused := __status_page(405)
         refused.headers = http.headers_set(refused.headers, "Allow", __allow_value(matched))
         return __HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
     }
@@ -1640,8 +1619,8 @@ __etag_matches: fn(list: String, etag: String) -> Bool Never! {
 
 __static_serve: fn(mount: __HTTPStaticMount, request: HTTPRequest) -[FS.Read]> HTTPResponse Never! {
     relative: request.param("jet_static_path") ?? ""
-    target: __static_target(mount, relative) ?? return response(404, "404 Not Found")
-    bytes: core.files.read_bytes(target.path) ?? return response(404, "404 Not Found")
+    target: __static_target(mount, relative) ?? return __status_page(404)
+    bytes: core.files.read_bytes(target.path) ?? return __status_page(404)
     seconds: target.modified_seconds
     etag: "\"{__hex(bytes.len())}-{__hex(seconds)}\""
     modified: __imf_date(seconds)

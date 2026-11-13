@@ -1,6 +1,6 @@
 // core.http.server: function-first mux with path params, served on a
 // loopback listener and answered for a client in the same program.
-// serve_once_listener drives one connection at a time so the golden output
+// app.serve_once drives one connection at a time so the golden output
 // order stays fixed.
 package: {
     name: "http_server"
@@ -8,6 +8,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_client: core.http.client
     http_server: core.http.server
     net: core.net
@@ -22,17 +23,17 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr: listener.local_addr() ?? panic("address")
-    mux: http_server.mux()
+    mux: web.app()
     mux.get("/", fn() { Ok(http_server.response(200, "hello from mux")) })
     mux.get("/ping", fn() { Ok(http_server.response(200, "pong")) })
     mux.post("/echo", fn(req: HTTPRequest) { Ok(http_server.response(200, req.text() ?? "invalid body")) })
     mux.get("/who", fn(req: HTTPRequest) { handle(req) })
     print("mux ready")
     serving: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     root: http_client.get("http://{addr}/") ?? panic("GET /")
     print("GET / -> {root.status()} {root.text() ?? "invalid body"}")

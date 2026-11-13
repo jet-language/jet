@@ -8,6 +8,7 @@ package: {
 }
 
 use {
+    web: core.web
     db: core.db
     server: core.http.server
 }
@@ -15,7 +16,7 @@ use {
 run: fn() {
     conn: db.open_memory() ?? panic("open")
     pool: db.pool(":memory:", max: 1) ?? panic("pool")
-    mux: server.mux()
+    mux: web.app()
     mux.post("/order", fn(req: HTTPRequest) {
         lease: pool.acquire(deadline: 100ms) ?? return Ok(server.response(503, "busy"))
         tx: conn.begin() ?? panic("begin")

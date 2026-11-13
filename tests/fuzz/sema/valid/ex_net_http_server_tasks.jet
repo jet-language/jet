@@ -2,6 +2,7 @@
 // The handler receives an HTTPRequest and returns an HTTPResponse; the server
 // task accepts one connection (for golden-test determinism).
 use {
+    web: core.web
     http: core.http.client
     server: core.http.server
     net: core.net
@@ -16,10 +17,10 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(req: HTTPRequest) { handle(req) })
     t: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
     resp: http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body().text(8388608) ?? panic("body failed"))

@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_server: core.http.server
     time: core.time
     ws: core.net.ws
@@ -22,9 +23,9 @@ handle_ws: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 }
 
 run: fn() (HTTPError | RangeError | TaskFailure | WsError)! {
-    mux: http_server.mux()
+    mux: web.app()
     mux.get("/live", fn(req: HTTPRequest) { handle_ws(req) })
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    server: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     serving: task {
         server.serve() ?? panic("serve")

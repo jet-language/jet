@@ -4,7 +4,7 @@ use {
 }
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/a", fn() { Ok(server.response(200, "a")) })
     mux.connect("/tunnel", fn() { Ok(server.response(200, "t")) })
     schema: web.openapi(mux) ?? panic("openapi: {err}")
@@ -12,7 +12,7 @@ run: fn() {
     print(schema.contains("\"/a\":{{\"get\":{{"))
     print(schema.contains("\"/tunnel\":{{\"additionalOperations\":{{\"CONNECT\":{{\"operationId\":"))
     print(schema.contains("\"connect\""))
-    plain: server.mux()
+    plain: web.app()
     plain.get("/a", fn() { Ok(server.response(200, "a")) })
     plain_schema: web.openapi(plain) ?? panic("openapi: {err}")
     print(plain_schema.starts_with("{{\"openapi\":\"3.1.0\",") && !plain_schema.contains("additionalOperations"))

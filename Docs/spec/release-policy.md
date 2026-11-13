@@ -132,17 +132,19 @@ battery against rustls and OpenSSL test vectors. Server TLS is an explicit
 named option on `core.http.server`:
 
 ```text
-use server: core.http.server
+use {
+    server: core.http.server
+    web: core.web
+}
 
 run: fn() {
     cert := "server.crt"
     key := "server.key"
-    mux: server.mux()
-    server.serve(
+    running: web.app().bind(
         "127.0.0.1:0",
-        mux,
         tls: server.tls(cert, key)
     ) ?? return
+    running.serve() ?? return
 }
 ```
 

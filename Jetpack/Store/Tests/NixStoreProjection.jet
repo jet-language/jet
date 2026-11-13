@@ -84,9 +84,9 @@ store_test_start_cache_server: fn(roots: HangarRoots, routes: [String: [U8]]) ->
         files.create_dir_all(files.dirname(path)) ?? panic("route dir")
         files.write_bytes(path, route.value) ?? panic("route body")
     }
-    mux: http_server.mux()
-    http_server.static_files(mux, "/", site)
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind cache server")
+    mux: core_web.app()
+    mux.static_files("/", site)
+    server: mux.bind("127.0.0.1:0") ?? panic("bind cache server")
     address: server.local_addr() ?? panic("cache server address")
     serving: task {
         _: server.serve() ?? panic("serve")

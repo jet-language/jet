@@ -1,29 +1,34 @@
-# PORT tests/web_app.rs::web_app_dev_auto_serves_with_reload_without_dev_function; request helper63-95 ported verbatim algorithm.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no run/reference proof.
+# `jet dev` of a web.app entry with no `dev: fn` serves the app graph with live
+# reload: it prints the ready line with ` (live reload)`,
+# every page carries the reload script, `/__jet/reload` answers the run's boot
+# id as an event stream, and an edit restarts the app, which answers a new id.
 mkdir: client
 copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
+copy: {root}/tests/cases/web_app/fixtures/reload.jet client/reload.jet
 copy: {root}/Examples/Apps/Web/WebApp.jet app.jet
-spawn server: jet dev {work}/app.jet --port={free-port:app}
+spawn server: jet dev {work}/app.jet
 env: JET_APP_PORT={free-port:app}
+stdout: file server.stdout
+stderr: file server.stderr
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=GET
 env: S6_WEB_PATH=/
 env: S6_WEB_RESPONSE={work}/page.http
 exit: 0
-file: page.http ^= "HTTP/1.1 200" # Original starts_with.
-file: page.http ~ "EventSource(\"/__jet/reload\")" # Original contains predicate.
-step: jet run client/request.jet
+file: page.http ^= "HTTP/1.1 200" # the page is served
+file: page.http ~ "EventSource(\"/__jet/reload\")" # the page carries the live-reload script
+step: jet run client/reload.jet
 env: S6_WEB_PORT={free-port:app}
-env: S6_WEB_METHOD=GET
-env: S6_WEB_PATH=/__jet/reload
-env: S6_WEB_RESPONSE={work}/reload.http
 env: S6_WEB_RELOAD_APP={work}/app.jet
+env: S6_WEB_RESPONSE={work}/reload.http
 exit: 0
-# Original predicate: helper reads to EOF against absolute250ms then10s windows from send/shutdown and source append.
-file: reload.http ^= "HTTP/1.1 200" # Original starts_with.
-file: reload.http ~ "text/event-stream" # Original contains predicate.
-file: reload.http ~ "data: reload" # Original contains predicate.
+stdout: = "reloaded\n"
+file: reload.http ^= "HTTP/1.1 200" # the reload endpoint answers
+file: reload.http ~ "text/event-stream" # as an event stream
+file: reload.http ~ "retry: 300\ndata: " # one event with the run's boot id, and the reconnect delay
+file: reload.http ~ "--- after the edit ---\nHTTP/1.1 200" # the restarted app answers again, with another boot id
 signal server: KILL
 wait: server
-exit: any # Original ServerChild drop kill/wait ignores status.
+exit: any # the case kills the dev loop; its status is not part of this proof
+file: server.stdout ~ "serving http://127.0.0.1:{free-port:app} (live reload)\n" # the ready line, printed by each run of the app

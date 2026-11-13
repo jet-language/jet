@@ -1,6 +1,7 @@
 // Port of tests/http_server_lifecycle.rs:1433-1577 against public Core APIs.
 // PENDING-SEAM(http-server-options): workers=1, admission_queue=8 setup.
 use {
+    web: core.web
     server: core.http.server
     net: core.net
 }
@@ -34,7 +35,7 @@ s6_head_assert: fn(response: String, status: String, length: Int) {
 
 #Test("HEAD preserves representation length without a wire body") {
     calls: Shared{S6HeadCalls{value: 0}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/implicit", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(200, "hello").header("x-origin", "get"))
@@ -48,7 +49,7 @@ s6_head_assert: fn(response: String, status: String, length: Int) {
         calls.value = calls.value + 1
         Ok(server.response(204, "forbidden"))
     })
-    bound: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    bound: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: bound.local_addr() ?? panic("address")
     serving: task { bound.serve() ?? panic("server") }
     crlf: s6_head_crlf()

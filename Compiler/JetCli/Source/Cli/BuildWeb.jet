@@ -6,7 +6,7 @@
 // `node app.js` runs the program, and so does index.html, the default page.
 use {
     cli_files: core.files
-    cli_server: core.http.server
+    cli_web: core.web
     cli_term: core.term
     cli_time: core.time
     jet_driver.[
@@ -142,10 +142,9 @@ jet_cli_dev_web_loop: fn(file: String, color: Bool, options: BuildOptions, threa
     version_path: "{first.build_dir}/__jet_dev_version"
     if jet_cli_web_write_text(file, color, version_path, "{revision}") == .Val(refused) -> return refused
     state: Shared{JetCLIDevWebState{stopped: None}}
-    mux: cli_server.mux()
-    cli_server.static_files(mux, "", first.build_dir)
+    preview: cli_web.app().static_files("", first.build_dir)
     fix: "pass a free port with `--port=N`, or leave `--port` out to let the preview listener choose one"
-    bound: cli_server.bind("127.0.0.1:{port}", mux) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for the app preview on 127.0.0.1:{port}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    bound: preview.bind("127.0.0.1:{port}") ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for the app preview on 127.0.0.1:{port}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     address: bound.local_addr() ?? "127.0.0.1:{port}"
     cli_term.print("App preview: http://{address}/")
     jet_cli_dev_canvas_hint(file)

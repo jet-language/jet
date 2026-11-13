@@ -3805,10 +3805,12 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 
 // Run `jet dev`'s program `executable`: from memory in a child, as
 // jet_cli_launch runs it, else from its file `binary`, written first. It
-// gets the environment that lets it write a production-failure receipt;
-// `port` is the dev server's (JET_DEV_PORT).
+// gets the environment that lets it write a production-failure receipt,
+// JET_DEV=1 (a web app then picks a free port and reloads its pages,
+// Core/Web/Web.jet __app_listen), and `port`, the dev server's (JET_DEV_PORT).
 jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
     vars := jet_cli_production_receipt_env(file, program_args)
+    vars.push(JetCLIEnvVar{name: "JET_DEV", value: "1"})
     if port == .Val(number) {
         vars.push(JetCLIEnvVar{name: "JET_DEV_PORT", value: "{number}"})
         cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")

@@ -11,7 +11,7 @@ Jokes: struct {
     }
 }
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/direct/:id", fn(id: JokeID) { Ok(server.response(200, "joke={id.value}")) })
     mux.mount(Jokes{})
     schema: web.openapi(mux) ?? panic("openapi: {err}")

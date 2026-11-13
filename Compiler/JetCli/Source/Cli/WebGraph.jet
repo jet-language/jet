@@ -1,10 +1,10 @@
-// `jet explain --web-graph` and the `inspect expand --facts web` lens: the
-// application graph of the entry's `run: fn` builder chain, read from the
-// checked program. The chain is read as written; no user code runs and no
-// source text is searched.
+// `jet explain --web-graph`, `jet explain --routes` and the
+// `inspect expand --facts web` lens: the application graph of the entry's
+// `run: fn` builder chain, read from the checked program. The chain is read
+// as written; no user code runs and no source text is searched.
 use {
     jet_driver.[JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
-    jet_foundation.[AppRouteRoot, CallArg, Expr, Field, Func, Item, Span, StructDef, Type, UnOp, WebPartitionMarker]
+    jet_foundation.[AppRouteRoot, CallArg, Expr, Field, Func, Item, Marker, Span, StructDef, Type, UnOp, WebPartitionMarker]
     jet_foundation.[app_entry_run_fn, app_route_file_address, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
     jet_sema.[sema_app_canonical_route_path, sema_app_route_parts, sema_app_route_static_parts, sema_app_routes_overlap]
     jet_semindex.[semindex_function_key, semindex_sorted_unique]
@@ -135,6 +135,22 @@ JetCLIWebRoot: struct {
     span: Span
 }
 
+// One row of the App's route table, in the order the program registers it.
+JetCLIWebRow: struct {
+    verb: String
+    address: String
+    // The page, handler, action, struct method or static root that answers.
+    target: String
+    // page, action, handler, mount, marked or static.
+    form: String
+    // The file the row is written in; "" is the entry.
+    file: String
+    span: Span
+    // `mount(value)`: the struct whose marked methods become rows; "" for
+    // every other row.
+    mounted: String{""}
+}
+
 JetCLIWebGraph: struct {
     entry: String
     hydration: String{"dev-overlay"}
@@ -151,15 +167,18 @@ JetCLIWebGraph: struct {
     cache: [String]{[String]{}}
     a11y: [String]{[String]{}}
     adapters: [String]{[String]{}}
+    table: [JetCLIWebRow]{[JetCLIWebRow]{}}
 }
 
 // The builder walk: the graph so far, the render mode later routes take, the
-// explicit mode the next route takes, and whether an `app()` root was seen.
+// explicit mode the next route takes, whether an `app()` root was seen, and
+// the `run` bindings that hold the App.
 JetCLIWebWalk: struct {
     graph: JetCLIWebGraph
     render: String{"csr"}
     next_override: String?{None}
     found_app: Bool{false}
+    app_names: [String]{[String]{}}
 }
 
 // ---- builder argument readers ----
@@ -516,6 +535,51 @@ jet_cli_web_is_app_receiver: fn(expression: Expr) -> Bool {
     false
 }
 
+// Whether `expression` is the App: a `web.app()` chain or a `run` binding
+// that holds one.
+jet_cli_web_on_app: fn(expression: Expr, app_names: [String]) -> Bool {
+    if expression == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method == "app" && args.len() == 0 && jet_cli_web_is_app_receiver(receiver) -> return true
+        return jet_cli_web_on_app(receiver, app_names)
+    }
+    if expression == .Call(call, _) -> return (call.name == "app" || call.name == "web.app" || call.name == "core.web.app") && call.args.len() == 0
+    if expression == .Ident(name, _, _) -> return app_names.contains(name)
+    if expression == .Copy(inner, _, _) -> return jet_cli_web_on_app(inner, app_names)
+    if expression == .Paren(inner, _, _) -> return jet_cli_web_on_app(inner, app_names)
+    false
+}
+
+// The verb of a single-route registration (`app.get`, `app.post`, ...).
+jet_cli_web_verb: fn(method: String) -> String? {
+    if method == "get" || method == "post" || method == "put" || method == "patch" || method == "delete" || method == "head" || method == "options" -> return Val(method.upper())
+    None
+}
+
+jet_cli_web_trim_slashes: fn(text: String) -> String {
+    trimmed := text.copy()
+    loop {
+        if !trimmed.ends_with("/") -> break
+        trimmed = trimmed.slice(0, trimmed.len() - 1)
+    }
+    trimmed
+}
+
+// `mount(value)` and `mount(prefix, value)` mount a struct's marked methods;
+// `mount(prefix, handler, ...)` mounts a handler function. The struct's name
+// when the value spells it, else "".
+jet_cli_web_struct_mount: fn(args: [CallArg], functions: [Func]) -> String? {
+    if args.len() == 0 || args.len() > 2 -> return None
+    value: args[args.len() - 1].expr
+    if value == .StructLit(type_name, _, _, _, _, _, _, _) -> return Val(type_name)
+    if args.len() == 1 -> return Val("")
+    if value == .Ident(name, _, _) && jet_cli_web_function(functions, name) == None -> return Val("")
+    None
+}
+
+jet_cli_web_row: fn(verb: String, address: String, target: String, form: String, span: Span) -> JetCLIWebRow {
+    JetCLIWebRow{verb: verb, address: address, target: target, form: form, file: "", span: span}
+}
+
 jet_cli_web_walk: fn(expression: Expr, walk: &JetCLIWebWalk, functions: [Func]) {
     if expression == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
@@ -523,8 +587,9 @@ jet_cli_web_walk: fn(expression: Expr, walk: &JetCLIWebWalk, functions: [Func]) 
                 walk.found_app = true
                 return
             }
+            on_app: jet_cli_web_on_app(receiver, walk.app_names)
             jet_cli_web_walk(receiver, walk, functions)
-            jet_cli_web_apply(method, args, method_span, walk, functions)
+            jet_cli_web_apply(method, args, method_span, on_app, walk, functions)
         }
         .Copy(inner, _, _) | .Paren(inner, _, _) | .Ok(inner, _, _) -> jet_cli_web_walk(inner, walk, functions)
         .Place(inner, _, _, _) -> jet_cli_web_walk(inner, walk, functions)
@@ -539,20 +604,37 @@ jet_cli_web_walk: fn(expression: Expr, walk: &JetCLIWebWalk, functions: [Func]) 
     }
 }
 
-jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, walk: &JetCLIWebWalk, functions: [Func]) {
+// `on_app` says the receiver is the App, so a name every type may have
+// (`get`, `post`, ...) registers a route.
+jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool, walk: &JetCLIWebWalk, functions: [Func]) {
     if method == "route" || method == "page" || method == "layout" {
         path: sema_app_canonical_route_path(jet_cli_web_const_text(args, 0) ?? "/")
         handler: jet_cli_web_handler(args, 1) ?? "<dynamic>"
         override_mode: walk.next_override
         walk.next_override = None
         render: walk.render.copy()
+        walk.graph.table.push(jet_cli_web_row("GET", path, handler, "page", span))
         jet_cli_web_record_route(walk, jet_cli_web_new_route(path, handler, render, override_mode, "builder", span))
+        return
+    }
+    if on_app && jet_cli_web_verb(method) == .Val(verb) {
+        walk.graph.table.push(jet_cli_web_row(verb, jet_cli_web_const_text(args, 0) ?? "<dynamic>", jet_cli_web_handler(args, 1) ?? "<closure>", "handler", span))
+        return
+    }
+    if on_app && method == "custom" {
+        walk.graph.table.push(jet_cli_web_row(jet_cli_web_const_text(args, 0) ?? "<dynamic>", jet_cli_web_const_text(args, 1) ?? "<dynamic>", jet_cli_web_handler(args, 2) ?? "<closure>", "handler", span))
+        return
+    }
+    if on_app && method == "static_files" {
+        prefix: jet_cli_web_trim_slashes(jet_cli_web_const_text(args, 0) ?? "<dynamic>")
+        walk.graph.table.push(jet_cli_web_row("GET", "{prefix}/*", jet_cli_web_const_text(args, 1) ?? "<dynamic>", "static", span))
         return
     }
     if method == "action" || method == "form" || method == "data" || method == "loader" {
         name := jet_cli_web_const_text(args, 0) ?? method
         if method == "loader" -> name = jet_cli_web_handler(args, 0) ?? jet_cli_web_const_text(args, 0) ?? method
         handler: jet_cli_web_handler(args, 1) ?? "<dynamic>"
+        if method != "loader" -> walk.graph.table.push(jet_cli_web_row("POST", "/actions/{name}", handler, "action", span))
         preload: method == "loader" && jet_cli_web_labeled_bool(args, "preload")
         contract: jet_cli_web_contract(jet_cli_web_function(functions, handler))
         walk.graph.actions.push(JetCLIWebAction{name: name, handler: handler, kind: method, preload: preload, contract: contract, provenance: "builder", span: span})
@@ -570,11 +652,24 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, walk: &JetCLI
         return
     }
     if method == "mount" {
+        if jet_cli_web_struct_mount(args, functions) == .Val(mounted) {
+            prefix: if args.len() == 2 -> jet_cli_web_const_text(args, 0) ?? "<dynamic>" else -> ""
+            target: if mounted == "" -> "<value>" else -> mounted
+            row := jet_cli_web_row("", jet_cli_web_trim_slashes(prefix), target, "marked", span)
+            row.mounted = mounted
+            walk.graph.table.push(row)
+            return
+        }
         effects := [String]{}
         security := [String]{}
         if jet_cli_web_const_text(args, 2) == .Val(row) -> effects.push(row)
         if jet_cli_web_const_text(args, 3) == .Val(rule) -> security.push(rule)
-        walk.graph.mounts.push(JetCLIWebMount{prefix: jet_cli_web_const_text(args, 0) ?? "/", handler: jet_cli_web_handler(args, 1) ?? "<mount>", effects: effects, security: security, provenance: "builder", span: span})
+        prefix: jet_cli_web_const_text(args, 0) ?? "/"
+        handler: jet_cli_web_handler(args, 1) ?? "<mount>"
+        base: jet_cli_web_trim_slashes(prefix)
+        walk.graph.table.push(jet_cli_web_row("GET", "{base}/*", handler, "mount", span))
+        walk.graph.table.push(jet_cli_web_row("POST", "{base}/*", handler, "mount", span))
+        walk.graph.mounts.push(JetCLIWebMount{prefix: prefix, handler: handler, effects: effects, security: security, provenance: "builder", span: span})
         return
     }
     if method == "routes" {
@@ -619,6 +714,7 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, walk: &JetCLI
     if method == "hydration_release" -> walk.graph.hydration = "release-keep-server"
     if method == "hydration_dev" -> walk.graph.hydration = "dev-overlay"
     value: jet_cli_web_const_text(args, 0) ?? return
+    if method == "assets" && walk.graph.assets.len() == 0 -> walk.graph.table.push(jet_cli_web_row("GET", "/assets/*", value, "static", span))
     if method == {
         "security" -> walk.graph.security.push(value)
         "assets" -> walk.graph.assets.push(value)
@@ -636,7 +732,10 @@ jet_cli_web_walk_run: fn(run: Func, walk: &JetCLIWebWalk, functions: [Func]) {
             .Return(value, _) -> {
                 if value == .Val(expression) -> jet_cli_web_walk(expression, walk, functions)
             }
-            .Val(binding) -> jet_cli_web_walk(binding.init, walk, functions)
+            .Val(binding) -> {
+                if jet_cli_web_on_app(binding.init, walk.app_names) -> walk.app_names.push(binding.name)
+                jet_cli_web_walk(binding.init, walk, functions)
+            }
             .Assign(_, _, _, value) -> jet_cli_web_walk(value, walk, functions)
             .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
         }
@@ -659,10 +758,61 @@ jet_cli_web_expand_roots: fn(walk: &JetCLIWebWalk, roots: [AppRouteRoot]) {
                 stem: if file.path.ends_with(".jet") -> file.path.slice(0, file.path.len() - 4) else -> file.path
                 handler: stem.replace("/", "_").replace("\\", "_").replace("[", "_").replace("]", "_")
                 jet_cli_web_record_route(walk, jet_cli_web_new_route(address.path, handler, render.copy(), override_mode.copy(), "{given.root}/{file.path}", given.span))
+                row := jet_cli_web_row("GET", address.path, "page", "page", Span{start: 0, end: 0})
+                row.file = "{given.root}/{file.path}"
+                walk.graph.table.push(row)
             }
             break
         }
     }
+}
+
+// A `#Server.<Verb>(path)` or `#Server.Custom(token, path)` route marker:
+// its verb and path, else None.
+jet_cli_web_marker_route: fn(marker: Marker) -> [String]? {
+    if marker.negated -> return None
+    parts: marker.name.split(".").to_list()
+    if parts.len() < 2 && (marker.declaration_module ?? "") != "core.http.server" -> return None
+    verb: parts[parts.len() - 1].lower()
+    texts := [String]{}
+    loop argument in marker.args {
+        if argument == .Expr(value) -> texts.push(jet_cli_web_literal(value) ?? "<dynamic>")
+    }
+    if verb == "custom" {
+        if texts.len() != 2 -> return None
+        return Val(texts)
+    }
+    if jet_cli_web_verb(verb) == None || texts.len() != 1 -> return None
+    Val([String]{verb.upper(), texts[0]})
+}
+
+// `mount(value)`: each marked method of the value's struct is one row under
+// the mount prefix, in the struct's method order, written where it is marked.
+jet_cli_web_expand_mounts: fn(modules: [JetDriverDocModule], table: &[JetCLIWebRow]) {
+    expanded := [JetCLIWebRow]{}
+    loop row in table {
+        if row.form != "marked" || row.mounted == "" {
+            expanded.push(row.copy())
+            next
+        }
+        found := false
+        loop doc_module in modules {
+            if doc_module.alias != "" -> next
+            definition: jet_cli_web_find_struct(doc_module.items, row.mounted) ?? next
+            found = true
+            loop method in definition.methods {
+                loop marker in method.markers {
+                    route: jet_cli_web_marker_route(marker) ?? next
+                    marked := jet_cli_web_row(route[0], "{row.address}{route[1]}", "{row.mounted}.{method.name}", "marked", marker.span)
+                    marked.file = doc_module.path
+                    expanded.push(marked)
+                }
+            }
+            break
+        }
+        if !found -> expanded.push(row.copy())
+    }
+    table = expanded
 }
 
 jet_cli_web_action_matches: fn(path: String, handler: String, action: JetCLIWebAction) -> Bool {
@@ -1058,6 +1208,7 @@ jet_cli_web_graph: fn(modules: [JetDriverDocModule], entry_identity: String) -> 
         if !walk.found_app -> return None
     }
     jet_cli_web_expand_roots(walk, entry.app_route_roots)
+    jet_cli_web_expand_mounts(modules, walk.graph.table)
     graph := walk.graph
     jet_cli_web_route_contracts(modules, functions, graph)
     jet_cli_web_sort_routes(graph.routes)
@@ -1295,6 +1446,78 @@ jet_cli_web_graph_report: fn(result: JetDriverCompileResult, json: Bool) -> JetD
     out := ""
     loop line in jet_cli_web_lines(found) -> out = "{out}{line}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet explain --routes <file.jet>`: every row of the App's one route table,
+// in registration order, with what answers it, how it was registered and
+// where.
+jet_cli_web_routes_report: fn(result: JetDriverCompileResult, json: Bool) -> JetDriverVerbOutput {
+    graph: jet_cli_web_graph(result.doc_modules, result.entry_module_identity)
+    if graph == None && json -> return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.routes", true, [JetCLIStatusField]{jet_cli_status_field("routes", JetCLIStatusValue.Null)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    found: graph ?? return JetDriverVerbOutput{stdout: "(none)\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    base: jet_cli_relative_parent(found.entry)
+    sites: loop row in found.table -> {
+        file: if row.file == "" -> found.entry else -> row.file
+        site := jet_cli_web_relative(base, jet_cli_web_row_path(result.doc_modules, file))
+        "{site}:{jet_cli_web_row_line(result.doc_modules, file, row)}"
+    }
+    if json {
+        rows: loop (index, row) in found.table -> jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_web_text("verb", row.verb),
+            jet_cli_web_text("address", row.address),
+            jet_cli_web_text("target", row.target),
+            jet_cli_web_text("form", row.form),
+            jet_cli_web_text("at", sites[index]),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.routes", true, [JetCLIStatusField]{jet_cli_web_text("entry", jet_cli_web_relative(base, found.entry)), jet_cli_status_field("routes", jet_cli_status_array(rows))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    verb_width := 0
+    address_width := 0
+    target_width := 0
+    form_width := 0
+    loop row in found.table {
+        if row.verb.len() > verb_width -> verb_width = row.verb.len()
+        if row.address.len() > address_width -> address_width = row.address.len()
+        if row.target.len() > target_width -> target_width = row.target.len()
+        if row.form.len() > form_width -> form_width = row.form.len()
+    }
+    out := "route table — {jet_cli_web_relative(base, found.entry)}\n"
+    loop (index, row) in found.table {
+        out = "{out}  {jet_cli_pad(row.verb, verb_width)}  {jet_cli_pad(row.address, address_width)}  {jet_cli_pad(row.target, target_width)}  {jet_cli_pad(row.form, form_width)}  {sites[index]}\n"
+    }
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `path` relative to the entry's directory when it lies under it.
+jet_cli_web_relative: fn(base: String, path: String) -> String {
+    if base != "" && path.starts_with("{base}/") -> return path.slice(base.len() + 1, path.len())
+    path.copy()
+}
+
+// The checked module a row's file names: the entry, a struct's module, or a
+// convention page under a `routes(from:)` root.
+jet_cli_web_row_module: fn(modules: [JetDriverDocModule], file: String) -> Int? {
+    loop (index, doc_module) in modules {
+        if doc_module.path == file || doc_module.physical_path == file || doc_module.path.ends_with("/{file}") || doc_module.physical_path.ends_with("/{file}") -> return Val(index)
+    }
+    None
+}
+
+jet_cli_web_row_path: fn(modules: [JetDriverDocModule], file: String) -> String {
+    index: jet_cli_web_row_module(modules, file) ?? return file.copy()
+    modules[index].path.copy()
+}
+
+// The line a row is written at; a convention page row is its `page` function.
+jet_cli_web_row_line: fn(modules: [JetDriverDocModule], file: String, row: JetCLIWebRow) -> Int {
+    index: jet_cli_web_row_module(modules, file) ?? return 1
+    start := row.span.start
+    if row.file != "" && row.form == "page" {
+        functions := [Func]{}
+        jet_cli_web_collect_functions(modules[index].items, functions)
+        if jet_cli_web_function(functions, "page") == .Val(page) -> start = page.name_span.start
+    }
+    diagnostic_line_at(modules[index].source, start)
 }
 
 jet_cli_web_located: fn(name: String, value: JetCLIStatusValue, span: Span, entry: String, source: String?) -> [JetCLIStatusField] {

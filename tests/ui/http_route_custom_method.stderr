@@ -1,26 +1,34 @@
 Error [jet.AmbiguousRoute]: Two routes both match `PURGE /cache`.
-  --> http_route_custom_method.jet:27:9
+  --> http_route_custom_method.jet:28:9
     |
- 27 |     mux.custom("PURGE", "/cache", handle)
+ 28 |     mux.custom("PURGE", "/cache", handle)
     |         ^^^^^^
- Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
- Fix: Remove one registration or use a distinct method and path
+  --> http_route_custom_method.jet:24:9
+    |
+ 24 |     mux.custom("PURGE", "/cache", handle)
+    |         ^^^^^^ first registered here
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
 More: jet-lang.dev/e/E2804
 
 Error [jet.AmbiguousRoute]: Two routes both match `PURGE /marked`.
-  --> http_route_custom_method.jet:12:5
+  --> http_route_custom_method.jet:13:5
     |
- 12 |     #Server.Custom("PURGE", "/marked")
+ 13 |     #Server.Custom("PURGE", "/marked")
     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list
- Fix: Remove one registration or use a distinct method and path
+  --> http_route_custom_method.jet:10:5
+    |
+ 10 |     #Server.Custom("PURGE", "/marked")
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ first registered here
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
 More: jet-lang.dev/e/E2804
 
 Error [jet.RouteMethodTokenRefused]: HTTPRouter custom route method must be a static String
-  --> http_route_custom_method.jet:32:19
+  --> http_route_custom_method.jet:33:19
     |
- 32 |     router.custom(names[0], "/cache", handle)
+ 33 |     router.custom(names[0], "/cache", handle)
     |                   ^^^^^
- Why: Router and `#Server.Custom` routes are fully checked while building; only a mux takes a run-time method, checked when it registers
- Fix: Use a literal or compile-time String constant, or register the route on a mux
+ Why: Router and `#Server.Custom` routes are fully checked while building; only an App takes a run-time method, checked when it registers
+ Fix: Use a literal or compile-time String constant, or register the route on a `web.app()`
 More: jet-lang.dev/e/E2808

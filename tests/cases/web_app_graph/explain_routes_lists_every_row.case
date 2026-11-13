@@ -1,0 +1,24 @@
+# `jet explain --routes` lists the App's one route table in registration order:
+# a page, its action, a single route, a mounted struct's marked methods (at
+# the mount, written where each is marked) and a static root, each with what
+# answers it, how it was registered and its file:line.
+fixture: explain_routes_lists_every_row.fixture
+step: jet explain --routes app.jet
+exit: 0
+stdout: ~ "route table — app.jet" # the heading names the entry file
+stdout: ~ "  GET    /                home          page     app.jet:31\n" # a page row
+stdout: ~ "  POST   /actions/save    save          action   app.jet:32\n" # the page's action
+stdout: ~ "  GET    /health          health        handler  app.jet:33\n" # a single route
+stdout: ~ "  GET    /api/orders/:id  Orders.order  marked   app.jet:12\n" # a marked method at its mount, at its mark
+stdout: ~ "  PURGE  /api/orders/:id  Orders.purge  marked   app.jet:17\n" # a marked method with a custom verb
+stdout: ~ "  GET    /public/*        public        static   app.jet:35\n" # the static root
+step: jet explain --routes app.jet --json
+exit: 0
+json: stdout doc $.entry = "app.jet"
+json: stdout doc $.routes #= 6
+json: stdout doc $.routes[0].form = "page"
+json: stdout doc $.routes[2].address = "/health"
+json: stdout doc $.routes[3].target = "Orders.order"
+json: stdout doc $.routes[3].at = "app.jet:12"
+json: stdout doc $.routes[4].verb = "PURGE"
+json: stdout doc $.routes[5].address = "/public/*"

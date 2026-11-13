@@ -11,15 +11,17 @@ package: {
 
 use {
     core: core
-    core.http.[HTTPRequest, HTTPResponse, HTTPRouter]
+    core.http.[HTTPError, HTTPRequest, HTTPResponse, HTTPRouter]
     web_http: core.http
-    core.http.server.[HTTPMux]
+    core.http.server.[HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
     http_server: core.http.server
     live_json: core.encoding.json
     core.encoding.[Dyn]
     // `web.form(Model, action: handler)` elaborates (in sema) into
     // core.web.forms values and calls, so core.web reaches that module.
     core.web.forms.[WebFormTyped]
+    core.prelude.[SourceLocation]
+    rt: jet.runtime.time
 }
 
 // core.web — server-rendered apps on `core.http`.
@@ -39,14 +41,17 @@ virtual: module
 // ── App: the full-stack application builder ──────────────────────────────
 //
 // `web.app()` starts one application graph; every builder call registers
-// into it and returns the builder, and copies share the graph. Sema writes
-// each registered handler as an adapter over `__AppCall`: the adapter
-// decodes the handler's typed route inputs (path parameters, the search
-// record or field, the loader data) and wraps its result as an `__AppReply`,
-// so the graph stores one handler shape. `serve` answers the graph over
-// `core.http.server`: each route is a GET page, each action, form or data
-// function a POST `/actions/<name>` server function, each mount a prefix,
-// and the first assets root `/assets`.
+// into it and returns the builder, and copies share the graph. The graph owns
+// the one route table: pages (GET), server functions (POST
+// `/actions/<name>`), handler mounts, single routes (`app.get`, `app.post`,
+// …), marked methods (`app.mount(value)`) and static files each register a
+// row as their call runs, so two rows with one method and address stop with
+// E2804 at the later call. Sema writes each registered page or server
+// function as an adapter over `__AppCall`: the adapter decodes the handler's
+// typed route inputs (path parameters, the search record or field, the
+// loader data) and wraps its result as an `__AppReply`, so the graph stores
+// one handler shape. `serve`, `bind` and `serve_once` answer the table over
+// `core.http.server`.
 
 /// A rendered page: its document title and its body markup.
 WebPage: struct {
@@ -170,6 +175,8 @@ __AppState: struct {
     // The render mode the next registered route takes.
     mode: String
     explicit_mode: Bool
+    // The one route table every row of the graph registers in.
+    table: HTTPMux
 }
 
 /// One application graph: routes, server functions, mounts and policies.
@@ -178,8 +185,11 @@ App: struct {
     __state: Shared<__AppState>
 
     // `route`, `page` and `layout` land here with the handler's adapter, its
-    // name and its typed input binding.
-    __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
+    // name and its typed input binding; the page answers GET `path`.
+    __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String, at: SourceLocation{#caller}) -> App Never! {
+        target: self.copy()
+        page: path.copy()
+        http_server.__route_add(__app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_page_response(target, page, request)) }), "", at)
         guard := self.__state.guard_edit()
         mode: guard.value.mode.copy()
         explicit: guard.value.explicit_mode
@@ -217,9 +227,12 @@ App: struct {
         self.copy()
     }
 
-    // `action`, `form` and `data`: one POST server function each. The first
-    // action or form after a route is that route's form.
-    __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
+    // `action`, `form` and `data`: one POST `/actions/<name>` server function
+    // each. The first action or form after a route is that route's form.
+    __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, at: SourceLocation{#caller}) -> App Never! {
+        reply: __app_handler(handler)
+        served: reply.copy()
+        http_server.__route_add(__app_table(self), "POST", "/actions/{name}", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_action_response(served, request)) }), "", at)
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
@@ -227,7 +240,7 @@ App: struct {
             route.form = name.copy()
             guard.value.routes[last] = route
         }
-        guard.value.actions.push(__AppAction{name: name, kind: kind, handler: Val(__app_handler(handler)), preload: false})
+        guard.value.actions.push(__AppAction{name: name, kind: kind, handler: Val(reply), preload: false})
         self.copy()
     }
 
@@ -248,15 +261,69 @@ App: struct {
         self.copy()
     }
 
-    // `mount(prefix, handler[, effect[, policy]])`; "" is an absent effect or
-    // policy.
-    __mount: fn(self, prefix: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
+    // `mount(prefix, handler[, effect[, policy]])`: the handler answers GET
+    // and POST under `prefix`; "" is an absent effect or policy.
+    __mount: fn(self, prefix: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String, at: SourceLocation{#caller}) -> App Never! {
         effects := [String]{}
         if effect_name != "" -> effects.push(effect_name.copy())
         security := [String]{}
         if policy != "" -> security.push(policy.copy())
+        mounted: __app_handler(handler)
+        reads: mounted.copy()
+        writes: mounted.copy()
+        base: __app_trim_slashes(prefix)
+        table: __app_table(self)
+        http_server.__route_add(table, "GET", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_mount_response(reads, request)) }), "", at)
+        http_server.__route_add(table, "POST", "{base}/*jet_app_mount_path", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_mount_response(writes, request)) }), "", at)
         guard := self.__state.guard_edit()
-        guard.value.mounts.push(__AppMount{prefix: prefix, handler: __app_handler(handler), effects: effects, security: security})
+        guard.value.mounts.push(__AppMount{prefix: prefix, handler: mounted, effects: effects, security: security})
+        self.copy()
+    }
+
+    // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
+    // path, handler)` and each marked method of `app.mount(value)` land here
+    // with the route's checked contract (sema lowers each). `at` is the
+    // registering call's place, which a refused or duplicate row names.
+    __http_route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+        http_server.__route_add(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        self.copy()
+    }
+
+    // A route whose pattern is a run-time value: it is checked, and listed,
+    // when it registers.
+    __http_route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+        http_server.__route_add_dynamic(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        self.copy()
+    }
+
+    // `app.custom(method, path, handler)` whose method is a run-time value.
+    __http_route_custom: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) -> App Never! {
+        http_server.__route_add_custom(__app_table(self), method, pattern, http_server.__handler(handler), contract, at)
+        self.copy()
+    }
+
+    // `app.middleware(layer)`: the first registered layer is the outermost,
+    // and every row, pages included, answers through it.
+    __http_middleware: fn(self, middleware: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) -> App Never! {
+        http_server.__layer_add(__app_table(self), middleware)
+        self.copy()
+    }
+
+    // GET `{prefix}/*` answers from the files under `root`.
+    static_files: fn(self, prefix: String, root: String, *, index: Bool?{None}, dotfiles: Bool?{None}, follow_links: Bool?{None}, at: SourceLocation{#caller}) -> App Never! {
+        http_server.__static_files(__app_table(self), prefix, root, index, dotfiles, follow_links, at)
+        self.copy()
+    }
+
+    // Answer cross-origin requests by `policy` (`server.cors_policy(…)`).
+    cors: fn(self, policy: HTTPCorsPolicy) -> App Never! {
+        http_server.__layer_add(__app_table(self), fn(next: HTTPHandler) { http_server.__cors_handler(policy, next) })
+        self.copy()
+    }
+
+    // Echo a valid incoming `x-request-id` on the response.
+    request_id: fn(self) -> App Never! {
+        http_server.__layer_add(__app_table(self), fn(next: HTTPHandler) { http_server.__request_id_handler(next) })
         self.copy()
     }
 
@@ -291,8 +358,10 @@ App: struct {
         self.copy()
     }
 
-    assets: fn(self, path: String) -> App Never! {
+    // The first assets root answers GET `/assets/*`.
+    assets: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
         guard := self.__state.guard_edit()
+        if guard.value.assets.len() == 0 -> http_server.__static_files(guard.value.table, "/assets", path, None, None, None, at)
         guard.value.assets.push(path.copy())
         self.copy()
     }
@@ -326,10 +395,23 @@ App: struct {
     facts_json: fn(self) -> String Never! { __app_facts_json(self) }
 
     // Serve on 127.0.0.1 until the process stops: on `JET_APP_PORT` when it
-    // holds a port, else on `port` (8080 for `serve()`).
+    // holds a port, else on `port` (8080 for `serve()`). One ready line names
+    // the address once the socket listens.
     serve: fn(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
     serve_on: fn(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+
+    // A server over the table on `address`; the labelled `tls:` option
+    // serves HTTPS and `deadline:` bounds each connection's reads and writes.
+    // A failed bind is the caller's error to handle.
+    bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
+        http_server.__bind(address, __app_table(self), tls, deadline)
+    }
+
+    // Answer the one connection `listener` accepts next.
+    serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
+        http_server.__serve_once(listener, __app_table(self))
+    }
 }
 
 app: fn() -> App Never! {
@@ -348,6 +430,7 @@ app: fn() -> App Never! {
         hydration: "dev-overlay",
         mode: "csr",
         explicit_mode: false,
+        table: http_server.__mux_new(),
     }}}
 }
 
@@ -363,6 +446,11 @@ __app_state: fn(app: App) -> __AppState Never! {
     guard.value.copy()
 }
 
+__app_table: fn(app: App) -> HTTPMux Never! {
+    guard: app.__state.guard_read()
+    guard.value.table.copy()
+}
+
 __app_port: fn(fallback: Int) -> Int Never! {
     raw: core.sys.__env_value("JET_APP_PORT") ?? return fallback
     text: String.from_bytes(raw) ?? return fallback
@@ -371,31 +459,110 @@ __app_port: fn(fallback: Int) -> Int Never! {
     port
 }
 
-__app_serve: fn(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
-    if port < 1 || port > 65535 -> panic("web app port {port} is out of range")
-    state: __app_state(app)
-    mux: http_server.mux()
-    loop route in state.routes {
-        target: app.copy()
-        path: route.path.copy()
-        mux.__route("GET", route.path, fn(request: HTTPRequest) { Ok(__app_page_response(target, path, request)) }, "")
+// Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
+// restarts the program on every change, and the served pages reload.
+__app_dev: fn() -> Bool Never! {
+    raw: core.sys.__env_value("JET_DEV") ?? return false
+    (String.from_bytes(raw) ?? "") == "1"
+}
+
+// Under `jet dev` the table gains the live-reload row and layer. Every GET
+// no row answers renders the not-found page, unless a catch-all row of the
+// program's own answers it.
+__app_serve: fn(app: App, port: Int) Never! -[Env, Net, FS.Read, Time]> {
+    dev: __app_dev()
+    table: __app_table(app)
+    if dev -> __app_dev_reload(table)
+    if !__app_has_root_catch_all(table) {
+        fallback: app.copy()
+        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #caller)
     }
-    loop action in state.actions {
-        if action.handler == .Val(handler) {
-            mux.__route("POST", "/actions/{action.name}", fn(request: HTTPRequest) { Ok(__app_action_response(handler, request)) }, "")
+    server: __app_listen(table, port, dev)
+    _: server.serve() ?? panic("web app server failed: {err}")
+}
+
+__app_has_root_catch_all: fn(table: HTTPMux) -> Bool Never! {
+    loop route in http_server.__mux_routes(table) {
+        if route.method == "GET" && route.pattern.starts_with("/*") -> return true
+    }
+    false
+}
+
+// How many ports past a busy one `jet dev` tries before it stops.
+C_APP_DEV_PORT_TRIES: 100
+
+// The one listen step of `jet run` and `jet dev`: bind 127.0.0.1:`port`, then
+// print the ready line (`serving http://127.0.0.1:8080`, and ` (live reload)`
+// under `jet dev`). A port another program holds stops `jet run` with E2809;
+// `jet dev` moves on to the next free port and names it in the line.
+__app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net]> HTTPServer Never! {
+    if port < 1 || port > 65535 -> core.rt.__coded_stop("E2809", "The web app can't listen on 127.0.0.1:{port}: a TCP port is a number from 1 to 65535.")
+    candidate := port
+    loop {
+        address: "127.0.0.1:{candidate}"
+        if core.net.tcp_listen(address) == {
+            .Ok(listener) -> {
+                server: http_server.__server_on(listener, mux, None, None)
+                suffix: if dev -> " (live reload)" else -> ""
+                print("serving http://{address}{suffix}")
+                return server
+            }
+            .Err(error) -> {
+                busy: __app_port_busy(error)
+                if dev && busy && candidate < 65535 && candidate - port + 1 < C_APP_DEV_PORT_TRIES {
+                    candidate = candidate + 1
+                } else {
+                    reason: if busy -> "another program is already listening on that port" else -> "{error}"
+                    core.rt.__coded_stop("E2809", "The web app can't listen on {address}: {reason}.")
+                }
+            }
         }
     }
-    loop mount in state.mounts {
-        base: __app_trim_slashes(mount.prefix)
-        handler: mount.handler.copy()
-        mux.__route("GET", "{base}/*jet_app_mount_path", fn(request: HTTPRequest) { Ok(__app_mount_response(handler, request)) }, "")
-        mux.__route("POST", "{base}/*jet_app_mount_path", fn(request: HTTPRequest) { Ok(__app_mount_response(handler, request)) }, "")
+}
+
+__app_port_busy: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .AddressInUse(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
-    if state.assets.len() > 0 -> http_server.static_files(mux, "/assets", state.assets[0])
-    fallback: app.copy()
-    mux.__route("GET", "/*jet_app_unmatched", fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }, "")
-    server: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
-    _: server.serve() ?? panic("web app server failed: {err}")
+}
+
+// Live reload under `jet dev`. Each run of the program answers
+// `/__jet/reload` with its own boot id as one server-sent event, and asks the
+// browser to come back in 300 ms. The script every served page carries keeps
+// the first id it reads and reloads the page when a restarted program answers
+// with another.
+__app_dev_reload: fn(table: HTTPMux) Never! {
+    boot: "{rt.clock_mono_ns()}"
+    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(__app_dev_reload_response(boot)) }), "", #caller)
+    http_server.__layer_add(table, fn(next: HTTPHandler) { __app_dev_layer(next) })
+}
+
+__app_dev_reload_response: fn(boot: String) -> HTTPResponse Never! {
+    typed: web_http.headers_set(web_http.headers(), "content-type", "text/event-stream")
+    fields: web_http.headers_set(typed, "cache-control", "no-cache")
+    payload: web_http.body_text("retry: 300\ndata: {boot}\n\n")
+    http_server.response_body(200, payload, fields)
+}
+
+C_APP_DEV_RELOAD_SCRIPT: "<script>(function(){{var boot=null;new EventSource(\"/__jet/reload\").onmessage=function(event){{if(boot===null){{boot=event.data}}else if(event.data!==boot){{location.reload()}}}}}})()</script>"
+
+__app_dev_layer: fn(next: HTTPHandler) -> HTTPHandler Never! {
+    http_server.__handler(fn(request: HTTPRequest) { __app_dev_page(next, request) })
+}
+
+// An HTML page gets the live-reload script before its closing body tag.
+__app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    answered := next.handle(request) ?? return Err(err)
+    kind: answered.header("content-type") ?? return Ok(answered)
+    if !kind.starts_with("text/html") -> return Ok(answered)
+    document := ""
+    if answered.body == .Text(text) -> document = text.copy()
+    if document == "" -> return Ok(answered)
+    closing: "</body></html>"
+    injected: if document.ends_with(closing) -> "{document.removesuffix(closing)}{C_APP_DEV_RELOAD_SCRIPT}{closing}" else -> "{document}{C_APP_DEV_RELOAD_SCRIPT}"
+    answered.body = web_http.body_text(injected)
+    Ok(answered)
 }
 
 __app_route: fn(app: App, path: String) -> __AppRoute? Never! {
@@ -695,10 +862,16 @@ Session: struct {
 // It returns the opaque typed-model form boundary, not the source forms
 // module's explicit input/action-name record API.
 
-// `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
+// `web.openapi(app)` checks as `__openapi_app(app)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
 openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
     __openapi_mux(web_http.__router_mux(router))
+}
+
+// An App's document: its handler rows; pages, server functions and static
+// files carry no endpoint contract and are not API operations.
+__openapi_app: fn(app: App) -> String OpenAPIError! {
+    __openapi_mux(__app_table(app))
 }
 
 // OpenAPI for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
@@ -709,6 +882,7 @@ openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
 __openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
     routes := [__OpenAPIRoute]{}
     loop route in http_server.__mux_routes(mux) {
+        if route.contract == "" -> next
         routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
     }
     __openapi_document(routes, "Jet HTTP Router", "1")

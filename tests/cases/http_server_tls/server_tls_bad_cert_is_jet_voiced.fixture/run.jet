@@ -4,14 +4,15 @@ package: {
     name: "run"
     authority: { allow: [Net] }
 }
+use web: core.web
 use server: core.http.server
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     // A fallible call propagates when bound with `:` (S7, Docs/spec/syntax-decisions.md:1843-1844),
     // so the outcome is matched on the call itself. Variant patterns take a leading `.`
     // (D-ENUMDOT1, Docs/spec/syntax-decisions.md:858; E0367 without it).
-    if server.serve("127.0.0.1:999999", mux, tls: server.tls("not a cert", "not a key")) == {
+    if mux.bind("127.0.0.1:999999", tls: server.tls("not a cert", "not a key")) == {
         .Ok(_) -> { print("unexpected") }
         .Err(e) -> { print(e) }
     }

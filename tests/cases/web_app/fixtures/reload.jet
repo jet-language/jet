@@ -1,0 +1,74 @@
+// Live-reload client for a web app under `jet dev`: reads the boot id the
+// app's `/__jet/reload` event stream sends, appends a newline to the app's
+// source so `jet dev` restarts it, then asks again until a restarted app
+// answers with another boot id, and records both answers.
+package: {
+    name: "s6_web_reload"
+    authority: { allow: [Env, FS.Write, Net, Time] }
+}
+use {
+    net: core.net
+    time: core.time
+    files: core.files
+    sys: core.sys
+}
+
+reload_env: fn(name: String) -> String {
+    sys.get(name) ?? panic("missing {name}")
+}
+
+// One GET of `/__jet/reload`: the response text, or None while nothing
+// listens on the port.
+reload_ask: fn(port: String) -> String? {
+    stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    request: "GET /__jet/reload HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
+    stream.write_all(request.bytes()) ?? return None
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? return None
+    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    bytes := [U8]{}
+    loop {
+        part: net.tcp_read_bytes(stream, 8192) ?? return None
+        if part.len() == 0 -> break
+        loop byte in part -> bytes.push(byte)
+    }
+    String.from_bytes(bytes)
+}
+
+// The `data:` value of an event-stream response.
+reload_boot: fn(response: String) -> String {
+    loop line in response.split("\n") {
+        if line.starts_with("data: ") -> return line.removeprefix("data: ").trim().copy()
+    }
+    ""
+}
+
+run: fn() {
+    port: reload_env("S6_WEB_PORT")
+    app: reload_env("S6_WEB_RELOAD_APP")
+    output: reload_env("S6_WEB_RESPONSE")
+    deadline: time.instant() + 60s
+    first := ""
+    loop first == "" {
+        if reload_ask(port) == .Val(response) -> first = response.copy()
+        if first == "" {
+            if time.instant() >= deadline -> panic("web app did not listen on {port}")
+            time.sleep(50ms)
+        }
+    }
+    boot: reload_boot(first)
+    files.append_all(app, "\n") ?? panic("append source newline")
+    later := ""
+    loop later == "" {
+        if reload_ask(port) == .Val(response) {
+            next_boot: reload_boot(response)
+            if next_boot != "" && next_boot != boot -> later = response.copy()
+        }
+        if later == "" {
+            if time.instant() >= deadline -> panic("the restarted app did not answer with a new boot id")
+            time.sleep(100ms)
+        }
+    }
+    files.write(output, "{first}\n--- after the edit ---\n{later}") ?? panic("record responses")
+    print("reloaded")
+}

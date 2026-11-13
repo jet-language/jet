@@ -1,25 +1,25 @@
 Error [jet.InvalidRoute]: Invalid HTTP route `/files/{name}`: use `:name` or final `*name`; braces are not route markers
-  --> http_route_path_type.jet:15:16
+  --> http_route_path_type.jet:16:16
     |
- 15 |     router.get(Path{"/files/{{name}}"}, named)
+ 16 |     router.get(Path{"/files/{{name}}"}, named)
     |                ^^^^
  Why: Route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
  Fix: Use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
 More: jet-lang.dev/e/E2805
 
 Error [jet.InvalidRoute]: HTTPRouter route path must be a static String or Path
-  --> http_route_path_type.jet:18:16
+  --> http_route_path_type.jet:19:16
     |
- 18 |     router.get(Path{"/area/{area}/:key"}, keyed)
+ 19 |     router.get(Path{"/area/{area}/:key"}, keyed)
     |                ^^^^
- Why: Router endpoint contracts are fully checked while building; mux value routes may be computed at runtime
- Fix: Use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a mux
+ Why: Router endpoint contracts are fully checked while building; App routes may be computed at runtime
+ Fix: Use a literal, a compile-time String constant or a Path without holes, or register the dynamic route on a `web.app()`
 More: jet-lang.dev/e/E2805
 
 Error [jet.BindingTypeMismatch]: This needs String, but the value is Int
-  --> http_route_path_type.jet:21:13
+  --> http_route_path_type.jet:22:13
     |
- 21 |     mux.get(42, keyed)
+ 22 |     mux.get(42, keyed)
     |             ^^
  Why: The value here does not have the type required by this declaration
  Fix: Use a value of the required type or convert it explicitly

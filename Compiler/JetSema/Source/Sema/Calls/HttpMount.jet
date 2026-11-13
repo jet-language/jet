@@ -14,6 +14,7 @@ use jet_foundation.[
     Marker,
     NamedSpan,
     Span,
+    StrPart,
     Symbol,
     SymbolKind,
     TLetTy,
@@ -50,11 +51,23 @@ sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
         flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
+// `app.mount(value)` and `app.mount(prefix, value)`: each marked method of
+// the struct value registers as the single route its marker names, under the
+// static `prefix` when there is one; the call is the App, so it chains.
 sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if args.len() != 1 {
-        diagnostics.push(sema_call_arity_diagnostic("mount", 1, args.len(), false, span))
+    if args.len() != 1 && args.len() != 2 {
+        diagnostics.push(sema_call_arity_diagnostic("mount", 2, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    prefix := ""
+    if args.len() == 2 {
+        text: sema_http_route_constant_string(args[0].expr, environment, program, scopes) ?? {
+            diagnostics.push(sema_error("E2805", args[0].span, "app.mount prefix must be a static String", "a mounted struct's routes are fully checked while building, prefix included", "use a literal or compile-time String constant"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        prefix = sema_http_mount_prefix(text)
+    }
+    value_arg: args[args.len() - 1]
     sema_scope_enter(scopes, state, "http.mount:{span.start}")
     body := [TStmt]{}
     mux_name: "__jet_http_mount_mux_{span.start}"
@@ -69,7 +82,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     body.push(TStmt.Let{local: mux_local, let_ty: TLetTy.Inferred,
         init: receiver_value, gc_promotion: None, gc_transferred: false, span: span})
     value_name: "__jet_http_mount_value_{span.start}"
-    binding: ast_binding(value_name, span, false, args[0].expr, None)
+    binding: ast_binding(value_name, span, false, value_arg.expr, None)
     checked_binding := sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics)
     if checked_binding == .Val(statement) {
         body.push(statement)
@@ -95,8 +108,16 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     marked_count: if custom -> 2 else -> 1
                     if marker.args.len() != marked_count || marked.len() != marked_count -> next
                     if custom && sema_http_route_constant_string(marked[0].expr, environment, program, scopes) == None {
-                        diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only a mux takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route on a mux"))
+                        diagnostics.push(sema_error("E2808", marked[0].span, "`#Server.Custom` route method must be a static String", "a marked route is fully checked while building; only `app.custom` takes a run-time method, checked when it registers", "use a literal or compile-time String constant, or register the route with `app.custom`"))
                         next
+                    }
+                    if prefix != "" {
+                        path_at: marked_count - 1
+                        path: sema_http_route_constant_string(marked[path_at].expr, environment, program, scopes) ?? {
+                            diagnostics.push(sema_error("E2805", marked[path_at].span, "a route marker under a mount prefix needs a static path", "the mounted route's address is the prefix and the marker's path, checked while building", "use a literal or compile-time String constant"))
+                            next
+                        }
+                        marked[path_at] = sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{prefix}{path}"}}, span: marked[path_at].span, id: AST_NODE_GENERATED}, marked[path_at].span)
                     }
                     params := [LambdaParam]{}
                     call_args := [CallArg]{}
@@ -123,12 +144,22 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                 panic("mount has no registration graph")
             }
         } else {
-            diagnostics.push(sema_error("E2805", args[0].span, "mux.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #Server.Get or another core.http.server verb marker"))
+            diagnostics.push(sema_error("E2805", value_arg.span, "app.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #Server.Get or another core.http.server verb marker"))
         }
     }
+    // The block's value is the App, so `app.mount(value)` chains.
+    body.push(TStmt.ExprStmt{value: sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), span: span})
     sema_single_use_leave_scope(scopes, state, diagnostics)
-    value: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.InlineBlock{body: body}, span)
+    value: sema_tree_node(receiver_value.ty, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// A mount prefix as it leads each mounted path: no trailing slash, so `/api`
+// and `/api/` both mount `#Get("/orders")` at `/api/orders`.
+sema_http_mount_prefix: fn(text: String) -> String Never! {
+    end := text.len()
+    loop end > 0 && text.slice(end - 1, end) == "/" -> end = end - 1
+    text.slice(0, end)
 }
 
 sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: String, mounted: &[String]) Never! {
@@ -188,8 +219,8 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
                     if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None -> next
                     diagnostics.push(sema_lint("E2818", graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index].span,
                         "HTTP route method `{graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.name}` belongs to a struct that is never mounted.",
-                        "Route markers record facts; only an explicit mux.mount(value) exposes that struct's routes.",
-                        "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to mux.mount, or remove the route marker."))
+                        "Route markers record facts; only an explicit app.mount(value) exposes that struct's routes.",
+                        "Pass a value of `{graph.modules[module_row_index].nominals[nominal_index].symbol.name}` to app.mount, or remove the route marker."))
                 }
             }
         }

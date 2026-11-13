@@ -281,7 +281,7 @@ HTTPRequest: struct {
 
     // The answer when a typed route input does not decode.
     __route_rejected: fn(self) -> HTTPResponse Never! {
-        payload: body_text("400 Bad Request")
+        payload: body_text("400 {reason_phrase(400)}")
         fields: headers()
         __response(400, payload, fields)
     }
@@ -588,7 +588,7 @@ __response: fn(status: Int, body: &&Body, fields: &&Headers) -> HTTPResponse Nev
 __text_response: fn(status: Int, text: String) -> HTTPResponse Never! {
     fields: headers()
     if status < 100 || status > 599 {
-        fallback: body_text("500 Internal Server Error")
+        fallback: body_text("500 {reason_phrase(500)}")
         return __response(500, fallback, fields)
     }
     payload: body_text(text)
@@ -665,27 +665,27 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
 /// A checked route table answered in process: `router.get(pattern, handler)`
 /// and its sibling verbs register typed handlers, `dispatch` answers a
 /// request without a listener, and `web.openapi(router)` renders the same
-/// routes. Copies share the one route table; routes match as a mux's do.
+/// routes. Copies share the one route table; routes match as an App's do.
 HTTPRouter: struct {
     __mux: HTTPMux
     __state: Shared<__HTTPRouterState>
 
     // `router.get(pattern, handler)` and its sibling verbs land here with the
     // route's checked contract (sema sema_call_try_http_router). The route
-    // registers on the router's mux, so duplicates, matching and
-    // `web.openapi` are the mux's; the handler keeps its `Net`-only type.
-    // `at` is the registering call's place, handed on to the mux.
+    // registers in the router's route table, so duplicates, matching and
+    // `web.openapi` are the table's; the handler keeps its `Net`-only type.
+    // `at` is the registering call's place, handed on to the table.
     __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{#caller}) Never! -[Net]> {
         state: self.__state
         index: __router_handler_count(self.__state)
-        self.__mux.__route(method, pattern, fn(request: HTTPRequest) { __router_call(state, index, request) }, contract, at)
+        routes.__route_add(self.__mux, method, pattern, routes.__handler(fn(request: HTTPRequest) { __router_call(state, index, request) }), contract, at)
         guard := self.__state.guard_edit()
         guard.value.handlers.push(__HTTPRouterHandler{call: handler.move()})
     }
 }
 
 // A router's handlers, in registration order: the `index`th is the handler
-// of the mux's `index`th route.
+// of the table's `index`th route.
 __HTTPRouterState: struct {
     handlers: [__HTTPRouterHandler]
 }
@@ -1020,6 +1020,9 @@ __body_all: fn(body: Body) -[Net]> [U8] HTTPError! {
     Ok(body.stream.held)
 }
 
+// The one reason-phrase table: the server's status lines, its own error
+// pages and its read-error replies all take their reason text from here. A
+// code the table does not register has an empty reason (RFC 9112 4).
 reason_phrase: fn(code: Int) -> String Never! {
     if code == {
         100 -> return "Continue"
@@ -1084,12 +1087,8 @@ reason_phrase: fn(code: Int) -> String Never! {
         508 -> return "Loop Detected"
         510 -> return "Not Extended"
         511 -> return "Network Authentication Required"
-        else -> { _ := 0 }
+        else -> return ""
     }
-    if code >= 500 -> return "Error"
-    if code >= 400 -> return "Bad Request"
-    if code >= 300 -> return "Redirect"
-    return "OK"
 }
 
 ascii_upper: fn(text: String) -> String Never! {

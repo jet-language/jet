@@ -1,0 +1,21 @@
+// `app.bind(address, deadline:)` binds 127.0.0.1:8080. The program holds that
+// port itself first, so the bind fails; the failure comes back to the caller
+// as an `HTTPError` it matches, and the program goes on to its last line.
+package: {
+    name: "run"
+    authority: { allow: [IO, Net, Time.Wait] }
+}
+use {
+    net: core.net
+    web: core.web
+}
+
+run: fn() {
+    _held: net.tcp_listen("127.0.0.1:8080") ?? panic("hold the port: {err}")
+    app: web.app()
+    if app.bind("127.0.0.1:8080", deadline: 5s) == {
+        .Ok(_) -> print("unexpected: bound a held port")
+        .Err(error) -> print("serve: {error}")
+    }
+    print("after serve")
+}

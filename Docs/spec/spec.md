@@ -5750,7 +5750,7 @@ ServeArgs: struct {
 }
 
 run: fn(args: ServeArgs) {
-    http.serve(routes(), port: args.port)
+    routes().bind("127.0.0.1:{args.port}") ?? return
 }
 ```
 

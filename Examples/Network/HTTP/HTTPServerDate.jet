@@ -1,11 +1,12 @@
 // Every server response carries one Date header in
 // IMF-fixdate form, read from the program clock; a handler-set Date passes
-// through unchanged. serve_once_listener keeps golden output order fixed.
+// through unchanged. app.serve_once keeps golden output order fixed.
 package: {
     name: "http_server_date"
     authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 use {
+    web: core.web
     http: core.http.client
     server: core.http.server
     net: core.net
@@ -28,14 +29,14 @@ imf_fixdate_shape: fn(value: String) -> Bool Never! {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(req: HTTPRequest) { handle_root(req) })
     mux.get("/dated", fn(req: HTTPRequest) { handle_dated(req) })
     t: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
     root: http.get("http://{addr}/") ?? panic("GET / failed")
     print("root date shape: {imf_fixdate_shape(root.header("date") ?? "")}")

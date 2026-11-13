@@ -1,9 +1,10 @@
+use web: core.web
 use server: core.http.server
 
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     // A standard method spelled exactly has its own verb, `mux.get`.
     mux.custom("GET", "/cache", handle)
 }

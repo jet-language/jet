@@ -296,7 +296,7 @@ sema_call_try_http_static: fn(
 }
 
 sema_call_http_known_receiver_type: fn(name: String) -> Bool Never! {
-    name == "HTTPClient" || name == "HTTPMux" || name == "HTTPRouter" || name == "Headers"
+    name == "HTTPClient" || name == "HTTPRouter" || name == "Headers"
 }
 
 sema_call_http_method_result: fn(name: String, method: String, count: Int) -> Type? {
@@ -434,32 +434,37 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
     parameter := SemaCallParam{label: "middleware", name: "middleware", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(callback_type), variadic: false}
     ownership := sema_ownership_check_method_call(state, "middleware", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_http_mux_source_call(receiver_value, "__middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    sema_call_http_mux_source_call(receiver_value, "__http_middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// Mux registration lowers to the mux's own source methods; the checked
+// A route registration lowers to its receiver's own source method (an App's
+// `__http_route…` and `__http_middleware`, a router's `__route`); the checked
 // arguments carry their conventions. A parameter the registration leaves out
 // takes its declared default, which is `#caller` (the `at: SourceLocation` of
-// `HTTPMux.__route`): the place of this call, as at any call.
+// the method): the place of this call, as at any call. An App method returns
+// the App, so registrations chain; a router's registers Net.
 sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: &&[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    owner: sema_call_http_nominal_leaf(receiver_value.ty)
     if program.registration_graph == .Val(graph) {
         candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, diagnostics)
-        candidate := candidates.pop() ?? panic("HTTPMux.{method} is not registered")
-        params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("HTTPMux.{method} has no parameter list")
+        candidate := candidates.pop() ?? panic("{owner}.{method} is not registered")
+        params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("{owner}.{method} has no parameter list")
         filled := args.move()
         loop index in filled.len()..<params.len() {
-            reference: params[index].default_ref ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no default")
-            declared: sema_registration_resolve_default(graph, reference) ?? panic("HTTPMux.{method} parameter `{params[index].name}` lost its default")
-            if !sema_site_is_caller(declared) -> panic("HTTPMux.{method} parameter `{params[index].name}` has a default other than `#caller`")
-            declared_ty: params[index].ty ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no type")
+            reference: params[index].default_ref ?? panic("{owner}.{method} parameter `{params[index].name}` has no default")
+            declared: sema_registration_resolve_default(graph, reference) ?? panic("{owner}.{method} parameter `{params[index].name}` lost its default")
+            if !sema_site_is_caller(declared) -> panic("{owner}.{method} parameter `{params[index].name}` has a default other than `#caller`")
+            declared_ty: params[index].ty ?? panic("{owner}.{method} parameter `{params[index].name}` has no type")
             location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
         }
-        built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
-        sema_call_http_record_effect("Net", "HTTPMux.{method}", built.ty, span, environment, program, scopes, context, diagnostics)
+        app: owner == "App"
+        result_type: if app -> receiver_value.ty.copy() else -> Type.Named{name: "Unit"}
+        built := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
+        if !app -> sema_call_http_record_effect("Net", "{owner}.{method}", built.ty, span, environment, program, scopes, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
     } else {
-        panic("HTTPMux.{method} needs a registration graph")
+        panic("{owner}.{method} needs a registration graph")
     }
 }
  
@@ -481,11 +486,10 @@ sema_call_try_http_method: fn(
 ) -> SemaMethodSpecialCheck {
     name: sema_call_http_nominal_leaf(receiver_value.ty)
     if !sema_call_http_known_receiver_type(name) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if name == "HTTPRouter" || name == "HTTPMux" {
+    if name == "HTTPRouter" {
         route := sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if route.handled -> return route
     }
-    if name == "HTTPMux" && method == "middleware" -> return sema_call_http_middleware(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 
     result_type := sema_call_http_method_result(name, method, args.len())
     if result_type == None -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -790,19 +794,19 @@ sema_call_http_transport: fn(record: CoreCallRecord, args: [CallArg], type_args:
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
-// `web.openapi(mux)`: an HTTPMux argument checks as the source
-// `core.web.__openapi_mux(routes: HTTPMux)`, which renders the checked
-// contracts the mux's routes were registered with. Every other argument
-// stays on the source-owned `openapi(router: HTTPRouter)`. The argument's
-// type is probed (nothing is kept), then the chosen target checks it once.
+// `web.openapi(app)`: an App argument checks as the source
+// `core.web.__openapi_app(app: App)`, which renders the checked contracts
+// the App's handler rows were registered with. Every other argument stays on
+// the source-owned `openapi(router: HTTPRouter)`. The argument's type is
+// probed (nothing is kept), then the chosen target checks it once.
 sema_call_http_web_openapi_mux: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if target.symbol.name != "openapi" || args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
     identity: sema_call_core_module_identity(environment, program, "core.web") ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if identity != target.symbol.module_name -> return SemaMethodSpecialCheck{handled: false, value: None}
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if sema_call_http_nominal_leaf(probed.ty) != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    mux_target: sema_call_core_source_target(environment, program, identity, "__openapi_mux", [Type]{}, span, true, diagnostics) ?? panic("core.web.__openapi_mux is not registered")
+    if !sema_app_is_core_app(probed.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    mux_target: sema_call_core_source_target(environment, program, identity, "__openapi_app", [Type]{}, span, true, diagnostics) ?? panic("core.web.__openapi_app is not registered")
     SemaMethodSpecialCheck{handled: true, value: sema_call_core_check_source_owned(mux_target, qualified_name, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }
 

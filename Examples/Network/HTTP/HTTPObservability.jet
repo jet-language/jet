@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     files: core.files
     client: core.http.client
     server: core.http.server
@@ -21,10 +22,10 @@ run: fn() {
         .Ok(_) -> print("static:ok")
         .Err(_) -> print("static:error")
     }
-    mux: server.mux()
-    if server.serve_once("127.0.0.1:65536", mux) == {
-        .Ok(_) -> print("serve-once:ok")
-        .Err(_) -> print("serve-once:error")
+    app: web.app()
+    if app.bind("127.0.0.1:65536") == {
+        .Ok(_) -> print("bind:ok")
+        .Err(_) -> print("bind:error")
     }
     files.remove_all(root) ?? return
 }

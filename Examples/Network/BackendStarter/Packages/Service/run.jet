@@ -13,6 +13,7 @@
 // deployment's stop signal, stops accepting, lets the request in progress
 // finish and ends with a drain report.
 use {
+    web: core.web
     backend
     contract
     auth: core.auth
@@ -82,15 +83,15 @@ run: fn() {
     stored: backend.register_account(config.operator, crypto.Secret.from_text(config.password)) ?? process.fail(CONFIG_ERROR, "operator account: {err}")
     operator: config.operator
 
-    mux: http_server.mux()
-    http_server.request_id(mux)
+    mux: web.app()
+    mux.request_id()
     // Liveness and readiness: the service answers only once it is migrated
     // and listening.
     mux.get("/health", fn(req: HTTPRequest) { http_server.json(200, contract.Health{status: "ok", api: contract.API_VERSION}) })
     mux.post("/login", fn(req: HTTPRequest) { login(req, operator.copy(), stored.copy()) })
     mux.post("/orders", fn(req: HTTPRequest) { create_order(req, orders.copy()) })
 
-    bound: http_server.bind(config.address, mux, deadline: 5s) ?? process.fail(CONFIG_ERROR, "listen on {config.address}: {err}")
+    bound: mux.bind(config.address, deadline: 5s) ?? process.fail(CONFIG_ERROR, "listen on {config.address}: {err}")
     address: bound.local_addr() ?? process.fail(CONFIG_ERROR, "listener address: {err}")
     // SIGTERM cancels the process: `serve` stops accepting new connections and
     // returns its report once the request in progress has been answered.

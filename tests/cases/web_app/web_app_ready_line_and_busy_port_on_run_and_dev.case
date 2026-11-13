@@ -1,0 +1,43 @@
+# A web app prints one ready line naming its address once
+# the socket listens. `jet run` prints `serving http://127.0.0.1:PORT` and
+# serves no dev extras; a second `jet run` on the port the first one holds
+# stops with E2809, which names the port and how to choose another. `jet dev`
+# goes through the same listen step (Core/Web/Web.jet __app_listen): on the
+# busy port it moves to the next free one and names it, with ` (live reload)`.
+mkdir: client
+copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
+copy: {root}/Examples/Apps/Web/AppHello.jet app.jet
+spawn server: jet run {root}/Examples/Apps/Web/AppHello.jet
+env: JET_APP_PORT={free-port:app}
+stdout: file server.stdout
+stderr: file server.stderr
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:app}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/page.http
+exit: 0
+file: page.http ^= "HTTP/1.1 200" # the app answers once the ready line is out
+file: page.http !~ "/__jet/reload" # `jet run` serves no live-reload script
+step busy: jet run {root}/Examples/Apps/Web/AppHello.jet
+env: JET_APP_PORT={free-port:app}
+exit: 70
+stdout: = ""
+stderr: ~ "Stop [E2809]: The web app can't listen on 127.0.0.1:{free-port:app}: another program is already listening on that port." # the registered diagnostic names the port
+stderr: ~ " Fix: Stop the program that holds the port, or choose another port" # and how to choose another
+stderr: !~ "panic" # a registered stop, not a panic
+stderr: !~ "E3001" # nor a generic program-side stop
+spawn dev: jet dev {work}/app.jet
+env: JET_APP_PORT={free-port:app}
+stdout: file dev.stdout
+stderr: file dev.stderr
+poll moved: cat {work}/dev.stdout until exit: 0 && stdout: ~ " (live reload)\n" timeout 120s every 100ms # `jet dev` printed its ready line
+signal dev: KILL
+wait: dev
+exit: any # the case kills the dev loop; its status is not part of this proof
+file: dev.stdout ~ "serving http://127.0.0.1:" # the dev ready line names its address
+file: dev.stdout !~ "serving http://127.0.0.1:{free-port:app} " # on another port than the busy one
+signal server: KILL
+wait: server
+exit: any # the case kills the server; its status is not part of this proof
+file: server.stdout = "serving http://127.0.0.1:{free-port:app}\n" # the `jet run` ready line, and nothing else

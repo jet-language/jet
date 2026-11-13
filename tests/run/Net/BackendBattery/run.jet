@@ -1,4 +1,5 @@
 use {
+    web: core.web
     backend
     crypto: core.crypto
     files: core.files
@@ -105,11 +106,11 @@ run: fn() {
     loop gate in backend.core_gates() -> print("gate:{gate.ticket}:available={gate.available}")
 
     metrics: Shared{Metrics{requests: 0, errors: 0}}
-    mux: http_server.mux()
-    http_server.request_id(mux)
+    mux: web.app()
+    mux.request_id()
     mux.get("/health", fn(req: HTTPRequest) { health(req, metrics) })
     mux.post("/orders", fn(req: HTTPRequest) { create_order(req, session_id, queue_path, metrics) })
-    bound: http_server.bind("127.0.0.1:0", mux, deadline: 2s) ?? panic("server bind")
+    bound: mux.bind("127.0.0.1:0", deadline: 2s) ?? panic("server bind")
     address: bound.local_addr() ?? panic("server address")
     serving: task { bound.serve() }
     time.sleep(20ms)

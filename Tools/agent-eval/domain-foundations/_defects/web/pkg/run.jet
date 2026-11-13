@@ -4,6 +4,7 @@ package: {
 }
 
 use {
+    web: core.web
     auth: core.auth
     db: core.db
     client: core.http.client
@@ -121,7 +122,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     cache_version := Cell.new(0)
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(req: HTTPRequest) {
         _path: req.path()
         return Ok(server.response(200, "<h1>Orders</h1><a href=\"/orders\">list</a>"))
@@ -131,17 +132,17 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     mux.post("/orders", fn(req: HTTPRequest) { create_order(db_path, cache_version, req) })
     mux.post("/login", fn(req: HTTPRequest) { login(req) })
     mux.get("/protected", fn(req: HTTPRequest) { protected(session_id, req) })
-    server.static_files(mux, "/assets", "$HOME/.cache/jet-luna/dx3/area-web/pkg/public")
+    mux.static_files("/assets", "$HOME/.cache/jet-luna/dx3/area-web/pkg/public")
 
     t: task {
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
     }
 
     home: client.get("http://{addr}/")

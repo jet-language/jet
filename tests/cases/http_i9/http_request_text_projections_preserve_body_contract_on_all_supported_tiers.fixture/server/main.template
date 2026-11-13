@@ -1,5 +1,6 @@
 
 use {
+    web: core.web
     server: core.http.server
     net: core.net
 }
@@ -80,18 +81,18 @@ request_text_handler: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
-    mux: server.mux()
+    mux: web.app()
     mux.post("/default", request_text_handler)
     mux.post("/explicit", request_text_handler)
     mux.post("/over", request_text_handler)
     mux.post("/consumed", request_text_handler)
     mux.post("/binary", request_text_handler)
     server_task: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     server_task.join() ?? panic("join")
 }

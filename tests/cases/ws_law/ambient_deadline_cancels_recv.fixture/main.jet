@@ -1,4 +1,5 @@
 use {
+    web: core.web
     net: core.net
     ws: core.net.ws
     server: core.http.server
@@ -13,9 +14,9 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/live", fn(req: HTTPRequest) { handle(req) })
-    serving: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    serving: task { mux.serve_once(listener) ?? panic("serve") }
     client: ws.connect("ws://{addr}/live") ?? panic("connect")
     client.send_text("0123456789") ?? panic("client send")
     reply: client.recv() ?? panic("client recv")

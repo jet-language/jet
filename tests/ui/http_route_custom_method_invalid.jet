@@ -1,9 +1,10 @@
+use web: core.web
 use server: core.http.server
 
 handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     // A space is not a token character.
     mux.custom("PU RGE", "/cache", handle)
 }

@@ -25,7 +25,7 @@ CacheRoutes: struct {
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/cache/:key", fn(key: String) { Ok(server.response(200, "cached {key}")) })
     mux.custom("PURGE", "/cache/:key", fn(key: String) { Ok(server.response(200, "purged {key}")) })
     // `get` is a custom method of its own, not GET.
@@ -54,7 +54,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     }
     serving: task {
         loop _ in 0..<9 {
-            server.serve_once_listener(listener, mux)
+            mux.serve_once(listener)
         }
     }
     loop send in sends {

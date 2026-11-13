@@ -2,7 +2,7 @@
 // handle (a borrowed resource) and a plain String. The handler runs once per
 // request on the server task; the enclosing function keeps using the same
 // scope afterwards, so the captured handle shares the one connection.
-// serve_once_listener drives one connection at a time so golden output order
+// app.serve_once drives one connection at a time so golden output order
 // stays fixed.
 package: {
     name: "http_handler_captures"
@@ -10,6 +10,7 @@ package: {
 }
 
 use {
+    web: core.web
     db: core.db
     http: core.http.client
     server: core.http.server
@@ -32,15 +33,15 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
 
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
     addr: listener.local_addr() ?? panic("address failed")
-    mux: server.mux()
+    mux: web.app()
     mux.post("/order", fn(req: HTTPRequest) {
         user: req.header("x-user") ?? "anonymous"
         scope.execute(SQL{"INSERT INTO orders (user) VALUES ({user})"}) ?? panic("insert")
         Ok(server.response(200, "{greeting} {user}"))
     })
     t: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
     print(post_order(addr, "alice"))
     print(post_order(addr, "bob"))

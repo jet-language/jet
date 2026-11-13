@@ -1127,10 +1127,12 @@ sema_app_literal_text: fn(expression: Expr) -> String? Never! {
     None
 }
 
-// One route the App chain registers: its canonical path, where it came from
-// (`builder` or the convention file), the span it reports at, and whether a
-// `.routes(from:)` convention file made it.
+// One row the App chain registers: its method (`GET` for a page or a
+// convention file), its canonical path, where it came from (`builder` or the
+// convention file), the span it reports at, and whether a `.routes(from:)`
+// convention file made it.
 SemaAppRouteRegistration: struct {
+    verb: String
     path: String
     provenance: String
     span: Span
@@ -1146,66 +1148,93 @@ SemaAppRoutePart: struct {
 // the call makes is checked against the registrations earlier in its builder
 // chain and its own earlier files, so each pair is checked once, at the later
 // call. A pair reports as the graph orders it: builder entries before
-// convention files, and otherwise in chain order.
-sema_app_check_route_registrations: fn(receiver: Expr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
-    if args.len() == 0 -> return
-    text: sema_app_literal_text(args[0].expr) ?? return
+// convention files, and otherwise in chain order. Whether it reported.
+sema_app_check_route_registrations: fn(receiver: Expr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     roots: sema_app_route_roots(environment, graph)
     current := [SemaAppRouteRegistration]{}
     if method == "routes" {
-        if args.len() != 1 -> return
+        if args.len() != 1 -> return false
+        text: sema_app_literal_text(args[0].expr) ?? return false
         current = sema_app_expand_route_root(roots, text, span, diagnostics)
     } else {
-        current.push(SemaAppRouteRegistration{path: sema_app_canonical_route_path(text), provenance: "builder", span: span, convention: false})
+        current.push(sema_app_builder_registration(method, args, span) ?? return false)
     }
     pool := [SemaAppRouteRegistration]{}
     sema_app_chain_registrations(receiver, roots, pool)
+    reported := false
     loop registration in current {
-        if sema_app_route_conflict(pool, registration, diagnostics) -> next
+        if sema_app_route_conflict(pool, registration, diagnostics) {
+            reported = true
+            next
+        }
         pool.push(registration)
     }
+    reported
+}
+
+// The row one builder call registers when its address is a literal: a page
+// (`route`, `page`, `layout`) answers GET; `app.get(path, handler)` and its
+// sibling verbs answer their verb, and `app.custom(token, path, handler)`
+// its literal token.
+sema_app_builder_registration: fn(method: String, args: [CallArg], span: Span) -> SemaAppRouteRegistration? {
+    verb := ""
+    path_index := 0
+    if method == "route" || method == "page" || method == "layout" {
+        verb = "GET"
+    } else if method == sema_http_route_custom_verb() {
+        if args.len() != 3 -> return None
+        verb = sema_app_literal_text(args[0].expr) ?? return None
+        path_index = 1
+    } else if sema_http_route_verbs().contains(method) {
+        verb = sema_http_route_method_name(method)
+    } else {
+        return None
+    }
+    if args.len() <= path_index -> return None
+    text: sema_app_literal_text(args[path_index].expr) ?? return None
+    Val(SemaAppRouteRegistration{verb: verb, path: sema_app_canonical_route_path(text), provenance: "builder", span: span, convention: false})
 }
 
 sema_app_route_conflict: fn(pool: [SemaAppRouteRegistration], registration: SemaAppRouteRegistration, diagnostics: &[Diagnostic]) -> Bool {
     loop previous in pool {
-        if previous.path != registration.path -> next
+        if previous.verb != registration.verb || previous.path != registration.path -> next
         swap: previous.convention && !registration.convention
         first: if swap -> registration else -> previous
         second: if swap -> previous else -> registration
-        row: diagnostic_registry_row("E2807") ?? panic("E2807 must have a registry row")
-        diagnostics.push(sema_error("E2807", second.span, "Route `{second.path}` is registered both by `{first.provenance}` and `{second.provenance}`", row.why, row.fix))
-        if first.span != second.span {
-            diagnostics.push(sema_error("E2807", first.span, "Earlier registration of route `{first.path}`", "both spans are kept so the provenance of each registration stays visible", "delete or rename this registration"))
-        }
+        diagnostics.push(sema_app_route_duplicate(first, second, "the other registration, by `{first.provenance}`"))
         return true
     }
     loop previous in pool {
-        if !sema_app_routes_overlap(previous.path, registration.path) -> next
+        if previous.verb != registration.verb || !sema_app_routes_overlap(previous.path, registration.path) -> next
         if sema_app_route_static_parts(previous.path) != sema_app_route_static_parts(registration.path) || sema_app_route_parts(previous.path).len() != sema_app_route_parts(registration.path).len() -> next
         swap: previous.convention && !registration.convention
         first: if swap -> registration else -> previous
         second: if swap -> previous else -> registration
-        diagnostics.push(sema_error("E2807", second.span, "Routes `{first.path}` and `{second.path}` are ambiguous", "the route graph matches static parts before dynamic ones, so two equally specific overlapping patterns have no deterministic owner", "make one pattern more specific, or remove the duplicate dynamic shape"))
+        diagnostics.push(sema_app_route_duplicate(first, second, "the other registration, `{first.path}` by `{first.provenance}`"))
         return true
     }
     false
 }
 
-// The routes the builder chain ending at `expression` registers, in chain
+// Two rows of the App's one table with one method and address.
+sema_app_route_duplicate: fn(first: SemaAppRouteRegistration, second: SemaAppRouteRegistration, first_label: String) -> Diagnostic {
+    source: if second.convention -> second.provenance else -> ""
+    sema_http_route_duplicate(second.verb, second.path, second.span, source, first.span, first_label)
+}
+
+// The rows the builder chain ending at `expression` registers, in chain
 // order. Convention files a root cannot route are left out; their own call
 // reports them.
 sema_app_chain_registrations: fn(expression: Expr, roots: [AppRouteRoot], registrations: &[SemaAppRouteRegistration]) {
     if expression == .MethodCall(receiver, method, method_span, _, _, args, _) {
         sema_app_chain_registrations(receiver, roots, registrations)
-        if args.len() == 0 -> return
-        text: sema_app_literal_text(args[0].expr) ?? return
         if method == "routes" && args.len() == 1 {
+            text: sema_app_literal_text(args[0].expr) ?? return
             unreported := [Diagnostic]{}
             loop registration in sema_app_expand_route_root(roots, text, method_span, unreported) {
                 if !sema_app_route_conflict(registrations, registration, unreported) -> registrations.push(registration)
             }
-        } else if method == "route" || method == "page" || method == "layout" {
-            registration: SemaAppRouteRegistration{path: sema_app_canonical_route_path(text), provenance: "builder", span: method_span, convention: false}
+        } else if sema_app_builder_registration(method, args, method_span) == .Val(registration) {
             unreported := [Diagnostic]{}
             if !sema_app_route_conflict(registrations, registration, unreported) -> registrations.push(registration)
         }
@@ -1236,7 +1265,7 @@ sema_app_expand_route_root: fn(roots: [AppRouteRoot], name: String, span: Span, 
             diagnostics.push(sema_error("E2806", span, "Convention file `{provenance}` has an unsupported bracket part `{part}`", "a bracket part must be one whole `[name]` that captures one address part", "rename the part to `[name]`, such as `[id]`"))
             next
         }
-        registrations.push(SemaAppRouteRegistration{path: address.path, provenance: provenance, span: span, convention: true})
+        registrations.push(SemaAppRouteRegistration{verb: "GET", path: address.path, provenance: provenance, span: span, convention: true})
     }
     registrations
 }
@@ -1301,12 +1330,18 @@ sema_app_routes_overlap: fn(left_path: String, right_path: String) -> Bool {
 
 // The App graph route check for a registering call on an App builder. It runs
 // beside the method's own check: `.routes(from:)` is Core's declared method,
-// so the check site calls it before declared-method resolution.
-sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
-    receiver_type: sema_call_resolved_type(receiver_value.ty, environment, program)
-    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return
-    graph: program.registration_graph ?? return
+// so the check site calls it before declared-method resolution. Whether it
+// reported.
+sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
+    if !sema_app_is_core_app(receiver_value.ty, environment, program) -> return false
+    graph: program.registration_graph ?? return false
     sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
+}
+
+// Whether `ty` is core.web's App.
+sema_app_is_core_app: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    resolved: sema_call_resolved_type(ty, environment, program)
+    resolved == (Type.Named{name: "App"}) || resolved == (Type.Named{name: "<corelib>/core.web::App"})
 }
 
 // The App capability check for a browser feature: `.csr`, `.island` and the
@@ -1343,10 +1378,41 @@ sema_app_module_row: fn(environment: SemaScopeEnvironment, graph: SemaRegistrati
     -1
 }
 
+// `app.mount(value)` and `app.mount(prefix, value)` mount a struct's marked
+// methods; `app.mount(prefix, handler[, effect[, policy]])` names a handler
+// function. A struct value is a literal or a local binding.
+sema_app_mounts_struct: fn(args: [CallArg], scopes: SemaScopeTable) -> Bool {
+    if args.len() == 1 -> return true
+    if args.len() != 2 -> return false
+    name: sema_http_mux_callee(args[1].expr) ?? return true
+    sema_scope_resolve_index(scopes, name) != None
+}
+
+// A route address with its parameter names left out: `/users/:id` and
+// `/users/{key}` answer the same requests.
+sema_app_route_shape: fn(path: String) -> String {
+    parts := [String]{}
+    loop part in sema_app_route_parts(path) {
+        if {
+            part.kind == 1 -> parts.push(":")
+            part.kind == 2 -> parts.push("*")
+            else -> parts.push(part.name)
+        }
+    }
+    "/{parts.join("/")}"
+}
+
 sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    receiver_type: sema_call_resolved_type(receiver_value.ty, environment, program)
-    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if method == "route" || method == "page" || method == "layout" -> sema_call_app_route_registrations(receiver, receiver_value, method, args, span, environment, program, diagnostics)
+    if !sema_app_is_core_app(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    // Single routes, marked methods and middleware: the App's one route
+    // table takes them as the HTTP registrations they are.
+    if method == sema_http_route_custom_verb() || sema_http_route_verbs().contains(method) -> return sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "middleware" -> return sema_call_http_middleware(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "mount" && sema_app_mounts_struct(args, scopes) -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "route" || method == "page" || method == "layout" {
+        reported: sema_call_app_route_registrations(receiver, receiver_value, method, args, span, environment, program, diagnostics)
+        if !reported && args.len() > 0 && sema_app_literal_text(args[0].expr) == .Val(path) -> sema_http_route_table_record(receiver, "GET", path, span, scopes, context, diagnostics)
+    }
     arity: sema_app_handler_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
     graph: program.registration_graph ?? return SemaMethodSpecialCheck{handled: false, value: None}

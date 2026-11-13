@@ -166,12 +166,12 @@ Useful module aliases are `term` for `core.term`, `files` for `core.files`,
 `regex` for `core.regex`, `math` for `core.math`, `time` for `core.time`, `net`
 for `core.net`, and `http` for `core.http`.
 
-HTTP services use `use server: core.http.server` and `use net: core.net`.
-Create a router with `server.mux()`, register `mux.get(path, handler)`, and
-return `Ok(server.response(status, body))` from the handler. A request route
-parameter is `request.param("name")`. `net.tcp_listen(address)` plus
-`server.serve_once_listener(listener, mux)` handles one request; repeat it in
-a loop when the service must stay up.
+HTTP services use `use server: core.http.server`, `use web: core.web` and
+`use net: core.net`. Create the app with `web.app()`, register
+`app.get(path, handler)`, and return `Ok(server.response(status, body))` from
+the handler. A request route parameter is `request.param("name")`.
+`net.tcp_listen(address)` plus `app.serve_once(listener)` handles one request;
+repeat it in a loop when the service must stay up.
 
 ## 6. Ten runnable canonical programs
 
@@ -279,6 +279,7 @@ run: fn() {
 ```jet
 use {
     server: core.http.server
+    web: core.web
     net: core.net
     process: core.process
 }
@@ -291,7 +292,7 @@ run: fn() (HTTPError | NetError | IOError)! {
     port: process.args().get(0) ?? "18080"
     listener: net.tcp_listen("127.0.0.1:{port}")
     state: Shared{State{done: false}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/health", fn(_req: HTTPRequest) { Ok(server.response(200, "{{\"status\":\"ok\"}}").header("content-type", "application/json")) })
     mux.get("/hello/:name", fn(req: HTTPRequest) {
         name: req.param("name") ?? ""
@@ -303,7 +304,7 @@ run: fn() (HTTPError | NetError | IOError)! {
     })
     loop {
         if state.done -> break
-        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        mux.serve_once(listener) ?? panic("serve failed")
     }
 }
 ```

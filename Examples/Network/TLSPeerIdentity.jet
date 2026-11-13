@@ -6,6 +6,7 @@ package: {
 }
 
 use {
+    web: core.web
     files: core.files
     server: core.http.server
     net: core.net
@@ -20,9 +21,9 @@ run: fn() {
     config: tls.ClientConfig.default()
         .with_trust(.CustomOnly(roots)) ?? panic("trust policy")
     bounded: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? panic("version policy")
-    mux: server.mux()
+    mux: web.app()
     mux.get("/", fn(_request: HTTPRequest) { Ok(server.response(200, "ok")) })
-    listener: server.bind("127.0.0.1:0", mux, tls: server.tls(cert, key)) ?? panic("bind TLS server")
+    listener: mux.bind("127.0.0.1:0", tls: server.tls(cert, key)) ?? panic("bind TLS server")
     addr: listener.local_addr() ?? panic("server address")
     serving: task { listener.serve() ?? panic("serve TLS") }
     tcp: net.tcp_connect(addr) ?? panic("connect loopback")

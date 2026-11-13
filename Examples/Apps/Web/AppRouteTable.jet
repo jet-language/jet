@@ -1,0 +1,44 @@
+// One route table: a page, a single route and a mounted API all register on
+// `web.app()`, and one listener answers each of them. `jet explain --routes
+// AppRouteTable.jet` lists the table's rows with where each is written.
+package: {
+    name: "app_route_table"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    client: core.http.client
+    server: core.http.server
+    net: core.net
+    web: core.web
+}
+
+Orders: struct {
+    #Server.Get("/orders/:id")
+    order: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "order {id}"))
+    }
+}
+
+home: fn() -> WebPage { web.page("Shop", "welcome") }
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    app: web.app()
+        .route("/", home)
+        .get("/health", fn() { Ok(server.response(200, "ok")) })
+        .mount("/api", Orders{})
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    serving: task {
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+    }
+    page: client.get("http://{addr}/")
+    print("page:{page.status()}:{(page.body().text(4096) ?? return).contains("welcome")}")
+    health: client.get("http://{addr}/health")
+    print("get:{health.status()}:{health.body().text(1024) ?? return}")
+    order: client.get("http://{addr}/api/orders/7")
+    print("mount:{order.status()}:{order.body().text(1024) ?? return}")
+    serving.join()
+}

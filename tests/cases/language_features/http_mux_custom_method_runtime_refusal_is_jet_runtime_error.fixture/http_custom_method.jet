@@ -1,3 +1,4 @@
+use web: core.web
 use server: core.http.server
 
 handle: fn(key: String) -> HTTPResponse HTTPError! {
@@ -5,7 +6,7 @@ handle: fn(key: String) -> HTTPResponse HTTPError! {
 }
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     methods: ["PURGE", "GET"]
     mux.custom(methods[0], "/cache/:key", handle)
     print("registered {methods[0]}")

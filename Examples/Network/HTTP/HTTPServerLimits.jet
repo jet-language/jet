@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_server: core.http.server
     net: core.net
 }
@@ -12,11 +13,11 @@ use {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: http_server.mux()
+    mux: web.app()
     mux.post("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "handler ran")) })
     server: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     smuggling: net.tcp_connect(addr) ?? panic("smuggling connect")
     smuggling_request := "".bytes()

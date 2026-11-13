@@ -1,5 +1,6 @@
 // Port of tests/http_server_lifecycle.rs:1115-1159 against public Core APIs.
 use {
+    web: core.web
     server: core.http.server
     net: core.net
 }
@@ -7,7 +8,7 @@ use {
 #Test("handler pulls first chunk before slow upload finishes") {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr: listener.local_addr() ?? panic("address")
-    mux: server.mux()
+    mux: web.app()
     { sender: first_tx, receiver: first_rx }: channel<Int>()
     mux.post("/slow", fn(req: HTTPRequest) {
         chunks: req.body().chunks(4096)
@@ -24,7 +25,7 @@ use {
         assert(!first, "missing first body chunk")
         Ok(server.response(200, "{total}"))
     })
-    serving: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    serving: task { mux.serve_once(listener) ?? panic("serve") }
     length: 512 * 1024
     client: net.tcp_connect(addr) ?? panic("connect")
     crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")

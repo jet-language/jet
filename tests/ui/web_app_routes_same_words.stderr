@@ -1,8 +1,12 @@
-Error [jet.DuplicateRoute]: Route `/order-items` is registered both by `routes_same_words/OrderItems.jet` and `routes_same_words/order-items.jet`
+Error [jet.AmbiguousRoute]: Two routes both match `GET /order-items`; this one comes from `routes_same_words/order-items.jet`.
   --> tests/ui/web_app_routes_same_words.jet:4:23
     |
   4 | run: fn() { web.app().routes(from: "routes_same_words").csr().serve() }
     |                       ^^^^^^
- Why: Explicit builder entries and `.routes(from:)` conventions must not claim the same path.
- Fix: Remove one registration, or rename the convention file.
-More: jet-lang.dev/e/E2807
+  --> tests/ui/web_app_routes_same_words.jet:4:23
+    |
+  4 | run: fn() { web.app().routes(from: "routes_same_words").csr().serve() }
+    |                       ^^^^^^ the other registration, by `routes_same_words/OrderItems.jet`
+ Why: Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added.
+ Fix: Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix).
+More: jet-lang.dev/e/E2804

@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_server: core.http.server
     net: core.net
 }
@@ -20,7 +21,7 @@ handle_trailers: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
 run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: http_server.mux()
+    mux: web.app()
     mux.post("/", fn(req: HTTPRequest) { handle_trailers(req) })
     wire_stream: net.tcp_connect(addr) ?? panic("connect")
     raw_request := "".bytes()
@@ -33,7 +34,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     raw_response := ""
     chunk := ""
     server_task: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     wire_stream.write_all(raw_request) ?? panic("request")
     loop _ in 0..32 {

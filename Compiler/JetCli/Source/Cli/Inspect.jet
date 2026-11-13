@@ -1515,7 +1515,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "explain-effects"
+    semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "routes" || job.action == "explain-effects"
     mode: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch: cli_time.start()
     compiled: jet_cli_compile_file(job.file, job.color, job.threads, mode)
@@ -1541,6 +1541,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 job.action == "web-graph" -> output = jet_cli_web_graph_report(result, job.json)
+                job.action == "routes" -> output = jet_cli_web_routes_report(result, job.json)
                 job.action == "explain-effects" -> output = jet_cli_explain_effects_report(result, job)
                 else -> panic("inspect action has no canonical provider: {job.action}")
             }

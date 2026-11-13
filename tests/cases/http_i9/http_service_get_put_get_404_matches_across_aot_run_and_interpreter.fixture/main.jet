@@ -1,5 +1,6 @@
 
 use {
+    web: core.web
     http: core.http.client
     server: core.http.server
     net: core.net
@@ -28,17 +29,17 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: listener.local_addr() ?? panic("address")
     store: Shared{[String:String]{}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/health", fn() { reply(200, "{{\"status\":\"ok\"}}") })
     mux.put("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, true) })
     mux.get("/kv/:key", fn(key: String, req: HTTPRequest) { kv(key, req, store, false) })
     mux.get("/shutdown", fn() { reply(200, "{{\"bye\":true}}") })
     server_task: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     health: http.request("GET", "http://{address}/health").send() ?? panic("health")
     print("{health.status()}|{health.text() ?? "health body"}")

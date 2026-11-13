@@ -1,5 +1,6 @@
 
 use {
+    web: core.web
     http: core.http.client
     server: core.http.server
     net: core.net
@@ -18,7 +19,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address: listener.local_addr() ?? panic("address")
     state: Shared{HandlerState{label: "before registration"}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/zero", fn() { Ok(server.response(200, "zero")) })
     mux.get("/items/:id", fn(id: String, req: HTTPRequest) {
         header: req.header("x-state") ?? "missing"
@@ -28,9 +29,9 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     mux.get("/error", route_error)
     state.label = "captured"
     t: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
-        server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     zero: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
     print(zero.text() ?? "zero body")

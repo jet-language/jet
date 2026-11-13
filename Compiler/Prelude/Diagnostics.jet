@@ -14868,8 +14868,8 @@ AmbiguousRoute: struct {
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Two routes both match `{self.method} {self.pattern}`." }
-        why: fn(self) -> String { "A duplicate route makes dispatch ambiguous — one handler would never be reached. Registered at start-up so the bug surfaces immediately." }
-        fix: fn(self) -> String { "Remove one of the duplicate registrations, or make the patterns distinct (e.g. add a static prefix to one)." }
+        why: fn(self) -> String { "Pages, convention files, handler routes and marked methods share one route table, so two rows with one method and address make dispatch ambiguous and one of them would never be reached. A route added while the program runs is checked when it is added." }
+        fix: fn(self) -> String { "Remove one of the two registrations, rename the convention file, or make the addresses distinct (e.g. mount one under its own prefix)." }
     }
 }
 
@@ -14909,24 +14909,7 @@ MissingPageFunction: struct {
     }
 }
 
-DuplicateRoute: struct {
-    path: String
-    a: String
-    b: String
 
-    impl Diagnostic {
-        code: "E2807"
-        safety_class: .Soundness
-        safety_reason: "Two registrations claim one path, so it has no one handler."
-        expert_path: "none: one registration per path"
-        stage: [.Compile]
-        meaning: "A path claimed by both a builder route and a convention file"
-        detail: true
-        what: fn(self) -> String { "Route `{self.path}` is registered both by `{self.a}` and `{self.b}`." }
-        why: fn(self) -> String { "Explicit builder entries and `.routes(from:)` conventions must not claim the same path." }
-        fix: fn(self) -> String { "Remove one registration, or rename the convention file." }
-    }
-}
 
 RouteMethodTokenRefused: struct {
     method: String
@@ -14943,6 +14926,23 @@ RouteMethodTokenRefused: struct {
         what: fn(self) -> String { "HTTP route method `{self.method}` is refused: {self.reason}." }
         why: fn(self) -> String { "A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it." }
         fix: fn(self) -> String { "Register a standard method with its own verb (`mux.get`), and give `custom` any other token of letters, digits and !#$%&'*+-.^_`|~." }
+    }
+}
+
+AppPortUnavailable: struct {
+    address: String
+    reason: String
+
+    impl Diagnostic {
+        code: "E2809"
+        stage: [.Runtime]
+        moment: .Run
+        meaning: "A web app port another program holds or the system refuses"
+        detail: true
+        fix_next: "Stop the program that holds the port, or choose another port."
+        what: fn(self) -> String { "The web app can't listen on {self.address}: {self.reason}." }
+        why: fn(self) -> String { "A web app serves on one local TCP port, and only one program can listen on a port at a time, so the app can't start while another program holds it or the system refuses the port." }
+        fix: fn(self) -> String { "Stop the program that holds the port, or choose another port: run with `JET_APP_PORT=8081`, or pass it as `serve(8081)`. `jet dev` moves to the next free port by itself." }
     }
 }
 

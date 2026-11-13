@@ -51,7 +51,7 @@ Jokes: struct {
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
-    mux: server.mux()
+    mux: web.app()
     state: Shared{JokeState{added: 0}}
     mux.get("/before/:name", fn(name: String) { Ok(server.response(200, "before:{name}")) })
     mux.mount(Jokes{prefix: "joke", state: state})
@@ -63,12 +63,12 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     serving: task {
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
-        server.serve_once_listener(listener, mux)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
+        mux.serve_once(listener)
     }
     got: client.get("http://{addr}/jokes/7")
     print("get:{got.status()}:{got.body().text(1024) ?? return}")

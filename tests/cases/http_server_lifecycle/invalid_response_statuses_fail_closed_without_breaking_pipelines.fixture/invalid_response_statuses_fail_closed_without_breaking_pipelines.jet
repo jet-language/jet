@@ -1,6 +1,7 @@
 // Port of tests/http_server_lifecycle.rs:1686-1776 against public Core APIs.
 // PENDING-SEAM(http-server-options): workers=1, admission_queue=8 setup.
 use {
+    web: core.web
     server: core.http.server
     net: core.net
 }
@@ -24,7 +25,7 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
 
 #Test("invalid response statuses fail closed without breaking pipelines") {
     calls: Shared{S6InvalidCalls{value: 0}}
-    mux: server.mux()
+    mux: web.app()
     mux.get("/low", fn(_req: HTTPRequest) {
         calls.value = calls.value + 1
         Ok(server.response(99, "secret-status-99"))
@@ -37,7 +38,7 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
         calls.value = calls.value + 1
         Ok(server.response(200, "next"))
     })
-    bound: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    bound: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: bound.local_addr() ?? panic("address")
     serving: task { bound.serve() ?? panic("server") }
     crlf: s6_invalid_crlf()

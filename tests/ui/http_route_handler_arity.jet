@@ -1,9 +1,10 @@
+use web: core.web
 use server: core.http.server
 
 named_zero: fn() -> HTTPResponse HTTPError! { Ok(server.response(200, "named")) }
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     mux.get("/zero", fn() { Ok(server.response(200, "zero")) })
     mux.get("/named", named_zero)
     mux.get("/one", fn(req: HTTPRequest) { Ok(server.response(200, req.path())) })

@@ -1,0 +1,67 @@
+// A response's status line takes its reason text from the one registered
+// table, `http.reason_phrase`: a handler that returns 503, 429 or 422 sends
+// the registered reason, a code the table does not register sends an empty
+// reason, and the server's own 404 page uses the same table.
+// app.serve_once keeps golden output order fixed.
+package: {
+    name: "http_server_reasons"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+use {
+    http: core.http
+    server: core.http.server
+    net: core.net
+    web: core.web
+}
+
+C_PATHS: [String]{"/busy", "/limited", "/invalid", "/unregistered", "/missing"}
+
+status_of: fn(path: String) -> Int Never! {
+    if path == {
+        "/busy" -> 503
+        "/limited" -> 429
+        "/invalid" -> 422
+        else -> 299
+    }
+}
+
+// The raw response to one GET, so the status line shows exactly as sent.
+fetch: fn(addr: String, path: String) -> String {
+    wire: net.tcp_connect(addr) ?? panic("connect failed")
+    request := "".bytes()
+    loop line in ["GET {path} HTTP/1.1", "Host: local", "Connection: close", ""] {
+        loop byte in line.bytes() -> request.push(byte)
+        request.push(13)
+        request.push(10)
+    }
+    wire.write_all(request) ?? panic("request failed")
+    raw := ""
+    loop _ in 0..32 {
+        chunk: wire.read_text(8192) ?? panic("response failed")
+        if chunk == "" -> break
+        raw = "{raw}{chunk}"
+    }
+    raw
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr: listener.local_addr() ?? panic("address failed")
+    app: web.app()
+    loop path in C_PATHS.slice(0, 4) {
+        code: status_of(path)
+        app.get(path, fn(_req: HTTPRequest) { Ok(server.response(code, "status {code}")) })
+    }
+    t: task {
+        loop _ in 0..<C_PATHS.len() -> app.serve_once(listener) ?? panic("serve failed")
+    }
+    loop path in C_PATHS {
+        raw: fetch(addr, path)
+        line: raw.split("\r\n").to_list()[0]
+        print("{path}: [{line}]")
+        if path == "/missing" -> print("{path} body: {raw.split("\r\n\r\n").to_list()[1]}")
+    }
+    print("table 503: {http.reason_phrase(503)}")
+    print("table 299: [{http.reason_phrase(299)}]")
+    t.join() ?? panic("server failed")
+}

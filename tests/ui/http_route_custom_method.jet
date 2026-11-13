@@ -1,4 +1,5 @@
 use {
+    web: core.web
     http: core.http
     server: core.http.server
 }
@@ -16,7 +17,7 @@ Purges: struct {
 BAN: "BAN"
 
 run: fn() {
-    mux: server.mux()
+    mux: web.app()
     // Kept in its exact case: `get` and `Purge` are custom methods, distinct from GET and PURGE.
     mux.get("/cache", handle)
     mux.custom("get", "/cache", handle)
@@ -26,7 +27,7 @@ run: fn() {
     // The same exact method twice is one duplicate route.
     mux.custom("PURGE", "/cache", handle)
     mux.mount(Purges{})
-    // Only a mux takes a method known when the program runs.
+    // Only an App takes a method known when the program runs.
     router: http.router()
     names: ["LINK"]
     router.custom(names[0], "/cache", handle)

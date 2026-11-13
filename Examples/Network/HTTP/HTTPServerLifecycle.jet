@@ -5,14 +5,15 @@ package: {
 }
 
 use {
+    web: core.web
     http_server: core.http.server
     time: core.time
 }
 
 run: fn() (HTTPError | RangeError | TaskFailure)! {
-    mux: http_server.mux()
+    mux: web.app()
     mux.get("/", fn(_req: HTTPRequest) { Ok(http_server.response(200, "ok")) })
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    server: mux.bind("127.0.0.1:0") ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     print(addr.starts_with("127.0.0.1:"))
     serving: task { server.serve() ?? panic("serve") }

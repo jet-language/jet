@@ -2173,7 +2173,8 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
 // report. Build facts resolve their writer chain over the load of the named
 // file (BuildFactExplain.jet); `marker` sites and a policy with a source file
 // are load-only source queries; `--web-graph <file>` reports the application
-// graph of the checked entry (WebGraph.jet). Any other query names a package:
+// graph of the checked entry and `--routes <file>` every row of its App's
+// route table (WebGraph.jet). Any other query names a package:
 // the Jetpack engine explains its Hangar record or last realization attempt.
 // The `--reload` and `--cost` views stay refused. `log [<file|dir>]` lists
 // every source of the core.log level filter (LogExplain.jet); `effects
@@ -2185,6 +2186,10 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     if jet_cli_has(jet_argv, "--web-graph") {
         if args.len() < 2 -> return jet_cli_done("", "usage: jet explain --web-graph <file.jet>\n", JET_DRIVER_EXIT_USAGE)
         return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "web-graph", file: jet_cli_inspect_absolute(args[1]), subject: None, json: json, color: false, threads: threads, notice: "", project: false}}
+    }
+    if jet_cli_has(jet_argv, "--routes") {
+        if args.len() < 2 -> return jet_cli_done("", "usage: jet explain --routes <file.jet>\n", JET_DRIVER_EXIT_USAGE)
+        return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "routes", file: jet_cli_inspect_absolute(args[1]), subject: None, json: json, color: false, threads: threads, notice: "", project: false}}
     }
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}

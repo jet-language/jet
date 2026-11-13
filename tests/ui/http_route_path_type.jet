@@ -1,4 +1,5 @@
 use {
+    web: core.web
     http: core.http
     server: core.http.server
 }
@@ -13,10 +14,10 @@ run: fn() {
     router.get(Path{"/files/:name"}, named)
     router.custom("PURGE", Path{"/files/:name"}, named)
     router.get(Path{"/files/{{name}}"}, named)
-    // A hole makes a run-time pattern, which only a mux registers.
+    // A hole makes a run-time pattern, which only an App registers.
     area: "eu"
     router.get(Path{"/area/{area}/:key"}, keyed)
-    mux: server.mux()
+    mux: web.app()
     mux.custom("PURGE", Path{"/area/{area}/:key"}, keyed)
     mux.get(42, keyed)
 }

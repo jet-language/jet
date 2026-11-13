@@ -525,7 +525,7 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         // change what a TUI draws, so reading them is Env.
         "core.tui" -> if member == "__cap_env_bytes" -> Val("Env") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
-        "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
+        "core.http" -> if member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.
         "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
         "core.perf" -> if member == {
@@ -661,10 +661,6 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             else -> None
         }
         "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
-        "core.http.server" -> if member == {
-            "serve" | "serve_once" | "serve_once_listener" -> Val("Time.Wait")
-            else -> None
-        }
         "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.xml" | "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("Time.Wait") else -> None
         "core.encoding.csv" -> if member == "reader" || member == "writer" || member == "query" -> Val("Time.Wait") else -> None
         "core.db" -> if member == {

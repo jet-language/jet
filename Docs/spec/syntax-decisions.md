@@ -7475,7 +7475,8 @@ statically evaluable App-returning `run: fn` builder chain into one typed graph.
 registration outside a declared typed `.mount` is a compile diagnostic. Mounts
 keep prefix, effects, and security policy static. Browser/server partition,
 hydration mismatch, checked program, and generated-source re-entry laws apply;
-`jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts.
+`jet inspect expand --facts web` and `jet explain --web-graph` expose stable JSON facts;
+`jet explain --routes` lists the App's route table, one row per registration.
 
 **D-DX-ROUTER1=A — routes bind typed inputs on the one App graph**: a route
 handler's parameters are its route contract. A parameter bound by name to a
@@ -7543,12 +7544,12 @@ answers its folder's address; such folders stay ordinary segments. A whole
 `[Name]` part captures one address part as `:name`, the snake_case word key
 (`[ID]` → `:id`, `[UserID]` → `:user_id`); any other bracket form is E2806.
 A page is the parsed top-level `page: fn` declaration, never commented text.
-Two files with the same words give the same address and fail E2807 naming both.
+Two files with the same words give the same address and fail E2804 naming both.
 Addresses are derived once at build time and requests match exactly, with no
 lowercasing or redirects. `jet new route --path /order-items` writes
 `Routes/OrderItems.jet` with the `.routes(from: "Routes")` opt-in. The
 `core.http.server.Get` marker (D-HTTP-ROUTE-EXPOSE1) tags methods of a
-`mux.mount(value)` struct; the `#Server.Get("/path")` page override that reuses
+`app.mount(value)` struct; the `#Server.Get("/path")` page override that reuses
 it is not implemented yet.
 
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,

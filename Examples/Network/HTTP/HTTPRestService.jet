@@ -5,6 +5,7 @@ package: {
 }
 
 use {
+    web: core.web
     http_client: core.http.client
     http_server: core.http.server
     files: core.files
@@ -20,14 +21,14 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static file")
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr() ?? panic("address")
-    mux: http_server.mux()
+    mux: web.app()
     mux.post("/api/:name/*path", handle_api)
     mux.get("/events", fn(_req: HTTPRequest) { Ok(http_server.sse("ready")) })
     mux.get("/file", fn(req: HTTPRequest) { Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")) })
     t: task {
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
+        mux.serve_once(listener) ?? panic("serve")
     }
     req0: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1: req0.form("tool", "jet")
