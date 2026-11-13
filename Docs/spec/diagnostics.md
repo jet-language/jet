@@ -73,6 +73,11 @@ words for the learner who hit it:
   or stage names. That material belongs to `jet explain CODE --verbose` and
   `--json`.
 
+`Tools/agent/DiagnosticRows.jet` enforces the mechanical half of this rubric
+on every row of `Compiler/Prelude/Diagnostics.jet`: it refuses a placeholder
+Why and a decision ID in a written meaning, What, Why or Fix, and names each
+offending code.
+
 ## Human rendering
 
 The fixed headings are `Error [jet.Name]:` and `Warning [jet.Name]:`, naming

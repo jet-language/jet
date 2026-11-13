@@ -1959,7 +1959,7 @@ parser_expression_lvalue: fn(state: &JetParserState, expr: Expr, fallback_span: 
     }
     if operator.kind != TOKEN_EQ {
         operator_text: parser_text(state, operator)
-        parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "S17 permits updates only on a mutable name or an `&` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
+        parser_add_fatal_code(state, "E0165", expr_span(expr), "Compound assignment needs a mutable place.", "Updates are allowed only on a mutable name or an `&` parameter; a computed value has no place to update.", "Bind the value with `:=`, then write `name {operator_text} value`")
     } else {
         parser_add_error(state, expr_span(expr), "this value can't be assigned to", "only a name or an indexed slot like `items[0]` can appear on the left of `=`", "use `name := ...` or `map[key] = ...`")
     }

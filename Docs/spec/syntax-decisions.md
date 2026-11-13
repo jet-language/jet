@@ -583,7 +583,7 @@ client: connect("db.internal", tls: true, timeout: 5)
 ```
 
 Retires the fixed-position rule: labels used to be spelling checks at one
-position and never reordered (E0125).
+position and never reordered.
 
 **D-CALLPOS1=A — positional when unambiguous, named to deconflict** *(ratified
 2026-08-19, card #2042)*: deterministic mapping follows one fixed sequence:
@@ -1086,7 +1086,7 @@ destructure structs, tuples, and lists:
 ```
 
 Tuple parentheses bind only member names, never positions. A name that is not
-a member (including `_`) is E0314; use a dotless `{ member: local }` pattern
+a member (including `_`) is an error; use a dotless `{ member: local }` pattern
 to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
 loops, such as `loop (i, item) in xs`, are unchanged.
 
@@ -2981,7 +2981,7 @@ never elevates; a body write requires `&`, while consuming ownership requires
 `^`. Copying is the method `.copy()` (D-COPY-WORD1). Raw `&T`
 reference returns and fields remain deleted (D-REF-SHORTHAND1/2 and
 E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
-`View<T>`/`ViewMut<T>` boundary instead. L0201
+`View<T>`/`ViewMut<T>` boundary instead. The silent-clone lint is
 deleted — moves of named bindings are always written `^`; temporaries pass
 freely; `x.copy()` (D-COPY-WORD1) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory facts now use `Mem.*` effect
@@ -2990,7 +2990,7 @@ denials (the old `no_alloc` spelling is tombstoned).
 grammar, call sites/receivers/formatter speak v5 spelling. **S2 shipped
 (2026-07-04)**: unmarked param is `Read`, decided at parse time — `Infer` and
 body-usage elevation are gone; a body write or an escape/consume of an
-unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); L0201 is
+unmarked param is a hard error (fix-it: add `&`, or `^`/copy it); the silent-clone lint is
 gone (E0209 hard error, no silent clone ever); `CapabilityFreeze`/E0912 are
 gone and the `api:` manifest field no longer exists (ordinary unknown-field
 error) — `ApiFreeze`'s snapshot mechanism remains, now unconditional pub-fn
@@ -3095,8 +3095,8 @@ indexes, or ranges) and never a call result, so `inspect(&buf.grow())` writes
 `inspect(&buf.len())` is rejected because `len` reads. Fresh receivers take no
 mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
 each mark against the resolved receiver
-convention of user methods, trait dispatch, and builtin receivers: E0224
-(missing), E0225 (extra), E0226 (wrong mark), each with a machine-applicable
+convention of user methods, trait dispatch, and builtin receivers: a missing,
+extra (E0225) or wrong mark is an error with a machine-applicable
 fix. A line that starts with `&name` or `^name` begins a new statement.
 Arithmetic uses named bit methods and `pow` (D-SIGIL-ALGEBRA1=B).
 `~` copy grouping and `&place` window lifetimes are
@@ -3106,7 +3106,7 @@ checks are unchanged. Rationale: one value-side mark position for receivers,
 arguments, and windows, with no new tokens.
 
 *Supersession (D-CALLSITE-MARK2=A):* this entry is historical. Calls carry no
-mark on receivers or arguments, and E0224 and E0226 are deleted; the marks
+mark on receivers or arguments, and the missing-mark and wrong-mark errors are deleted; the marks
 that remain are listed under D-CALLSITE-MARK2=A.
 
 **D-COPY-DEFAULT1=A — the compiler chooses, a mark gives exact control**
@@ -3122,7 +3122,7 @@ E0225 (the element stays in its collection), and on borrowed storage is E0201.
 `ys: xs` of a place stays a read view and `xs.copy()` stays an independent copy.
 A taking receiver call on a whole local at its last use needs no `^`
 (`ticket.redeem()`); a take on a field or on a local read again later still
-needs `^`, and a writing call always needs `&` (E0224). An unmarked use that
+needs `^`, and a writing call always needs `&`. An unmarked use that
 is not the last one shares the value: the source stays usable, and each holder
 has its own value (a use in `return`, or in a loop's `break` value, is the last
 use for the loops it leaves). Values that cannot be copied (resources,
@@ -3150,7 +3150,7 @@ part of a list passed to a writing parameter is a write window by itself, and
 a call never copies on its own. An early move is `x.move()`
 (D-COPY-MOVE-SPELL1=A); a plain field passed to a take parameter is written
 `a.b.move()`. The retired call marks are ordinary parse or type errors; no
-code teaches them (E0202, E0203, E0224, E0226, E0434 and E0435 are deleted; a
+code teaches them (their old codes are deleted; a
 plain call that changes a `:` binding is E0111, and one that changes a read
 parameter or `self` is E0205, each quoting the callee's signature line).
 
@@ -3725,7 +3725,7 @@ reverses the intervening same-day ruling that erased `@if` in favor of plain
 
 Because the name is the same name inside and outside a compile-time block,
 there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
-concept, its carry-out rule, and E2713 are deleted rather than generalized; an
+concept, its carry-out rule, and its diagnostic are deleted rather than generalized; an
 unresolved marked name now reports the ordinary E0107. `#Known`, `#Known if`
 and the `#Known` block retire together and teach E0377, and `#Known` leaves
 the marker registry because a stage is not a rule about a target. The
@@ -5438,7 +5438,7 @@ nonce/AAD domains, parser caps, atomic publication rules, cancellation points,
 and platform primitives are normative parts of the decision, not replaceable
 aliases or whole-buffer facades.
 
-**D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `Decimal` moves into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). The former arbitrary-precision integer construction is superseded by exact `Int` under D-INTBIG1; the no-auto-promotion law (E0130–E0133) is retired by D-TYPE2-NUM1, and lint L0504 remains.
+**D-CORE-NUMERIC1=A — one math home** *(ratified by owner 2026-07-12, card #512)*: `Decimal` moves into `core.math`; `core.numeric` leaves the registry (ordinary unknown-module error). The former arbitrary-precision integer construction is superseded by exact `Int` under D-INTBIG1; the no-auto-promotion law is retired by D-TYPE2-NUM1, and lint L0504 remains.
 
 **D-API-LEN1=A — Law 1 blessed vocabulary** *(ratified by owner 2026-07-12, card #513)*: the API rubric keeps its plain-English rule; `len` joins a closed blessed-abbreviation list (with the module names `fmt`, `args`, `env`, `mem`); extensions to the list need a ballot. The shipped `len()`/`.len` surface is untouched.
 
@@ -8385,7 +8385,7 @@ the JSON envelope; the outcomes below are durable report law.
 - **D-REPORT-HOME1=A — typed rows are the one text home (handoff #1806).** A typed row is the only home for code, severity, moment, What/Why/Fix templates, named holes, and structured fixes. The registry generates the spec, error pages, and `jet explain`; no renderer or emitter keeps a second copy. I4 `Adding a diagnostic` now requires the row, its snapshot, and both-direction coverage. Required guards: the card's UI snapshot proves the complete row-backed report, and I9 proves the same row-backed meaning under AOT, `jet run`, and the interpreter.
 - **D-REPORT-SEV1=A — two severities and the ratified words (handoff #1678).** Blocking and advisory are the only levels. `Error`, `Stop`, and `Warning` remain the frame words; a contained failed assertion is `Stop` in the E3001 family, not a new `Fail` word or code block. Moment is row metadata, not a new severity. The duplicate severity enum is deleted; E and L prefixes stay, and W0410 stays the frozen exception. Required guards: UI snapshots cover each changed severity form, and I9 proves identical severity meaning and frame text under AOT, `jet run`, and the interpreter.
 - **D-REPORT-TEST1=A — a failed test shows the full report (handoff #1684).** A failed assertion or golden check prints the full report frame under the test ledger, through the same renderer used by the stop path, with registered code, location, and caret. A golden failure states whether the file is missing or the output changed and includes its diff. Passing output stays unchanged. `JETTEST2` proof records stay separate from JSON reports. Required guards: one UI snapshot covers the failed-test frame, and I9 proves the E3001 report is the same under AOT, `jet run`, and the interpreter.
-- **D-REPORT-MACHINE1=A — one JSON line for every report (handoff #1713).** Each report is one complete `jet.report/v1` JSON object per line, with schema, moment, severity, code, What, Why, Fix, detail, location, span, `fix_edits`, cause, and clears fields when applicable. Command status envelopes remain status data; every report inside them uses this object. Amendment: D-DX1 changes `message` to `what`, `suggestions` to `fix_edits`, and `schema_version` to `schema`. The failed-test example uses registered code **E3001**, never provisional E3020. Required guards: UI/machine snapshots cover the exact emitted object, and I9 proves one condition emits the same report meaning under AOT, `jet run`, and the interpreter; no engine invents a second JSON shape or report field meaning.
+- **D-REPORT-MACHINE1=A — one JSON line for every report (handoff #1713).** Each report is one complete `jet.report/v1` JSON object per line, with schema, moment, severity, code, What, Why, Fix, detail, location, span, `fix_edits`, cause, and clears fields when applicable. Command status envelopes remain status data; every report inside them uses this object. Amendment: D-DX1 changes `message` to `what`, `suggestions` to `fix_edits`, and `schema_version` to `schema`. The failed-test example uses registered code **E3001**, never a provisional code. Required guards: UI/machine snapshots cover the exact emitted object, and I9 proves one condition emits the same report meaning under AOT, `jet run`, and the interpreter; no engine invents a second JSON shape or report field meaning.
 - **D-REPORT-EDITOR1=A — the editor gets the whole report (handoff #1807).** LSP uses What as `message` and carries Why, Fix, `fix_edits`, cause, the `jet://explain/<CODE>` link, and related locations in structured fields. Code actions reuse the row-owned edit used by `jet fix`; no editor path parses prose or keeps editor-only text. Required guards: LSP/UI snapshots cover the full payload and action, and I9 proves the same report meaning and recovery data under AOT, `jet run`, and the interpreter.
 
 These six cards share exact truthfulness guards. Every report code is registered;

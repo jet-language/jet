@@ -12,7 +12,12 @@
 // Jetpack/ (tests and fixtures aside): no hand-written file may build report
 // text (a `Error [CODE]`-style heading or a `jet-lang.dev/e/` link), since
 // every report renders from its row through Diagnostics/Render.jet, and each
-// generated or assembly copy of a runtime report must match its row.
+// generated or assembly copy of a runtime report must match its row. They
+// read every spec page under Docs/spec too: each `E####` or `L####` code a
+// page cites must name a row (a retired or reserved row keeps an old code
+// explainable). Every row's texts follow the plain-words rubric of
+// Docs/spec/diagnostics.md: a Why gives a reason, not a placeholder, and no
+// meaning, What, Why or Fix names a decision ID.
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
@@ -38,6 +43,8 @@ CASE_SNAPSHOT_DIRS: [String]{"tests/cases/ui_lint_style"}
 // The path a compiler diagnostic's type name is read under: reports print
 // `Error [jet.UnusedParameter]`, and `#Allow` and `jet explain` take it.
 NAME_PATH: "jet."
+// The spec pages, whose diagnostic codes must each name a row.
+SPEC_DIR: "Docs/spec"
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
@@ -54,6 +61,9 @@ REPLACE_FIX: Regex{"^\.Replace\{{from: (\x22(?:[^\x22\\]|\\.)*\x22), to: (\x22(?
 REMOVE_FIX: Regex{"^\.Remove\{{text: (\x22(?:[^\x22\\]|\\.)*\x22)\}}$"}
 STAGE_LIST: Regex{"^\[(\.[A-Z][a-z]*(?:, \.[A-Z][a-z]*)*)\]$"}
 LINT_NAME: Regex{"^[a-z][a-z0-9_]*$"}
+// The rubric's placeholder Why and its decision IDs (`D-…`, `S…`).
+PLACEHOLDER_WHY: Regex{"The registered .* rule applies here"}
+DECISION_ID: Regex{"\bD-[A-Z0-9-]+|\bS[0-9]+\b"}
 
 #Error
 DiagnosticRowsError: struct {
@@ -103,6 +113,8 @@ RowFacts: struct {
 RenderedRow: struct {
     text: String
     facts: RowFacts
+    // The row's breaks of the plain-words rubric, each naming its code.
+    rubric: [String]
 }
 
 RenderedRows: struct {
@@ -279,6 +291,11 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         body: literal_body(literal, "{context}.{part}") ?? return Err(err)
         texts.push(registry_text(body, source.fields, "{context}.{part}") ?? return Err(err))
     }
+    rubric := [String]{}
+    if PLACEHOLDER_WHY.is_match(texts[1]) -> rubric.push("{code_text} why is a placeholder")
+    loop (index, part) in parts {
+        if DECISION_ID.find(texts[index]) == .Val(id) -> rubric.push("{code_text} {part} names decision {id}")
+    }
     severity: constant_case(entry(source.constants, "severity") ?? ".Error", "{context}.severity") ?? return Err(err)
     has_lint: entry(source.constants, "lint_name") != None
     lint: constant_literal(source, "lint_name", "") ?? return Err(err)
@@ -303,6 +320,9 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         stages = list.groups[0].replace(", .", "/").remove_prefix(".").lower()
     }
     meaning: constant_literal(source, "meaning", texts[0]) ?? return Err(err)
+    if entry(source.constants, "meaning") != None {
+        if DECISION_ID.find(meaning) == .Val(id) -> rubric.push("{code_text} meaning names decision {id}")
+    }
     detail: entry(source.constants, "detail") ?? "false"
     if detail != "true" && detail != "false" -> return Err(rows_fail("{context}: `detail` is `true` or `false`"))
     written_fix: entry(source.constants, "structured_fix") ?? ""
@@ -355,7 +375,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     }.join("\n")
     shown := [String]{}
     loop (index, part) in parts -> shown.push(display_text(texts[index], "{context}.{part}") ?? return Err(err))
-    Ok(RenderedRow{text: text, facts: RowFacts{
+    Ok(RenderedRow{text: text, rubric: rubric, facts: RowFacts{
         code: code_text,
         name: "{NAME_PATH}{source.name}",
         active: status == "Active",
@@ -373,13 +393,16 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
     codes := [String]{}
     rendered := [String]{}
     facts := [RowFacts]{}
+    rubric := [String]{}
     loop row in rows {
         one: render_row(row) ?? return Err(err)
         if codes.contains(one.facts.code) -> return Err(rows_fail("code `{one.facts.code}` is used twice"))
         codes.push(one.facts.code)
         rendered.push(one.text)
         facts.push(one.facts)
+        loop problem in one.rubric -> rubric.push(problem.copy())
     }
+    if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID): {rubric.join("; ")}"))
     Ok(RenderedRows{text: "{GENERATED_BY}\nDIAGNOSTIC_ROWS: #run {{ [DiagnosticRegistryRow]{{\n{rendered.join("\n")}\n}} }}\n", facts: facts})
 }
 
@@ -887,6 +910,81 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
     Ok(sites)
 }
 
+// What the spec-citation check read and found.
+SpecCitations: struct {
+    pages: Int
+    cited: Int
+    problems: [String]
+}
+
+// Whether `byte` can continue a word: an ASCII letter, digit or `_`.
+word_byte: fn(byte: Int) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+// The diagnostic codes one line cites: an `E` or `L` and four digits, as a
+// whole word. A `#L1234` link anchor names a line, not a code.
+cited_codes: fn(line: String) -> [String] Never! {
+    bytes: line.bytes()
+    found := [String]{}
+    loop (index, byte) in bytes {
+        head: Int.from_u8(byte)
+        if (head != 69 && head != 76) || index + 5 > bytes.len() -> next
+        if index > 0 && (word_byte(Int.from_u8(bytes[index - 1])) || Int.from_u8(bytes[index - 1]) == 35) -> next
+        if index + 5 < bytes.len() && word_byte(Int.from_u8(bytes[index + 5])) -> next
+        digits := true
+        loop at in (index + 1)..<(index + 5) {
+            digit: Int.from_u8(bytes[at])
+            if digit < 48 || digit > 57 -> digits = false
+        }
+        if digits -> found.push(String.from_bytes(bytes.slice(index, index + 5)) ?? "")
+    }
+    found
+}
+
+// The `.md` files under `directory`, each directory's entries sorted by name.
+spec_pages: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
+    children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
+    children.sort_by(child -> child.name)
+    found := [String]{}
+    loop child in children {
+        if child.name.starts_with(".") -> next
+        if child.is_dir {
+            loop path in (spec_pages(child.path) ?? return Err(err)) -> found.push(path)
+        } else if child.name.ends_with(".md") {
+            found.push(child.path.copy())
+        }
+    }
+    Ok(found)
+}
+
+// The codes one page cites, and each that names no row as `path:line`.
+page_citations: fn(known: [String:Bool], path: String, text: String) -> SpecCitations Never! {
+    found := SpecCitations{pages: 1, cited: 0, problems: [String]{}}
+    loop (index, line) in text.split("\n").to_list() {
+        loop code in cited_codes(line) {
+            found.cited += 1
+            if known.get(code) == None -> found.problems.push("{path}:{index + 1}: {code} names no diagnostic row; cite the code the compiler reports, or describe the rule without one")
+        }
+    }
+    found
+}
+
+// Every spec page's cited codes, checked against the rows.
+spec_citations: fn(rows: [RowFacts]) -[FS]> SpecCitations DiagnosticRowsError! {
+    known := [String:Bool]{}
+    loop row in rows -> known[row.code] = true
+    found := SpecCitations{pages: 0, cited: 0, problems: [String]{}}
+    loop path in (spec_pages(SPEC_DIR) ?? return Err(err)) {
+        text: files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
+        one: page_citations(known, path, text)
+        found.pages += 1
+        found.cited += one.cited
+        loop problem in one.problems -> found.problems.push(problem)
+    }
+    Ok(found)
+}
+
 diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
     if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: DiagnosticRows.jet [--check|--write]"))
@@ -896,6 +994,8 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     stale: stale_pages(generated) ?? return Err(err)
     sites: report_sites(rows.facts) ?? return Err(err)
     sites_failure: "{sites.problems.len()} report sites do not render through their rows:\n{sites.problems.join("\n")}"
+    citations: spec_citations(rows.facts) ?? return Err(err)
+    citations_failure: "{citations.problems.len()} spec citations name no diagnostic row:\n{citations.problems.join("\n")}"
     differing := [String]{}
     loop file in generated {
         current: if files.exists(file.path) -> files.read(file.path) ?? return Err(rows_fail("cannot read {file.path}: {err}")) else -> ""
@@ -908,6 +1008,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     if mode == "--write" {
         loop path in stale -> files.remove(path) ?? return Err(rows_fail("cannot remove {path}: {err}"))
         if sites.problems.len() > 0 -> return Err(rows_fail(sites_failure))
+        if citations.problems.len() > 0 -> return Err(rows_fail(citations_failure))
         return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len()} in all")
     }
     loop path in stale -> differing.push("{path} (no diagnostic row owns this page)")
@@ -921,8 +1022,9 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
         failures.push("{differing.len()} copies differ from {SOURCE_PATH}; run jet Tools/agent/DiagnosticRows.jet --write. First: {first.join(", ")}")
     }
     if sites.problems.len() > 0 -> failures.push(sites_failure)
+    if citations.problems.len() > 0 -> failures.push(citations_failure)
     if failures.len() > 0 -> return Err(rows_fail(failures.join("\n")))
-    Ok("diagnostic rows check passed: {generated.len()} copies match; {sites.files} source files read, none builds a report by hand, and {sites.copies} runtime report copies match their rows")
+    Ok("diagnostic rows check passed: {generated.len()} copies match; {sites.files} source files read, none builds a report by hand, and {sites.copies} runtime report copies match their rows; {citations.cited} codes cited in {citations.pages} spec pages each name a row")
 }
 
 run: fn() { print(diagnostic_rows_main(process.args()) ?? process.fail(1, err.message)) }
@@ -970,6 +1072,25 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
     assert(diagnostic_rows_error(row.replace("    path: String\n\n", "")).contains("reads no field"))
     assert(diagnostic_rows_error("{row}{row}").contains("used twice"))
     assert(diagnostic_rows_error(row.replace("site", "si\\qte")).contains("backslash escape"))
+}
+
+#Test("a placeholder Why or a decision ID in a row's text is refused, naming every code") {
+    row: MINIMAL_ROW
+    placeholder: row.replace("routes are matched from the \\\"site\\\" root", "The registered sema rule applies here").replace("must start with /", "must start with / (S12)")
+    decision: row.replace(MINIMAL_CODE, "{MINIMAL_CODE}        meaning: \"Routes start at the root (S9)\"\n").replace("E9999", "E9998").replace("write {{{{/path}}}}", "see D-ROUTE-1")
+    error: diagnostic_rows_error("{placeholder}{decision}")
+    assert(error.contains("4 row texts break the plain-words rubric"))
+    assert(error.contains("E9999 why is a placeholder"))
+    assert(error.contains("E9999 what names decision S12"))
+    assert(error.contains("E9998 meaning names decision S9"))
+    assert(error.contains("E9998 fix names decision D-ROUTE-1"))
+    assert_eq(diagnostic_rows_error(row.replace("start with /", "start with /S")), "")
+}
+
+#Test("every Prelude row's Why gives a reason and no human text names a decision ID") {
+    source: files.read(SOURCE_PATH) ?? panic("cannot read {SOURCE_PATH}: {err}")
+    rows: render_rows(source) ?? panic(err.message)
+    assert(rows.facts.len() > 0)
 }
 
 #Test("a structured fix renders as its registry fix") {
@@ -1031,6 +1152,18 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
     assembly: "texts:\n    .asciz \"Stop [E3999]: route\"\n    .asciz \" Fix: write {{/path}}\\nMore: jet-lang.dev/e/E3999\\n\"\n"
     assert_eq(file_report_problems(rows, "c.S", assembly).problems.join("\n"), "")
     assert_eq(file_report_problems(rows, "c.S", assembly.replace("{{/path}}", "/path")).problems.len(), 1)
+}
+
+#Test("a spec page may cite only a code that has a row") {
+    known := [String:Bool]{}
+    known["E0107"] = true
+    known["L0103"] = true
+    assert_eq(cited_codes("E0107, `L0103` and (E0108); not XE0109, E01090, E010 or [line 12](#L1234)").join("|"), "E0107|L0103|E0108")
+    assert_eq(cited_codes("E0107–E0109").join("|"), "E0107|E0109")
+    page: page_citations(known, "Docs/spec/a.md", "intro\nan unknown name is E0107\nthe old rule was E0125, see [here](#L0125)\n")
+    assert_eq(page.cited, 2)
+    assert_eq(page.problems.len(), 1)
+    assert(page.problems[0].starts_with("Docs/spec/a.md:3: E0125 names no diagnostic row"), page.problems[0])
 }
 
 #Test("a row's page shows its texts as a reader sees them") {
