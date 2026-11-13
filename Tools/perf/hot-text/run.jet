@@ -9,6 +9,10 @@
 // counter ir.object.hot_missing); regenerate after large renames.
 //
 //   jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out Compiler/JetCli/hot-text.list]
+//   jet Tools/perf/hot-text/run.jet --check
+//
+// `--check` needs no build: it fails, listing them, when rows of the list
+// name no function the sources declare (hot_text_row_declared).
 //
 // <jet> is a built compiler beside its jet-runtime/ directory. Only the
 // compiler's own functions are listed: its object is the link's first input,
@@ -24,7 +28,15 @@ use core.[collections, crypto, files, process, sys]
 use core.encoding.binary
 use core.text.fmt
 
-USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>]"
+USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>] | --check"
+LIST: "Compiler/JetCli/hot-text.list"
+// The source trees the compiler is built from.
+SOURCE_DIRS: [String]{"Compiler", "Core", "Jetpack"}
+// A copy of one function: an owned clone, a lambda in it, a generic
+// instance, a foreign asm body, or the program entry's wrapper.
+COPY_SUFFIX: Regex{"(?:\.own\d+|__lambda_[0-9a-f]{{16}}|__[0-9a-f]{{16}}|__asm|__entry)$"}
+FN_DECL: Regex{"^\s*(\w+)\s*:\s*fn\b"}
+TYPE_DECL: Regex{"^(\w+)(?:<[^>]*>)?\s*:\s*(?:struct|enum)\b"}
 
 HELLO: "run: fn() {{\n    print(\"hello\")\n}}\n"
 
@@ -90,7 +102,11 @@ run: fn() -> Never Err! {
     // The checkout: three up from Tools/perf, which holds this program's directory.
     root: files.normalize("{sys.executable()}/../../../..")
     argv: process.args()
-    args := [String: String]{"jet": "", "out": files.join(root, "Compiler/JetCli/hot-text.list")}
+    if argv.len() == 1 && argv[0] == "--check" {
+        print(check(root))
+        process.exit(0)
+    }
+    args := [String: String]{"jet": "", "out": files.join(root, LIST)}
     i := 0
     loop i < argv.len() {
         key: argv[i].remove_prefix("--")
@@ -147,6 +163,120 @@ run: fn() -> Never Err! {
     files.write(args["out"], "{lines.join("\n")}\n")
     print("{args["out"]}: {names.len()} functions")
     process.exit(0)
+}
+
+// `--check`: the list's rows that name no function the sources declare, as
+// the failure, else how many rows were read.
+check: fn(root: String) -> String Err! {
+    declared: hot_text_declared(root)
+    rows: files.read(files.join(root, LIST)).lines().filter(line -> line != "" && !line.starts_with("#"))
+    stale: rows.filter(row -> !hot_text_row_declared(declared, row))
+    if stale.len() > 0 -> return Err("{LIST}: {stale.len()} of {rows.len()} rows name no function the sources declare; regenerate the list (jet Tools/perf/hot-text/run.jet -- --jet <jet>):\n{stale.join("\n")}")
+    Ok("{LIST}: all {rows.len()} rows name a function the sources declare")
+}
+
+// What the sources declare, under the names the build gives functions
+// (JetIR ir_symbol_name: the module and the name made one C identifier). A
+// source file's module is its name, so `jet_cli_run: fn` in Host.jet, or a
+// method of that name there, is `Host_jet_cli_run`. A Core file's module is
+// `core.` and its directories' snake_case names, then the file's own unless
+// it names its directory: `decode_scalars: fn` in
+// Core/Text/Runtime/KernelTextWidth.jet is
+// `core_text_runtime_kernel_text_width_decode_scalars`, and `read: fn` in
+// Core/Files/Files.jet is `core_files_read`. `typed` holds the modules that
+// declare a struct or an enum, whose order the compiler derives
+// (`<module>_compare`).
+HotTextDeclared: struct {
+    functions: Set<String>
+    typed: Set<String>
+}
+
+hot_text_declared: fn(root: String) -> HotTextDeclared Err! {
+    declared := HotTextDeclared{functions: Set.from([String]{}), typed: Set.from([String]{})}
+    loop dir in SOURCE_DIRS {
+        top: files.join(root, dir)
+        loop walked in files.walk_files(top) {
+            entry: walked ?? return Err("cannot walk {top}: {err}")
+            if !entry.relative.ends_with(".jet") -> next
+            hot_text_declare(declared, hot_text_modules(dir, entry.relative), files.read(files.join(top, entry.relative)))
+        }
+    }
+    Ok(declared)
+}
+
+// The module names the build may give the file at `relative` under `dir`.
+hot_text_modules: fn(dir: String, relative: String) -> [String] Never! {
+    stem: files.stem(relative)
+    if dir != "Core" -> return [String]{stem}
+    parts: relative.split("/").to_list()
+    path: ["core"].concat(parts[0..<parts.len() - 1].map(part -> hot_text_snake(part))).join("_")
+    [String]{path, "{path}_{hot_text_snake(stem)}"}
+}
+
+// The snake_case name of a PascalCase path segment, as the compiler names
+// Core modules (`KernelTextWidth` is `kernel_text_width`, `HTTPServer` is
+// `http_server`).
+hot_text_snake: fn(segment: String) -> String Never! {
+    bytes: segment.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        upper: code >= 65 && code <= 90
+        if upper && index > 0 {
+            previous: Int.from_u8(bytes[index - 1])
+            following: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            acronym_end: previous >= 65 && previous <= 90 && following >= 97 && following <= 122
+            if acronym_end || (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) -> out.push(U8{95})
+        }
+        out.push(if upper -> U8{code + 32} else -> bytes[index])
+    }
+    String.from_bytes_lossy(out)
+}
+
+// Adds what `text`, the source of a file the build names by `modules`,
+// declares.
+hot_text_declare: fn(declared: &HotTextDeclared, modules: [String], text: String) Never! {
+    loop line in text.lines() {
+        if FN_DECL.match(line) == .Val(found) {
+            name: found.group(1) ?? next
+            loop prefix in modules -> declared.functions.add("{prefix}_{name}")
+        } else if TYPE_DECL.is_match(line) {
+            loop prefix in modules -> declared.typed.add(prefix.copy())
+        }
+    }
+}
+
+// Whether list row `row` names a function `declared` holds. A row may name
+// a copy of one (COPY_SUFFIX); `jet_ir_` rows are helpers the build makes
+// (drops, clones, stop polls), with no source to check.
+hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never! {
+    name := row.copy()
+    loop COPY_SUFFIX.is_match(name) -> name = COPY_SUFFIX.replace_first(name, "")
+    if name.starts_with("jet_ir_") || declared.functions.has(name) -> return true
+    name.ends_with("_compare") && declared.typed.has(name.remove_suffix("_compare"))
+}
+
+#Test("a row names a declared function, a copy of one, or a build-made helper") {
+    declared := HotTextDeclared{functions: Set.from([String]{}), typed: Set.from([String]{})}
+    hot_text_declare(declared, hot_text_modules("Compiler", "JetCli/Source/Cli/Host.jet"), "jet_cli_run: fn() {{\n    open: fn(self) -> Int {{ 1 }}\n}}\nRow: struct {{\n}}\n")
+    hot_text_declare(declared, hot_text_modules("Core", "Files/Files.jet"), "is_dir: fn(path: String) -> Bool {{ false }}\n")
+    hot_text_declare(declared, hot_text_modules("Core", "Text/Runtime/KernelTextWidth.jet"), "decode_scalars: fn(text: String) -> [Int] {{ [] }}\n")
+    assert(hot_text_row_declared(declared, "Host_jet_cli_run"))
+    assert(hot_text_row_declared(declared, "Host_open"))
+    assert(hot_text_row_declared(declared, "Host_jet_cli_run.own2"))
+    assert(hot_text_row_declared(declared, "Host_jet_cli_run__lambda_c6ecc473a20ea58a"))
+    assert(hot_text_row_declared(declared, "Host_jet_cli_run__4c09dc3a67987b87"))
+    assert(hot_text_row_declared(declared, "Host_compare"))
+    assert(hot_text_row_declared(declared, "core_files_is_dir"))
+    assert(hot_text_row_declared(declared, "core_text_runtime_kernel_text_width_decode_scalars"))
+    assert(hot_text_row_declared(declared, "jet_ir_drop_7906809aed821885"))
+    assert(!hot_text_row_declared(declared, "Host_jet_cli_parse_root"))
+    assert(!hot_text_row_declared(declared, "core_files_compare"))
+    assert(!hot_text_row_declared(declared, "core_files_stat"))
+    assert(!hot_text_row_declared(declared, "core_text_decode_scalars"))
+    assert(!hot_text_row_declared(declared, "__core_crypto_md_hash_start"))
+    assert_eq(hot_text_snake("HTTPServer"), "http_server")
+    assert_eq(hot_text_snake("SSL"), "ssl")
 }
 
 // The little-endian `format` fields of the ELF file `bytes` at `at`.
