@@ -2261,6 +2261,11 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     // this jet is the one under test: its identity reaches the suite even
     // when the caller set none (jet_cli_compiler_identity reads IDENTITY).
     if code_suite && jet_cli_compiler_identity() == .Val(identity) -> spec = spec.env(JET_CLI_COMPILER_IDENTITY_ENV, identity)
+    // The test process finds the jet under test in JET, as a profile's
+    // children do: a test that runs `jet`, or a script whose `#!` names it,
+    // runs this jet, not whichever `jet` a PATH lookup finds.
+    running: cli_sys.executable()
+    if running != "" -> spec = spec.env(JET_CLI_TEST_SUITE_JET_ENV, running)
     if options.project_root == .Val(project_root) -> spec = spec.env("JET_PROJECT_ROOT", project_root)
     if options.update_snapshots -> spec = spec.env("JET_UPDATE_SNAPSHOTS", "1")
     if options.filter == .Val(filter) -> spec = spec.env("JET_TEST_FILTER", filter)

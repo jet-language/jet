@@ -961,7 +961,9 @@ matching packaged test runtime as `.jet/build/.test_<stem>.<pid>`; release
 keeps the emitted harness path. Native property generation is refused. Both
 paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
-`JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
+`JET_PROJECT_ROOT`, and set `JET` to the running `jet`, so a test that runs
+`jet` (or a script whose `#!` names it) runs the compiler under test, as a
+profile's children do. Native outcomes use process-private framed record files,
 never stdout, kept in memory: in the per-user runtime directory
 (`XDG_RUNTIME_DIR`), else `/dev/shm`, and in `.jet/build` only on a host with
 neither. A run removes its own harness and record files on every exit path;
