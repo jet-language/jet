@@ -19,7 +19,9 @@
 // Docs/spec/diagnostics.md: a Why gives a reason, not a placeholder, no
 // meaning, What, Why or Fix names a decision ID, and an active row states a
 // meaning of its own words, not its What again, and a Fix that is a step,
-// not the placeholder.
+// not the placeholder. A row's code letter follows its severity: a lint
+// takes an `L` code and no other row does. The codes registered before that
+// law sit in LETTER_LAW_EXCEPTIONS, which may only shrink.
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
@@ -47,6 +49,13 @@ CASE_SNAPSHOT_DIRS: [String]{"tests/cases/ui_lint_style"}
 NAME_PATH: "jet."
 // The spec pages, whose diagnostic codes must each name a row.
 SPEC_DIR: "Docs/spec"
+// The codes registered before the letter law whose letter disagrees with
+// their severity (Docs/spec/diagnostics.md: codes are never renumbered).
+// Lints with a non-`L` code: E2818, E2930, E2931, E2934, JT0101 and the
+// reserved W0410; a blocking row with an `L` code: L1101. The list only
+// shrinks: a code whose letter matches again, or whose row is gone, fails the
+// check until it is removed here, and a new mismatch can't be added.
+LETTER_LAW_EXCEPTIONS: [String]{"E2818", "E2930", "E2931", "E2934", "JT0101", "L1101", "W0410"}
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
@@ -103,6 +112,8 @@ RowFacts: struct {
     // The type path a report's header prints: `jet.` and the impl's type.
     name: String
     active: Bool
+    // `severity: .Lint`; the letter law reads it against the code.
+    lint: Bool
     plane: String
     // A structured fix other than `CryptoMisuse`, which carries evidence, not an edit.
     edit: Bool
@@ -390,6 +401,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         code: code_text,
         name: "{NAME_PATH}{source.name}",
         active: status == "Active",
+        lint: severity == "Lint",
         plane: stages,
         edit: edit != "" && edit != "CryptoMisuse",
         reason: no_fix_kind != "",
@@ -415,6 +427,28 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
     }
     if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID; an active row's meaning is its own words and its Fix a step): {rubric.join("; ")}"))
     Ok(RenderedRows{text: "{GENERATED_BY}\nDIAGNOSTIC_ROWS: #run {{ [DiagnosticRegistryRow]{{\n{rendered.join("\n")}\n}} }}\n", facts: facts})
+}
+
+// The rows whose code letter breaks the letter law, and the exceptions that
+// no longer name a breaking row. A lint takes an `L` code and no other row
+// does; `exceptions` names the frozen older codes that keep their letter.
+letter_law_problems: fn(rows: [RowFacts], exceptions: [String]) -> [String] Never! {
+    problems := [String]{}
+    breaking := [String]{}
+    loop row in rows {
+        if row.lint == row.code.starts_with("L") -> next
+        breaking.push(row.code.copy()) // copy: the row keeps its code
+        if exceptions.contains(row.code) -> next
+        if row.lint {
+            problems.push("{row.code} is a lint, so its code takes the letter `L`")
+        } else {
+            problems.push("{row.code} is not a lint, so its code can't take the letter `L`")
+        }
+    }
+    loop code in exceptions {
+        if !breaking.contains(code) -> problems.push("{code} is in LETTER_LAW_EXCEPTIONS but no row breaks the letter law under it; remove it from the list")
+    }
+    problems
 }
 
 // The active rows' counts per plane, in plane order. An active row may carry a
@@ -1001,6 +1035,8 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: DiagnosticRows.jet [--check|--write]"))
     source: files.read(SOURCE_PATH) ?? return Err(rows_fail("cannot read {SOURCE_PATH}: {err}"))
     rows: render_rows(source) ?? return Err(err)
+    letter: letter_law_problems(rows.facts, LETTER_LAW_EXCEPTIONS)
+    if letter.len() > 0 -> return Err(rows_fail("{letter.len()} codes break the letter law of Docs/spec/diagnostics.md:\n{letter.join("\n")}"))
     generated: generated_files(rows) ?? return Err(err)
     stale: stale_pages(generated) ?? return Err(err)
     sites: report_sites(rows.facts) ?? return Err(err)
@@ -1128,6 +1164,27 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     source: files.read(SOURCE_PATH) ?? panic("cannot read {SOURCE_PATH}: {err}")
     rows: render_rows(source) ?? panic(err.message)
     assert(rows.facts.len() > 0)
+}
+
+#Test("a code's letter follows its severity, and the frozen exceptions only shrink") {
+    lint_code: "{MINIMAL_CODE}        severity: .Lint\n        lint_name: \"bad_path\"\n"
+    blocking: (render_rows(MINIMAL_ROW) ?? panic(err.message)).facts
+    loose_source: MINIMAL_ROW.replace(MINIMAL_CODE, lint_code.replace("E9999", "L9998")).replace("BadPath:", "LooseBadPath:")
+    both: (render_rows("{MINIMAL_ROW}{loose_source}") ?? panic(err.message)).facts
+    assert_eq(letter_law_problems(both, [String]{}), [String]{})
+    e_lint: (render_rows(MINIMAL_ROW.replace(MINIMAL_CODE, lint_code)) ?? panic(err.message)).facts
+    assert_eq(letter_law_problems(e_lint, [String]{}), [String]{"E9999 is a lint, so its code takes the letter `L`"})
+    assert_eq(letter_law_problems(e_lint, [String]{"E9999"}), [String]{})
+    l_blocking: (render_rows(MINIMAL_ROW.replace("E9999", "L9999")) ?? panic(err.message)).facts
+    assert_eq(letter_law_problems(l_blocking, [String]{}), [String]{"L9999 is not a lint, so its code can't take the letter `L`"})
+    assert_eq(letter_law_problems(blocking, [String]{"E9999"}), [String]{"E9999 is in LETTER_LAW_EXCEPTIONS but no row breaks the letter law under it; remove it from the list"})
+    assert_eq(letter_law_problems(blocking, [String]{"E8888"}), [String]{"E8888 is in LETTER_LAW_EXCEPTIONS but no row breaks the letter law under it; remove it from the list"})
+}
+
+#Test("the Prelude rows keep the letter law with exactly the frozen exceptions") {
+    source: files.read(SOURCE_PATH) ?? panic("cannot read {SOURCE_PATH}: {err}")
+    rows: render_rows(source) ?? panic(err.message)
+    assert_eq(letter_law_problems(rows.facts, LETTER_LAW_EXCEPTIONS), [String]{})
 }
 
 #Test("a structured fix renders as its registry fix") {

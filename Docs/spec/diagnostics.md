@@ -38,9 +38,13 @@ library diagnostic without a `code` constant uses its type path as its code.
 The `L` prefix marks a lint: every new row with `severity: .Lint` takes an `L`
 code, and no new row of any other severity does. A code registered before
 this law keeps its letter even where the two disagree, because codes are never
-renumbered. `W0410` (`jet.RandomCryptoContext`, reserved) is the one code with
-a third letter: a frozen historical exception that no new code follows
-(D-REPORT-SEV1).
+renumbered: the lints `E2818`, `E2930`, `E2931`, `E2934` and `JT0101`, and the
+blocking `L1101`. `W0410` (`jet.RandomCryptoContext`, reserved) is a frozen
+historical exception with a third letter that no new code follows
+(D-REPORT-SEV1). `Tools/agent/DiagnosticRows.jet --check` enforces the law: it
+refuses a row whose letter disagrees with its severity unless the code is in
+its frozen `LETTER_LAW_EXCEPTIONS` list, and it refuses an entry there that no
+longer names a disagreeing row, so the list only shrinks.
 Codes are stable identities: do not reuse or renumber one. Lexer, parser, and
 semantic checks raise the row that owns the violated rule; a library rule
 raises its own type with `reject(Value)` from a marker's `expand` body, which
