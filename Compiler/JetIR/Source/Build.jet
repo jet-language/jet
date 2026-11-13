@@ -2537,9 +2537,10 @@ ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 // after pushing its IRLoopFrame. The passes treat it as any other poll: a
 // poll later in the same iteration folds it (OptStops.jet
 // ir_opt_fold_polls); the branch back to the head keeps one per iteration.
-// On x86-64, a check that follows no call reads only the runtime's armed
-// word before it calls the poll, and the poll keeps every register but rax
-// (X64Select.jet ir_x64_stop_point, ir_x64_stop_poll).
+// On x86-64 and the web target, a check that follows no call reads only the
+// runtime's armed word before it calls the poll, and on x86-64 the poll
+// keeps every register but rax (X64Select.jet ir_x64_stop_point,
+// ir_x64_stop_poll; JetWeb Select.jet web_stop_point).
 ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
     ir_stop_check(m, b)
 }

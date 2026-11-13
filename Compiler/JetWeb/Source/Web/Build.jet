@@ -1,28 +1,32 @@
 // The two partitions of a web build (Module.jet). The runtime partition is
 // selected once, when the toolchain packages the runtime library; its
-// receipt (`layout`, `export` and `import` rows) is what the program
+// receipt (`layout`, `export`, `data` and `import` rows) is what the program
 // partition is placed and linked against at `jet build --target web`.
 
 use {
+    jet_backend.[X64DataExport]
     jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS]
-    jet_ir.[IRLibraryExport, IRModule]
+    jet_ir.[IRLibraryExport, IRModule, IR_X64_CHECKS_ARMED_SYMBOL]
 }
 
 WebRuntime: struct {
     bytes: [U8]
     // The receipt: `layout\t<data end>\t<slots>`, then an `export\t<symbol>\t<sig>`
-    // row per export and an `import\t<space>\t<name>\t<sig>` row per import.
+    // row per export, a `data\t<symbol>\t<address>` row per data export and an
+    // `import\t<space>\t<name>\t<sig>` row per import.
     receipt: String
     errors: [String]
 }
 
 // The runtime partition of the runtime library's lowered module `m` (JetIR
-// ir_x64_compile_module's program) and its exports and lifecycle hooks. Every
-// web program shares it, and a web build has no checked heap, so it leaves
-// out the checked heap's exports (CHECKED_ALLOC_RUNTIME_EXPORTS), as the
-// prelinked native image does (JetBackend Image/RuntimePack.jet): their hook
-// would turn checked mode on in every web program.
-web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime Never! {
+// ir_x64_compile_module's program), its exports and lifecycle hooks, and its
+// data exports `data` (words a program's code reads in place, the native
+// object's data symbols). Every web program shares it, and a web build has
+// no checked heap, so it leaves out the checked heap's exports
+// (CHECKED_ALLOC_RUNTIME_EXPORTS), as the prelinked native image does
+// (JetBackend Image/RuntimePack.jet): their hook would turn checked mode on
+// in every web program.
+web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64DataExport]) -> WebRuntime Never! {
     rows := [String:Int]{}
     hooks := [WebHook]{}
     loop row in exports {
@@ -31,9 +35,12 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport]) -> WebRuntime
         if row.init_priority >= 0 -> hooks.push(WebHook{row: row.function, priority: row.init_priority, fini: false})
         if row.fini_priority >= 0 -> hooks.push(WebHook{row: row.function, priority: row.fini_priority, fini: true})
     }
-    built := web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, web_host_functions(), rows, hooks)
+    built := web_module(m, false, WebLayout{data_base: WEB_DATA_BASE, table_base: 0}, [String:String]{}, -1, web_host_functions(), rows, hooks)
     lines := [String]{"layout\t{built.data_end}\t{built.slots}"}
     loop row in built.exports -> lines.push("export\t{row}")
+    loop row in data {
+        if row.data >= 0 && row.data < built.data_at.len() -> lines.push("data\t{row.symbol}\t{built.data_at[row.data]}")
+    }
     loop row in built.imports -> lines.push("import\t{row}")
     lines.push("")
     WebRuntime{bytes: built.bytes.move(), receipt: lines.join("\n"), errors: built.errors.move()}
@@ -51,6 +58,7 @@ WebProgram: struct {
 web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
     runtime_end := -1
     runtime_slots := -1
+    armed := -1
     runtime := [String:String]{}
     loop line in receipt.split("\n").to_list() {
         fields: line.split("\t").to_list()
@@ -59,6 +67,8 @@ web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
             runtime_slots = Int.parse(fields[2]) ?? -1
         } else if fields.len() == 3 && fields[0] == "export" {
             runtime[fields[1].copy()] = fields[2].copy()
+        } else if fields.len() == 3 && fields[0] == "data" && fields[1] == IR_X64_CHECKS_ARMED_SYMBOL {
+            armed = Int.parse(fields[2]) ?? -1
         }
     }
     if runtime_end < 0 || runtime_slots < 0 {
@@ -67,7 +77,7 @@ web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
     m := program.move()
     web_lower(m)
     base: web_align_up(runtime_end, 16)
-    built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, web_host_functions(), [String:Int]{}, [WebHook]{})
+    built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
     manifest: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
     WebProgram{bytes: built.bytes.move(), manifest: manifest, errors: built.errors.move()}
 }

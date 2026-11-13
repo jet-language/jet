@@ -42,6 +42,8 @@ WebModule: struct {
     // The first byte after the module's data, and its table slots.
     data_end: Int
     slots: Int
+    // Per IR data row: its address.
+    data_at: [Int]
     // The functions it imports, `space\tname\tsig` rows, and exports,
     // `name\tsig` rows.
     imports: [String]
@@ -207,16 +209,17 @@ web_place_data: fn(tables: IRX64Tables, base: Int) -> [Int] Never! {
 // The module of lowered IR module `m` (web_lower). The runtime module
 // (`app` false) exports `exports` (symbol -> IR function) and builds its
 // `hooks`; the program module calls the runtime's exports `runtime`
-// (symbol -> signature) and runs `m.entry`. `hosts` are the C functions the
+// (symbol -> signature), reads the runtime's armed word at `armed` (-1:
+// none, WebState.armed) and runs `m.entry`. `hosts` are the C functions the
 // host provides.
-web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:String], hosts: [String:Bool], exports: [String:Int], hooks: [WebHook]) -> WebModule Never! {
+web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:String], armed: Int, hosts: [String:Bool], exports: [String:Int], hooks: [WebHook]) -> WebModule Never! {
     tables: ir_x64_tables(m)
     places := web_place_data(tables, layout.data_base)
     data_end: places.pop() ?? layout.data_base
     st := WebState{
         app: app, stop_points: m.stop_points, data_at: places, table_base: layout.table_base, slots: [Int]{}, slot_rows: [Int]{},
         types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
-        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), errors: [String]{},
+        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), armed: armed, errors: [String]{},
     }
     loop (row, f) in m.functions {
         st.slots.push(-1)
@@ -409,7 +412,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     wasm_put_unsigned(section, names_body.len())
     section.extend(names_body)
     wat_put_section(out, WEB_SECTION_CUSTOM, section)
-    WebModule{bytes: out.move(), errors: st.errors.move(), data_end: data_end, slots: st.slot_rows.len(), imports: imports.move(), exports: export_rows.move()}
+    WebModule{bytes: out.move(), errors: st.errors.move(), data_end: data_end, slots: st.slot_rows.len(), data_at: st.data_at.move(), imports: imports.move(), exports: export_rows.move()}
 }
 
 // A function's name as the native object names it.

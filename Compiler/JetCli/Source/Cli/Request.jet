@@ -189,7 +189,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
         // (JetWeb Build.jet), selected from the same lowered module, as
         // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
         if cli_sys.get("JET_FRONT_RUNTIME_WEB_OUTPUT") == .Val(web_prefix) {
-            web := web_runtime_partition(compiled.program, library.exports)
+            web := web_runtime_partition(compiled.program, library.exports, library.data)
             if web.errors.len() > 0 {
                 cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
                 return jet_driver_compile_escaped_failure("the runtime's web partition failed; see {prefix}.issues")

@@ -8,13 +8,15 @@
 // keeps its If: the edge runs inline, and a return from inside it is a stop
 // return. A body's stop return leaves global WEB_GLOBAL_EDX 1, any other
 // return 0, as x86-64 leaves edx, so the stop point right after a call of a
-// body reads that global instead of calling the poll. The slow paths of the
-// instruction before a trap point set the `flag` local that point reads.
+// body reads that global instead of calling the poll. A loop's poll that
+// checks no call reads the runtime's armed word first, as x86-64 does, and
+// calls the poll only once it is set. The slow paths of the instruction
+// before a trap point set the `flag` local that point reads.
 
 use {
     jet_backend.[LINK_FAULT_REPORT]
-    jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_code_line_source, ir_kind_name, ir_op_name, ir_overflow_wraps, ir_timing_marked, ir_x64_overflow_message]
-    jet_foundation.[name_rows_value]
+    jet_ir.[IRFunction, IRModule, IROp, IRSlotKind, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_args, ir_clone_shares, ir_code_line_source, ir_emit, ir_end, ir_function_new, ir_kind_name, ir_module_new, ir_op_name, ir_open, ir_open_if, ir_opt_polls_checks_call, ir_overflow_wraps, ir_slot, ir_stop_poll, ir_timing_marked, ir_type_row, ir_x64_overflow_message, ir_x64_tables]
+    jet_foundation.[Type, name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
 }
 
@@ -124,6 +126,8 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
         web_tee(e, frame)
         web_global_set(e, WEB_GLOBAL_SP)
     }
+    // Per instruction, whether it sits in a Loop (web_stop_point).
+    in_loops: if st.stop_points && st.armed >= 0 -> web_in_loops(f) else -> [Bool]{}
     at := 0
     loop at < f.op.len() {
         if checked {
@@ -131,7 +135,7 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
             marks.push(at)
         }
         if st.stop_points && e.pad_ends.len() == 0 {
-            resume: web_stop_point(e, st, m, f, at)
+            resume: web_stop_point(e, st, m, f, at, in_loops)
             if resume >= 0 {
                 at = resume
                 next
@@ -154,8 +158,10 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
 }
 
 // The stop point at `at`, if it is one: its check and the opened edge.
-// Returns where selection resumes (-1: not a stop point).
-web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) -> Int Never! {
+// Returns where selection resumes (-1: not a stop point). `in_loops` marks
+// the instructions in a Loop (web_in_loops; empty when the runtime names no
+// armed word).
+web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int, in_loops: [Bool]) -> Int Never! {
     if !web_is_stop_point(st, f, at) -> return -1
     branch: at + 1
     stopped: f.dst[at]
@@ -174,6 +180,22 @@ web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
         web_global_get(e, WEB_GLOBAL_EDX)
         web_op(e, 0xad)
         web_store(e, stopped)
+    } else if at < in_loops.len() && in_loops[at] && !ir_opt_polls_checks_call(f, st.poll, st.trap, at) {
+        // A loop's poll that checks no call can observe only what another
+        // task asked for, which arms the runtime's word first (JetRuntime
+        // Scheduler.jet scheduler_checks_arm): while it is 0 the iteration
+        // calls nothing.
+        web_i64(e, 0)
+        web_store(e, stopped)
+        web_i64(e, st.armed)
+        web_wrap(e)
+        web_mem(e, 0x29, 0)
+        web_op(e, 0x50)
+        web_op(e, 0x45)
+        web_if(e)
+        web_call(e, f.a[at])
+        web_store(e, stopped)
+        web_end(e)
     } else {
         web_call(e, f.a[at])
         web_store(e, stopped)
@@ -182,6 +204,26 @@ web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
     web_if(e)
     e.pad_ends.push(f.c[branch])
     branch + 1
+}
+
+// Per instruction of `f`, whether it sits in a Loop (the Loop itself and its
+// End included).
+web_in_loops: fn(f: IRFunction) -> [Bool] Never! {
+    inside := [Bool]{}
+    opens := [Bool]{}
+    loops := 0
+    loop op in f.op {
+        if op == .Block || op == .Loop || op == .If {
+            opens.push(op == .Loop)
+            if op == .Loop -> loops += 1
+        }
+        inside.push(loops > 0)
+        if op == .End {
+            closed: opens.pop() ?? false
+            if closed -> loops -= 1
+        }
+    }
+    inside
 }
 
 // Restores the stack pointer and sets the stop global (`stopped`).
@@ -1409,4 +1451,64 @@ web_convert: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: I
         return web_store(e, dst)
     }
     web_fail(e, st, f, at, "no conversion from {ir_kind_name(from.kind)} to {ir_kind_name(to.kind)}")
+}
+
+// `spin`, a Loop whose iteration only checks for a stop, selected with the
+// runtime's armed word at `armed` (-1: none): the code before the poll's
+// call, through its `call` opcode.
+web_select_test_spin: fn(armed: Int) -> [U8] Never! {
+    m := ir_module_new()
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    f := ir_function_new("spin", "test:spin.jet::spin", "", "spin.jet", 1)
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    _ := ir_open(f, IROp.Loop, 2)
+    no_args: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, poll, no_args, 0, 2)
+    _ := ir_open_if(f, stopped, 2)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 2)
+    ir_end(f, 2)
+    _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 2)
+    ir_end(f, 2)
+    row: m.functions.len()
+    m.functions.push(f)
+    st := WebState{
+        app: true, stop_points: true, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
+        types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
+        exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: poll, trap: -1, armed: armed, errors: [String]{},
+    }
+    loop g in m.functions {
+        st.slots.push(-1)
+        st.sigs.push(web_function_sig(m, g))
+    }
+    body: web_select_body(st, m, m.functions[row], ir_x64_tables(m))
+    if st.errors.len() > 0 -> panic(st.errors.join("; "))
+    loop index in 0..<(body.fixups.len() /% 2) {
+        if body.fixups[2 * index + 1] != poll -> next
+        call: body.fixups[2 * index]
+        before := [U8]{}
+        loop k in 0..<call -> before.push(body.code[k])
+        return before
+    }
+    panic("spin calls no poll")
+}
+
+// Whether `code` ends with `tail`.
+web_test_ends_with: fn(code: [U8], tail: [U8]) -> Bool Never! {
+    if code.len() < tail.len() -> return false
+    loop k in 0..<tail.len() {
+        if code[code.len() - tail.len() + k] != tail[k] -> return false
+    }
+    true
+}
+
+// With the runtime's armed word, the loop's poll is called only under
+// `i64.const 4096; i32.wrap_i64; i64.load; i64.eqz; i32.eqz; if`, so an
+// iteration calls nothing while the word is 0; with none, the Loop calls it
+// first thing.
+#Test("A loop's own stop check calls its poll only once the runtime's word is armed") {
+    armed: web_select_test_spin(4096)
+    assert(web_test_ends_with(armed, [U8]{0x42, 0x80, 0x20, 0xa7, 0x29, 0x00, 0x00, 0x50, 0x45, 0x04, 0x40, 0x10}))
+    plain: web_select_test_spin(-1)
+    assert(web_test_ends_with(plain, [U8]{0x03, 0x40, 0x10}))
 }
