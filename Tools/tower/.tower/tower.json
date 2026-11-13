@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101725,
+    "rev": 101734,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78803,12 +78803,21 @@
         },
         {
           "n": 7,
-          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item and ui.drop_zone has type fn() app.Notice!: its error type must convert to app.Notice; the frame shows the notice beside the control, announces it, and rolls back a refused predicted write. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
+          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files's on_drop has type fn() app.Notice!: its error type must convert to app.Notice. The frame shows the notice at the handler's destination (beside the control, a disabled menu item, the resumed window, or the drop target), announces it, and rolls back a refused predicted write; native.background logs it. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:48.297Z"
+          "at": "2026-11-13T18:17:42.307Z"
+        },
+        {
+          "n": 8,
+          "text": "app.live's closure must be one call of an app.Remote endpoint with codable arguments, so the subscription is keyed by the method and its arguments; anything else is a compile error with a registered diagnostic. Proof: `jet test Compiler --profile cases --filter web_app/live_takes_one_remote_call`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:43.299Z"
         }
       ],
       "refs": [],
@@ -78819,9 +78828,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-13T17:08:48.297Z",
+      "updated": "2026-11-13T18:17:43.299Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c0isxyo3",
@@ -96932,6 +96941,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T17:08:54.356Z"
+        },
+        {
+          "n": 5,
+          "text": "An upload is spooled before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. Proof: `jet test Compiler --profile cases --filter web_app/upload_spools_before_the_transaction_and_rolls_back`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:39.440Z"
         }
       ],
       "refs": [],
@@ -96942,9 +96960,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-13T17:08:54.356Z",
+      "updated": "2026-11-13T18:17:39.440Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0b8qwec",
@@ -97499,7 +97517,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "D-BOUND-METHOD1 is withdrawn in #6792 r4: the closure is the target form for app.live, keyed by its one call. #6824 is no longer a dependency of the proposal and stays a language gap without a ballot."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97528,7 +97552,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:03.329Z",
-      "updated": "2026-11-13T17:08:05.793Z",
+      "updated": "2026-11-13T18:17:44.342Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -97553,12 +97577,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, a committed one runs the job exactly once after the commit, retried with backoff up to retries:. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each queued call has a key that app.notify and app.mail pass to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID), so a retried send is collapsed. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:08.497Z"
+          "at": "2026-11-13T18:17:36.601Z"
         },
         {
           "n": 2,
@@ -97586,6 +97610,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T17:08:11.519Z"
+        },
+        {
+          "n": 5,
+          "text": "app.enqueue's body must be one call of an #App.Job method of the same service with codable arguments, evaluated and encoded at the call; anything else is a compile error with a registered diagnostic and a UI snapshot. Proof: `jet test Compiler --profile cases --filter web_app/enqueue_takes_one_job_call`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:37.554Z"
         }
       ],
       "refs": [],
@@ -97596,9 +97629,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-13T17:08:11.519Z",
+      "updated": "2026-11-13T18:17:37.554Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0b5xq4b",
@@ -97654,6 +97687,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T17:08:19.040Z"
+        },
+        {
+          "n": 5,
+          "text": "Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; auth.verified_email returns the lowercased address. set_role, remove_member and leave keep at least one owner (LastOwner); a removed member's open live queries re-run and are refused; jobs that push check membership first. Proof: `jet test Compiler --profile cases --filter web_app/membership_lifecycle_keeps_an_owner_and_refuses_the_removed`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:38.500Z"
         }
       ],
       "refs": [],
@@ -97664,9 +97706,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:12.993Z",
-      "updated": "2026-11-13T17:08:19.040Z",
+      "updated": "2026-11-13T18:17:38.500Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0w7y8wz",
@@ -97698,21 +97740,21 @@
         },
         {
           "n": 2,
-          "text": "Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects. Proof: `jet test Compiler --profile cases --filter db/count_by_is_one_query` (the case counts statements).",
+          "text": "Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects, counting the policies' statements. A policy whose reads are key lookups compiles into the query as a join; other policies run per row, memoized per key in the transaction, and jet inspect choices names them. Proof: `jet test Compiler --profile cases --filter db/count_by_is_one_query`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:23.232Z"
+          "at": "2026-11-13T18:17:40.387Z"
         },
         {
           "n": 3,
-          "text": "A way to load a row's related rows in one query (a join or an IN list) exists and Crewboard's board uses it; the query count of board() does not grow with the number of members. Proof: `jet test Compiler --profile cases --filter db/related_rows_load_in_one_query`.",
+          "text": "A way to load a row's related rows in one query (a join or an IN list) exists and Crewboard's board uses it; the query count of board(), policies included, does not grow with the number of members, and limit counts rows after the policy. Proof: `jet test Compiler --profile cases --filter db/related_rows_load_in_one_query`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:24.377Z"
+          "at": "2026-11-13T18:17:41.346Z"
         }
       ],
       "refs": [],
@@ -97723,7 +97765,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:20.796Z",
-      "updated": "2026-11-13T17:08:24.377Z",
+      "updated": "2026-11-13T18:17:41.346Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -204019,6 +204061,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:17:44.343Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vc9b8r",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T18:17:43.299Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y7zq8s",
+      "note": "#8 app.live's closure must be one call of an app.Remote endpoin"
+    },
+    {
+      "at": "2026-11-13T18:17:42.308Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#7: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 14); was: A handler of kit.button, icon_button, swipe_action, file_button, native.item and ui.drop_zone has type fn() app.Notice!: its error type must convert to app.Notice; the frame shows the notice beside th"
+    },
+    {
+      "at": "2026-11-13T18:17:41.346Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w7y8wz",
+      "note": "#3: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 13); was: A way to load a row's related rows in one query (a join or an IN list) exists and Crewboard's board uses it; the query count of board() does not grow with the number of members. Proof: `jet test Compi"
+    },
+    {
+      "at": "2026-11-13T18:17:40.387Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0w7y8wz",
+      "note": "#2: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 13); was: Rows.count_by(group) is one query (GROUP BY), and my_projects runs two queries whatever the number of projects. Proof: `jet test Compiler --profile cases --filter db/count_by_is_one_query` (the case c"
+    },
+    {
+      "at": "2026-11-13T18:17:39.440Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pg5tj9",
+      "note": "#5 An upload is spooled before the transaction starts; a retrie"
+    },
+    {
+      "at": "2026-11-13T18:17:38.500Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b5xq4b",
+      "note": "#5 Invitations and membership: accepting an invitation deletes "
+    },
+    {
+      "at": "2026-11-13T18:17:37.554Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0se7lpr",
+      "note": "#5 app.enqueue's body must be one call of an #App.Job method of"
+    },
+    {
+      "at": "2026-11-13T18:17:36.601Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#1: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 11); was: app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, a committed one runs the job exactly once after the commit, retried with"
+    },
     {
       "at": "2026-11-13T18:17:35.428Z",
       "by": "Main",
