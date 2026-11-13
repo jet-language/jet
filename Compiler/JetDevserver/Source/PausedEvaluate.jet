@@ -1218,7 +1218,7 @@ dyn_object: fn(value: Dyn) -> [String:Dyn]? Never! {
     }
 }
 
-required_string: fn(fields: [String:Dyn], key: String) -> String PausedEvaluateError! {
+paused_required_string: fn(fields: [String:Dyn], key: String) -> String PausedEvaluateError! {
     value: fields.get(key) ?? return Err(paused_error("paused request requires string `{key}`"))
     if value == {
         .Text(text) -> {
@@ -1262,8 +1262,8 @@ parse_identity: fn(fields: [String:Dyn]) -> SessionIdentity PausedEvaluateError!
     if fields.get("identity") == .Val(nested) {
         identity = dyn_object(nested) ?? return Err(paused_error("paused request `identity` must be an object"))
     }
-    SessionIdentity.new(required_string(identity, "session_id"), required_string(identity, "source_id"),
-        required_string(identity, "source_revision"), required_string(identity, "pause_id"), required_string(identity, "frame_id"))
+    SessionIdentity.new(paused_required_string(identity, "session_id"), paused_required_string(identity, "source_id"),
+        paused_required_string(identity, "source_revision"), paused_required_string(identity, "pause_id"), paused_required_string(identity, "frame_id"))
 }
 
 parse_budget: fn(fields: [String:Dyn]) -> EvaluationBudget PausedEvaluateError! {
@@ -1280,7 +1280,7 @@ parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvalua
             authority := [AuthorityRequirement]{}
             loop entry in values {
                 requirement: dyn_object(entry) ?? return Err(paused_error("paused authority requirement must be an object"))
-                authority.push(AuthorityRequirement.new(required_string(requirement, "capability"), required_string(requirement, "scope_id")))
+                authority.push(AuthorityRequirement.new(paused_required_string(requirement, "capability"), paused_required_string(requirement, "scope_id")))
             }
             Ok(authority)
         }
@@ -1289,11 +1289,11 @@ parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvalua
 }
 
 validate_header: fn(fields: [String:Dyn], kind: String) PausedEvaluateError! {
-    if required_string(fields, "protocol") != PAUSED_EVALUATE_PROTOCOL -> return Err(paused_error("paused request protocol does not match jet.devtools.v1"))
+    if paused_required_string(fields, "protocol") != PAUSED_EVALUATE_PROTOCOL -> return Err(paused_error("paused request protocol does not match jet.devtools.v1"))
     schema_value: fields.get("schema_version") ?? return Err(paused_error("paused request schema_version is missing or invalid"))
     schema: foundation_json_integer(schema_value) ?? return Err(paused_error("paused request schema_version is missing or invalid"))
     if schema != PAUSED_EVALUATE_SCHEMA_VERSION -> return Err(paused_error("paused request schema_version is unsupported"))
-    if required_string(fields, "kind") != kind -> return Err(paused_error("paused request kind must be `{kind}`"))
+    if paused_required_string(fields, "kind") != kind -> return Err(paused_error("paused request kind must be `{kind}`"))
     Ok()
 }
 
@@ -1306,9 +1306,9 @@ parse_inspect_request: fn(raw: String) -> InspectRequest PausedEvaluateError! {
     fields: request_object(raw)
     validate_header(fields, "paused.inspect")
     request: InspectRequest{
-        request_id: required_string(fields, "request_id"),
+        request_id: paused_required_string(fields, "request_id"),
         identity: parse_identity(fields),
-        scope_id: required_string(fields, "scope_id"),
+        scope_id: paused_required_string(fields, "scope_id"),
         value_id: optional_string(fields, "value_id"),
         budget: parse_budget(fields),
         authority: parse_authority(fields),
@@ -1321,7 +1321,7 @@ parse_inspect_request: fn(raw: String) -> InspectRequest PausedEvaluateError! {
 parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! {
     fields: request_object(raw)
     validate_header(fields, "paused.evaluate")
-    mode: if required_string(fields, "mode") == {
+    mode: if paused_required_string(fields, "mode") == {
         "read_only" -> EvaluationMode.ReadOnly
         "mutate" -> EvaluationMode.Mutate
         else -> { return Err(paused_error("paused evaluation mode is unsupported")) }
@@ -1344,10 +1344,10 @@ parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! 
         }
     }
     request: EvaluateRequest{
-        request_id: required_string(fields, "request_id"),
+        request_id: paused_required_string(fields, "request_id"),
         identity: parse_identity(fields),
-        scope_id: required_string(fields, "scope_id"),
-        expression: required_string(fields, "expression"),
+        scope_id: paused_required_string(fields, "scope_id"),
+        expression: paused_required_string(fields, "expression"),
         mode: mode,
         effects: effects,
         authority: parse_authority(fields),

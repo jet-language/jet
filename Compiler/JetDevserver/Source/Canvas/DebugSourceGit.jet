@@ -5,6 +5,7 @@ use {
     canvas_files: core.files
     canvas_process: core.process
     canvas_sys: core.sys
+    jet_canvas.[read_source_without_symlinks, source_revision]
     jet_debug.[DebugSnapshot, NATIVE_DEBUG_BREAKPOINT_HIT, NATIVE_DEBUG_LOCALS_LABEL, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
     jet_foundation.[Diagnostic, Span, diagnostic_render, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex_bytes]
 }
@@ -47,7 +48,7 @@ DebugTier: enum {
                     else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native-lldb"))
                 }
             }
-            else -> Ok(DebugTier.NativeLLDB)
+            .None -> Ok(DebugTier.NativeLLDB)
         }
     }
 
@@ -132,7 +133,7 @@ DebugSessions: struct {
                 self.sessions[requested] = session
                 id = requested
             }
-            else -> {
+            .None -> {
                 if self.sessions.len() >= MAX_DEBUG_SESSIONS {
                     oldest := String?{None}
                     oldest_created := 0
@@ -176,7 +177,7 @@ DebugSessions: struct {
             if result.snapshot == .Val(snapshot) {
                 build_id: if session.native == {
                     .Val(native) -> native.build_id
-                    else -> None
+                    .None -> None
                 }
                 source: PausedDebugSource{source_id: session.source_id, revision: session.revision, build_id: build_id, world_id: None}
                 identity: SessionIdentity.new(id, session.source_id, session.revision, snapshot.pause_id(), snapshot.frame_id()) ?? return Err(canvas_debug_error("execution", err.message))
@@ -204,13 +205,16 @@ DebugSessions: struct {
     }
 
     clear_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
+        session := self.sessions.get(id) ?? {
+            debug_clear_host_session(host, id)
+            return Ok()
+        }
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
                 live.exit(host)
             }
-            else -> debug_clear_host_session(host, id)
+            .None -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -218,13 +222,16 @@ DebugSessions: struct {
     }
 
     resume_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
+        session := self.sessions.get(id) ?? {
+            debug_clear_host_session(host, id)
+            return Ok()
+        }
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
                 live.resume(host)
             }
-            else -> debug_clear_host_session(host, id)
+            .None -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -232,13 +239,16 @@ DebugSessions: struct {
     }
 
     cancel_paused_session: fn(&self, host: &PausedEvaluateHost, id: String, reason: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
+        session := self.sessions.get(id) ?? {
+            debug_clear_host_session(host, id)
+            return Ok()
+        }
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
                 live.cancel(host, reason) ?? return Err(canvas_debug_error("execution", err.message))
             }
-            else -> debug_clear_host_session(host, id)
+            .None -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -253,13 +263,16 @@ DebugSessions: struct {
     }
 
     stale_paused_session: fn(&self, host: &PausedEvaluateHost, id: String) CanvasDebugError! {
-        session := self.sessions.get(id) ?? return Ok(debug_clear_host_session(host, id))
+        session := self.sessions.get(id) ?? {
+            debug_clear_host_session(host, id)
+            return Ok()
+        }
         if session.paused_adapter == {
             .Val(adapter) -> {
                 live := adapter
                 live.stale(host)
             }
-            else -> debug_clear_host_session(host, id)
+            .None -> debug_clear_host_session(host, id)
         }
         session.paused_adapter = None
         self.sessions[id] = session
@@ -298,7 +311,7 @@ DebugSessions: struct {
         if session.native == .Val(native) {
             if canvas_files.remove_all(native.dir) == {
                 .Err(_) -> {}
-                else -> {}
+                .Ok(_) -> {}
             }
         }
     }
@@ -365,7 +378,7 @@ debug_words: fn(text: String) -> [String] Never! {
 debug_positive_int: fn(text: String) -> Bool Never! {
     if Int.parse(text) == {
         .Ok(value) -> value >= 1
-        else -> false
+        .Err(_) -> false
     }
 }
 
@@ -401,14 +414,14 @@ native_debug_artifact: fn(jet: String, path: String, id: String) -> NativeDebugA
     if !built.success {
         if canvas_files.remove_all(scratch) == {
             .Err(_) -> {}
-            else -> {}
+            .Ok(_) -> {}
         }
         return Err(canvas_debug_error("diagnostic", "{built.output}{built.errors}"))
     }
     binary: native_debug_image(path, out_dir)
     build_id: if canvas_files.read_bytes(binary) == {
         .Ok(bytes) -> Val("sha256-{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}")
-        else -> None
+        .Err(_) -> None
     }
     lines := [String]{}
     loop line in jet_source.split("\n") -> lines.push(line)
@@ -492,9 +505,9 @@ debug_ok: fn(request: DebugOkRequest) -> String Never! {
     active_line: if request.status == {
         .Running -> if request.snapshot == {
             .Val(snapshot) -> Val(snapshot.line)
-            else -> active_line_from_transcript(transcript)
+            .None -> active_line_from_transcript(transcript)
         }
-        else -> None
+        .Finished | .Failed -> None
     }
     active_span := Span{start: 0, end: 0}
     active_node := ""
@@ -515,20 +528,20 @@ debug_ok: fn(request: DebugOkRequest) -> String Never! {
     revision: source_revision(src)
     locals: if request.snapshot == {
         .Val(snapshot) -> snapshot_locals_json(snapshot)
-        else -> locals_json(transcript)
+        .None -> locals_json(transcript)
     }
     watch_values: if request.snapshot == {
         .Val(snapshot) -> snapshot_watches_json(snapshot, request.watches)
-        else -> watches_json(transcript, request.watches)
+        .None -> watches_json(transcript, request.watches)
     }
     call_stack: if request.snapshot == {
         .Val(snapshot) -> snapshot_call_stack_json(snapshot, request.source_id)
-        else -> call_stack_json(transcript)
+        .None -> call_stack_json(transcript)
     }
     trace: trace_json(transcript)
     line_json: if active_line == {
         .Val(line) -> "{line}"
-        else -> "null"
+        .None -> "null"
     }
     wires := [String]{}
     loop wire in wire_path.ids -> wires.push(foundation_json_quote(wire))
@@ -604,7 +617,7 @@ active_line_from_transcript: fn(transcript: String) -> Int? Never! {
         if !line.contains("<- here") -> next
         before_pipe: if line.split_once("|") == {
             .Val(parts) -> parts.before
-            else -> line
+            .None -> line
         }
         words: debug_words(before_pipe)
         if words.len() == 0 -> next
@@ -709,7 +722,7 @@ debug_collect_record_spans: fn(value: Dyn, id_key: String, records: &[DebugRecor
         .Array(items) -> {
             loop item in items -> debug_collect_record_spans(item, id_key, records)
         }
-        else -> {}
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> {}
     }
 }
 
@@ -783,7 +796,7 @@ breakpoint_json: fn(src: String, lines: [Int], stale_anchors: [String]) -> Strin
     loop anchor in stale_anchors {
         span_json: if anchor_span(src, anchor) == {
             .Val(span) -> debug_span_json(span)
-            else -> "null"
+            .None -> "null"
         }
         entries.push("{{\"line\":null,\"source_span\":{span_json},\"anchor\":{foundation_json_quote(anchor)},\"state\":\"stale\"}}")
     }
@@ -956,7 +969,7 @@ debug_newest_entries: fn(lines: [String], first: Int, max_count: Int, max_bytes:
 canonical_path: fn(path: String) -> String Never! {
     if canvas_files.canonicalize(path) == {
         .Ok(resolved) -> resolved
-        else -> path
+        .Err(_) -> path
     }
 }
 
@@ -977,11 +990,10 @@ git_relative_path: fn(root: String, path: String) -> String Never! {
 }
 
 git_output: fn(root: String, args: [String]) -> String? Never! {
-    argv := [String]{"git", "-C", root}
-    loop arg in args -> argv.push(arg)
+    argv: [String]{"git", "-C", root, ...args}
     if canvas_process.cmd(argv).stdout(.Capture).stderr(.Capture).output_limit(MAX_DEBUG_CHILD_OUTPUT_BYTES).run() == {
         .Ok(receipt) -> if receipt.success -> Val(receipt.output) else -> None
-        else -> None
+        .Err(_) -> None
     }
 }
 

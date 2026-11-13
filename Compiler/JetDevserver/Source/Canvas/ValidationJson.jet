@@ -18,28 +18,28 @@ is_jet_ident: fn(name: String) -> Bool Never! {
     true
 }
 
-validate_ident: fn(name: String) String! {
+validate_ident: fn(name: String) Err! {
     if name == "" -> return Err(edit_error("bad_request", "empty identifier"))
     if !is_jet_ident(name) -> return Err(edit_error("bad_request", "identifier is not a Jet name"))
     Ok()
 }
 
-validate_query_ident: fn(name: String) String! {
+validate_query_ident: fn(name: String) Err! {
     if name == "" -> return Err(query_error("bad_request", "empty identifier"))
     if !is_jet_ident(name) -> return Err(query_error("bad_request", "identifier is not a Jet name"))
     Ok()
 }
 
-validate_ident_for_project: fn(name: String) String! {
+validate_ident_for_project: fn(name: String) Err! {
     if name == "" -> return Err(project_edit_error("bad_request", "empty identifier"))
-    if !is_jet_ident(name) -> return Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
+    if !is_jet_ident(name) {
+        return Err(project_edit_error("bad_request", "identifier is not a Jet package name"))
+    }
     Ok()
 }
 
-validate_qualified_name: fn(name: String) String! {
-    loop part in name.split(".") {
-        _: validate_ident(part) ?? return Err(err)
-    }
+validate_qualified_name: fn(name: String) Err! {
+    loop part in name.split(".") -> _: validate_ident(part) ?? return Err(err)
     Ok()
 }
 
@@ -47,52 +47,68 @@ has_body_text: fn(fragment: String) -> Bool Never! {
     fragment.contains("{{") || fragment.contains("}}") || fragment.contains("\n")
 }
 
-validate_signature_fragment: fn(fragment: String) String! {
-    if has_body_text(fragment) -> return Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
+validate_signature_fragment: fn(fragment: String) Err! {
+    if has_body_text(fragment) {
+        return Err(edit_error("bad_request", "function parameter text must stay inside the signature"))
+    }
     Ok()
 }
 
-validate_type_fragment: fn(fragment: String) String! {
-    if fragment.trim() == "" || has_body_text(fragment) -> return Err(edit_error("bad_request", "return type is not a Jet type"))
+validate_type_fragment: fn(fragment: String) Err! {
+    if fragment.trim() == "" || has_body_text(fragment) {
+        return Err(edit_error("bad_request", "return type is not a Jet type"))
+    }
     Ok()
 }
 
-validate_function_signature: fn(signature: String) String! {
-    if has_body_text(signature) -> return Err(edit_error("bad_request", "function signature must not include a body"))
+validate_function_signature: fn(signature: String) Err! {
+    if has_body_text(signature) {
+        return Err(edit_error("bad_request", "function signature must not include a body"))
+    }
     loop part in signature.split(" ") {
         word: part.trim()
-        if word == "fn" || word.starts_with("fn(") || word.starts_with("fn<") || word.ends_with(":fn") || word.contains(":fn(") -> return Ok()
+        if word == "fn" || word.starts_with("fn(") || word.starts_with("fn<") || word.ends_with(":fn") || word.contains(":fn(") {
+            return Ok()
+        }
     }
     Err(edit_error("bad_request", "function signature must include fn"))
 }
 
-validate_single_line_fragment: fn(fragment: String, label: String) String! {
-    if fragment.trim() == "" || fragment.contains("\n") || fragment.contains("\r") -> return Err(edit_error("bad_request", label))
+validate_single_line_fragment: fn(fragment: String, label: String) Err! {
+    if fragment.trim() == "" || fragment.contains("\n") || fragment.contains("\r") {
+        return Err(edit_error("bad_request", label))
+    }
     Ok()
 }
 
-validate_comment_color: fn(color: String) String! {
+validate_comment_color: fn(color: String) Err! {
     bytes: color.bytes()
     ok := bytes.len() == 7 && Int{bytes[0]} == 35
     if ok {
         loop i in 1..<7 {
             byte: Int{bytes[i]}
-            if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> ok = false
+            if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) {
+                ok = false
+            }
         }
     }
     if !ok -> return Err(edit_error("bad_request", "Canvas comment color must be #RRGGBB"))
     Ok()
 }
 
-validate_comment_alpha: fn(alpha: String) String! {
+validate_comment_alpha: fn(alpha: String) Err! {
     value: alpha.trim().to_float() ?? return Err(edit_error("bad_request", "Canvas comment alpha must be a number"))
-    if value < 0.0 || value > 1.0 -> return Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1"))
+    if value < 0.0 || value > 1.0 {
+        return Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1"))
+    }
     Ok()
 }
 
-normalize_bounds: fn(bounds: String) -> String String! {
+normalize_bounds: fn(bounds: String) -> String Err! {
     parsed: parse_bounds(bounds) ?? return Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h"))
-    if parsed.w <= 0 || parsed.h <= 0 -> return Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h with positive size"))
+    if parsed.w <= 0 || parsed.h <= 0 {
+        return Err(edit_error("bad_request", "Canvas comment bounds must be x,y,w,h with positive size"))
+    }
     Ok("{parsed.x},{parsed.y},{parsed.w},{parsed.h}")
 }
 
@@ -162,7 +178,8 @@ identifiers: fn(expr: String) -> [String] Never! {
     out := [String]{}
     bytes: expr.bytes()
     start := -1
-    loop i in 0..bytes.len() {
+    stop: bytes.len() + 1
+    loop i in 0..<stop {
         byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
         if ident_byte(byte, false) {
             if start < 0 -> start = i
@@ -170,7 +187,9 @@ identifiers: fn(expr: String) -> [String] Never! {
         }
         if start >= 0 {
             word: expr.slice(start, i)
-            if ident_byte(Int{bytes[start]}, true) && word != "true" && word != "false" && word != "ok" && word != "err" -> out.push(word)
+            if ident_byte(Int{bytes[start]}, true) && word != "true" && word != "false" && word != "ok" && word != "err" {
+                out.push(word)
+            }
             start = -1
         }
     }
@@ -224,7 +243,8 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
     out := [String]{}
     bytes: expr.bytes()
     start := -1
-    loop i in 0..bytes.len() {
+    stop: bytes.len() + 1
+    loop i in 0..<stop {
         byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
         if ident_byte(byte, false) {
             if start < 0 -> start = i
@@ -241,15 +261,15 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
 }
 
 
-required_string: fn(text: String, key: String) -> String String! {
+required_string: fn(text: String, key: String) -> String Err! {
     json_string_field(text, key) ?? return Err(edit_error("bad_request", "missing `{key}`"))
 }
 
-required_query_string: fn(text: String, key: String) -> String String! {
+required_query_string: fn(text: String, key: String) -> String Err! {
     json_string_field(text, key) ?? return Err(query_error("bad_request", "missing `{key}`"))
 }
 
-required_project_string: fn(text: String, key: String) -> String String! {
+required_project_string: fn(text: String, key: String) -> String Err! {
     json_string_field(text, key) ?? return Err(project_edit_error("bad_request", "missing `{key}`"))
 }
 
@@ -278,7 +298,9 @@ json_bool_field: fn(text: String, key: String) -> Bool? Never! {
 leading_digits: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := 0
-    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 {
+        end += 1
+    }
     text.slice(0, end)
 }
 
@@ -299,6 +321,19 @@ json_string_array: fn(text: String, key: String) -> [String] Never! {
         out.push(parsed.value)
         rest = rest.slice(parsed.consumed, rest.len()).trim_start()
         if rest.starts_with(",") -> rest = rest.remove_prefix(",")
+    }
+    out
+}
+
+// The integers of the JSON array at `"key":`, up to its first non-integer.
+json_int_array: fn(text: String, key: String) -> [Int] Never! {
+    out := [Int]{}
+    body: json_array_body(text, key) ?? return out
+    loop item in body.split(",") {
+        trimmed: item.trim()
+        if trimmed == "" -> next
+        value: trimmed.to_int() ?? return out
+        out.push(value)
     }
     out
 }

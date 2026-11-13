@@ -1,7 +1,7 @@
 // Blueprint, game, interface, event, task, and reasoning facts beside the
 // Canvas graphs, and the callable exports Canvas actions run.
 use {
-    jet_canvas.[json_bool, json_optional_str, json_str, json_strs, snippet, span_json]
+    jet_canvas.[Projection, canvas_graph_projection, json_bool, json_optional_str, json_str, json_strs, snippet, span_json]
     jet_driver.[JetDriverDocModule]
     jet_foundation.[DerivationRecord, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_visit_body, derivation_record_json, expr_span, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
     jet_semindex.[SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
@@ -96,6 +96,30 @@ canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
     "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(shown_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":{index.derivations.len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
 
+// The Canvas document of a checked file with the devserver's facts beside the
+// checked ones: the blueprint and reasoning facts in the document, and the
+// entry module's callable exports and game calls for the action catalog. The
+// entry is the module read from `path`, else the one whose text is `src`.
+project_checked: fn(path: String, source_id: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?) -> QueryContext {
+    entry: canvas_event_module(path, src, modules) ?? 0
+    has_entry: entry < modules.len()
+    game_facts: if has_entry -> canvas_game_facts(source_id, src, modules[entry]) else -> [CanvasGameFact]{}
+    entry_identity: if has_entry -> modules[entry].module_identity else -> ""
+    blueprint: canvas_blueprint_facts_json(path, src, modules, index, runtime_events, game_facts)
+    reasoning: canvas_reasoning_json(path, index)
+    checked: canvas_graph_projection(source_id, src, modules, entry_identity, index)
+    projection: projection_with_facts(checked, ",\"blueprint\":{blueprint},\"reasoning\":{reasoning}")
+    QueryContext{projection: projection, index: index, callable_exports: canvas_callable_exports(modules, entry), game_facts: game_facts}
+}
+
+// The graph document with `extra` members added to its `facts` object; that
+// object and the document close together at the end of the text.
+projection_with_facts: fn(projection: &&Projection, extra: String) -> Projection Never! {
+    json: projection.json
+    if !json.ends_with("}}}}") -> return projection
+    Projection{json: "{json.slice(0, json.len() - 2)}{extra}}}}}", inline_exprs: projection.inline_exprs, graph_anchors: projection.graph_anchors, node_refs: projection.node_refs}
+}
+
 // The module of `modules` the name ledger numbers `name_index`.
 canvas_module_at_name_index: fn(modules: [JetDriverDocModule], name_index: Int) -> JetDriverDocModule? {
     loop doc_module in modules {
@@ -125,7 +149,7 @@ canvas_callable_exports: fn(modules: [JetDriverDocModule], entry: Int) -> [Canva
 }
 
 canvas_callable_callee: fn(ledger: NameLedger, entry_index: Int, declaration: NameDeclaration, module_alias: String) -> String {
-    source_path: source_item_path(ledger, declaration.module_index, module_alias, declaration.name, declaration.span, [String]{})
+    source_path: source_item_path(ledger, declaration.module_index, module_alias, declaration.name, declaration.span, "")
     if declaration.module_index == entry_index -> return source_path
     leaf: name_facts_leaf(source_path)
     loop alias in ledger.facts.aliases {
@@ -173,24 +197,18 @@ canvas_game_facts: fn(source_id: String, src: String, entry_module: JetDriverDoc
 
 collect_game_items: fn(items: [Item], source_id: String, src: String, out: &[CanvasGameFact]) {
     loop item in items {
-        if item == {
-            .Func(function) -> {
-                ast_visit_body(function.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+        if item == .Func(function) {
+            ast_visit_body(function.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+        } else if item == .Struct(structure) {
+            loop method in structure.methods {
+                ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
             }
-            .Struct(structure) -> {
-                loop method in structure.methods {
-                    ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
-                }
+        } else if item == .Impl(implementation) {
+            loop method in implementation.methods {
+                ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
             }
-            .Impl(implementation) -> {
-                loop method in implementation.methods {
-                    ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
-                }
-            }
-            .CodeModule(module_value) -> {
-                if module_value.body == .Val(body) -> collect_game_items(body, source_id, src, out)
-            }
-            else -> {}
+        } else if item == .CodeModule(module_value) {
+            if module_value.body == .Val(body) -> collect_game_items(body, source_id, src, out)
         }
     }
 }
@@ -230,6 +248,7 @@ note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expre
         } else {
             return
         }
+        authored_instance_id: "{source_id}:game:{operation}:{source_span.start}-{source_span.end}"
         out.push(
             CanvasGameFact{
                 source_id: source_id,
@@ -239,26 +258,22 @@ note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expre
                 value_source: value_source,
                 source_span: source_span,
                 field_span: field_span,
-                authored_instance_id: "{source_id}:game:{operation}:{source_span.start}-{source_span.end}",
+                authored_instance_id: authored_instance_id,
             },
         )
     }
 }
 
 game_assets_receiver: fn(expr: Expr) -> Bool {
-    if expr == {
-        .Field(_, name, _, _) -> name == "assets"
-        .Paren(inner, _, _) -> game_assets_receiver(inner)
-        else -> false
-    }
+    if expr == .Field(_, name, _, _) -> return name == "assets"
+    if expr == .Paren(inner, _, _) -> return game_assets_receiver(inner)
+    false
 }
 
 game_receiver_start: fn(expr: Expr) -> Int {
-    if expr == {
-        .Field(base, _, _, _) -> game_receiver_start(base)
-        .Paren(base, _, _) -> game_receiver_start(base)
-        else -> expr_span(expr).start
-    }
+    if expr == .Field(base, _, _, _) -> return game_receiver_start(base)
+    if expr == .Paren(base, _, _) -> return game_receiver_start(base)
+    expr_span(expr).start
 }
 
 // From the receiver chain's first byte through the call's closing paren.
@@ -317,56 +332,48 @@ output_fact_json: fn(output: SemOutput) -> String {
 collect_module_interfaces: fn(doc_module: JetDriverDocModule, out: &[String]) {
     storage: doc_module.name_ledger ?? return
     permit: storage.guard_read()
-    collect_interface_facts(doc_module.items, out, [String]{}, doc_module.source, doc_module.name_module_index, doc_module.alias, permit.value)
+    collect_interface_facts(doc_module.items, out, "", doc_module.source, doc_module.name_module_index, doc_module.alias, permit.value)
 }
 
-collect_interface_facts: fn(items: [Item], out: &[String], scope: [String], src: String, module_index: Int, module_alias: String, ledger: NameLedger) {
+// `scope` is the enclosing code modules' dotted prefix, `""` at the top.
+collect_interface_facts: fn(items: [Item], out: &[String], scope: String, src: String, module_index: Int, module_alias: String, ledger: NameLedger) {
     loop item in items {
-        if item == {
-            .Trait(definition) -> {
-                out.push(trait_fact_json(src, definition, source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)))
+        if item == .Trait(definition) {
+            out.push(trait_fact_json(src, definition, source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)))
+        } else if item == .Impl(implementation) {
+            if implementation.trait_name == .Val(trait_name) && !implementation.is_generated_serde {
+                type_path: source_item_path(ledger, module_index, module_alias, implementation.type_name, implementation.type_span, scope)
+                trait_path: source_item_path(ledger, module_index, module_alias, trait_name, implementation.trait_span ?? implementation.type_span, scope)
+                out.push(trait_impl_fact_json(type_path, trait_path, implementation.methods, implementation.assoc_type_impls, implementation.delegation_field, implementation.type_span))
             }
-            .Impl(implementation) -> {
-                if implementation.trait_name == .Val(trait_name) && !implementation.is_generated_serde {
-                    type_path: source_item_path(ledger, module_index, module_alias, implementation.type_name, implementation.type_span, scope)
-                    trait_path: source_item_path(ledger, module_index, module_alias, trait_name, implementation.trait_span ?? implementation.type_span, scope)
-                    out.push(trait_impl_fact_json(type_path, trait_path, implementation.methods, implementation.assoc_type_impls, implementation.delegation_field, implementation.type_span))
-                }
+        } else if item == .Struct(structure) {
+            loop block in structure.trait_impls {
+                if block.compiler_generated -> next
+                type_path: source_item_path(ledger, module_index, module_alias, structure.name, structure.name_span, scope)
+                trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
+                out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
             }
-            .Struct(structure) -> {
-                loop block in structure.trait_impls {
-                    if block.compiler_generated -> next
-                    type_path: source_item_path(ledger, module_index, module_alias, structure.name, structure.name_span, scope)
-                    trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
-                    out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
-                }
+        } else if item == .Enum(definition) {
+            loop block in definition.trait_impls {
+                if block.compiler_generated -> next
+                type_path: source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)
+                trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
+                out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
             }
-            .Enum(definition) -> {
-                loop block in definition.trait_impls {
-                    if block.compiler_generated -> next
-                    type_path: source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)
-                    trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
-                    out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
-                }
+        } else if item == .CodeModule(module_value) {
+            if module_value.body == .Val(body) {
+                nested_scope: "{scope}{module_value.name}."
+                collect_interface_facts(body, out, nested_scope, src, module_index, module_alias, ledger)
             }
-            .CodeModule(module_value) -> {
-                if module_value.body == .Val(body) {
-                    nested_scope := [String]{}
-                    loop name in scope -> nested_scope.push(name)
-                    nested_scope.push(module_value.name)
-                    collect_interface_facts(body, out, nested_scope, src, module_index, module_alias, ledger)
-                }
-            }
-            else -> {}
         }
     }
 }
 
 // The path source in the module writes for an item, without the module's
 // own alias.
-source_item_path: fn(ledger: NameLedger, module_index: Int, module_alias: String, internal_name: String, span: Span, scope: [String]) -> String {
+source_item_path: fn(ledger: NameLedger, module_index: Int, module_alias: String, internal_name: String, span: Span, scope: String) -> String {
     candidates := [String]{"{module_alias}.{internal_name}"}
-    if scope.len() > 0 -> candidates.push("{module_alias}.{scope.join(".")}.{internal_name}")
+    if scope != "" -> candidates.push("{module_alias}.{scope}{internal_name}")
     loop candidate in candidates {
         if name_ledger_display_path(ledger, module_index, candidate, Val(module_index)) == .Val(path) {
             return strip_module_alias(path, module_alias)
@@ -375,14 +382,12 @@ source_item_path: fn(ledger: NameLedger, module_index: Int, module_alias: String
     if name_ledger_display_path_at(ledger, module_index, span, internal_name, None, Val(module_index)) == .Val(path) {
         return strip_module_alias(path, module_alias)
     }
-    fallback: if scope.len() == 0 || internal_name.contains(".") -> internal_name else -> "{scope.join(".")}.{internal_name}"
+    fallback: if scope == "" || internal_name.contains(".") -> internal_name else -> "{scope}{internal_name}"
     strip_module_alias(fallback, module_alias)
 }
 
 strip_module_alias: fn(path: String, module_alias: String) -> String {
-    prefix: "{module_alias}."
-    if path.starts_with(prefix) -> return path.remove_prefix(prefix)
-    path
+    path.remove_prefix("{module_alias}.")
 }
 
 // The part of a dotted path before its last segment, else "".
@@ -545,7 +550,7 @@ event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: S
             Val(CanvasEventOperand{name: found.name, ty: type_name(written), span: found.span})
         }
         .Param(ty) -> Val(CanvasEventOperand{name: found.name, ty: type_name(ty), span: found.span})
-        else -> None
+        .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> None
     }
 }
 

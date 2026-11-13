@@ -1,7 +1,10 @@
 // The response bodies of Canvas edits, previews, actions, queries, and
 // project transactions.
 use {
-    jet_canvas.[NodeQueryRef, Projection, QUERY_SCHEMA_VERSION, is_space_byte, json_bool, json_str, line_start, query_error, source_revision, span_json]
+    jet_canvas.[
+        NodeQueryRef, Projection, QUERY_SCHEMA_VERSION, is_space_byte, json_bool, json_str, line_start, query_error, read_source_without_symlinks, source_revision,
+        span_json,
+    ]
     jet_foundation.[
         DIAGNOSTIC_LINT, Diagnostic, Span, TextEdit, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
         diagnostic_source_texts,
@@ -10,10 +13,13 @@ use {
     jet_semindex.[SemIndex]
 }
 
-// A projection and the semantic index of one file, opened together.
+// A projection and the semantic index of one file, opened together, with the
+// entry module's callable exports and game calls the action catalog reads.
 QueryContext: struct {
     projection: Projection
     index: SemIndex
+    callable_exports: [CanvasCallableExport]
+    game_facts: [CanvasGameFact]
 }
 
 graph_id_name_span: fn(graph_id: String) -> Span? Never! {
@@ -24,7 +30,7 @@ graph_id_name_span: fn(graph_id: String) -> Span? Never! {
     Val(Span{start: start, end: end})
 }
 
-function_signature_span: fn(src: String, name_span: Span) -> Span String! {
+function_signature_span: fn(src: String, name_span: Span) -> Span Err! {
     start: line_start(src, name_span.start)
     from: if name_span.end < src.len() -> name_span.end else -> src.len()
     brace_rel: src.slice(from, src.len()).index_of("{{") ?? return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
@@ -80,7 +86,7 @@ preview_ok: fn(before: String, after: String) -> String Never! {
     "{{\"protocol\":\"jet.canvas.preview\",\"schema_version\":{EDIT_SCHEMA_VERSION},\"changed\":{json_bool(before != after)},\"diff\":{json_str(simple_diff(before, after))},\"after_revision\":{json_str(source_revision(after))}}}"
 }
 
-canvas_action_preview_ok: fn(path: String, before: String, after: String, action_id: String, callee: String) -[FS]> String Never! {
+canvas_action_preview_ok: fn(path: String, before: String, after: String, action_id: String, callee: String) -[Env, FS]> String Never! {
     authority: canvas_authority_context(path)
     "{{\"protocol\":\"jet.canvas.action\",\"schema_version\":{ACTION_SCHEMA_VERSION},\"ok\":true,\"changed\":{json_bool(before != after)},\"action_id\":{json_str(action_id)},\"callee\":{json_str(callee)},\"engine\":\"checked+jit\",\"execution\":\"preview\",\"writes\":\"source_transaction_only\",\"authority\":[{json_str(authority.grant)}],\"audit\":{{\"package_id\":{json_str(authority.package_id)},\"version\":{json_str(authority.version)},\"hash\":{json_str(source_revision(after))},\"touched_files\":[{json_str(authority.touched_file)}],\"diagnostics\":[]}},\"diff\":{json_str(simple_diff(before, after))},\"after_revision\":{json_str(source_revision(after))}}}"
 }
@@ -101,7 +107,7 @@ query_result_json: fn(kind: String, title: String, symbol: String, module_path: 
     "{{\"kind\":{json_str(kind)},\"title\":{json_str(title)},\"symbol\":{json_str(symbol)},\"module_path\":{json_str(module_path)},\"graph_id\":{json_str(graph_id)},\"node_id\":{json_str(node_id)},\"node_kind\":{json_str(node_kind)},\"source_span\":{span_json(span)},\"line\":{line_number_for(src, span.start)},\"excerpt\":{json_str(source_line_for(src, span.start))}}}"
 }
 
-open_query_context: fn(checker: LSPChecker, path: String, src: String) -> QueryContext String! {
+open_query_context: fn(checker: LSPChecker, path: String, src: String) -> QueryContext Err! {
     project_file_context(checker, path, None) ?? return Err(query_diagnostics_error(path, src, err.diagnostics))
 }
 
@@ -140,15 +146,20 @@ contains_ci: fn(text: String, needle: String) -> Bool Never! {
     text.to_ascii_lower().contains(needle.to_ascii_lower())
 }
 
+// Keeps the first of each equal result, in order.
 dedupe_results: fn(results: &[String]) {
-    seen := [String:Bool]{}
-    kept := [String]{}
-    loop result in results {
-        if seen.has_key(result) -> next
-        seen[result] = true
-        kept.push(result)
+    index := 0
+    loop index < results.len() {
+        seen := false
+        loop earlier in 0..<index {
+            if results[earlier] == results[index] -> seen = true
+        }
+        if seen {
+            _ := results.remove(index, .Slot)
+        } else {
+            index += 1
+        }
     }
-    results = kept
 }
 
 line_number_for: fn(src: String, offset: Int) -> Int Never! {
@@ -169,8 +180,8 @@ source_line_for: fn(src: String, offset: Int) -> String Never! {
 }
 
 simple_diff: fn(before: String, after: String) -> String Never! {
-    before_lines: before.lines().to_list()
-    after_lines: after.lines().to_list()
+    before_lines: before.lines()
+    after_lines: after.lines()
     before_set := [String:Bool]{}
     after_set := [String:Bool]{}
     loop line in before_lines -> before_set[line] = true

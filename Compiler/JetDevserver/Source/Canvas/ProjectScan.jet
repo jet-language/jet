@@ -5,6 +5,7 @@
 use {
     scan_files: core.files
     scan_paths: core.files.path
+    jet_canvas.[json_bool, json_optional_str, json_str, json_strs, source_revision]
     jet_driver.[jet_driver_has_errors]
     jet_env_model.[DevServicePlan, envmodel_evaluate_env, envmodel_workspace_evaluate_checked_source, envmodel_workspace_load_checked_source]
     jet_foundation.[Diagnostic, sha256_hex_bytes]
@@ -98,7 +99,7 @@ ProjectFiles: struct {
     diagnostic: Diagnostic?
 }
 
-EnvProjectJson: struct {
+EnvProjectJSON: struct {
     envs: String
     services: String
     diagnostics: String
@@ -123,8 +124,7 @@ project_file_context: fn(checker: LSPChecker, path: String, runtime_events: Stri
     index: result.index ?? return Err(ProjectFileError{diagnostics: result.diagnostics})
     resolver.revalidate_file(checked) ?? return Err(project_file_error(err.diagnostic()))
     source_id: rel_path(project_context_for_entry(path).project_root, checked.path)
-    projection: project_checked(path, source_id, src, result.modules, index, runtime_events)
-    Ok(QueryContext{projection: projection, index: index})
+    Ok(project_checked(path, source_id, src, result.modules, index, runtime_events))
 }
 
 project_context_for_entry: fn(path: String) -> ProjectContext {
@@ -141,9 +141,10 @@ project_context_for_entry: fn(path: String) -> ProjectContext {
         boundary_diagnostic = found.diagnostic
     }
     manifest_diagnostic := Diagnostic?{None}
-    manifest_root := pkg_find_manifest_root_checked(cache, entry_dir) ?? {
-        manifest_diagnostic = Val(err.diagnostic)
-        None
+    manifest_root := String?{None}
+    if pkg_find_manifest_root_checked(cache, entry_dir) == {
+        .Ok(found) -> manifest_root = found
+        .Err(error) -> manifest_diagnostic = Val(error.diagnostic)
     }
     if manifest_root == .Val(manifest) {
         if boundary == .Val(found) {
@@ -194,8 +195,8 @@ manifest_in_boundary: fn(entry_dir: String, manifest: String, boundary: Workspac
 }
 
 absolute_entry_path: fn(path: String) -> String {
-    if scan_files.is_abs(path) -> return path
     parent: entry_parent(path)
+    if scan_files.is_abs(path) -> return scan_files.join(parent, scan_files.basename(path))
     base: scan_files.canonicalize(parent) ?? {
         cwd: scan_files.cwd() ?? return scan_files.join(parent, scan_files.basename(path))
         scan_files.join(cwd, parent)
@@ -230,12 +231,13 @@ find_workspace_boundary: fn(cache: &WorkspaceDeclarationCache, start: String) ->
             dir = parent_dir(dir) ?? return None
             next
         }
-        found: resolver.resolve_workspace_source(cache) ?? return Val(malformed_boundary(resolver.root, err.workspace_diagnostic()))
-        source: found ?? {
-            dir = parent_dir(resolver.root) ?? return None
-            next
+        source := WorkspaceSource?{None}
+        if resolver.resolve_workspace_source(cache) == {
+            .Ok(found) -> source = found
+            .Err(error) -> return Val(malformed_boundary(resolver.root, error.workspace_diagnostic()))
         }
-        return Val(workspace_boundary(resolver, start, source))
+        if source == .Val(found) -> return Val(workspace_boundary(resolver, start, found))
+        dir = parent_dir(resolver.root) ?? return None
     }
 }
 
@@ -250,8 +252,10 @@ workspace_boundary: fn(resolver: AuthorityResolver, start: String, source: Works
     if source.role == WorkspaceSourceRole.Authority {
         return WorkspaceBoundary{root: resolver.root, member_root: None, malformed: false, diagnostic: None}
     }
-    member_root: matching_member_root(resolver, start, plan) ?? return malformed_boundary(resolver.root, err.diagnostic())
-    WorkspaceBoundary{root: resolver.root, member_root: member_root, malformed: false, diagnostic: None}
+    if matching_member_root(resolver, start, plan) == {
+        .Ok(member_root) -> WorkspaceBoundary{root: resolver.root, member_root: member_root, malformed: false, diagnostic: None}
+        .Err(error) -> malformed_boundary(resolver.root, error.diagnostic())
+    }
 }
 
 // The deepest checked member directory that holds the entry directory.
@@ -302,10 +306,11 @@ workspace_view: fn(cache: &WorkspaceDeclarationCache, root: String) -> Workspace
     resolver: AuthorityResolver.open(root) ?? {
         return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(err.diagnostic()), source_failed: true}
     }
-    found: resolver.resolve_workspace_source(cache) ?? {
-        return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(err.workspace_diagnostic()), source_failed: true}
+    source: if resolver.resolve_workspace_source(cache) == {
+        .Val(found) -> found
+        .None -> return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: None, source_failed: false}
+        .Err(error) -> return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(error.workspace_diagnostic()), source_failed: true}
     }
-    source: found ?? return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: None, source_failed: false}
     path: source.path
     if source.role != WorkspaceSourceRole.Index {
         return WorkspaceView{source_path: Val(path), members: [WorkspacePlanMember]{}, diagnostic: None, source_failed: false}
@@ -320,7 +325,7 @@ workspace_view: fn(cache: &WorkspaceDeclarationCache, root: String) -> Workspace
 // the entry, env.jet, the package and workspace manifests, the lock and the
 // discovered sources. The first refusal is the project's diagnostic.
 collect_project_files: fn(cache: &WorkspaceDeclarationCache, project_root: String, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> ProjectFiles {
-    paths := [String]{}
+    paths := [String:Bool]{}
     diagnostic := Diagnostic?{None}
     push_existing(paths, entry_path)
     push_existing(paths, scan_files.join(project_root, ENV_FILE))
@@ -338,8 +343,8 @@ collect_project_files: fn(cache: &WorkspaceDeclarationCache, project_root: Strin
         push_existing(paths, scan_files.join(root, UNIFIED_LOCK_FILE))
         loop member in view.members {
             member_root: scan_files.join(root, member.path)
-            member_roots.push(member_root)
             push_existing(paths, scan_files.join(member_root, PACKAGE_FILE))
+            member_roots.push(member_root)
         }
         if view.source_failed -> fallback_workspace = scan_files.join(root, WORKSPACE_FILE)
         if view.diagnostic != None -> diagnostic = view.diagnostic
@@ -352,10 +357,10 @@ collect_project_files: fn(cache: &WorkspaceDeclarationCache, project_root: Strin
     loop file in discovered {
         if file.path == fallback_workspace -> next
         if workspace_root != None && !within_any(file.path, member_roots) -> next
-        paths.push(file.path)
+        paths[file.path] = true
     }
     records := [ProjectFileRec]{}
-    loop path in sorted_unique(paths) {
+    loop path in sorted_keys(paths) {
         relative: resolver.relative_path(path) ?? {
             keep_first(diagnostic, err.diagnostic())
             next
@@ -387,26 +392,18 @@ keep_first: fn(slot: &Diagnostic?, diagnostic: Diagnostic) {
 
 // A path that is present (a missing path is skipped); a regular file with
 // more than one hard link is skipped, since Canvas never edits through one.
-push_existing: fn(paths: &[String], path: String) {
+push_existing: fn(paths: &[String:Bool], path: String) {
     info: scan_files.stat(path) ?? {
         if err == .NotFound(_) {
             return
         }
-        paths.push(path)
+        paths[path] = true
         return
     }
     if info.is_file && info.links != 1 {
         return
     }
-    paths.push(path)
-}
-
-sorted_unique: fn(values: [String]) -> [String] Never! {
-    seen := [String:Bool]{}
-    loop value in values -> seen[value] = true
-    out := seen.keys().to_list()
-    out.sort()
-    out
+    paths[path] = true
 }
 
 project_revision_from_files: fn(records: [ProjectFileRec]) -> String Never! {
@@ -418,8 +415,7 @@ project_revision_from_files: fn(records: [ProjectFileRec]) -> String Never! {
 rel_path: fn(root: String, path: String) -> String Never! {
     if path == root -> return ""
     prefix: if root.ends_with("/") -> root else -> "{root}/"
-    if path.starts_with(prefix) -> return path.removeprefix(prefix)
-    path
+    path.removeprefix(prefix)
 }
 
 // One project-level diagnostic in the Canvas report shape.
@@ -445,16 +441,16 @@ workspace_project_json: fn(project_root: String, workspace_root: String?) -> Str
 // workspace members, or the entry's own directory when it carries an inline
 // Package.
 project_package_dirs: fn(cache: &WorkspaceDeclarationCache, entry_path: String, manifest_root: String?, ecosystem_root: String?, workspace_root: String?) -> [String] {
-    dirs := [String]{}
-    if manifest_root == .Val(root) -> dirs.push(root)
-    if ecosystem_root == .Val(root) -> dirs.push(root)
+    dirs := [String:Bool]{}
+    if manifest_root == .Val(root) -> dirs[root] = true
+    if ecosystem_root == .Val(root) -> dirs[root] = true
     if workspace_root == .Val(root) {
         loop member in workspace_view(cache, root).members {
-            dirs.push(scan_files.join(root, member.path))
+            dirs[scan_files.join(root, member.path)] = true
         }
     }
-    if dirs.len() > 0 -> return sorted_unique(dirs)
-    inline: inline_entry_dir(entry_path) ?? return dirs
+    if dirs.len() > 0 -> return sorted_keys(dirs)
+    inline: inline_entry_dir(entry_path) ?? return [String]{}
     [String]{inline}
 }
 
@@ -475,9 +471,10 @@ targets_project_json: fn(project_root: String, entry_path: String, manifest_root
 
 inline_entry_dir: fn(entry_path: String) -> String? {
     source: scan_files.read(entry_path) ?? return None
-    block: pkg_extract_inline_package(source) ?? return Val(entry_parent(entry_path))
-    if block == None -> return None
-    Val(entry_parent(entry_path))
+    if pkg_extract_inline_package(source) == {
+        .Val(_) -> Val(entry_parent(entry_path))
+        .None | .Err(_) -> None
+    }
 }
 
 // The entry's own Package when it lies in `dir`, else the Package rooted at
@@ -552,18 +549,19 @@ package_project_json: fn(cache: &WorkspaceDeclarationCache, project_root: String
     package_targets := [String]{}
     outputs := [String]{}
     loop name in sorted_output_names(facts) {
-        output_name: facts.outputs[name].name
+        output_name: json_str(facts.outputs[name].name)
+        outputs.push("{{\"name\":{output_name},{output_fields_json(facts, name)}}}")
         package_targets.push(output_name)
-        outputs.push("{{\"name\":{json_str(output_name)},{output_fields_json(facts, name)}}}")
     }
     loop package in facts.packages {
-        if !package_targets.contains(package.name) -> package_targets.push(package.name)
+        package_name: json_str(package.name)
+        if !package_targets.contains(package_name) -> package_targets.push(package_name)
     }
     environment_names := facts.environments.keys().to_list()
     environment_names.sort()
     environments: loop key in environment_names -> environment_fact_json(facts.environments[key])
     members: loop member in facts.members -> member.path()
-    "{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, scan_files.join(dir, PACKAGE_FILE)))},\"name\":{json_str(facts.name)},\"version\":{json_optional_str(facts.version)},\"targets\":[{profiles.join(",")}],\"package_targets\":[{json_strs(package_targets)}],\"deps\":[{deps.join(",")}],\"outputs\":[{outputs.join(",")}],\"environments\":[{environments.join(",")}],\"configs\":[{json_strs(facts.configs)}],\"members\":[{json_strs(members)}],\"package_facts\":null,\"workspace_overlays\":null,\"effects_enabled\":false,\"diagnostics\":[]}}"
+    "{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, scan_files.join(dir, PACKAGE_FILE)))},\"name\":{json_str(facts.name)},\"version\":{json_optional_str(facts.version)},\"targets\":[{profiles.join(",")}],\"package_targets\":[{package_targets.join(",")}],\"deps\":[{deps.join(",")}],\"outputs\":[{outputs.join(",")}],\"environments\":[{environments.join(",")}],\"configs\":[{json_strs(facts.configs)}],\"members\":[{json_strs(members)}],\"package_facts\":null,\"workspace_overlays\":null,\"effects_enabled\":false,\"diagnostics\":[]}}"
 }
 
 environment_fact_json: fn(environment: EnvironmentFact) -> String Never! {
@@ -586,7 +584,7 @@ ints_json: fn(values: [Int]) -> String Never! {
 
 // The project's env.jet plan as the env and service panels read it. A missing
 // env.jet is no plan; any other refusal is the panel's diagnostic.
-env_project_json: fn(project_root: String) -> EnvProjectJson {
+env_project_json: fn(project_root: String) -> EnvProjectJSON {
     resolver: AuthorityResolver.open(project_root) ?? return env_refusal(err)
     checked: resolver.checked_file(ENV_FILE) ?? return env_refusal(err)
     src: checked.text() ?? return env_refusal(err)
@@ -604,16 +602,16 @@ env_project_json: fn(project_root: String) -> EnvProjectJson {
     languages: loop language in plan.languages -> language.name
     services: loop service in plan.dev_services -> dev_service_json(service)
     envs: "{{\"path\":{json_str(ENV_FILE)},\"prompt\":{json_str(prompt)},\"environments\":[{json_strs(plan.environment_names)}],\"sources\":[{json_strs(plan.source_files)}],\"presets\":[{json_strs(presets)}],\"languages\":[{json_strs(languages)}],\"reload\":{json_str(reload)},\"packages\":[{json_strs(plan.package_refs)}],\"secrets\":[{json_strs(secrets)}],\"diagnostics\":[]}}"
-    EnvProjectJson{envs: envs, services: services.join(","), diagnostics: ""}
+    EnvProjectJSON{envs: envs, services: services.join(","), diagnostics: ""}
 }
 
-env_refusal: fn(error: AuthorityError) -> EnvProjectJson Never! {
-    if error.is_missing() -> return EnvProjectJson{envs: "", services: "", diagnostics: ""}
+env_refusal: fn(error: AuthorityError) -> EnvProjectJSON Never! {
+    if error.is_missing() -> return EnvProjectJSON{envs: "", services: "", diagnostics: ""}
     env_failure(error.diagnostic())
 }
 
-env_failure: fn(diagnostic: Diagnostic) -> EnvProjectJson Never! {
-    EnvProjectJson{envs: "", services: "", diagnostics: diagnostic_json(diagnostic)}
+env_failure: fn(diagnostic: Diagnostic) -> EnvProjectJSON Never! {
+    EnvProjectJSON{envs: "", services: "", diagnostics: diagnostic_json(diagnostic)}
 }
 
 dev_service_json: fn(service: DevServicePlan) -> String Never! {
@@ -621,7 +619,7 @@ dev_service_json: fn(service: DevServicePlan) -> String Never! {
     shutdown: if service.shutdown == {
         .Val(.Kill) -> "\"Kill\""
         .Val(.Term(_)) -> "\"Term\""
-        else -> "null"
+        .None -> "null"
     }
     extra: loop field in service.extra -> "{{\"key\":{json_str(field.name)},\"value\":{json_str(field.value)}}}"
     "{{\"name\":{json_str(service.name)},\"enable\":{json_bool(service.enable)},\"ports\":[{ints_json(service.ports)}],\"run\":{run},\"shutdown\":{shutdown},\"data_dir\":{json_optional_str(service.data_dir)},\"ready\":{json_optional_str(service.ready)},\"after\":[{json_strs(service.after)}],\"before_start\":[{json_strs(service.before_start)}],\"extra\":[{extra.join(",")}],\"source\":{json_str(ENV_FILE)}}}"

@@ -140,8 +140,8 @@ listener_map: fn(source_id: String, executable: NativeSwapExecutable, listeners:
     if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
     map := [String: NativeSwapListenerHandle]{}
     loop listener in listeners {
-        _: validate_identity(listener.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(listener.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(listener.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(listener.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !listener.source.matches(executable.source) -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
         if listener.generation != executable.generation -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` does not match resident generation"))
         if map.get(listener.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
@@ -153,9 +153,9 @@ connection_map: fn(source_id: String, executable: NativeSwapExecutable, connecti
     if connections.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "resident connection count exceeds its bounded fact limit"))
     map := [String: NativeSwapConnectionHandle]{}
     loop connection in connections {
-        _: validate_identity(connection.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_identity(connection.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(connection.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(connection.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(connection.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(connection.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !connection.source.matches(executable.source) -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
         if connection.generation != executable.generation -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` does not match resident generation"))
         if listeners.get(connection.listener_id) == None -> return Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved, "connection `{connection.id}` names unknown listener `{connection.listener_id}`"))
@@ -164,25 +164,25 @@ connection_map: fn(source_id: String, executable: NativeSwapExecutable, connecti
     }
     map
 }
-validate_identity: fn(value: String, label: String) Err! {
+native_swap_validate_identity: fn(value: String, label: String) Err! {
     if value == "" -> return Err("{label} must not be empty")
     if value.bytes().len() > MAX_NATIVE_SWAP_ID_BYTES -> return Err("{label} exceeds {MAX_NATIVE_SWAP_ID_BYTES} bytes")
     loop byte in value.bytes() {
         if byte < 32 || byte == 127 -> return Err("{label} contains a control character")
     }
 }
-validate_source_identity: fn(identity: NativeSwapSourceIdentity, label: String) Err! {
-    validate_identity(identity.source_id, "{label} source")
-    validate_identity(identity.module_ref, "{label} module")
+native_swap_validate_source_identity: fn(identity: NativeSwapSourceIdentity, label: String) Err! {
+    native_swap_validate_identity(identity.source_id, "{label} source")
+    native_swap_validate_identity(identity.module_ref, "{label} module")
 }
 validate_hot_swap_decision: fn(source_id: String, source: NativeSwapSourceIdentity, decision: HotSwapDecision) NativeSwapError! {
-    _: validate_identity(decision.module_ref, "hot-swap decision module") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+    _: native_swap_validate_identity(decision.module_ref, "hot-swap decision module") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
     if decision.module_ref != source.module_ref -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
     facts: decision.state_facts()
     if facts.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
     seen := [String: Bool]{}
     loop fact in facts {
-        _: validate_identity(fact.key, "hot-swap retention key") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(fact.key, "hot-swap retention key") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if seen.get(fact.key) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
         seen[fact.key] = true
     }
@@ -204,8 +204,8 @@ validate_listener_plan_facts: fn(source_id: String, expected_source: NativeSwapS
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
     seen := [String: Bool]{}
     loop handle in handles {
-        _: validate_identity(handle.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(handle.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(handle.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(handle.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !handle.source.matches(expected_source) -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
         if seen.get(handle.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
         seen[handle.id] = true
@@ -215,20 +215,20 @@ validate_connection_plan_facts: fn(source_id: String, expected_source: NativeSwa
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its connection fact limit"))
     seen := [String: Bool]{}
     loop handle in handles {
-        _: validate_identity(handle.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_identity(handle.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(handle.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(handle.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(handle.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(handle.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !handle.source.matches(expected_source) -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
         if seen.get(handle.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
         seen[handle.id] = true
     }
 }
-validate_revision: fn(value: String, label: String) Err! { validate_identity(value, label) }
+native_swap_validate_revision: fn(value: String, label: String) Err! { native_swap_validate_identity(value, label) }
 validate_fact_list: fn(source_id: String, facts: [String]) NativeSwapError! {
     if facts.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap fact list exceeds its bounded fact limit"))
     seen := [String: Bool]{}
     loop fact in facts {
-        _: validate_identity(fact, "native swap fact") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(fact, "native swap fact") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if seen.get(fact) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
         seen[fact] = true
     }
