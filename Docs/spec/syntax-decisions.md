@@ -7,6 +7,15 @@ This file records one final entry per decision. Canonical truth is
 the syntax registry `Compiler/JetFoundation/Data/Syntax/` plus this file (D-CANON-SOURCE1).
 Retired forms get ordinary syntax errors under D-S14-PAUSE.
 
+The counted surface has a ceiling per kind (D-SURFACE-BUDGET1): keywords,
+lexical forms, markers, facts and CLI commands, each counted from its canonical
+rows by `Tools/agent/SurfaceBudget.jet`. The ceilings live in
+`Tools/agent/surface_budget.tsv`, and only a decision in the ratified index
+below raises one; a retirement lowers its count, and the ceiling follows it
+down. `jet Tools/agent/SurfaceBudget.jet --ballot <before-checkout>` prints a
+ballot's before and after counts, with the public Core functions per module,
+which are reported and never gated.
+
 Vocabulary: [Jet vocabulary](vocabulary.md).
 
 ## Ratified
