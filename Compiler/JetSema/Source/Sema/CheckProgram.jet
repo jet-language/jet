@@ -6,6 +6,7 @@ use jet_foundation.[
     BodyTree,
     FnBody,
     MARKER_CLI,
+    MarkerHook,
     MARKER_FX,
     MARKER_SCALAR,
     NodeKind,
@@ -2235,10 +2236,19 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // Rust `check_fn`: the function's builtin markers bind their signatures
     // with its parameters in scope. The markers are written before the
     // parameters, so names resolve position free, as the contract conditions do
-    // (sema_contract_check_expr).
+    // (sema_contract_check_expr). A `#Deadline(limit)` function bounds the
+    // waits of its whole body, as a `#Deadline` block around it would.
     marker_position_free: scopes.position_free
     scopes.position_free = true
-    _ := sema_marker_rules_check_rule_signatures(func.markers, updated, program, scopes, state, tail_store, context, diagnostics)
+    markers_valid: sema_marker_rules_check_rule_signatures(func.markers, updated, program, scopes, state, tail_store, context, diagnostics)
+    deadline_guards := [TContextGuard]{}
+    loop marker in func.markers {
+        if !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 -> next
+        if marker.args[0] == .Expr(value) {
+            limit: sema_check_expression(value, None, updated, program, scopes, state, tail_store, context, diagnostics) ?? next
+            deadline_guards.push(sema_stmt_deadline_guard(limit, marker.span))
+        }
+    }
     scopes.position_free = marker_position_free
     if func.return_type == .Val(declared_return) {
         resolved_return := declared_return
@@ -2306,6 +2316,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // Validation borrows the original checked rows. Once that loan ends the
     // same vector moves into the function; no owning TStmt-vector copy.
     body := statements.value.move()
+    if deadline_guards.len() > 0 {
+        body = [TStmt]{TStmt.ContextBlock{guards: deadline_guards, body: body, span: func.span}}
+    }
     if contract.complete && contract.post.len() > 0 {
         body = [TStmt]{TStmt.ContractScope{pre: [TContract]{}, body: body, post: contract.post, result: contract.result, span: func.span}}
     }

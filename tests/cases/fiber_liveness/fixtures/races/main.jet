@@ -60,7 +60,7 @@ cancel_vs_timer: fn(rounds: Int) -> (woke: Int, cancelled: Int) {
 
 deadline_receiver: fn(rx: Receiver<Int>) -> Int {
     got := 0
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 1) {
+    #Deadline(1ms) {
         got = rx.receive() ?? 0
     }
     got

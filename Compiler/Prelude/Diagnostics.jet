@@ -6979,10 +6979,13 @@ UnknownContextField: struct {
         safety_class: .Soundness
         safety_reason: "`#Context` carries only its declared fields and the package's `#ContextKey` constants, so an unknown name has no slot to fill."
         expert_path: "none: `#Context` takes `allocator`, `logger`, `deadline` and the package's `#ContextKey` constants"
+        stage: [.Parse, .Sema]
         meaning: "A `#Context` field name or context key that is neither a context field nor a `#ContextKey` constant"
-        no_fix: .Ambiguous
-        what: fn(self) -> String { "Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger`, `deadline` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable" }
-        why: fn(self) -> String { "The context bundle holds `allocator`, `logger` and `deadline`, plus the values a package declares with `#ContextKey`" }
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable" }
+        why: fn(self) -> String { "The context bundle holds `allocator` and `logger`, plus the values a package declares with `#ContextKey`" }
         fix: fn(self) -> String { "Use a context field or declare the key: `#ContextKey frame_index: 0`, then `#Context(frame_index: 3)` and `context.get(frame_index)`." }
     }
 }
@@ -6995,7 +6998,7 @@ ContextFieldTypeMismatch: struct {
         expert_path: "none: the field takes its declared type"
         meaning: "A `#Context` field given a value of the wrong type"
         no_fix: .Ambiguous
-        what: fn(self) -> String { "`#Context` field type mismatch (`allocator` must be an allocator handle or a `mem.Allocator` value; `deadline` must be Int epoch-ms)" }
+        what: fn(self) -> String { "`#Context` field type mismatch (`allocator` must be an allocator handle or a `mem.Allocator` value)" }
         why: fn(self) -> String { "Each context field holds one kind of value, so the code under it can rely on that type" }
         fix: fn(self) -> String { "Give each `#Context` field its required type." }
     }
@@ -7278,11 +7281,11 @@ DeadlineExceeded: struct {
         safety_reason: "The context's deadline ran out, so going on would spend time the caller never granted."
         expert_path: "none: a longer deadline, or less work"
         stage: [.Runtime]
-        meaning: "Deadline exceeded at a wait/IO point while a `#Context(deadline: …)` budget is active"
+        meaning: "Deadline exceeded at a wait/IO point while a `#Deadline(…)` budget is active"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "`deadline exceeded while waiting in {self.wait_kind}`." }
-        why: fn(self) -> String { "A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed." }
+        why: fn(self) -> String { "A wait/IO point observed an active `#Deadline(…)` budget and the remaining time reached zero before the operation completed." }
         fix: fn(self) -> String { "Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope." }
     }
 }

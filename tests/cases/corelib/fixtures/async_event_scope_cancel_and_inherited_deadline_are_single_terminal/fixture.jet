@@ -2,7 +2,6 @@ package: { name: "async-event-scope-cancel" authority: { allow: [Time] } }
 use {
     event: core.event
     tasks: core.tasks
-    time: core.time
 }
 
 owner_teardown_task: fn() -> Task<DispatchReport<String>> {
@@ -54,7 +53,7 @@ run: fn() {
     })
     queued_running: queued_deadline.emit_async(10)
     queued_started: queued_started_rx.receive() ?? panic("started")
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
+    #Deadline(20ms) {
         expires_queued: queued_deadline.emit_async(11)
         queued_expired: expires_queued.join() ?? panic("deadline queued join")
         print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
@@ -73,7 +72,7 @@ run: fn() {
     pending_running: pending_deadline.emit_async(20)
     pending_started: pending_started_rx.receive() ?? panic("started")
     pending_queued: pending_deadline.emit_async(21)
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 20) {
+    #Deadline(20ms) {
         expires_pending: pending_deadline.emit_async(22)
         pending_expired: expires_pending.join() ?? panic("deadline pending join")
         print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")

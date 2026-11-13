@@ -1,0 +1,30 @@
+use time: core.time
+
+deadline: fn() -> Int { context.deadline ?? -1 }
+
+#Deadline(3600s)
+bounded: fn() -> Int { deadline() }
+
+#Deadline(3600s)
+bounded_early: fn(early: Bool) -> Int {
+    if early -> return 1
+    deadline()
+}
+
+run: fn() {
+    print("outside {deadline()}")
+    #Deadline(3600s) {
+        block: deadline()
+        print("block {block >= 0}")
+        #Deadline(1800s) { print("shorter wins {deadline() < block}") }
+        #Deadline(7200s) { print("longer keeps {deadline() == block}") }
+        #Deadline(time.instant() + 1800s) { print("instant shorter wins {deadline() < block}") }
+        #Deadline(time.instant() + 7200s) { print("instant longer keeps {deadline() == block}") }
+        print("restored {deadline() == block}")
+    }
+    print("after {deadline()}")
+    print("function {bounded() >= 0}")
+    print("function restored {deadline()}")
+    print("early return {bounded_early(true)}")
+    print("early restored {deadline()}")
+}

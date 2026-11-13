@@ -1,5 +1,5 @@
 # Port of tests/corelib_parts/compile.rs::core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary; guest sources preserved verbatim
-# except the deadline, which spec.md `#Context(deadline: <Int epoch_ms>)` spells as an already-passed epoch 0.
+# except the deadline, which is `#Deadline(0ms)`, already passed on entry.
 # The guests flush stdout after `ready`: a pipe stdout is written when its buffer fills (spec.md print).
 requires: os:unix
 # PENDING-GRAMMAR(batch-four): raw-session SIGINT; exact ready and rest bytes.
@@ -14,5 +14,5 @@ close app
 exit: 0
 stdout: = "second\n"
 stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # original predicate, current E3003 text
-stderr: ~ "Why: A wait/IO point observed an active `#Context(deadline: …)` budget" # original predicate, current E3003 text
+stderr: ~ "Why: A wait/IO point observed an active `#Deadline(…)` budget" # original predicate, current E3003 text
 stderr: ~ "Fix: Raise the deadline budget, shorten the work" # original predicate, current E3003 text

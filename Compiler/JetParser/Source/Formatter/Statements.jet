@@ -259,10 +259,13 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
             label: if binding == .Val(named) -> Val(named.name) else -> None
             Val(JetFmtBlockMarker{name: "FX", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Idents{label: label, values: values}}})
         }
+        // A context block whose one field is `deadline` is `#Deadline(limit)`
+        // (Parser Statements.jet parser_context_fields).
         .ContextBlock(fields, _, _) -> {
+            deadline: fields.len() == 1 && fields[0].name == "deadline"
             args := [JetFmtMarkerArgument]{}
-            loop field in fields -> args.push(JetFmtMarkerArgument.Expr{label: Val(field.name), value: field.value})
-            Val(JetFmtBlockMarker{name: "Context", negated: false, args: args})
+            loop field in fields -> args.push(JetFmtMarkerArgument.Expr{label: if deadline -> None else -> Val(field.name), value: field.value})
+            Val(JetFmtBlockMarker{name: if deadline -> "Deadline" else -> "Context", negated: false, args: args})
         }
         .Live(_, _) -> Val(JetFmtBlockMarker{name: "Live", negated: false, args: [JetFmtMarkerArgument]{}})
         // copy: `reason_expr` is a payload of read parameter `stmt`, which keeps the original; field `value` of the new JetFmtMarkerArgument.Expr owns this one

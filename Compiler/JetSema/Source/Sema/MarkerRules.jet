@@ -6,6 +6,7 @@ use jet_foundation.[
     Expr,
     Func,
     Item,
+
     Marker,
     MarkerDecl,
     MarkerDeclParam,
@@ -169,6 +170,7 @@ sema_marker_rules_type_kind: fn(ty: Type) -> TAppliedRuleArgKind Never! {
     if ty == .Union(members) {
         has_string := false
         has_duration := false
+        has_instant := false
         has_naming_case := false
         loop member in members {
             if member == Type.String {
@@ -177,12 +179,18 @@ sema_marker_rules_type_kind: fn(ty: Type) -> TAppliedRuleArgKind Never! {
             if member == (Type.Named{name: "Duration"}) {
                 has_duration = true
             }
+            if member == (Type.Named{name: "Instant"}) {
+                has_instant = true
+            }
             if member == (Type.Named{name: "NamingCase"}) {
                 has_naming_case = true
             }
         }
         if has_string && has_duration && members.len() == 2 {
             return TAppliedRuleArgKind.DurationOrString
+        }
+        if has_duration && has_instant && members.len() == 2 {
+            return TAppliedRuleArgKind.DurationOrInstant
         }
         if has_string && has_naming_case && members.len() == 2 {
             return TAppliedRuleArgKind.StringOrMenu
@@ -1068,6 +1076,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
                     .Bool -> observation.ty == (Val(Type.Bool))
                     .Int -> observation.ty == (Val(Type.Int))
                     .DurationOrString -> unit_argument || observation.ty == (Val(Type.String)) || observation.ty == (Val(Type.Named{name: "Duration"}))
+                    .DurationOrInstant -> observation.ty == (Val(Type.Named{name: "Duration"})) || observation.ty == (Val(Type.Named{name: "Instant"}))
                     .StringOrMenu -> sema_marker_rules_names_menu_word(argument) || observation.ty == (Val(Type.String))
                     .EffectRoots -> argument == .ListLit(_, _, _)
                 }
@@ -1147,7 +1156,7 @@ sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: Sema
 // Rust `take_statement_rule_fact` then `validate_rule_signature`: the marker of
 // a marked statement or block is the module's Statement- or Block-site
 // application targeting the statement. `#Meta` is its binding's
-// (Statements.jet) and `#Context` its block's
+// (Statements.jet) and `#Context` or `#Deadline` its block's
 // (sema_marker_rules_check_context_fact). A marker with a site-dependent
 // signature (`#HTML(path)` at the file site, bare `#HTML { … }` at the block
 // site; Rust `validate_registered_rule_marker`, @ 6083377777) is bare at its
@@ -1161,7 +1170,7 @@ sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScope
             loop index in 0..<graph.modules[row].program.rule_facts.len() {
                 if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
                 if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
-                if sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Meta) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) -> next
+                if sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Meta) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Deadline) -> next
                 if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) -> next
                 _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, state, tail_store, context, diagnostics)
             }
@@ -1177,17 +1186,19 @@ sema_marker_rules_block_form_is_bare: fn(registry: SemaScopeMembersMarkerRegistr
 }
 
 // Rust `Stmt::ContextBlock`: the block's `#Context` application binds against
-// `Context(allocator:, logger:, deadline:)`, its labels naming
-// `#ContextKey` constants left out (ContextKeys.jet
-// sema_context_marker_fields). False when it does not bind; the field
-// checks then stay quiet.
+// `Context(allocator:, logger:)`, its labels naming `#ContextKey` constants
+// left out (ContextKeys.jet sema_context_marker_fields), and its `#Deadline`
+// application against `Deadline(limit:)`. False when it does not bind; the
+// field checks then stay quiet.
 sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == None -> return true
         row: sema_scope_caller_row(environment, graph)
         if row < 0 -> return true
         loop index in 0..<graph.modules[row].program.rule_facts.len() {
-            if !sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
+            deadline: sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Deadline)
+            if (!deadline && !sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context)) || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
+            if deadline -> return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, state, tail_store, context, diagnostics)
             return sema_marker_rules_check_rule_signature(sema_context_marker_fields(graph.modules[row].program.rule_facts[index].marker), environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }

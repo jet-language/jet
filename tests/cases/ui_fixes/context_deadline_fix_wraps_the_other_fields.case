@@ -1,0 +1,19 @@
+# Beside other context fields, the E0761 edit splits the block: a
+# `#Deadline(limit)` block wraps a `#Context` block that keeps the other
+# fields, its body indented one level. A second `jet fix` changes nothing.
+fixture: context_deadline_fix_wraps_the_other_fields.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "`deadline` isn't a context field" # the E0761 headline; the fix steps check its edit
+step: jet fix run.jet
+exit: 0
+stderr: ~ "applied 1 fix" # the one E0761 edit
+file: run.jet = context_deadline_fix_wraps_the_other_fields.fixed
+step: jet fix run.jet
+exit: 0
+stderr: ~ "no changes made" # the migrated file has nothing left to fix
+file: run.jet = context_deadline_fix_wraps_the_other_fields.fixed
+step: jet run run.jet
+exit: 0
+stdout: = "bounded true\nafter -1\n"

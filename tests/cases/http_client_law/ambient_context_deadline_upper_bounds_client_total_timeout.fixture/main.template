@@ -1,11 +1,10 @@
 
 use {
     http: core.http.client
-    time: core.time
 }
 run: fn() {
     client: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 40) {
+    #Deadline(40ms) {
         if client.send(http.request("GET", "http://{cap:addr}/slow")) == {
             .Ok(_) -> print("ok")
             .Err(_) -> print("timeout")

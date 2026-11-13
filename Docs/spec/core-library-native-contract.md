@@ -572,7 +572,7 @@ Cancellation requests deliver at wait points, while the native Check
 rail delivers explicit session interrupts. Post-call propagation observes only
 an already-delivered stop, so a new request cannot invalidate an initialized
 result. Shielded cleanup defers delivery until its outermost boundary exits.
-Context deadlines save and restore the absolute millisecond budget in a
+`#Deadline` blocks and functions save and restore the absolute millisecond budget in a
 separate caller-owned 16-byte slot on every normal and stopped cleanup edge.
 Scheduler state, task controls, timers, completion frames, lexical groups and
 all/any/race selection are Jet-owned runtime carriers. A host entering a

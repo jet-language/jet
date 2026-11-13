@@ -10,12 +10,12 @@ shadowed: fn(context: Probe) -> Int {
 }
 
 report: fn() -> String {
-    "deadline {context.deadline ?? -1} thread {context.thread}"
+    "deadline {(context.deadline ?? -1) >= 0} thread {context.thread}"
 }
 
 run: fn() {
     print(report())
-    #Context(deadline: 4102444800000) {
+    #Deadline(3600s) {
         print(report())
     }
     print("shadowed {shadowed(Probe{deadline: 7})}")

@@ -1,0 +1,30 @@
+# `#Deadline(limit: Duration | Instant)` on a block or a function bounds its waits; a
+# nested deadline can only shorten the one in force (the earliest wins), and the enclosing
+# deadline returns when the block or function exits, a `return` included. An expired
+# wait under a function's or an Instant's deadline is the E3003 report, on every tier.
+fixture: fixtures/deadline_marker_bounds_blocks_and_functions_earliest_wins
+step: jet run nested.jet
+exit: 0
+stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
+step o1: jet run --optimize=basic nested.jet
+exit: 0
+stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
+step o2: jet run --optimize=full nested.jet
+exit: 0
+stdout: = "outside -1\nblock true\nshorter wins true\nlonger keeps true\ninstant shorter wins true\ninstant longer keeps true\nrestored true\nafter -1\nfunction true\nfunction restored -1\nearly return 1\nearly restored -1\n"
+step function: jet run expired_function.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
+step function_o2: jet run --optimize=full expired_function.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
+step instant: jet run expired_instant.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier
+step instant_o2: jet run --optimize=full expired_instant.jet
+exit: nonzero
+stdout: empty
+stderr: ~ "Error [E3003]: `deadline exceeded while waiting in time sleep`." # the report header; the stack below it differs by tier

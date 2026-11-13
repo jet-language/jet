@@ -3679,7 +3679,7 @@ jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
 
 // Whether the identifier at `index` spells a context field: a read
 // `context.<field>`, or a `<field>:` label of a `#Context(…)` marker
-// (`#Context(deadline: d, logger: h)`).
+// (`#Context(allocator: a, logger: h)`).
 jet_driver_context_field_spelled: fn(tokens: [Token], names: JetDriverCoreDemandNames, from: Int, to: Int, index: Int) -> Bool Never! {
     if index >= from + 2 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.context_name -> return true
     if index + 1 >= to || tokens[index + 1].kind != TOKEN_COLON -> return false

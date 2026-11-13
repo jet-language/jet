@@ -3861,17 +3861,20 @@ Jet primitives. A future lossy log sink requires an explicit owner decision.
 
 ### Deadlines and teaching diagnostics
 
-`#Context(deadline: <Int epoch_ms>) { ... }` supplies an ambient deadline.
+`#Deadline(limit: Duration | Instant)` bounds the waits of a block
+(`#Deadline(200ms) { ... }`) or of a whole function body (`#Deadline(5s)`
+written on the function). A `Duration` counts from entry; an `Instant` is the
+point on the monotonic clock (`time.instant()`) the work must finish by. A
+nested deadline can only shorten the one in force: the earliest wins, and the
+enclosing deadline returns when the block or function exits (D-DEADLINE-ONE1).
 Wait and I/O points inherit it, including task joins, channel receive,
-`time.sleep`, and network reads and writes. Exceeding the budget emits **E3003**
-and exits with the runtime error code (D-DEADLINE1).
-For a relative wall-clock budget, derive that absolute millisecond value from
-`time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
-`DateTime`, not the deadline's integer epoch.
+`time.sleep`, and network reads and writes. An expired wait whose operation
+returns a typed error (a network read, an HTTP request) returns it; any other
+wait emits **E3003** and exits with the runtime error code (D-DEADLINE1).
 
 Code reads the task context as `context.<field>` (D-CONTEXT1).
 `context.deadline` is the installed absolute wall-millisecond deadline as an
-`Int?`, `None` outside every `#Context(deadline:)` block and `task.timeout`;
+`Int?`, `None` outside every `#Deadline` block or function and `task.timeout`;
 a task reads the deadline it was spawned under. `context.thread` is the
 running thread's index as an `Int`: 0 on the main thread, and a fiber reads
 its carrier thread's index. A read is an implicit input of every function,

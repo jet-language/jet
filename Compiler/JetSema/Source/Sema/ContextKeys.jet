@@ -27,7 +27,9 @@ use jet_foundation.[
     expr_span,
 ]
 
-// The fields `#Context` sets itself; any other label names a key.
+// The fields a context block sets itself: `#Context`'s `allocator` and
+// `#Deadline`'s `deadline` (Parser Statements.jet parser_context_fields); any
+// other label names a key.
 SEMA_CONTEXT_SET_FIELDS: [String]{"allocator", "deadline"}
 
 // The names of the context's own fields and of `context.get`, which a key
@@ -177,7 +179,7 @@ sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool 
 
 // The `#Context` marker `marker` with only its field arguments: the labels
 // naming keys are checked by sema_stmt_check_context_block, not bound
-// against `Context(allocator:, logger:, deadline:)`.
+// against `Context(allocator:, logger:)`.
 sema_context_marker_fields: fn(marker: Marker) -> Marker Never! {
     // copy: `marker` is the module's rule fact; the bound marker owns its parts.
     kept := marker.copy()

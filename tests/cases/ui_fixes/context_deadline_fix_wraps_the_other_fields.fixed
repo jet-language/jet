@@ -1,0 +1,14 @@
+use core.mem
+
+deadline: fn() -> Int { context.deadline ?? -1 }
+
+run: fn() {
+    arena: mem.Arena.new()
+    #Deadline(3600s) {
+        #Context(allocator: arena) {
+            print("bounded {deadline() >= 0}")
+        }
+    }
+    print("after {deadline()}")
+    close(arena)
+}

@@ -6,11 +6,10 @@ package: {
 // `context.<field>` reads the task context, an implicit input of every
 // function: a read is no effect, so pure (`-[]>`) code reads it too.
 // `context.deadline` is the installed absolute wall-millisecond deadline
-// (`Int?`), None outside every `#Context(deadline:)` block; a task reads the
-// deadline it was spawned under. `context.thread` is the running thread's
-// index (`Int`), 0 on the main thread.
-
-FAR: 4102444800000
+// (`Int?`), None outside every `#Deadline` block; a nested `#Deadline` can
+// only make it earlier, and a task reads the deadline it was spawned under.
+// `context.thread` is the running thread's index (`Int`), 0 on the main
+// thread.
 
 deadline_or_none: fn() -> Int { context.deadline ?? -1 }
 
@@ -28,14 +27,14 @@ deadline_plus: fn(offset: Int) -[]> Int {
     deadline_or_none() + offset
 }
 
-spawn_under: fn(deadline: Int) -> Task<Int> {
-    #Context(deadline: deadline) { return task deadline_or_none() }
+spawn_under_deadline: fn() -> Task<Int> {
+    #Deadline(3600s) { return task deadline_or_none() }
     task deadline_or_none()
 }
 
 report: fn(name: String, handle: &&Task<Int>) {
     if handle.join() == {
-        .Ok(value) -> { print("{name}: {value}") }
+        .Ok(value) -> { print("{name}: {value >= 0}") }
         .Err(_) -> { print("{name}: failed") }
     }
 }
@@ -43,16 +42,20 @@ report: fn(name: String, handle: &&Task<Int>) {
 run: fn() {
     print("main thread {context.thread}")
     print("outside {deadline_or_none()}")
-    #Context(deadline: FAR) {
-        print("block {deadline_or_none()}")
-        #Context(deadline: FAR - 1) {
+    #Deadline(3600s) {
+        block: deadline_or_none()
+        print("block {block >= 0}")
+        #Deadline(1800s) {
             nested: context.deadline ?? -1
-            print("nested {nested}")
+            print("nested earlier {nested < block}")
         }
-        print("restored {deadline_or_none()}")
+        #Deadline(7200s) {
+            print("later kept {deadline_or_none() == block}")
+        }
+        print("restored {deadline_or_none() == block}")
     }
     print("after {deadline_or_none()}")
-    inside: spawn_under(FAR)
+    inside: spawn_under_deadline()
     plain: task deadline_or_none()
     report("task inside", inside)
     report("task outside", plain)
@@ -63,10 +66,11 @@ run: fn() {
     }
     print("pure outside {has_deadline()}")
     first: deadline_plus(1)
-    #Context(deadline: FAR) {
+    #Deadline(3600s) {
         print("pure inside {has_deadline()}")
-        print("memo inside {deadline_plus(1)}")
-        print("memo again {deadline_plus(1)}")
+        inside_plus: deadline_plus(1)
+        print("memo inside {inside_plus > 1}")
+        print("memo again {deadline_plus(1) == inside_plus}")
     }
     print("memo outside {first}, {deadline_plus(1)}")
     stats: deadline_plus.cache()

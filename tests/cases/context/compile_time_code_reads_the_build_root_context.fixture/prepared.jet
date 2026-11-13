@@ -7,11 +7,11 @@ report: fn() -> String {
         .Val(ms) -> "{ms}"
         .None -> "None"
     }
-    "prepared thread {ROOT_THREAD} {thread} deadline {shown}; running thread {context.thread} deadline {context.deadline ?? -1}"
+    "prepared thread {ROOT_THREAD} {thread} deadline {shown}; running thread {context.thread} deadline {(context.deadline ?? -1) >= 0}"
 }
 
 run: fn() {
-    #Context(deadline: 100) {
+    #Deadline(3600s) {
         worker: task report()
         if worker.join() == {
             .Ok(line) -> { print(line) }

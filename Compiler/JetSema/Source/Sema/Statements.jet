@@ -49,6 +49,7 @@ use jet_foundation.[
     TDestructureBinding,
     TEffectSpan,
     TFailureCarrier,
+    TFieldRef,
     TForInMethod,
     TGenericParam,
     TIntegerBounds,
@@ -9642,20 +9643,21 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
 }
 
 // Each `#Context` field value is checked once in the enclosing scope
-// (`deadline` is an Int
-// epoch-millis instant, `allocator` an `Arena`, `Bump`, `Pool` or `Fixed`
-// handle, `context.scratch`, the task's own arena (sema_stmt_context_scratch),
-// or a value whose type implements `mem.Allocator`, whose guard is
-// its handler, sema_stmt_context_allocator_handler); `logger` is core.log's
+// (`allocator` an `Arena`, `Bump`, `Pool` or `Fixed` handle,
+// `context.scratch`, the task's own arena (sema_stmt_context_scratch), or a
+// value whose type implements `mem.Allocator`, whose guard is its handler,
+// sema_stmt_context_allocator_handler); `logger` is core.log's
 // `logger` key and `on_stop` the stop
 // handler, a `fn(debug.Stop)` (ContextKeys.jet sema_context_field_key), and
 // any other label names a `#ContextKey` constant, whose value takes the
-// key's type; a label naming neither is E0761. Then the body is an ordinary
-// nested block. Lowering installs the guards around the body (IR
-// BuildTransact.jet ir_context_block).
+// key's type; a label naming neither is E0761. A `#Deadline(limit)` block is
+// the context block of its one `deadline` field, a `Duration` or an `Instant`
+// (the marker binding, E0930). Then the body is an ordinary nested block.
+// Lowering installs the guards around the body (IR BuildTransact.jet
+// ir_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    // Rust binds the block's `#Context` application first; fields that do
-    // not bind (E0930) get no E0762 of their own.
+    // Rust binds the block's `#Context` or `#Deadline` application first;
+    // fields that do not bind (E0930) get no E0762 of their own.
     signature_valid: sema_marker_rules_check_context_fact(span, environment, program, scopes, state, tail_store, context, diagnostics)
     complete := signature_valid
     guards := [TContextGuard]{}
@@ -9664,7 +9666,7 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
             found: sema_context_label_key(field.name, environment, program, scopes) ?? {
                 _ := sema_check_expression(field.value, None, environment, program, scopes, state, tail_store, context, diagnostics)
-                diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger`, `deadline` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)`, `#Context(deadline: …)` or `#Context(on_stop: …)`"))
+                diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)` or `#Context(on_stop: …)`"))
                 complete = false
                 next
             }
@@ -9689,9 +9691,9 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             complete = false
             next
         }
-        if signature_valid && field.name == "deadline" && !sema_stmt_context_deadline_type(checked.ty) {
-            diagnostics.push(sema_error("E0762", field.span, "`deadline` needs an Int epoch-millis instant, got {sema_type_show(checked.ty)}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`"))
-            complete = false
+        if field.name == "deadline" {
+            if signature_valid -> guards.push(sema_stmt_deadline_guard(checked, field.span))
+            next
         }
         if signature_valid && field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
             if !sema_stmt_context_user_allocator(checked.ty, environment, program) {
@@ -9721,7 +9723,10 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             state.block_allocators.push(SemaOwnershipBlockAllocator{name: sema_ownership_place_name(places[0]), key: places[0].root_key.copy()})
         }
     }
-    scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else -> 1
+    // A `#Deadline` block, the block of the one `deadline` field, sets no
+    // allocation context of its own; L0506 reads the enclosing one.
+    deadline_only: fields.len() == 1 && fields[0].name == "deadline"
+    scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else if deadline_only -> previous_allocation else -> 1
     nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "context@{span.start}", loop_depth)
     loop state.block_allocators.len() > open_allocators {
         _ := state.block_allocators.pop()
@@ -9743,11 +9748,16 @@ sema_stmt_context_scratch: fn(value: Expr, environment: SemaScopeEnvironment, pr
     false
 }
 
-sema_stmt_context_deadline_type: fn(ty: Type) -> Bool Never! {
-    if ty == {
-        .Int | .InlineRange(_, _, _) -> true
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-    }
+// A `#Deadline(limit)` guard reads the bound's nanoseconds: a `Duration`
+// bounds the waits that long from entry (`deadline_after_ns`), an `Instant`
+// at its monotonic nanosecond (`deadline_at_ns`). Lowering keeps the earlier
+// of it and the deadline already in force.
+sema_stmt_deadline_guard: fn(limit: &&TExpr, span: Span) -> TContextGuard Never! {
+    at: limit.ty == (Type.Named{name: "Instant"})
+    owner: if at -> "Instant" else -> "Duration"
+    member: if at -> "start_ns" else -> "ns"
+    reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner, member), name: member, ty: Type.Int, boxed: false}
+    TContextGuard{field: if at -> "deadline_at_ns" else -> "deadline_after_ns", value: sema_tree_node(Type.Int, TExprKind.Field{receiver: limit, field: reference}, span)}
 }
 
 sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {

@@ -15,7 +15,7 @@ wait_for_deadline: fn(state: Shared<State>, changed: Condition) {
 run: fn() {
     state: Shared{State{ready: false}}
     changed: Condition.new()
-    #Context(deadline: 0) {
+    #Deadline(0ms) {
         waiter: task wait_for_deadline(state, changed)
         outcome: waiter.join()
         if outcome == {

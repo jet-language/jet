@@ -27,7 +27,7 @@ run: fn() {
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
-    #Context(deadline: time.unix_ns() /% 1_000_000 - 1) {
+    #Deadline(0ms) {
         if second.read(1) == {
             .Ok(_) -> print("unexpected second read")
             .Err(error) -> print(net.error_message(error))

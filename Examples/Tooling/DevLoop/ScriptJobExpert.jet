@@ -23,7 +23,6 @@ package: {
     version: "0.1.0"
     authority: { allow: [IO, Mem.Alloc, Time] }
 }
-use time: core.time
 
 env.dev: module {
     formatter: pkgs.nixfmt
@@ -49,7 +48,7 @@ checked_input: fn(value: String) -> String InputError! {
 
 #[Job(.Ship), Doc("run the controlled scripting job")]
 ship_job: fn() {
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 1000) {
+    #Deadline(1000ms) {
         print("expert: environment=dev")
         print("expert: authority=IO")
         print("expert: deadline=1000ms")

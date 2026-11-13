@@ -16,7 +16,7 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_ST
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
 // `shield` set and nothing else: an early exit leaves the session Shield.
-// A `#Context(deadline: …)` block is a frame with `deadline`, the two-word
+// A `#Deadline(…)` block is a frame with `deadline`, the two-word
 // save area of the deadline it replaced (-1: none): an early exit restores
 // that deadline. A `#Context` block setting `#ContextKey` values has
 // `values`, the number of value nodes it pushed: an early exit pops them.
@@ -288,14 +288,17 @@ ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
 }
 
-// `#Context(field: value, …) { .. }`: the guard values run in order, then
-// take effect for the body. A `deadline` (absolute wall milliseconds,
-// Deadline.jet) is installed by jet_ctx_push_deadline, which saves the
-// enclosing one in a stack save area, and jet_ctx_pop_deadline restores it
-// after the body's bindings drop or on an early exit (ir_tx_unwind,
-// ir_stop_return). A `#ContextKey` value, `logger` included (core.log's
-// key), moves into a node in front of the task's value chain
-// (ir_context_push_value), which jet_ctx_value_pop unlinks the same way.
+// `#Context(field: value, …) { .. }` and `#Deadline(limit) { .. }`: the
+// guard values run in order, then take effect for the body. A deadline
+// guard is the limit's nanoseconds, `deadline_after_ns` from now (a
+// `Duration`) or `deadline_at_ns` on the monotonic clock (an `Instant`);
+// jet_ctx_push_deadline_after_ns or jet_ctx_push_deadline_at_ns installs the
+// earlier of it and the enclosing deadline (absolute wall milliseconds,
+// Deadline.jet), saving the enclosing one in a stack save area, and
+// jet_ctx_pop_deadline restores it after the body's bindings drop or on an
+// early exit (ir_tx_unwind, ir_stop_return). A `#ContextKey` value, `logger`
+// included (core.log's key), moves into a node in front of the task's value
+// chain (ir_context_push_value), which jet_ctx_value_pop unlinks the same way.
 // A user allocator's guard value is its handler (Sema Statements.jet
 // sema_stmt_context_allocator_handler), a function value whose owner moves
 // to jet_ctx_push_allocator with the block's stack mark (Build.jet
@@ -340,17 +343,18 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
             arena_owned = b.fresh[value]
             next
         }
-        if guard.field != "deadline" || save >= 0 {
+        if (guard.field != "deadline_after_ns" && guard.field != "deadline_at_ns") || save >= 0 {
             ir_release(m, b, value)
             next
         }
         word_row: ir_word_row(m)
-        deadline: if m.types[b.f.slot_type[value]].kind == .Int -> ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row) else -> value
-        if deadline != value -> ir_release(m, b, value)
+        nanos: if m.types[b.f.slot_type[value]].kind == .Int -> ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row) else -> value
+        if nanos != value -> ir_release(m, b, value)
         pointer_row: ir_pointer_row(m)
         save = ir_temp(m, b, pointer_row)
         ir_emit(b.f, IROp.StackAddress, save, 16, 8, -1, b.line)
-        _: ir_runtime(m, b, "jet_ctx_push_deadline", [Int]{deadline, save}, -1)
+        push: if guard.field == "deadline_at_ns" -> "jet_ctx_push_deadline_at_ns" else -> "jet_ctx_push_deadline_after_ns"
+        _: ir_runtime(m, b, push, [Int]{nanos, save}, -1)
     }
     loop index in 0..<keys.len() {
         ir_context_push_value(m, p, b, keys[index], values[index])
@@ -496,7 +500,7 @@ ir_context_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
 // context (Runtime Context.jet), whose runtime reads cannot stop.
 // `thread` is the running thread's index (jet_ctx_thread); `deadline` is
 // the installed absolute wall-millisecond deadline, None when no
-// `#Context(deadline:)` or `task.timeout` installed one; `trace` is the
+// `#Deadline(…)` or `task.timeout` installed one; `trace` is the
 // text of the calling frames (Runtime Fault.jet jet_rt_context_trace),
 // which sema hands to core.debug's `__trace_records`. The call is built in
 // the reading function, so the walk starts at its frame. `scratch` is a

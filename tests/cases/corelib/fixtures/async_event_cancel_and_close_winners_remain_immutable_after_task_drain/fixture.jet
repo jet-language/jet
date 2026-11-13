@@ -2,7 +2,6 @@ package: { name: "async-event-cancel-close" authority: { allow: [Time] } }
 use {
     event: core.event
     tasks: core.tasks
-    time: core.time
 }
 
 run: fn() {
@@ -21,7 +20,7 @@ run: fn() {
     })
     cancel_hold: cancel_event.emit_async(0)
     cancel_hold_started: cancel_hold_started_rx.receive() ?? panic("cancel hold start")
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
+    #Deadline(100000ms) {
         cancel_queued: cancel_event.emit_async(1)
         cancel_pending: cancel_event.emit_async(2)
         cancel_event.on(cancel_scope, fn(n: Int) {})
@@ -47,7 +46,7 @@ run: fn() {
     close_event.on(close_scope, fn(n: Int) {})
     close_hold: close_event.emit_async(0)
     close_hold_started: close_hold_started_rx.receive() ?? panic("close hold start")
-    #Context(deadline: time.unix_ns() /% 1_000_000 + 100000) {
+    #Deadline(100000ms) {
         close_queued: close_event.emit_async(3)
         close_pending: close_event.emit_async(4)
         close_event.close()

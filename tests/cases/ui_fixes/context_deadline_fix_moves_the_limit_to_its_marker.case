@@ -1,0 +1,20 @@
+# A block's wait bound is its own `#Deadline` marker, not a context field.
+# E0761 on a `deadline: limit` context field carries the Safe edit to
+# `#Deadline(limit)`: `jet fix` migrates the file, the result runs bounded,
+# and a second `jet fix` changes nothing.
+fixture: context_deadline_fix_moves_the_limit_to_its_marker.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "`deadline` isn't a context field" # the E0761 headline; the fix steps check its edit
+step: jet fix run.jet
+exit: 0
+stderr: ~ "applied 1 fix" # the one E0761 edit
+file: run.jet = context_deadline_fix_moves_the_limit_to_its_marker.fixed
+step: jet fix run.jet
+exit: 0
+stderr: ~ "no changes made" # the migrated file has nothing left to fix
+file: run.jet = context_deadline_fix_moves_the_limit_to_its_marker.fixed
+step: jet run run.jet
+exit: 0
+stdout: = "bounded true\nafter -1\n"

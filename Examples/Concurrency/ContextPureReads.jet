@@ -16,8 +16,6 @@ use term: core.term
 // neither the view nor a value made in it may leave the reading function
 // (E0631).
 
-FAR: 4102444800000
-
 read_deadline: fn() -[]> Int { context.deadline ?? -1 }
 
 read_thread: fn() -[]> Int { context.thread }
@@ -58,8 +56,8 @@ fill_scratch: fn() {
 
 run: fn() {
     print("deadline {read_deadline()}, thread {read_thread()}")
-    #Context(deadline: FAR) {
-        print("deadline {read_deadline()}")
+    #Deadline(3600s) {
+        print("deadline {read_deadline() >= 0}")
     }
     print("logger {logger_level()}")
     #Context(logger: log.handler(.Warn)) {

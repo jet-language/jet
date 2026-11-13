@@ -567,7 +567,6 @@ Nondeterministic: struct {
 Context: struct {
     allocator: Value{default}
     logger: Value{default}
-    deadline: Int{default}
 
     impl Marker {
         sites: [.Block]
@@ -582,6 +581,17 @@ Context: struct {
 ContextKey: struct {
     impl Marker {
         sites: [.Declaration]
+    }
+}
+
+// `#Deadline(limit)` bounds the waits of a block or a function body: a
+// `Duration` from entry or an `Instant`. A nested deadline can only shorten
+// the one in force; the earliest wins.
+Deadline: struct {
+    limit: Duration | Instant
+
+    impl Marker {
+        sites: [.Block, .Function]
     }
 }
 

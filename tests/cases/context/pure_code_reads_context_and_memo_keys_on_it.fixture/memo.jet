@@ -9,10 +9,10 @@ left: fn(now: Int) -> Int { remaining(now) }
 run: fn() {
     a: left(5)
     b := 0
-    #Context(deadline: 100) {
+    #Deadline(3600s) {
         b = left(5)
     }
     c: left(5)
     stats: left.cache()
-    print("memo {a} {b} {c} hits={stats.hits} misses={stats.misses}")
+    print("memo {a} {b > 0} {c} hits={stats.hits} misses={stats.misses}")
 }
