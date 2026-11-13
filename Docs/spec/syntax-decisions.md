@@ -2829,6 +2829,25 @@ and two `#Off` forms on one statement are E0344.
 Names introduced inside the marker body do not escape. The build's profile is
 the fact `#build.profile`.
 
+**D-DEEP-CHECK1=A, D-DEEP-SPELL1=B — Deep checks** *(ratified 2026-11-12)*:
+`#On(.Deep) <stmt>` (a statement or a block) marks an in-memory deep check.
+Its body is parsed and type-checked in every build, and emits code only in a
+function the compile's `--deep-checks` request selects. A bare
+`--deep-checks` keeps every deep check. `--deep-checks=<scope>`, repeatable,
+keeps those of one package, or of one module, type or function in it. A scope
+is `<package>` or `<package>::<name>(.<name>)*`: the declared package name,
+then, after one `::`, dotted names (`tree`, `tree::run`,
+`tree::balance.rebuild`, `tree::balance.Tree.rebalance`). Repeated scopes are a
+union. An empty or malformed scope, such as `tree.run`, is E2119, one that
+names no declaration is E2120, and one that keeps no deep check is E2121.
+Selection does not depend on the profile, so `--release` keeps a
+selected deep check. Required contracts and safety checks are not deep checks
+and stay on either way. The body reads the state around it but may not change
+it, and it may not leave the enclosing function or loop. Each build condition
+belongs to one marker: `#Off` takes `.Release` and `#On` takes `.Deep`, so
+`#Off(.Deep)` and `#On(.Release)` are E0397. `#Off` and `#On` on one statement
+are E0344, and `#On` in expression position is E0343.
+
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
 `const`/`comptime` bindings. `category` is a non-empty plain string literal and
