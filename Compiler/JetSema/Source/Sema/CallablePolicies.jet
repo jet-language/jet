@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_CONTEXT_KEY, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 sema_policy_builtin: fn(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -265,7 +265,13 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
     unsupported
 }
 
+// A module binding's `#ContextKey` is the binding's own form too: the
+// constant carries it as its marker, and the context-key check reads it there
+// (sema_context_key_declared).
 sema_policy_statement_form: fn(application: AppliedRuleApplication) -> Bool Never! {
-    if application.site == .Val(site) -> return site == RuleSite.Block || site == RuleSite.Statement || site == RuleSite.Arm
+    if application.site == .Val(site) {
+        if site == RuleSite.Declaration -> return application.marker.name == MARKER_CONTEXT_KEY
+        return site == RuleSite.Block || site == RuleSite.Statement || site == RuleSite.Arm
+    }
     false
 }
