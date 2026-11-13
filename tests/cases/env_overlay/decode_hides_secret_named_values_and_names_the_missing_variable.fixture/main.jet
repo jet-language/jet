@@ -1,0 +1,32 @@
+// Decodes one settings record from APP_* variables the case sets: a bad port,
+// a missing db_url, two secret-named values and a renamed secret variable,
+// with the nested replica record left unset. Prints each framed failure.
+package: {
+    name: "env_decode_redacts_and_names_missing"
+    authority: { allow: [Env, IO] }
+}
+
+use env: core.sys
+
+#[Debug, Decode]
+Replica: struct {
+    host: String
+}
+
+#[Debug, Decode]
+Settings: struct {
+    port: Int
+    db_url: String
+    db_password: Int
+    api_key: Int
+    #Rename("stripe", env: "STRIPE_SECRET") stripe: Int
+    replica: Replica
+}
+
+run: fn() {
+    names: ["APP_PORT", "APP_DB_URL", "APP_DB_PASSWORD", "APP_API_KEY", "APP_STRIPE_SECRET", "APP_REPLICA__HOST"]
+    if env.decode<Settings>(prefix: "APP_", file: "", allow: names) == {
+        .Ok(_) -> print("accepted")
+        .Err(errors) -> { loop error in errors -> print(error.reason) }
+    }
+}

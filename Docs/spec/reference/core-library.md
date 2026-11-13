@@ -2649,8 +2649,11 @@ protocol. Its source policy requires a project-relative file with no parent
 components, treats a missing dotenv file as empty, folds environment names in
 ASCII, and overlays logical process values over dotenv values. Empty values
 remain values; `__` separates lowercase field segments. Decoder failures retain
-their field paths and `E2416` provenance; secret/password/token/key path segments
-redact the rejected value.
+their field paths and `E2416` provenance, naming the variable that supplied the
+value or, for a missing value, the variable that would have (`APP_DB_URL`). The
+rejected value is hidden when the field path or the variable's name after the
+prefix contains `secret`, `password`, `token` or `key` in any case
+(`APP_DB_PASSWORD`, `APP_API_KEY`).
 ---
 
 ### `core.process` — process execution

@@ -2094,7 +2094,7 @@ decode: fn<Target: Decode>(prefix: String, file: String, allow: [String], names:
         }
         .Err(failures) -> {
             rt.text_cells_leave(previous)
-            return Err(__decode_errors(failures, found.origins))
+            return Err(__decode_errors(failures, found.origins, prefix, names))
         }
     }
 }
@@ -2142,34 +2142,59 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
     Ok((tree: config_tree(tree), origins: origins))
 }
 
-__decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
+// Frames each decode failure with its variable: the one that supplied the
+// value, else, for a value that is missing, the variable that would have
+// supplied it. The value is hidden when the field path or the variable's
+// name after the prefix contains a secret word (`db_password`, `api_key`).
+__decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)], prefix: String, names: [(env_name: String, key: String)]) -> [FieldError] Never! {
     framed := [FieldError]{}
     loop error in errors {
-        reason := error.reason
-        raw: error.path.bytes()
-        start := 0
-        loop at in 0..<raw.len() + 1 {
-            separator: at == raw.len() || raw[at] == (U8{46}) || raw[at] == (U8{91}) || raw[at] == (U8{93})
-            if separator {
-                part: ascii_lower(slice_ascii(raw, start, at))
-                if part == "secret" || part == "password" || part == "token" || part == "key" -> reason = "secret value rejected"
-                start = at + 1
-            }
-        }
-        origin := String?{None}
+        variable := String?{None}
         loop entry in origins {
             if ascii_lower(entry.path) == ascii_lower(error.path) {
-                origin = Val(entry.name)
+                variable = Val(entry.name)
                 break
             }
         }
-        message: if origin == {
+        if variable == None -> variable = __decode_variable(error.path, prefix, names)
+        hidden := __decode_secret(error.path)
+        if variable == .Val(name) {
+            raw: name.bytes()
+            own: if ascii_lower(name).starts_with(ascii_lower(prefix)) -> slice_ascii(raw, prefix.bytes().len(), raw.len()) else -> name
+            if __decode_secret(own) -> hidden = true
+        }
+        reason: if hidden -> "secret value rejected" else -> error.reason
+        message: if variable == {
             .Val(name) -> "E2416: env var {name} -> {error.path}: {reason}"
             .None -> "E2416: config field {error.path}: {reason}"
         }
         framed.push(FieldError{path: error.path, reason: message})
     }
     framed
+}
+
+// Whether a field path or variable name contains a secret word, in any case.
+__decode_secret: fn(text: String) -> Bool Never! {
+    folded: ascii_lower(text)
+    folded.contains("secret") || folded.contains("password") || folded.contains("token") || folded.contains("key")
+}
+
+// The variable that supplies the field at `path`: the checked env name of a
+// top-level field (a full name or one the prefix starts), else the prefix and
+// the upper-cased segments joined by `__`. A list element has none.
+__decode_variable: fn(path: String, prefix: String, names: [(env_name: String, key: String)]) -> String? Never! {
+    if path.len() == 0 -> return None
+    loop byte in path.bytes() { if byte == (U8{91}) || byte == (U8{93}) -> return None }
+    segments: path.split(".").to_list()
+    if segments.len() == 1 {
+        loop rename in names {
+            if ascii_lower(rename.key) == ascii_lower(path) {
+                if prefix.len() > 0 && ascii_lower(rename.env_name).starts_with(ascii_lower(prefix)) -> return Val(rename.env_name)
+                return Val("{prefix}{rename.env_name}")
+            }
+        }
+    }
+    Val("{prefix}{ascii_upper(segments.join("__"))}")
 }
 
 config_error: fn(reason: String) -> [FieldError] Never! { [FieldError]{FieldError{path: "", reason: reason}} }
@@ -2349,8 +2374,24 @@ config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
         .Err(errors) -> assert_eq(errors[0].reason, "E2416: invalid .env line 1")
         .Ok(_) -> assert(false)
     }
-    errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")})
+    no_names: [(env_name: String, key: String)]{}
+    errors: __decode_errors([FieldError]{FieldError{path: "db.password", reason: "rejected supersecret"}}, [(name: String, path: String)]{(name: "APP_DB__PASSWORD", path: "db.password")}, "APP_", no_names)
     assert_eq(errors[0].reason, "E2416: env var APP_DB__PASSWORD -> db.password: secret value rejected")
+    joined: __decode_errors([FieldError]{FieldError{path: "db_password", reason: "expected Int, found text \"hunter2\""}, FieldError{path: "api_key", reason: "expected Int, found text \"sk-live\""}, FieldError{path: "port", reason: "expected Int, found text \"x\""}}, [(name: String, path: String)]{(name: "APP_DB_PASSWORD", path: "db_password"), (name: "APP_API_KEY", path: "api_key"), (name: "APP_PORT", path: "port")}, "APP_", no_names)
+    assert_eq(joined[0].reason, "E2416: env var APP_DB_PASSWORD -> db_password: secret value rejected")
+    assert_eq(joined[1].reason, "E2416: env var APP_API_KEY -> api_key: secret value rejected")
+    assert_eq(joined[2].reason, "E2416: env var APP_PORT -> port: expected Int, found text \"x\"")
+    // A renamed variable whose name holds the secret word hides the value too.
+    renamed: [(env_name: String, key: String)]{(env_name: "STRIPE_SECRET", key: "stripe"), (env_name: "DB_URL", key: "db_url"), (env_name: "SERVICE_HOST", key: "host")}
+    hidden: __decode_errors([FieldError]{FieldError{path: "stripe", reason: "expected Int, found text \"sk\""}}, [(name: String, path: String)]{(name: "APP_STRIPE_SECRET", path: "stripe")}, "APP_", renamed)
+    assert_eq(hidden[0].reason, "E2416: env var APP_STRIPE_SECRET -> stripe: secret value rejected")
+    // A missing value names the variable that would have supplied it.
+    missing: __decode_errors([FieldError]{FieldError{path: "db_url", reason: "missing"}, FieldError{path: "db.host", reason: "missing"}, FieldError{path: "hosts[0]", reason: "missing"}}, [(name: String, path: String)]{}, "APP_", renamed)
+    assert_eq(missing[0].reason, "E2416: env var APP_DB_URL -> db_url: missing")
+    assert_eq(missing[1].reason, "E2416: env var APP_DB__HOST -> db.host: missing")
+    assert_eq(missing[2].reason, "E2416: config field hosts[0]: missing")
+    full: __decode_errors([FieldError]{FieldError{path: "host", reason: "missing"}}, [(name: String, path: String)]{}, "SERVICE_", renamed)
+    assert_eq(full[0].reason, "E2416: env var SERVICE_HOST -> host: missing")
 }
 
 #Test("Dotenv tree replacement preserves sibling order and nested values") {
