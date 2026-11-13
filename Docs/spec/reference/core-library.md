@@ -1790,7 +1790,10 @@ thread that opened them (**E1102**).
 | `locator.set_files(path)` | `!BrowserError` | Set files on a file-upload control. |
 | `page.screenshot()` / `page.pdf()` | `[U8] !BrowserError` | Capture a bounded screenshot or PDF artifact. |
 | `browser.protocol("bidi" \| "cdp")` / `protocol.send(method, params)` | `BrowserProtocol` / response | Access the selected protocol; CDP requires the advertised capability. |
+| `page.protocol("cdp")` | `BrowserProtocol !BrowserError` | A CDP handle for one page: its sends carry the page's CDP session (asked of the driver with `goog:cdp.getSession`, never handed out), and its `subscribe` and `next_event` see only that page's events. `"bidi"` is refused; CDP requires the advertised capability. |
 | `protocol.subscribe(kind)` / `protocol.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to a CDP `Domain.event` (or a BiDi event) and receive it from the session's one event queue, as its `Domain.event` kind with the same slots and redaction. |
+| `event.frame_line()` / `frame_column()` / `frame_function_hash()` / `source_map_url_hash()` / `url_hash()` | `Int` / `String` | Debugger facts: the 0-based line and column and the function-name hash of a `Debugger.paused` top frame (-1, -1, "" otherwise), and the source-map URL and URL hashes of a `Debugger.scriptParsed`. |
+| `fact_hash(text)` | `String` | The FNV-1a 64 hex hash every event and trace fact carries, to compare a fact against text the caller holds. |
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
 | `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture !BrowserError` / `BrowserContext` / `BrowserPage` | Open a named test fixture (locked engine, isolated context, page, event subscriptions) and read its context and page. |

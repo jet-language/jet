@@ -1,0 +1,17 @@
+# A page's CDP handle on the Chromium pinned in .jet/lock: "bidi" is refused,
+# its commands carry the page's CDP session (Debugger.enable, then a script
+# that names a source URL and a source map and stops at `debugger`), its
+# scriptParsed and paused events arrive as line, column and hashed facts, a
+# second page's handle sees none of them, and it is refused once the page is
+# closed.
+fixture: core_browser_page_cdp_debugger_facts.fixture
+env: NO_COLOR=1
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+env: JET_PROJECT_ROOT={work}
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {work}/main.jet
+exit: 0
+stdout: = core_browser_page_cdp_debugger_facts.1.out

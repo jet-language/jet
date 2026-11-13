@@ -92,7 +92,8 @@ BrowserPrivacy: struct {
     shared_profiles: fn(self) -> Bool Never! { self.shared_profiles }
 }
 
-// One bounded, redacted event: method name, request facts, and hashes only.
+// One bounded, redacted event: method name, request facts, debugger facts, and
+// hashes only.
 BrowserEvent: struct {
     method: String
     request_id: String
@@ -102,6 +103,14 @@ BrowserEvent: struct {
     status_code: Int
     download_id: String
     suggested_filename_hash: String
+    frame_line: Int
+    frame_column: Int
+    frame_function_hash: String
+    source_map_url_hash: String
+    // The CDP session a `goog:cdp` event came from, "" for a BiDi event. A
+    // page's CDP handle takes only its own session's events; the session
+    // never leaves Core.
+    __session: String
 
     kind: fn(self) -> String Never! { self.method }
     request_id: fn(self) -> String Never! { self.request_id }
@@ -111,6 +120,14 @@ BrowserEvent: struct {
     status_code: fn(self) -> Int Never! { self.status_code }
     download_id: fn(self) -> String Never! { self.download_id }
     suggested_filename_hash: fn(self) -> String Never! { self.suggested_filename_hash }
+    // The top call frame of a `Debugger.paused`: its 0-based line and column
+    // and the hash of its function name. -1, -1 and "" on any other event.
+    frame_line: fn(self) -> Int Never! { self.frame_line }
+    frame_column: fn(self) -> Int Never! { self.frame_column }
+    frame_function_hash: fn(self) -> String Never! { self.frame_function_hash }
+    // The hash of the source-map URL a `Debugger.scriptParsed` names; "" when
+    // the script names none.
+    source_map_url_hash: fn(self) -> String Never! { self.source_map_url_hash }
 }
 
 BrowserTrace: struct {
@@ -284,7 +301,7 @@ Browser: struct {
         if guard.value.closed -> return Err(BrowserError{kind: "closed"})
         supported: kind == "bidi" || (kind == "cdp" && guard.value.cdp)
         if !supported -> return Err(BrowserError{kind: "unsupported protocol"})
-        Ok(BrowserProtocol{__browser: self, __kind: kind})
+        Ok(BrowserProtocol{__browser: self, __kind: kind, __context: new_scope(""), __page: new_scope(""), __session: new_scope("")})
     }
 
     trace: fn(self) -> BrowserTrace Never! {
@@ -349,6 +366,16 @@ BrowserPage: struct {
         if !scope_closed(self.__context) && !browser_closed(self.__browser) -> browser_command(self.__browser, "browsingContext.close", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope)))]))
         scope_close(self.__scope)
         Ok()
+    }
+
+    // A CDP handle for this page alone: its commands carry the page's CDP
+    // session, and its events are this page's only. "bidi" is refused: BiDi
+    // commands already name their page.
+    protocol: fn(self, kind: String) -> BrowserProtocol BrowserError! {
+        page_live(self)
+        if browser_closed(self.__browser) -> return Err(BrowserError{kind: "closed"})
+        if kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
+        Ok(BrowserProtocol{__browser: self.__browser, __kind: "cdp", __context: self.__context, __page: self.__scope, __session: new_scope("")})
     }
 
     main_frame: fn(self) -> BrowserFrame BrowserError! {
@@ -565,9 +592,16 @@ BrowserIntercept: struct {
 // smuggle `goog:cdp.*`, and CDP methods and events must have the
 // `Domain.name` shape. CDP events join the session's one event queue, with
 // the same slots and redaction as BiDi events, as their `Domain.event` kinds.
+// A page's CDP handle (`page.protocol("cdp")`) sends through that page's CDP
+// session and takes only that session's events; a browser's handle has empty
+// page and session ids.
 BrowserProtocol: struct {
     __browser: Browser
     __kind: String
+    __context: Shared<__BrowserScope>
+    __page: Shared<__BrowserScope>
+    // The page's CDP session, asked of the driver on first use.
+    __session: Shared<__BrowserScope>
 
     send: fn(self, method: String, params_json: String) -[Net, Time]> String BrowserError! {
         params: json.parse(params_json) ?? return Err(BrowserError{kind: "protocol"})
@@ -579,7 +613,10 @@ BrowserProtocol: struct {
         }
         if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
-        result: browser_command(self.__browser, "goog:cdp.sendCommand", obj([(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)]))
+        page_session: protocol_session(self)
+        request := [(key: String, value: Dyn)]{(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)}
+        if page_session == .Val(session) -> request.push((key: "session", value: Dyn.Text(session)))
+        result: browser_command(self.__browser, "goog:cdp.sendCommand", obj(request))
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
     }
 
@@ -590,11 +627,42 @@ BrowserProtocol: struct {
         }
         if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
         if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
-        browser_command(self.__browser, "session.subscribe", obj([(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))]))
+        request := [(key: String, value: Dyn)]{(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))}
+        if protocol_session(self) != None -> request.push((key: "contexts", value: Dyn.Array([Dyn]{Dyn.Text(scope_id(self.__page))})))
+        browser_command(self.__browser, "session.subscribe", obj(request))
         Ok()
     }
 
-    next_event: fn(self, timeout: BrowserTimeout) -[Net, Time]> BrowserEvent BrowserError! { self.__browser.next_event(timeout) }
+    // A page's handle waits for the next event of its own CDP session and
+    // leaves every other event queued.
+    next_event: fn(self, timeout: BrowserTimeout) -[Net, Time]> BrowserEvent BrowserError! {
+        page_session: protocol_session(self)
+        session: page_session ?? return self.__browser.next_event(timeout)
+        if browser_closed(self.__browser) -> return Err(BrowserError{kind: "closed"})
+        if browser_pop_session_event(self.__browser, session) == .Val(queued) -> return Ok(queued)
+        started: time.instant()
+        loop {
+            value: browser_recv_json(self.__browser, started, timeout.milliseconds)
+            if !browser_capture_event(self.__browser, value) -> return Err(BrowserError{kind: "protocol"})
+            if browser_pop_session_event(self.__browser, session) == .Val(event) -> return Ok(event)
+        }
+    }
+}
+
+// The CDP session of a page's handle, asked of the driver once with
+// `goog:cdp.getSession` and kept in the handle; None for a browser's handle.
+// It never leaves Core.
+protocol_session: fn(protocol: BrowserProtocol) -[Net, Time]> String? BrowserError! {
+    page: scope_id(protocol.__page)
+    if page == "" -> return Ok(None)
+    if scope_closed(protocol.__page) || scope_closed(protocol.__context) -> return Err(BrowserError{kind: "closed"})
+    known: scope_id(protocol.__session)
+    if known != "" -> return Ok(Val(known))
+    result: browser_command(protocol.__browser, "goog:cdp.getSession", obj([(key: "context", value: Dyn.Text(page))]))
+    session: browser_string(result, "session")
+    if session == "" -> return Err(BrowserError{kind: "protocol"})
+    scope_set_id(protocol.__session, session)
+    Ok(Val(session))
 }
 
 BrowserLocked: struct {
@@ -1068,11 +1136,29 @@ browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
     guard.value.events.push(event.copy())
 }
 
+// The first queued event of CDP session `session`; every other event stays
+// queued in order.
+browser_pop_session_event: fn(browser: Browser, session: String) -> BrowserEvent? Never! {
+    guard := browser.__state.guard_edit()
+    found := -1
+    loop index in 0..<guard.value.events.len() {
+        if found < 0 && guard.value.events[index].__session == session -> found = index
+    }
+    if found < 0 -> return None
+    taken: guard.value.events[found]
+    rest := [BrowserEvent]{}
+    loop index in 0..<guard.value.events.len() {
+        if index != found -> rest.push(guard.value.events[index])
+    }
+    guard.value.events = rest
+    Val(taken)
+}
+
 browser_check_command: fn(browser: Browser, method: String) BrowserError! {
     guard: browser.__state.guard_read()
     if guard.value.closed -> return Err(BrowserError{kind: "closed"})
     if !profile_allows(guard.value.profile, method) -> return Err(BrowserError{kind: "unsupported protocol"})
-    if method == "goog:cdp.sendCommand" && !guard.value.cdp -> return Err(BrowserError{kind: "unsupported protocol"})
+    if (method == "goog:cdp.sendCommand" || method == "goog:cdp.getSession") && !guard.value.cdp -> return Err(BrowserError{kind: "unsupported protocol"})
     Ok()
 }
 
@@ -1157,7 +1243,7 @@ browser_capture_event: fn(browser: Browser, value: Dyn) -> Bool BrowserError! {
 }
 
 event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
-    out := BrowserEvent{method: method, request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: ""}
+    out := BrowserEvent{method: method, request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
     params: browser_get(value, "params") ?? return out
     out.is_blocked = browser_true_field(params, "isBlocked")
     url := String?{None}
@@ -1175,11 +1261,15 @@ event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
 }
 
 // chromedriver's BiDi mapper sends a CDP event as `goog:cdp.<Domain.event>`
-// with the CDP payload under `params.params`. It is queued as its
-// `Domain.event` kind with the same redacted network facts.
+// with the CDP payload under `params.params` and the CDP session under
+// `params.session`. It is queued as its `Domain.event` kind with the same
+// redacted network facts, plus the named debugger facts: the top frame of a
+// `Debugger.paused`, and the URL and source-map URL of a
+// `Debugger.scriptParsed`. Nothing else of the payload is kept.
 __cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
-    out := BrowserEvent{method: method.remove_prefix("goog:cdp."), request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: ""}
+    out := BrowserEvent{method: method.remove_prefix("goog:cdp."), request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: "", frame_line: -1, frame_column: -1, frame_function_hash: "", source_map_url_hash: "", __session: ""}
     outer: browser_get(value, "params") ?? return out
+    out.__session = browser_text(outer, "session") ?? ""
     params: browser_get(outer, "params") ?? return out
     out.request_id = browser_text(params, "requestId") ?? ""
     if browser_get(params, "request") == .Val(request) {
@@ -1187,6 +1277,21 @@ __cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
         if browser_text(request, "url") == .Val(url) -> out.url_hash = fact_hash(url)
     }
     out.status_code = __response_status(params)
+    if out.method == "Debugger.scriptParsed" {
+        if browser_text(params, "url") == .Val(url) -> out.url_hash = fact_hash(url)
+        if browser_text(params, "sourceMapURL") == .Val(map) && map != "" -> out.source_map_url_hash = fact_hash(map)
+    }
+    if out.method == "Debugger.paused" {
+        frames: browser_get(params, "callFrames") ?? return out
+        if frames == .Array(items) {
+            if items.len() == 0 -> return out
+            top: items[0]
+            out.frame_function_hash = fact_hash(browser_text(top, "functionName") ?? "")
+            location: browser_get(top, "location") ?? return out
+            if browser_get(location, "lineNumber") == .Val(line) -> out.frame_line = dyn_int(line) ?? -1
+            if browser_get(location, "columnNumber") == .Val(column) -> out.frame_column = dyn_int(column) ?? -1
+        }
+    }
     out
 }
 
@@ -1208,7 +1313,7 @@ C_BIDI_2024_11: [String]{
     "network.addIntercept", "network.continueRequest", "network.failRequest", "network.provideResponse", "network.removeIntercept",
     "storage.getCookies", "storage.setCookie", "storage.deleteCookies",
     "script.addPreloadScript", "script.callFunction", "script.disown", "script.evaluate", "script.getRealms", "script.removePreloadScript",
-    "goog:cdp.sendCommand"
+    "goog:cdp.sendCommand", "goog:cdp.getSession"
 }
 
 profile_allows: fn(name: String, method: String) -> Bool Never! {
@@ -1267,7 +1372,9 @@ browser_id: fn(value: Dyn) -> Int? Never! {
     Val(id)
 }
 
-// FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits.
+// FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits: the hash every
+// event and trace fact carries. Public, so a caller compares a fact against
+// text it already holds without the text ever being kept.
 fact_hash: fn(value: String) -> String Never! {
     hash := U64{14695981039346656037}
     loop byte in value.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
@@ -1357,6 +1464,11 @@ scope_closed: fn(scope: Shared<__BrowserScope>) -> Bool Never! {
 scope_close: fn(scope: Shared<__BrowserScope>) Never! {
     guard := scope.guard_edit()
     guard.value.closed = true
+}
+
+scope_set_id: fn(scope: Shared<__BrowserScope>, id: String) Never! {
+    guard := scope.guard_edit()
+    guard.value.id = id
 }
 
 context_create_tab: fn(context: BrowserContext) -[Net, Time]> BrowserPage BrowserError! {
@@ -1993,8 +2105,44 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert_eq(event.request_method(), "GET")
     assert_eq(event.url_hash(), fact_hash("https://example.test/app.js"))
     assert_eq(event.status_code(), 200)
+    assert_eq(event.frame_line(), -1)
+    assert_eq(event.frame_function_hash(), "")
+    assert_eq(event.source_map_url_hash(), "")
     bare: __cdp_event_facts(json.parse("{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.paused\"}}") ?? panic("the bare event parses"), "goog:cdp.Debugger.paused")
-    assert_eq("{bare.kind()} {bare.request_id()} {bare.status_code()}", "Debugger.paused  0")
+    assert_eq("{bare.kind()} {bare.request_id()} {bare.status_code()} {bare.frame_line()} {bare.frame_column()} {bare.frame_function_hash()}", "Debugger.paused  0 -1 -1 ")
+}
+
+#Test("a CDP debugger event keeps its top frame and script facts as hashes and its session in Core") {
+    paused_wire: "{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.paused\",\"params\":{{\"event\":\"Debugger.paused\",\"session\":\"S1\",\"params\":{{\"reason\":\"other\",\"hitBreakpoints\":[\"1:41:0:https://app.example/main.js\"],\"callFrames\":[{{\"callFrameId\":\"F0\",\"functionName\":\"render\",\"location\":{{\"scriptId\":\"42\",\"lineNumber\":41,\"columnNumber\":7}},\"url\":\"https://app.example/main.js\",\"scopeChain\":[],\"this\":{{\"type\":\"undefined\"}}}},{{\"callFrameId\":\"F1\",\"functionName\":\"\",\"location\":{{\"scriptId\":\"42\",\"lineNumber\":90,\"columnNumber\":0}},\"url\":\"https://app.example/main.js\",\"scopeChain\":[],\"this\":{{\"type\":\"undefined\"}}}}]}}}}}}"
+    paused: __cdp_event_facts(json.parse(paused_wire) ?? panic("the paused event parses"), "goog:cdp.Debugger.paused")
+    assert_eq(paused.kind(), "Debugger.paused")
+    assert_eq(paused.frame_line(), 41)
+    assert_eq(paused.frame_column(), 7)
+    assert_eq(paused.frame_function_hash(), fact_hash("render"))
+    assert_eq(paused.__session, "S1")
+    assert_eq(paused.url_hash(), "")
+    anonymous_wire: "{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.paused\",\"params\":{{\"event\":\"Debugger.paused\",\"session\":\"S2\",\"params\":{{\"reason\":\"other\",\"callFrames\":[{{\"callFrameId\":\"F0\",\"functionName\":\"\",\"location\":{{\"scriptId\":\"7\",\"lineNumber\":0}}}}]}}}}}}"
+    anonymous: __cdp_event_facts(json.parse(anonymous_wire) ?? panic("the anonymous paused event parses"), "goog:cdp.Debugger.paused")
+    assert_eq("{anonymous.frame_line()} {anonymous.frame_column()} {anonymous.frame_function_hash()} {anonymous.__session}", "0 -1 {fact_hash("")} S2")
+    parsed_wire: "{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.scriptParsed\",\"params\":{{\"event\":\"Debugger.scriptParsed\",\"session\":\"S1\",\"params\":{{\"scriptId\":\"42\",\"url\":\"https://app.example/main.js\",\"startLine\":0,\"startColumn\":0,\"endLine\":120,\"endColumn\":0,\"executionContextId\":1,\"hash\":\"abc\",\"sourceMapURL\":\"main.js.map\"}}}}}}"
+    parsed: __cdp_event_facts(json.parse(parsed_wire) ?? panic("the scriptParsed event parses"), "goog:cdp.Debugger.scriptParsed")
+    assert_eq(parsed.kind(), "Debugger.scriptParsed")
+    assert_eq(parsed.url_hash(), fact_hash("https://app.example/main.js"))
+    assert_eq(parsed.source_map_url_hash(), fact_hash("main.js.map"))
+    assert_eq("{parsed.frame_line()} {parsed.frame_column()} {parsed.frame_function_hash()}", "-1 -1 ")
+    mapless_wire: "{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.scriptParsed\",\"params\":{{\"event\":\"Debugger.scriptParsed\",\"session\":\"S1\",\"params\":{{\"scriptId\":\"43\",\"url\":\"\",\"sourceMapURL\":\"\"}}}}}}"
+    mapless: __cdp_event_facts(json.parse(mapless_wire) ?? panic("the mapless scriptParsed event parses"), "goog:cdp.Debugger.scriptParsed")
+    assert_eq("{mapless.url_hash()} {mapless.source_map_url_hash()}", "{fact_hash("")} ")
+    bidi: event_facts(json.parse("{{\"type\":\"event\",\"method\":\"log.entryAdded\",\"params\":{{\"text\":\"x\"}}}}") ?? panic("the BiDi event parses"), "log.entryAdded")
+    assert_eq(bidi.__session, "")
+    assert_eq(fact_hash(""), "cbf29ce484222325")
+    assert_eq(fact_hash("a"), "af63dc4c8601ec8c")
+}
+
+#Test("goog:cdp.getSession is allowed only where goog:cdp.sendCommand is") {
+    assert(profile_allows("bidi-2024.11", "goog:cdp.getSession"))
+    assert(profile_allows("bidi-2025.5", "goog:cdp.getSession"))
+    assert(!profile_allows("bidi-2023.1", "goog:cdp.getSession"))
 }
 
 #Test("browser report renders the v1 schema, text summary, and escaped viewer") {

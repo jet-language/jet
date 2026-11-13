@@ -1,0 +1,92 @@
+// A page's CDP handle on the locked Chromium: it is refused for "bidi", its
+// commands reach only its page (Debugger.enable, then a script that names a
+// source URL and a source map and stops at `debugger`), and its events are
+// that page's alone: the scriptParsed and paused facts arrive as hashes, and
+// a second page's handle sees none of them. Each fact prints only after the
+// step before it succeeded.
+use browser: core.browser
+
+SCRIPT: "{{\"expression\":\"function probe() {{\\n  debugger\\n}}\\nsetTimeout(probe, 0)\\n//# sourceURL=probe.js\\n//# sourceMappingURL=probe.js.map\"}}"
+
+// The next event of `kind` on `cdp`, skipping any other kind.
+next_of: fn(cdp: browser.BrowserProtocol, kind: String) -[Net, Time]> browser.BrowserEvent browser.BrowserError! {
+    loop {
+        event: cdp.next_event(browser.timeout(10000) ?? return Err(browser.BrowserError{kind: "timeout"})) ?? return Err(err)
+        if event.kind() == kind -> return Ok(event)
+    }
+}
+
+run: fn() {
+    session: browser.launch("chromium") ?? {
+        print("launch failed: {err}")
+        return
+    }
+    context: session.context() ?? {
+        print("context failed: {err}")
+        return
+    }
+    page: context.page() ?? {
+        print("page failed: {err}")
+        return
+    }
+    other: context.page() ?? {
+        print("second page failed: {err}")
+        return
+    }
+    print("bidi refused:{page.protocol("bidi") == .Err(_)}")
+    cdp: page.protocol("cdp") ?? {
+        print("cdp failed: {err}")
+        return
+    }
+    other_cdp: other.protocol("cdp") ?? {
+        print("second cdp failed: {err}")
+        return
+    }
+    loop kind in ["Debugger.scriptParsed", "Debugger.paused"] {
+        cdp.subscribe(kind) ?? {
+            print("subscribe {kind} failed: {err}")
+            return
+        }
+        other_cdp.subscribe(kind) ?? {
+            print("second subscribe {kind} failed: {err}")
+            return
+        }
+    }
+    cdp.send("Debugger.enable", "{{}}") ?? {
+        print("enable failed: {err}")
+        return
+    }
+    cdp.send("Runtime.evaluate", SCRIPT) ?? {
+        print("evaluate failed: {err}")
+        return
+    }
+    parsed := next_of(cdp, "Debugger.scriptParsed") ?? {
+        print("scriptParsed failed: {err}")
+        return
+    }
+    loop parsed.url_hash() != browser.fact_hash("probe.js") {
+        parsed = next_of(cdp, "Debugger.scriptParsed") ?? {
+            print("probe scriptParsed failed: {err}")
+            return
+        }
+    }
+    print("script url:{parsed.url_hash() == browser.fact_hash("probe.js")} map:{parsed.source_map_url_hash() == browser.fact_hash("probe.js.map")}")
+    paused: next_of(cdp, "Debugger.paused") ?? {
+        print("paused failed: {err}")
+        return
+    }
+    print("paused line:{paused.frame_line()} column:{paused.frame_column()} function:{paused.frame_function_hash() == browser.fact_hash("probe")}")
+    cdp.send("Debugger.resume", "{{}}") ?? {
+        print("resume failed: {err}")
+        return
+    }
+    print("second page quiet:{other_cdp.next_event(browser.timeout(1000) ?? return) == .Err(_)}")
+    other.close() ?? print("second page close failed: {err}")
+    page.close() ?? print("page close failed: {err}")
+    context.close() ?? print("context close failed: {err}")
+    session.close() ?? {
+        print("close failed: {err}")
+        return
+    }
+    print("page cdp after close:{page.protocol("cdp") == .Err(_)}")
+}
