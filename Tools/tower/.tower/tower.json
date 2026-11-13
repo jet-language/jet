@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6824,
-    "rev": 101625,
+    "rev": 101650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96162,6 +96162,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T16:43:11.804Z"
+        },
+        {
+          "n": 2,
+          "text": "A tap opens the open: state through the one route table on every target that registered. An open: value whose type has no route on such a target fails jet check. Proof: `jet test Compiler --profile cases --filter native_app/push_open_state_without_a_route_is_a_compile_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:13.200Z"
+        },
+        {
+          "n": 3,
+          "text": "Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox card from R2-6 item 12. Proof: `jet test Compiler --profile cases --filter web_app/assignee_push_is_sent_after_commit_only`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:14.329Z"
         }
       ],
       "refs": [],
@@ -96172,14 +96190,14 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-13T16:43:11.804Z",
+      "updated": "2026-11-13T16:43:14.329Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 3
     },
     {
       "id": "c01pk3vf",
       "num": 6801,
-      "title": "Background work: deferred and periodic jobs on phones (BGTaskScheduler, WorkManager), desktop and the web (background sync)",
+      "title": "Background work: deferred and periodic jobs on phones (BGTaskScheduler, WorkManager) and desktops; browsers run none (server jobs and push cover the web)",
       "body": "Gap card for #6792 c6/c7 (owner order 2026-11-13: one cohesive package covering everything a web app and a native app need, with styling far better than HTML and CSS). This build card waits on the D-WEBAPP-SHAPE1 ratification. Its criteria are written from the ratified shape and from the matching example in Docs/proposals/2026-11-13-web-app-framework-shape.md (key G3).",
       "kind": "feature",
       "track": "sidequest",
@@ -96194,7 +96212,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.background(every:, run:) registers per platform. On iOS it is a BGAppRefreshTask whose identifier the build writes into Info.plist BGTaskSchedulerPermittedIdentifiers. On Android it is a WorkManager PeriodicWorkRequest, with every: raised to the 15-minute minimum. On desktops it is a timer while the app runs, or a login item. Proof: `jet test Compiler --profile cases --filter native_app/background_registers_per_platform_and_floors_the_period`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:15.326Z"
+        },
+        {
+          "n": 2,
+          "text": "A run that passes the system's time budget is cancelled as an ordinary task cancellation, and its cleanup runs. Proof: `jet test Compiler --profile cases --filter native_app/background_run_past_its_budget_is_cancelled`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:16.366Z"
+        },
+        {
+          "n": 3,
+          "text": "native.background in a graph built for the web output is a compile error that names server jobs as the replacement, never a silent no-op. Proof: `jet test Compiler --profile cases --filter web_app/background_on_the_web_output_is_a_compile_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:17.423Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96203,8 +96249,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:42.496Z",
-      "updated": "2026-11-13T15:13:42.496Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:19.203Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0mq8xwu",
@@ -96224,7 +96271,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. It is backed by a path on desktops, a content URI on Android, a security-scoped URL on iOS and a File in the browser. import_tasks in examples/files.jet imports the same CSV on each target. Proof: `jet test Compiler --profile cases --filter native_app/picked_file_reads_the_same_bytes_on_every_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:20.466Z"
+        },
+        {
+          "n": 2,
+          "text": "native.save_file writes where the person chose: through the system save dialog on desktops, the document picker on phones, and showSaveFilePicker or a download in the browser. Proof: `jet test Compiler --profile cases --filter native_app/save_file_writes_where_the_person_chose`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:21.684Z"
+        },
+        {
+          "n": 3,
+          "text": "Access to a chosen folder survives a restart. This uses security-scoped bookmarks on macOS and iOS, persisted URI permissions on Android, and in the browser a stored FileSystemDirectoryHandle that asks for permission again. Proof: `jet test Compiler --profile cases --filter native_app/folder_access_survives_a_restart`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:22.687Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96233,8 +96308,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-13T15:13:43.767Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:22.687Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c097myt8",
@@ -96254,7 +96330,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place. In the browser they map to a capture input or getUserMedia, and to the Geolocation API. Proof: `jet test Compiler --profile cases --filter native_app/camera_and_location_give_typed_values_after_a_grant`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:23.712Z"
+        },
+        {
+          "n": 2,
+          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered. Proof: `jet test Compiler --profile cases --filter native_app/sensor_streams_stop_with_their_scope`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:24.737Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96263,8 +96358,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-13T15:13:45.126Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:24.737Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0unyp7q",
@@ -96284,7 +96380,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "https://crew.example.com/tasks/42, an iOS universal link, an Android App Link and crewboard://tasks/42 all land on TaskView{id: 42} through the one route table. An unmatched path opens the not-found state. Proof: `jet test Compiler --profile cases --filter native_app/every_link_form_lands_on_the_route_state`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:25.731Z"
+        },
+        {
+          "n": 2,
+          "text": "The server output serves /.well-known/apple-app-site-association and /.well-known/assetlinks.json, written from the phone output's id and signing identity. Proof: `jet test Compiler --profile cases --filter web_app/app_link_files_are_written_from_the_phone_output`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:26.728Z"
+        },
+        {
+          "n": 3,
+          "text": "Desktop single instance: a second launch with crewboard://tasks/42 hands its URL to the running app, which focuses its window and opens the state, and the second process exits. The reference designs are Electron requestSingleInstanceLock and Tauri's single-instance plugin. Proof: `jet test Compiler --profile cases --filter native_app/second_launch_hands_its_link_to_the_running_app`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:27.696Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96293,8 +96417,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:46.424Z",
-      "updated": "2026-11-13T15:13:46.424Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:27.696Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0fqrrpk",
@@ -96314,7 +96439,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "native.share opens the system share sheet on phones, macOS and Windows, and the Web Share API in a browser that has it. Elsewhere it copies the link and says so. Proof: `jet test Compiler --profile cases --filter native_app/share_uses_the_system_sheet_or_copies`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:28.662Z"
+        },
+        {
+          "n": 2,
+          "text": "native.copy_text and native.paste_text work on every target. On the web, paste runs only inside a user gesture, and a refused read gives None. Proof: `jet test Compiler --profile cases --filter native_app/clipboard_round_trips_on_every_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:29.678Z"
+        },
+        {
+          "n": 3,
+          "text": "ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2 SC 2.5.7). Proof: `jet test Compiler --profile cases --filter native_app/drop_zone_refuses_other_types_and_offers_a_move_without_dragging`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:30.794Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96323,8 +96476,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-13T15:13:47.698Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:30.794Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c02inyar",
@@ -96344,7 +96498,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The build writes each purposes: line into Info.plist usage descriptions and AndroidManifest.xml uses-permission entries. A call that needs a permission with no purposes: line fails the build, naming the call and the missing key. Proof: `jet test Compiler --profile cases --filter native_app/permission_without_a_purpose_fails_the_build`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:31.969Z"
+        },
+        {
+          "n": 2,
+          "text": "native.ask gives Granted, Denied or Restricted on every target, and prompts only at first use. native.open_settings opens the app's settings page. Proof: `jet test Compiler --profile cases --filter native_app/ask_gives_a_typed_grant_on_every_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:33.122Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96353,8 +96526,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-13T15:13:49.075Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:33.123Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0rom5jy",
@@ -96374,7 +96548,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "kit views export their role, name and state: through AccessKit on desktops (UIA, NSAccessibility, AT-SPI), through UIAccessibility on iOS and AccessibilityNodeInfo on Android, and as semantic HTML with ARIA on the web. move_button in examples/access.jet is a button named \"Move <title> to <status>\" on every target. Proof: `jet test Compiler --profile cases --filter native_app/access_tree_names_kit_views` and `jet test Compiler --profile cases --filter web_app/kit_views_render_semantic_html`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:34.134Z"
+        },
+        {
+          "n": 2,
+          "text": "A kit.icon_button without label: and a ui.image without alt: fail jet check (section 6.5 rows b4 and b5). Proof: `jet test Compiler --profile cases --filter ui_style/missing_alt_and_label_are_compile_errors`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:35.384Z"
+        },
+        {
+          "n": 3,
+          "text": "ui.announce reaches screen readers as a polite announcement and does not move focus. Proof: `jet test Compiler --profile cases --filter native_app/announce_is_polite_and_keeps_focus`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:36.501Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96383,8 +96585,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:50.597Z",
-      "updated": "2026-11-13T15:13:50.597Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:36.501Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0fpntwa",
@@ -96404,7 +96607,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet i18n --add=de writes one catalog entry per view literal in examples/words.jet. The German build shows the translations, and text passed through ui.verbatim is never looked up. Proof: `jet test Compiler --profile cases --filter ui_i18n/catalog_from_view_literals_and_verbatim_is_untranslated`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:37.439Z"
+        },
+        {
+          "n": 2,
+          "text": "ui.text(..., one:, plural:) picks the CLDR plural category per locale (one, few, many, other), and ui.date and numbers follow the reader's locale. Proof: `jet test Compiler --profile cases --filter ui_i18n/plurals_dates_and_numbers_follow_the_locale`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:38.383Z"
+        },
+        {
+          "n": 3,
+          "text": "In a right-to-left locale, rows, leading and trailing edges and icons that show direction are mirrored, and text from data keeps its own direction. Proof: `jet test Compiler --profile cases --filter ui_i18n/right_to_left_mirrors_layout`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:39.337Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96413,8 +96644,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:52.050Z",
-      "updated": "2026-11-13T15:13:52.050Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:39.337Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c051j6ab",
@@ -203248,6 +203480,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T16:43:39.337Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fpntwa",
+      "note": "#3 In a right-to-left locale, rows, leading and trailing edges "
+    },
+    {
+      "at": "2026-11-13T16:43:38.383Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fpntwa",
+      "note": "#2 ui.text(..., one:, plural:) picks the CLDR plural category p"
+    },
+    {
+      "at": "2026-11-13T16:43:37.440Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fpntwa",
+      "note": "#1 jet i18n --add=de writes one catalog entry per view literal "
+    },
+    {
+      "at": "2026-11-13T16:43:36.501Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rom5jy",
+      "note": "#3 ui.announce reaches screen readers as a polite announcement "
+    },
+    {
+      "at": "2026-11-13T16:43:35.384Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rom5jy",
+      "note": "#2 A kit.icon_button without label: and a ui.image without alt:"
+    },
+    {
+      "at": "2026-11-13T16:43:34.134Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rom5jy",
+      "note": "#1 kit views export their role, name and state: through AccessK"
+    },
+    {
+      "at": "2026-11-13T16:43:33.123Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02inyar",
+      "note": "#2 native.ask gives Granted, Denied or Restricted on every targ"
+    },
+    {
+      "at": "2026-11-13T16:43:31.969Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02inyar",
+      "note": "#1 The build writes each purposes: line into Info.plist usage d"
+    },
+    {
+      "at": "2026-11-13T16:43:30.794Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fqrrpk",
+      "note": "#3 ui.drop_zone<T> takes only a T. A file or text dropped on th"
+    },
+    {
+      "at": "2026-11-13T16:43:29.678Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fqrrpk",
+      "note": "#2 native.copy_text and native.paste_text work on every target."
+    },
+    {
+      "at": "2026-11-13T16:43:28.662Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fqrrpk",
+      "note": "#1 native.share opens the system share sheet on phones, macOS a"
+    },
+    {
+      "at": "2026-11-13T16:43:27.696Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0unyp7q",
+      "note": "#3 Desktop single instance: a second launch with crewboard://ta"
+    },
+    {
+      "at": "2026-11-13T16:43:26.728Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0unyp7q",
+      "note": "#2 The server output serves /.well-known/apple-app-site-associa"
+    },
+    {
+      "at": "2026-11-13T16:43:25.731Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0unyp7q",
+      "note": "#1 https://crew.example.com/tasks/42, an iOS universal link, an"
+    },
+    {
+      "at": "2026-11-13T16:43:24.737Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c097myt8",
+      "note": "#2 native.location_updates and the motion sensors are typed str"
+    },
+    {
+      "at": "2026-11-13T16:43:23.712Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c097myt8",
+      "note": "#1 After native.ask grants access, native.take_photo gives a Pi"
+    },
+    {
+      "at": "2026-11-13T16:43:22.688Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mq8xwu",
+      "note": "#3 Access to a chosen folder survives a restart. This uses secu"
+    },
+    {
+      "at": "2026-11-13T16:43:21.684Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mq8xwu",
+      "note": "#2 native.save_file writes where the person chose: through the "
+    },
+    {
+      "at": "2026-11-13T16:43:20.466Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mq8xwu",
+      "note": "#1 native.open_file and native.drop_files give native.PickedFil"
+    },
+    {
+      "at": "2026-11-13T16:43:19.204Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01pk3vf",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-13T16:43:17.423Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01pk3vf",
+      "note": "#3 native.background in a graph built for the web output is a c"
+    },
+    {
+      "at": "2026-11-13T16:43:16.366Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01pk3vf",
+      "note": "#2 A run that passes the system's time budget is cancelled as a"
+    },
+    {
+      "at": "2026-11-13T16:43:15.326Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01pk3vf",
+      "note": "#1 native.background(every:, run:) registers per platform. On i"
+    },
+    {
+      "at": "2026-11-13T16:43:14.329Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f4o904",
+      "note": "#3 Crewboard's \"assigned to you\" push is sent only after update"
+    },
+    {
+      "at": "2026-11-13T16:43:13.200Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0f4o904",
+      "note": "#2 A tap opens the open: state through the one route table on e"
+    },
     {
       "at": "2026-11-13T16:43:11.804Z",
       "by": "Main",
