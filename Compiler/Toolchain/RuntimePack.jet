@@ -76,7 +76,8 @@ RUNTIME_TREE: "JetRuntime"
 // and prelinks it into the image. It is off until S7b binds programs to it:
 // until then nothing calls a `jet_core_fn_*` symbol, and the library costs
 // the step a second front end over every Core body and all of Core at O1
-// (about 75 of its 87 s) and grows the image from about 5 MB to 37 MB. S7b
+// (about 12 s: the step took 87.1 s with it and 75.3 s without, on the
+// batch-2 gate) and grows the image from about 2.7 MB to 37 MB. S7b
 // turns it on together with its consumer and Compiler/build.jet's three
 // Core files.
 CORE_LIBRARY: false
@@ -398,8 +399,11 @@ keep_issues: fn(work: String, out: String) {
         path: files.join(work, "jet_runtime_jet{suffix}")
         if files.exists(path) -> files.copy(path, files.join(out, "runtime{suffix}")) ?? ()
     }
-    core_issues: files.join(work, "jet_core.issues")
-    if files.exists(core_issues) -> files.copy(core_issues, files.join(out, "core.issues")) ?? ()
+    core_names: [String]{"issues", "skipped"}
+    loop name in core_names {
+        core_file: files.join(work, "jet_core.{name}")
+        if files.exists(core_file) -> files.copy(core_file, files.join(out, "core.{name}")) ?? ()
+    }
 }
 
 // Builds the pack in `work` and publishes it in `tool.out`.
@@ -465,7 +469,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     thread_rows: threads.split("\n").to_list()
     thread_names: loop name in thread_rows if name != "" -> name.copy()
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) -> fail("runtime thread receipt names a symbol the checked exports lack")
-    if CORE_LIBRARY -> check_core_library(core)
+    if CORE_LIBRARY -> check_core_library(core, tool.out)
     // The jet.runtime interface the runtime source renders (Request.jet
     // jet_cli_runtime_library) must be the copy jet embeds; a stale copy fails
     // the pack with the rendered file beside the outputs.
@@ -528,13 +532,25 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
 // The Core library's export list (JetIR BuildCore.jet ir_core_exports_text:
 // symbol, key and IR signature per line) and its thread receipt, which names
 // Core exports, or is `*`.
-check_core_library: fn(core: String) {
+check_core_library: fn(core: String, out: String) {
     core_text: files.read("{core}.exports") ?? fail("cannot read the Core exports: {err}")
     core_rows: core_text.split("\n").to_list()
     if !core_rows.any(fn(row) { row != "" }) -> fail("the Core export list is empty")
     core_threads: files.read("{core}.threads") ?? fail("cannot read the Core thread receipt: {err}")
     core_thread_rows: core_threads.split("\n").to_list()
     if core_threads.trim() != "*" && core_thread_rows.any(fn(name) { name != "" && !core_rows.any(fn(row) { row.starts_with("{name}\t") }) }) -> fail("Core thread receipt names a symbol the Core exports lack")
+    // A Core root the library left out (JetCli CoreLibrary.jet writes one
+    // `{prefix}.skipped` row per failure) fails the pack, the rows kept in OUT
+    // as core.skipped: a skipped root would make its callers fall back
+    // silently.
+    skipped_text: files.read("{core}.skipped") ?? fail("cannot read the skipped Core roots: {err}")
+    skipped: loop row in skipped_text.split("\n") if row.trim() != "" -> row.copy()
+    if skipped.len() > 0 {
+        files.create_dir_all(out) ?? ()
+        kept: files.join(out, "core.skipped")
+        copy_into("{core}.skipped", kept)
+        fail("the Core library left out {skipped.len()} root(s), listed in `{kept}`; the first: {skipped[0]}")
+    }
 }
 
 // The sources sources.list lists, in order.
