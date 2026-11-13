@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100650,
+    "rev": 100675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-13T02:01:24.225Z"
+    "completionCursor": "2026-11-13T02:04:37.884Z"
   },
   "epochs": [
     {
@@ -39516,7 +39516,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m11-jetpack-in-jet",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nImplement the five ratified Jetpack network needs in Core Jet: a capped streaming body, a redirect host policy, pinned destinations, inherited listeners and Unix peer credentials. The syscalls stay as policy-free leaves.\n\n## Current state\n- Core/http/client.jet has no body-limit, stream, destination or redirect-target API. `RedirectPolicy` is `{Disabled, Limited, All}` (:26-29), with a fixed `C_MAX_BODY_BYTES` (:181, :282).\n- Core/net/net.jet has no `inherited_listeners` or `unix_peer`.\n- Core/net/ip.jet `is_global` (:81-83) and `ipv6_is_global` (:453-455) are narrower than the proposed table (no CGNAT 100.64/10, 198.18/15, documentation ranges or 2000::/3 rule).\n- Ratified A: D-CORE-HTTPBODYLIMIT1 (`HTTPResponse.body(limit: Int = 67108864) -> Body`, where Body implements `core.io.Reader`; over-cap gives `IOError.InvalidInput` through the reader or `HTTPError.BodyTooLarge(limit)` inherently; Content-Length above the cap fails before any byte; the Rust `HTTP_RESPONSE_BODY_LIMIT` checks are removed); D-CORE-HTTPREDIRECT1 (`RedirectTarget {AnyHost, SameOrigin, Hosts([String])}` in `Follow{max, same_origin_credentials, to}`, refusing with `HTTPError.Redirect` before connecting); D-CORE-HTTPDEST1 (`HTTPDestinations {Any, Public, Loopback}` and `HTTPClient.destinations(rule)`, resolving once per client, pinning, applying to IP literals and every hop, `HTTPError.Policy`); D-CORE-NETINHERIT1 (`net.inherited_listeners() -[Net, Env]> [InheritedListener] NetError!` under the sd_listen_fds protocol); D-CORE-NETPEER1 (`net.unix_peer(stream) -[Net]> UnixPeer NetError!`).\n- D-CORE-NETPUBLIC1 (which addresses count as public) is still open. Recommended: A, the jet_net table.\n- The ratified texts name #3665 as the port that merges the Rust transport and the Jet client.\n\n## Changes\n1. Net slice (independent; land first): Core/net/net.jet `InheritedListener`, `inherited_listeners` and `UnixPeer`/`unix_peer`, with LISTEN_PID/FDS/FDNAMES validation, SO_ACCEPTCONN and SO_TYPE checks, CLOEXEC and unsetting the variables. The leaves (getsockopt, SO_PEERCRED/getpeereid) go in the retained host.\n2. HTTP slice, on the #3665 Jet client: the body cap on every read path, `RedirectTarget` with Location resolved through core.net.url join, and destination pinning (a per-client map keyed by scheme, host and port, shared by clones, bypassing the DNS TTL, ignoring env proxies under .Public/.Loopback, and keeping SNI on the original host).\n3. The .Public rule uses the NETPUBLIC1 table once it is ratified. Written for A: `is_global` and `ipv6_is_global` bodies become that table in ip.jet, and nothing else changes.\n4. Regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n\n## Proof\n- `jet test Compiler --profile cases network_core_contract/network_core_contract_example_covers_reserved_cidr_and_mime_boundaries` passes, with Examples/features/net/network_core_contract.jet extended with the table rows and 240.0.0.1 still not public.\n- New tests: `cargo test --test http_client_law -- http_body_limit_streams_and_rejects_over_cap http_redirect_target_same_origin_and_hosts http_destinations_public_pins_and_refuses_private` pass.\n- New tests: `cargo test --test corelib_net -- net_inherited_listeners_sd_listen_fds net_unix_peer_reports_uid_gid` pass on Linux.\n\n## Batch\nbatch-core-net: Core/http and Core/net.\n\n## Dependencies\n#3665 for the HTTP slice. D-CORE-NETPUBLIC1 (open) gates only `.Public`.",
       "checkSteps": null,
@@ -39527,6 +39527,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Merged into #3665 by board audit."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -39618,46 +39623,51 @@
           "n": 1,
           "text": "Inherited listeners and Unix peer credentials work per D-CORE-NETINHERIT1/NETPEER1; proof: `cargo test --test corelib_net -- net_inherited_listeners_sd_listen_fds net_unix_peer_reports_uid_gid` passes.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181).",
-          "at": "2026-10-04T17:42:39.764Z"
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:47.898Z",
+          "closure": "duplicate"
         },
         {
           "n": 2,
           "text": "Body cap, redirect target and destination pinning work per D-CORE-HTTPBODYLIMIT1/HTTPREDIRECT1/HTTPDEST1; proof: `cargo test --test http_client_law -- http_body_limit_streams_and_rejects_over_cap http_redirect_target_same_origin_and_hosts http_destinations_public_pins_and_refuses_private` passes.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181).",
-          "at": "2026-10-04T17:42:40.452Z"
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:50.033Z",
+          "closure": "duplicate"
         },
         {
           "n": 3,
           "text": "`.Public` uses the ratified D-CORE-NETPUBLIC1 table; proof: `cargo test --test network_core_contract -- network_core_contract_example_covers_reserved_cidr_and_mime_boundaries` passes.",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181).",
-          "at": "2026-10-04T17:42:42.205Z"
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:52.196Z",
+          "closure": "duplicate"
         },
         {
           "n": 4,
           "text": "{\"decisionIds\": [\"D-CORE-NETPUBLIC1\"], \"text\": \"`is_global` follows a dated copy of the IANA special-purpose registries, so it answers \\\"can this address be reached?\\\". A separate `is_public_destination` answers \\\"is it safe to fetch?\\\".\", \"proof\": {\"testName\": \"v04_ratified_contract\", \"suite\": \"tests/ratified/V04.jet (proposed Jet-side production integration suite)\", \"golden\": \"tests/ratified/expected/V04/V04.out (proposed; security/process/measurement outcomes attach identity-bound receipts)\", \"requiredCases\": [\"dated IANA IPv4/IPv6 special-purpose table including reachability exceptions\", \"is_public_destination independently excludes 6to4/Teredo/NAT64 and forbidden fetch destinations\", \"HTTP Public uses stricter function on initial literal/resolution and every redirect before connecting\"]}}",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181).",
-          "at": "2026-10-04T17:42:43.442Z"
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:54.355Z",
+          "closure": "duplicate"
         },
         {
           "n": 5,
           "text": "{\"text\": \"The inspected contradiction is absent from the active public product path, with complete affected caller/fixture/generated-doc cutover. A canonical successful consumer and each named rejection/transition exercise real behavior; bypassing the implementation fails the witness.\", \"proof\": {\"testName\": \"v04_cutover_regression\", \"suite\": \"tests/ratified/V04.jet (proposed)\", \"requiredCases\": [\"source witness boundary exercised through Jet compiler/Jet-hosted tool, not frozen Rust semantic change\", \"retired public path never executes under a compatibility alias\", \"matching stdout/stderr/exit and located registered errors across applicable staged engines; no unproved target treated as passed\"]}}",
           "status": "met",
-          "metBy": "Pip",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Burn-down consolidation 2026-10-04: merged into #3665; criteria carried there as [#3595]. Jetpack HTTP/net needs are blocked by #3665 and live in the same modules (Core/http/client.jet:26-29,181).",
-          "at": "2026-10-04T17:42:44.729Z"
+          "evidence": "merged into #3665 (burn-down consolidation 2026-10-04)",
+          "at": "2026-11-13T02:04:56.553Z",
+          "closure": "duplicate"
         },
         {
           "n": 14,
@@ -39684,12 +39694,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.727Z",
-      "updated": "2026-11-13T01:57:41.314Z",
+      "updated": "2026-11-13T02:04:58.211Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 15
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-13T02:04:58.211Z"
     },
     {
       "id": "c0lt9o2a",
@@ -50300,7 +50311,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -50309,6 +50320,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
         {
           "at": "2026-10-31",
           "by": "Main",
@@ -50342,12 +50358,13 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:26.241Z",
-      "updated": "2026-11-13T02:04:00.763Z",
+      "updated": "2026-11-13T02:04:13.379Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-13T02:04:13.379Z"
     },
     {
       "id": "c0vsqf8a",
@@ -50358,7 +50375,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -50367,6 +50384,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -50458,12 +50480,13 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-07T15:05:28.935Z",
-      "updated": "2026-11-13T02:04:07.119Z",
+      "updated": "2026-11-13T02:04:17.972Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 46
+      "criteriaLastN": 46,
+      "completedAt": "2026-11-13T02:04:17.972Z"
     },
     {
       "id": "c0h063eg",
@@ -51040,7 +51063,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Prepare one narrow owner decision after checking whether the ratified public byte_views/View contract offers an existing legal route. Compare genuine checked compiler-private standard-memory caller selection, repairing and reusing an existing approved public view interface, and retaining Core-only access while String invocation stays unimplemented. Name exact definition/source qualification/caller audience/lifetime-alias-escape rules/forged-caller rejection and shared runtime semantics. New audience requires owner ratification; then paired sema/runtime/caller cutover and allocation/lifetime/I9 proof. Independent byte-input source patch is not blocked.",
       "checkSteps": null,
@@ -51051,6 +51074,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
         {
           "at": "2026-10-28",
           "by": "Main",
@@ -51071,11 +51099,12 @@
         {
           "n": 3,
           "text": "Retired: Both open criteria are superseded by ratified D-CORE-PRIVATE-SEAM1=A (2026-11-01, #4896): borrowed text needs no seam.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:04:09.118Z"
+          "evidence": "Both open criteria are superseded by ratified D-CORE-PRIVATE-SEAM1=A (2026-11-01, #4896): borrowed text needs no seam.",
+          "at": "2026-11-13T02:04:11.198Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -51089,12 +51118,13 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-08T22:22:47.614Z",
-      "updated": "2026-11-13T02:04:09.118Z",
+      "updated": "2026-11-13T02:04:19.533Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-13T02:04:19.533Z"
     },
     {
       "id": "c0dp5efn",
@@ -54231,7 +54261,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -54240,6 +54270,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -54284,12 +54319,13 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:45.128Z",
-      "updated": "2026-11-13T02:04:04.640Z",
+      "updated": "2026-11-13T02:04:15.897Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-13T02:04:15.897Z"
     },
     {
       "id": "c0qrom2s",
@@ -54976,9 +55012,11 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-17T23:30:06.429Z",
-      "updated": "2026-11-13T01:53:44.414Z",
+      "updated": "2026-11-13T02:04:59.899Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "criteriaLastN": 7
     },
     {
@@ -56615,9 +56653,11 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T15:42:32.097Z",
-      "updated": "2026-11-09T19:04:07.061Z",
+      "updated": "2026-11-13T02:05:01.575Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G6"
+      ],
       "criteriaLastN": 18
     },
     {
@@ -56771,9 +56811,11 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-13T01:06:10.037Z",
-      "updatedBy": "owner",
-      "goals": []
+      "updated": "2026-11-13T02:05:03.230Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G3"
+      ]
     },
     {
       "id": "c0awastn",
@@ -57087,9 +57129,11 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-21T16:12:00.588Z",
-      "updated": "2026-11-09T19:02:49.422Z",
+      "updated": "2026-11-13T02:05:04.831Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G3"
+      ],
       "criteriaLastN": 8
     },
     {
@@ -60500,9 +60544,11 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:14.997Z",
-      "updated": "2026-11-04T23:50:07.451Z",
+      "updated": "2026-11-13T02:05:06.494Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [
+        "G7"
+      ]
     },
     {
       "id": "c0kdgbf8",
@@ -60647,9 +60693,11 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:17.509Z",
-      "updated": "2026-11-09T19:54:10.211Z",
+      "updated": "2026-11-13T02:05:08.242Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G3"
+      ],
       "criteriaLastN": 12
     },
     {
@@ -62896,9 +62944,11 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:05.440Z",
-      "updated": "2026-11-11T16:47:03.171Z",
+      "updated": "2026-11-13T02:05:10.115Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "criteriaLastN": 53
     },
     {
@@ -63252,9 +63302,11 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:10.709Z",
-      "updated": "2026-11-07T03:47:35.143Z",
+      "updated": "2026-11-13T02:05:11.605Z",
       "updatedBy": "Main",
-      "goals": [],
+      "goals": [
+        "G6"
+      ],
       "criteriaLastN": 34
     },
     {
@@ -199504,6 +199556,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:05:11.606Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w9o2sz",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:10.115Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h4r83r",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:08.242Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kdgbf8",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:06.495Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0etvk8s",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:04.831Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03pc5la",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:03.230Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:05:01.575Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c022g7qw",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:04:59.899Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07bi8ml",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-13T02:04:58.211Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0692z4s",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:04:56.553Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-13T02:04:55.521Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0692z4s",
+      "note": "#5: Re-recording as a duplicate: these were met by the 2026-10-04 merge into #3665, with no commit."
+    },
+    {
+      "at": "2026-11-13T02:04:54.355Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-13T02:04:53.310Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0692z4s",
+      "note": "#4: Re-recording as a duplicate: these were met by the 2026-10-04 merge into #3665, with no commit."
+    },
+    {
+      "at": "2026-11-13T02:04:52.197Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-13T02:04:51.121Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0692z4s",
+      "note": "#3: Re-recording as a duplicate: these were met by the 2026-10-04 merge into #3665, with no commit."
+    },
+    {
+      "at": "2026-11-13T02:04:50.033Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-13T02:04:48.927Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0692z4s",
+      "note": "#2: Re-recording as a duplicate: these were met by the 2026-10-04 merge into #3665, with no commit."
+    },
+    {
+      "at": "2026-11-13T02:04:47.898Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-13T02:04:46.866Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0692z4s",
+      "note": "#1: Re-recording as a duplicate: these were met by the 2026-10-04 merge into #3665, with no commit."
+    },
+    {
+      "at": "2026-11-13T02:04:37.885Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-13T02:04:37.884Z"
+    },
+    {
+      "at": "2026-11-13T02:04:19.533Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dm29w2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:04:17.972Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vsqf8a",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:04:15.897Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09uai16",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:04:13.379Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09kpw5i",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:04:11.198Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0dm29w2",
+      "note": "#3"
+    },
     {
       "at": "2026-11-13T02:04:09.118Z",
       "by": "Main",
