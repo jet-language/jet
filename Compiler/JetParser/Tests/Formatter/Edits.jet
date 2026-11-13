@@ -1,6 +1,36 @@
 use {
     jet_foundation.[Span, TextEdit]
-    jet_parser.[jfmt_apply_source_edits]
+    jet_parser.[jet_format_unified_diff, jfmt_apply_source_edits]
+}
+
+#Test("unified_diff_prints_one_blank_line_insert_as_a_one_line_hunk") {
+    assert_eq(jet_format_unified_diff("f.jet", "a: 1\nb: 2\n", "a: 1\n\nb: 2\n"), "--- f.jet\n+++ f.jet\n@@ -1,0 +2,1 @@\n+\n")
+    assert_eq(jet_format_unified_diff("f.jet", "h\nn\n1\n2\n", "h\n1\n2\n"), "--- f.jet\n+++ f.jet\n@@ -2,1 +1,0 @@\n-n\n")
+    assert_eq(jet_format_unified_diff("f.jet", "x\ny\nz\n", "x\nY\nz\n"), "--- f.jet\n+++ f.jet\n@@ -2,1 +2,1 @@\n-y\n+Y\n")
+    assert_eq(jet_format_unified_diff("f.jet", "x\n", "x\n"), "--- f.jet\n+++ f.jet\n")
+}
+
+#Test("unified_diff_never_prints_unchanged_lines_between_changes") {
+    old := [String]{}
+    new := [String]{}
+    expected := "--- f.jet\n+++ f.jet\n"
+    loop index in 0..<20 {
+        old.push("l{index}")
+        if index == 10 {
+            new.push("L10")
+            expected = "{expected}@@ -11,1 +{new.len()},1 @@\n-l10\n+L10\n"
+        } else {
+            new.push("l{index}")
+        }
+        if index % 3 == 2 {
+            new.push("")
+            expected = "{expected}@@ -{index + 1},0 +{new.len()},1 @@\n+\n"
+        }
+    }
+    old_text: old.join("\n")
+    new_text: new.join("\n")
+    assert_eq(jet_format_unified_diff("f.jet", "{old_text}\n", "{new_text}\n"), expected)
+    assert_eq(jet_format_unified_diff("f.jet", "{new_text}\n", "{new_text}\n"), "--- f.jet\n+++ f.jet\n")
 }
 
 #Test("formatter_edits_refuse_non_utf8_boundaries") {

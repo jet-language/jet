@@ -2191,26 +2191,153 @@ jfmt_lines: fn(text: String) -> [String] Never! {
     lines
 }
 
-// Rust `unified_diff`: the simple diff `jet fmt --check --diff` prints.
+// The unified diff `jet fmt --check --diff` prints, without context lines.
+// Its hunks are the runs of lines between those of a longest common
+// subsequence, so a moved or unchanged line never prints as deleted and
+// re-added. An empty side starts at the line it follows, as `diff -U0` writes.
 jet_format_unified_diff: fn(path: String, old: String, new: String) -> String Never! {
     old_lines: jfmt_lines(old)
     new_lines: jfmt_lines(new)
-    out := "--- {path}\n+++ {path}\n"
+    // Lines compare as numbers: equal text, equal number.
+    numbers := [String:Int]{}
+    a: loop line in old_lines -> jfmt_diff_line_number(numbers, line)
+    b: loop line in new_lines -> jfmt_diff_line_number(numbers, line)
+    old_kept := [Bool]{}
+    new_kept := [Bool]{}
+    loop _ in 0..<a.len() -> old_kept.push(false)
+    loop _ in 0..<b.len() -> new_kept.push(false)
+    jfmt_diff_mark(a, b, 0, a.len(), 0, b.len(), old_kept, new_kept)
+    parts := [String]{"--- {path}\n+++ {path}\n"}
     i := 0
     j := 0
-    loop i < old_lines.len() || j < new_lines.len() {
-        if i < old_lines.len() && j < new_lines.len() && old_lines[i] == new_lines[j] {
+    loop i < a.len() || j < b.len() {
+        // Kept lines pair up in order, so two kept lines are one common line.
+        if i < a.len() && j < b.len() && old_kept[i] && new_kept[j] {
             i += 1
             j += 1
             next
         }
         start_i: i
         start_j: j
-        loop i < old_lines.len() && (j >= new_lines.len() || old_lines[i] != (if j < new_lines.len() -> new_lines[j] else -> "")) -> i += 1
-        loop j < new_lines.len() && (i >= old_lines.len() || new_lines[j] != (if i < old_lines.len() -> old_lines[i] else -> "")) -> j += 1
-        out = "{out}@@ -{start_i + 1},{i - start_i} +{start_j + 1},{j - start_j} @@\n"
-        loop k in start_i..<i -> out = "{out}-{old_lines[k]}\n"
-        loop k in start_j..<j -> out = "{out}+{new_lines[k]}\n"
+        loop i < a.len() && !old_kept[i] -> i += 1
+        loop j < b.len() && !new_kept[j] -> j += 1
+        parts.push("@@ -{jfmt_diff_hunk_start(start_i, i - start_i)},{i - start_i} +{jfmt_diff_hunk_start(start_j, j - start_j)},{j - start_j} @@\n")
+        loop k in start_i..<i -> parts.push("-{old_lines[k]}\n")
+        loop k in start_j..<j -> parts.push("+{new_lines[k]}\n")
     }
-    out
+    parts.join("")
+}
+
+jfmt_diff_line_number: fn(numbers: &[String:Int], line: String) -> Int Never! {
+    numbers.get(line) ?? {
+        numbers[line.copy()] = numbers.len()
+        numbers.len() - 1
+    }
+}
+
+// A hunk side's 1-based first line; an empty side names the line it follows.
+jfmt_diff_hunk_start: fn(start: Int, count: Int) -> Int Never! {
+    if count == 0 -> start else -> start + 1
+}
+
+// Marks the lines of one longest common subsequence of `a[a_start..<a_end]`
+// and `b[b_start..<b_end]`: the common ends, then each side of a middle
+// point on a shortest edit path.
+jfmt_diff_mark: fn(a: [Int], b: [Int], a_start: Int, a_end: Int, b_start: Int, b_end: Int, old_kept: &[Bool], new_kept: &[Bool]) Never! {
+    a0 := a_start
+    b0 := b_start
+    a1 := a_end
+    b1 := b_end
+    loop a0 < a1 && b0 < b1 && a[a0] == b[b0] {
+        old_kept[a0] = true
+        new_kept[b0] = true
+        a0 += 1
+        b0 += 1
+    }
+    loop a0 < a1 && b0 < b1 && a[a1 - 1] == b[b1 - 1] {
+        a1 -= 1
+        b1 -= 1
+        old_kept[a1] = true
+        new_kept[b1] = true
+    }
+    if a0 == a1 || b0 == b1 -> return
+    middle: jfmt_diff_middle(a, b, a0, a1, b0, b1) ?? return
+    jfmt_diff_mark(a, b, a0, middle.old, b0, middle.new, old_kept, new_kept)
+    jfmt_diff_mark(a, b, middle.old, a1, middle.new, b1, old_kept, new_kept)
+}
+
+// Myers' middle snake: a point on one shortest edit path through
+// `a[a0..<a1]` and `b[b0..<b1]`, searched from both ends at once in linear
+// space, or None when the ranges share no line. Each search keeps, per
+// diagonal `k = x - y`, the furthest `x` its paths with `d` edits reach.
+jfmt_diff_middle: fn(a: [Int], b: [Int], a0: Int, a1: Int, b0: Int, b1: Int) -> (old: Int, new: Int)? Never! {
+    n: a1 - a0
+    m: b1 - b0
+    max_d: (n + m + 1) /% 2
+    offset: max_d
+    // Diagonals run from `-max_d` to `max_d`, and each step reads the slot
+    // one past its own.
+    size: 2 * max_d + 2
+    forward := [Int]{}
+    backward := [Int]{}
+    loop _ in 0..<size {
+        forward.push(-1)
+        backward.push(-1)
+    }
+    forward[offset + 1] = 0
+    backward[offset + 1] = 0
+    delta: n - m
+    // With an odd delta the forward search meets the backward paths first.
+    front: delta % 2 != 0
+    // Diagonals whose paths left the grid are not extended again.
+    k1_start := 0
+    k1_end := 0
+    k2_start := 0
+    k2_end := 0
+    loop d in 0..<max_d {
+        k1 := k1_start - d
+        loop k1 <= d - k1_end {
+            k1_at: offset + k1
+            x1 := if k1 == -d || (k1 != d && forward[k1_at - 1] < forward[k1_at + 1]) -> forward[k1_at + 1] else -> forward[k1_at - 1] + 1
+            y1 := x1 - k1
+            loop x1 < n && y1 < m && a[a0 + x1] == b[b0 + y1] {
+                x1 += 1
+                y1 += 1
+            }
+            forward[k1_at] = x1
+            if {
+                x1 > n -> k1_end += 2
+                y1 > m -> k1_start += 2
+                front && jfmt_diff_reached(backward, offset + delta - k1, n - x1) -> return Val((old: a0 + x1, new: b0 + y1))
+            }
+            k1 += 2
+        }
+        k2 := k2_start - d
+        loop k2 <= d - k2_end {
+            k2_at: offset + k2
+            x2 := if k2 == -d || (k2 != d && backward[k2_at - 1] < backward[k2_at + 1]) -> backward[k2_at + 1] else -> backward[k2_at - 1] + 1
+            y2 := x2 - k2
+            loop x2 < n && y2 < m && a[a1 - x2 - 1] == b[b1 - y2 - 1] {
+                x2 += 1
+                y2 += 1
+            }
+            backward[k2_at] = x2
+            if {
+                x2 > n -> k2_end += 2
+                y2 > m -> k2_start += 2
+                !front && jfmt_diff_reached(forward, offset + delta - k2, n - x2) -> {
+                    x1: forward[offset + delta - k2]
+                    return Val((old: a0 + x1, new: b0 + x1 - delta + k2))
+                }
+            }
+            k2 += 2
+        }
+    }
+    None
+}
+
+// Whether the other search's path on diagonal slot `at` has come at least
+// `x` lines from its end, so the two searches overlap there.
+jfmt_diff_reached: fn(furthest: [Int], at: Int, x: Int) -> Bool Never! {
+    at >= 0 && at < furthest.len() && furthest[at] >= x
 }
