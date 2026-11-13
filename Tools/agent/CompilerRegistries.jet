@@ -50,11 +50,10 @@ TEST_SCHEMA: "jet.test.v1"
 REGISTRY_TIMEOUT_MS: 3500000
 TRANSPORT_TIMEOUT_MS: 600000
 REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
-// The C host of a plain transport: it registers the process arguments a stop
-// reports, attaches the main thread and runs the fragment's exported entry.
-PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
 // The committed C host of a fragment run as a program: jet_rt_main runs its
-// entry to the real process end, then the fragment's ended check runs.
+// entry to the real process end, then the fragment's ended check runs. Given
+// `isolated` it only attaches the main thread, for a fragment that owns the
+// whole heap.
 FRAGMENT_HOST: "tests/fixtures/runtime_fragment_host.c"
 // The ICU root primary order of the ASCII names a repository holds: the order
 // the inventory walk lists directory entries in.
@@ -814,18 +813,18 @@ runner_calls: fn(name: String) -> [RunnerCall] Never! {
 specification: fn(id: String) -> Spec? Never! {
     if id.starts_with("JetRuntime/Tests/") {
         name: id.removeprefix("JetRuntime/Tests/").removesuffix("Tests")
-        // A plain transport calls its entry from the generated driver, runs
-        // the committed C host `witness` that drives the fragment, or for a
-        // codec fixture generates the driver around its export.
+        // A plain transport runs the committed C host `witness` that drives
+        // the fragment (FRAGMENT_HOST calls its entry), or for a codec
+        // fixture generates the driver around its export.
         plain: if name == {
-            "Alloc" -> Val((call: Val("alloc_tests"), witness: "", expected: "alloc tests: ok\n"))
-            "Collections" -> Val((call: Val("collections_tests"), witness: "", expected: ""))
-            "Scan" -> Val((call: Val("scan_tests"), witness: "", expected: ""))
-            "Text" -> Val((call: Val("text_tests"), witness: "", expected: ""))
-            "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
+            "Alloc" -> Val((call: Val("alloc_tests"), witness: FRAGMENT_HOST, expected: "alloc tests: ok\n"))
+            "Collections" -> Val((call: Val("collections_tests"), witness: FRAGMENT_HOST, expected: ""))
+            "Scan" -> Val((call: Val("scan_tests"), witness: FRAGMENT_HOST, expected: ""))
+            "Text" -> Val((call: Val("text_tests"), witness: FRAGMENT_HOST, expected: ""))
+            "Unicode" -> Val((call: Val("unicode_tests"), witness: FRAGMENT_HOST, expected: ""))
             "Secret" -> Val((call: Val("secret_tests"), witness: FRAGMENT_HOST, expected: "secret tests: ok\n"))
-            "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: "", expected: ""))
-            "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: "", expected: ""))
+            "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: FRAGMENT_HOST, expected: ""))
+            "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: FRAGMENT_HOST, expected: ""))
             "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
             "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
             "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
@@ -1429,7 +1428,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
         ended: if found.ended == .Val(check) -> "#Export(c) jet_rt_plain_fixture_ended: fn() {{ {check}() }}\n" else -> ""
         export: codec_export(found.name)
-        if entry == "" && found.witness == "" && export == "" -> return Err(problem("plain transport {found.name} names no entry"))
+        if found.witness == "" && export == "" -> return Err(problem("plain transport {found.name} names no C host and no codec export"))
         fixture: "{native}/Source/Fixture.jet"
         files.write(fixture, "{unit}{entry}{ended}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
         package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
@@ -1449,10 +1448,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
         generated: "{native}/driver.c"
         driver: if found.witness != "" -> "{repo}/{found.witness}" else -> generated.copy()
-        if found.witness == "" {
-            source: if export != "" -> codec_driver(found.name, export) else -> PLAIN_DRIVER.copy()
-            files.write(generated, source) ?? return Err(problem("`{generated}` cannot be written: {err}"))
-        }
+        if found.witness == "" -> files.write(generated, codec_driver(found.name, export)) ?? return Err(problem("`{generated}` cannot be written: {err}"))
         binary: "{native}/driver"
         link_with(lane, found.cflags, driver, "{native}/fixture.o", binary) ?? return Err(err)
         if found.name == "Scheduler" -> return scheduler_verdict(lane, binary)
@@ -1461,8 +1457,13 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         if found.name == "SharedPublication" -> return publication_verdict(lane, binary, "{native}/fixture.o", found.expected)
         if CRYPTO.contains(found.name) -> return crypto_verdict(lane, found.name, binary)
         expected: if found.expected_file != "" -> files.read("{repo}/{found.expected_file}") ?? return Err(problem("`{found.expected_file}` cannot be read: {err}")) else -> found.expected.copy()
-        // The file-leaf export writes, reads back and removes the path given.
-        args: if found.name == "CompilerFileLeaves" -> [String]{"{out}/file-leaves.data"} else -> [String]{}
+        args: if found.name == {
+            // The file-leaf export writes, reads back and removes the path given.
+            "CompilerFileLeaves" -> [String]{"{out}/file-leaves.data"}
+            // The allocator witness inspects slab metadata: it owns the whole heap.
+            "Alloc" -> [String]{"isolated"}
+            else -> [String]{}
+        }
         ran: execute(lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(ran, expected, "")
     }
@@ -2396,7 +2397,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
     assert_eq(crypto_inputs("Sha256"), [String]{})
 }
 
-#Test("a plain transport runs its generated entry driver or its committed C host") {
+#Test("a plain transport runs its committed C host") {
     repo: test_repo()
     loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "Secret", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
@@ -2412,11 +2413,11 @@ fragment_registry: fn(name: String) -> Registry Never! {
         }
         if call != "" {
             assert_eq(text_field(transport, "call"), call)
-            // Secret runs as a program and checks what the process end left.
-            program: name == "Secret"
-            assert(field(transport, "witness") == if program -> Dyn.Text(FRAGMENT_HOST.copy()) else -> Dyn.Null)
-            assert(field(transport, "ended") == if program -> Dyn.Text("secret_tests_ended") else -> Dyn.Null)
-            assert_eq(array_field(entry, "sources").contains(Dyn.Text(FRAGMENT_HOST.copy())), program)
+            // A fragment runs under the committed host; Secret also checks
+            // what the process end left.
+            assert(field(transport, "witness") == Dyn.Text(FRAGMENT_HOST.copy()))
+            assert(field(transport, "ended") == if name == "Secret" -> Dyn.Text("secret_tests_ended") else -> Dyn.Null)
+            assert(array_field(entry, "sources").contains(Dyn.Text(FRAGMENT_HOST.copy())))
             assert(field(transport, "fragments") == texts([String]{name.copy()}))
             next
         }
