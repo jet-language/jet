@@ -2450,6 +2450,18 @@ memory-denial spellings. An explicit memory, waiting, or panic denial still
 rejects a reachable operation
 (D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).
 
+`Unsafe` is a deny-only row too: it is the fact that a function reaches
+`#Unsafe` code. A function that opens an `#Unsafe` gate itself (an
+`#Unsafe` block, an `#Unsafe` function, or a foreign function's gate) records
+it, and every function that can call it inherits it; an open-world call
+outside Core reaches it as well, so an opaque callee fails closed. Core's own
+gates are vetted and sealed, so calling Core never reaches `Unsafe`.
+`-[!Unsafe]>`, a cap's `!Unsafe`, `authority: { deny: [Unsafe] }` and
+`--deny=Unsafe` each refuse every such path with E0749, which prints the call
+path to the function that opens the gate and the gate's `file:line`. `Unsafe`
+never has to be granted, and naming it in a positive row grants nothing
+(D-MEMRAW-EFFECT1).
+
 Core operations contribute the following broad categories. More precise leaves
 are retained when the operation supplies them.
 
@@ -2600,7 +2612,7 @@ owns, an unannotated foreign call) lists `FFI`, whose words say the program
 "calls native code, which can do anything". `Exec` reads "starts other
 programs, which this list does not limit". The floor, `IO`, `Mem.Alloc` and
 `Exec.Args`, is never listed, and neither are the deny-only rights (`Panic`,
-`Mem`, `Time.Wait`) or `Context`, the task context every program reads
+`Mem`, `Time.Wait`, `Unsafe`) or `Context`, the task context every program reads
 without a grant. The floor covers output, ordinary allocation and argument
 reads, and carries no power the shell has not already given the process. It
 never covers the `Exec` root, which also starts processes.

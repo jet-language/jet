@@ -1,0 +1,12 @@
+// A module's `#FX(!Unsafe)` cap keeps every function inside it, and every
+// callee it can reach, out of `#Unsafe` code.
+peek: fn() {
+    #Unsafe("audited peek") {}
+}
+
+#FX(!Unsafe)
+vault: module {
+    read: fn() { peek() }
+}
+
+run: fn() { vault.read() }

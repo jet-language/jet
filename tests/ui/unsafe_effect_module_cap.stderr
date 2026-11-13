@@ -1,0 +1,15 @@
+Error [jet.ProhibitedEffectReached]: `read` reaches `#Unsafe` code, but module `vault` denies Unsafe
+  --> tests/ui/unsafe_effect_module_cap.jet:9:5
+    |
+  9 |     read: fn() { peek() }
+    |     ^^^^
+  --> tests/ui/unsafe_effect_module_cap.jet:7:1
+    |
+  7 | #FX(!Unsafe)
+    | ^^^^^^^^^^^^ module `vault` is capped here
+ Why: `peek` opens the `#Unsafe` gate at unsafe_effect_module_cap.jet:4; the module's `#FX(!Unsafe)` cap means every function inside it and every callee it can reach must stay out of `#Unsafe` code
+ Fix: Remove the `#Unsafe` gate from `peek` or stop calling it, move `read` out of module `vault`, or drop `!Unsafe` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: read → peek
+ Scope chain: module vault
+More: jet-lang.dev/e/E0749

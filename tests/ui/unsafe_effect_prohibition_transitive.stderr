@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `top` reaches `#Unsafe` code, but Unsafe is denied here
+  --> tests/ui/unsafe_effect_prohibition_transitive.jet:9:14
+    |
+  9 | top: fn() -[!Unsafe]> { middle() }
+    |              ^^^^^^
+ Why: `peek` opens the `#Unsafe` gate at unsafe_effect_prohibition_transitive.jet:4; `top` and every callee it can reach must stay out of `#Unsafe` code when Unsafe is denied
+ Fix: Remove the `#Unsafe` gate from `peek` or stop calling it, or drop the `-[!Unsafe]>` prohibition
+ Denial: invocation
+ Call chain: top → middle → peek
+More: jet-lang.dev/e/E0749

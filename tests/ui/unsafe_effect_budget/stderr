@@ -1,0 +1,10 @@
+Error [jet.ProhibitedEffectReached]: `run` reaches `#Unsafe` code, but the package denies Unsafe with `authority: { deny: [Unsafe] }`
+  --> tests/ui/unsafe_effect_budget/run.jet:5:1
+    |
+  5 | run: fn() {
+    | ^^^
+ Why: `peek` opens the `#Unsafe` gate at unsafedep.jet:3; every function in the package and every callee it can reach must stay out of `#Unsafe` code when Unsafe is denied
+ Fix: Remove the `#Unsafe` gate from `peek` or stop calling it, or drop `Unsafe` from `authority.deny`
+ Denial: invocation
+ Call chain: run → peek
+More: jet-lang.dev/e/E0749

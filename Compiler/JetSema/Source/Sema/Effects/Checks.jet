@@ -361,6 +361,9 @@ SemaEffectNode: struct {
     // The Rust effect key (`name`, or `Owner::name` for a method): the
     // name a denial's call chain shows for this function.
     chain_name: String{""}
+    // The first `#Unsafe` gate this body opens itself outside Core, as
+    // `file:line` (sema_effect_record_unsafe_gate); "" when it opens none.
+    unsafe_site: String{""}
     // The first entry of the declared effect row (E0740's span) and its first
     // `!` prohibition (E0749's span).
     row_span: Span?{None}
@@ -1049,8 +1052,9 @@ sema_effect_bare_covered: fn(names: [String], name: String) -> Bool Never! {
 
 // `e0749` / `e0749_panic`: a reached Panic names the reachable function where
 // the stop enters the call graph, and the call chain to it
-// (sema_effect_panic_steps).
-sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], panic_steps: [String]) -> Diagnostic {
+// (sema_effect_panic_steps); a reached Unsafe names the function that opens
+// the gate, the gate, and the call chain to it (sema_effect_unsafe_reach).
+sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?) -> Diagnostic {
     reached_list: sema_effect_show(reached)
     declared: sema_effect_show(node.prohibited)
     span: node.prohibition_span ?? node.name_span
@@ -1061,6 +1065,11 @@ sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], p
         panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error("E0749", span, "`{node.name}` can stop, but Panic is denied here", "`{panic_site}` can stop; `{node.name}` and every reachable callee must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop the `-[!{declared}]>` prohibition")
         return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, panic_steps), [String]{}, None)
+    }
+    if unsafe_reach == .Val(reach) {
+        opener: sema_effect_panic_site_name(node, reach.steps)
+        diagnostic: sema_error("E0749", span, "`{node.name}` reaches `#Unsafe` code, but Unsafe is denied here", "`{opener}` {sema_effect_unsafe_gate_text(reach.gate)}; `{node.name}` and every callee it can reach must stay out of `#Unsafe` code when Unsafe is denied", "remove the `#Unsafe` gate from `{opener}` or stop calling it, or drop the `-[!{declared}]>` prohibition")
+        return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, reach.steps), [String]{}, None)
     }
     diagnostic: sema_error("E0749", span, "`{node.name}` reaches the `{reached_list}` effect, which it prohibits with `-[!{declared}]>`", "a `-[!{declared}]>` row means the function and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop the `-[!{declared}]>` prohibition")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
@@ -1077,8 +1086,9 @@ SemaEffectDenial: struct {
 // A package `authority.deny` row, or the organization policy's, reached by
 // one of the package's functions. A denied Panic names the reachable
 // function where the stop enters the call graph and the chain to it
-// (`panic_steps`) and the three exits, the same as a `-[!Panic]>` row.
-sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], organization: String) -> Diagnostic {
+// (`panic_steps`) and the three exits, the same as a `-[!Panic]>` row; a
+// denied Unsafe names the gate and the chain to it, as `-[!Unsafe]>` does.
+sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, organization: String) -> Diagnostic {
     reached_list: sema_effect_show(reached)
     reaches_panic: loop effect_name in reached {
         if sema_effect_root(effect_name) == "Panic" -> break true
@@ -1089,6 +1099,11 @@ sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String
         panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error("E0749", node.name_span, "`{node.name}` can stop, but {denier} denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or {undo}")
         return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, panic_steps), [String]{}, None)
+    }
+    if unsafe_reach == .Val(reach) {
+        opener: sema_effect_panic_site_name(node, reach.steps)
+        diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches `#Unsafe` code, but {denier} denies Unsafe with `authority: {{ deny: [{denied}] }}`", "`{opener}` {sema_effect_unsafe_gate_text(reach.gate)}; every function in the package and every callee it can reach must stay out of `#Unsafe` code when Unsafe is denied", "remove the `#Unsafe` gate from `{opener}` or stop calling it, or {undo}")
+        return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, reach.steps), [String]{}, None)
     }
     row: if organization == "" -> "a package `deny` row" else -> "an organization `deny` row"
     diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which {denier} denies with `authority: {{ deny: [{denied}] }}`", "{row} means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or {undo}")
@@ -1378,7 +1393,9 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
         }
         panic_steps := [String]{}
         if sema_effect_root(effect_name) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, node_by_key, node_index)
-        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_steps, cap), notes, reached))
+        unsafe_reach := SemaEffectUnsafeReach?{None}
+        if sema_effect_root(effect_name) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, node_by_key, node_index))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_module_denied_diagnostic(node, reached, effect_name, panic_steps, unsafe_reach, cap), notes, reached))
     }
     ceiling: sema_effect_cap_ceiling(cap.cap) ?? return
     over: sema_effect_uncovered(solved, ceiling)
@@ -1461,7 +1478,7 @@ sema_effect_module_cap_report: fn(diagnostic: Diagnostic, chain: [String], cap: 
     diagnostic_with_rights(labeled, "invocation", chain, [String]{"{cap.cap.scope} {cap.cap.owner}"}, None)
 }
 
-sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], cap: SemaEffectModuleCap) -> Diagnostic {
+sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, cap: SemaEffectModuleCap) -> Diagnostic {
     name: sema_inline_member_source_name(node.name)
     scope: cap.cap.scope
     owner: cap.cap.owner
@@ -1471,6 +1488,11 @@ sema_effect_module_denied_diagnostic: fn(node: SemaEffectNode, reached: [String]
         panic_site: sema_effect_panic_site_name(node, panic_steps)
         diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` can stop, but {scope} `{owner}` denies Panic", "`{panic_site}` can stop; the {scope}'s `#FX(!Panic)` cap means {members} and every callee it can reach must not stop{where}", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `!Panic` from the {scope}'s `#FX(…)` cap")
         return sema_effect_module_cap_report(diagnostic, sema_effect_panic_chain(name, panic_steps), cap)
+    }
+    if unsafe_reach == .Val(reach) {
+        opener: sema_effect_panic_site_name(node, reach.steps)
+        diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` reaches `#Unsafe` code, but {scope} `{owner}` denies Unsafe", "`{opener}` {sema_effect_unsafe_gate_text(reach.gate)}; the {scope}'s `#FX(!Unsafe)` cap means {members} and every callee it can reach must stay out of `#Unsafe` code{where}", "remove the `#Unsafe` gate from `{opener}` or stop calling it, {sema_effect_cap_move(name, cap)}or drop `!Unsafe` from the {scope}'s `#FX(…)` cap")
+        return sema_effect_module_cap_report(diagnostic, sema_effect_panic_chain(name, reach.steps), cap)
     }
     reached_list: sema_effect_show(reached)
     diagnostic: sema_error(sema_effect_cap_code(cap), node.name_span, "`{name}` reaches the `{reached_list}` effect, which {scope} `{owner}` denies", "the {scope}'s `#FX(…)` cap denies `{denied}` to {members} and every callee it can reach{where}", "remove the call that introduces `{reached_list}`, {sema_effect_cap_move(name, cap)}or drop `!{denied}` from the {scope}'s `#FX(…)` cap")
@@ -1811,6 +1833,92 @@ sema_effect_panic_chain: fn(first: String, panic_steps: [String]) -> [String] Ne
     chain
 }
 
+// Where a denied Unsafe enters the call graph: the chain names past the
+// denied function (`steps`, as sema_effect_panic_steps gives them) and the
+// gate the chain ends at as `file:line`, or "" when it ends at an opaque call.
+SemaEffectUnsafeReach: struct {
+    steps: [String]
+    gate: String
+}
+
+// Whether a function brings the Unsafe fact in itself: outside Core, it
+// opens an `#Unsafe` gate or makes an opaque call (a maximal row), which
+// fails closed. Core's gates are vetted and sealed.
+sema_effect_unsafe_opens: fn(node: SemaEffectNode) -> Bool Never! {
+    if node.module_identity.starts_with("<corelib>/") -> return false
+    node.maximal || node.direct.contains("Unsafe")
+}
+
+// The functions from `index` to the first one reached depth-first that
+// brings the Unsafe fact in (sema_effect_unsafe_opens), both ends included,
+// so a function that opens a gate itself is its own one-step path. Empty
+// when none does.
+sema_effect_unsafe_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, index: Int, seen: &[Bool]) -> [Int] Never! {
+    if seen[index] -> return [Int]{}
+    seen[index] = true
+    if sema_effect_unsafe_opens(nodes[index]) -> return [Int]{index}
+    loop edge in nodes[index].call_edges {
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        rest: sema_effect_unsafe_path(nodes, node_by_key, target, seen)
+        if rest.len() == 0 -> next
+        path := [Int]{index}
+        loop step in rest -> path.push(step)
+        return path
+    }
+    [Int]{}
+}
+
+// A reached Unsafe's call chain after function `node_index` and the gate it
+// ends at; "the reachable call graph" when no opener is found.
+sema_effect_unsafe_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, node_index: Int) -> SemaEffectUnsafeReach Never! {
+    seen := (loop _ in nodes -> false)
+    path: sema_effect_unsafe_path(nodes, node_by_key, node_index, seen)
+    if path.len() == 0 -> return SemaEffectUnsafeReach{steps: [String]{"the reachable call graph"}, gate: ""}
+    steps := [String]{}
+    loop at in 1..<path.len() -> steps.push(nodes[path[at]].chain_name)
+    SemaEffectUnsafeReach{steps: steps, gate: nodes[path[path.len() - 1]].unsafe_site}
+}
+
+// Whether a denial's reached effects include the Unsafe fact.
+sema_effect_reaches_unsafe: fn(reached: [String]) -> Bool Never! {
+    loop effect_name in reached {
+        if sema_effect_root(effect_name) == "Unsafe" -> return true
+    }
+    false
+}
+
+// What the function a denied Unsafe names does: opens the gate at
+// `file:line`, or makes an opaque call when the chain ends at one.
+sema_effect_unsafe_gate_text: fn(gate: String) -> String Never! {
+    if gate == "" -> return "makes an opaque call, which can reach `#Unsafe` code"
+    "opens the `#Unsafe` gate at {gate}"
+}
+
+// An `#Unsafe` gate a body opens (an `#Unsafe` block, an `#Unsafe` function,
+// a foreign function's gate) records the deny-only Unsafe fact at `span`;
+// callers inherit it through the solved rows. Core's gates record none.
+sema_effect_record_unsafe_gate: fn(nodes: &[SemaEffectNode], node_index: Int, gate: TUnsafeGate, span: Span) Never! {
+    if nodes[node_index].module_identity.starts_with("<corelib>/") -> return
+    if nodes[node_index].unsafe_site == "" -> nodes[node_index].unsafe_site = sema_effect_unsafe_site(gate)
+    sema_effect_node_add_direct(nodes, node_index, "Unsafe", span)
+}
+
+sema_effect_unsafe_site: fn(gate: TUnsafeGate) -> String Never! {
+    "{sema_effect_source_display(gate.file)}:{gate.line}"
+}
+
+// An `#Unsafe` gate the walk meets records the Unsafe fact on the function it
+// collects for; a lambda's gate is its enclosing function's, as its loops
+// are (SemaEffectWalk.LambdaBody). A flat gate with no span of its own is
+// charged at the function.
+sema_effect_walk_unsafe_gate: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], gate: TUnsafeGate, span: Span?) Never! {
+    node_index: if walk == {
+        .Collect(index) | .LambdaBody(index) -> index
+        .Unsafe(_) | .PreludeDemands(_) | .Region(_, _) -> return
+    }
+    sema_effect_record_unsafe_gate(nodes, node_index, gate, span ?? nodes[node_index].span)
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Summary construction
 
@@ -1896,6 +2004,10 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         if sema_effect_set_add(node.direct, effect_name) -> node.direct_spans.push(TEffectSpan{name: effect_name, span: function.source_span})
     }
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
+    if function.unsafe_gate == .Val(gate) && !function.module_identity.starts_with("<corelib>/") {
+        node.unsafe_site = sema_effect_unsafe_site(gate)
+        if sema_effect_set_add(node.direct, "Unsafe") -> node.direct_spans.push(TEffectSpan{name: "Unsafe", span: function.source_span})
+    }
     loop edge in function.effects.value_edges -> sema_effect_set_add(node.value_edges, edge)
     // copy: the node keeps the writes; the function keeps its effect facts.
     node.module_writes = function.effects.module_writes.copy()
@@ -3447,7 +3559,11 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
     pending := [SemaEffectPending]{}
     loop (index, node) in nodes {
         row := node.direct
-        if node.maximal -> sema_effect_set_union(row, authority_grantable_roots())
+        if node.maximal {
+            sema_effect_set_union(row, authority_grantable_roots())
+            // An opaque call outside Core fails closed for `!Unsafe`.
+            if !node.module_identity.starts_with("<corelib>/") -> sema_effect_set_add(row, "Unsafe")
+        }
         loop edge in node.call_edges {
             if edge == "__jet_panic__" {
                 sema_effect_set_add(row, "Panic")
@@ -4218,7 +4334,7 @@ sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], node_by_key: NameR
 
 // A pure body's reached effects go to `pure_reached`; E3401 is reported once
 // the solved rows are stamped, so it can name the call that reaches them.
-sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reached: Bool, dispatch: Diagnostic?, panic_steps: [String], unsafe_reach: SemaEffectUnsafeReach?, notes: [SemaEffectInstanceNote], pure_reached: &[String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     // This rule with (Rust `check_inferred_memo`, E0938): a
     // `#Memo` function that is not declared pure is judged by its solved row;
@@ -4277,7 +4393,7 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
     }
     prohibited: sema_effect_covered(solved, node.prohibited)
     if prohibited.len() > 0 {
-        diagnostics.push(sema_effect_with_instance_notes(sema_effect_prohibited_diagnostic(node, prohibited, panic_steps), notes, prohibited))
+        diagnostics.push(sema_effect_with_instance_notes(sema_effect_prohibited_diagnostic(node, prohibited, panic_steps, unsafe_reach), notes, prohibited))
         valid = false
     }
     if node.is_replayable {
@@ -4299,7 +4415,7 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
 sema_effect_row_has_no_outcome: fn(node: SemaEffectNode, solved: [String]) -> Bool Never! {
     if node.maximal -> return false
     loop effect_name in solved {
-        if sema_effect_root(effect_name) != "Mem" -> return false
+        if sema_effect_root(effect_name) != "Mem" && effect_name != "Unsafe" -> return false
     }
     true
 }
@@ -4508,9 +4624,13 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             }
         }
         panic_steps := [String]{}
-        if nodes[node_index].prohibited.len() > 0 -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
+        unsafe_reach := SemaEffectUnsafeReach?{None}
+        if nodes[node_index].prohibited.len() > 0 {
+            panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
+            if sema_effect_reaches_unsafe(sema_effect_covered(solved[node_index], nodes[node_index].prohibited)) -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, calls.node_by_key, node_index))
+        }
         notes: sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index])
-        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_steps, notes, pure_reached, function_diagnostics) {
+        if !sema_effect_check_node(nodes[node_index], solved[node_index], secret_reach[node_index], dispatch, panic_steps, unsafe_reach, notes, pure_reached, function_diagnostics) {
             // Keep all diagnostics; the caller receives one complete graph
             // result instead of a partially updated function list.
         }
@@ -4602,8 +4722,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             if reached.len() == 0 -> next
             panic_steps := [String]{}
             if sema_effect_root(denied) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
+            unsafe_reach := SemaEffectUnsafeReach?{None}
+            if sema_effect_root(denied) == "Unsafe" -> unsafe_reach = Val(sema_effect_unsafe_reach(nodes, calls.node_by_key, node_index))
             denial_diagnostics := [Diagnostic]{}
-            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, denial.organization), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
+            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, unsafe_reach, denial.organization), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
     }
@@ -5485,8 +5607,15 @@ sema_effect_walk_stmt_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode
             }
             if else_body == .Val(else_statements) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, else_statements)
         }
-        .Unsafe(_, body) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
-        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
+        .Unsafe(gate, body) -> {
+            sema_effect_walk_unsafe_gate(walk, nodes, gate, None)
+            sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
+        }
+        .UnsafeBlock(gate, body, span) -> {
+            sema_effect_walk_unsafe_gate(walk, nodes, gate, Val(span))
+            sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
+        }
+        .SentryPolicy(_, body, _) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         .Reactive(executable, _) -> sema_effect_walk_lambda_children(walk, nodes, facts, diagnostics, caller, tree, executable)
         .Layout(_, _, body, _) -> sema_effect_walk_stmt_list_children(walk, nodes, facts, diagnostics, caller, tree, body)
         .ContextBlock(guards, body, _) -> {

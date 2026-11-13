@@ -27,13 +27,16 @@ AUTHORITY_PANIC_ROOT: "Panic"
 // jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
 // work, a deny-only leaf.
 AUTHORITY_TIME_WAIT_LEAF: "Time.Wait"
+// The deny-only root of reaching `#Unsafe` code outside Core.
+AUTHORITY_UNSAFE_ROOT: "Unsafe"
 
-// jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root and the
-// `Time.Wait` leaf may be refused but never have to be granted, so the
-// application policy never asks for them or writes them into `allow:`.
+// jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root, the
+// `Time.Wait` leaf and `Unsafe` (reaching `#Unsafe` code) may be refused but
+// never have to be granted, so the application policy never asks for them or
+// writes them into `allow:`.
 authority_is_deny_only: fn(right: String) -> Bool Never! {
     root: authority_root(right)
-    root == AUTHORITY_PANIC_ROOT || root == "Mem" || right == AUTHORITY_TIME_WAIT_LEAF
+    root == AUTHORITY_PANIC_ROOT || root == "Mem" || root == AUTHORITY_UNSAFE_ROOT || right == AUTHORITY_TIME_WAIT_LEAF
 }
 
 // Reading the task context (`context.deadline`, `context.get(key)`): a
@@ -266,6 +269,7 @@ authority_effect_action: fn(right: String) -> String Never! {
         "Mem" -> "allocates memory"
         "Context" -> "reads the task context"
         "Panic" -> "can stop with a panic"
+        "Unsafe" -> "reaches `#Unsafe` code"
         else -> "uses an undeclared authority"
     }
 }

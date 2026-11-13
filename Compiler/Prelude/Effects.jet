@@ -13,9 +13,9 @@
 // Core's, is the canonical order of a written effect row.
 // `irreversible: fn(self) -> Bool` says which effects a `#Transact` rollback
 // can't take back; a family is irreversible when any of its cases is.
-// `Panic`, `Mem` and `Time.Wait` are deny-only: a policy may refuse them but
-// never has to grant them. `Context` is never granted either (every program
-// holds it), but a function's row still names it.
+// `Panic`, `Mem`, `Time.Wait` and `Unsafe` are deny-only: a policy may refuse
+// them but never has to grant them. `Context` is never granted either (every
+// program holds it), but a function's row still names it.
 
 Net: struct {
     impl Effect {
@@ -124,5 +124,14 @@ Mem: enum {
 // policy grants it and a policy may deny it (Policy/Authority.jet
 // authority_needs_no_grant).
 Context: struct {
+    impl Effect {}
+}
+
+// Reaching `#Unsafe` code: a function that opens an `#Unsafe` gate (a block,
+// an `#Unsafe` function or a foreign function's gate) outside Core, and every
+// function that can call it. Core's gates are vetted and sealed, so calling
+// Core reaches none. `-[!Unsafe]>`, a cap's `!Unsafe` or a policy's
+// `deny: [Unsafe]` refuses every such path.
+Unsafe: struct {
     impl Effect {}
 }

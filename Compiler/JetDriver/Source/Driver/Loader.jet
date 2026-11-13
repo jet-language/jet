@@ -317,7 +317,7 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
                         if {
                             !jet_driver_is_ui_capability(name) && sema_effect_parse_name(root) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect or UI capability"))
                             name.contains("(") -> diagnostics.push(jet_driver_authority_diagnostic(span, jet_driver_authority_needs_argument(name)))
-                            root == "Panic" || root == "Mem" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is deny-only and cannot be declared in `authority.needs`"))
+                            root == "Panic" || root == "Mem" || root == "Unsafe" -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is deny-only and cannot be declared in `authority.needs`"))
                             else -> needs.push(name)
                         }
                     }

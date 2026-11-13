@@ -243,7 +243,7 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 
 #Test("the effect roots are the build roots, the deny-only roots and four irreversible ones") {
     roots := [EffectVocabularyRow]{}
-    names: [String]{"Mem", "Panic", "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI"}
+    names: [String]{"Mem", "Panic", "Unsafe", "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI"}
     loop name in names {
         roots.push(EffectVocabularyRow{name: name, irreversible: name == "Net" || name == "FS" || name == "Exec" || name == "FFI", kernel: [String]{}})
     }
@@ -253,6 +253,8 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     assert(core_decl_effect_roots_problem(roots).contains("must be Net, FS, Exec, and FFI"))
     without_mem: loop row in roots if row.name != "Mem" -> row.copy()
     assert(core_decl_effect_roots_problem(without_mem).contains("deny-only root Mem is not declared"))
+    without_unsafe: loop row in roots if row.name != "Unsafe" -> row.copy()
+    assert(core_decl_effect_roots_problem(without_unsafe).contains("deny-only root Unsafe is not declared"))
 }
 
 #Test("list bodies, owned wrappers and source names read as the build reads them") {

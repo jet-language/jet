@@ -7960,14 +7960,14 @@ sema_comptime_tree_reads_phase: fn(tree: BodyTree) -> Bool Never! {
 }
 
 // Whether effect row entry `name` names no outside-world effect: an
-// exclusion (`!X`), `Panic`, or a `Mem` right.
+// exclusion (`!X`), `Panic`, `Unsafe`, or a `Mem` right.
 sema_comptime_effect_pure: fn(name: String) -> Bool Never! {
     if name.starts_with("!") -> return true
     dotted: name.split(".").to_list()
     head: if dotted.len() > 0 -> dotted[0] else -> name
     parts: head.split("(").to_list()
     root: if parts.len() > 0 -> parts[0].trim() else -> head
-    root == "Panic" || root == "Mem"
+    root == "Panic" || root == "Mem" || root == "Unsafe"
 }
 
 sema_comptime_checked_text_source: fn(evaluation: SemaCheckedTextEvaluation) -> SemaComptimeItemSource Never! {

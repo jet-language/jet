@@ -677,7 +677,7 @@ core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], 
 // What is wrong with the effect roots the build and policy tables name, or
 // "". Build authority is the ten-effect projection (Net FS IO DB Time Rand
 // Env Exec Log GPU; FFI, Browser and Secret are runtime authority roots, not
-// build grants); Mem and Panic are the deny-only roots, declared with the
+// build grants); Mem, Panic and Unsafe are the deny-only roots, declared with the
 // rest of the vocabulary and refused by a policy but never granted; the
 // irreversible roots are exactly Net, FS, Exec and FFI.
 core_decl_effect_roots_problem: fn(rows: [EffectVocabularyRow]) -> String Never! {
@@ -688,7 +688,7 @@ core_decl_effect_roots_problem: fn(rows: [EffectVocabularyRow]) -> String Never!
         roots.push(row.name)
         if row.irreversible -> irreversible.push(row.name)
     }
-    loop root in ([String]{"Mem", "Panic"}) {
+    loop root in ([String]{"Mem", "Panic", "Unsafe"}) {
         if !roots.contains(root) -> return "{EFFECT_VOCABULARY_MACHINE_PATH}: deny-only root {root} is not declared"
     }
     loop root in ([String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU"}) {

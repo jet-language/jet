@@ -78,8 +78,8 @@ jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
 }
 
 // The goal card's required effects: the function's solved row without the
-// deny-only rows (`Panic`, `Mem`), which no positive ceiling has to list
-// (spec.md "`Panic` and `Mem` are deny-only rows"); the hole's own `#Todo`
+// deny-only rows (`Panic`, `Mem`, `Unsafe`), which no positive ceiling has to
+// list (spec.md "`Panic` and `Mem` are deny-only rows"); the hole's own `#Todo`
 // panic is one of them.
 jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) -> String Never! {
     local: jet_cli_fill_function_name(function)
@@ -89,7 +89,7 @@ jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) ->
             if fact.function == key {
                 required := [String]{}
                 loop row in fact.inferred {
-                    if row != "Panic" && row != "Mem" && !row.starts_with("Mem.") -> required.push(row.copy())
+                    if row != "Panic" && row != "Mem" && row != "Unsafe" && !row.starts_with("Mem.") -> required.push(row.copy())
                 }
                 return if required.len() == 0 -> "none" else -> "[{required.join(", ")}]"
             }

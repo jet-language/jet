@@ -164,7 +164,11 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
             if edge != "__jet_panic__" -> effect_edges += 1
         }
     }
-    if pending.declared_effects || direct.len() > 0 || effect_edges > 0 || maximal {
+    // The deny-only Unsafe fact an `#Unsafe` gate records is no effect.
+    direct_effects: loop name in direct {
+        if name != "Unsafe" -> break true
+    } ?? false
+    if pending.declared_effects || direct_effects || effect_edges > 0 || maximal {
         diagnostics.push(sema_kernel_failure("no reachable effects or opaque calls", pending.span))
         return false
     }
