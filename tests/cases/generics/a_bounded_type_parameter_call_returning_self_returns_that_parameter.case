@@ -1,0 +1,16 @@
+# A trait method that returns `Self`, called on a bounded type parameter
+# (`fn<T: Scaled>(n: T) -> T { n.scaled(2) }`), returns that parameter, so the
+# body checks as a T and runs on every tier.
+fixture: a_bounded_type_parameter_call_returning_self_returns_that_parameter.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "42\n1200\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "42\n1200\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "42\n1200\n"

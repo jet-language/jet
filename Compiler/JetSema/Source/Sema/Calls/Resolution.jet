@@ -580,7 +580,12 @@ sema_call_trait_method_candidate_from_registration: fn(graph: SemaRegistrationGr
     if method.parameters.len() == 0 || method.declaration.params.len() == 0 || method.declaration.params[0].name != "self" {
         return None
     }
-    declared_signature: sema_type_resolve_declared_with_generics(graph, sema_call_trait_dispatch_signature(method.signature, method.declaration.return_type), caller_module, generic_params)
+    dispatched: sema_call_trait_dispatch_signature(method.signature, method.declaration.return_type)
+    // A call on a bounded type parameter hands back that parameter where the
+    // trait writes `Self`, so `fn<T: Roundable>(n: T) -> T { n.rounded(mode) }`
+    // returns a T. A trait object keeps `Self`.
+    own: if receiver_type == .TraitObject(_) -> dispatched else -> sema_inference_substitute_type(dispatched, [String]{"Self"}, [Type]{receiver_type.copy()})
+    declared_signature: sema_type_resolve_declared_with_generics(graph, own, caller_module, generic_params)
     signature: sema_call_trait_signature_with_receiver(declared_signature, receiver_type) ?? return None
     reference: TMethodRef{symbol: method.symbol.id, name: method.declaration.name, mangled: false, trait_owner: Val(trait_nominal.symbol.id), operator_identity: None}
     SemaCallMethodCandidate{

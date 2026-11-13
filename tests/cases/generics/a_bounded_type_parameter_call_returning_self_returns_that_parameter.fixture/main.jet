@@ -1,0 +1,25 @@
+// A trait method that returns `Self`, called on a value whose type is a
+// bounded type parameter, returns that parameter: `twice` returns a T.
+
+Scaled: trait {
+    scaled: fn(self, by: Int) -> Self Never!
+}
+
+impl Int.Scaled {
+    scaled: fn(self, by: Int) -> Int Never! { self * by }
+}
+
+Cents: struct {
+    value: Int
+
+    impl Scaled {
+        scaled: fn(self, by: Int) -> Cents Never! { Cents{value: self.value * by} }
+    }
+}
+
+twice: fn<T: Scaled>(n: T) -> T Never! { n.scaled(2) }
+
+run: fn() {
+    print(twice(21))
+    print(twice(Cents{value: 600}).value)
+}
