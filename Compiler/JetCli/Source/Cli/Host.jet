@@ -2831,11 +2831,16 @@ jet_cli_fmt_is_package_manifest_file: fn(origin: String) -> Bool Never! {
 
 // `format_package_manifest_for_fmt`: `package.jet` is formatted only by the
 // typed Package model, which keeps every comment in place. A manifest the
-// model cannot read stops the run with its registered manifest diagnostic
-// (E1215 and family); one it cannot lay out with its comments in order is
-// left exactly as written.
+// model cannot read is reported with its registered manifest diagnostic (E1215
+// and family), at the manifest's first line when the diagnostic has no place
+// of its own, and skipped (jet_cli_format_run); one it cannot lay out with its
+// comments in order is left exactly as written.
 jet_cli_fmt_package_manifest: fn(source: String, origin: String) -> JetCLIFmtSource {
-    if PackageFacts.parse(source, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})
+    if PackageFacts.parse(source, origin) == .Err(error) {
+        diagnostic := pkg_manifest_parse_diagnostic(origin, error)
+        if diagnostic.span == None -> diagnostic.span = Val(Span{start: 0, end: 0})
+        return jet_cli_fmt_rejected([Diagnostic]{diagnostic})
+    }
     if pkg_format_source(source, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
     jet_cli_fmt_formatted(source)
 }

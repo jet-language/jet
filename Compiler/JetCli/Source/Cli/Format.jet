@@ -60,10 +60,18 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         }
         results.push(jet_cli_fmt_one(path, source, request))
     }
+    // The preflight keeps the run atomic: a source that can't be read, parsed or
+    // migrated stops every write. A package.jet the package model can't read is
+    // the exception: it is reported, left as written, and the run goes on.
     failed := false
+    skipped := ""
     loop result in results {
-        if result.io_error != None || result.report != None || result.diagnostics.len() > 0 {
-            failed = true
+        if {
+            result.io_error != None || result.report != None -> failed = true
+            result.diagnostics.len() > 0 && jet_cli_fmt_is_package_manifest_file(result.path) -> {
+                skipped = "{skipped}{if json -> jet_cli_format_diagnostics(result.path, result.original, result.diagnostics) else -> diagnostic_render_all(result.path, result.original, result.diagnostics, false)}"
+            }
+            result.diagnostics.len() > 0 -> failed = true
         }
     }
     if failed {
@@ -85,7 +93,10 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         loop result in results {
             if result.changed -> dirty.push(result)
         }
-        if dirty.len() == 0 -> return jet_cli_external_fmt_ok(json)
+        if dirty.len() == 0 {
+            if skipped == "" -> return jet_cli_external_fmt_ok(json)
+            return JetDriverVerbOutput{stdout: "", stderr: skipped, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
         relative: loop result in dirty -> jet_cli_fmt_relative(result.path, display_root)
         order := [Int]{}
         loop index in 0..<dirty.len() -> order.push(index)
@@ -117,13 +128,14 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
             }
         }
         if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
-        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        return JetDriverVerbOutput{stdout: stdout, stderr: skipped, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    stderr := ""
+    stderr := skipped
     loop result in results {
         if !result.changed -> next
         cli_files.write(result.path, result.formatted) ?? return JetDriverVerbOutput{stdout: "", stderr: "{stderr}{jet_cli_report("E2105", "couldn't write `{result.path}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", exit_code: JET_DRIVER_EXIT_USAGE}
     }
-    // Rust write mode emits no success status, including --json.
-    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+    // Rust write mode emits no success status, including --json. A skipped
+    // package.jet still fails the run.
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: if skipped == "" -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USAGE}
 }

@@ -1,0 +1,23 @@
+# Claim: a package.jet the package model can't read does not stop a multi-file
+#   `jet fmt`: it is reported at its first line (`--> …bad/package.jet:1:1`) and left
+#   as written, and every other file, the ones under that manifest included, is
+#   still checked and formatted; the run fails
+fixture: fmt_reports_an_unreadable_package_manifest_and_formats_the_rest.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --check {work}
+exit: 1 # two files would change and the manifest is refused
+stdout: ~ "good/main.jet" # --check still names the dirty files
+stdout: ~ "bad/src/main.jet"
+stderr: ~ "bad/package.jet:1:1" # the manifest error has a place
+file: good/main.jet = fmt_reports_an_unreadable_package_manifest_and_formats_the_rest.before.bytes
+file: bad/src/main.jet = fmt_reports_an_unreadable_package_manifest_and_formats_the_rest.before.bytes
+step: jet fmt {work}
+exit: 2 # the refused manifest fails the run
+stderr: ~ "bad/package.jet:1:1" # the same located error
+file: good/main.jet !~ "fn( )" # the readable files are formatted all the same
+file: bad/src/main.jet !~ "fn( )"
+file: bad/package.jet = "name: \"demo\"\nversion: \"0.1.0\"\nflavour: \"sweet\"\n"
+step: jet fmt --check {work}/good {work}/bad/src
+exit: 0 # what was formatted is now clean
