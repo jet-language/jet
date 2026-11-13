@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101210,
+    "rev": 101211,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29687,7 +29687,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-13T02:24:35.914Z",
+      "updated": "2026-11-13T04:02:24.146Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -194306,6 +194306,221 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T03:55:17.242Z"
+    },
+    {
+      "id": "D-SEND-ERROR1",
+      "cardId": "c06l1r0z",
+      "group": "library",
+      "title": "Sending on a closed channel: return the Closed error that receive uses, return a SendError that hands the value back, stop the program, or keep dropping it",
+      "situation": "Today sender.send(v) returns nothing. When the receiver is closed or gone, the runtime drops v and returns as if the send worked, so the program never learns the value was lost. The other end already reports this case: receiver.receive() returns T !Closed once every sender is closed. Card #3239 c61 says sender.send(v) returns SendError! and a closed send is that error. That changes public API. 405 lines of Jet code contain .send(. This vote decides what a send on a closed channel does.",
+      "gist": "When a program sends on a channel whose receiver is closed, should send return an error, stop the program, or keep dropping the value?",
+      "lesson": "A channel has two ends. The sender puts values in and the receiver takes them out. If the receiver closes first, the sender has nowhere to put the value. Today Jet throws the value away and says nothing. This vote picks what happens instead.",
+      "explainer": "Words used here. A closed channel is one whose receiver called close() or was dropped. Closed is the error receive already returns when every sender is gone. Jet has no ? operator: a fallible call propagates by itself. Where the function's error type can't take the failure, a bare call is a compile error (E2402), so the caller handles it with ?? or declares a conversion.",
+      "story": "Ana runs a worker task that sends results to a logger task. The logger stops early. Today her worker keeps sending and every result vanishes. Under A or B her send line fails, and she writes ?? to stop the worker. Under C her program stops with a located message. Under D nothing changes.",
+      "inWild": "// Rust: send returns Err(SendError(value)) once the receiver is dropped.\nif let Err(SendError(value)) = tx.send(7) {\n    println!(\"no receiver; kept {value}\");\n}",
+      "detail": "What this ballot decides. What Sender.send returns, and what it does when the channel's receiver is closed or dropped.\n\nToday's send. Compiler/JetSema/Source/Sema/Calls/Concurrency.jet types sender.send(v) as Unit. Compiler/JetRuntime/Source/Channel.jet jet_rt_native_sender_send breaks out of its loop when the channel is closed or has no receiver left, then drops the value it was given. The caller cannot tell. The spec says send moves its value into the channel and says nothing about a closed channel.\n\nToday's receive. receive() -> T !Closed. Closed is a built-in error type with one case.\n\nWhat the card says. #3239 c61 reads: core.tasks has no sentinel or silent rail: sender.send(v) returns SendError! and a send on a closed channel is that error (never -1).\n\nHow many lines this touches. 405 lines contain .send(; 404 are not comments, in 217 files. 122 of those already handle a result with ??; they are HTTP requests, services and browser calls, not channel sends. So at most 282 lines are channel sends. 161 lines call send on a value named sender, tx, or ending in _sender or _tx.\n\nWhat a bare send does under A and B. A fallible call propagates by itself. Inside a function whose error type can't take Closed, a bare call is refused with E2402 (jet.MissingErrorConversion); that includes a plain run: fn(), and no impl Closed -> Err exists. Each such line gains ?? or its function declares a conversion. Inside a function that already fails with Closed, a bare send propagates the failure, which is handled, not silent.\n\nA and B make send fallible. A reuses Closed. B adds SendError<T>, which carries the unsent value back. C keeps send returning nothing and stops the program with a located message. D keeps today's silent drop and writes it into the spec.",
+      "options": [
+        {
+          "key": "A",
+          "name": "send returns Closed!, the error receive uses",
+          "detail": "sender.send(v) returns Unit !Closed. A send on a closed channel, or one with no receiver left, returns Closed and drops v. The program sees the loss and chooses what to do. Both ends of a channel then report the same error.",
+          "technical": "Concurrency.jet: the SenderSend node gets type Unit !Closed. Channel.jet: jet_rt_native_sender_send returns 0 when accepted and 1 when closed, and the IR builds the Closed error from it. A cancelled send still unwinds, as a cancelled receive does. Update spec.md Channels, core-library.md, the goldens that send, and every channel send line (at most 282) that E2402 then refuses.",
+          "code": "run: fn() {\n    { sender, receiver }: channel<Int>()\n    receiver.close()\n    sender.send(7) ?? print(\"no receiver\")\n    print(\"done\")\n}\n// prints: no receiver, then done"
+        },
+        {
+          "key": "B",
+          "name": "send returns SendError<T>!, which hands the value back",
+          "detail": "sender.send(v) returns Unit !SendError<T>. The error carries the value that was not sent, in err.value, as Rust's SendError does. The card names this type. The program can log the value or send it elsewhere.",
+          "technical": "Add SendError<T>: struct { value: T } to core.tasks, a generic type marked #Error with one field. Concurrency.jet types SenderSend as Unit !SendError<T>. Channel.jet keeps the slot when the send fails and moves it into the error instead of dropping it. Update spec.md, core-library.md, the goldens that send, and the same channel send lines as A.",
+          "code": "run: fn() {\n    { sender, receiver }: channel<Int>()\n    receiver.close()\n    sender.send(7) ?? print(\"no receiver; kept {err.value}\")\n    print(\"done\")\n}\n// prints: no receiver; kept 7, then done"
+        },
+        {
+          "key": "C",
+          "name": "send stops the program",
+          "detail": "sender.send(v) still returns nothing. A send on a closed channel stops the program with a message naming the send line, as an index out of range does. No caller changes. A program that must survive an early-closed receiver has to check before it sends.",
+          "technical": "Channel.jet: when the send loop finds the channel closed, call the runtime stop with a new located code instead of dropping the slot. Register the stop code and add a UI snapshot. No sema or call-site change. Update spec.md Channels.",
+          "code": "run: fn() {\n    { sender, receiver }: channel<Int>()\n    receiver.close()\n    sender.send(7)\n    print(\"done\")\n}\n// stops at the send line: send on a closed channel"
+        },
+        {
+          "key": "D",
+          "name": "Keep dropping, and write it down",
+          "detail": "sender.send(v) still returns nothing and still drops v on a closed channel. The spec states this. The card's rule that nothing is dropped silently is removed for send.",
+          "technical": "No code change. spec.md Channels gains one sentence: a send on a closed channel drops its value. Card #3239 c61 text loses its send clause.",
+          "code": "run: fn() {\n    { sender, receiver }: channel<Int>()\n    receiver.close()\n    sender.send(7)\n    print(\"done\")\n}\n// prints: done; the 7 is gone"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "std::sync::mpsc send returns Err(SendError(value)) once the receiver is dropped, handing the value back.",
+          "code": "tx.send(7).unwrap_or_else(|SendError(v)| eprintln!(\"lost {v}\"));"
+        },
+        {
+          "lang": "Go",
+          "note": "Sending on a closed channel panics. A receiver that just stops reading makes the sender block forever.",
+          "code": "ch <- 7 // panics if ch is closed"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Channel.send throws ClosedSendChannelException; trySend returns a failed result instead.",
+          "code": "channel.trySend(7).onFailure { println(\"no receiver\") }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A makes the loss visible with the error Jet already has for the other end, so both ends of a channel report Closed. Handing the value back only helps a program that can retry, and a closed channel never reopens. The ratified try_send already hands the value back when the channel is full.",
+        "gains": [
+          "No send loses a value without the program being told.",
+          "One error, Closed, for both ends of a channel.",
+          "No new public type."
+        ],
+        "losses": [
+          {
+            "loss": "Up to 282 channel send lines change: each one in a function that can't fail with Closed gains ?? or a declared conversion.",
+            "mitigation": "The compiler refuses each such bare send with E2402, so none is missed; a send in a function that already fails with Closed propagates."
+          },
+          {
+            "loss": "The unsent value is dropped, so a program cannot recover it from a closed send.",
+            "mitigation": "A closed channel never reopens, so the value has nowhere to go. try_send hands it back when the channel is only full."
+          },
+          {
+            "loss": "The card's SendError name is not used.",
+            "mitigation": "The card text changes to Closed!, and its rule that no send is silent still holds."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a generic public error type to hand back a value that can never be delivered on that channel."
+          },
+          {
+            "key": "C",
+            "reason": "C turns a common shutdown race, a consumer finishing first, into a crash, and gives the program no way to handle it."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the silent loss the card exists to remove."
+          }
+        ],
+        "tradeoff": "Up to 282 send lines gain ?? or a conversion, in exchange for no send ever losing a value unseen."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. I challenged two claims: that err is bound in the fallback of a send, and that an unhandled send cannot be silently missed. Seed probes confirm both: E2402 refuses a bare unhandled send, and a bare send inside a Closed fn propagates."
+      },
+      "checkInstructions": "Count the lines that contain .send( in the Jet repository with git grep -n -F '.send(' c367fdfe56 -- '*.jet'; it lists 405 lines.\n\nRun git grep -n -P '^(?!\\s*//).*\\.send\\(' c367fdfe56 -- '*.jet'; it lists 404 non-comment lines in 217 files (add -l and count for the files).\n\nCount the lines that already handle a result, which are not channel sends. Run git grep -n -P '^(?!\\s*//).*\\.send\\([^)]*\\)\\s*\\?\\?' c367fdfe56 -- '*.jet'; it lists 122 lines, so at most 282 are channel sends.\n\nCount the sends on a value named like a sender. Run git grep -n -P '^(?!\\s*//).*\\b(sender|tx|[a-z_]*_sender|[a-z_]*_tx|sender[0-9]*)\\.send\\(' c367fdfe56 -- '*.jet'; it lists 161 lines.\n\nToday's silent drop is in Compiler/JetRuntime/Source/Channel.jet, in jet_rt_native_sender_send. When the channel is closed or has no receiver, its loop breaks and coll_slot_drop drops the value.\n\nThe seed (b14) proves the handling claims with the programs in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SEND-ERROR1. jet run err_in_fallback.jet prints no receiver; kept 7, then done, so err names the failure inside a ?? fallback.\n\njet check bare_closed_call.jet, a bare call of a Unit !Closed function in run: fn(), is refused with E2402 (jet.MissingErrorConversion). jet run closed_propagates.jet prints closed, then done: a bare call inside a function that fails with Closed propagates.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Should a send on a closed channel return an error, stop the program, or keep dropping the value?",
+        "lesson": "A channel has a sender end and a receiver end. If the receiver closes first, today's send throws the value away and says nothing. This vote picks what happens instead.",
+        "trio": {
+          "current": {
+            "note": "send returns nothing; on a closed channel the value is dropped unseen.",
+            "code": "receiver.close()\nsender.send(7)\nprint(\"done\")   // the 7 is gone"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "send returns an error that hands the value back.",
+            "code": "if let Err(SendError(v)) = tx.send(7) {\n    println!(\"lost {v}\");\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Return Closed",
+            "gist": "send returns the Closed error that receive already uses.",
+            "gains": [
+              "No value is lost unseen.",
+              "One error for both ends."
+            ],
+            "losses": [
+              "Up to 282 send lines gain ?? or a conversion."
+            ],
+            "proposed": {
+              "code": "sender.send(7) ?? print(\"no receiver\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Return SendError",
+            "gist": "send returns an error that carries the value back.",
+            "gains": [
+              "The value comes back.",
+              "Matches the card and Rust."
+            ],
+            "losses": [
+              "New public generic type.",
+              "Up to 282 send lines gain ?? or a conversion."
+            ],
+            "proposed": {
+              "code": "sender.send(7) ?? print(\"kept {err.value}\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Stop the program",
+            "gist": "send stays the same, but a closed send stops with a message.",
+            "gains": [
+              "No call line changes."
+            ],
+            "losses": [
+              "An early-closed receiver crashes the sender."
+            ],
+            "proposed": {
+              "code": "sender.send(7)   // stops: send on a closed channel"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Keep dropping",
+            "gist": "Write today's silent drop into the spec.",
+            "gains": [
+              "No change at all."
+            ],
+            "losses": [
+              "Values still vanish unseen."
+            ],
+            "proposed": {
+              "code": "sender.send(7)   // dropped if closed"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The loss becomes visible with the error Jet already has, and a closed channel never reopens, so handing the value back buys nothing.",
+          "gains": [
+            "No value is lost unseen.",
+            "No new public type."
+          ],
+          "losses": [
+            {
+              "loss": "Up to 282 send lines gain ?? or a conversion.",
+              "mitigation": "The compiler refuses every unhandled send with E2402."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A new type for a value that can't be delivered."
+            },
+            {
+              "key": "C",
+              "reason": "A consumer finishing first crashes the program."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps the silent loss."
+            }
+          ],
+          "tradeoff": "Longer send lines, for no unseen loss."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T04:02:24.146Z"
     }
   ],
   "questions": [
@@ -197573,6 +197788,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T04:02:24.146Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SEND-ERROR1",
+      "note": "Sending on a closed channel: return the Closed error that receive uses, return a SendError that hands the value back, stop the program, or keep dropping it"
+    },
     {
       "at": "2026-11-13T04:01:47.201Z",
       "by": "Main",
