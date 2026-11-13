@@ -1,0 +1,39 @@
+// `middle` joins `spin` right after spawning it, so it runs `spin` inline.
+// `spin` passes a wait point on every turn but never parks: its channel
+// always holds an item. Cancelling `middle` reaches `spin` all the same, as
+// it would if `middle`'s join had woken to cancel it.
+use time: core.time
+
+spin: fn() -> Int {
+    { sender, receiver }: channel<Int>(capacity: 1)
+    turns := 0
+    loop turns >= 0 {
+        sender.send(1)
+        turns += receiver.receive() ?? 0
+    }
+    turns
+}
+
+middle: fn(started: Sender<Int>) -> Int {
+    task.group inner {
+        started.send(1)
+        spinner: task spin()
+        got: spinner.join() ?? -1
+        print("spin returned {got}")
+    }
+    0
+}
+
+run: fn() {
+    { sender: started, receiver: ready }: channel<Int>(capacity: 1)
+    task.group outer {
+        worker: task middle(started)
+        _ := ready.receive() ?? panic("closed")
+        time.sleep(20ms)
+        worker.cancel()
+        if worker.join() == {
+            .Err(_) -> print("cancelled")
+            .Ok(_) -> print("finished")
+        }
+    }
+}

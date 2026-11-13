@@ -227,6 +227,10 @@ IRBuilder: struct {
     // The stores of the group updates being built (`map[key] = group`):
     // the window already wrote the entry, so each builds nothing.
     map_stores: [Int]{[Int]{}}
+    // The statement being built spawns a grouped task the next statement
+    // joins first (BuildCoreClosures.jet ir_spawn_joined_next): its spawn
+    // defers the task to that join (ir_task_spawn).
+    spawn_joined: Bool{false}
     // A task body (ir_task_spawn): a failure that leaves it stops the task,
     // which its join reports as TaskFailure.Panicked (ir_try_failure).
     task_body: Bool{false}

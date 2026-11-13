@@ -1,7 +1,7 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
 // Control128: refs0 paused8 cancelled16 pauseMode24 status32 stop40 pending48
-// observe56 park64 mutex72 waiters80 callbacks88 nextCallback96 scopeFlags104
+// observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120. StopCleanup's opaque token owns old flags.
 // Stop56: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
 // 1 rendered diagnostic); -1 denotes absent optional comptime metadata.
@@ -607,6 +607,10 @@ scheduler_control_cancel: fn(control: I64) {
         sync_park_wake(sync_load(wrapping(waiter + I64{8})))
         waiter = sync_load(waiter)
     }
+    // A task this one runs inline (scheduler_control_inline) is cancelled
+    // with it, as its join would cancel it on waking.
+    forwarded: sync_load(wrapping(control + I64{96}))
+    scheduler_control_retain(forwarded)
     callbacks: sync_load(wrapping(control + I64{88}))
     sync_store(wrapping(control + I64{88}), I64{0})
     node := callbacks
@@ -627,6 +631,25 @@ scheduler_control_cancel: fn(control: I64) {
         sync_mutex_unlock(wrapping(control + I64{72}))
         node = next_node
     }
+    if (forwarded != I64{0}) {
+        scheduler_control_cancel(forwarded)
+        scheduler_control_drop(forwarded)
+    }
+}
+
+// Names the control of a task the running task's thread runs inline
+// (Task.jet task_run_joined) at the running task's inline96, or clears it
+// (0), under the control's lock: a cancel from then on cancels it too. A
+// cancel already requested cancels it at once.
+scheduler_control_inline: fn(control: I64, target: I64) {
+    scheduler_control_retain(target)
+    sync_mutex_lock(wrapping(control + I64{72}))
+    previous: sync_load(wrapping(control + I64{96}))
+    sync_store(wrapping(control + I64{96}), target)
+    cancelled: sync_load(wrapping(control + I64{16})) != I64{0}
+    sync_mutex_unlock(wrapping(control + I64{72}))
+    scheduler_control_drop(previous)
+    if (cancelled && target != I64{0}) -> scheduler_control_cancel(target)
 }
 
 // A cancel the task has consumed into its own result (an AsyncEvent entry's
@@ -1330,7 +1353,7 @@ scheduler_carrier_idle: fn(root: I64) {
             }
             sync_store(wrapping(fiber + I64{56}), task)
         }
-        fiber_run(root, record, fiber)
+        _ := fiber_run(root, record, fiber)
         sync_store(runs, wrapping(sync_load(runs) + I64{1}))
     }
 }

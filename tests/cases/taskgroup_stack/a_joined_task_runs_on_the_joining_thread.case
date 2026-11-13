@@ -1,0 +1,35 @@
+# A grouped task whose handle the next statement joins starts on the joining
+# thread instead of a carrier (JetRuntime Task.jet task_run_joined), on a
+# fiber of its group's stack. inline.jet's recursion outgrows a default stack
+# and its built program starts no thread (the strace watches the program, not
+# the compiler, whose own threads depend on the compiler that built it);
+# parks.jet's task sleeps, so a carrier resumes it; cancel.jet cancels a task
+# while it runs such a task inline, which never parks, and the cancel reaches
+# it; overflow.jet's task outgrows its group's stack and stops the program
+# with E3012. The overflow is checked at -O0, where every call keeps its frame.
+requires: os-name:linux
+requires: tool:strace
+fixture: fixtures/joined
+env: NO_COLOR=1
+step: jet build inline.jet
+exit: 0
+step inline: strace -f -qq -e trace=clone,clone3 -o {work}/inline.trace {work}/.jet/build/inline
+exit: 0
+stdout: = "reached the bottom true\n"
+file.filter(where ~ "CLONE_THREAD"): inline.trace lines = 0 # only thread starts count; a fork of the program is no thread
+step inline_o2: jet run --optimize=full inline.jet
+exit: 0
+stdout: = "reached the bottom true\n"
+stderr: empty
+step parks: jet run parks.jet
+exit: 0
+stdout: = "slept 42\n"
+stderr: empty
+step cancel: jet run cancel.jet
+timeout: 60s
+exit: 0
+stdout: = "cancelled\n"
+stderr: empty
+step overflow: jet run overflow.jet
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow" # the stop's heading; its frame and source lines are the report's

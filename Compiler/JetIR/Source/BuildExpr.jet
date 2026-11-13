@@ -293,7 +293,9 @@ ir_stmts: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
             b.map_take = statement
             b.map_stores.push(body[stored])
         }
+        b.spawn_joined = ir_spawn_joined_next(p, b, body, at)
         if outermost -> ir_stmt_collecting(m, p, b, statement) else -> ir_stmt(m, p, b, statement)
+        b.spawn_joined = false
     }
     // The entry's outermost block ends: its variables drop before the
     // return it falls through to (ir_return_fallthrough).

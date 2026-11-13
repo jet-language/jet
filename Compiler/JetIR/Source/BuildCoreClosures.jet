@@ -232,8 +232,12 @@ ir_core_closure_name: fn(kind: BodyCoreClosureKind) -> String Never! {
 // `task body` / `group.spawn(body)`: the body becomes a zero-parameter
 // closure whose result is the checked Task element (3698-3727); the runtime
 // takes the box over with its task.body (lazy.callback) and task.release
-// helpers and the result's descriptor. A grouped spawn joins its group.
+// helpers and the result's descriptor. A grouped spawn joins its group; one
+// the next statement joins first (ir_spawn_joined_next) leaves the task to
+// that join, which runs it on the joining thread.
 ir_task_spawn: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, task_ty: Type, group: Int?, site: Int, label: String, executable: BodyLambda, span: Span) -> Int Never! {
+    joined: b.spawn_joined
+    b.spawn_joined = false
     element: ir_task_element(task_ty) ?? return ir_fail_slot(b, span, "spawn producing {ir_type_name(task_ty)}")
     task_row: ir_value_type(m, p, task_ty) ?? return ir_type_fail(b, span, task_ty)
     group_slot := -1
@@ -280,9 +284,58 @@ ir_task_spawn: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, task_ty: Type, grou
     args.push(invoke)
     args.push(release)
     args.push(meta)
-    spawned: ir_runtime(m, b, if group_slot >= 0 -> "jet_rt_native_group_spawn" else -> "jet_rt_native_task_spawn", args, task_row)
+    symbol: if {
+        group_slot < 0 -> "jet_rt_native_task_spawn"
+        joined -> "jet_rt_native_group_spawn_joined"
+        else -> "jet_rt_native_group_spawn"
+    }
+    spawned: ir_runtime(m, b, symbol, args, task_row)
     if group_slot >= 0 -> ir_release(m, b, group_slot)
     spawned
+}
+
+// Whether statement `at` of `body` binds a grouped task (`t: task f()`) whose
+// handle the next statement joins before it runs anything else (`t.join()`,
+// `t.join()?`, `t.join() ?? x`, `list.push(t.join() ?? x)`, or one bound by
+// a `Let`). Nothing between the spawn and the join can wait for the task, so
+// deferring its start to the join changes no outcome.
+ir_spawn_joined_next: fn(p: IRProgram, b: IRBuilder, body: [Int], at: Int) -> Bool Never! {
+    if at + 1 >= body.len() -> return false
+    if ir_body_stmt(p, b, body[at]) == .Let(local, _, init, _, _, _) {
+        if ir_body_node(p, b, init).kind == .CoreClosureCall(kind) {
+            if kind == .Spawn(group, _, _, _) {
+                if group == None -> return false
+                name: ir_map_take_name(local)
+                next: ir_body_stmt(p, b, body[at + 1])
+                if next == .ExprStmt(value, _) -> return ir_spawn_joined_first(p, b, value, name)
+                if next == .Let(_, _, value, _, _, _) -> return ir_spawn_joined_first(p, b, value, name)
+            }
+        }
+    }
+    false
+}
+
+// Whether the first thing node `id` runs is the join of the task variable
+// `name` (ir_map_take_name): the join itself, or the value a fallback, a `?`
+// or a builtin method on a variable evaluates first.
+ir_spawn_joined_first: fn(p: IRProgram, b: IRBuilder, id: Int, name: String) -> Bool Never! {
+    kind: ir_body_node(p, b, id).kind
+    if kind == .HandleMethod(receiver, operation, args) -> return operation == .TaskJoin && args.len() == 0 && ir_spawn_joined_local(p, b, receiver, name)
+    if kind == .OrFallback(value, _, _) -> return ir_spawn_joined_first(p, b, value, name)
+    if kind == .Try(value, _, _) -> return ir_spawn_joined_first(p, b, value, name)
+    if kind == .TryWithContext(inner, _, _, _, _, _) -> return ir_spawn_joined_first(p, b, inner, name)
+    if kind == .BuiltinMethod(receiver, _, args) -> return args.len() > 0 && ir_spawn_joined_local(p, b, receiver, "") && ir_spawn_joined_first(p, b, args[0], name)
+    false
+}
+
+// Whether node `id` reads the variable `name` (any variable when empty),
+// moved or borrowed.
+ir_spawn_joined_local: fn(p: IRProgram, b: IRBuilder, id: Int, name: String) -> Bool Never! {
+    kind: ir_body_node(p, b, id).kind
+    if kind == .Move(value) -> return ir_spawn_joined_local(p, b, value, name)
+    if kind == .Borrow(place, _) -> return ir_spawn_joined_local(p, b, place, name)
+    if kind == .Local(local) -> return name == "" || ir_map_take_name(local) == name
+    false
 }
 
 // The label of a task the checker named none: the called function's name

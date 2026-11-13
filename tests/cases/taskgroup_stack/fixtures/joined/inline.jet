@@ -1,0 +1,17 @@
+// A grouped task the next statement joins runs on the joining thread, on a
+// fiber of its group's stack: the recursion outgrows a default stack, and
+// the run starts no thread.
+DEPTH: 400000
+
+deep: fn(n: Int, a: Int, b: Int, c: Int, d: Int) -> Int {
+    if n == 0 -> return a + b + c + d
+    1 + deep(n - 1, b, c, d, a + n)
+}
+
+run: fn() {
+    task.group roomy(stack: 536870912) {
+        direct: task deep(DEPTH, 1, 2, 3, 4)
+        reached: direct.join() ?? -1
+        print("reached the bottom {reached > DEPTH}")
+    }
+}

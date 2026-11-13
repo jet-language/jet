@@ -5,8 +5,14 @@
 // typedDeadline184 ownedWorld192, then the task's Context record (Context.jet)
 // at TASK_CONTEXT. Result initializes only after Propagate == 0. stack is the
 // stack size of the fiber the task runs on (Fiber.jet fiber_stack_class; 0,
-// the default size): its group's, else the starting task's.
+// the default size): its group's, else the starting task's. queueNext88 holds
+// TASK_DEFERRED until a deferred task is claimed (task_claim).
 TASK_CONTEXT: I64{200}
+// A grouped task its handle's join follows at once
+// (jet_rt_native_group_spawn_joined) is not submitted: the join runs it on
+// the joining thread (task_run_joined), so a program whose only task is so
+// joined starts no carrier. Any other wait for it, a drain, submits it.
+TASK_DEFERRED: I64{-1}
 task_state_bytes: fn() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
 // JetTaskFailure: ordinals 0/1/2.
 task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
@@ -196,15 +202,33 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     state: sync_load(group)
     permit: task_group_admit(state)
     if (jet_scheduler_native_propagate() != I64{0}) {
-        saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
-        jet_scheduler_shield_enter()
-        if (permit != I64{0}) -> task_group_release(state)
-        coll_call1_unit(release, env)
-        jet_scheduler_shield_leave()
-        jet_rt_session_cleanup_leave(saved)
+        task_spawn_refused(state, permit, env, release)
         return I64{0}
     }
     task_spawn_state(site, label, env, invoke, release, meta, state, permit)
+}
+// A deterministic world schedules every task it counts, so under one the
+// task is submitted as jet_rt_native_group_spawn's is.
+#Export(c) jet_rt_native_group_spawn_joined: fn(group: I64, site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
+    if (world_current() != I64{0}) -> return jet_rt_native_group_spawn(group, site, label, env, invoke, release, meta)
+    state: sync_load(group)
+    permit: task_group_admit(state)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        task_spawn_refused(state, permit, env, release)
+        return I64{0}
+    }
+    child: task_state_new(site, label, env, invoke, release, meta, state, permit)
+    sync_store(wrapping(child + I64{88}), TASK_DEFERRED)
+    child
+}
+// A spawn a stop refused releases its admission and its captures.
+task_spawn_refused: fn(state: I64, permit: I64, env: I64, release: I64) {
+    saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    jet_scheduler_shield_enter()
+    if (permit != I64{0}) -> task_group_release(state)
+    coll_call1_unit(release, env)
+    jet_scheduler_shield_leave()
+    jet_rt_session_cleanup_leave(saved)
 }
 #Export(c) jet_rt_native_task_cancel: fn(child: I64) { scheduler_control_cancel(sync_load(wrapping(child + I64{8}))) }
 #Export(c) jet_rt_native_task_pause: fn(child: I64) { scheduler_control_pause(sync_load(wrapping(child + I64{8})), I64{0}) }
@@ -292,8 +316,56 @@ task_run: fn(child: I64) {
     task_drop(child)
 }
 
+// A deferred task no join claimed runs on a carrier, as any other.
 task_drain: fn(child: I64) {
+    if task_claim(child) -> scheduler_submit(child)
     loop sync_load(wrapping(child + I64{24})) == (I64{0}) -> _ := sync_wait(child + I64{24}, I64{0}, I64{-1})
+}
+
+// Takes a deferred task (TASK_DEFERRED) to start it; false when it is not
+// deferred or another took it.
+task_claim: fn(child: I64) -> Bool {
+    sync_cas(wrapping(child + I64{88}), TASK_DEFERRED, I64{0}) == TASK_DEFERRED
+}
+
+// Runs a deferred task its join claimed on the joining thread, which
+// carries the task's fiber (its own stack size, guard page and overflow stop)
+// as a carrier would (Fiber.jet fiber_run), through a carrier record of its
+// own; a joining fiber carries it the same way. The joiner's cancel reaches
+// the task (Scheduler.jet scheduler_control_inline) unless the joiner is
+// shielded or a root, whose join would not cancel it either. A task that
+// parks is woken onto the carriers, the first of which starts then if none
+// has, and the join waits for it as for any; one that yields goes to them at
+// once. A thread with no TCB, or no fiber stack to map, submits the task
+// instead.
+task_run_joined: fn(child: I64) {
+    base: thread_base()
+    root: scheduler_root_required()
+    fiber: if (base == I64{0}) -> I64{0} else -> fiber_take(root, scheduler_job_stack(child))
+    if (fiber == I64{0}) {
+        scheduler_submit(child)
+        return
+    }
+    record: jet_rt_alloc(SCHEDULER_CARRIER_BYTES, I64{8})
+    thread_zero(record, SCHEDULER_CARRIER_BYTES)
+    sync_store(record, root)
+    sync_store(wrapping(record + I64{24}), base)
+    sync_store(wrapping(fiber + I64{56}), child)
+    sync_thread_lock(root)
+    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    sync_thread_unlock(root)
+    joiner: scheduler_control_current()
+    forward: joiner != I64{0} && !scheduler_shielded() && !scheduler_control_is_root(joiner)
+    if forward -> scheduler_control_inline(joiner, sync_load(wrapping(child + I64{8})))
+    action: fiber_run(root, record, fiber)
+    if forward -> scheduler_control_inline(joiner, I64{0})
+    if (action == FIBER_PARK || action == FIBER_YIELD) {
+        sync_thread_lock(root)
+        taker: if (action == FIBER_YIELD) -> fiber_ready_taker(root) else -> fiber_carrier_first(root)
+        sync_thread_unlock(root)
+        fiber_ready_take(root, taker)
+    }
+    jet_rt_free(record, SCHEDULER_CARRIER_BYTES, I64{8})
 }
 
 // A typed child whose own deadline is no later than the joiner's ends by
@@ -433,7 +505,12 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
     success
 }
 
+// A deferred task its join claims runs here, unless the joiner is already
+// stopping, whose join cancels and drains it on a carrier.
 #Export(c) jet_rt_native_task_join: fn(child: I64, flatten: I64, out: I64) -> I64 {
+    if (child != I64{0} && task_claim(child)) {
+        if (jet_scheduler_native_propagate() == I64{0}) -> task_run_joined(child) else -> scheduler_submit(child)
+    }
     if (task_join_wait(child) != I64{0}) {
         scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
         task_drain(child)

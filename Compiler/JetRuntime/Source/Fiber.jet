@@ -145,12 +145,39 @@ fiber_ready: fn(fiber: I64) {
     sync_store(fiber, FIBER_RUNNABLE)
     sync_thread_lock(root)
     fiber_ready_push(root, fiber)
-    woke: scheduler_wake_idle(root)
-    // No idle carrier to take it: the monitor watches for blocked ones.
-    monitor: if woke -> I64{0} else -> scheduler_monitor_arm(root)
+    taker: fiber_ready_taker(root)
     sync_thread_unlock(root)
-    if woke -> scheduler_kick_idle(root)
-    if (monitor != I64{0}) -> scheduler_monitor_kick(root, monitor)
+    fiber_ready_take(root, taker)
+}
+
+// Who takes a fiber just queued on the ready FIFO, with the root lock held:
+// an idle carrier (-1), woken; else the first carrier (fiber_carrier_first);
+// else the monitor, which watches for blocked carriers
+// (scheduler_monitor_arm: 0 when it already watches).
+fiber_ready_taker: fn(root: I64) -> I64 {
+    if scheduler_wake_idle(root) -> return I64{-1}
+    first: fiber_carrier_first(root)
+    if (first != I64{0}) -> first else -> scheduler_monitor_arm(root)
+}
+
+// The first carrier's start (-2, for fiber_ready_take) when none ever
+// started, else 0; the root lock is held. A fiber a plain thread ran
+// (Task.jet task_run_joined) can park, and its timer wait for a carrier to
+// fire it, before any carrier exists.
+fiber_carrier_first: fn(root: I64) -> I64 {
+    if (sync_load(wrapping(root + I64{152})) != I64{0}) -> return I64{0}
+    sync_store(wrapping(root + I64{152}), I64{1})
+    I64{-2}
+}
+
+// The half of fiber_ready_taker that runs after the root unlock. The first
+// carrier settles the pool size first, as a submit's would (scheduler_get).
+fiber_ready_take: fn(root: I64, taker: I64) {
+    if {
+        (taker == I64{-1}) -> scheduler_kick_idle(root)
+        (taker == I64{-2}) -> scheduler_start_worker(scheduler_get())
+        (taker != I64{0}) -> scheduler_monitor_kick(root, taker)
+    }
 }
 
 // The ready FIFO at root 168/176; callers hold the root lock.
@@ -194,9 +221,10 @@ fiber_gs_write: fn(root: I64, base: I64) {
 }
 
 // A carrier's half of running a fiber until it switches out, then the
-// action the fiber left. The carrier record's save word (record+16) holds
-// the carrier's stack while the fiber runs.
-fiber_run: fn(root: I64, record: I64, fiber: I64) {
+// action the fiber left: FIBER_PARK (parked), FIBER_YIELD (on the ready
+// FIFO), FIBER_DONE (pooled) or FIBER_DEAD (unmapped). The carrier record's
+// save word (record+16) holds the carrier's stack while the fiber runs.
+fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
     tcb: sync_load(wrapping(record + I64{24}))
     fiber_tcb: sync_load(wrapping(fiber + I64{24}))
     loop {
@@ -217,7 +245,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
         if (action == FIBER_PARK) {
             if (sync_cas(fiber, FIBER_PARKING, FIBER_PARKED) == FIBER_PARKING) {
                 _ := sync_add(wrapping(root + I64{48}), I64{1})
-                return
+                return FIBER_PARK
             }
             // Woken while it switched out: run it again at once.
             next
@@ -227,7 +255,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
             sync_thread_lock(root)
             fiber_ready_push(root, fiber)
             sync_thread_unlock(root)
-            return
+            return FIBER_YIELD
         }
         sync_thread_lock(root)
         if (action == FIBER_DONE && sync_load(wrapping(root + I64{64})) >= FIBER_POOL_CAP) {
@@ -253,7 +281,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) {
             alloc_unmap(mapping, bytes)
             fiber_space_give(root, bytes)
         }
-        return
+        return action
     }
 }
 
