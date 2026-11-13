@@ -6,7 +6,7 @@
 // the signatures in as canonical TEXT, not a second hash: Lock folds it into
 // SHA256.
 use {
-    jet_foundation.[diagnostic_text_lines]
+    jet_foundation.[ENV_JET_API_CACHE_DIR, diagnostic_text_lines]
     jetpack_foundation.[foundation_read_file_nofollow_at_root]
     sys: core.sys
     files: core.files
@@ -79,7 +79,7 @@ pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> Stri
     parts.join("\n--\n")
 }
 pkg_project_capability_digest: fn(project_root: String) -[FS, Env]> String Never! {
-    directory: sys.get("JET_API_CACHE_DIR") ?? files.join(project_root, ".jet/cache/api")
+    directory: sys.get(ENV_JET_API_CACHE_DIR) ?? files.join(project_root, ".jet/cache/api")
     entries := files.list_dir(directory) ?? return ""
     entries.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { left.name <=> right.name })
     snapshots := [PackageCapabilitySnapshot]{}

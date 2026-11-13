@@ -3,6 +3,7 @@
 // Every resolved answer must pass Core's strict public-destination predicates
 // (ip.is_public_destination / ip.ipv6_is_public_destination). Full Fetch is #4262.
 use {
+    jet_foundation.[ENV_PREFIX_JET_REGISTRY]
     jet_pkg_model.[PublicationRegistryConfig, pkg_bytes_space_width, pkg_bytes_text, pkg_hex_bytes, publication_registry_url_has_credentials]
     jetpack_foundation.[foundation_hardened_git_command, foundation_hardened_ssh_command]
     publication_dns: core.http.client
@@ -149,7 +150,7 @@ publication_registry_git_command: fn(transport: PublicationRegistryTransport) -[
     names: sys.vars()
     spec := transport.command().args_extend([String]{"-c", "credential.useHttpPath=true"}).env("GIT_TERMINAL_PROMPT", "0")
     loop name in names {
-        if name.starts_with("JET_REGISTRY_") -> spec = spec.env_remove(name)
+        if name.starts_with(ENV_PREFIX_JET_REGISTRY) -> spec = spec.env_remove(name)
     }
     Ok(spec)
 }

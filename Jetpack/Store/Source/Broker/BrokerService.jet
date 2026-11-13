@@ -280,7 +280,7 @@ store_broker_trust_key: fn(config: SharedStoreConfig) -> String StoreError! {
     if !config.is_admin() -> return Ok(config.trust_key)
     credentials: sys.get("CREDENTIALS_DIRECTORY") ?? return Err(store_broker_invalid("shared-store broker credentials directory is missing"))
     expected: files.join(credentials, "hangar.key")
-    actual: sys.get("JET_SHARED_STORE_TRUST_KEY") ?? return Err(store_broker_invalid("shared-store broker trust credential is missing"))
+    actual: sys.get(ENV_JET_SHARED_STORE_TRUST_KEY) ?? return Err(store_broker_invalid("shared-store broker trust credential is missing"))
     if actual != expected || !files.is_abs(actual) {
         return Err(store_broker_invalid("shared-store broker trust credential is outside the systemd credential directory"))
     }

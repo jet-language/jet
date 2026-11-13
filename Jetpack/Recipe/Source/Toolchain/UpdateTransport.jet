@@ -206,7 +206,7 @@ recipe_update_fetch_bytes: fn(endpoint: ToolchainEndpoint, relative: String, lim
     if endpoint == {
         .File(root) -> recipe_update_read_local_path(root, relative, limit, label)
         .HTTP(http) -> {
-            if (sys.get("JETPACK_DENY_NETWORK") ?? "") != "" {
+            if (sys.get(ENV_JETPACK_DENY_NETWORK) ?? "") != "" {
                 return Err(RecipeError.Update("network disabled by JETPACK_DENY_NETWORK while trying to {label}"))
             }
             if recipe_update_fetch_http(http, http.url(relative), limit) == {

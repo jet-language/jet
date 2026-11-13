@@ -2,7 +2,7 @@
 // source store holds path/git dependency trees identified by their full lock
 // fingerprint. All filesystem operations reuse Foundation's retained authority.
 use {
-    jet_foundation.[Diagnostic, diagnostic_from_registry]
+    jet_foundation.[Diagnostic, ENV_JET_PACKAGE_STORE_DIR, diagnostic_from_registry]
     jetpack_foundation.[FoundationDirectoryAuthority, foundation_open_directory_authority]
     sys: core.sys
     files: core.files
@@ -33,7 +33,7 @@ PackageSourceEntry: struct {
 }
 
 pkg_source_store_dir: fn() -[Env]> String Never! {
-    explicit: sys.get("JET_PACKAGE_STORE_DIR")
+    explicit: sys.get(ENV_JET_PACKAGE_STORE_DIR)
     if explicit == .Val(path) -> return path
     home: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
     files.join(files.join(home, ".jet"), "store")

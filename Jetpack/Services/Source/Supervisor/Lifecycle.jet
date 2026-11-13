@@ -222,12 +222,12 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
     if resolved.ports.len() > 0 {
         rendered := [String]{}
         loop port in resolved.ports -> rendered.push("{port}")
-        service_env["JETPACK_SERVICE_PORTS"] = rendered.join(",")
-        service_env["JETPACK_SERVICE_PORT"] = "{resolved.ports[0]}"
+        service_env[ENV_JETPACK_SERVICE_PORTS] = rendered.join(",")
+        service_env[ENV_JETPACK_SERVICE_PORT] = "{resolved.ports[0]}"
     }
     if socket_paths.len() > 0 {
-        service_env["JETPACK_SERVICE_SOCKETS"] = socket_paths.join("\n")
-        loop index in 0..<socket_paths.len() -> service_env["JETPACK_SERVICE_SOCKET_{index}"] = socket_paths[index]
+        service_env[ENV_JETPACK_SERVICE_SOCKETS] = socket_paths.join("\n")
+        loop index in 0..<socket_paths.len() -> service_env["{ENV_PREFIX_JETPACK_SERVICE_SOCKET}{index}"] = socket_paths[index]
     }
     names: envmodel_sorted_keys_of(service_env)
     argv := [String]{}

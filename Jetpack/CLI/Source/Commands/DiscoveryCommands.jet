@@ -233,9 +233,9 @@ cli_shell_on_failed_build: fn(theme: Theme, roots: HangarRoots, package: String)
         return
     }
     fallback: if sys.name() == "windows" -> "cmd" else -> "sh"
-    shell: sys.get("JETPACK_SHELL_ON_FAIL") ?? sys.get("SHELL") ?? fallback
+    shell: sys.get(ENV_JETPACK_SHELL_ON_FAIL) ?? sys.get("SHELL") ?? fallback
     theme.status("build failed at step {attempt.failed_step} · shell in preserved build dir {scratch}")
-    process.cmd([String]{shell}).cwd(scratch).env("JETPACK_FAILED_SCRATCH", scratch).env("JETPACK_FAILED_STEP", "{attempt.failed_step}").env("JETPACK_FAILED_PACKAGE", package).run().drop("the failed-build shell is interactive and best-effort")
+    process.cmd([String]{shell}).cwd(scratch).env(ENV_JETPACK_FAILED_SCRATCH, scratch).env(ENV_JETPACK_FAILED_STEP, "{attempt.failed_step}").env(ENV_JETPACK_FAILED_PACKAGE, package).run().drop("the failed-build shell is interactive and best-effort")
 }
 
 // The attempt's preserved scratch only when it is exactly the real

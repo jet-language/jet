@@ -2,6 +2,7 @@
 // boundary row appended to binder records, local archive identity inputs, and
 // pinned host-tool identities. Ported from jet_pkg_model::ForeignBridge.
 use {
+    jet_foundation.[ENV_JET_TARGET]
     bridge_core_files: core.files
     bridge_core_sys: core.sys
     bridge_core_process: core.process
@@ -43,7 +44,7 @@ ForeignProvenance: struct {
 // The target identity used by adapters that do not receive a target argument.
 // An environment-provided target wins over host guessing.
 pkg_bridge_foreign_host_target: fn() -[Env]> String Never! {
-    if bridge_core_sys.get("JET_TARGET") == .Val(target) -> return target
+    if bridge_core_sys.get(ENV_JET_TARGET) == .Val(target) -> return target
     if bridge_core_sys.get("TARGET") == .Val(target) -> return target
     "{bridge_core_sys.arch()}-{bridge_core_sys.name()}"
 }

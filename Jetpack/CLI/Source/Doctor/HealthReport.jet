@@ -258,12 +258,12 @@ DoctorRegistryFailure: enum {
 // configured the default Jet registry is used.
 cli_doctor_registry_endpoints: fn() -[Env]> [(name: String, url: String)] Never! {
     found := [String: String]{}
-    default_url: sys.get("JET_REGISTRY_URL") ?? ""
+    default_url: sys.get(ENV_JET_REGISTRY_URL) ?? ""
     if default_url != "" -> found["jet"] = default_url
     names: sys.vars() ?? [String]{}
     loop key in names {
-        if !key.starts_with("JET_REGISTRY_") -> next
-        rest: key.removeprefix("JET_REGISTRY_")
+        if !key.starts_with(ENV_PREFIX_JET_REGISTRY) -> next
+        rest: key.removeprefix(ENV_PREFIX_JET_REGISTRY)
         if !rest.ends_with("_URL") -> next
         name: rest.removesuffix("_URL")
         url: sys.get(key) ?? ""
@@ -316,7 +316,7 @@ cli_doctor_git_registry_probe: fn(url: String) DoctorRegistryFailure! -[Env, Exe
         .timeout(4s)
     names: sys.vars() ?? [String]{}
     loop key in names {
-        if key.starts_with("JET_REGISTRY_") -> spec = spec.env_remove(key)
+        if key.starts_with(ENV_PREFIX_JET_REGISTRY) -> spec = spec.env_remove(key)
     }
     receipt: process.run_spec(spec) ?? return Err(DoctorRegistryFailure.ClientUnavailable)
     if receipt.timed_out -> return Err(DoctorRegistryFailure.TimedOut)
@@ -384,14 +384,14 @@ cli_doctor_check_cache: fn(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Nev
 
 // `JET_KEYS_DIR`, else `<home>/.jet/keys` (HOME, then USERPROFILE, then `.`).
 cli_doctor_keys_dir: fn() -[Env]> String Never! {
-    explicit: sys.get("JET_KEYS_DIR") ?? ""
+    explicit: sys.get(ENV_JET_KEYS_DIR) ?? ""
     if explicit != "" -> return explicit
     home: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
     files.join(home, ".jet/keys")
 }
 
 cli_doctor_check_signing_key: fn() -[FS, Env]> DoctorCheck Never! {
-    registry: sys.get("JET_REGISTRY_NAME") ?? "jet"
+    registry: sys.get(ENV_JET_REGISTRY_NAME) ?? "jet"
     secret: files.join(cli_doctor_keys_dir(), "{registry}.ed25519")
     public: files.join(cli_doctor_keys_dir(), "{registry}.ed25519.pub")
     if !files.is_file(secret) || !files.is_file(public) -> return DoctorCheck.degraded("signing", "signing key for `{registry}` is missing or incomplete", "run `jet registry keygen` before publishing")

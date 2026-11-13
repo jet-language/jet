@@ -5,7 +5,7 @@
 // Compiler gate #4303: borrowed String.trim -> bytes ABI. Keep the exact
 // trimmed-hex original acceptance; never copy trim to hide the compiler defect.
 use {
-    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row]
+    jet_foundation.[Diagnostic, ENV_JET_KEYS_DIR, diagnostic_from_registry, diagnostic_registry_row]
     jetpack_foundation.[FoundationPublicationPolicy, MAX_TREE_FILE_BYTES, foundation_open_file_authority, foundation_read_file_nofollow_at_root, foundation_write_file_nofollow_at_root]
     base64: core.encoding.base64
     crypto: core.crypto
@@ -29,7 +29,7 @@ PublicationGeneratedKey: struct {
 
 // Rust keys_dir / key_paths. Empty HOME remains a supplied value, not absence.
 publication_keys_dir: fn() -[Env]> String Never! {
-    override: sys.get("JET_KEYS_DIR") ?? ""
+    override: sys.get(ENV_JET_KEYS_DIR) ?? ""
     if override != "" -> return override
     home: sys.get("HOME") ?? (sys.get("USERPROFILE") ?? ".")
     files.join(files.join(home, ".jet"), "keys")

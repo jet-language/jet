@@ -1,7 +1,10 @@
 // The publish registry's identity: which registry, its tier, and the one
 // credential redaction. Publication's transport and `jet self doctor` both read
 // it here.
-use sys: core.sys
+use {
+    jet_foundation.[ENV_JET_REGISTRY_TIER, ENV_JET_REGISTRY_URL, ENV_PREFIX_JET_REGISTRY]
+    sys: core.sys
+}
 
 PublicationRegistryTier: enum {
     Core
@@ -22,7 +25,7 @@ publication_parse_tier: fn(value: String) -> PublicationRegistryTier? Never! {
     }
 }
 publication_tier_from_environment: fn() -[Env]> PublicationRegistryTier Never! {
-    publication_parse_tier(sys.get("JET_REGISTRY_TIER") ?? "") ?? PublicationRegistryTier.Core
+    publication_parse_tier(sys.get(ENV_JET_REGISTRY_TIER) ?? "") ?? PublicationRegistryTier.Core
 }
 
 PublicationRegistryConfig: struct {
@@ -43,11 +46,11 @@ PublicationRegistryConfig: struct {
 publication_parse_registries_from_env: fn(env: [String: String]) -> [PublicationRegistryConfig] Never! {
     result := [PublicationRegistryConfig]{}
     loop entry in env {
-        if !entry.key.starts_with("JET_REGISTRY_") -> next
-        suffix: entry.key.removeprefix("JET_REGISTRY_")
+        if !entry.key.starts_with(ENV_PREFIX_JET_REGISTRY) -> next
+        suffix: entry.key.removeprefix(ENV_PREFIX_JET_REGISTRY)
         if !suffix.ends_with("_URL") -> next
         name: suffix.removesuffix("_URL")
-        mirror: (env.get("JET_REGISTRY_{name}_MIRROR") ?? "") == "true"
+        mirror: (env.get("{ENV_PREFIX_JET_REGISTRY}{name}_MIRROR") ?? "") == "true"
         result.push(PublicationRegistryConfig.private(name.to_lower(), entry.value, mirror))
     }
     if result.len() == 0 -> result.push(PublicationRegistryConfig.public_default())
@@ -55,7 +58,7 @@ publication_parse_registries_from_env: fn(env: [String: String]) -> [Publication
 }
 publication_resolve_publish_registry: fn() -[Env]> PublicationRegistryConfig Never! {
     registry := PublicationRegistryConfig.public_default()
-    url: sys.get("JET_REGISTRY_URL") ?? ""
+    url: sys.get(ENV_JET_REGISTRY_URL) ?? ""
     if url != "" -> registry.url = url
     registry.tier = publication_tier_from_environment()
     registry.require_signed = registry.tier == .Community

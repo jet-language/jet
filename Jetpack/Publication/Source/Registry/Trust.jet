@@ -4,6 +4,7 @@
 // composition and entropy #3597/#4262.
 
 use {
+    jet_foundation.[ENV_JET_REGISTRY_ROOT_KEY]
     jet_pkg_model.[pkg_sha256_hex]
     jetpack_foundation.[FoundationPublicationPolicy, foundation_open_directory_authority, foundation_open_file_authority, foundation_write_file_nofollow_at_root]
     files: core.files
@@ -23,7 +24,7 @@ publication_registry_trust_path: fn(keys_dir: String, registry_name: String, dir
     files.join(files.join(base, directory), "{pkg_sha256_hex(registry_name.bytes())}.{extension}")
 }
 publication_configured_registry_root_key_path: fn(registry_name: String) -[Env]> String Never! {
-    configured: sys.get("JET_REGISTRY_ROOT_KEY") ?? ""
+    configured: sys.get(ENV_JET_REGISTRY_ROOT_KEY) ?? ""
     if configured != "" -> configured else -> publication_registry_root_key_path(registry_name)
 }
 publication_registry_root_key_is_hex: fn(public_key: String) -> Bool Never! {
@@ -58,7 +59,7 @@ publication_ensure_registry_root_key: fn(registry_name: String, public_key: Stri
     if !publication_registry_root_key_is_hex(public_key) -> return Err(publication_read_error(.InvalidInput, registry_name, "registry root key is not a 32-byte hexadecimal public key"))
     path: publication_configured_registry_root_key_path(registry_name)
     if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
-    if (sys.get("JET_REGISTRY_ROOT_KEY") ?? "") != "" -> return Err(publication_read_error(.NotFound, path, "configured registry root key is unavailable at {path}"))
+    if (sys.get(ENV_JET_REGISTRY_ROOT_KEY) ?? "") != "" -> return Err(publication_read_error(.NotFound, path, "configured registry root key is unavailable at {path}"))
     parent: files.dirname(path)
     if parent == "" -> return Err(publication_read_error(.InvalidInput, path, "registry root key has no parent"))
     authority: foundation_open_directory_authority(parent, true)

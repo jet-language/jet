@@ -2,7 +2,7 @@
 // organization floor. Gates run before creating directories or process locks.
 use {
     jet_foundation.[
-        Diagnostic, PolicyDeclaration, PolicyKey, PolicyScope, Span,
+        Diagnostic, ENV_JET_ORG_UNSAFE_POLICY, PolicyDeclaration, PolicyKey, PolicyScope, Span,
         diagnostic_from_registry, policy_gate_forbidding, policy_key_is_audited_gate, policy_key_name,
     ]
     sys: core.sys
@@ -43,7 +43,7 @@ PackageOrganizationPolicy: struct {
 }
 
 pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy PackageGateError! {
-    path: sys.get("JET_ORG_UNSAFE_POLICY") ?? return Ok(PackageOrganizationPolicy{declarations: [PolicyDeclaration]{}, deny: [String]{}, source: ""})
+    path: sys.get(ENV_JET_ORG_UNSAFE_POLICY) ?? return Ok(PackageOrganizationPolicy{declarations: [PolicyDeclaration]{}, deny: [String]{}, source: ""})
     source: files.read(path) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "cannot read the configured organization gate policy",
         "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {pkg_io_cause(err)}",

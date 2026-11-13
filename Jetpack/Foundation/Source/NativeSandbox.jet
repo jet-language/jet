@@ -7,6 +7,7 @@
 // AppContainer backend, so Windows reports the sandbox unavailable and every
 // sandboxed action fails closed.
 use {
+    jet_foundation.[ENV_JETPACK_DENY_NETWORK, ENV_JETPACK_FAKE_SANDBOX, ENV_JET_BUILD_OUTPUT, ENV_JET_BWRAP_URL]
     sys: core.sys
     process: core.process
     time: core.time
@@ -18,7 +19,7 @@ use {
 }
 
 
-NATIVE_SANDBOX_FAKE_ENV: "JETPACK_FAKE_SANDBOX"
+NATIVE_SANDBOX_FAKE_ENV: ENV_JETPACK_FAKE_SANDBOX
 NATIVE_SANDBOX_MAX_OUTPUT_BYTES: 67108864
 NATIVE_SANDBOX_MACOS_EXEC: "/usr/bin/sandbox-exec"
 NATIVE_SANDBOX_NOT_ENFORCED: "not-enforced"
@@ -46,11 +47,11 @@ NATIVE_SANDBOX_BWRAP_NAME: "bwrap"
 // Where a missing pinned Bubblewrap may come from besides the copy beside the
 // running jet: `JET_BWRAP_URL` (`https://` or `file://`), else the release
 // the seed's one-line RELEASE file names.
-NATIVE_SANDBOX_BWRAP_URL_ENV: "JET_BWRAP_URL"
+NATIVE_SANDBOX_BWRAP_URL_ENV: ENV_JET_BWRAP_URL
 NATIVE_SANDBOX_RELEASE_BASE: "https://github.com/jet-language/jet/releases/download"
 NATIVE_SANDBOX_RELEASE_FILE: "RELEASE"
 NATIVE_SANDBOX_MAX_RELEASE_BYTES: 256
-NATIVE_SANDBOX_DENY_NETWORK_ENV: "JETPACK_DENY_NETWORK"
+NATIVE_SANDBOX_DENY_NETWORK_ENV: ENV_JETPACK_DENY_NETWORK
 NATIVE_SANDBOX_FETCH_TIMEOUT_MS: 120000
 NATIVE_SANDBOX_FETCH_MAX_REDIRECTS: 5
 // How a user makes the sandbox usable, for every missing-sandbox diagnostic.
@@ -451,7 +452,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
-        .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
+        .Val(path) -> spec = spec.env(ENV_JET_BUILD_OUTPUT, path)
         .None -> {}
     }
     loop name in foundation_sandbox_sorted_names(env) -> spec = spec.env(name, env[name])
@@ -486,7 +487,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                         argv.push(source_path.copy())
                         argv.push("/work/source")
                     }
-                    output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
+                    output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output"}
                     loop part in output_args -> argv.push(part)
                 }
                 .None -> {

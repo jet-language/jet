@@ -112,7 +112,7 @@ store_verify_cache_entry_with_graph: fn(verification: &StoreVerification, roots:
     }
     closure: output_exists && policy && store_closure_is_reachable(roots, entry) && objects_rehash
     outcome: CacheVerification{output_exists, output_digest, source, recipe, platform, policy, signature_verified, unsigned_local_allowed, closure}
-    if !outcome.trusted() && sys.get("JETPACK_VERIFY_TRACE") != None {
+    if !outcome.trusted() && sys.get(ENV_JETPACK_VERIFY_TRACE) != None {
         term.eprint("VERIFY-TRACE ref={entry.reference} id={entry.id} legs={outcome.debug()} hash_probe={store_reuse_hash_probe(verification, roots, entry)}")
     }
     outcome

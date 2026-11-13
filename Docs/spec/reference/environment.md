@@ -34,6 +34,15 @@ one exists instead of adding another spelling for the same job.
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
 | `JETPACK_BIN` | executable path | Names the `jetpack` engine that `jet`'s engine verbs (`fetch`, `add`, `env`, `trust`, …) run. The lookup order is `JETPACK_BIN`, then the `jetpack` beside the running `jet`, then `PATH`; a `JETPACK_BIN` that names no executable file refuses with E1228 instead of falling through. `jet test --jetpack=<path>` (the `jetpack` test setting) sets it for every corpus row it runs, which otherwise get the engine this order finds for the jet under test. The name predates the `JET_<AREA>_<SETTING>` convention; it matches the `JETPACK_BIN` that Jetpack's process claims already use. |
+| `JETPACK_DENY_NETWORK` | any non-empty value | Keeps `jetpack` off the network: a provider fetch, a source-channel refresh, a toolchain update or a pinned-bubblewrap download fails as offline instead. |
+| `JETPACK_HANGAR_MAX_BYTES` | positive byte count | The Hangar's largest size (128 GiB when unset). It wins over the Hangar's `config/hangar-max-bytes`. |
+| `JETPACK_NIX_FALLBACK_BIN` | executable path | Names the Nix a local Nix fallback runs, instead of the one on `PATH`. |
+| `JETPACK_NIX_FALLBACK_POLICY` | `allow` or `deny` | `allow` lets a CI or non-interactive run fall back to a local Nix; `deny` forbids the fallback everywhere. Unset, only an interactive run falls back. |
+| `JETPACK_PRINCIPAL` | principal name | The principal recorded on a manually registered external root, instead of the CLI's. |
+| `JETPACK_SHARED_CAS` | directory | Names the content-addressed store every Hangar root shares, instead of each root's own `cas` directory. |
+| `JETPACK_SHELL_ON_FAIL` | shell executable | The shell a failed build opens in its preserved scratch directory, instead of `SHELL` (else `sh`, or `cmd` on Windows). |
+| `JET_ADVISORY_DB` | path | Names the advisory database a lock is checked against, instead of the project's `.jet/advisories.db`. |
+| `JET_BUILD_TARGET` | target triple | The target triple a Rust FFI bridge builds for, instead of rustc's host. |
 | `JET_BWRAP_URL` | `https://` or `file://` URL | Names where a command that runs build actions (`jet build`, `jet cc`) fetches Jet's pinned bubblewrap when neither the `bwrap` on PATH nor a pinned copy in the Hangar (`<hangar>/tools/<sha256>/bwrap`) or beside jet passes its probe, instead of the jet release. The file must still hash to the SHA-256 jet embeds (`NATIVE_SANDBOX_BWRAP_ASSETS`); a `file://` copy works offline, and `JETPACK_DENY_NETWORK` refuses an `https://` fetch. |
 | `JET_CC_PACK_ROOT` | directory | Names an unpacked C toolchain pack (a `jet env fetch-toolchain --json` root) whose clang and llvm-ar build a C or C++ file with `jet run` and `jet build` on every tier, instead of the pack jet's `jetpack` fetches. A Jet program's C closure still takes the pack and its musl sysroot from the `jetpack` engine. `CC` or `AR` still win. A golden `jet test` run with a jetpack sets it for every row. |
 | `JET_CC_PACK_URL` | `https://` or `file://` URL | Names where `jet cc` and `jet env fetch-toolchain` fetch this jet's C toolchain pack when it is neither in the Hangar nor beside jet, instead of the jet release. The pack must still hash to the SHA-256 jet embeds; a `file://` pack is a local copy and works offline. |
@@ -41,19 +50,27 @@ one exists instead of adding another spelling for the same job.
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_FUZZ_ITERATIONS` | positive integer | Sets the generated fuzz-case limit: the cases each property test runs (200 when unset). `jet test --grade=generated --iterations=<n>` sets it on the test harness (1000 when `--iterations` is unset). |
 | `JET_HELP_SHELL_PREFILL` | any value | Set by the `jet env hook` and branded-shell widgets (bare `jet`, Alt-?) when they run bare `jet` with stdout captured: the command picker still opens while stdin and stderr are a terminal, and prints the picked command line on stdout for the shell to put in its edit buffer, never running it. Unset, a picked line is only named on stderr. |
+| `JET_INSPECT` | `1` | Turns on a release deployment's devtools inspection. |
+| `JET_INSPECT_ALLOWLIST` | comma-separated networks | The networks (at most 64) a release deployment's devtools inspection answers. |
+| `JET_INSPECT_TOKEN` | token | The token a release deployment's devtools inspection requires. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
 | `JET_PACKAGE_STORE_DIR` | path | Overrides the package-store directory. |
 | `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. `jet test --grade=generated --seed=<n>` sets it on the test harness (the fixed 0 when `--seed` is unset and the caller sets none). `jet prove` runs every property from this seed, else from one derived from the program's inputs, and names it in each property row as `effectiveSeed`. |
+| `JET_REGISTRY_*` | URL, or `true` | `JET_REGISTRY_<NAME>_URL` names the endpoint of the registry `<name>` (in lowercase); `JET_REGISTRY_<NAME>_MIRROR=true` marks that registry a mirror. No Git that `jetpack` runs sees a `JET_REGISTRY_` variable. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |
 | `JET_REGISTRY_NAME` | registry name | Selects the named registry used by Jetpack doctor checks. |
+| `JET_REGISTRY_ROOT_KEY` | path | Names the pinned registry root key, instead of the registry's own key path. A configured key that is missing refuses. |
+| `JET_REGISTRY_TIER` | `core`, `community`, … | Selects the publication registry tier (`core` when unset or unknown). |
 | `JET_REGISTRY_URL` | URL | Overrides the default registry index. |
 | `JET_REPL_HISTORY` | `off` | Keeps REPL history in memory for the current session instead of persisting it. |
 | `JET_REPL_HISTORY_LIMIT` | positive integer | Sets the maximum persisted REPL entries. |
 | `JET_ROOT` | path | Overrides the installed Jet runtime-data root. |
 | `JET_SCHEDULER_THREADS` | positive integer | Sets the generated program's scheduler worker count. |
+| `JET_TARGET` | target triple | The target an environment's task facts, its entry receipt and a foreign bridge record, instead of the host's. |
 | `JET_TEST_FILTER` | test-name substring | Selects generated `jet test` cases; prefer the corresponding CLI flag. |
 | `JET_TEST_SERIAL` | `1` | Runs generated `jet test` cases serially; prefer the corresponding CLI flag. |
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |
+| `JET_TOOLCHAIN_ENDPOINT` | URL | Names the toolchain update endpoint, instead of the project's configured one and `https://dl.jet-lang.dev`. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
 <!-- END GENERATED ENVIRONMENT VARIABLES: User -->
 
@@ -95,6 +112,9 @@ object. A URL's user and password never appear in that list.
 <!-- BEGIN GENERATED ENVIRONMENT VARIABLES: Maintainer (Tools/agent/EnvironmentRows.jet; edit Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet) -->
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
+| `JETPACK_SEAL_CENSUS` | any value | Counts how often each path is sealed and reports the census. |
+| `JETPACK_TIMING` | any value | Reports the time each phase of composing an environment took. |
+| `JETPACK_VERIFY_TRACE` | any value | Prints to stderr why each cache entry failed verification. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (E2105) and names both. A code suite of `jet test` (the `packages`, `selfhost` and `perf` profiles of `Compiler`) gets the identity of the jet under test here, so it runs in a shell that sets none. |
 | `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
@@ -134,24 +154,42 @@ the text before it.
 <!-- BEGIN GENERATED ENVIRONMENT VARIABLES: Internal (Tools/agent/EnvironmentRows.jet; edit Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet) -->
 | Variable | Read by | Purpose |
 | --- | --- | --- |
+| `JETPACK_AUTO_CLEAN_ALWAYS` | `Jetpack/Store/Source/Lifecycle/GarbageCollection.jet` | Test hook: the Hangar's automatic clean runs every time, instead of at most once a day. |
 | `JETPACK_BOOTSTRAP_*` | `Compiler/test.jet` | The scratch directory, source root and engine areas the Jetpack bootstrap suite hands `Jetpack/Bootstrap/Assemble.jet`. |
 | `JETPACK_ENV` | `Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet` | Marks a shell that `jet env` activated. |
 | `JETPACK_ENV_DIR` | `Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet` | The `env.jet` directory `jet env hook` last activated, empty for none; a change from it loads or unloads. |
 | `JETPACK_ENV_HASH` | `Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet` | The identity of the environment `jet env hook` activated. |
 | `JETPACK_ENV_OLD_PATH` | `Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet` | The `PATH` from before activation, restored verbatim on unload. |
+| `JETPACK_FAILED_PACKAGE` | `Jetpack/CLI/Source/Commands/DiscoveryCommands.jet` | The package whose build failed, in the shell a failed build opens. |
+| `JETPACK_FAILED_SCRATCH` | `Jetpack/CLI/Source/Commands/DiscoveryCommands.jet` | The preserved scratch directory, in the shell a failed build opens. |
+| `JETPACK_FAILED_STEP` | `Jetpack/CLI/Source/Commands/DiscoveryCommands.jet` | The step that failed, in the shell a failed build opens. |
 | `JETPACK_FAKE_SANDBOX` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | Test hook: refuses the native Linux sandbox probe of the Rust foreign helper. |
+| `JETPACK_FIXTURES` | `Jetpack/Provider/Source/Core/CacheIdentity.jet` | The fixtures directory an `--offline` run resolves packages from, when no `--fixtures` names one. |
+| `JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT` | `Jetpack/CLI/Source/Tools/ToolProfile.jet` | Fault injection: a tool profile's publication fails at the phase it names. |
+| `JETPACK_PROMPT_LABEL` | `Jetpack/Environment/Source/Shell/BrandedShell.jet` | The label the prompt of a Jetpack shell prints. |
 | `JETPACK_REF` | `Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet` | The realized package refs inside a Jetpack shell. |
 | `JETPACK_ROOT` | `Compiler/JetTestKit/Source/Exec.jet` | Set by the test kit to each case's own Jetpack root under its scratch directory. |
+| `JETPACK_SERVICE_HEALTH_TIMEOUT_MS` | `Jetpack/CLI/Source/Services/ServicesCommand.jet` | Test hook: how long, in milliseconds, a service gets to become healthy (15 seconds when unset). |
+| `JETPACK_SERVICE_PORT` | `Jetpack/Services/Source/Supervisor/Lifecycle.jet` | Set for a service: its first port. |
+| `JETPACK_SERVICE_PORTS` | `Jetpack/Services/Source/Supervisor/Lifecycle.jet` | Set for a service: its ports, comma-separated. |
+| `JETPACK_SERVICE_SOCKETS` | `Jetpack/Services/Source/Supervisor/Lifecycle.jet` | Set for a service: its socket paths, one per line. |
+| `JETPACK_SERVICE_SOCKET_*` | `Jetpack/Services/Source/Supervisor/Lifecycle.jet` | Set for a service: `JETPACK_SERVICE_SOCKET_<n>` is its socket path number `<n>`, from 0. |
+| `JETPACK_SERVICE_SUPERVISOR` | `Jetpack/Services/Source/Supervisor/ServiceState.jet` | Marks the supervisor process a service is handed to. |
 | `JETPACK_TEST_REPO_ROOT` | `Compiler/test.jet` | The checkout a code suite's child runs from. |
 | `JET_ADAPTER_MODE` | `Compiler/JetCli/Source/Cli/InspectDecisions.jet` | The adapter mode `jet inspect decisions` hands the canonical pass. |
 | `JET_ADAPTER_OPERATION_IDS` | `Compiler/JetCli/Source/Cli/InspectDecisions.jet` | Comma-separated operation ids `jet inspect decisions` hands the canonical pass. |
+| `JET_ADVISORY_NOW` | `Jetpack/Publication/Source/Advisory.jet` | Test clock: the Unix seconds an advisory check takes as now. |
 | `JET_API_CACHE_DIR` | `Jetpack/PackageModel/Source/Store/CapabilityDigest.jet` | Isolates the capability-digest cache of repository tests from user state. |
 | `JET_BIN` | `Compiler/test.jet` | The jet under test, handed to the Jetpack bootstrap and to suite children. |
+| `JET_BIND_TEMP` | `Jetpack/PackageModel/Source/Foreign/WorkerSupervisor.jet` | The private scratch directory a foreign binder's supervisor gives its worker. |
 | `JET_BUILD_OUTPUT` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The output directory inside the Rust foreign build sandbox. |
 | `JET_CI_EVIDENCE_DIR` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | Receives each corpus suite's case verdicts as `<suite>.json`. |
 | `JET_CODEMOD_CRASH_AFTER_JOURNAL` | `Compiler/JetCli/Source/Cli/SourceTransaction.jet` | Fault injection: with `1`, a source transaction exits after writing its journal. |
 | `JET_CODEMOD_CRASH_AFTER_RENAME` | `Compiler/JetCli/Source/Cli/SourceTransaction.jet` | Fault injection: a source transaction exits after the rename this number counts, from 1. |
 | `JET_COMPILER_EXTENSION` | `Compiler/JetTestKit/Source/Exec.jet` | Kept out of every test-kit child. |
+| `JET_COMPTIME_CACHE_OBSERVATION_PATH` | `Jetpack/Store/Source/Build/Cache.jet` | The file, inside `$HOME/.cache`, each action-cache decision is appended to as evidence. |
+| `JET_COMPTIME_MODE` | `Jetpack/Store/Source/Build/Cache.jet` | The mode an action-cache observation records. |
+| `JET_COMPTIME_OPERATION_ID` | `Jetpack/Store/Source/Build/Cache.jet` | The operation id an action-cache observation records. |
 | `JET_COV_OUT` | `Compiler/JetCli/Source/Cli/TestCoverage.jet` | The file a covered test program writes its coverage counts to. |
 | `JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the locked closure a development build's production receipt records. |
 | `JET_DEVELOPMENT_RECEIPT_DIRECTORY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The directory a development build's program writes its production receipt to. |
@@ -203,6 +241,7 @@ the text before it.
 | `JET_NATIVE_TEST_REPORT_PATH` | `Compiler/JetCli/Source/Cli/NativeTests.jet` | The outcome file a native test program reports, instead of running its tests. |
 | `JET_OBSERVE` | `Compiler/JetCli/Source/Cli/Host.jet` | Marks a program that an observed run started. |
 | `JET_ORG_UNSAFE_POLICY` | `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet` | CI and admin input naming an organization's unsafe-policy file; a configured file that cannot be read fails closed. |
+| `JET_PROFILE` | `Jetpack/Recipe/Source/Build/Fetch.jet` | Set to `default` for a recipe build. |
 | `JET_PROJECT_ROOT` | `Compiler/JetCli/Source/Cli/Host.jet` | The project root `jet test` hands its test child. |
 | `JET_PROVE_CAPTURE_JOURNAL` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The journal a program `jet prove` captures appends each raw read to. |
 | `JET_PROVE_REPLAY_JOURNAL` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The journal of records a program `jet prove` replays reads from. |
@@ -218,8 +257,11 @@ the text before it.
 | `JET_RUST_MUSL_TOOLCHAIN` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The musl Rust toolchain whose `bin/rustc` Rust foreign builds run. |
 | `JET_SCHEMA_CACHE_DIR` | `Compiler/JetDriver/Source/Driver/Schema.jet` | Isolates the schema cache of repository tests from user state. |
 | `JET_SCRATCH_ROOT` | `Compiler/JetTestKit/Source/Kit.jet` | The disk-backed root under which the test kit keeps its scratch and state. |
+| `JET_SHARED_STORE_TRUST_KEY` | `Jetpack/Store/Source/Broker/BrokerService.jet` | The trust-key credential the shared-store broker's systemd unit hands it. |
 | `JET_STORE_CAP_BYTES` | `Compiler/JetCli/Source/Cli/Cache.jet` | The byte cap of the build store, reported by `jet cache status` as its source. |
 | `JET_STORE_DIR` | `Compiler/JetRuntime/Source/VaultGet.jet` | The store directory a vault audit is rooted in when no test scratch is set. |
+| `JET_STORE_RESERVE_BYTES` | `Jetpack/Store/Source/ArtifactStore/StoreConfig.jet` | The free bytes the build store keeps in reserve (2 GiB when unset). |
+| `JET_TASK_LIMIT_*` | `Jetpack/CLI/Source/Jobs/JobRunner.jet` | Set for a task: each `limits` entry of its metadata as `JET_TASK_LIMIT_<NAME>`. |
 | `JET_TEST_CAPTURE` | `Compiler/JetCli/Source/Cli/Host.jet` | The output capture mode `jet test` hands its test child. |
 | `JET_TEST_JSON` | `Tools/agent/RuntimeGenerators.jet` | Asks a test program for its results as JSON. |
 | `JET_TEST_MEASURE` | `Compiler/JetCli/Source/Cli/Host.jet` | With `1`, a test program measures each test. |
@@ -237,6 +279,21 @@ the text before it.
 | `JET_TEST_TRACE_TIERS` | `Compiler/JetCli/Source/Cli/Host.jet` | With `1`, a test program traces its tiers. |
 | `JET_TOOLCHAIN_EXEC` | `Compiler/JetFoundation/Data/Syntax/Predicates.jet` | Marks a child that a pinned toolchain re-executed, so it runs natively instead of re-executing again. |
 | `JET_TOOLCHAIN_FIXTURE` | `Compiler/JetFoundation/Data/Syntax/Predicates.jet` | Points toolchain realization at a Hangar object holding prebuilt ring artifacts. |
+| `JET_TOOLCHAIN_UPDATE_CHANNEL` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The channel of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_CURRENT` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The executable the Windows update helper replaces. |
+| `JET_TOOLCHAIN_UPDATE_EXPIRES_AT` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The expiry of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_HELPER` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | Marks the copy of jet that finishes a toolchain update on Windows once the old executable is released. |
+| `JET_TOOLCHAIN_UPDATE_MIN_VERSION` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The minimum version of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_PLATFORM` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The platform of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_PUBLISHED_AT` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The publication time of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_ROLLBACK` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | Where the Windows update helper keeps the old executable until the new one passes its health check. |
+| `JET_TOOLCHAIN_UPDATE_RUNNING_VERSION` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The version of the jet that staged the update the Windows update helper finishes. |
+| `JET_TOOLCHAIN_UPDATE_SEQUENCE` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The sequence number of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_SHA256` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The SHA-256 of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_SIZE` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The artifact size of the update plan the Windows update helper checks the staged executable against. |
+| `JET_TOOLCHAIN_UPDATE_STAGED` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The verified new executable the Windows update helper installs. |
+| `JET_TOOLCHAIN_UPDATE_STATE` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The update state file the Windows update helper commits. |
+| `JET_TOOLCHAIN_UPDATE_VERSION` | `Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet` | The version of the update plan the Windows update helper checks the staged executable against. |
 <!-- END GENERATED ENVIRONMENT VARIABLES: Internal -->
 
 The test kit starts every case child with `HOME`, `JET_HOME`, and the

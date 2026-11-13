@@ -7,7 +7,7 @@
 // (MoveFileExW with MOVEFILE_DELAY_UNTIL_REBOOT). Core has no such call, so
 // the helper copy is left in the temporary directory.
 
-TOOLCHAIN_WINDOWS_HELPER_ENV: "JET_TOOLCHAIN_UPDATE_HELPER"
+TOOLCHAIN_WINDOWS_HELPER_ENV: ENV_JET_TOOLCHAIN_UPDATE_HELPER
 TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS: 600
 TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS: 50
 
@@ -338,20 +338,20 @@ recipe_update_install_windows_deferred: fn(current_exe: String, parent: String, 
     }
     spec: process.cmd([String]{helper})
         .env(TOOLCHAIN_WINDOWS_HELPER_ENV, "1")
-        .env("JET_TOOLCHAIN_UPDATE_CURRENT", current_exe)
-        .env("JET_TOOLCHAIN_UPDATE_STAGED", staged)
-        .env("JET_TOOLCHAIN_UPDATE_ROLLBACK", rollback)
-        .env("JET_TOOLCHAIN_UPDATE_STATE", state_path)
-        .env("JET_TOOLCHAIN_UPDATE_CHANNEL", plan.channel)
-        .env("JET_TOOLCHAIN_UPDATE_PLATFORM", plan.platform)
-        .env("JET_TOOLCHAIN_UPDATE_SEQUENCE", "{plan.sequence}")
-        .env("JET_TOOLCHAIN_UPDATE_VERSION", plan.version)
-        .env("JET_TOOLCHAIN_UPDATE_PUBLISHED_AT", "{plan.published_at}")
-        .env("JET_TOOLCHAIN_UPDATE_EXPIRES_AT", "{plan.expires_at}")
-        .env("JET_TOOLCHAIN_UPDATE_MIN_VERSION", plan.min_version)
-        .env("JET_TOOLCHAIN_UPDATE_RUNNING_VERSION", running_version)
-        .env("JET_TOOLCHAIN_UPDATE_SIZE", "{plan.size}")
-        .env("JET_TOOLCHAIN_UPDATE_SHA256", plan.sha256)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_CURRENT, current_exe)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_STAGED, staged)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_ROLLBACK, rollback)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_STATE, state_path)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_CHANNEL, plan.channel)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_PLATFORM, plan.platform)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_SEQUENCE, "{plan.sequence}")
+        .env(ENV_JET_TOOLCHAIN_UPDATE_VERSION, plan.version)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_PUBLISHED_AT, "{plan.published_at}")
+        .env(ENV_JET_TOOLCHAIN_UPDATE_EXPIRES_AT, "{plan.expires_at}")
+        .env(ENV_JET_TOOLCHAIN_UPDATE_MIN_VERSION, plan.min_version)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_RUNNING_VERSION, running_version)
+        .env(ENV_JET_TOOLCHAIN_UPDATE_SIZE, "{plan.size}")
+        .env(ENV_JET_TOOLCHAIN_UPDATE_SHA256, plan.sha256)
         .detached()
     if spec.spawn() == {
         .Ok(_) -> Ok(ToolchainInstallOutcome.Deferred)
@@ -391,19 +391,19 @@ recipe_update_copy_regular_file: fn(source: String, destination: String, label: 
 // the parent passed, wait for the old executable to be released, replace it,
 // health-check, commit the state, and roll back on failure.
 recipe_update_windows_helper_run: fn() RecipeError! -[FS, Env, Exec, Time, Time.Wait]> {
-    current: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_CURRENT")
-    staged: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STAGED")
-    rollback: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_ROLLBACK")
-    state_path: recipe_update_helper_path("JET_TOOLCHAIN_UPDATE_STATE")
-    channel: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_CHANNEL")
-    platform: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_PLATFORM")
-    version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_VERSION")
-    published_at: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_PUBLISHED_AT")
-    expires_at: recipe_update_helper_timestamp("JET_TOOLCHAIN_UPDATE_EXPIRES_AT")
-    min_version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_MIN_VERSION")
-    running_version: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_RUNNING_VERSION")
+    current: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_CURRENT)
+    staged: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_STAGED)
+    rollback: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_ROLLBACK)
+    state_path: recipe_update_helper_path(ENV_JET_TOOLCHAIN_UPDATE_STATE)
+    channel: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_CHANNEL)
+    platform: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_PLATFORM)
+    version: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_VERSION)
+    published_at: recipe_update_helper_timestamp(ENV_JET_TOOLCHAIN_UPDATE_PUBLISHED_AT)
+    expires_at: recipe_update_helper_timestamp(ENV_JET_TOOLCHAIN_UPDATE_EXPIRES_AT)
+    min_version: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_MIN_VERSION)
+    running_version: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_RUNNING_VERSION)
     size: recipe_update_helper_size()
-    sha256: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SHA256")
+    sha256: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_SHA256)
     sequence: recipe_update_helper_sequence()
     state: ToolchainUpdateState{schema: 1, channel, platform, sequence, version, sha256}
     recipe_update_validate_component(state.channel, "Windows self-update channel")
@@ -489,12 +489,12 @@ recipe_update_helper_text: fn(name: String) -[Env]> String RecipeError! {
 }
 
 recipe_update_helper_sequence: fn() -[Env]> Int RecipeError! {
-    text: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SEQUENCE")
+    text: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_SEQUENCE)
     recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper sequence is invalid"))
 }
 
 recipe_update_helper_size: fn() -[Env]> Int RecipeError! {
-    text: recipe_update_helper_text("JET_TOOLCHAIN_UPDATE_SIZE")
+    text: recipe_update_helper_text(ENV_JET_TOOLCHAIN_UPDATE_SIZE)
     size: recipe_parse_count(text) ?? return Err(RecipeError.Update("Windows helper artifact size is invalid"))
     if size == 0 || size > TOOLCHAIN_MAX_ARTIFACT_BYTES -> return Err(RecipeError.Update("Windows helper artifact size is outside the channel bound"))
     Ok(size)

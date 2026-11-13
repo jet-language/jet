@@ -262,7 +262,7 @@ cli_first_word: fn(text: String) -> String? Never! {
 }
 
 cli_git_ls_remote: fn(url: String, pattern: String) -[Env, Exec, Time.Wait]> String ProviderError! {
-    if sys.get("JETPACK_DENY_NETWORK") == .Val(value) && value != "" {
+    if sys.get(ENV_JETPACK_DENY_NETWORK) == .Val(value) && value != "" {
         return Err(ProviderError.Offline("network disabled by JETPACK_DENY_NETWORK while refreshing source channels"))
     }
     spec: foundation_hardened_git_command().args_extend([String]{"ls-remote", "--refs", "--", url, pattern})

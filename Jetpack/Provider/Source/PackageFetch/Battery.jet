@@ -11,7 +11,7 @@ PKG_FETCH_BATTERIES_DIR: "Jetpack/Provider/Batteries"
 // finds it: JET_TOOLCHAIN_ROOT, else the nearest directory at or above
 // `start` that holds a Jet toolchain (`Core/` and `Compiler/Prelude/`).
 pkg_fetch_toolchain_root: fn(start: String) -[FS, Env]> String? Never! {
-    if sys.get("JET_TOOLCHAIN_ROOT") == .Val(root) -> return Val(root)
+    if sys.get(ENV_JET_TOOLCHAIN_ROOT) == .Val(root) -> return Val(root)
     current := start
     loop {
         if files.is_dir(files.join(current, "Core")) && files.is_dir(files.join(current, "Compiler/Prelude")) -> return Val(current)

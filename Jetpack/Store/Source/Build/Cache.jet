@@ -8,7 +8,8 @@
 use {
     jet_foundation.[
         DiagnosticBuildError, DiagnosticErrorContextFrame, DiagnosticErrorConversion, DiagnosticErrorDetails, DiagnosticErrorField,
-        DiagnosticErrorSpan, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, foundation_json_integer,
+        DiagnosticErrorSpan, ENV_JET_COMPTIME_CACHE_OBSERVATION_PATH, ENV_JET_COMPTIME_MODE, ENV_JET_COMPTIME_OPERATION_ID,
+        diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, foundation_json_integer,
     ]
     jet_pkg_model.[pkg_json_array, pkg_json_object, pkg_json_render, pkg_json_text]
     files: core.files
@@ -591,7 +592,7 @@ build_record_lines: fn(text: String) -> [String] Never! {
 // confines the path, and a final link is never followed. It never supplies
 // or influences a cache decision.
 build_record_cache_event: fn(action: String, key: String, status: ActionCacheStatus, phase: String, outcome: ActionOutcome?) -[FS, Env]> {
-    path: sys.get("JET_COMPTIME_CACHE_OBSERVATION_PATH") ?? return
+    path: sys.get(ENV_JET_COMPTIME_CACHE_OBSERVATION_PATH) ?? return
     home: sys.get("HOME") ?? return
     allowed_root: files.join(home, ".cache")
     if !path.starts_with("/") || !cli_paths.is_relative_to(cli_paths.of(path), cli_paths.of(allowed_root)) -> return
@@ -615,8 +616,8 @@ build_record_cache_event: fn(action: String, key: String, status: ActionCacheSta
         .Val(value) -> Dyn.Text(build_encode_outcome(value))
         .None -> Dyn.Null
     }
-    mode: sys.get("JET_COMPTIME_MODE") ?? "unknown"
-    operation_id: sys.get("JET_COMPTIME_OPERATION_ID") ?? "unknown"
+    mode: sys.get(ENV_JET_COMPTIME_MODE) ?? "unknown"
+    operation_id: sys.get(ENV_JET_COMPTIME_OPERATION_ID) ?? "unknown"
     event: Dyn.Object([
         "schema": Dyn.Text("jet.comptime-cache-event.v1"),
         "mode": Dyn.Text(mode),

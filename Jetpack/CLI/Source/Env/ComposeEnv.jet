@@ -197,7 +197,8 @@ NativeEnvironmentProjection: struct {
     }
 
     env_vars: fn(self) -[Env]> [String: String] Never! {
-        vars := [String: String]{"JET_ROOT": self.project_root}
+        vars := [String: String]{}
+        vars[ENV_JET_ROOT] = self.project_root
         if self.activation == {
             .Disabled -> vars[ENV_DISABLE_VAR] = "1"
         }
@@ -341,7 +342,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     live_tty: live_mode && theme.live_enabled()
     live := theme.live_region()
     completed_steps := 0
-    phase_timing: sys.get("JETPACK_TIMING") != None
+    phase_timing: sys.get(ENV_JETPACK_TIMING) != None
     compose_started: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
     loop spec in plan.refs {
@@ -624,7 +625,7 @@ cli_validate_integration_facts: fn(plan: RunPlan) CLIError! -[Env]> {
         .Ok(_) -> {}
     }
     os: if sys.name() == "macos" -> "darwin" else -> sys.name()
-    target: sys.get("JET_TARGET") ?? "{sys.arch()}-{os}"
+    target: sys.get(ENV_JET_TARGET) ?? "{sys.arch()}-{os}"
     loop fact in facts.task_facts {
         if !facts.tasks.contains(fact.name) -> return Err(CLIError.InvalidData("integration task `{fact.name}` is not disclosed by its fact projection"))
         loop package in fact.packages {

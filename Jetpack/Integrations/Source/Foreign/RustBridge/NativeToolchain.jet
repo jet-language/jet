@@ -4,6 +4,7 @@
 // the bridge cache identity; a missing selected tool is a refusal, never a
 // silent fallback to another host tool.
 use {
+    jet_foundation.[ENV_JET_BUILD_TARGET, ENV_JET_FFI_CACHE_DIR]
     sys: core.sys
     process: core.process
     files: core.files
@@ -137,7 +138,7 @@ pkg_ffi_native_toolchain_identity: fn() -[Env, Exec, Time.Wait]> String Never! {
 
 // The target triple: `JET_BUILD_TARGET` when set, else rustc's host line.
 pkg_ffi_host_target: fn() -[Env, Exec, Time.Wait]> String Never! {
-    if sys.get("JET_BUILD_TARGET") == .Val(target) {
+    if sys.get(ENV_JET_BUILD_TARGET) == .Val(target) {
         if target.trim() != "" -> return target
     }
     rustc: sys.get("RUSTC") ?? "rustc"
@@ -152,7 +153,7 @@ pkg_ffi_host_target: fn() -[Env, Exec, Time.Wait]> String Never! {
 
 // `JET_FFI_CACHE_DIR`, else `<home>/.cache/jet/ffi`.
 pkg_ffi_cache_dir: fn() -[Env]> String Never! {
-    if sys.get("JET_FFI_CACHE_DIR") == .Val(dir) -> return dir
+    if sys.get(ENV_JET_FFI_CACHE_DIR) == .Val(dir) -> return dir
     files.join(files.join(files.join(pkg_ffi_dirs_home(), ".cache"), "jet"), "ffi")
 }
 

@@ -4,6 +4,7 @@
 // #3594; the complete signed/offline Fetch journey remains #4262/#3597.
 
 use {
+    jet_foundation.[ENV_JET_REGISTRY_CACHE_DIR]
     jet_pkg_model.[PublicationRegistryConfig, pkg_sha256_hex]
     jetpack_foundation.[FoundationDirectoryAuthority, foundation_open_directory_authority]
     files: core.files
@@ -20,7 +21,7 @@ publication_registry_cache_component: fn(name: String) -> String Never! {
     if safe -> name.copy() else -> "registry-{pkg_sha256_hex(name.bytes())}"
 }
 publication_index_repo_path: fn(registry: PublicationRegistryConfig) -[Env]> String Never! {
-    configured: sys.get("JET_REGISTRY_CACHE_DIR") ?? ""
+    configured: sys.get(ENV_JET_REGISTRY_CACHE_DIR) ?? ""
     base: if configured != "" -> configured else -> files.join(files.join(sys.get("HOME") ?? ".", ".jet"), "registry-index")
     files.join(base, publication_registry_cache_component(registry.name))
 }

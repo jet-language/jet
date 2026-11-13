@@ -5,7 +5,7 @@
 // #4438: time.now declares JetDateTime while its native leaf returns i64.
 // Keep the real clock and original JET_ADVISORY_NOW override; no alternate clock.
 use {
-    jet_foundation.[Diagnostic, authority_ascii_lower, diagnostic_from_registry]
+    jet_foundation.[Diagnostic, ENV_JET_ADVISORY_DB, ENV_JET_ADVISORY_NOW, authority_ascii_lower, diagnostic_from_registry]
     jet_pkg_model.[LockFile, LockedPackage, PackagePolicyException, pkg_lock_enforce_provenance_requirement, pkg_lock_parse_unsigned]
     jetpack_foundation.[foundation_tree_hash]
     files: core.files
@@ -136,7 +136,7 @@ PublicationLockMaturity: struct {
 }
 
 publication_advisory_feed_path: fn(root: String) -[FS, Env]> String? Never! {
-    if sys.get("JET_ADVISORY_DB") == .Val(path) -> return Val(path)
+    if sys.get(ENV_JET_ADVISORY_DB) == .Val(path) -> return Val(path)
     path: files.join(files.join(root, ".jet"), "advisories.db")
     if files.is_file(path) -> return Val(path)
     None
@@ -450,7 +450,7 @@ publication_lock_maturity_diagnostics: fn(lock: LockFile, feed: PublicationAdvis
     Ok(result)
 }
 publication_advisory_now: fn() -[Env, Time]> Int Never! {
-    if sys.get("JET_ADVISORY_NOW") == .Val(value) {
+    if sys.get(ENV_JET_ADVISORY_NOW) == .Val(value) {
         if pkg_lock_parse_unsigned(value, PUBLICATION_U64_MAX) == .Val(now) -> return now
     }
     now: time.unix_ms(time.now()) /% 1000

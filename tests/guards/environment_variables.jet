@@ -1,15 +1,19 @@
 use environment_files: core.files
 
-// Every `JET_*` or `JETPACK_*` variable the compiler names has its one row in
-// JET_ENVIRONMENT_VARIABLES, or is a compiler control's variable
+// Every `JET_*` or `JETPACK_*` variable the compiler or Jetpack names has its
+// one row in JET_ENVIRONMENT_VARIABLES, or is a compiler control's variable
 // (CLIControls.jet); every row's reader still names it, by its text or by the
-// runtime accessor Tools/agent/EnvironmentRows.jet generates for it. A name is
-// a whole string literal of a compiler source outside its Tests directories, or
-// of the runtime generators. A literal ending in `_` is a prefix the code
-// matches names by; a row starting with it covers it. A row ending in `*` is a
-// family and covers every name starting with the text before the `*`.
+// constant or runtime accessor Tools/agent/EnvironmentRows.jet generates for
+// it. A name is a whole string literal of a compiler or Jetpack source outside
+// its Tests directories, or of the runtime generators. A literal ending in `_`
+// is a prefix the code matches names by; a row starting with it covers it. A
+// row ending in `*` is a family and covers every name starting with the text
+// before the `*`.
 ENVIRONMENT_REGISTRY: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
-ENVIRONMENT_ROOTS: [String]{"Compiler", "Tools/agent/RuntimeGenerators.jet"}
+ENVIRONMENT_ROOTS: [String]{"Compiler", "Jetpack", "Tools/agent/RuntimeGenerators.jet"}
+// The scanned roots' directories not yet scanned: the Jetpack bootstrap scripts,
+// whose variables get their rows with the checkout tools' own.
+ENVIRONMENT_UNSCANNED: [String]{"Jetpack/Bootstrap"}
 
 // The literals in the scanned code that name no environment variable.
 ENVIRONMENT_NOT_VARIABLES: [(prefix: String, why: String)]{
@@ -70,6 +74,7 @@ environment_scan: fn(path: String, out: &[String]) {
     if environment_files.is_dir(path) {
         loop child in (environment_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || child.name == "Tests" -> next
+            if ENVIRONMENT_UNSCANNED.contains(environment_files.join(path, child.name)) -> next
             environment_scan(environment_files.join(path, child.name), out)
         }
         return
@@ -103,6 +108,13 @@ environment_accessor: fn(name: String) -> String {
     "env_name_{text.lower()}()"
 }
 
+// The constant of the row `name` (Compiler/JetFoundation/Source/Registry/EnvironmentNames.jet).
+environment_constant: fn(name: String) -> String {
+    text: name.removesuffix("*")
+    if text != name -> return "ENV_PREFIX_{text.removesuffix("_")}"
+    "ENV_{text}"
+}
+
 #Test("every environment variable the compiler names has one registry row, and every row's reader names it") {
     guards_enter_root()
     rows: environment_rows()
@@ -114,7 +126,7 @@ environment_accessor: fn(name: String) -> String {
         if seen.contains(row.name) -> problems.push("{row.name}: two rows")
         seen.push(row.name.copy())
         text: environment_files.read(row.reader) ?? ""
-        if !text.contains(row.name.removesuffix("*")) && !text.contains(environment_accessor(row.name)) -> problems.push("{row.name}: its reader {row.reader} does not name it")
+        if !text.contains(row.name.removesuffix("*")) && !text.contains(environment_accessor(row.name)) && !text.contains(environment_constant(row.name)) -> problems.push("{row.name}: its reader {row.reader} does not name it")
     }
     found := [String]{}
     loop root in ENVIRONMENT_ROOTS {
@@ -140,6 +152,8 @@ environment_accessor: fn(name: String) -> String {
     assert(environment_covered("JET_C", sample, [String]{"JET_C"}))
     assert_eq(environment_accessor("JET_B"), "env_name_jet_b()")
     assert_eq(environment_accessor("JET_A_*"), "env_prefix_jet_a()")
+    assert_eq(environment_constant("JET_B"), "ENV_JET_B")
+    assert_eq(environment_constant("JET_A_*"), "ENV_PREFIX_JET_A")
     lits := [String]{}
     environment_literals("f", "a(\"JET_X\") b(\"JET_Y: {{v}}\") \"JETPACK_Z\" \"JETX\"", lits)
     assert_eq(lits.join(","), "f JET_X,f JETPACK_Z")
