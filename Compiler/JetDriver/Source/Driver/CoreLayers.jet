@@ -6,6 +6,10 @@
 // code, or a private part (`__core_<area>_<part>`) of a higher area. The scan
 // reads tokens, not import edges, so a qualified path with no `use` counts
 // too. Comments and quoted text name nothing; an interpolation's code does.
+// A higher layer's name still binds, so the report doesn't stop the compile:
+// the driver checks it beside the load (Pipeline.jet
+// jet_driver_compile_stages), and `jet check Core` reports Core's body errors
+// with it.
 use {
     jet_foundation.[Diagnostic, ModuleLayer, Span]
     jet_lexer.[STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACKET, TOKEN_QUESTION_DOT, TOKEN_RBRACKET, Token, TokenTables, lex_generated, token_decoded, token_string_parts]

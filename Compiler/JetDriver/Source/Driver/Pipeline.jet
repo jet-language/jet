@@ -3874,7 +3874,13 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKe
     // so does a `jet test` of a Core source, so its unit loads with its owner.
     load := jet_driver_load_reach(request, !kg.enabled && !request.every_core_body && request.core_tests == "")
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
+    // Under `jet check Core`, each Core name of a higher layer's module
+    // (E1012). The name still binds, so it reports without stopping the
+    // compile, and the check also reports every Core body's errors.
+    layer_diagnostics := [Diagnostic]{}
+    jet_driver_check_core_layers(request, load.source_units, layer_diagnostics)
     result := jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture)
+    loop diagnostic in layer_diagnostics -> result.diagnostics.push(diagnostic)
     // The compile is over: no comptime child may outlive it (Native.jet).
     if request.eval_config.native == .Val(session) -> jet_eval_native_session_close(session)
     jet_driver_trace_released(request.trace_sink)
