@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6794,
-    "rev": 101525,
+    "nextNum": 6795,
+    "rev": 101534,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58254,6 +58254,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Owner order (2026-11-13): one slot works the data-oriented core immediately, done carefully, systemically and cleanly as a fast intelligent cutover. Tracked as #6793 (step 3, gate #5479 c7 and #5910; staffed by G11Speed-5). The parallel pipeline is tracked as #6794 (step 2, gate #5479 c6). It is unstaffed, and starts after #6793's interning and arenas land."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Speed rows (Lander5, cold, median of 3): seed-b14 (a0.0.45) against the g11-core-b1 jet on dev 3e01b4d967.\n- jetc-trace run: 2.40 s → 0.90 s (−63%)\n- check Core: 29.98 s → 9.39 s (−69%)\n- check JetSema: 31.62 s → 20.26 s (−36%)\n- Throughput: 7,602 → 8,510 lines/s (+12%)\n- hello run: unchanged at 0.02 s; peak memory −15% (46 → 39 MB)\n- RunColdContext --help: 9.74 s → 3.46 s, but it still ends in the #6791 ICE, so this is time to the ICE.\n- Peak memory is otherwise within ±1%.\nWhat the core-b1 jet carries: everything on dev since seed-b14 (lx1 lexer, ly1 lazy trait impls, the c23 calling-thread compile, zlib-a and the rest) plus core-b1's unlanded members layers-a5, tbl and t1-r2. Their replacements (a6, tbl-r2, t1-r3) wait in g11-core-d. c1land, dec1 and the c22 precompiled-Core train are not in it."
         },
         {
@@ -58536,7 +58541,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T14:40:10.209Z",
+      "updated": "2026-11-13T14:47:43.364Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -95759,6 +95764,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T14:47:19.304Z"
+        },
+        {
+          "n": 3,
+          "text": "Flat AST: the parser writes struct-of-arrays node columns into a phase arena, and no AST node is a separate heap allocation. Proof: the census, the chain fixed point and identical goldens, ui and cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:20.528Z"
+        },
+        {
+          "n": 4,
+          "text": "Flat types and IR: the type table and IR are flat id-indexed columns in per-phase arenas, freed in bulk at phase end. Compiler data carries no reference counts. Proof: the census, the chain fixed point and identical goldens, ui and cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:21.654Z"
+        },
+        {
+          "n": 5,
+          "text": "Memory: peak RSS of the self-compile is under 1 GB (#5910), and jet check of one Compiler file is under 1 GB (#5910 c62), each measured with GNU time maxrss on the dev tip.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:22.689Z"
+        },
+        {
+          "n": 6,
+          "text": "Speed gate: the #5479 c1 cell (cold, uncached jet build of Compiler plus Core, n=3 median) shows at most 5 µs CPU per line, and #5479 c7's gate is met from this evidence. Each landed slice records its before and after row in $JET_SCRATCH_ROOT/lanes/Main/speed-metrics.tsv and a log on this card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:23.831Z"
         }
       ],
       "refs": [],
@@ -95769,9 +95810,68 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-13T14:47:19.304Z",
+      "updated": "2026-11-13T14:47:23.831Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 6
+    },
+    {
+      "id": "c0hkdzht",
+      "num": 6794,
+      "title": "Parallel compiler pipeline: streaming modules, parallel comptime, wait-free queues, per-thread arenas (24 of 32 threads)",
+      "body": "Owner order (2026-11-13): the parallel pipeline is tracked as its own card so it cannot be lost. This card is the work home for #5479 plan step 2 (#5479 c6), which stays as the gate and is met from this card's evidence. It is not staffed today: the data-oriented core (#6793) takes the speed slot, and this card starts once #6793's interning and per-phase arenas have landed. Lock-free per-thread allocation and contention-free scaling depend on them.\n\nWhat it is: modules stream through the pipeline as soon as their dependencies are checked, with no phase-wide barriers. Comptime runs in parallel. Work queues are wait-free. Each thread allocates from its own arena and takes no global lock.\n\nProjected ceiling (from today's numbers, not measured): about 5 to 24 busy threads, so at most about 5× wall time on its own with CPU per line unchanged. Its 400K lines/s gate needs #6793's CPU cut as well.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design: a slice plan on the card covering the module dependency scheduler, removal of the phase barriers in the driver, parallel comptime children, the wait-free work queue, and per-thread arenas built on #6793's arenas, each with its proof.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:39.951Z"
+        },
+        {
+          "n": 2,
+          "text": "Streaming: a module enters sema, lowering and codegen as soon as its dependencies are checked, with no phase-wide barrier in the driver. Comptime evaluation runs in parallel. Output is identical: chain fixed point plus goldens, ui and cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:41.088Z"
+        },
+        {
+          "n": 3,
+          "text": "Scaling: on the #5479 c1 cell (32 hardware threads, cold, n=3 median), average parallelism (CPU-s / wall) is at least 24, 32 threads beat 16, no global allocator or queue lock shows in a perf profile, and throughput is at least 400K lines/s. #5479 c6 is met from this evidence.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:42.235Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T14:47:25.288Z",
+      "updated": "2026-11-13T14:47:42.236Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -200980,6 +201080,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T14:47:43.364Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T14:47:42.236Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hkdzht",
+      "note": "#3 Scaling: on the #5479 c1 cell (32 hardware threads, cold, n="
+    },
+    {
+      "at": "2026-11-13T14:47:41.088Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hkdzht",
+      "note": "#2 Streaming: a module enters sema, lowering and codegen as soo"
+    },
+    {
+      "at": "2026-11-13T14:47:39.951Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hkdzht",
+      "note": "#1 Design: a slice plan on the card covering the module depende"
+    },
+    {
+      "at": "2026-11-13T14:47:25.288Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0hkdzht",
+      "note": "Parallel compiler pipeline: streaming modules, parallel comptime, wait-free queues, per-thread arenas (24 of 32 threads)"
+    },
+    {
+      "at": "2026-11-13T14:47:23.831Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#6 Speed gate: the #5479 c1 cell (cold, uncached jet build of C"
+    },
+    {
+      "at": "2026-11-13T14:47:22.689Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#5 Memory: peak RSS of the self-compile is under 1 GB (#5910), "
+    },
+    {
+      "at": "2026-11-13T14:47:21.654Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#4 Flat types and IR: the type table and IR are flat id-indexed"
+    },
+    {
+      "at": "2026-11-13T14:47:20.529Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#3 Flat AST: the parser writes struct-of-arrays node columns in"
+    },
     {
       "at": "2026-11-13T14:47:19.304Z",
       "by": "Main",
