@@ -2101,6 +2101,14 @@ jfmt_fmt_lambda: fn(f: &JetFmt, lambda: Lambda) {
         jfmt_fmt_type(f, ret)
     }
     statements: if lambda.body == .Block(body) -> body else -> [Stmt]{}
+    // A one-line empty body stays `{{}}`, as a function's does: `fn(value) {{}}`.
+    // Opened onto two lines it would turn the call or literal holding it
+    // multi-line, and a second pass would lay that out again.
+    empty_block: if lambda.body == .Block(body) -> body.len() == 0 else -> false
+    if empty_block && !jfmt_source_span_multiline(f, lambda.span) {
+        jfmt_write(f, " {{}}")
+        return
+    }
     // A one-line lambda of one value or one assignment keeps its line:
     // `fn(n) {{ n > 2 }}`, `fn(a) {{ a.balance -= n }}`.
     if statements.len() == 1 && !jfmt_source_span_multiline(f, lambda.span) {

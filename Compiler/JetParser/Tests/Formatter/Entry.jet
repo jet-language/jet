@@ -355,3 +355,24 @@ SUM: #run { count() + 1 }
     assert(formatted.contains("BARE: #run count()\n"), "a bare operand stays bare")
     assert(formatted.contains("SUM: #run {{ count() + 1 }}\n"), "a wider value keeps its braces")
 }
+// An empty lambda body written on one line stays `{}`: printed open, it turned
+// the literal or call holding it multi-line, and a second pass then split that.
+// The rows are the corpus's: Jetpack/Store/Tests/StoreIngestLate.jet and the
+// core.web forms and store conformance sources.
+#Test("a one-line empty lambda body stays on its line, and a second pass changes nothing") {
+    source: `run: fn() {
+    hook := EnvelopeWalkHook{events: [EnvelopeWalkEvent]{}, react: fn(path: String, stage: EnvelopeWalkStage) {}}
+    print(api.typed_validate_field(form, "jet", .Change, fn(value) {}).valid)
+    print(api.subscribe_selector<String, String, Never>(store, fn(value) { value }, fn(value) {}).active)
+    open := fn() {
+    }
+}
+`
+    // fmt_core_stable asserts that a second pass changes nothing. The two
+    // over-width rows may wrap, but each empty body stays `{}`.
+    formatted: fmt_core_stable(source)
+    assert(formatted.contains("    print(api.typed_validate_field(form, \"jet\", .Change, fn(value) {{}}).valid)\n"), formatted)
+    assert(formatted.contains("react: fn(path: String, stage: EnvelopeWalkStage) {{}}"), formatted)
+    assert_eq(formatted.split("fn(value) {{}}").to_list().len(), 3)
+    assert(!formatted.contains("open := fn() {{}}"), "a body written open stays open")
+}
