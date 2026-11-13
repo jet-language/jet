@@ -173,25 +173,25 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
 
 #Test("prompt rc prefills help selection without accepting line") {
     bash: env_shell_bash_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
-    assert(bash.contains("JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty"))
+    assert(bash.contains("JET_HELP_SHELL_PREFILL=1 command jet </dev/tty"))
     assert(bash.contains("READLINE_LINE=$picked"))
     assert(bash.contains("__jet_help_prefill"))
-    assert(bash.contains("jet() {{"))
+    assert(bash.contains("jet() {{ if [ \"$#\" -eq 0 ]"))
     assert(bash.contains("read -r -e -i"))
 
     zsh: env_shell_zsh_rc("web-api", PromptPathMode.Short, PromptStripMode.Off)
     assert(zsh.contains("BUFFER=$picked"))
     assert(zsh.contains("bindkey '^[?' __jet_help_prefill"))
-    assert(zsh.contains("jet() {{"))
+    assert(zsh.contains("jet() {{ if [[ $# -eq 0 ]]"))
     assert(zsh.contains("print -z --"))
-    assert(zsh.contains("alias jet='noglob jet'"))
+    assert(!zsh.contains("noglob"))
     assert(zsh.contains("setopt NO_NOMATCH"))
 
     fish: env_shell_fish_init("web-api", PromptPathMode.Short, PromptStripMode.Off)
     assert(fish.contains("commandline -r -- \"$picked\""))
     assert(fish.contains("bind \\e\\? __jet_help_prefill"))
-    assert(fish.contains("function jet;"))
-    assert(fish.contains("command jet '?'"))
+    assert(fish.contains("function jet; if test (count $argv) -eq 0;"))
+    assert(fish.contains("command jet </dev/tty"))
     assert(fish.contains("set -lx JET_HELP_SHELL_PREFILL 1"))
     assert(fish.contains("set -e __jet_help_pending"))
     assert(fish.contains("function __jet_help_postexec --on-event fish_postexec"))
@@ -231,27 +231,24 @@ env_shell_test_read_marker: fn(marker: String, shell: String, output: String) {
     assert(fish_out.contains("JET_HELP_WIDGET_RETURNED"), fish_out)
     env_shell_test_read_marker(marker, "fish widget", fish_out)
 
-    fish_literal_out: env_shell_test_pty_prefill_oracle(fish, marker, "jet ?\n")
-    assert(fish_literal_out.contains("JET_HELP_WIDGET_RETURNED"), fish_literal_out)
-    env_shell_test_read_marker(marker, "literal `jet ?` in fish", fish_literal_out)
+    fish_bare_out: env_shell_test_pty_prefill_oracle(fish, marker, "jet\n")
+    assert(fish_bare_out.contains("JET_HELP_WIDGET_RETURNED"), fish_bare_out)
+    env_shell_test_read_marker(marker, "bare `jet` in fish", fish_bare_out)
 
-    bash_literal_file: env_shell_write_temp("jetpack-help-bashrc-literal", env_shell_bash_rc("help", PromptPathMode.Short, PromptStripMode.Off))
-    bash_literal: "PATH={env_hook_sh_quote(path)} bash --noprofile --rcfile {bash_literal_file} -i"
-    bash_literal_out: env_shell_test_pty_prefill_oracle(bash_literal, marker, "jet ?\n")
-    env_shell_remove_file(bash_literal_file)
-    assert(bash_literal_out.contains("JET_HELP_WIDGET_RETURNED"), bash_literal_out)
-    env_shell_test_read_marker(marker, "literal `jet ?` in bash", bash_literal_out)
+    bash_bare_file: env_shell_write_temp("jetpack-help-bashrc-bare", env_shell_bash_rc("help", PromptPathMode.Short, PromptStripMode.Off))
+    bash_bare: "PATH={env_hook_sh_quote(path)} bash --noprofile --rcfile {bash_bare_file} -i"
+    bash_bare_out: env_shell_test_pty_prefill_oracle(bash_bare, marker, "jet\n")
+    env_shell_remove_file(bash_bare_file)
+    assert(bash_bare_out.contains("JET_HELP_WIDGET_RETURNED"), bash_bare_out)
+    env_shell_test_read_marker(marker, "bare `jet` in bash", bash_bare_out)
 
-    literal_zdir: env_shell_write_temp_dir("jetpack-help-zdotdir-literal")
-    // Hostile: a one-character pathname must not steal bare `jet ?` via zsh glob.
-    files.write(files.join(literal_zdir, "x"), "") ?? panic("write glob bait")
-    files.write(files.join(literal_zdir, ".zshrc"), env_shell_zsh_rc("help", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
-    zsh_literal: "cd {env_hook_sh_quote(literal_zdir)} && PATH={env_hook_sh_quote(path)} ZDOTDIR={env_hook_sh_quote(literal_zdir)} zsh -d -i"
-    zsh_literal_out: env_shell_test_pty_prefill_oracle(zsh_literal, marker, "jet ?\n")
-    env_shell_remove_tree(literal_zdir)
-    assert(zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"), zsh_literal_out)
-    assert(files.exists(marker), "literal `jet ?` did not prefill zsh:\n{zsh_literal_out}")
-    assert_eq(files.read(marker) ?? panic("read marker"), "JET_SELECTED_BYTES")
+    bare_zdir: env_shell_write_temp_dir("jetpack-help-zdotdir-bare")
+    files.write(files.join(bare_zdir, ".zshrc"), env_shell_zsh_rc("help", PromptPathMode.Short, PromptStripMode.Off)) ?? panic("write zshrc")
+    zsh_bare: "cd {env_hook_sh_quote(bare_zdir)} && PATH={env_hook_sh_quote(path)} ZDOTDIR={env_hook_sh_quote(bare_zdir)} zsh -d -i"
+    zsh_bare_out: env_shell_test_pty_prefill_oracle(zsh_bare, marker, "jet\n")
+    env_shell_remove_tree(bare_zdir)
+    assert(zsh_bare_out.contains("JET_HELP_WIDGET_RETURNED"), zsh_bare_out)
+    env_shell_test_read_marker(marker, "bare `jet` in zsh", zsh_bare_out)
 }
 
 #Test("prompt rc has plain no color fallback") {

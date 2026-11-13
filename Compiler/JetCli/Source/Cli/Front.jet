@@ -2478,6 +2478,13 @@ jet_cli_json_outcome: fn(json: Bool, output: &&JetDriverVerbOutput) -> JetDriver
     outcome
 }
 
+// Bare `jet`: the interactive picker (Picker.jet) on a terminal, else the
+// static palette, which `--json` always gets.
+jet_cli_bare: fn(color: Bool, json: Bool) -[FS, Env, IO, Time.Wait]> JetCLIPlan Never! {
+    if !json && jet_cli_picker(color) == .Val(plan) -> return plan
+    jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
+}
+
 jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     // The compiler verbs own every raw argument, before Jet's output/flag
     // parsing; the `jet-cc`/`jet-cxx`/`jet-c++` aliases arrive here as these
@@ -2509,7 +2516,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     quiet := owned.contains("--quiet")
     verbose := owned.contains("--verbose") || owned.contains("-v")
     json := jet_cli_wants_json(owned)
-    if raw.len() == 0 -> return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
+    if raw.len() == 0 -> return jet_cli_bare(color, json)
 
     // Moved and grouped spellings. copy: `raw` stays with the caller (`raw` is a read parameter:
     // no move out of it, E0201) and the binding `argv` owns its own.
@@ -2617,7 +2624,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
             return jet_cli_renderable(jet_cli_usage_page(order, pkg_jet_build().version), json)
         }
-        return jet_cli_renderable(jet_cli_palette(pkg_version_line(pkg_jet_build())), json)
+        return jet_cli_bare(color, json)
     }
     command: args[0]
     if !jet_cli_is_builtin(command) && !command.ends_with(".jet") {

@@ -1,13 +1,13 @@
 # PENDING-GRAMMAR(batch-four)
 # A terminal step puts all three of the child's streams on the terminal, so the
-# fixture's capture.jet, built first, runs `jet` with stdin and stderr on the
-# terminal and stdout captured into `picked`, then prints the marker.
+# step's shell runs `jet` with stdin and stderr on the terminal and stdout
+# captured into `picked`, then prints the marker, as a shell hook's `$(jet)`
+# does. The shell runs `jet` in the terminal's foreground process group; a
+# core.process child gets a process group of its own, and its first terminal
+# read would stop it.
 requires: os:unix
-fixture: shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured.fixture
 normalize: replace "\r" ""
-step: jet build --allow=Exec,FS capture.jet
-exit: 0
-step: {work}/.jet/build/capture {work}/picked {jet} --color=never
+step: sh -c '{jet} --color=never > {work}/picked; printf "\nJET_HELP_CAPTURED\n"'
 env: JET_HELP_SHELL_PREFILL=1
 pty: true
 pty-send: "\r" after 150ms

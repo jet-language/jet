@@ -58,30 +58,31 @@ ShellKind: enum {
     }
 
     // Help-app prefill widgets for an already-running user shell (`jet env
-    // hook`) and for Jet subshells. Idempotent when sourced twice.
+    // hook`) and for Jet subshells: Alt-? and bare `jet` open the picker
+    // and put the picked command line in the edit buffer, never running it.
+    // Idempotent when sourced twice.
     help_prefill_widgets: fn(self) -> String Never! {
         lines: if self == {
             .Bash -> [String]{
                 "if ! type __jet_help_prefill >/dev/null 2>&1; then",
-                "  __jet_help_prefill() {{ local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }}",
+                "  __jet_help_prefill() {{ local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }}",
                 "  bind -x '\"\\e?\":__jet_help_prefill' 2>/dev/null || true",
-                "  jet() {{ if [ \"$#\" -eq 1 ] && [ \"$1\" = '?' ]; then local picked code line; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); code=$?; [ -n \"$picked\" ] || return $code; if IFS= read -r -e -i \"$picked\" -p \"${{PS1@P}}\" line; then [ -n \"$line\" ] || return 0; history -s -- \"$line\"; eval -- \"$line\"; return $?; fi; return 0; fi; command jet \"$@\"; }}",
+                "  jet() {{ if [ \"$#\" -eq 0 ]; then local picked code line; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty); code=$?; [ -n \"$picked\" ] || return $code; if IFS= read -r -e -i \"$picked\" -p \"${{PS1@P}}\" line; then [ -n \"$line\" ] || return 0; history -s -- \"$line\"; eval -- \"$line\"; return $?; fi; return 0; fi; command jet \"$@\"; }}",
                 "fi"
             }
             .Zsh -> [String]{
                 "if ! typeset -f __jet_help_prefill >/dev/null 2>&1; then",
-                "  __jet_help_prefill() {{ local picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); [[ -n $picked ]] || return; BUFFER=$picked; CURSOR=$#BUFFER; zle redisplay; }}",
+                "  __jet_help_prefill() {{ local picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty); [[ -n $picked ]] || return; BUFFER=$picked; CURSOR=$#BUFFER; zle redisplay; }}",
                 "  zle -N __jet_help_prefill 2>/dev/null || true",
                 "  bindkey '^[?' __jet_help_prefill 2>/dev/null || true",
-                "  jet() {{ if [[ $# -eq 1 && $1 == '?' ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }}",
-                "  alias jet='noglob jet'",
+                "  jet() {{ if [[ $# -eq 0 ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }}",
                 "fi"
             }
             .Fish -> [String]{
                 "if not functions -q __jet_help_prefill",
-                "  function __jet_help_prefill; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end",
+                "  function __jet_help_prefill; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet </dev/tty; end); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end",
                 "  bind \\e\\? __jet_help_prefill",
-                "  function jet; if test (count $argv) -eq 1; and test \"$argv[1]\" = '?'; set -e __jet_help_pending; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); set -l code $status; if test -n \"$picked\"; set -g __jet_help_pending \"$picked\"; end; return $code; end; command jet $argv; end",
+                "  function jet; if test (count $argv) -eq 0; set -e __jet_help_pending; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet </dev/tty; end); set -l code $status; if test -n \"$picked\"; set -g __jet_help_pending \"$picked\"; end; return $code; end; command jet $argv; end",
                 "  function __jet_help_postexec --on-event fish_postexec; set -q __jet_help_pending; or return; commandline -r -- \"$__jet_help_pending\"; commandline -C (string length -- \"$__jet_help_pending\"); set -e __jet_help_pending; end",
                 "end"
             }

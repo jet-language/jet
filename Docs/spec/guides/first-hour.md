@@ -254,9 +254,11 @@ controls.
 | Learn next | Open the executable first-hour example. | `jet run Examples/Basics/FirstHour.jet` | Continue with the golden-tested example and then choose the next example from its index. |
 
 Bare `jet`, with no command, prints the command palette: every command under
-its category, as the same static text whether or not a terminal is attached.
-`jet help` adds each command's usage and the flags. `--color=never` or
-`NO_COLOR` keeps captured output plain. Only `jet repl` starts the REPL.
+its category, as static text, when no terminal is attached. On a terminal it
+opens the command picker instead: type to search, Tab for a command's usage
+and flags, F1 for the reference, Enter to pick, Escape to leave. `jet help`
+adds each command's usage and the flags. `--color=never` or `NO_COLOR` keeps
+captured output plain. Only `jet repl` starts the REPL.
 
 
 ## 9. Recover when the path breaks

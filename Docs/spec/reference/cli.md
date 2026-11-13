@@ -188,11 +188,19 @@ not become argv-reachable.
 ## Root command index
 
 Bare `jet`, with no command (global flags such as `--color=never` allowed),
-prints the command palette and exits 0: every canonical command under its
-category (Build & Run, Projects & Environments, Packages, Jetos, Development
-Server, Reference), then the Error Codes row and a pointer to `jet help`. The
-palette is the same static text with or without a terminal and never opens
-`/dev/tty`. Only `jet repl` starts the REPL: a line session that checks each
+opens the command picker on a terminal (stdin and stdout both a terminal) and
+otherwise prints the command palette and exits 0. The palette lists every
+canonical command under its category (Build & Run, Projects & Environments,
+Packages, Jetos, Development Server, Reference), then the Error Codes row and
+a pointer to `jet help`; it is static text and never opens `/dev/tty`. The
+picker draws on stderr: the palette's categories, fuzzy results while typing,
+a command's usage and flags (Tab), and a two-pane reference on the alternate
+screen (F1); a typed diagnostic code shows its `jet explain` page. Enter picks
+a command, Alt-Enter its example, Escape or `q` quits. A picked line is never
+run: at a bare terminal the picker names it on stderr, and with
+`JET_HELP_SHELL_PREFILL` set (the `jet env hook` widgets for bare `jet` and
+Alt-?) it prints the line on stdout for the shell to put in its edit buffer.
+`--json` always gets the palette. Only `jet repl` starts the REPL: a line session that checks each
 input against the session so far, then builds and runs it after the earlier
 statements; `:help` lists its meta-commands. Raw-terminal keys, `--console`,
 `:rerun`, `:history` and `?name` docs for names the session did not define
