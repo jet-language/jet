@@ -1,10 +1,11 @@
 // Every corpus row is an all-F32 call of one correctly rounded core.math
 // function: its argument words, then the correctly rounded binary32 result
 // MPFR computed offline, each binary32 value as the hex bits of its exact
-// binary64 widening (a whole exponent as its 64-bit word). The program prints
-// one line per function with the rows it checked and how many results differ,
-// plus the first differing rows. MPFR has no NaN bits, so a NaN matches any
-// NaN.
+// binary64 widening (a whole exponent as its 64-bit word). A row where musl
+// 1.2.5's float function returns other bits ends in `~` and musl's result
+// word. The program prints one line per function with the rows it checked,
+// how many results differ and how many rows list a musl difference, plus the
+// first differing rows. MPFR has no NaN bits, so a NaN matches any NaN.
 use {
     math: core.math
 }
@@ -145,23 +146,36 @@ value: fn(name: String, a: [F32], w: [Int]) -> F32 {
     panic("no corpus function {name}")
 }
 
+// Whether result words `a` and `b` differ: any NaN matches any NaN.
+differ: fn(a: Int, b: Int) -> Bool { a != b && !(is_nan_word(a) && is_nan_word(b)) }
+
 check: fn(name: String, corpus: String) {
     raw: corpus.bytes()
     at := 0
     rows := 0
     wrong := 0
+    musl := 0
     loop at < raw.len() {
         if raw[at] == (U8{35}) {
             loop raw[at] != (U8{10}) -> at = at + 1
             at = at + 1
             next
         }
-        // The row's words: its arguments, then the result.
+        // The row's words: its arguments, then the result, then musl's
+        // result after a `~`.
         words := [Int]{}
+        listed := false
+        musl_word := 0
         loop {
             words.push(word_at(raw, at))
             at = at + 17
             if raw[at - 1] == (U8{10}) -> break
+            if raw[at] == (U8{126}) {
+                listed = true
+                musl_word = word_at(raw, at + 1)
+                at = at + 18
+                break
+            }
         }
         want: words[words.len() - 1]
         arguments := [F32]{}
@@ -170,14 +184,18 @@ check: fn(name: String, corpus: String) {
             arguments.push(narrow(math.from_bits(words[i])))
             shown.push(hex_word(words[i]))
         }
+        if listed {
+            musl = musl + 1
+            if !differ(musl_word, want) -> print("{name}({shown.join(", ")}): the listed musl word {hex_word(musl_word)} is the correctly rounded one")
+        }
         got: math.to_bits(Float.from_f32(value(name, arguments, words)))
         rows = rows + 1
-        if got != want && !(is_nan_word(got) && is_nan_word(want)) {
+        if differ(got, want) {
             wrong = wrong + 1
             if wrong <= 3 -> print("{name}({shown.join(", ")}) = {hex_word(got)}, correctly rounded {hex_word(want)}")
         }
     }
-    print("{name}: {rows} rows, {wrong} not correctly rounded")
+    print("{name}: {rows} rows, {wrong} not correctly rounded, {musl} musl 1.2.5 differences listed")
 }
 
 run: fn() {
