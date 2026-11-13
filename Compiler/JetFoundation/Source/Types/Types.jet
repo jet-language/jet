@@ -504,8 +504,21 @@ symbol_local_keys: fn() -> SymbolKeys Never! {
 }
 
 // The core builtin owner types (`Task`, `Receiver`, `Sender`): declared by
-// no module, like the owned traits.
+// no module, like the owned traits. A subset view of the built-in type
+// catalog (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
 SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender"}
+SYMBOL_BUILTIN_TYPES_CHECKED: #run symbol_builtin_types_checked(SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
+
+// The number of names in `view` (SYMBOL_BUILTIN_TYPES), once each is one of
+// `vocabulary`; else the build stops naming the strays.
+symbol_builtin_types_checked: fn(view: [String], vocabulary: [String]) -> Int {
+    strays := [String]{}
+    loop name in view {
+        if !vocabulary.contains(name) -> strays.push(name.copy())
+    }
+    if strays.len() > 0 -> panic("SYMBOL_BUILTIN_TYPES names {strays.join(", ")}, which the built-in type catalog JET_TYPE_NAMES does not hold")
+    view.len()
+}
 
 // The compiler-owned declarations no module declares: every owned trait
 // (OWNED_TRAITS, which a bound may name bare), the builtin owner types, then

@@ -1,0 +1,19 @@
+# Card #6759 c1: a function that a local value's pass first checks to run
+# while compiling, and that has a warning, lands as an owner like any other
+# (JetSema Comptime/LocalSplice.jet). The first owner check reports its
+# warning as a body. The second takes its comptime result, whose diagnostics
+# the whole-program half reports, so the warning leaves the owner module's
+# rows. It is still reported once, as the full recheck reports it. Under
+# JET_RECHECK_VERIFY=1 the compile also checks the whole program again and
+# stops on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "helper: fn(base: Int) -> Int {\n    unused: 3\n    total := 0\n    loop i in 0..<4 -> total += i\n    total + base\n}\n\nrun: fn() {\n    x: helper(1)\n    print(\"{x}\")\n}\n"
+step: jet check --trace main.jet
+exit: 0
+stderr: ~ "Local binding `unused` is never read." # helper's warning is still reported
+stderr: ~ "has no errors (1 warning)" # once, not once per check
+stderr: ~ "# sema.local_values_spliced = 2\n" # `run`, and `helper`, which the pass first checked to run while compiling
+stderr: !~ "# sema.local_values_refused" # the warning no longer sends the pass back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the spliced result, its diagnostics included, is the full recheck's

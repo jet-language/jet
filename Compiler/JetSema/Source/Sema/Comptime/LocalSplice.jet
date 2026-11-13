@@ -21,10 +21,16 @@
 // leaving `comptime_body_sources` (one whose outcome is a run-time reason
 // stays): the call facts, hardware use, name references,
 // comptime requests, compute facts, `exact_int_reachable`, copy events,
-// diagnostics, `complete`, failure facts, incomplete reasons, injected
-// functions and their keys, and tests. No landed site whose value is not a
-// failure may hold a call fact strictly inside its span: the effect solve
-// walks the bodies, and a value node, which takes its initializer's span,
+// `complete`, failure facts, incomplete reasons, injected functions and
+// their keys, and tests. The diagnostics are the same too, but for those
+// of a function the pass first checked to run while compiling: its first
+// check reports them as an owner body, where its second takes its comptime
+// result, whose diagnostics the whole-program half reports
+// (sema_comptime_function_diagnostics), so they leave the owner module's
+// rows, as in the full recheck (sema_local_splice_holds). No landed site
+// whose value is not a failure may hold a call fact strictly inside its
+// span: the effect solve walks the bodies, and a value node, which takes
+// its initializer's span,
 // finds only the call fact of that span (sema_effect_find_exact_fact), so the
 // edges of any call inside it (an argument's call, a `?? panic`) leave with
 // the value, and the finalized stamps would keep them. The comptime function
@@ -240,10 +246,71 @@ sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], index: Int, row
     }
 }
 
-// The merged rows of `rows` the whole-program passes read, as one text:
-// all but the bodies and the body comptime sites.
-sema_module_body_rows_text: fn(rows: SemaModuleBodyRows) -> String Never! {
-    "calls={rows.call_facts:Debug};hardware={rows.hardware_use:Debug};names={rows.name_references:Debug};requests={rows.comptime_requests:Debug};compute={rows.compute_facts:Debug};exact={rows.exact_int_reachable};copies={rows.copy_events:Debug};diagnostics={rows.diagnostics:Debug};complete={rows.complete};failures={rows.failure_facts:Debug};incomplete={rows.incomplete_reasons:Debug};injected={rows.injected_function_keys:Debug};tests={rows.tests:Debug}"
+// The first merged row the whole-program passes read that differs between
+// `old` and `new`, named for the refusal's trace counter
+// (sema_local_splice_refused), or None when they all agree: all but the
+// bodies, the body comptime sites and the diagnostics, which
+// sema_local_splice_holds compares itself.
+sema_module_body_rows_difference: fn(old: SemaModuleBodyRows, new: SemaModuleBodyRows) -> String? Never! {
+    if "{old.call_facts:Debug}" != "{new.call_facts:Debug}" -> return Val("rows_calls")
+    if "{old.hardware_use:Debug}" != "{new.hardware_use:Debug}" -> return Val("rows_hardware")
+    if "{old.name_references:Debug}" != "{new.name_references:Debug}" -> return Val("rows_names")
+    if "{old.comptime_requests:Debug}" != "{new.comptime_requests:Debug}" -> return Val("rows_requests")
+    if "{old.compute_facts:Debug}" != "{new.compute_facts:Debug}" -> return Val("rows_compute")
+    if old.exact_int_reachable != new.exact_int_reachable -> return Val("rows_exact")
+    if "{old.copy_events:Debug}" != "{new.copy_events:Debug}" -> return Val("rows_copies")
+    if old.complete != new.complete -> return Val("rows_complete")
+    if "{old.failure_facts:Debug}" != "{new.failure_facts:Debug}" -> return Val("rows_failures")
+    if "{old.incomplete_reasons:Debug}" != "{new.incomplete_reasons:Debug}" -> return Val("rows_incomplete")
+    if "{old.injected_function_keys:Debug}" != "{new.injected_function_keys:Debug}" -> return Val("rows_injected")
+    if "{old.tests:Debug}" != "{new.tests:Debug}" -> return Val("rows_tests")
+    None
+}
+
+// The texts of `diagnostics` (their Debug form), sorted.
+sema_local_splice_diagnostic_texts: fn(diagnostics: [Diagnostic]) -> [String] Never! {
+    texts := [String]{}
+    loop diagnostic in diagnostics -> texts.push("{diagnostic:Debug}")
+    texts.sort()
+    texts
+}
+
+// Sorted `texts` less one of each text of sorted `taken`; None when `taken`
+// holds a text more often than `texts` does.
+sema_local_splice_texts_without: fn(texts: [String], taken: [String]) -> [String]? Never! {
+    rest := [String]{}
+    at := 0
+    loop text in texts {
+        if at < taken.len() && taken[at] < text -> return None
+        if at < taken.len() && taken[at] == text {
+            at += 1
+            next
+        }
+        rest.push(text.copy())
+    }
+    if at < taken.len() -> return None
+    Val(rest)
+}
+
+// Drops from `diagnostics` one diagnostic of each text of `dropped`
+// (sema_local_splice_diagnostic_texts), keeping the order of the rest.
+sema_local_splice_drop_diagnostics: fn(diagnostics: &[Diagnostic], dropped: [String]) Never! {
+    if dropped.len() == 0 -> return
+    taken := [Bool]{}
+    loop _ in dropped -> taken.push(false)
+    held := compiler_take_rows<Diagnostic>(diagnostics)
+    loop diagnostic in held {
+        text: "{diagnostic:Debug}"
+        found := false
+        loop at in 0..<dropped.len() {
+            if !taken[at] && dropped[at] == text {
+                taken[at] = true
+                found = true
+                break
+            }
+        }
+        if !found -> diagnostics.push(diagnostic)
+    }
 }
 
 // The position of the one function `key` in `functions`; None when there is
@@ -304,16 +371,21 @@ sema_local_splice_valued: fn(landed: [String:Bool], after: [SemaModuleBodyRows])
     valued
 }
 
-// Whether the two checks of the owner modules (`earlier` against the
-// finalized values, which it takes, and `after` against the pass's) let the
-// splice stand, as the file comment says. `owners` holds the owner function
-// keys, `landed` the `module\nkey` of each landed site that got a value, and
-// `computed` those of them whose value is not a failure; `into` says whether
-// `modules` carries the whole-program stamps, which an earlier owner body
-// must be given before it equals its body there.
-sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], computed: [String:Bool], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto) -> Bool Never! {
+// Why the two checks of the owner modules (`earlier` against the finalized
+// values, which it takes, and `after` against the pass's) keep the splice
+// from standing, as the file comment says, or None when it stands.
+// `owners` holds the owner function keys, `landed` the `module\nkey` of each
+// landed site that got a value, and `computed` those of them whose value is
+// not a failure; `into` says whether `modules` carries the whole-program
+// stamps, which an earlier owner body must be given before it equals its
+// body there. `replayed` holds the texts of the diagnostics the pass's
+// comptime results bring (sema_local_splice_diagnostic_texts): a diagnostic
+// only the first check reports must be one of them, and of its owner
+// module's; `dropped` gets, per owner module, those its rows drop.
+sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], computed: [String:Bool], replayed: [String], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: &[[String]]) -> String? Never! {
     stamped: sema_local_splice_stamped(into)
     before := earlier.move()
+    unclaimed := replayed.copy()
     settled_owners := 0
     position := owner_modules.len()
     loop before.len() > 0 {
@@ -321,30 +393,41 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         old := before.pop() ?? break
         new: after[position]
         module_index: owner_modules[position]
-        if sema_module_body_rows_text(old) != sema_module_body_rows_text(new) -> return false
+        if sema_module_body_rows_difference(old, new) == .Val(difference) -> return Val(difference)
+        if "{old.diagnostics:Debug}" != "{new.diagnostics:Debug}" {
+            // `diagnostics_added`: the second check reports one the first
+            // does not; `diagnostics_unclaimed`: the first reports one no
+            // comptime result brings; `diagnostics_module`: one the owner
+            // module's rows do not hold.
+            extra: sema_local_splice_texts_without(sema_local_splice_diagnostic_texts(old.diagnostics), sema_local_splice_diagnostic_texts(new.diagnostics)) ?? return Val("diagnostics_added")
+            unclaimed = sema_local_splice_texts_without(unclaimed, extra) ?? return Val("diagnostics_unclaimed")
+            if sema_local_splice_texts_without(sema_local_splice_diagnostic_texts(modules[module_index].diagnostics), extra) == None -> return Val("diagnostics_module")
+            dropped[position] = extra
+        }
         // A value keeps only the effects of the call at its own span. A
         // failure keeps the initializer as run-time code, calls and all.
-        if stamped && sema_local_splice_inner_call(old, computed) -> return false
+        if stamped && sema_local_splice_inner_call(old, computed) -> return Val("inner_call")
         sema_local_splice_unlanded(old.comptime_body_sources, landed)
-        if "{old.comptime_body_sources:Debug}" != "{new.comptime_body_sources:Debug}" -> return false
-        if old.functions.len() != new.functions.len() -> return false
+        if "{old.comptime_body_sources:Debug}" != "{new.comptime_body_sources:Debug}" -> return Val("sources")
+        if old.functions.len() != new.functions.len() -> return Val("bodies")
         checked := old.functions.move()
         index := checked.len()
         loop checked.len() > 0 {
             index -= 1
             function := checked.pop() ?? break
-            if new.functions[index].key != function.key -> return false
+            if new.functions[index].key != function.key -> return Val("bodies")
             if owners.get(function.key) == None {
-                if "{function:Debug}" != "{new.functions[index]:Debug}" -> return false
+                if "{function:Debug}" != "{new.functions[index]:Debug}" -> return Val("bodies")
                 next
             }
-            slot: sema_local_splice_slot(modules[module_index].functions, function.key) ?? return false
+            slot: sema_local_splice_slot(modules[module_index].functions, function.key) ?? return Val("bodies")
             if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
-            if "{function:Debug}" != "{modules[module_index].functions[slot]:Debug}" -> return false
+            if "{function:Debug}" != "{modules[module_index].functions[slot]:Debug}" -> return Val("finalized_bodies")
             settled_owners += 1
         }
     }
-    settled_owners == owners.len()
+    if settled_owners != owners.len() -> return Val("owners")
+    None
 }
 
 // The sites of `landed` (`module\nkey`) whose value in `values` is not a
@@ -639,13 +722,18 @@ sema_local_splice_owners: fn(
     computed: sema_local_splice_computed(valued, values)
     same_named: sema_local_splice_same_keys(sema_local_splice_named_core(graph, before, owners), sema_local_splice_named_core(graph, after, owners))
     same_demand: sema_local_splice_same_demand(earlier_demand, pass_demand)
-    holds: same_named && same_demand && sema_local_splice_holds(modules, owner_modules, owners, valued, computed, before, after, into)
-    if !holds {
-        reason: if {
-            !same_named -> "named_core"
-            !same_demand -> "demand"
-            else -> "rows"
-        }
+    // The diagnostics the whole-program half reports from the pass's
+    // comptime results.
+    replayed_diagnostics := [Diagnostic]{}
+    _: sema_comptime_function_diagnostics(comptime_functions, replayed_diagnostics)
+    dropped := [[String]]{}
+    loop _ in owner_modules -> dropped.push([String]{})
+    refusal: if {
+        !same_named -> Val("named_core")
+        !same_demand -> Val("demand")
+        else -> sema_local_splice_holds(modules, owner_modules, owners, valued, computed, sema_local_splice_diagnostic_texts(replayed_diagnostics), before, after, into, dropped)
+    }
+    if refusal == .Val(reason) {
         sema_local_splice_refused(trace_sink, reason, owners.len())
         return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     }
@@ -664,6 +752,7 @@ sema_local_splice_owners: fn(
             if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
             modules[module_index].functions[slot] = function.move()
         }
+        sema_local_splice_drop_diagnostics(modules[module_index].diagnostics, dropped[row])
         sema_local_splice_unlanded(modules[module_index].comptime_body_sources, valued)
     }
     SemaLocalValueSplice{graph: graph.move(), spliced: true, valued: valued.move()}
