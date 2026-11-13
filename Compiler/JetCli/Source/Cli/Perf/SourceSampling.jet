@@ -10,7 +10,7 @@ use {
 
 JetCLIPerfSource: struct { identity: SourceIdentity, run_span: Span?, text: String }
 jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
-    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [(kind: String, name: String)]{}}
+    identity := SourceIdentity{path: path, sha256: sha256_hex(text), symbols: [(name: String, kind: String)]{}}
     block: jet_driver_inline_package(text)
     if block.error != None -> return JetCLIPerfSource{identity: identity, run_span: None, text: text}
     masked: jet_driver_mask_inline_package(text, block)
@@ -18,7 +18,7 @@ jet_cli_perf_source: fn(path: String, text: String) -> JetCLIPerfSource Never! {
     run_span := Span?{None}
     loop item in program.items {
         if item == .Func(function) {
-            identity.symbols.push((kind: "fn", name: function.name))
+            identity.symbols.push((name: function.name, kind: "fn"))
             if function.name == "run" -> run_span = Val(function.span)
         }
     }
