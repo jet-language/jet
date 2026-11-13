@@ -1,5 +1,6 @@
 use {
     ui: core.ui
+    core.color.[Color]
     env: core.sys
     files: core.files
 }
@@ -14,16 +15,16 @@ use {
 Args: struct {}
 run: fn(args: Args) {
     frames: 1200
-    palette: [ui.Color]{
-        ui.color(0, 0, 0, 0),
-        ui.color(52, 101, 164, 255),
-        ui.color(78, 154, 6, 255),
-        ui.color(196, 160, 0, 255),
+    palette: [Color]{
+        Color{r: 0, g: 0, b: 0, a: 0},
+        Color{r: 52, g: 101, b: 164, a: 255},
+        Color{r: 78, g: 154, b: 6, a: 255},
+        Color{r: 196, g: 160, b: 0, a: 255},
     }
-    sky: ui.color(16, 20, 32, 255)
-    bar: ui.color(0, 0, 0, 160)
-    white: ui.color(255, 255, 255, 255)
-    gold: ui.color(255, 220, 120, 200)
+    sky: Color{r: 16, g: 20, b: 32, a: 255}
+    bar: Color{r: 0, g: 0, b: 0, a: 160}
+    white: Color{r: 255, g: 255, b: 255, a: 255}
+    gold: Color{r: 255, g: 220, b: 120, a: 200}
     title: "JET RASTER"
     tiles := 0
     sprites := 0
@@ -49,7 +50,7 @@ run: fn(args: Args) {
         loop i in 0..<48 {
             x: (i * 41 + f * (1 + i % 4)) % 344 - 12
             y: (i * 29 + f * (1 + i % 3)) % 224 - 12
-            frame.draw_rectangle(x, y, 12, 12, ui.color((i * 53) % 256, (i * 97) % 256, (i * 31 + f) % 256, 180))
+            frame.draw_rectangle(x, y, 12, 12, Color{r: U8{(i * 53) % 256}, g: U8{(i * 97) % 256}, b: U8{(i * 31 + f) % 256}, a: 180})
             sprites += 1
         }
         frame.draw_rectangle(0, 0, 320, 12, bar)
@@ -94,7 +95,7 @@ FONT5X7: [Int]{
 
 // ASCII text in the 5x7 font at a whole-pixel scale, one rectangle per
 // vertical run of a glyph column; a byte outside the font draws as "?".
-bitmap_text: fn(frame: ui.Frame, text: String, x: Int, y: Int, scale: Int, color: ui.Color) {
+bitmap_text: fn(frame: ui.Frame, text: String, x: Int, y: Int, scale: Int, color: Color) {
     pen := x
     loop byte in text.bytes() {
         code: Int.from_u8(byte)

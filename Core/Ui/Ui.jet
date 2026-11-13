@@ -12,6 +12,7 @@ use {
     core: core
     tui_text: core.tui
     core.term.[Key]
+    core.color.[Color]
     core.ui.host.[UIAccessibility, UIAccessibilityState, UITextRange]
     core.ui.host.ime.[UIIMEComposition]
     draw: __core_ui_draw
@@ -72,15 +73,6 @@ Rect: struct {
     y: Float
     width: Float
     height: Float
-}
-
-// A color: red, green, blue and alpha, each 0..255, alpha straight (not
-// premultiplied).
-Color: struct {
-    r: Int
-    g: Int
-    b: Int
-    a: Int
 }
 
 SizeConstraint: struct {
@@ -166,8 +158,6 @@ size: fn(width: Float, height: Float) -> Size Never! {
 rect: fn(x: Float, y: Float, width: Float, height: Float) -> Rect Never! {
     Rect{x: x, y: y, width: width, height: height}
 }
-// A color with each channel clamped to 0..255.
-color: fn(r: Int, g: Int, b: Int, a: Int) -> Color Never! { draw.color(r, g, b, a) }
 constraint: fn(min_width: Float, min_height: Float, max_width: Float, max_height: Float) -> SizeConstraint Never! {
     SizeConstraint{min_width: min_width, min_height: min_height, max_width: max_width, max_height: max_height}
 }
@@ -617,8 +607,8 @@ image_color_replace: fn(image: &Image, color: Color, replace: Color) Never! { dr
 //     window: ui.open(width: 640, height: 400, title: "demo")
 //     loop frame in window.frames() {
 //         loop event in frame.events() { … }
-//         frame.clear_background(ui.color(11, 11, 13, 255))
-//         frame.draw_text("Jet", 20, 20, 40, ui.color(232, 35, 42, 255))
+//         frame.clear_background(Color{r: 11, g: 11, b: 13, a: 255})
+//         frame.draw_text("Jet", 20, 20, 40, Color{r: 232, g: 35, b: 42, a: 255})
 //     }
 //
 // or presents RGBA pixels of its own with `frame.present(pixels)`; a
@@ -1810,16 +1800,16 @@ priv internal: module {
     window: headless(width: 4, height: 2, script: [[UIEvent]]{[UIEvent]{}, [UIEvent]{}, [UIEvent]{}}) ?? panic("headless")
     loop frame in window.frames() {
         if frame.index == 0 {
-            frame.clear_background(color(255, 0, 0, 255))
-            frame.draw_pixel(1, 0, color(0, 0, 300, 255))
+            frame.clear_background(Color{r: 255, g: 0, b: 0, a: 255})
+            frame.draw_pixel(1, 0, Color{r: 0, g: 0, b: 255, a: 255})
         }
         // A frame that presents shows its own pixels, not what it drew.
         if frame.index == 2 {
-            frame.draw_rectangle(0, 0, 4, 2, color(9, 9, 9, 255))
+            frame.draw_rectangle(0, 0, 4, 2, Color{r: 9, g: 9, b: 9, a: 255})
             frame.present([U8]{1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8}) ?? panic("present")
         }
     }
-    // Red with the second pixel blue, its blue clamped to 255.
+    // Red with the second pixel blue.
     first: [U8]{255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255}
     // Frame 1 drew nothing and presented nothing, so it shows nothing.
     presented: [U8]{1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8}
@@ -1874,12 +1864,12 @@ priv internal: module {
 }
 
 #Test("images, collisions and text measure without a window") {
-    image := gen_image_checked(2, 1, 1, 1, color(1, 2, 3, 255), color(4, 5, 6, 255))
+    image := gen_image_checked(2, 1, 1, 1, Color{r: 1, g: 2, b: 3, a: 255}, Color{r: 4, g: 5, b: 6, a: 255})
     image_flip_horizontal(image)
     assert(get_image_color(image, 0, 0) == Color{r: 4, g: 5, b: 6, a: 255})
     image_crop(image, rect(1.0, 0.0, 1.0, 1.0))
     assert(image.width() == 1 && image.height() == 1 && image.pixels() == [U8]{1, 2, 3, 255})
-    assert(gen_image_color(0, 1, color(0, 0, 0, 0)).width() == 0)
+    assert(gen_image_color(0, 1, Color{r: 0, g: 0, b: 0, a: 0}).width() == 0)
     assert(check_collision_recs(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)))
     assert(get_collision_rec(rect(0.0, 0.0, 2.0, 2.0), rect(1.0, 1.0, 2.0, 2.0)) == rect(1.0, 1.0, 1.0, 1.0))
     assert(check_collision_lines(point(0.0, 0.0), point(2.0, 2.0), point(0.0, 2.0), point(2.0, 0.0)) == Val(point(1.0, 1.0)))

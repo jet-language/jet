@@ -14,17 +14,18 @@ package: {
 // native tiers'.
 use {
     ui: core.ui
+    core.color.[Color]
 }
 
 HEX: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
 
 run: fn() {
-    jet: ui.color(11, 11, 13, 255)
-    red: ui.color(232, 35, 42, 255)
-    bright: ui.color(255, 59, 65, 255)
-    ink: ui.color(236, 236, 240, 255)
-    mist: ui.color(255, 255, 255, 40)
-    veil: ui.color(232, 35, 42, 128)
+    jet: Color{r: 11, g: 11, b: 13, a: 255}
+    red: Color{r: 232, g: 35, b: 42, a: 255}
+    bright: Color{r: 255, g: 59, b: 65, a: 255}
+    ink: Color{r: 236, g: 236, b: 240, a: 255}
+    mist: Color{r: 255, g: 255, b: 255, a: 40}
+    veil: Color{r: 232, g: 35, b: 42, a: 128}
     atlas: ui.load_texture_atlas("mist.atlas")
     if !atlas.loaded() -> panic("mist.png did not decode")
     script: [[ui.UIEvent]]{[ui.UIEvent]{}, [ui.UIEvent]{}, [ui.UIEvent]{}}
@@ -67,8 +68,8 @@ run: fn() {
     show("repainted", ui.get_image_color(screen, 9, 9))
 }
 
-show: fn(name: String, color: ui.Color) {
-    print("{name}: #{hex(color.r)}{hex(color.g)}{hex(color.b)}, alpha {color.a}")
+show: fn(name: String, color: Color) {
+    print("{name}: #{hex(Int.from_u8(color.r))}{hex(Int.from_u8(color.g))}{hex(Int.from_u8(color.b))}, alpha {color.a}")
 }
 
 // A checksum as 16 hex digits; an unsigned word whatever its sign.

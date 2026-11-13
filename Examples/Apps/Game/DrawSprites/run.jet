@@ -8,6 +8,7 @@ package: {
 use {
     files: core.files
     ui: core.ui
+    core.color.[Color]
 }
 
 // Lines, circles and triangles beside sprites blitted from two PNG textures:
@@ -31,15 +32,15 @@ run: fn() {
     window: ui.headless(width: 96, height: 64, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("a 96x64 window")
     loop frame in window.frames() {
         if frame.index > 0 -> break
-        frame.clear_background(ui.color(16, 18, 28, 255))
-        frame.draw_triangle(4, 60, 48, 4, 92, 60, ui.color(40, 90, 160, 255))
+        frame.clear_background(Color{r: 16, g: 18, b: 28, a: 255})
+        frame.draw_triangle(4, 60, 48, 4, 92, 60, Color{r: 40, g: 90, b: 160, a: 255})
         // The other winding fills the same way; this one is half transparent.
-        frame.draw_triangle(92, 4, 4, 4, 48, 40, ui.color(220, 120, 40, 128))
-        frame.draw_circle(70, 40, 14, ui.color(250, 220, 90, 200))
-        frame.draw_circle(-2, 30, 9, ui.color(120, 230, 140, 255))
-        frame.draw_line(0, 0, 95, 63, ui.color(255, 255, 255, 255))
-        frame.draw_line(95, 2, 10, 50, ui.color(255, 60, 90, 160))
-        frame.draw_line(30, -5, 34, 70, ui.color(90, 255, 255, 255))
+        frame.draw_triangle(92, 4, 4, 4, 48, 40, Color{r: 220, g: 120, b: 40, a: 128})
+        frame.draw_circle(70, 40, 14, Color{r: 250, g: 220, b: 90, a: 200})
+        frame.draw_circle(-2, 30, 9, Color{r: 120, g: 230, b: 140, a: 255})
+        frame.draw_line(0, 0, 95, 63, Color{r: 255, g: 255, b: 255, a: 255})
+        frame.draw_line(95, 2, 10, 50, Color{r: 255, g: 60, b: 90, a: 160})
+        frame.draw_line(30, -5, 34, 70, Color{r: 90, g: 255, b: 255, a: 255})
         frame.draw_sprite(sprites, "ship", 8, 8)
         frame.draw_sprite(sprites, "ship", 90, 58)
         frame.draw_sprite(sprites, "gem", -3, 20)

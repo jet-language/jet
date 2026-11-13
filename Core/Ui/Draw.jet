@@ -1,7 +1,8 @@
 use {
     core: core
     font: core.ui.font
-    core.ui.[Color, Point, Rect, UIRect]
+    core.color.[Color]
+    core.ui.[Point, Rect, UIRect]
 }
 // __core_ui_draw — core.ui's software rasterizer, a private part of
 // core.ui: 2D drawing, images, text, textures and collision checks in Jet.
@@ -31,9 +32,9 @@ use {
 // 1/256-pixel grid and covers the pixels whose centers lie inside it, with
 // one tie rule for centers exactly on an edge.
 
-// A color with each channel clamped to 0..255.
+// The color of four Int channels, each clamped to 0..255.
 color: fn(r: Int, g: Int, b: Int, a: Int) -> Color Never! {
-    Color{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
+    Color{r: U8{clamp8(r)}, g: U8{clamp8(g)}, b: U8{clamp8(b)}, a: U8{clamp8(a)}}
 }
 
 point_at: fn(x: Float, y: Float) -> Point {
@@ -206,7 +207,7 @@ gen_image_checked: fn(width: Int, height: Int, checks_x: Int, checks_y: Int, fir
 get_image_color: fn(image: Image, x: Int, y: Int) -> Color Never! {
     if x < 0 || x >= image.width || y < 0 || y >= image.height -> return Color{r: 0, g: 0, b: 0, a: 0}
     rgba: straight_at(image.pixels, (y * image.width + x) * 4)
-    Color{r: (rgba >> 24).bit_and(255), g: (rgba >> 16).bit_and(255), b: (rgba >> 8).bit_and(255), a: rgba.bit_and(255)}
+    color((rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
 }
 
 // Image drawing stores the color, premultiplied, alpha included; it does
@@ -1242,7 +1243,7 @@ Span: struct {
 }
 
 pack_rgba: fn(color: Color) -> Int {
-    (clamp8(color.r) << 24) + (clamp8(color.g) << 16) + (clamp8(color.b) << 8) + clamp8(color.a)
+    (Int.from_u8(color.r) << 24) + (Int.from_u8(color.g) << 16) + (Int.from_u8(color.b) << 8) + Int.from_u8(color.a)
 }
 
 min_int: fn(a: Int, b: Int) -> Int {
@@ -2237,7 +2238,7 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     assert_eq(rect_runs(extent, 10, 0, 4, 4, 7).len(), 0)
     assert_eq(rect_runs(extent, 2, 2, 0, 4, 7).len(), 0)
     assert_eq(pack_rgba(color(255, 220, 120, 255)), 0xFFDC78FF)
-    assert_eq(pack_rgba(Color{r: 300, g: -1, b: 0, a: 128}), 0xFF000080)
+    assert_eq(pack_rgba(Color{r: 255, g: 0, b: 0, a: 128}), 0xFF000080)
 }
 
 #Test("raster lines round exactly and merge runs") {

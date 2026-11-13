@@ -8,6 +8,7 @@ package: {
 use {
     files: core.files
     ui: core.ui
+    core.color.[Color]
 }
 
 // Two frames drawn by Jet's software rasterizer on a headless window. The
@@ -24,15 +25,15 @@ run: fn() {
     loop frame in window.frames() {
         if frame.index > 1 -> break
         if frame.index == 0 {
-            frame.clear_background(ui.color(10, 20, 30, 255))
-            frame.draw_rectangle(-4, -4, 24, 20, ui.color(200, 40, 40, 255))
-            frame.draw_rectangle(12, 8, 30, 24, ui.color(40, 200, 90, 128))
-            frame.draw_rectangle(30, 20, 40, 40, ui.color(255, 255, 255, 64))
+            frame.clear_background(Color{r: 10, g: 20, b: 30, a: 255})
+            frame.draw_rectangle(-4, -4, 24, 20, Color{r: 200, g: 40, b: 40, a: 255})
+            frame.draw_rectangle(12, 8, 30, 24, Color{r: 40, g: 200, b: 90, a: 128})
+            frame.draw_rectangle(30, 20, 40, 40, Color{r: 255, g: 255, b: 255, a: 64})
             next
         }
         save_pam(window.load_image_from_screen(), "Frame.pam")
         width = ui.measure_text(text, 10)
-        frame.draw_text(text, 4, 4, 10, ui.color(255, 220, 120, 255))
+        frame.draw_text(text, 4, 4, 10, Color{r: 255, g: 220, b: 120, a: 255})
     }
 
     print("canvas=64x48 frame=presented")

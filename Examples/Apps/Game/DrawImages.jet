@@ -5,12 +5,15 @@ package: {
     }
 }
 
-use ui: core.ui
+use {
+    ui: core.ui
+    core.color.[Color]
+}
 
 // core.ui's image functions edit an Image in memory: no window and no
 // effect. After each step the image is printed one letter per pixel:
 // R red, B blue, W white, K black, G green, . nothing, ? any other color.
-letter: fn(color: ui.Color) -> String {
+letter: fn(color: Color) -> String {
     if color.a == 0 -> return "."
     if color.r == 200 && color.g == 40 && color.b == 40 -> return "R"
     if color.r == 40 && color.g == 40 && color.b == 200 -> return "B"
@@ -29,14 +32,14 @@ show: fn(step: String, image: ui.Image) {
     }
 }
 
-channels: fn(color: ui.Color) -> String { "{color.r},{color.g},{color.b},{color.a}" }
+channels: fn(color: Color) -> String { "{color.r},{color.g},{color.b},{color.a}" }
 
 run: fn() {
-    red: ui.color(200, 40, 40, 255)
-    blue: ui.color(40, 40, 200, 255)
-    white: ui.color(255, 255, 255, 255)
-    black: ui.color(0, 0, 0, 255)
-    green: ui.color(40, 200, 40, 255)
+    red: Color{r: 200, g: 40, b: 40, a: 255}
+    blue: Color{r: 40, g: 40, b: 200, a: 255}
+    white: Color{r: 255, g: 255, b: 255, a: 255}
+    black: Color{r: 0, g: 0, b: 0, a: 255}
+    green: Color{r: 40, g: 200, b: 40, a: 255}
     image := ui.gen_image_checked(6, 4, 2, 2, red, blue)
     show("checked", image)
     ui.image_draw_rectangle(image, 1, 1, 3, 2, white)
@@ -59,15 +62,15 @@ run: fn() {
     ui.image_rotate_ccw(image)
     show("flip_vertical_rotate_ccw", image)
     print("outside={channels(ui.get_image_color(image, 6, 0))}")
-    tone := ui.gen_image_color(2, 1, ui.color(200, 100, 50, 255))
-    ui.image_draw_pixel(tone, 1, 0, ui.color(10, 20, 30, 128))
-    ui.image_color_tint(tone, ui.color(128, 255, 0, 200))
+    tone := ui.gen_image_color(2, 1, Color{r: 200, g: 100, b: 50, a: 255})
+    ui.image_draw_pixel(tone, 1, 0, Color{r: 10, g: 20, b: 30, a: 128})
+    ui.image_color_tint(tone, Color{r: 128, g: 255, b: 0, a: 200})
     print("tint={channels(ui.get_image_color(tone, 0, 0))} {channels(ui.get_image_color(tone, 1, 0))}")
     ui.image_color_invert(tone)
     print("invert={channels(ui.get_image_color(tone, 0, 0))} {channels(ui.get_image_color(tone, 1, 0))}")
     ui.image_color_brightness(tone, -240)
     print("brightness={channels(ui.get_image_color(tone, 0, 0))} {channels(ui.get_image_color(tone, 1, 0))}")
-    ui.image_clear_background(tone, ui.color(1, 2, 3, 4))
+    ui.image_clear_background(tone, Color{r: 1, g: 2, b: 3, a: 4})
     print("clear={channels(ui.get_image_color(tone, 1, 0))}")
     // A crop with no whole column leaves no pixels; its height stays.
     ui.image_crop(image, ui.rect(0.0, 0.0, 0.5, 2.0))

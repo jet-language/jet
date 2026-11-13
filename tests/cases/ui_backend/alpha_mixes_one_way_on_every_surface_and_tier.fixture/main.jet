@@ -11,14 +11,15 @@ package: {
 // covered mask. Each prints the pixel it left.
 use {
     ui: core.ui
+    core.color.[Color]
     font: core.ui.font
 }
 
 HEX: [String]{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"}
 
 run: fn() {
-    jet: ui.color(11, 11, 13, 255)
-    mist: ui.color(255, 255, 255, 20)
+    jet: Color{r: 11, g: 11, b: 13, a: 255}
+    mist: Color{r: 255, g: 255, b: 255, a: 20}
     atlas: ui.load_texture_atlas("mist.atlas")
     if !atlas.loaded() -> panic("mist.png did not decode")
     window: ui.headless(width: 48, height: 48, script: [[ui.UIEvent]]{[ui.UIEvent]{}}) ?? panic("headless: {err}")
@@ -41,7 +42,7 @@ run: fn() {
 
 // The text's most covered pixel: the brightest below the top rows, where
 // the stem covers whole pixels.
-brightest: fn(screen: ui.Image) -> ui.Color {
+brightest: fn(screen: ui.Image) -> Color {
     best := ui.get_image_color(screen, 0, 4)
     loop y in 4..<screen.height() {
         loop x in 0..<screen.width() {
@@ -52,8 +53,8 @@ brightest: fn(screen: ui.Image) -> ui.Color {
     best
 }
 
-show: fn(surface: String, color: ui.Color) {
-    print("{surface}: #{hex(color.r)}{hex(color.g)}{hex(color.b)}, alpha {color.a}")
+show: fn(surface: String, color: Color) {
+    print("{surface}: #{hex(Int.from_u8(color.r))}{hex(Int.from_u8(color.g))}{hex(Int.from_u8(color.b))}, alpha {color.a}")
 }
 
 hex: fn(byte: Int) -> String {

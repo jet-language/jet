@@ -3258,7 +3258,8 @@ run: fn() {
 Core's libraries take this one value (D-VERDICT-3288-1=A). In `core.tui`,
 `color_rgb(color)` is `TUIColor.RGB(color)`: a terminal shows no alpha, so the
 alpha is ignored, and a profile without true color shows the nearest ANSI 256
-or ANSI 16 color.
+or ANSI 16 color. `core.ui`'s drawing and image functions take and return a
+`Color`.
 
 ### `core.math.random` — deterministic pseudorandom values
 
@@ -4903,8 +4904,9 @@ of the frame's size in Jet, the same on every backend and tier, clipped to the
 canvas, and the frame presents that canvas when the next frame begins unless
 the program called `present` itself. The canvas, like every `Image`, holds
 premultiplied RGBA8 pixels, and every draw follows core.ui's one blend rule,
-source-over on the sRGB bytes as they are: a color comes in straight and
-premultiplies, red, green and blue each `(c * a + 127) / 255`, and each byte
+source-over on the sRGB bytes as they are: a color, core.color's `Color`,
+comes in straight and premultiplies, red, green and blue each
+`(c * a + 127) / 255`, and each byte
 of the canvas, alpha included, becomes `s + (d * (255 - a) + 127) / 255` for
 the premultiplied source byte `s` (alpha 20 white over `#0B0B0D` gives
 `#1E1E20`). A clear stores its color instead. Pixels read back straight: each
@@ -4919,7 +4921,6 @@ inside, one on a right or bottom edge is not. The collision checks and the
 | Signature | Result | Description |
 |---|---|---|
 | `Frame.clear_background(color)` | — | Set every canvas pixel to the color, alpha included. |
-| `color(r, g, b, a)` | `Color` | Clamp each component to `0..255` and construct a color. |
 | `Frame.draw_rectangle(x, y, width, height, color)` | — | Fill a rectangle, clipped to the canvas and blended src-over. |
 | `Frame.draw_line(start_x, start_y, end_x, end_y, color)` | — | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
 | `Frame.draw_circle(center_x, center_y, radius, color)` | — | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
