@@ -5077,10 +5077,10 @@ index, not a substitute for that law.
   with interpolation or a joined list of lines; `Cursor.over(text)` reads text
   in pieces.
 - **D-DEQUE-QUEUE1=A** *(ratified 2026-09-30, card #3281)*: the built-in
-  `Queue<T>` is the only double-ended queue; `core.collections` has no
-  `Deque` or deque functions. A rotate is `pop_back` then `push_front`; an
-  extend is a loop of `push_back`. `Deque` stays the retired D-COLLNAME1=A
-  spelling.
+  `Queue<T>` is the only double-ended queue; `core.collections` has no second
+  double-ended queue type and no deque functions. A rotate is `pop_back` then
+  `push_front`; an extend is a loop of `push_back`. The retired D-COLLNAME1=A
+  spelling stays retired.
 - **D-URL1=A**: `core.url` and `core.mime` are separate typed modules. `Url`
   owns parse/build/join/normalize, typed repeated query pairs, component
   percent-encoding, IDNA host handling, and `file:`/`data:` URLs. `Mime` owns

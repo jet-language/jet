@@ -6,7 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 
 ## Lessons
 
-- [ByteBuffer](ByteBuffer.jet)
+- [Bytes](Bytes.jet) — `Bytes` is the one in-memory byte buffer: a builder, a read cursor and text-like reads.
 - [IOPrelude](IOPrelude.jet) — The readable Core prelude opens its closed ambient surface without a `use` line.
 - [IOSurface](IOSurface.jet) — Qualified Core IO remains available for #NoPrelude and explicit IO work.
 - [Log](Log.jet) — core.log — structured logging with levels, fields, spans and sinks.

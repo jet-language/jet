@@ -3761,7 +3761,7 @@ String-like operations decode UTF-8 lossily and then use String behavior:
 
 Consuming typed reads remain on `core.encoding.Reader`; terminal output remains
 on the `core.term` writer. `Bytes` does not introduce a second reader or
-writer hierarchy. See `Examples/Systems/ByteBuffer.jet`
+writer hierarchy. See `Examples/Systems/Bytes.jet`
 (D-ITERTOOLS1=A, #1467).
 
 ### `core.math`
