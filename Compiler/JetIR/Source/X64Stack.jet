@@ -1,0 +1,142 @@
+// Worst-case stack per entry point (`jet inspect memory`): each compiled
+// function's own stack (X64FunctionDebug.stack) added up along its deepest
+// chain of calls, the Function targets of its relocations. A chain that
+// comes back to a function on it (recursion) or reaches a call through a
+// function value has no bound. The runtime's own frames (the Runtime
+// targets) are not counted; each bound names the runtime symbols it reaches.
+
+use {
+    jet_backend.[X64RelocTarget]
+}
+
+IRX64StackBound: struct {
+    // The entry's function row.
+    entry: Int
+    // Bytes along the deepest chain; -1 when unbounded.
+    bytes: Int
+    // The function names of that chain, the entry first. When unbounded:
+    // the chain into the recursion, its repeated function last, or to the
+    // function that calls through a function value.
+    path: [String]
+    // Why unbounded: "recursion" or "dynamic"; "" when bounded.
+    open: String
+    // The runtime symbols the entry reaches, sorted; `bytes` leaves their
+    // frames out.
+    runtime: [String]
+}
+
+// Per function row of one walk: 0 not seen, 1 on the chain being walked,
+// 2 done; its deepest bytes (-1 unbounded), the callee that chain goes
+// through (-1 none), and why it is unbounded.
+IRX64StackWalk: struct {
+    state: [Int]
+    deep: [Int]
+    next: [Int]
+    open: [String]
+}
+
+// The entry rows: the module's entry, then the roots its build kept
+// (IRModule.kept).
+ir_x64_stack_entries: fn(compiled: IRX64Result) -> [Int] Never! {
+    rows := [Int]{}
+    count: compiled.functions.len()
+    entry: compiled.program.entry
+    if entry >= 0 && entry < count -> rows.push(entry)
+    loop row in compiled.program.kept {
+        if row >= 0 && row < count && !rows.contains(row) -> rows.push(row)
+    }
+    rows
+}
+
+// The worst-case stack bound of every entry (ir_x64_stack_entries).
+ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
+    walk := IRX64StackWalk{state: [Int]{}, deep: [Int]{}, next: [Int]{}, open: [String]{}}
+    loop _ in compiled.functions {
+        walk.state.push(0)
+        walk.deep.push(0)
+        walk.next.push(-1)
+        walk.open.push("")
+    }
+    bounds := [IRX64StackBound]{}
+    loop entry in ir_x64_stack_entries(compiled) {
+        if walk.state[entry] == 0 -> ir_x64_stack_visit(walk, compiled, entry)
+        path := [String]{}
+        seen := [Int:Bool]{}
+        row := entry
+        loop row >= 0 {
+            path.push(compiled.functions[row].name.copy())
+            if seen.get(row) != None -> break
+            seen[row] = true
+            row = walk.next[row]
+        }
+        bounds.push(IRX64StackBound{entry: entry, bytes: walk.deep[entry], path: path.move(), open: walk.open[entry].copy(), runtime: ir_x64_stack_runtime(compiled, entry)})
+    }
+    bounds
+}
+
+// Settles `row`'s deepest bytes after its callees'.
+ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) Never! {
+    walk.state[row] = 1
+    if compiled.debug[row].dynamic {
+        walk.deep[row] = -1
+        walk.open[row] = "dynamic"
+        walk.state[row] = 2
+        return
+    }
+    best := 0
+    loop reloc in compiled.functions[row].relocs {
+        if reloc.target == .Function(id) {
+            callee: id.value
+            if callee < 0 || callee >= walk.state.len() -> next
+            if walk.state[callee] == 1 {
+                walk.deep[row] = -1
+                walk.next[row] = callee
+                walk.open[row] = "recursion"
+                walk.state[row] = 2
+                return
+            }
+            if walk.state[callee] == 0 -> ir_x64_stack_visit(walk, compiled, callee)
+            if walk.deep[callee] < 0 {
+                walk.deep[row] = -1
+                walk.next[row] = callee
+                walk.open[row] = walk.open[callee].copy()
+                walk.state[row] = 2
+                return
+            }
+            if walk.deep[callee] > best {
+                best = walk.deep[callee]
+                walk.next[row] = callee
+            }
+        }
+    }
+    walk.deep[row] = compiled.debug[row].stack + best
+    walk.state[row] = 2
+}
+
+// The runtime symbols the functions `entry` reaches call, sorted.
+ir_x64_stack_runtime: fn(compiled: IRX64Result, entry: Int) -> [String] Never! {
+    reached := [Int:Bool]{}
+    pending := [Int]{entry}
+    names := [String]{}
+    reached[entry] = true
+    loop pending.len() > 0 {
+        row := pending.pop() ?? { break }
+        loop reloc in compiled.functions[row].relocs {
+            if reloc.target == {
+                .Function(id) -> {
+                    if id.value >= 0 && id.value < compiled.functions.len() && reached.get(id.value) == None {
+                        reached[id.value] = true
+                        pending.push(id.value)
+                    }
+                }
+                .Runtime(symbol) -> {
+                    if !names.contains(symbol) -> names.push(symbol.copy())
+                }
+                .Data(_) -> {}
+                .RuntimeData(_) -> {}
+            }
+        }
+    }
+    names.sort()
+    names
+}

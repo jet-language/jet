@@ -57,6 +57,13 @@ X64FunctionDebug: struct {
     body: Int
     cfi: [U8]
     ranges: [X64VariableRange]
+    // The most stack the function's own code holds at once, its return
+    // address included and its callees' frames not: `jet inspect memory`
+    // adds these up along the call graph (JetIR X64Stack.jet).
+    stack: Int{0}
+    // Whether it calls through a function value, whose targets the call
+    // graph does not name.
+    dynamic: Bool{false}
 }
 
 // The source types of the debug variables, described by their machine

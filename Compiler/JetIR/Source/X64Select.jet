@@ -285,6 +285,12 @@ IRX64Emitter: struct {
     // another thread they publish to sees them in program order with the
     // plain stores after them.
     streams: Bool
+    // The most bytes pushed below the frame at once (a call's stack
+    // arguments, a slow path's saved result: ir_x64_below), and whether a
+    // call goes through a function value (X64FunctionDebug.stack and
+    // .dynamic).
+    below: Int
+    dynamic: Bool
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -529,12 +535,19 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
     if !keeps -> ir_x64_keep_xmms(e, f, al, true)
     if e.streams && !keeps -> x64_sfence(e.code)
     if indirect {
+        e.dynamic = true
         x64_call_reg(e.code, X64_R10)
     } else {
         at: x64_call_rel32(e.code)
         e.relocs.push(X64Reloc{at: at, target: target})
     }
     if !keeps -> ir_x64_keep_xmms(e, f, al, false)
+}
+
+// `bytes` pushed below the frame for a while (ir_x64_compile_body's
+// X64FunctionDebug.stack counts the most at once).
+ir_x64_below: fn(e: &IRX64Emitter, bytes: Int) Never! {
+    if bytes > e.below -> e.below = bytes
 }
 
 // Whether function `id` is a stop poll or trap (ir_x64_stop_poll).
@@ -587,6 +600,7 @@ ir_x64_call: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         stacked.push(position)
     }
     pad: stacked.len() % 2
+    ir_x64_below(e, 8 * (stacked.len() + pad))
     if pad == 1 -> x64_alu_ri(e.code, X64Alu.Sub, X64_RSP, 8)
     index := stacked.len() - 1
     loop index >= 0 {
@@ -890,6 +904,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                     // its stop and returns. Two pushes keep the stack aligned
                     // and the result across the status call; pops keep the
                     // flags of its test.
+                    ir_x64_below(e, 16)
                     x64_push(e.code, X64_RAX)
                     x64_push(e.code, X64_RAX)
                     ir_x64_call_out(e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}, false)
@@ -910,6 +925,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 if !cold.drops.is_empty() {
                     // Two pushes keep the result (and the stack aligned)
                     // across the drops.
+                    ir_x64_below(e, 16)
                     x64_push(e.code, X64_RAX)
                     x64_push(e.code, X64_RAX)
                     ir_x64_cold_drops(e, m, f, al, cold.drops)
@@ -979,6 +995,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 ir_x64_lea_data(e, X64_R8, path)
                 x64_mov_ri(e.code, X64_R9, tables.lengths[path])
                 // The seventh argument goes on the stack, padded to 16 bytes.
+                ir_x64_below(e, 16)
                 x64_alu_ri(e.code, X64Alu.Sub, X64_RSP, 8)
                 x64_mov_ri(e.code, X64_R11, cold.line)
                 x64_push(e.code, X64_R11)
@@ -998,6 +1015,7 @@ ir_x64_emit_colds: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 x64_test_rr(e.code, X64_R11, X64_R11)
                 soft: x64_jcc_rel32(e.code, X64Cond.NE)
                 // cpuid leaf 1 clobbers rbx, a slot register.
+                ir_x64_below(e, 8)
                 x64_push(e.code, X64_RBX)
                 x64_mov_ri(e.code, X64_RAX, 1)
                 x64_mov_ri(e.code, X64_RCX, 0)
@@ -3862,7 +3880,7 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     name: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: relocs.move(), align: X64_FUNCTION_ALIGN},
-        debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: cfi.move(), ranges: [X64VariableRange]{}},
+        debug: X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: cfi.move(), ranges: [X64VariableRange]{}, stack: 8 + frame},
         variables: [X64DebugVariable]{},
         errors: [String]{},
         log: [String]{},
@@ -3890,6 +3908,9 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
     dwarf_cfa_def_cfa_register(cfi, x64_dwarf_register(X64_RBP))
     body: code.bytes.len()
     stacked: IR_X64_ARGUMENT_REGISTERS.len()
+    // An unbound template's arguments go through the stack (its own code
+    // leaves rsp balanced).
+    pushed: if ir_x64_asm_bound(leaf) -> 0 else -> 8 * leaf.regs.len()
     if ir_x64_asm_bound(leaf) {
         loop index in stacked..<leaf.regs.len() -> x64_load(code, leaf.regs[index], X64_RBP, 16 + 8 * (index - stacked))
     } else {
@@ -3924,7 +3945,7 @@ ir_x64_asm_function: fn(m: IRModule, f: IRFunction, leaf: IRAsmLeaf, row: Int, l
     log: ir_x64_log_text(m, f, code)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: [X64Reloc]{}, align: X64_FUNCTION_ALIGN},
-        debug: X64FunctionDebug{lines: lines.move(), body: body, cfi: cfi.move(), ranges: [X64VariableRange]{}},
+        debug: X64FunctionDebug{lines: lines.move(), body: body, cfi: cfi.move(), ranges: [X64VariableRange]{}, stack: 16 + pushed},
         variables: [X64DebugVariable]{},
         errors: [String]{},
         log: log,
@@ -4116,7 +4137,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     al: ir_x64_allocate(m, f)
     checked: ir_timing_marked(f)
     logged: ir_x64_logged(tables, row)
-    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore)}
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
@@ -4355,7 +4376,9 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move()},
+        // The return address, rbp, the saved registers, the frame homes and
+        // the most pushed below them at once.
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: 16 + 8 * al.saved.len() + al.frame_bytes + e.below, dynamic: e.dynamic},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,

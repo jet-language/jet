@@ -1,0 +1,86 @@
+// `jet inspect memory`: the worst-case stack of each entry point of the
+// program `jet build` would write (jet_cli_native_program, at the level and
+// with the inlining of the job's profile and build option flags), from the
+// x86-64 selection's per-function stack and the call graph (JetIR
+// X64Stack.jet). A recursive chain or a call through a function value has no
+// bound and says which; the runtime's own frames are not counted, and each
+// entry names the runtime symbols it reaches.
+use {
+    jet_driver.[JetDriverCompileMode, JetDriverIceRow, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_entry_root_path, jet_driver_ice_record, jet_driver_present_diagnostics]
+    jet_foundation.[CompilerThreads, build_options_stock]
+    jet_ir.[IRX64StackBound, ir_x64_compile_module, ir_x64_stack_bounds]
+}
+
+// One entry's stack line: its bytes and deepest chain, or why it has none.
+jet_cli_memory_stack_text: fn(bound: IRX64StackBound) -> String Never! {
+    chain: bound.path.join(" -> ")
+    if bound.open == "recursion" -> return "stack: unbounded, recursion via {chain} (add #MaxDepth(n))"
+    if bound.open == "dynamic" -> return "stack: unbounded, a call through a function value via {chain} (seal its targets)"
+    "stack: {bound.bytes} B via {chain}"
+}
+
+jet_cli_memory_report: fn(bounds: [IRX64StackBound], scope: String, file: String, profile: String, level: Int, json: Bool) -> String Never! {
+    if !json {
+        text := "memory: scope={scope} source={file} profile={profile} level=O{level}\n"
+        loop bound in bounds {
+            name: bound.path[0]
+            text = "{text}entry {name}\n  {jet_cli_memory_stack_text(bound)}\n"
+            if bound.runtime.len() > 0 -> text = "{text}  runtime frames not counted: {bound.runtime.join(", ")}\n"
+        }
+        return text
+    }
+    entries := [JetCLIStatusValue]{}
+    loop bound in bounds {
+        entries.push(jet_cli_status_object([
+            jet_cli_status_field("name", jet_cli_status_text(bound.path[0])),
+            jet_cli_status_field("stack_bytes", if bound.bytes >= 0 -> jet_cli_status_int(bound.bytes) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field("unbounded", jet_cli_status_text(bound.open)),
+            jet_cli_status_field("path", jet_cli_status_texts(bound.path)),
+            jet_cli_status_field("runtime_not_counted", jet_cli_status_texts(bound.runtime)),
+        ]))
+    }
+    fields := [JetCLIStatusField]{
+        jet_cli_status_field("scope", jet_cli_status_text(scope)), jet_cli_status_field("source", jet_cli_status_text(file)), jet_cli_status_field("profile", jet_cli_status_text(profile)),
+        jet_cli_status_field("level", jet_cli_status_int(level)),
+        jet_cli_status_field("entries", jet_cli_status_array(entries)),
+    }
+    "{jet_cli_status_render("inspect.memory", true, fields)}\n"
+}
+
+// The checked Program compile of the authorized sources under the job's
+// profile, the check failure every inspect plane reports, then the native
+// program's selection and its stack bounds. A fault on the way is the ICE
+// report `jet build` gives it.
+jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Program)
+    if prepared == {
+        .Refused(refusal) -> output = refusal.move()
+        .Prepared(value, snapshot) -> {
+            request := value.move()
+            request.profile = job.profile
+            sources := request.authorized_sources
+            compiler_threads: request.compiler_threads.copy()
+            front := jet_cli_lowering_inputs(request, None)
+            errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
+            if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
+            if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
+            inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
+            if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", JetCLINativeFailure.NoEntry, job.color))
+            build := build_options_stock("build")
+            if job.build == .Val(given) -> build = given.copy()
+            runtime: jet_cli_runtime_exports(jet_cli_runtime_dir())
+            if runtime.failure == .Val(failure) -> jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))
+            census := [JetDriverIceRow]{}
+            built := jet_cli_native_program(front.compile, inputs, None, build, runtime, census, job.file, jet_driver_entry_root_path(snapshot))
+            if built.failure == .Val(failure) -> jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", failure, job.color))
+            threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+            compiled := ir_x64_compile_module(built.program.move(), threads)
+            loop error in compiled.errors -> jet_driver_ice_record(census, "-", "ir.x64", "select", error)
+            if census.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_ice_census(job.file, census))
+            report: jet_cli_memory_report(ir_x64_stack_bounds(compiled), job.scope, job.file, job.profile, jet_cli_native_level(build), job.json)
+            jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+        }
+    }
+    output
+}

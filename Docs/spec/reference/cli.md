@@ -1452,6 +1452,20 @@ The compiler assembly includes only the trust store's read path. Gate-aware
 grant writers stay in Jetpack's existing command source alongside its selector
 and JSON writer; granting still checks policy before any store read or write.
 
+`jet inspect memory [<entry.jet>] [--profile <name>]` compiles the program
+through the same native pipeline as `jet build` and prints, for each entry
+point (the program entry and every kept function), the worst-case stack in
+bytes and the deepest call path, for example `stack: 96 B via run -> step ->
+leaf`. Each function's frame is its return address, saved frame pointer,
+saved registers, locals, and the largest outgoing argument area. A call cycle
+reports `stack: unbounded, recursion via ...` and asks for `#MaxDepth(n)`; a
+call through a function value reports `stack: unbounded, a call through a
+function value via ...` until its targets are sealed. Runtime frames are not
+counted; they are named on a `runtime frames not counted:` line. JSON uses the
+`inspect.memory` status with one `entries` row per entry point
+(`stack_bytes` is null when unbounded). This is a different report from
+`jet inspect audit memory`, which reads exercised memory witnesses.
+
 `jet inspect target [machine] [--json]` reads only the toolchain's machine
 table, never a project. With no name it lists every declared target machine
 with its triple, environment, and the tiers it runs at; `--json` prints one

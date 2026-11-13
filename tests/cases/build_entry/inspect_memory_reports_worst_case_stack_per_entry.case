@@ -1,0 +1,38 @@
+# `jet inspect memory` compiles the program as `jet build` does and prints,
+# for each entry point, its worst-case stack and the deepest call chain that
+# needs it. Without the optimizer every call stays a call: direct calls give a
+# byte bound via run -> step -> leaf; a function that calls itself has no
+# bound and asks for #MaxDepth(n); a call through a function value has no
+# bound until its targets are sealed. Runtime frames are not counted, and the
+# report names the runtime symbols each entry reaches. JSON carries the same
+# rows under the `inspect.memory` status.
+fixture: inspect_memory_reports_worst_case_stack_per_entry.fixture
+env: NO_COLOR=1
+step direct: jet inspect memory --optimize=none direct.jet
+exit: 0
+stdout: ~ "memory: scope=" # the report header
+stdout: ~ "level=O0" # --optimize=none is the build's level
+stdout: ~ "entry run" # the program entry
+stdout: ~ " B via run -> step -> leaf" # bytes, then the deepest chain of direct calls
+stdout: !~ "unbounded" # every call is direct
+step recursive: jet inspect memory --optimize=none recursive.jet
+exit: 0
+stdout: ~ "entry run" # the program entry
+stdout: ~ "stack: unbounded, recursion via run -> depth -> depth (add #MaxDepth(n))" # the cycle closes on depth
+step default: jet inspect memory recursive.jet
+exit: 0
+stdout: ~ "unbounded, recursion via " # the build's own level keeps the non-tail self call
+step value: jet inspect memory --optimize=none through_value.jet
+exit: 0
+stdout: ~ "stack: unbounded, a call through a function value via run -> apply (seal its targets)" # apply calls the value it is given
+step recjson: jet inspect memory --optimize=none recursive.jet --json
+exit: 0
+json: stdout doc $.action = "inspect.memory"
+json: stdout doc $.entries[0].name = "run"
+json: stdout doc $.entries[0].stack_bytes = null
+json: stdout doc $.entries[0].unbounded = "recursion"
+json: stdout doc $.entries[0].path[1] = "depth"
+step directjson: jet inspect memory --optimize=none direct.jet --json
+exit: 0
+json: stdout doc $.entries[0].unbounded = ""
+json: stdout doc $.entries[0].path[2] = "leaf"
