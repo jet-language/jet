@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6799,
-    "rev": 101555,
+    "rev": 101556,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -56708,12 +56708,12 @@
         },
         {
           "n": 31,
-          "text": "jet build --target=web writes source maps (app.js.map and app.wasm.map) that map back to Jet source lines, so a debugger pause on a mapped Jet line works. On dev at 2026-11-12 the js_source_map case fixture built with seed-b13 writes app.js, app.wasm, index.html, jet_dom_runtime.js, rt.wasm and web.manifest.json and no maps (G4Ports-1). #5072 c3 (the sourcemap tool's parity entry and the live CDP breakpoint) depends on this. Proof: the js_source_map case passes and lists both map files.",
+          "text": "jet build --target=web writes app.wasm.map, a v3 source map with sourcesContent and relative sources, referenced by a sourceMappingURL custom section in app.wasm. It maps app.wasm instructions back to Jet source lines, so a debugger pause on a mapped Jet line works. app.js is the fixed host loader and holds no Jet code, so it has no map; Tools/web-test/SourceMap.jet checks an app.js.map only when a build writes a JS partition. #5072 c3 (the sourcemap tool's parity entry and the live CDP breakpoint) depends on this. Proof: the js_source_map case, rewritten for the wasm map, passes: sources [\"main.jet\"], no host path, and mappings land on the fixture's main.jet lines.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T22:26:49.340Z"
+          "at": "2026-11-13T15:05:39.585Z"
         }
       ],
       "refs": [],
@@ -56723,7 +56723,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-13T09:23:33.120Z",
+      "updated": "2026-11-13T15:05:39.585Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -201352,6 +201352,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T15:05:39.585Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m58g8t",
+      "note": "#31: Decision (Main, 2026-11-13): the dev web build compiles the whole program to app.wasm, and app.js is the fixed host loader with no Jet code (Host.jet WEB_APP_JS). An app.js.map would have no Jet line to map, and the case pinned the retired JS emitter's output. Greenfield: the criterion now names the map that exists.; was: jet build --target=web writes source maps (app.js.map and app.wasm.map) that map back to Jet source lines, so a debugger pause on a mapped Jet line works. On dev at 2026-11-12 the js_source_map case f"
+    },
     {
       "at": "2026-11-13T15:03:24.843Z",
       "by": "Main",
