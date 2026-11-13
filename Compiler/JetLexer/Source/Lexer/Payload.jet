@@ -60,15 +60,60 @@ literal_row: fn(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
 }
 
 number_literal: fn(integer: Int?, decimal: Float?, suffix: Name) -> TokenLiteral Never! {
-    TokenLiteral{integer: integer, decimal: decimal, suffix: suffix, interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
+    TokenLiteral{integer: integer, decimal: decimal, suffix: suffix, interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}}
 }
 
 text_literal: fn(interpolations: Int, parts: [StringPart]) -> TokenLiteral Never! {
-    TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: interpolations, string_parts: parts, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
+    TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: interpolations, string_parts: parts, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}}
 }
 
 add_diagnostic: fn(diagnostics: &[Diagnostic], code: String, start: Int, end: Int, what: String, why: String, fix: String) {
     diagnostics.push(diagnostic_from_registry(code, Val(Span{start: start, end: end}), what, why, fix))
+}
+
+// E0001 for the escape `\{escape_text}` at `start..<end`, which Jet doesn't know.
+add_unknown_escape: fn(diagnostics: &[Diagnostic], start: Int, end: Int, escape_text: String) {
+    what := "`\\{escape_text}` isn't an escape Jet knows"
+    why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+    add_diagnostic(diagnostics, "E0001", start, end, what, why, "write `\\\\` for a real backslash")
+}
+
+// `source[start..<end]` (one scalar's UTF-8 bytes) packed into one Int, first
+// byte highest (TextEscape.bytes).
+packed_bytes: fn(source: [U8], start: Int, end: Int) -> Int Never! {
+    packed := 0
+    loop index in start..<end -> packed = packed * 256 + byte_at(source, index)
+    packed
+}
+
+// The scalar a TextEscape escapes, as its diagnostic spells it.
+text_escape_text: fn(escape: TextEscape) -> String Never! {
+    width: escape.span.end - escape.span.start - 1
+    scale := 1
+    loop _ in 1..<width -> scale *= 256
+    out := [U8]{}
+    loop _ in 0..<width {
+        out.push(U8{(escape.bytes /% scale).bit_and(255)})
+        scale /%= 256
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// The diagnostics a reading of quoted text reports once the parser picks it
+// (TokenLiteral): those it kept (`deferred`), with an E0001 for each escape
+// it doesn't know (`escapes`), in the order the lexer met them.
+text_reading_diagnostics: fn(deferred: [Diagnostic], escapes: [TextEscape]) -> [Diagnostic] {
+    out := [Diagnostic]{}
+    escape := 0
+    loop index in 0..<deferred.len() + 1 {
+        loop escape < escapes.len() && escapes[escape].before <= index {
+            found: escapes[escape]
+            add_unknown_escape(out, found.span.start, found.span.end, text_escape_text(found))
+            escape += 1
+        }
+        if index < deferred.len() -> out.push(deferred[index].copy())
+    }
+    out
 }
 
 bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
@@ -586,7 +631,7 @@ append_text_part: fn(parts: &[StringPart], start: Int, end: Int, text: Name) Nev
     })
 }
 
-decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, indent: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic], defer_escapes: Bool, escapes: &[TextEscape]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     decoded := [U8]{}
     literal := [U8]{}
     parts := [StringPart]{}
@@ -667,12 +712,8 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
             escape_width: utf8_width(source, cursor + 1)
             escape_end := cursor + 1 + escape_width
             if {
-                escaped < 0 -> {
-                    escape_text: bytes_text(source, cursor + 1, escape_end)
-                    what := "`\\{escape_text}` isn't an escape Jet knows"
-                    why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
-                    add_diagnostic(diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
-                }
+                escaped < 0 && defer_escapes -> escapes.push(TextEscape{span: Span{start: cursor, end: escape_end}, bytes: packed_bytes(source, cursor + 1, escape_end), before: diagnostics.len()})
+                escaped < 0 -> add_unknown_escape(diagnostics, cursor, escape_end, bytes_text(source, cursor + 1, escape_end))
                 else -> {
                     push_ascii_byte(literal, escaped)
                     push_ascii_byte(decoded, escaped)
@@ -809,7 +850,9 @@ check_triple_delimiter_text: fn(source: [U8], begin: Int, end: Int, position: St
 // The reading of the string `source[start..<end]`: plain text decodes its
 // escapes, a typed head's body (`raw_head`) keeps its backslashes as written,
 // and a byte head's body (`byte_head`) decodes them and reads `\xNN` as a byte.
-decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
+// A reading the parser may not pick (`defer_escapes`) keeps the escapes it
+// doesn't know in `escapes` instead of reporting them (TextEscape).
+decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic], defer_escapes: Bool, escapes: &[TextEscape]) -> (decoded: String, interpolations: Int, parts: [StringPart], valid: Bool) {
     triple := byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
     content_start := start + 1
     content_end := end - 1
@@ -834,7 +877,7 @@ decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head:
         if content_end > content_start && byte_at(source, content_end - 1) == 10 -> content_end -= 1
         if content_end < content_start -> content_end = content_start
     }
-    decode_string_content(source, content_start, content_end, triple, indent, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+    decode_string_content(source, content_start, content_end, triple, indent, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics, defer_escapes, escapes)
 }
 
 decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
@@ -1017,7 +1060,8 @@ gap_diagnostic: fn(source: [U8], facts: [Int], start: Int, end: Int, config_surf
             modes: string_head_modes(source, facts, index)
             scanned: scan_plain_string_end(source, cursor, modes.raw_head)
             stop: if scanned < 0 -> -scanned - 1 else -> scanned
-            body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+            unreported := [TextEscape]{}
+            body: decode_string_content(source, cursor + 1, stop, false, 0, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics, false, unreported)
             if body.valid -> add_diagnostic(diagnostics, "E0002", cursor, stop, "this text never gets a closing quote", "a piece of text must start and end with a `\"` on the same line", "add a closing `\"` before the end of the line")
             cursor = stop
             next
@@ -1076,7 +1120,8 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         }
         modes: string_head_modes(source, facts, index)
         if modes.raw_head || modes.byte_head -> return string_readings_payload(source, start, end, modes.raw_head, modes.byte_head, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
-        decoded: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, diagnostics)
+        unreported := [TextEscape]{}
+        decoded: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, diagnostics, false, unreported)
         if !decoded.valid -> return (decoded: name_empty(), keep: false, literal: -1)
         return (decoded: name_intern(tables.names, decoded.decoded), keep: true, literal: literal_row(tables, text_literal(decoded.interpolations, decoded.parts)))
     }
@@ -1093,25 +1138,29 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
 
 // Text a typed head may take, read both ways: the plain reading is the
 // token's row and the head's reading its `head` row, each with its own
-// diagnostics deferred until the parser picks one. A reading that doesn't
-// close (a `{` with no `}` after it) is still kept while the other reading
-// closes, as `\{{` does in a typed head's body; text that closes neither way
-// fails as any string does.
+// diagnostics and unknown escapes deferred until the parser picks one. A
+// reading that doesn't close (a `{` with no `}` after it) is still kept while
+// the other reading closes, as `\{{` does in a typed head's body; text that
+// closes neither way fails as any string does.
 string_readings_payload: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head: Bool, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: Name, literal: Int, keep: Bool) {
     plain_diagnostics := [Diagnostic]{}
-    plain: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, plain_diagnostics)
+    plain_escapes := [TextEscape]{}
+    plain: decode_string(source, start, end, false, false, config_surface, allow_reserved_identifiers, depth, tables, plain_diagnostics, true, plain_escapes)
     head_diagnostics := [Diagnostic]{}
-    head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics)
+    head_escapes := [TextEscape]{}
+    head: decode_string(source, start, end, raw_head, byte_head, config_surface, allow_reserved_identifiers, depth, tables, head_diagnostics, true, head_escapes)
     if !plain.valid && !head.valid {
-        loop diagnostic in plain_diagnostics.move() -> diagnostics.push(diagnostic.move())
+        loop diagnostic in text_reading_diagnostics(plain_diagnostics, plain_escapes) -> diagnostics.push(diagnostic.move())
         return (decoded: name_empty(), keep: false, literal: -1)
     }
     head_literal := text_literal(head.interpolations, head.parts)
     head_literal.deferred = head_diagnostics.move()
+    head_literal.escapes = head_escapes.move()
     literal := text_literal(plain.interpolations, plain.parts)
     literal.head = literal_row(tables, head_literal)
     literal.head_decoded = name_intern(tables.names, head.decoded)
     literal.deferred = plain_diagnostics.move()
+    literal.escapes = plain_escapes.move()
     (decoded: name_intern(tables.names, plain.decoded), keep: true, literal: literal_row(tables, literal))
 }
 

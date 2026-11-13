@@ -26,8 +26,10 @@ Token: struct {
 // tell from a block's first line, so it gets two readings: this row decodes
 // its escapes, and the row `head` (with spelling `head_decoded`) keeps its
 // backslashes as written or reads its `\xNN` escapes as bytes. The parser
-// picks one (parser_text_reading); each reading holds its own diagnostics in
-// `deferred`, which the parser reports for the reading it picks.
+// picks one (parser_text_reading) and reports that reading's diagnostics
+// (text_reading_diagnostics): what it kept in `deferred`, and an E0001 for
+// each of its `escapes`. A byte asset's plain reading has one unknown escape
+// per byte, so it builds its diagnostics only if the parser picks it.
 TokenLiteral: struct {
     integer: Int?
     decimal: Float?
@@ -38,6 +40,16 @@ TokenLiteral: struct {
     head: Int
     head_decoded: Name
     deferred: [Diagnostic]
+    escapes: [TextEscape]
+}
+
+// An escape a deferred reading doesn't know: `span` covers the `\` and the
+// escaped scalar, whose UTF-8 bytes `bytes` packs, first byte highest. It
+// reports right before `deferred[before]`, where the lexer met it.
+TextEscape: struct {
+    span: Span
+    bytes: Int
+    before: Int
 }
 
 StringPart: struct {
@@ -132,7 +144,7 @@ token_shift_spans: fn(token: &Token, offset: Int, literals: &[TokenLiteral]) Nev
 }
 
 // Moves a literal row's string parts, their tokens, its deferred diagnostics
-// and its typed-head reading by `offset`.
+// and escapes, and its typed-head reading by `offset`.
 literal_shift_spans: fn(row: Int, offset: Int, literals: &[TokenLiteral]) Never! {
     loop part_index in 0..<literals[row].string_parts.len() {
         literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
@@ -147,6 +159,7 @@ literal_shift_spans: fn(row: Int, offset: Int, literals: &[TokenLiteral]) Never!
         shifted_diagnostic(diagnostic, offset)
         literals[row].deferred[index] = diagnostic
     }
+    loop index in 0..<literals[row].escapes.len() -> literals[row].escapes[index].span = shifted_token_span(literals[row].escapes[index].span, offset)
     if literals[row].head >= 0 -> literal_shift_spans(literals[row].head, offset, literals)
 }
 

@@ -63,6 +63,7 @@ use {
         TOKEN_UNIFIED_ARROW,
         TOKEN_UNIT_NUMBER,
         StringPart,
+        TextEscape,
         Token,
         TokenLiteral,
         TokenTables,
@@ -541,7 +542,7 @@ parser_fence_int_token: fn(tables: &TokenTables, value: Int, span: Span) -> Toke
     spelled: name_intern(tables.names, "{value}")
     token.text = spelled
     token.decoded = spelled
-    tables.literals.push(TokenLiteral{integer: Val(value), decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}})
+    tables.literals.push(TokenLiteral{integer: Val(value), decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}})
     token.literal = tables.literals.len() - 1
     token
 }

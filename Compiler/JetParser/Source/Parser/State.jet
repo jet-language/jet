@@ -61,6 +61,7 @@ use {
         TOKEN_UNIT_NUMBER,
         Token,
         TokenTables,
+        text_reading_diagnostics,
         token_decimal,
         token_decoded,
         token_integer,
@@ -256,7 +257,7 @@ parser_take_text: fn(state: &JetParserState, head: Bool) -> Token Never! {
     token: parser_text_reading(state, bumped, head)
     if token.literal < 0 -> return token
     row: token.literal
-    loop index in 0..<state.tables[0].literals[row].deferred.len() -> state.diagnostics.push(state.tables[0].literals[row].deferred[index].copy())
+    loop diagnostic in text_reading_diagnostics(state.tables[0].literals[row].deferred, state.tables[0].literals[row].escapes) -> state.diagnostics.push(diagnostic.move())
     token
 }
 

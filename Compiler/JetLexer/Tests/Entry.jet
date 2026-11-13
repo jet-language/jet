@@ -29,10 +29,12 @@ use {
         TOKEN_LT,
         TOKEN_RBRACKET,
         TOKEN_STRING,
+        TextEscape,
         Token,
         TokenLiteral,
         lex,
         lex_payload,
+        text_reading_diagnostics,
     ]
 }
 
@@ -46,7 +48,7 @@ lexer_test_name: fn(lexed: Lexed, name: Name) -> String Never! { name_text(lexed
 
 // The literal facts of `token`; a token without a literal row has none.
 lexer_test_literal: fn(lexed: Lexed, token: Token) -> TokenLiteral Never! {
-    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}}
+    if token.literal < 0 -> return TokenLiteral{integer: None, decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}, head: -1, head_decoded: name_empty(), deferred: [Diagnostic]{}, escapes: [TextEscape]{}}
     lexed.tables.literals[token.literal].copy()
 }
 
@@ -71,13 +73,14 @@ lexer_test_head_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
     strings
 }
 
-// The lexer's diagnostics and those each string's plain reading keeps for
-// the parser.
+// The lexer's diagnostics and those each string's plain reading reports once
+// the parser picks it.
 lexer_test_reported: fn(lexed: Lexed) -> [Diagnostic] Never! {
     reported := lexed.diagnostics.copy()
     loop token in lexed.tokens {
         if token.kind == TOKEN_STRING {
-            loop diagnostic in lexer_test_literal(lexed, token).deferred -> reported.push(diagnostic.copy())
+            literal: lexer_test_literal(lexed, token)
+            loop diagnostic in text_reading_diagnostics(literal.deferred, literal.escapes) -> reported.push(diagnostic.move())
         }
     }
     reported
@@ -150,7 +153,8 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
 }
 
 // Each reading keeps its own diagnostics for the parser: `\d` is no escape
-// of plain text, while a typed head's body keeps it as written.
+// of plain text, while a typed head's body keeps it as written. The plain
+// reading keeps the escape, not a built diagnostic, until the parser picks it.
 #Test("each_reading_defers_its_own_diagnostics") {
     lexed: lexer_test_raw(`x: Regex{"\d+"}`)
     assert(lexed.diagnostics.is_empty())
@@ -159,8 +163,28 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
         if token.kind != TOKEN_STRING -> next
         literal: lexer_test_literal(lexed, token)
         assert(literal.head >= 0)
-        assert(literal.deferred.len() == 1 && literal.deferred[0].what.contains("isn't an escape"))
-        assert(lexed.tables.literals[literal.head].deferred.is_empty())
+        assert(literal.deferred.is_empty() && literal.escapes.len() == 1)
+        reading: text_reading_diagnostics(literal.deferred, literal.escapes)
+        assert(reading.len() == 1 && reading[0].what.contains("isn't an escape"))
+        head: lexed.tables.literals[literal.head]
+        assert(text_reading_diagnostics(head.deferred, head.escapes).is_empty())
+        found = true
+    }
+    assert(found)
+}
+
+// A reading's unknown escapes report where the lexer met them, among the
+// diagnostics it kept.
+#Test("a_deferred_reading_reports_in_source_order") {
+    lexed: lexer_test_raw(`x: Regex{"\d { } \q"}`)
+    found := false
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_STRING -> next
+        literal: lexer_test_literal(lexed, token)
+        reading: text_reading_diagnostics(literal.deferred, literal.escapes)
+        assert(reading.len() == 3)
+        assert(reading[0].code == "E0001" && reading[1].code == "E0003" && reading[2].code == "E0001")
+        assert(reading[0].what.contains("\\d") && reading[2].what.contains("\\q"))
         found = true
     }
     assert(found)

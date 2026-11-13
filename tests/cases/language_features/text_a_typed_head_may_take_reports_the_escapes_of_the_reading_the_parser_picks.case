@@ -1,0 +1,15 @@
+# Text after `Name{`, `.{` or `[U8]{` carries a plain and a typed-head
+# reading (JetLexer Payload.jet string_readings_payload). Each reading keeps
+# the escapes it doesn't know (TokenLiteral.escapes), and the parser reports
+# them only for the reading it picks (text_reading_diagnostics): the block's
+# first line in `bytes` reads as plain text, so its `\x`, `\q` and `\é` each
+# report, while TABLE's byte head reads `\xNN` as bytes and reports nothing.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "bytes: fn() -> [U8] { \"\\x41\\q\\é\" }\n\nTABLE: [U8]{\"\\x41\\x42\"}\n\nrun: fn() {\n    print(TABLE.len())\n}\n"
+step: jet run main.jet
+exit: 1
+stderr: ~ "`\\x` isn't an escape Jet knows" # the plain reading's `\x` reports once it is picked
+stderr: ~ "`\\q` isn't an escape Jet knows" # every unknown escape of the picked reading reports
+stderr: ~ "`\\é` isn't an escape Jet knows" # a multi-byte scalar escape spells its whole scalar
+stderr: ~ "3 problems found" # the byte head's `\xNN` escapes in TABLE report nothing
