@@ -2682,10 +2682,11 @@ function toolCommand(script) {
   return [...(TOOL_INTERPRETERS[path.extname(script)] ?? []), script];
 }
 
-// `argv` with a case's `env` set where it wins. Each command runs through
-// JetEnv, which applies the dev shell's variables over the caller's the way
-// `nix develop` does, so the shell's CC would replace a case's `CC`; env(1)
-// inside JetEnv sets the case's variables again, last.
+// `argv` with a case's `env` set inside JetEnv, where it wins and where JetEnv
+// never sees it. JetEnv applies the dev shell's variables over the caller's the
+// way `nix develop` does, so the shell's CC would replace a case's `CC`, and it
+// refuses a scratch variable on /tmp, which a case may set to prove the program
+// refuses it; env(1) inside JetEnv sets the case's variables last.
 function withCaseEnv(env, argv) {
   const pairs = Object.entries(env).map(([name, value]) => `${name}=${value}`);
   return pairs.length === 0 ? argv : ["env", "--", ...pairs, ...argv];
@@ -2695,13 +2696,15 @@ function withCaseEnv(env, argv) {
 // entry's shape). Each case runs the original (`tool.original`) and the Jet
 // twin (`tool.jet`), both paths under `root` (the repository), with the
 // case's `args` and `env` (variables over the harness environment and over
-// the dev shell's, which JetEnv applies: the case's always win); each
-// must exit with the case's `exit` (0 when it names none) and do the job. A
-// case with a `check` (a Jet program in the entry) proves the job: after each
-// program, `jetBin CHECK STDOUT` runs in the case directory, STDOUT being a
-// file holding the program's output, and must exit 0 and print the case's
-// `expected` file byte for byte; a case without one compares the program's
-// own output with `expected` byte for byte. A `jetBin` given as a path is also the
+// the dev shell's, which JetEnv applies: the case's always win, and JetEnv
+// itself never sees them, so what a case proves is the program's behaviour);
+// each must exit with the case's `exit` (0 when it names none) and do the
+// job. A case with a `check` (a Jet program in the entry) proves the job:
+// after each program, `jetBin CHECK STDOUT` runs in the case directory, with
+// the case's `env` too, STDOUT being a file holding the program's output, and
+// must exit 0 and print the case's `expected` file byte for byte; a case
+// without one compares the program's own output with `expected` byte for
+// byte. A `jetBin` given as a path is also the
 // `jet` the scripts run: its directory goes first on PATH and it is $JET,
 // which the dev shell's `jet` runs (a case's `env` may still set either); a
 // bare name is left to the caller's PATH. Every run starts in its own fresh
@@ -2748,14 +2751,14 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
       await fs.rm(cwd, { recursive: true, force: true });
       if (fixtures === null) await fs.mkdir(cwd, { recursive: true });
       else await fs.cp(fixtures, cwd, { recursive: true, verbatimSymlinks: true });
-      const result = await runProcess(cwd, withCaseEnv(env, [...command, ...args]), { env: { ...inner, ...env } });
+      const result = await runProcess(cwd, withCaseEnv(env, [...command, ...args]), { env: inner });
       let reason = result.code !== exitCode
         ? `exit ${result.code}, not ${exitCode}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
         : null;
       if (reason === null && typeof item?.check === "string" && item.check !== "") {
         const printed = `${cwd}.stdout`;
         await fs.writeFile(printed, result.stdout);
-        const checked = await runProcess(cwd, withCaseEnv(env, [jetBin, path.join(dir, item.check), printed]), { env: { ...inner, ...env } });
+        const checked = await runProcess(cwd, withCaseEnv(env, [jetBin, path.join(dir, item.check), printed]), { env: inner });
         await fs.rm(printed, { force: true });
         reason = checked.code !== 0
           ? `its check \`${item.check}\` fails (exit ${checked.code}): ${checked.stderr.toString("utf8").trim().slice(0, 300)}`

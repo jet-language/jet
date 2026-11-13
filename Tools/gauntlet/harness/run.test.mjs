@@ -325,6 +325,23 @@ test("a tool case's env wins over the dev shell's variables in both runs", stage
   });
 });
 
+test("a tool case's env reaches its programs and its check but never JetEnv, which refuses a scratch variable on /tmp", stagedEntryTestOptions, async () => {
+  await withScratch("tool-check-env", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "" });
+    // Each program refuses the /tmp CARGO_TARGET_DIR itself, with 65; JetEnv
+    // would refuse it before either ran, with 64. The check (the fake jet
+    // again) prints the variable it sees.
+    const refused = "/tmp/gauntlet-check-env-refused";
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "process.exit(process.env.CARGO_TARGET_DIR.startsWith('/tmp/') ? 65 : 0);\n");
+    await fs.writeFile(jetBin, "#!/bin/sh\ncase \"$1\" in\n*check.jet) printf '%s\\n' \"$CARGO_TARGET_DIR\" ;;\n*) case \"$CARGO_TARGET_DIR\" in /tmp/*) exit 65 ;; esac ;;\nesac\n");
+    await fs.writeFile(path.join(entryDir, "check.jet"), "// the check's source; the fake jet stands in for running it\n");
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), `${refused}\n`);
+    entry.tool.cases = [{ args: [], env: { CARGO_TARGET_DIR: refused }, exit: 65, check: "check.jet", expected: "expected/lines.out" }];
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
+  });
+});
+
 test("a tool case's args reach the twin verbatim, a leading -- included", stagedEntryTestOptions, async () => {
   await withScratch("tool-separator", async (root) => {
     const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "" });
