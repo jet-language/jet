@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0761 — Jet diagnostic</title>
-<meta name="description" content="Unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`)">
+<meta name="description" content="Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable">
 <meta property="og:title" content="E0761 — Jet diagnostic">
-<meta property="og:description" content="Unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`)">
+<meta property="og:description" content="Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0761</h1>
-<p>Unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`)</p>
+<p>Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">Unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`)</p>
+<p class="diag-copy what" data-registry-field="what">Unknown `#Context` field or context key: a `#Context` label or `context.get` argument names neither `allocator`, `logger` nor a `#ContextKey` constant, or a `#ContextKey` reuses a context field name or is mutable</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">The context bundle has a fixed set of fields: `allocator`, `logger` and `deadline`</p>
+<p class="diag-copy why" data-registry-field="why">The context bundle holds `allocator` and `logger`, plus the values a package declares with `#ContextKey`</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use only the supported `#Context` fields: `allocator`, `logger`, and `deadline`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use a context field or declare the key: `#ContextKey frame_index: 0`, then `#Context(frame_index: 3)` and `context.get(frame_index)`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0761</code>: <code>tests/ui/context_unknown_field.stderr</code>.</p>
-<pre class="diag">Error [jet.UnknownContextField]: `scheduler` isn&#39;t a context field
-  --&gt; tests/ui/context_unknown_field.jet:7:14
+<p>First UI snapshot mentioning <code>E0761</code>: <code>tests/ui/context_get_not_key.stderr</code>.</p>
+<pre class="diag">Error [jet.UnknownContextField]: `context.get` needs a context key
+  --&gt; tests/ui/context_get_not_key.jet:5:20
     |
-  7 |     #Context(scheduler: arena) {
-    |              ^^^^^^^^^
- Why: The context bundle holds `allocator`, `logger`, and `deadline`
- Fix: Write `#Context(allocator: …)`, `#Context(logger: …)`, or `#Context(deadline: …)`
+  5 |     _: context.get(LIMIT)
+    |                    ^^^^^
+ Why: Only a constant declared with `#ContextKey` names a context value
+ Fix: Declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name
 More: jet-lang.dev/e/E0761
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

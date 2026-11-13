@@ -39,7 +39,8 @@ The `L` prefix marks a lint: every new row with `severity: .Lint` takes an `L`
 code, and no new row of any other severity does. A code registered before
 this law keeps its letter even where the two disagree, because codes are never
 renumbered: the lints `E2818`, `E2930`, `E2931`, `E2934` and `JT0101`, and the
-blocking `L1101`. `W0410` (`jet.RandomCryptoContext`, reserved) is a frozen
+blocking `L0528` (a lint that became an error) and `L1101`. `W0410`
+(`jet.RandomCryptoContext`, reserved) is a frozen
 historical exception with a third letter that no new code follows
 (D-REPORT-SEV1). `Tools/agent/DiagnosticRows.jet --check` enforces the law: it
 refuses a row whose letter disagrees with its severity unless the code is in

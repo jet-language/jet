@@ -85,6 +85,7 @@ use {
     ]
     jet_foundation.[
         ELF_SECTION,
+        ENV_JET_DEV,
         ENV_JET_DEVTOOLS_RELAY_BUILD_ID,
         ENV_JET_DEVTOOLS_RELAY_REVISION,
         ENV_JET_DEVTOOLS_RELAY_SESSION_ID,
@@ -3845,7 +3846,7 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 // Core/Web/Web.jet __app_listen), and `port`, the dev server's (JET_DEV_PORT).
 jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], verbose: Bool, color: Bool) -> JetCLIDevChild {
     vars := jet_cli_production_receipt_env(file, program_args)
-    vars.push(JetCLIEnvVar{name: "JET_DEV", value: "1"})
+    vars.push(JetCLIEnvVar{name: ENV_JET_DEV, value: "1"})
     if port == .Val(number) {
         vars.push(JetCLIEnvVar{name: ENV_JET_DEV_PORT, value: "{number}"})
         cli_term.eprint("jet dev: dev server port {number} ({ENV_JET_DEV_PORT})")

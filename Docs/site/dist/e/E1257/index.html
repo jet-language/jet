@@ -36,7 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze).</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E1257</code>: <code>tests/ui/plugin_export_needs_a_literal_artifact.stderr</code>.</p>
+<pre class="diag">Error [jet.SandboxInterfaceChanged]: Plugin export `normal` has no Component interface
+  --&gt; tests/ui/plugin_export_needs_a_literal_artifact.jet:7:19
+    |
+  7 |     _value: guest.normal()
+    |                   ^^^^^^
+ Why: Plugin members resolve only through a literal artifact path whose Component the compiler reads while it builds the host
+ Fix: Pass `core.plugin.load` a literal path, from the package root, of a readable WebAssembly Component
+More: jet-lang.dev/e/E1257
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

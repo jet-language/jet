@@ -2330,6 +2330,9 @@ TypestateMoveWithoutArrow: struct {
 
     impl Diagnostic {
         code: "E0174"
+        safety_class: .Soundness
+        safety_reason: "A state list names every move a value may make, so a move outside it would reach a state by a path the type does not allow."
+        expert_path: "none: add the arrow to the state list"
         meaning: "Typestate: a method moves between two states the state list does not connect"
         detail: true
         what: fn(self) -> String { "`{self.type}` has no `{self.from} -> {self.to}` in its state list" }
@@ -4984,6 +4987,9 @@ DeferLeavesItsBlock: struct {
 
     impl Diagnostic {
         code: "E0509"
+        safety_class: .Soundness
+        safety_reason: "A `defer` body runs after its block's exit was chosen, so a second exit from it would give one block two exits."
+        expert_path: "none: choose the exit in the block itself"
         meaning: "A `defer` body tries to leave its block"
         detail: true
         what: fn(self) -> String { "`{self.word}` can't leave a `defer` body" }
@@ -5020,6 +5026,9 @@ ExpiringForce: struct {
 DeferPropagatesFailure: struct {
     impl Diagnostic {
         code: "E0512"
+        safety_class: .Soundness
+        safety_reason: "A `defer` body runs after its block's exit was chosen, so a failure passed out of it would have no exit to take."
+        expert_path: "none: handle the failure inside the body"
         meaning: "A `defer` body passes a failure on"
         detail: true
         what: fn(self) -> String { "A failure can't pass out of a `defer` body" }
@@ -7990,6 +7999,9 @@ AsmUnencodedMnemonic: struct {
 
     impl Diagnostic {
         code: "E3221"
+        safety_class: .Soundness
+        safety_reason: "The template assembler has no encoding for the mnemonic, so the line has no bytes to emit."
+        expert_path: "an `#FFI(c)` body"
         stage: [.Sema]
         meaning: "An x86-64 inline asm line names a mnemonic Jet's template assembler has no encoding for"
         detail: true
@@ -15032,6 +15044,9 @@ AppPortUnavailable: struct {
 
     impl Diagnostic {
         code: "E2809"
+        safety_class: .Soundness
+        safety_reason: "Only one program can listen on a port, so the app has no port to serve on."
+        expert_path: "none: free the port or choose another"
         stage: [.Runtime]
         moment: .Run
         meaning: "A web app port another program holds or the system refuses"

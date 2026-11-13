@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0398 — Jet diagnostic</title>
-<meta name="description" content="`!` needs a Bool operand.">
+<meta name="description" content="Bit arithmetic and power use named methods, not signs.">
 <meta property="og:title" content="E0398 — Jet diagnostic">
-<meta property="og:description" content="`!` needs a Bool operand.">
+<meta property="og:description" content="Bit arithmetic and power use named methods, not signs.">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0398</h1>
-<p>`!` needs a Bool operand.</p>
+<p>Bit arithmetic and power use named methods, not signs.</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`!` needs a Bool operand.</p>
+<p class="diag-copy what" data-registry-field="what">Bit arithmetic and power use named methods, not signs.</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">`!` negates a Bool; integer bits use named methods.</p>
+<p class="diag-copy why" data-registry-field="why">`!` negates a Bool and `&amp;`, `|` and `^` mark ownership; integer bits and powers use named methods.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `value.bit_not()` to flip integer bits.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `value.bit_not()` to flip integer bits; for an update, assign the method result back: `x = x.bit_and(m)`, `x = x.bit_or(m)` or `x = x.pow(n)`.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0398</code>: <code>tests/ui/sigil_integer_not_retired.stderr</code>.</p>
-<pre class="diag">Error [jet.LogicalNotOnNonBool]: `!` needs Bool; use `bit_not` to flip integer bits
-  --&gt; sigil_integer_not_retired.jet:2:11
+<p>First UI snapshot mentioning <code>E0398</code>: <code>tests/ui/sigil_compound_update_retired.stderr</code>.</p>
+<pre class="diag">Error [jet.BitArithmeticNeedsMethod]: `&amp;=` is retired; assign the `bit_and` result back
+  --&gt; sigil_compound_update_retired.jet:3:11
     |
-  2 |     print(!1)
+  3 |     flags &amp;= 3
     |           ^^
  Why: Marks express ownership and outcomes; arithmetic uses named methods
- Fix: Write `value.bit_not()` for an integer, or compare the value to produce Bool
+ Fix: Write `x = x.bit_and(m)` in place of `x &amp;= m`
 More: jet-lang.dev/e/E0398
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -255,6 +255,7 @@ the text before it.
 | `JET_COMPTIME_MODE` | `Jetpack/Store/Source/Build/Cache.jet` | The mode an action-cache observation records. |
 | `JET_COMPTIME_OPERATION_ID` | `Jetpack/Store/Source/Build/Cache.jet` | The operation id an action-cache observation records. |
 | `JET_COV_OUT` | `Compiler/JetCli/Source/Cli/TestCoverage.jet` | The file a covered test program writes its coverage counts to. |
+| `JET_DEV` | `Compiler/JetCli/Source/Cli/Host.jet` | Set to `1` for the program `jet dev` launches: a web app then picks a free port and reloads its pages. |
 | `JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the locked closure a development build's production receipt records. |
 | `JET_DEVELOPMENT_RECEIPT_DIRECTORY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The directory a development build's program writes its production receipt to. |
 | `JET_DEVELOPMENT_RECEIPT_ENTRY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The project-relative entry a development build's production receipt names. |
