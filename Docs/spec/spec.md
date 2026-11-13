@@ -2147,7 +2147,13 @@ forms are `!Mem.Alloc(above: N)` and `!Mem.Stack(above: N)`. E0921 identifies
 the incompatible operation, prints the full call path, and names the denial and
 its provenance. An open-world dispatch needs a sealed target set or signed
 dependency summary; otherwise the strict fact is unprovable and rejected
-(D-AUTHORITY-MEM1, D-MEM-FACTS1).
+(D-AUTHORITY-MEM1, D-MEM-FACTS1). For `!Mem.Stack(above: N)`, an executable
+build (one with a `run: fn` in its entry file or an Output entry) seals its own
+dispatch: a call through a trait value may run any implementation the program
+holds of the method, and a call through a function value may run any function
+the program takes as a value or lambda it writes that takes the call's
+arguments. A library build leaves both open, since its callers may pass any
+value or add implementations.
 `!Mem.Gc` forbids collection by the opt-in tracing collector (D-DENY-COST1); a
 row, a `#FX(…)` cap or an authority `deny:` names it like any other deny-only
 leaf, and the denial follows every reachable call.
@@ -2161,10 +2167,15 @@ integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {
 `!Mem.Stack(above: N)` bounds the stack every call path may take, in bytes
 (D-STACKBOUND1). Sema bounds each frame by a fixed allowance for call linkage
 and saved registers plus two slots for every parameter and checked value, each
-slot sized by the value's layout, and adds the deepest callee's path. A path
-through a call cycle with no `#MaxDepth(n)` function on it, a function value,
-a trait value, an open dispatch or a value of unknown size, such as an unbound
-generic parameter, has no bound, so the denial is E0921. `Mem.Stack` has no
+slot sized by the value's layout, and adds the deepest callee's path. In an
+executable build a call through a function or trait value, or a function
+value handed to other code, counts each target of its sealed set, and a
+lambda's frame on top of the caller's. A path through a call cycle with no
+`#MaxDepth(n)` function on it, a function or trait value in a library build, a
+function value with no checked body, a trait value with no implementation, an
+open dispatch or a value of unknown size, such as an unbound generic
+parameter, has no bound, so the denial is E0921. Adding a function the program
+takes as a value, or an implementation, can change a bound. `Mem.Stack` has no
 unbounded form: `!Mem.Stack` alone is E0119. The backend checks every frame it
 lays out for a function a `!Mem.Stack(above: N)` denial reaches against sema's
 bound for that function, with the bounds of the bodies inlined into it added;

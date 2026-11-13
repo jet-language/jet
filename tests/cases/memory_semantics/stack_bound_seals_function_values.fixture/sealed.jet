@@ -1,0 +1,14 @@
+// `apply` calls the function value it is given. The program takes only
+// `double` as a value, so that call is sealed to `double` and `run` has a
+// stack bound.
+double: fn(value: Int) -> Int {
+    value * 2
+}
+
+apply: fn(f: fn(Int) -> Int, value: Int) -> Int {
+    f(value)
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := apply(double, 20)
+}

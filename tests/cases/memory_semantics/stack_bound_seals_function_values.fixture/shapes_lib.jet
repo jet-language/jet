@@ -1,0 +1,19 @@
+// shapes.jet as a library: its callers may add implementations of `Shape`,
+// so the call through the trait value in `measure` stays open.
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int {
+            self.side * self.side
+        }
+    }
+}
+
+measure: fn(shape: Shape) -[!Mem.Stack(above: 65536)]> Int {
+    shape.area()
+}

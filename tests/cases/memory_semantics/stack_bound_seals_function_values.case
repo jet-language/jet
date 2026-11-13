@@ -1,0 +1,47 @@
+# In an executable build `!Mem.Stack(above: N)` seals each call through a
+# function value to the functions the program takes as values and the lambdas
+# it writes, with the call's argument count, and each call through a trait
+# value to the implementations the program holds. `jet inspect memory` names
+# the sealed set in the step of the call path. Adding a function taken as a
+# value changes the set and the bound. A library build leaves both kinds of
+# call open (E0921).
+fixture: stack_bound_seals_function_values.fixture
+env: NO_COLOR=1
+step sealed: jet check sealed.jet
+exit: 0
+stderr: !~ "Error [" # the only target is `double`, so `run` has a bound
+step report: jet inspect memory --optimize=none sealed.jet
+exit: 0
+stdout: ~ "stack bound: " # sema's bound for the entry
+stdout: !~ "stack bound: unbounded" # the sealed call has a bound
+stdout: ~ "sealed::apply (" # the path runs through the call in `apply`
+stdout: ~ "calls through values sealed to `sealed::double`)" # and names its sealed set
+step grown: jet check grown.jet
+exit: nonzero
+stderr: ~ "`!Mem.Stack(above: 65536)` cannot be proved for grown::run: recursion through grown::" # `again` joins the set and closes a cycle
+stderr: ~ " with no `#MaxDepth(n)` on its cycle" # the report says what would bound it
+step marked: jet check marked.jet
+exit: 0
+stderr: !~ "Error [" # `#MaxDepth(8)` on `again` bounds the cycle
+step markedreport: jet inspect memory --optimize=none marked.jet
+exit: 0
+stdout: !~ "stack bound: unbounded" # the marked cycle has a bound
+stdout: ~ "`marked::double`" # the set holds `double`
+stdout: ~ "`marked::again`" # and the added `again`
+stdout: ~ "up to 8 deep" # whose calls the bound counts eight times
+step lambda: jet inspect memory --optimize=none lambda.jet
+exit: 0
+stdout: !~ "stack bound: unbounded" # the lambda has a bound
+stdout: ~ "calls through values sealed to a lambda in lambda::run)" # the set is the lambda `run` writes
+stdout: ~ " B lambda, calls through values sealed to " # and its frame counts on top of `apply`'s
+step library: jet check library.jet
+exit: nonzero
+stderr: ~ "`!Mem.Stack(above: 65536)` cannot be proved for library::apply: a call through a function value in library::apply, whose targets a library build leaves open" # a library's callers may pass any function
+step shapes: jet inspect memory --optimize=none shapes.jet
+exit: 0
+stdout: !~ "stack bound: unbounded" # both implementations have a bound
+stdout: ~ "shapes::measure (" # the path runs through the trait-value call
+stdout: ~ "calls through values sealed to `" # which names its sealed set
+step shapeslib: jet check shapes_lib.jet
+exit: nonzero
+stderr: ~ "a call through a trait value in shapes_lib::measure, whose implementations a library build leaves open" # a library's callers may add implementations

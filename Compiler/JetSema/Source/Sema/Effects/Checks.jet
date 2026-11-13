@@ -20,6 +20,7 @@ use jet_foundation.[
     BodyCallArg,
     BodyContract,
     BodyCoreClosureKind,
+    BodyFnValueKind,
     BodyHostCall,
     BodyIfCond,
     BodyLambda,
@@ -66,6 +67,7 @@ use jet_foundation.[
     TEffectSpan,
     TFailureCarrier,
     TFuncKind,
+    TMethodRef,
     TTypeDef,
     Type,
     compiler_take_rows,
@@ -1380,7 +1382,7 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_by_key: NameRows,
         effect_name: sema_effect_parse_name(entry.name.slice(1, entry.name.len())) ?? next
         if sema_effect_stack_bound(effect_name) != None {
             span: if cap.site == None -> entry.span else -> node.name_span
-            sema_effect_check_stack(stack, frames, nodes, node_by_key, node_index, EffectRowEntry{name: effect_name, span: span}, "cap `#FX({entry.name})` over {node.display_key}", diagnostics)
+            sema_effect_check_stack(stack, frames, nodes, node_index, EffectRowEntry{name: effect_name, span: span}, "cap `#FX({entry.name})` over {node.display_key}", diagnostics)
             next
         }
         if sema_effect_memory_fact(effect_name) != None {
@@ -4075,33 +4077,349 @@ sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows, call
     texts
 }
 
-// D-STACKBOUND1: each node's own frame bound by the frame model
-// (jet_foundation Target/Frame.jet), stamped as FnBody.frame_bound: the
+// Each node's own frame bound by the frame model (jet_foundation
+// Target/Frame.jet), stamped as FnBody.frame_bound: the
 // frame allowance plus the slots of every parameter and checked value. -1
 // with `why` naming the type that has no known size, or with `why` empty
 // when the node has no checked body. `depth` is the node's `#MaxDepth(n)`,
-// 0 when unmarked.
+// 0 when unmarked. `edges` are the nodes each node's calls may run: its
+// direct calls, and in an executable build the sealed targets of its calls
+// through function values (sema_effect_stack_seal). `carried` is the largest
+// frame of a lambda those calls may run, which sits on the node's own;
+// `carrier` is the lambda's writer, -1 for none. `sealed` names the sealed
+// targets, "" for none, and `dynamic_calls` holds the spans of the calls
+// through function values. In a library build, or when the program takes a
+// function with no checked body as a value, a node's calls through function
+// values are `open` instead, with the reason; "" when they are not.
 SemaStackFrames: struct {
     own: [Int]
     why: [String]
     depth: [Int]
+    edges: [[Int]]
+    carried: [Int]
+    carrier: [Int]
+    sealed: [String]
+    dynamic_calls: [[Span]]
+    open: [String]
 }
 
-sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: NameRows) -> SemaStackFrames {
+// What the program's bodies do with function and trait values: the calls
+// through them (a trait-value call has arity -1), the lambdas they write,
+// the policy wrappers they take as values, the functions with no checked
+// body they take as values, and in an executable build the implementations
+// each trait-value call may run.
+SemaStackValues: struct {
+    calls: [SemaStackDynamicCall]
+    lambdas: [SemaStackLambda]
+    wrappers: [SemaStackTaken]
+    bodiless: [SemaStackTaken]
+    dispatches: [SemaStackDispatch]
+}
+
+// A function value `node` makes: a node, or for one with no checked body,
+// -1 and its `name`.
+SemaStackTaken: struct {
+    node: Int
+    target: Int
+    name: String
+}
+
+// A call through a trait value in `node` and the implementations it may run.
+SemaStackDispatch: struct {
+    node: Int
+    targets: [Int]
+}
+
+// `closed` is an executable build, whose every function value the program
+// makes; a library's callers may pass any.
+sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool) -> SemaStackFrames {
     defs := [TTypeDef]{}
     loop graph in modules {
         loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
     }
     types: jet_frame_types(defs)
-    frames := SemaStackFrames{own: (loop _ in nodes -> -1), why: (loop _ in nodes -> ""), depth: (loop _ in nodes -> 0)}
+    frames := SemaStackFrames{
+        own: (loop _ in nodes -> -1),
+        why: (loop _ in nodes -> ""),
+        depth: (loop _ in nodes -> 0),
+        edges: (loop node in nodes -> sema_effect_stack_node_targets(node, facts.node_by_key)),
+        carried: (loop _ in nodes -> 0),
+        carrier: (loop _ in nodes -> -1),
+        sealed: (loop _ in nodes -> ""),
+        dynamic_calls: (loop _ in nodes -> [Span]{}),
+        open: (loop _ in nodes -> ""),
+    }
+    arity := (loop _ in nodes -> -1)
+    values := SemaStackValues{calls: [SemaStackDynamicCall]{}, lambdas: [SemaStackLambda]{}, wrappers: [SemaStackTaken]{}, bodiless: [SemaStackTaken]{}, dispatches: [SemaStackDispatch]{}}
     loop module_row in inputs {
         loop function in modules[module_row.module_index].functions {
-            node_index: sema_effect_node_index(node_by_key, function.key) ?? next
+            node_index: sema_effect_node_index(facts.node_by_key, function.key) ?? next
             frames.depth[node_index] = function.max_depth
+            arity[node_index] = function.params.len()
             sema_effect_stack_own(types, function, node_index, frames)
+            sema_effect_stack_dynamic(function.tree, node_index, nodes, facts, closed, values)
         }
     }
+    loop call in values.calls -> frames.dynamic_calls[call.node].push(call.span)
+    if !closed {
+        loop call in values.calls {
+            display: nodes[call.node].display_key
+            frames.open[call.node] = if call.arity < 0 -> "a call through a trait value in {display}, whose implementations a library build leaves open" else -> "a call through a function value in {display}, whose targets a library build leaves open"
+        }
+        return frames
+    }
+    sema_effect_stack_seal(frames, nodes, facts.node_by_key, arity, values)
     frames
+}
+
+// The nodes of `keys` that have a body, in order.
+sema_effect_stack_call_targets: fn(keys: [String], node_by_key: NameRows) -> [Int] Never! {
+    targets := [Int]{}
+    loop key in keys {
+        target: sema_effect_node_index(node_by_key, key) ?? next
+        targets.push(target)
+    }
+    targets
+}
+
+// The nodes `node` calls, and the named functions it takes as values: code
+// it hands one to, such as a Core loop built into its own body, may call it
+// on top of its frame.
+sema_effect_stack_node_targets: fn(node: SemaEffectNode, node_by_key: NameRows) -> [Int] Never! {
+    targets := sema_effect_stack_call_targets(node.call_edges, node_by_key)
+    loop key in node.value_edges {
+        target: sema_effect_node_index(node_by_key, key) ?? next
+        sema_effect_stack_add_edge(targets, target)
+    }
+    targets
+}
+
+// A call through a function value in `node`, or a read of a function value
+// there that code it hands the value to may call: the argument count and
+// the span.
+SemaStackDynamicCall: struct {
+    node: Int
+    arity: Int
+    span: Span
+}
+
+// A lambda written in `node`: its parameter count and the nodes it calls.
+SemaStackLambda: struct {
+    node: Int
+    arity: Int
+    edges: [Int]
+}
+
+sema_effect_stack_lambda: fn(node_index: Int, value: BodyLambda, node_by_key: NameRows) -> SemaStackLambda Never! {
+    SemaStackLambda{node: node_index, arity: value.param_types.len(), edges: sema_effect_stack_call_targets(value.effects.call_edges, node_by_key)}
+}
+
+// The calls through function values in `tree`, the body of `node_index`,
+// the reads of function-typed locals and fields, and, in an executable
+// build, the function values it makes. A lambda written in the same body
+// is a known body (sema_effect_local_lambda_call), not a dynamic call.
+sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool, values: &SemaStackValues) Never! {
+    loop (id, node) in tree.nodes {
+        if node.kind == .IndirectCall(callee, _, args, _) {
+            if !sema_effect_written_lambda(tree, callee) -> values.calls.push(SemaStackDynamicCall{node: node_index, arity: args.len(), span: node.span})
+        } else if node.kind == .Lambda(value) {
+            if closed -> values.lambdas.push(sema_effect_stack_lambda(node_index, value, facts.node_by_key))
+        } else if node.kind == .FnValue(kind) {
+            if closed -> sema_effect_stack_fn_value(kind, node_index, nodes, facts, values)
+        } else if node.kind == .ConstRef(symbol) {
+            if closed && body_type(tree, id) == .Fn(_, _, _, _, _, _) {
+                if sema_effect_node_index(facts.node_by_key, symbol.key) == None -> values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "`{sema_effect_symbol_leaf(symbol.key)}`"})
+            }
+        } else if node.kind == .MethodCall(receiver, method, _, _) {
+            if method.trait_owner != None && body_type(tree, receiver) == .TraitObject(_) {
+                if closed {
+                    values.dispatches.push(SemaStackDispatch{node: node_index, targets: sema_effect_stack_impls(method, facts)})
+                } else {
+                    values.calls.push(SemaStackDynamicCall{node: node_index, arity: -1, span: node.span})
+                }
+            }
+        } else if sema_effect_stack_value_read(node.kind) {
+            if body_type(tree, id) == .Fn(params, _, _, _, _, _) {
+                if !sema_effect_written_lambda(tree, id) -> values.calls.push(SemaStackDynamicCall{node: node_index, arity: params.len(), span: node.span})
+            }
+        }
+    }
+}
+
+// The implementations the program holds of `method`, called through a trait
+// value (sema_effect_record_value_reads).
+sema_effect_stack_impls: fn(method: TMethodRef, facts: SemaEffectCallIndex) -> [Int] Never! {
+    targets := [Int]{}
+    trait_owner: method.trait_owner ?? return targets
+    trait_name: sema_effect_symbol_leaf(trait_owner.key)
+    trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
+    owners: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
+    loop owner in owners {
+        impl_key: facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}#{owner}") ?? next
+        target: sema_effect_node_index(facts.node_by_key, impl_key) ?? next
+        targets.push(target)
+    }
+    targets
+}
+
+// A function value `kind` made in `node_index`: the lambda it wraps is one
+// the program writes, a policy wrapper is a function it takes as a value,
+// and a named function with no checked body leaves the seal incomplete.
+// The other kinds wrap a value made elsewhere in the tree.
+sema_effect_stack_fn_value: fn(kind: BodyFnValueKind, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, values: &SemaStackValues) Never! {
+    if kind == {
+        .NamedFn(function, lambda) -> {
+            if lambda == .Val(value) {
+                values.lambdas.push(sema_effect_stack_lambda(node_index, value, facts.node_by_key))
+                return
+            }
+            decl: function ?? {
+                values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "a function named in {nodes[node_index].display_key}"})
+                return
+            }
+            if sema_effect_decl_node(facts, decl) < 0 -> values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "a function named in {nodes[node_index].display_key}"})
+        }
+        .Policy(_, _, _, wrapper, _, _) -> {
+            decl: wrapper ?? return
+            target: sema_effect_decl_node(facts, decl)
+            if target < 0 {
+                values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "a policy wrapper in {nodes[node_index].display_key}"})
+                return
+            }
+            values.wrappers.push(SemaStackTaken{node: node_index, target: target, name: ""})
+        }
+        .Call(_, _) | .Send(_) -> return
+    }
+}
+
+// A read of a local or a field.
+sema_effect_stack_value_read: fn(kind: NodeKind) -> Bool Never! {
+    if kind == .Local(_) -> return true
+    if kind == .Field(_, _) -> return true
+    false
+}
+
+// Sealed target sets: an executable build makes every function value it
+// calls, so a call through one runs a function the program takes as a
+// value, or a lambda it writes, that takes the call's arguments. A named
+// function counts its receiver, if any, as one, so either count matches.
+// Only code the program may run makes values: every node outside Core, and
+// every node those reach by calls, by functions taken as values and by the
+// sealed calls, found as the sets grow. Each sealed call's node gets the
+// named functions as call edges and, for the lambdas, their calls as edges
+// and the largest lambda frame on its own. A lambda's frame is at most its
+// writer's, whose checked values include the lambda's. A trait-value call
+// already has every implementation as an edge (sema_effect_record_dispatch);
+// its set is only named here. A function value with no checked body that
+// reached code makes leaves every reached call through a function value open.
+sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, arity: [Int], values: SemaStackValues) Never! {
+    calls_at := (loop _ in nodes -> [Int]{})
+    loop (row, call) in values.calls -> calls_at[call.node].push(row)
+    lambdas_at := (loop _ in nodes -> [Int]{})
+    loop (row, lambda) in values.lambdas -> lambdas_at[lambda.node].push(row)
+    wrappers_at := (loop _ in nodes -> [Int]{})
+    loop wrapper in values.wrappers -> wrappers_at[wrapper.node].push(wrapper.target)
+    seal := SemaStackSeal{reached: (loop _ in nodes -> false), pending: [Int]{}, taken: (loop _ in nodes -> false), takens: [Int]{}, lambdas: [Int]{}, calls: [Int]{}, names: (loop _ in nodes -> [String]{})}
+    loop (index, node) in nodes {
+        if !node.module_identity.starts_with("<corelib>/") -> sema_effect_stack_reach(seal, index)
+    }
+    loop {
+        index := seal.pending.pop() ?? { break }
+        loop target in frames.edges[index] -> sema_effect_stack_reach(seal, target)
+        loop key in nodes[index].value_edges {
+            target: sema_effect_node_index(node_by_key, key) ?? next
+            sema_effect_stack_take(seal, frames, nodes, arity, values, target)
+        }
+        loop target in wrappers_at[index] -> sema_effect_stack_take(seal, frames, nodes, arity, values, target)
+        loop row in lambdas_at[index] {
+            seal.lambdas.push(row)
+            loop call_row in seal.calls -> sema_effect_stack_run_lambda(seal, frames, nodes, values.calls[call_row], values.lambdas[row])
+        }
+        loop row in calls_at[index] {
+            seal.calls.push(row)
+            loop target in seal.takens -> sema_effect_stack_run_taken(seal, frames, nodes, arity, values.calls[row], target)
+            loop lambda_row in seal.lambdas -> sema_effect_stack_run_lambda(seal, frames, nodes, values.calls[row], values.lambdas[lambda_row])
+        }
+    }
+    loop dispatch in values.dispatches {
+        loop target in dispatch.targets -> sema_effect_set_add(seal.names[dispatch.node], "`{nodes[target].display_key}`")
+    }
+    loop index in 0..<nodes.len() {
+        if !seal.reached[index] -> next
+        if seal.names[index].len() == 0 && frames.dynamic_calls[index].len() == 0 -> next
+        frames.sealed[index] = if seal.names[index].len() == 0 -> "nothing" else -> seal.names[index].join(", ")
+    }
+    loop call in values.calls {
+        if !seal.reached[call.node] -> frames.open[call.node] = "a call through a function value in {nodes[call.node].display_key}, which no code outside Core reaches, so its targets are not sealed"
+    }
+    loop entry in values.bodiless {
+        if !seal.reached[entry.node] -> next
+        loop row in seal.calls {
+            call: values.calls[row]
+            frames.open[call.node] = "a call through a function value in {nodes[call.node].display_key} may run {entry.name}, a function value with no checked body"
+        }
+        break
+    }
+}
+
+// The walk that seals calls through values: the nodes reached so far and
+// those still to read, the functions taken as values, the rows of the
+// lambdas and calls through values in reached code, and each node's sealed
+// target names.
+SemaStackSeal: struct {
+    reached: [Bool]
+    pending: [Int]
+    taken: [Bool]
+    takens: [Int]
+    lambdas: [Int]
+    calls: [Int]
+    names: [[String]]
+}
+
+sema_effect_stack_reach: fn(seal: &SemaStackSeal, index: Int) Never! {
+    if seal.reached[index] -> return
+    seal.reached[index] = true
+    seal.pending.push(index)
+}
+
+// `target` is taken as a value by reached code: every reached call through
+// a function value may run it.
+sema_effect_stack_take: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], values: SemaStackValues, target: Int) Never! {
+    sema_effect_stack_reach(seal, target)
+    if seal.taken[target] -> return
+    seal.taken[target] = true
+    seal.takens.push(target)
+    loop row in seal.calls -> sema_effect_stack_run_taken(seal, frames, nodes, arity, values.calls[row], target)
+}
+
+sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], arity: [Int], call: SemaStackDynamicCall, target: Int) Never! {
+    if call.arity < 0 -> return
+    if arity[target] != call.arity && arity[target] + 1 != call.arity -> return
+    sema_effect_stack_add_edge(frames.edges[call.node], target)
+    sema_effect_set_add(seal.names[call.node], "`{nodes[target].display_key}`")
+    sema_effect_stack_reach(seal, target)
+}
+
+sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, nodes: [SemaEffectNode], call: SemaStackDynamicCall, lambda: SemaStackLambda) Never! {
+    if lambda.arity != call.arity -> return
+    loop target in lambda.edges {
+        sema_effect_stack_add_edge(frames.edges[call.node], target)
+        sema_effect_stack_reach(seal, target)
+    }
+    sema_effect_set_add(seal.names[call.node], "a lambda in {nodes[lambda.node].display_key}")
+    writer: frames.own[lambda.node]
+    if frames.carrier[call.node] >= 0 && frames.carried[call.node] < 0 -> return
+    if writer < 0 || writer > frames.carried[call.node] {
+        frames.carried[call.node] = writer
+        frames.carrier[call.node] = lambda.node
+    }
+}
+
+sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
+    loop edge in edges {
+        if edge == target -> return
+    }
+    edges.push(target)
 }
 
 sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, node_index: Int, frames: &SemaStackFrames) {
@@ -4183,14 +4501,13 @@ sema_effect_stack_walk: fn(nodes: [SemaEffectNode]) -> SemaStackWalk Never! {
 }
 
 // Mark every node `root` reaches, itself included, as guarded.
-sema_effect_stack_guard: fn(walk: &SemaStackWalk, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int) Never! {
+sema_effect_stack_guard: fn(walk: &SemaStackWalk, frames: SemaStackFrames, root: Int) Never! {
     if walk.guarded[root] -> return
     walk.guarded[root] = true
     pending := [Int]{root}
     loop {
         index := pending.pop() ?? { break }
-        loop edge in nodes[index].call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in frames.edges[index] {
             if walk.guarded[target] -> next
             walk.guarded[target] = true
             pending.push(target)
@@ -4199,41 +4516,66 @@ sema_effect_stack_guard: fn(walk: &SemaStackWalk, nodes: [SemaEffectNode], node_
 }
 
 // Why the node's own body has no stack bound; "" when it has one.
-sema_effect_stack_own_why: fn(frames: SemaStackFrames, node: SemaEffectNode, index: Int) -> String Never! {
-    if frames.own[index] < 0 {
-        if frames.why[index] == "" -> return "{node.display_key} has no checked body"
-        return "{frames.why[index]} in {node.display_key}"
+sema_effect_stack_own_why: fn(frames: SemaStackFrames, nodes: [SemaEffectNode], index: Int) -> String Never! {
+    node: nodes[index]
+    if frames.own[index] < 0 -> return sema_effect_stack_body_why(frames, node, index)
+    loop open in node.memory_opens {
+        if sema_effect_stack_dynamic_call(frames.dynamic_calls[index], open.span) -> next
+        return "{open.reason} at {open.source}"
     }
-    if node.memory_opens.len() > 0 -> return "{node.memory_opens[0].reason} at {node.memory_opens[0].source}"
     if node.dispatches.len() > 0 -> return "a call through a trait value in {node.display_key}"
-    if node.value_edges.len() > 0 -> return "`{node.value_edges[0]}` taken as a value in {node.display_key}, whose calls have no sealed target set"
+    if frames.open[index] != "" -> return frames.open[index].copy()
+    if frames.carried[index] < 0 {
+        carrier: frames.carrier[index]
+        return "a call through a function value in {node.display_key} may run a lambda in {nodes[carrier].display_key}, and {sema_effect_stack_body_why(frames, nodes[carrier], carrier)}"
+    }
     ""
 }
 
-sema_effect_stack_visit: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, index: Int) Never! {
+// Why a node with no own frame bound has none.
+sema_effect_stack_body_why: fn(frames: SemaStackFrames, node: SemaEffectNode, index: Int) -> String Never! {
+    if frames.why[index] == "" -> return "{node.display_key} has no checked body"
+    "{frames.why[index]} in {node.display_key}"
+}
+
+// Whether `span` is one of `calls`, a node's calls through function values,
+// which `sealed` and `open` answer for.
+sema_effect_stack_dynamic_call: fn(calls: [Span], span: Span) -> Bool Never! {
+    loop call in calls {
+        if call.start == span.start && call.end == span.end -> return true
+    }
+    false
+}
+
+// A node's frame on the stack: its own and the largest lambda frame its
+// calls through function values may run on top of it.
+sema_effect_stack_frame: fn(frames: SemaStackFrames, index: Int) -> Int Never! {
+    sema_effect_stack_saturate(frames.own[index] + frames.carried[index])
+}
+
+sema_effect_stack_visit: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], index: Int) Never! {
     walk.order[index] = walk.visited
     walk.low[index] = walk.visited
     walk.visited += 1
     walk.state[index] = 1
     walk.pending.push(index)
-    walk.why[index] = sema_effect_stack_own_why(frames, nodes[index], index)
+    walk.why[index] = sema_effect_stack_own_why(frames, nodes, index)
     if walk.why[index] == "" {
-        loop edge in nodes[index].call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in frames.edges[index] {
             if walk.state[target] == 0 {
-                sema_effect_stack_visit(walk, frames, nodes, node_by_key, target)
+                sema_effect_stack_visit(walk, frames, nodes, target)
                 if walk.low[target] < walk.low[index] -> walk.low[index] = walk.low[target]
             } else if walk.state[target] == 1 && walk.order[target] < walk.low[index] {
                 walk.low[index] = walk.order[target]
             }
         }
     }
-    if walk.low[index] == walk.order[index] -> sema_effect_stack_settle(walk, frames, nodes, node_by_key, index)
+    if walk.low[index] == walk.order[index] -> sema_effect_stack_settle(walk, frames, nodes, index)
 }
 
 // Settle the part `root` was visited first in: every node visited after it
 // that is still pending.
-sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int) Never! {
+sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int) Never! {
     members := [Int]{}
     loop {
         member := walk.pending.pop() ?? { break }
@@ -4250,8 +4592,7 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
             open = member
             break
         }
-        loop edge in nodes[member].call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in frames.edges[member] {
             if walk.part[target] != root && walk.bytes[target] < 0 {
                 open = member
                 walk.next[member] = target
@@ -4270,8 +4611,7 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
     outside := 0
     cyclic := false
     loop member in members {
-        loop edge in nodes[member].call_edges {
-            target: sema_effect_node_index(node_by_key, edge) ?? next
+        loop target in frames.edges[member] {
             if walk.part[target] == root {
                 cyclic = true
                 next
@@ -4281,7 +4621,7 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
         }
     }
     if !cyclic {
-        walk.bytes[root] = frames.own[root] + outside
+        walk.bytes[root] = sema_effect_stack_saturate(sema_effect_stack_frame(frames, root) + outside)
         return
     }
     depths := 0
@@ -4289,7 +4629,7 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
     loop member in members {
         depths = sema_effect_stack_saturate(depths + frames.depth[member])
         if walk.segment[member] == -2 {
-            closed: sema_effect_stack_segment(walk, frames, nodes, node_by_key, root, member)
+            closed: sema_effect_stack_segment(walk, frames, root, member)
             if closed >= 0 {
                 walk.why[closed] = "recursion through {nodes[closed].display_key} with no `#MaxDepth(n)` on its cycle"
                 loop other in members {
@@ -4312,12 +4652,11 @@ sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
 // of unmarked functions closes, or -1. The path's next step replaces the
 // node's deepest outside callee in walk.next, and a call into a marked
 // function of the part stands in when the node has neither.
-sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, index: Int) -> Int Never! {
+sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, root: Int, index: Int) -> Int Never! {
     walk.segment[index] = -3
     deepest := 0
     marked := -1
-    loop edge in nodes[index].call_edges {
-        target: sema_effect_node_index(node_by_key, edge) ?? next
+    loop target in frames.edges[index] {
         if walk.part[target] != root -> next
         if frames.depth[target] > 0 {
             if marked < 0 -> marked = target
@@ -4325,7 +4664,7 @@ sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nod
         }
         if walk.segment[target] == -3 -> return target
         if walk.segment[target] == -2 {
-            closed: sema_effect_stack_segment(walk, frames, nodes, node_by_key, root, target)
+            closed: sema_effect_stack_segment(walk, frames, root, target)
             if closed >= 0 -> return closed
         }
         if walk.segment[target] > deepest {
@@ -4334,7 +4673,7 @@ sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nod
         }
     }
     if walk.next[index] < 0 -> walk.next[index] = marked
-    walk.segment[index] = frames.own[index] + deepest
+    walk.segment[index] = sema_effect_stack_saturate(sema_effect_stack_frame(frames, index) + deepest)
     return -1
 }
 
@@ -4367,7 +4706,9 @@ sema_effect_stack_trail: fn(walk: SemaStackWalk, frames: SemaStackFrames, nodes:
     loop row >= 0 && seen.get(row) == None {
         seen[row] = true
         depth: if frames.depth[row] > 0 -> ", up to {frames.depth[row]} deep" else -> ""
-        step: if frames.own[row] < 0 -> nodes[row].display_key.copy() else -> "{nodes[row].display_key} ({frames.own[row]} B{depth})"
+        lambda: if frames.carried[row] > 0 -> " + {frames.carried[row]} B lambda" else -> ""
+        sealed: if frames.sealed[row] != "" -> ", calls through values sealed to {frames.sealed[row]}" else -> ""
+        step: if frames.own[row] < 0 -> nodes[row].display_key.copy() else -> "{nodes[row].display_key} ({frames.own[row]} B{lambda}{depth}{sealed})"
         steps.push(step)
         if walk.bytes[row] < 0 && walk.why[row] != "" {
             why = walk.why[row].copy()
@@ -4380,14 +4721,14 @@ sema_effect_stack_trail: fn(walk: SemaStackWalk, frames: SemaStackFrames, nodes:
 
 // The stack text of every node nothing calls (FnBody.stack), by node; ""
 // for the others.
-sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, called: [Bool]) -> [String] Never! {
+sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], called: [Bool]) -> [String] Never! {
     texts := [String]{}
     loop index in 0..<nodes.len() {
         if called[index] {
             texts.push("")
             next
         }
-        if walk.state[index] == 0 -> sema_effect_stack_visit(walk, frames, nodes, node_by_key, index)
+        if walk.state[index] == 0 -> sema_effect_stack_visit(walk, frames, nodes, index)
         trail: sema_effect_stack_trail(walk, frames, nodes, index)
         text: if walk.bytes[index] < 0 -> "unbounded, {trail.why} via {trail.path}" else -> "{walk.bytes[index]} B via {trail.path}"
         texts.push(text)
@@ -4397,17 +4738,17 @@ sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
 
 // `!Mem.Stack(above: N)` on `root` (E0921): every call path from it takes at
 // most N bytes of stack by the frame model, so none may be unbounded.
-sema_effect_check_stack: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, denial: EffectRowEntry, provenance: String, diagnostics: &[Diagnostic]) {
+sema_effect_check_stack: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, provenance: String, diagnostics: &[Diagnostic]) {
     limit: sema_effect_stack_bound(denial.name) ?? return
-    sema_effect_stack_guard(walk, nodes, node_by_key, root)
-    if walk.state[root] == 0 -> sema_effect_stack_visit(walk, frames, nodes, node_by_key, root)
+    sema_effect_stack_guard(walk, frames, root)
+    if walk.state[root] == 0 -> sema_effect_stack_visit(walk, frames, nodes, root)
     if walk.bytes[root] >= 0 && walk.bytes[root] <= limit -> return
     fact: "!{denial.name}"
     display: nodes[root].display_key
     span: if denial.span.start == denial.span.end -> nodes[root].name_span else -> denial.span
     trail: sema_effect_stack_trail(walk, frames, nodes, root)
     if walk.bytes[root] < 0 {
-        diagnostics.push(sema_error("E0921", span, "`{fact}` cannot be proved for {display}: {trail.why}", "no bound holds for the call path {trail.path}; a stack bound needs every value's size, every call's target, and a `#MaxDepth(n)` function on every call cycle; declaration provenance: {provenance}", "give every value a known size, every call a direct target and every call cycle a `#MaxDepth(n)` function, or move the call outside this denial"))
+        diagnostics.push(sema_error("E0921", span, "`{fact}` cannot be proved for {display}: {trail.why}", "no bound holds for the call path {trail.path}; a stack bound needs every value's size, every call's target, and a `#MaxDepth(n)` function on every call cycle; declaration provenance: {provenance}", "give every value a known size, every call a direct or sealed target (an executable build seals calls through function values) and every call cycle a `#MaxDepth(n)` function, or move the call outside this denial"))
         return
     }
     diagnostics.push(sema_error("E0921", span, "{display} may take {walk.bytes[root]} bytes of stack, above the effective `{fact}` declared at {nodes[root].source_display}", "the deepest call path is {trail.path}; each frame counts {JET_FRAME_ALLOWANCE} bytes of call linkage and saved registers plus two slots for every parameter and checked value; declaration provenance: {provenance}", "raise the bound, shorten the call path, or keep large values in a heap list"))
@@ -4462,7 +4803,7 @@ sema_effect_memory_project: fn(nodes: [SemaEffectNode], node_by_key: NameRows, r
 sema_effect_check_memory_denials: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, stack: &SemaStackWalk, frames: SemaStackFrames, diagnostics: &[Diagnostic], facts: &SemaMemoryProjectionFacts) {
     loop denial in nodes[root].memory_denials {
         if sema_effect_stack_bound(denial.name) != None {
-            sema_effect_check_stack(stack, frames, nodes, node_by_key, root, denial, "signature denial `-[!{denial.name}]>` in {nodes[root].source_display}", diagnostics)
+            sema_effect_check_stack(stack, frames, nodes, root, denial, "signature denial `-[!{denial.name}]>` in {nodes[root].source_display}", diagnostics)
             next
         }
         if sema_effect_memory_fact(denial.name) == None -> next
@@ -4659,11 +5000,13 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // table, which direct callees name. `prep_functions` holds the keys of the
 // functions the build checked to run while compiling (a comptime item's
 // callees, whose call sites no module records): prep code, never a runtime
-// entry (sema_effect_runtime_input_paths). The first `taken` modules are
-// taken seeded ones (sema_finalize_seeded_taken): their bodies keep the rows
-// their finalization solved, and a row this solve would change on one is
+// entry (sema_effect_runtime_input_paths). `closed` is an executable build,
+// which seals each call through a function value to the program's own
+// functions and lambdas (sema_effect_stack_seal). The first `taken` modules
+// are taken seeded ones (sema_finalize_seeded_taken): their bodies keep the
+// rows their finalization solved, and a row this solve would change on one is
 // counted in the result's `seeded_writes`, not stamped.
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -4816,7 +5159,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // Every call path's stack, by the frame model; FnBody keeps each frame
     // bound and each entry's path bound.
-    frames: sema_effect_stack_frames(modules, inputs, nodes, calls.node_by_key)
+    frames: sema_effect_stack_frames(modules, inputs, nodes, calls, closed)
     stack := sema_effect_stack_walk(nodes)
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}
@@ -4835,7 +5178,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if sema_effect_stack_bound(name) != None {
             loop root in 0..<nodes.len() {
                 stack_diagnostics := [Diagnostic]{}
-                sema_effect_check_stack(stack, frames, nodes, calls.node_by_key, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, provenance, stack_diagnostics)
+                sema_effect_check_stack(stack, frames, nodes, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, provenance, stack_diagnostics)
                 sema_effect_publish_diagnostics(diagnostics, inputs[nodes[root].module_index].source_segments, stack_diagnostics)
             }
             next
@@ -4910,7 +5253,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // function's heap and stack bounds.
     called: sema_effect_called(nodes, calls.node_by_key)
     heaps: sema_effect_heap_bounds(nodes, calls.node_by_key, called)
-    stacks: sema_effect_stack_bounds(stack, frames, nodes, calls.node_by_key, called)
+    stacks: sema_effect_stack_bounds(stack, frames, nodes, called)
     seeded_writes := 0
     loop module_row in inputs {
         target: module_row.module_index

@@ -1,0 +1,33 @@
+// `measure` calls `area` through a trait value. The program holds two
+// implementations, so the call is sealed to both.
+Shape: trait {
+    area: fn(self) -> Int
+}
+
+Square: struct {
+    side: Int
+
+    impl Shape {
+        area: fn(self) -> Int {
+            self.side * self.side
+        }
+    }
+}
+
+Strip: struct {
+    width: Int
+
+    impl Shape {
+        area: fn(self) -> Int {
+            self.width
+        }
+    }
+}
+
+measure: fn(shape: Shape) -> Int {
+    shape.area()
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := measure(Square{side: 3}) + measure(Strip{width: 4})
+}

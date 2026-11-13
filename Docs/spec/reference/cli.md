@@ -1472,13 +1472,21 @@ with a `#MaxDepth(n)` function on it counts that function's n allowed calls
 and stays bounded; a cycle with none reports `stack: unbounded, recursion via
 ...` and asks for `#MaxDepth(n)`; a
 call through a function value reports `stack: unbounded, a call through a
-function value via ...` until its targets are sealed. Runtime frames are not
+function value via ...`. Runtime frames are not
 counted; they are named on a `runtime frames not counted:` line. Under the
 stack line, `stack bound:` gives the bound sema proved for the entry by the
 frame model `!Mem.Stack(above: N)` checks; the backend holds every frame a
 stack denial reaches to it: `stack bound: <n> B via run (<n> B) -> step
 (<n> B)`, each step with its own frame's bound, or `stack bound: unbounded,
-<why> via <path>`. The program
+<why> via <path>`. In an executable build sema seals each call through a
+function value to the functions the program takes as values and the lambdas
+it writes, with the same argument count, and each call through a trait value
+to the implementations the program holds, and the step names them:
+``apply (<n> B + <n> B lambda, calls through values sealed to `double`, a
+lambda in run)``, where the lambda part is the largest lambda frame the call
+may run. A library build leaves them open: `stack bound: unbounded, a call
+through a function value in apply, whose targets a library build leaves open
+via ...`. The program
 entry also gets its worst-case heap, by the proof `!Mem.Alloc(above: N)`
 checks: `heap: 8 B`
 is the arena bytes every call path from it may reserve, and

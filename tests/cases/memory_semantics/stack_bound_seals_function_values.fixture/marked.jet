@@ -1,0 +1,19 @@
+// grown.jet with `#MaxDepth(8)` on `again`: the cycle through the sealed
+// call is bounded again, by eight calls of `again`.
+double: fn(value: Int) -> Int {
+    value * 2
+}
+
+apply: fn(f: fn(Int) -> Int, value: Int) -> Int {
+    f(value)
+}
+
+#MaxDepth(8)
+again: fn(value: Int) -> Int {
+    if value <= 0 -> return 0
+    apply(again, value - 1)
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := apply(double, 20) + apply(again, 3)
+}

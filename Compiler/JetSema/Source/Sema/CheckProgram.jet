@@ -10306,9 +10306,18 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // never a runtime entry (sema_effect_runtime_input_paths).
     prep_functions := [String:Bool]{}
     loop result in comptime_functions -> prep_functions[result.function_key.copy()] = true
+    // An executable build (its entry module's `run`, or a function an Output
+    // links) makes every function value it calls; a library's callers may
+    // pass any.
+    closed := final_graph.output_name_references.len() > 0
+    loop module_row in modules {
+        loop function in module_row.functions {
+            if function.name == "run" && function.module_identity == final_graph.entry_module_identity -> closed = true
+        }
+    }
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, prep_functions, threads, organization_denials, organization_source, taken)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, prep_functions, threads, closed, organization_denials, organization_source, taken)
     seeded_writes += effects.seeded_writes
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
