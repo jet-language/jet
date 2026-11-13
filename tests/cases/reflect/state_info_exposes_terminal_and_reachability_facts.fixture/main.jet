@@ -1,8 +1,11 @@
 Door: struct {
-    state { Open, Closed }
+    state {
+        Open -> Closed
+        Closed
+    }
 
-    #State(_ -> Open) begin: fn() -[]> Door { return Door{} }
-    #State(Open -> Closed) close: fn(self: &&Door) -[]> Door { return self }
+    begin: fn() -[]> Door.Open { return Door{} }
+    close: fn(self: &&Door.Open) -[]> Door.Closed { return self }
 }
 STATE_INFO: #run Door.reflect()
 run: fn() {

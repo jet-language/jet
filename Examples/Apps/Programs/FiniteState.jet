@@ -3,8 +3,8 @@
 // Anti-pattern from the dogfood port: `state := "running"` plus parallel
 // `seen_started := true` / `seen_finished := false` values allowed impossible
 // combinations. Rule: model finite values with an enum and a
-// nested variant group, group equivalent arms with `|`, and use typestate
-// transitions for order that must be checked at compile time.
+// nested variant group, group equivalent arms with `|`, and use a state list
+// with state types for order that must be checked at compile time.
 ParsedManifest: tag { deny: [Net] }
 
 Phase: enum {
@@ -31,17 +31,21 @@ phase_kind: fn(phase: Phase) -> String {
 }
 
 Build: struct {
-    state { Queued, Running, Finished }
+    state {
+        Queued -> Running
+        Running -> Finished
+        Finished
+    }
 
     name: String
 
-    #State(_ -> Queued) queue: fn(name: String) -> Build { {name: name.copy()} }
+    queue: fn(name: String) -> Build.Queued { {name: name.copy()} }
 
-    #State(Queued -> Running) start: fn(self: &&Build) -> Build { self }
+    start: fn(self: &&Build.Queued) -> Build.Running { self }
 
-    #State(Running -> Finished) finish: fn(self: &&Build) -> Build { self }
+    finish: fn(self: &&Build.Running) -> Build.Finished { self }
 
-    #State(Finished) report: fn(self) -> String { "finished:{self.name}" }
+    report: fn(self: Build.Finished) -> String { "finished:{self.name}" }
 }
 
 run: fn() {

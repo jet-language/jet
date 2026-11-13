@@ -924,12 +924,6 @@ ContractClause: struct {
     required: Bool{false}
 }
 
-StateTransition: struct {
-    from: String?
-    to: String
-    span: Span
-}
-
 EveryArg: enum {
     Duration(int: Int?, float: Float?, suffix: String, suffix_span: Span)
     WallClock(text: String, text_span: Span)
@@ -1016,8 +1010,6 @@ Func: struct {
     scrub_tag: String?
     declared_effects: [EffectRowEntry]?
     effect_via: NamedSpan?
-    state_requires: NamedSpan?
-    state_transition: StateTransition?
     is_reactive: Bool
     reactive_upgrades: [String]
     is_replayable: Bool
@@ -1552,8 +1544,6 @@ ast_func: fn(name: String, name_span: Span, span: Span) -> Func Never! {
         scrub_tag: None,
         declared_effects: None,
         effect_via: None,
-        state_requires: None,
-        state_transition: None,
         is_reactive: false,
         reactive_upgrades: [String]{},
         is_replayable: false,

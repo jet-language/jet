@@ -1,19 +1,17 @@
-// The typestate flow check (A value moves through the
-// states its owner declares: `#State(S)` on a method or free function needs its
-// receiver (or first argument) in `S`, and `#State(From -> To)` needs `From`
-// and leaves `To`. Each body is walked once, statement by statement, with the
-// state of every tracked local. Calling an operation in the wrong state is
-// E0150; an untracked local stays silent. Where two paths meet, a local keeps
-// its state only when both paths agree; otherwise L0152 says so, and the local
-// may be in any of their states, so an operation that needs one of them is
-// E0150. A path that leaves its block (`return`, `break`, `continue`) meets
-// no join after it; a `break` or `continue` meets the paths that leave its
-// loop. A spawned task is a compiler-owned row: it
-// starts `Running` and `join`/`detach` move it to `Joined`/`Detached`.
-// State types say the same in the signature: a parameter typed
+// The typestate flow check. A value moves through the states its owner's
+// state list declares, and a function's types say which: a parameter typed
 // `Order.Draft` (or a set or group of states) needs its argument in one of
 // those states, and a call whose result is typed `Order.Shipped` yields a
-// value in that state. A value never changes state in place through them.
+// value in that state. A value never changes state in place. Each body is
+// walked once, statement by statement, with the state of every tracked
+// local. Calling an operation in the wrong state is E0150; an untracked
+// local stays silent. Where two paths meet, a local keeps its state only
+// when both paths agree; otherwise L0152 says so, and the local may be in
+// any of their states, so an operation that needs one of them is E0150. A
+// path that leaves its block (`return`, `break`, `continue`) meets no join
+// after it; a `break` or `continue` meets the paths that leave its loop.
+// A spawned task is a compiler-owned row: it starts `Running` and
+// `join`/`detach` move it to `Joined`/`Detached` in place.
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
@@ -31,22 +29,13 @@ sema_state_task_spawn_method: fn() -> String Never! {
     "{nul}jet.task.spawn"
 }
 
-// A transition's from-state (None for an entry transition) and to-state.
-SemaStateMove: struct {
-    from: String?
-    to: String
-}
-
 // Program-wide typestate rows, collected once from every user module.
 // Methods key as `Type::method`, free functions by name. `needs` and
 // `results` come from state types (`self: Order.Draft`, `-> Order.Shipped`);
-// a state set is its names joined by `|`.
+// a state set is its names joined by `|`. `task_moves` maps a task method to
+// the state it leaves the task in.
 SemaStateTable: struct {
-    requires: [String:String]
-    transitions: [String:SemaStateMove]
-    fn_requires: [String:String]
-    fn_transitions: [String:SemaStateMove]
-    entry_ctors: [String:String]
+    task_moves: [String:String]
     needs: [String:[SemaStateNeed]]{[String:[SemaStateNeed]]{}}
     results: [String:String]{[String:String]{}}
     // Each enum with a state list: its states, which are cases.
@@ -94,10 +83,10 @@ SemaStateSplit: struct {
 }
 
 sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
-    table := SemaStateTable{requires: [String:String]{}, transitions: [String:SemaStateMove]{}, fn_requires: [String:String]{}, fn_transitions: [String:SemaStateMove]{}, entry_ctors: [String:String]{}}
+    table := SemaStateTable{task_moves: [String:String]{}}
     loop registered in graph.modules -> sema_state_table_add_items(table, registered.program.items)
-    table.transitions["{SEMA_STATE_TASK}::join"] = SemaStateMove{from: Val(SEMA_STATE_TASK_RUNNING), to: SEMA_STATE_TASK_JOINED}
-    table.transitions["{SEMA_STATE_TASK}::detach"] = SemaStateMove{from: Val(SEMA_STATE_TASK_RUNNING), to: SEMA_STATE_TASK_DETACHED}
+    table.task_moves["join"] = SEMA_STATE_TASK_JOINED
+    table.task_moves["detach"] = SEMA_STATE_TASK_DETACHED
     loop module_index in 0..<modules.len() {
         registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         open_switches := [Span]{}
@@ -107,18 +96,18 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
         walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, mixed: [String:[String]]{}, ended: false, exits: [SemaStateFacts]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
         loop item in graph.modules[registration].program.items {
             if item == {
-                .Func(function) -> sema_state_check_function(walk, function, None, modules[module_index].functions)
+                .Func(function) -> sema_state_check_function(walk, function, modules[module_index].functions)
                 .Impl(implementation) -> {
-                    loop method in implementation.methods -> sema_state_check_function(walk, method, Val(implementation.type_name), modules[module_index].functions)
+                    loop method in implementation.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
                 }
                 .Struct(definition) -> {
-                    loop method in definition.methods -> sema_state_check_function(walk, method, Val(definition.name), modules[module_index].functions)
+                    loop method in definition.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
                     loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_state_check_function(walk, method, Val(definition.name), modules[module_index].functions)
+                        loop method in block.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
                     }
                 }
                 .Enum(definition) -> {
-                    loop method in definition.methods -> sema_state_check_function(walk, method, Val(definition.name), modules[module_index].functions)
+                    loop method in definition.methods -> sema_state_check_function(walk, method, modules[module_index].functions)
                 }
                 .Test(test) -> {
                     sema_state_start(walk)
@@ -152,9 +141,9 @@ sema_state_start: fn(walk: &SemaStateWalk) Never! {
     walk.exits = [SemaStateFacts]{}
 }
 
-// Rust `check_func_state`: `self` starts in the state its own `#State(S)` or
-// `#State(A -> B)` marker names, so a chain of self-transitions checks.
-sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, owner: String?, bodies: [FnBody]) Never! {
+// `self` and every other parameter typed by states start in them, so a chain
+// of moves on `self` checks.
+sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, bodies: [FnBody]) Never! {
     sema_state_start(walk)
     walk.typed = false
     tree := body_tree_new()
@@ -165,22 +154,14 @@ sema_state_check_function: fn(walk: &SemaStateWalk, function: Func, owner: Strin
             break
         }
     }
-    if function.params.len() > 0 && function.params[0].name == "self" {
-        if function.state_requires == .Val(required) {
-            walk.states["self"] = sema_state_for_owner(owner, required.name)
-        } else if function.state_transition == .Val(transition) {
-            if transition.from == .Val(from) -> walk.states["self"] = sema_state_for_owner(owner, from)
-        }
-    }
-    // A parameter typed by states starts in them.
     loop typed in function.state_types {
-        if typed.position >= 0 && typed.position < function.params.len() -> walk.states[function.params[typed.position].name] = sema_state_set(typed.states)
+        if typed.position >= 0 && typed.position < function.params.len() -> walk.states[function.params[typed.position].name] = sema_state_set_value(typed.states)
     }
     sema_state_block(walk, tree, function.body)
 }
 
 // A state set as one tracked value: its names joined by `|`.
-sema_state_set: fn(states: [String]) -> String Never! {
+sema_state_set_value: fn(states: [String]) -> String Never! {
     states.join("|")
 }
 
@@ -209,11 +190,11 @@ sema_state_table_add_typed: fn(table: &SemaStateTable, key: String, function: Fu
     needs := [SemaStateNeed]{}
     loop typed in function.state_types {
         if typed.position == -1 {
-            table.results[key] = sema_state_set(typed.states)
+            table.results[key] = sema_state_set_value(typed.states)
             next
         }
         arg: if receiver -> typed.position - 1 else -> typed.position
-        needs.push(SemaStateNeed{arg: arg, owner: typed.owner, states: sema_state_set(typed.states)})
+        needs.push(SemaStateNeed{arg: arg, owner: typed.owner, states: sema_state_set_value(typed.states)})
     }
     if needs.len() > 0 {
         table.needs[key] = needs.move()
@@ -224,7 +205,7 @@ sema_state_table_add_typed: fn(table: &SemaStateTable, key: String, function: Fu
 sema_state_table_add_items: fn(table: &SemaStateTable, items: [Item]) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> sema_state_table_add_free_fn(table, function)
+            .Func(function) -> sema_state_table_add_typed(table, function.name, function)
             .Impl(implementation) -> {
                 loop method in implementation.methods -> sema_state_table_add_method(table, implementation.type_name, method)
             }
@@ -244,53 +225,7 @@ sema_state_table_add_items: fn(table: &SemaStateTable, items: [Item]) Never! {
 }
 
 sema_state_table_add_method: fn(table: &SemaStateTable, type_name: String, method: Func) Never! {
-    key: "{type_name}::{method.name}"
-    sema_state_table_add_typed(table, key, method)
-    if method.state_requires == .Val(required) {
-        if sema_state_graph_leaf(type_name, required.name) == .Val(state) -> table.requires[key] = state
-    }
-    if method.state_transition == .Val(transition) {
-        to: sema_state_graph_leaf(type_name, transition.to) ?? return
-        from := String?{None}
-        if transition.from == .Val(written) -> from = sema_state_graph_leaf(type_name, written)
-        if transition.from == None -> table.entry_ctors[key] = to
-        table.transitions[key] = SemaStateMove{from: from, to: to}
-    }
-}
-
-sema_state_table_add_free_fn: fn(table: &SemaStateTable, function: Func) Never! {
-    sema_state_table_add_typed(table, function.name, function)
-    if function.state_requires == .Val(required) {
-        table.fn_requires[function.name] = sema_state_for_owner(sema_state_free_fn_owner(function, false), required.name)
-    }
-    if function.state_transition == .Val(transition) {
-        owner: sema_state_free_fn_owner(function, transition.from == None)
-        from := String?{None}
-        if transition.from == .Val(written) -> from = Val(sema_state_for_owner(owner, written))
-        table.fn_transitions[function.name] = SemaStateMove{from: from, to: sema_state_for_owner(owner, transition.to)}
-    }
-}
-
-// Rust `free_fn_state_owner`: the first parameter's or the result's nominal
-// type; an entry transition prefers the result.
-sema_state_free_fn_owner: fn(function: Func, entry: Bool) -> String? Never! {
-    param_owner := String?{None}
-    if function.params.len() > 0 -> param_owner = sema_state_nominal(function.params[0].ty)
-    return_owner := String?{None}
-    if function.return_type == .Val(ty) -> return_owner = sema_state_nominal(ty)
-    if entry {
-        if return_owner != None -> return return_owner
-        return param_owner
-    }
-    if param_owner != None -> return param_owner
-    return_owner
-}
-
-sema_state_for_owner: fn(owner: String?, state: String) -> String Never! {
-    if owner == .Val(name) {
-        if sema_state_graph_leaf(name, state) == .Val(leaf) -> return leaf
-    }
-    state.copy()
+    sema_state_table_add_typed(table, "{type_name}::{method.name}", method)
 }
 
 sema_state_nominal: fn(ty: Type) -> String? Never! {
@@ -547,9 +482,9 @@ sema_state_case: fn(walk: SemaStateWalk, tree: BodyTree, value: Expr) -> String?
     None
 }
 
-// A binding or plain assignment takes the to-state of a transition call, the
-// entry state of a constructor, or (a binding only) the states of the local
-// it aliases; otherwise it is untracked.
+// A binding or plain assignment takes the states its value's type names, a
+// spawn's `Running`, or (a binding only) the states of the local it aliases;
+// otherwise it is untracked.
 sema_state_rebind: fn(walk: &SemaStateWalk, tree: BodyTree, name: String, value: Expr, aliases: Bool) Never! {
     if sema_state_result(walk, tree, value) == .Val(to) {
         sema_state_set(walk, name, to)
@@ -675,8 +610,7 @@ sema_state_leave_loop: fn(walk: &SemaStateWalk) Never! {
     walk.ended = true
 }
 
-// Rust `entry_state_of`: a spawn starts `Running`; an entry-transition
-// constructor or free function starts its to-state.
+// Rust `entry_state_of`: a spawn starts `Running`.
 sema_state_entry: fn(walk: SemaStateWalk, value: Expr) -> String? Never! {
     if value == {
         .OrFallback(inner, _, _, _, _) -> sema_state_entry(walk, inner)
@@ -685,22 +619,13 @@ sema_state_entry: fn(walk: SemaStateWalk, value: Expr) -> String? Never! {
         .Paren(inner, _, _) -> sema_state_entry(walk, inner)
         .Ok(inner, _, _) -> sema_state_entry(walk, inner)
         .Try(inner, _, _, _, _) -> sema_state_entry(walk, inner)
-        .MethodCall(receiver, method, _, _, _, _, _) -> {
-            if method == sema_state_task_spawn_method() -> return Val(SEMA_STATE_TASK_RUNNING)
-            type_name: sema_state_static_type(receiver) ?? return None
-            walk.table.entry_ctors.get("{type_name}::{method}")
-        }
-        .Call(call, _) -> {
-            if walk.table.fn_transitions.get(call.name) == .Val(move) {
-                if move.from == None -> return Val(move.to)
-            }
-            None
-        }
+        .MethodCall(_, method, _, _, _, _, _) -> if method == sema_state_task_spawn_method() -> Val(SEMA_STATE_TASK_RUNNING) else -> None
+        .Call(_, _) -> None
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
-// Rust `result_state_of`: the to-state a transition call leaves its result in.
+// Rust `result_state_of`: the states a call's result type names.
 sema_state_result: fn(walk: SemaStateWalk, tree: BodyTree, value: Expr) -> String? Never! {
     if sema_state_case(walk, tree, value) == .Val(named) -> return Val(named)
     if value == {
@@ -714,19 +639,9 @@ sema_state_result: fn(walk: SemaStateWalk, tree: BodyTree, value: Expr) -> Strin
             type_name := sema_state_node_type(walk, tree, sema_state_expr_id(receiver))
             if type_name == None -> type_name = sema_state_static_type(receiver)
             owner: type_name ?? return None
-            // A task transition discharges the handle; its result is not
-            // another task row.
-            if owner == SEMA_STATE_TASK -> return None
-            key: "{owner}::{method}"
-            if walk.table.results.get(key) == .Val(result) -> return Val(result)
-            move: walk.table.transitions.get(key) ?? return None
-            Val(move.to)
+            walk.table.results.get("{owner}::{method}")
         }
-        .Call(call, _) -> {
-            if walk.table.results.get(call.name) == .Val(result) -> return Val(result)
-            move: walk.table.fn_transitions.get(call.name) ?? return None
-            Val(move.to)
-        }
+        .Call(call, _) -> walk.table.results.get(call.name)
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
@@ -747,52 +662,21 @@ sema_state_expr_id: fn(value: Expr) -> Int Never! {
     }
 }
 
-// E0150 when the local's state is known and is not `required`, or when paths
-// that left it in different states met before this operation.
-sema_state_require: fn(walk: &SemaStateWalk, local: String, possible: [String], required: String, owner: String, operation: String, span: Span) Never! {
-    if possible.len() == 0 -> return
-    if possible.len() == 1 && possible[0] == required -> return
-    transition: sema_state_hint(walk, owner, required)
-    if possible.len() == 1 {
-        state: possible[0]
-        fix: if transition.len() == 0 -> "transition `{local}` into state `{required}` before calling `{operation}`" else -> "transition it first: call `{transition}` to reach `{required}`"
-        walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` is in state `{state}`", "typestate: `{operation}` is only valid in state `{required}`; calling it in `{state}` is the out-of-order-events bug it prevents", fix))
-        return
-    }
-    other := possible[0]
-    shown := [String]{}
-    loop state in possible {
-        if other == required -> other = state
-        shown.push("`{state}`")
-    }
-    last: shown.pop() ?? ""
-    walk.diagnostics.push(sema_error("E0150", span, "`{operation}` needs `{owner}` in state `{required}`, but `{local}` may be in state `{other}`", "typestate: paths that leave `{local}` in {shown.join(", ")} and {last} meet before this, so `{operation}` may run in `{other}`, the out-of-order-events bug it prevents", "bring every path to `{required}` before they meet, or call `{operation}` inside the path that reaches `{required}`"))
-}
-
-// The operation that reaches `required` on `owner`: a method transition of
-// that owner, else a free-function transition (first by name).
-sema_state_hint: fn(walk: SemaStateWalk, owner: String, required: String) -> String Never! {
-    keys := [String]{}
-    loop key in walk.table.transitions.keys() -> keys.push(key)
-    keys.sort()
-    loop key in keys {
-        move: walk.table.transitions.get(key) ?? next
-        if move.to == required && key.starts_with("{owner}::") -> return key.split("::").to_list()[1]
-    }
-    names := [String]{}
-    loop name in walk.table.fn_transitions.keys() -> names.push(name)
-    names.sort()
-    loop name in names {
-        move: walk.table.fn_transitions.get(name) ?? next
-        if move.to == required -> return name
-    }
-    ""
-}
-
-// The state an argument is in: a tracked local's, or the result states of the
-// call it is.
+// The state an argument is in: a tracked local's (where paths met in
+// different states, the set of them all), or the result states of the call
+// it is.
 sema_state_arg_state: fn(walk: SemaStateWalk, tree: BodyTree, value: Expr) -> String? Never! {
-    if sema_state_local(value) == .Val(local) -> return walk.states.get(local)
+    if sema_state_local(value) == .Val(local) {
+        if walk.states.get(local) == .Val(state) -> return Val(state)
+        possible: walk.mixed.get(local) ?? return None
+        states := [String]{}
+        loop entry in possible {
+            loop state in entry.split("|").to_list() {
+                if !states.contains(state) -> states.push(state)
+            }
+        }
+        return Val(sema_state_set_value(states))
+    }
     sema_state_result(walk, tree, value)
 }
 
@@ -842,38 +726,19 @@ sema_state_method: fn(walk: &SemaStateWalk, tree: BodyTree, receiver: Expr, meth
     typed_owner := sema_state_node_type(walk, tree, sema_state_expr_id(receiver))
     if typed_owner == None -> typed_owner = sema_state_static_type(receiver)
     if typed_owner == .Val(typed_name) -> sema_state_check_needs(walk, tree, "{typed_name}::{method}", method, Val(receiver), args, method_span)
+    // A spawned task moves in place through the row this pass owns: only a
+    // local already in a task state moves.
     local: sema_state_local(receiver) ?? return
-    possible: sema_state_possible(walk.states, walk.mixed, local)
-    task_key: "{SEMA_STATE_TASK}::{method}"
-    // Built-in Task methods resolve through the task row this pass owns: only
-    // a local already in a task state moves.
-    state: if possible.len() == 1 -> possible[0] else -> ""
-    implicit_task: walk.table.transitions.get(task_key) != None && (state == SEMA_STATE_TASK_RUNNING || state == SEMA_STATE_TASK_JOINED || state == SEMA_STATE_TASK_DETACHED)
-    owner := sema_state_node_type(walk, tree, sema_state_expr_id(receiver))
-    if (owner ?? "") == SEMA_STATE_TASK && !implicit_task -> return
-    if owner == None && implicit_task -> owner = Val(SEMA_STATE_TASK)
-    type_name: owner ?? return
-    key: "{type_name}::{method}"
-    if type_name != SEMA_STATE_TASK {
-        if walk.table.requires.get(key) == .Val(required) -> sema_state_require(walk, local, possible, required, type_name, method, method_span)
-    }
-    move: walk.table.transitions.get(key) ?? return
-    if type_name != SEMA_STATE_TASK {
-        if move.from == .Val(from) -> sema_state_require(walk, local, possible, from, type_name, method, method_span)
-    }
-    sema_state_set(walk, local, move.to)
+    state: walk.states.get(local) ?? return
+    if state != SEMA_STATE_TASK_RUNNING && state != SEMA_STATE_TASK_JOINED && state != SEMA_STATE_TASK_DETACHED -> return
+    to: walk.table.task_moves.get(method) ?? return
+    if (sema_state_node_type(walk, tree, sema_state_expr_id(receiver)) ?? SEMA_STATE_TASK) != SEMA_STATE_TASK -> return
+    sema_state_set(walk, local, to)
 }
 
 sema_state_call: fn(walk: &SemaStateWalk, tree: BodyTree, name: String, args: [Expr]) Never! {
     sema_state_check_needs(walk, tree, name, name, None, args, expr_span(args[0]))
-    first: args[0]
-    local: sema_state_local(first) ?? return
-    span: expr_span(first)
-    possible: sema_state_possible(walk.states, walk.mixed, local)
-    if walk.table.fn_requires.get(name) == .Val(required) -> sema_state_require(walk, local, possible, required, local, name, span)
-    move: walk.table.fn_transitions.get(name) ?? return
-    if move.from == .Val(from) -> sema_state_require(walk, local, possible, from, local, name, span)
-    sema_state_set(walk, local, move.to)
+
 }
 
 // The local a receiver or first argument names, if it is a bare local or a
@@ -890,8 +755,8 @@ sema_state_exprs: fn(walk: &SemaStateWalk, tree: BodyTree, values: [Expr]) Never
     loop value in values -> sema_state_expr(walk, tree, value)
 }
 
-// Walk an expression for typestate violations; a transition call advances
-// its receiver (or first argument) in place.
+// Walk an expression for typestate violations; a task method moves its
+// receiver in place.
 sema_state_expr: fn(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
     if value == {
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {

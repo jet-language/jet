@@ -1,4 +1,4 @@
-# Port of tests/semindex.rs:486-535; fixture source bytes unchanged.
+# Port of tests/semindex.rs:486-535; the fixture moved from qualified `#State` markers to state types.
 # Public inspect semindex uses the same open()/to_status_envelope() as the original index.to_json().
 # A source slice equals Closed iff its byte span is one of the exact Closed occurrences below.
 # These are source-derived spans, not compiler-output snapshots or blessed span positions.
@@ -12,5 +12,5 @@ capture: defend stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0]
 capture: qualified stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].name
 json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].target.span.start = {cap:defstart}
 json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].target.span.end = {cap:defend}
-json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].span in [{"start":27,"end":33},{"start":86,"end":92},{"start":158,"end":164}]
+json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].span in [{"start":36,"end":42},{"start":95,"end":101},{"start":146,"end":152}]
 stdout: ~ "\"name\":\"{cap:qualified}\"" # original predicate

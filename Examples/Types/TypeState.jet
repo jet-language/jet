@@ -1,13 +1,19 @@
 // Typestate: order-of-events safety, checked at compile time.
 //
-// States are declared in the owning struct body. An operation
-// declares the state it needs and the state it advances the value into:
+// A type lists its states and moves once, in its `state { }` list. A
+// function's types name the states it needs and the state it returns:
 //
-//   Reservation: struct { state { Pending, Confirmed, CheckedIn } ... }
+//   Reservation: struct {
+//       state {
+//           Pending -> Confirmed
+//           Confirmed -> CheckedIn
+//           CheckedIn
+//       }
+//   }
 //
-//   #State(_ -> Pending)  book: fn(...)     -- entry: value starts in `Pending`
-//   #State(Pending -> Confirmed) pay: fn(self) R -> …  -- advances the state
-//   #State(Confirmed) check_in: fn(self)         -- valid only in `Confirmed`
+//   book: fn(...) -> Reservation.Pending                           -- starts in `Pending`
+//   pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed  -- a move, listed as an arrow
+//   room_key: fn(self: Reservation.CheckedIn)                      -- valid only in `CheckedIn`
 //
 // Calling an operation in the wrong state is the compile error E0150 (see the ui
 // snapshot `typestate_wrong_state` for the rejected case: `check_in` on a still
@@ -15,14 +21,18 @@
 // function by the checker and **erased in codegen** — a typestate program generates
 // the exact same Rust as the untagged version, at zero runtime cost.
 Reservation: struct {
-    state { Pending, Confirmed, CheckedIn }
+    state {
+        Pending -> Confirmed
+        Confirmed -> CheckedIn
+        CheckedIn
+    }
 
     guest: String
 
-    // Entry transition: a fresh booking starts life in `Pending`.
-    #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
+    // A fresh booking starts life in `Pending`.
+    book: fn(guest: String) -> Reservation.Pending { {guest: guest.copy()} }
 
-    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation {
+    pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
         // value (`&&self` — a move), matching the ratified mechanism: a fn takes the old
         // state and returns the next. Calling `pay` on anything but a pending
@@ -31,56 +41,69 @@ Reservation: struct {
         return self
     }
 
-    #State(Confirmed -> CheckedIn) check_in: fn(self: &&Reservation) -> Reservation {
+    check_in: fn(self: &&Reservation.Confirmed) -> Reservation.CheckedIn {
         // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self
     }
 
     // A plain guarded read: only legal once checked in. No state change.
-    #State(CheckedIn) room_key: fn(self) -> String { "key for {self.guest}" }
+    room_key: fn(self: Reservation.CheckedIn) -> String { "key for {self.guest}" }
 }
 
 // Terminal outcomes are ordinary states. Success, failure, and cancellation
 // stop the workflow, and read-only reporting remains legal in each terminal state.
 Workflow: struct {
-    state { Pending, Success, Failure, Cancelled, Orphan }
+    state {
+        Pending -> Success, Failure, Cancelled
+        Success
+        Failure
+        Cancelled
+        Orphan
+    }
 
-    #State(_ -> Pending) begin: fn() -> Workflow { Workflow{} }
+    begin: fn() -> Workflow.Pending { Workflow{} }
 
-    #State(Pending -> Success) succeed: fn(self: &&Workflow) -> Workflow { self }
+    succeed: fn(self: &&Workflow.Pending) -> Workflow.Success { self }
 
-    #State(Pending -> Failure) fail: fn(self: &&Workflow) -> Workflow { self }
+    fail: fn(self: &&Workflow.Pending) -> Workflow.Failure { self }
 
-    #State(Pending -> Cancelled) cancel: fn(self: &&Workflow) -> Workflow { self }
+    cancel: fn(self: &&Workflow.Pending) -> Workflow.Cancelled { self }
 
-    #State(Success) success_report: fn(self) -> String { "success" }
+    success_report: fn(self: Workflow.Success) -> String { "success" }
 
-    #State(Failure) failure_report: fn(self) -> String { "failure" }
+    failure_report: fn(self: Workflow.Failure) -> String { "failure" }
 
-    #State(Cancelled) cancel_report: fn(self) -> String { "cancelled" }
+    cancel_report: fn(self: Workflow.Cancelled) -> String { "cancelled" }
 }
 
 // Self-loops and reopen edges keep their source state nonterminal.
 Session: struct {
-    state { Open, Closed, Reopened }
+    state {
+        Open -> Closed
+        Closed -> Reopened
+        Reopened
+    }
 
-    #State(_ -> Open) open: fn() -> Session { Session{} }
+    open: fn() -> Session.Open { Session{} }
 
-    #State(Open -> Open) heartbeat: fn(self: &&Session) -> Session { self }
+    heartbeat: fn(self: &&Session.Open) -> Session.Open { self }
 
-    #State(Open -> Closed) close: fn(self: &&Session) -> Session { self }
+    close: fn(self: &&Session.Open) -> Session.Closed { self }
 
-    #State(Closed -> Reopened) reopen: fn(self: &&Session) -> Session { self }
+    reopen: fn(self: &&Session.Closed) -> Session.Reopened { self }
 
-    #State(Reopened) audit: fn(self) -> String { "reopened" }
+    audit: fn(self: Session.Reopened) -> String { "reopened" }
 }
 
 // No entry means no initial state and no reachability warning.
 Unseeded: struct {
-    state { Raw, Done }
+    state {
+        Raw -> Done
+        Done
+    }
 
-    #State(Raw -> Done) finish: fn(self: &&Unseeded) -> Unseeded { self }
+    finish: fn(self: &&Unseeded.Raw) -> Unseeded.Done { self }
 }
 
 run_terminal_outcomes: fn() {

@@ -1,11 +1,15 @@
 
 Settlement: struct {
-    state { Queued, Approved, Settled }
+    state {
+        Queued -> Approved
+        Approved -> Settled
+        Settled
+    }
 
-    #State(_ -> Queued) begin: fn() -[]> Settlement { Settlement{} }
-    #State(Queued -> Approved) approve: fn(self: &&Settlement) -[]> Settlement { self }
-    #State(Approved -> Settled) settle: fn(self: &&Settlement) -[]> Settlement { self }
-    #State(Settled) report: fn(self) -[]> String { "settled" }
+    begin: fn() -[]> Settlement.Queued { Settlement{} }
+    approve: fn(self: &&Settlement.Queued) -[]> Settlement.Approved { self }
+    settle: fn(self: &&Settlement.Approved) -[]> Settlement.Settled { self }
+    report: fn(self: Settlement.Settled) -[]> String { "settled" }
 }
 
 STATE_INFO: #run Settlement.reflect()

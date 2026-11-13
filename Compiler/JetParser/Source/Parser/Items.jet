@@ -44,7 +44,6 @@ use {
         RustConstKind,
         Span,
         StateDecl,
-        StateTransition,
         Stmt,
         STATE_ARROW_LABEL,
         StructDef,
@@ -1805,18 +1804,13 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     return
                 }
             }
-            // `#State(S)` requires S; `#State(A -> B)` moves A
-            // to B, and `_` as A is the entry transition.
+            // `#State(S)` and `#State(A -> B)` are retired: state types carry
+            // the facts, and the file's post-pass reports each marker with its
+            // migration. A marker of another shape is still malformed.
             .State -> {
-                paths: parser_state_marker_paths(marker) ?? {
+                if parser_state_marker_paths(marker) == None {
                     parser_state_marker_shape_fatal(state, marker)
                     return
-                }
-                if paths.len() == 1 {
-                    func.state_requires = Val(NamedSpan{name: paths[0], span: marker.span})
-                } else {
-                    from: if paths[0] == "_" -> String?{None} else -> Val(paths[0])
-                    func.state_transition = Val(StateTransition{from: from, to: paths[1], span: marker.span})
                 }
             }
             .Undo -> {

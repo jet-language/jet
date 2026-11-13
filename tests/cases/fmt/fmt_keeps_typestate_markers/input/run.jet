@@ -1,16 +1,19 @@
 Reservation: struct {
-    state { Pending, Confirmed }
+    state {
+        Pending -> Confirmed
+        Confirmed
+    }
     guest: String
 
-    #State(_ -> Pending) book: fn(guest: String) -> Reservation {
+    book: fn(guest: String) -> Reservation.Pending {
         return Reservation{guest: guest.copy()}
     }
 
-    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation {
+    pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed {
         return self
     }
 
-    #State(Confirmed) check_in: fn(self) {
+    check_in: fn(self: Reservation.Confirmed) {
         print(self.guest)
     }
 }

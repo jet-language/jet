@@ -1,8 +1,8 @@
-Error [jet.TypestateMarkerWithoutStates]: `Door` has a `#State` marker but no `state { … }` section
+Error [jet.TypestateMarkerRetired]: `#State` markers on `Door` are retired
   --> tests/ui/typestate/state_section_shape_diagnostics_are_distinct_5.jet:4:5
     |
   4 |     #State(Ready) open: fn(self) {}
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: Markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected
- Fix: Add one `state { Name, … }` section inside `Door: struct`, or remove the typestate marker
-More: jet-lang.dev/e/E0159
+    |     ^^^^^^^^^^^^^
+ Why: State types carry these facts: a parameter typed `Owner.A` requires `A`, a result typed `Owner.B` moves the value to `B`, and the owner's state list names each move as `A -> B`
+ Fix: Write the states into the signature (`self: &&Door.A`, `-> Door.B`), add `A -> B` to the state list of `Door`, and delete the marker
+More: jet-lang.dev/e/E0175

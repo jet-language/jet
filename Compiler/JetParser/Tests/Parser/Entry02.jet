@@ -141,26 +141,16 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     edit: entry02_diag(ds, "E0999").edit ?? panic("marker stack edit")
     assert(edit.new_text == "#[Pre(message: \"positive\", condition: x > 0), Meta(maturity: .Tested, category: \"state\")]")
 }
-// `#State(A -> B)` is the transition, its to-state carried
-// under the arrow label; `_` is only the entry from-state.
-#Test("state_arrow_marker_parses_the_transition_and_rejects_other_shapes") {
-    src: "#State(_ -> Open)\nopen: fn() {{}}\n#State(Open -> Closed)\nclose: fn() {{}}\n#State(Closed)\nread: fn() {{}}\n"
-    p: entry02_program(src)
-    entry: entry02_func(p, "open").state_transition ?? panic("entry transition")
-    assert(entry.from == None)
-    assert(entry.to == "Open")
-    close_fn: entry02_func(p, "close")
-    step: close_fn.state_transition ?? panic("transition")
-    assert(step.from == (Val("Open")))
-    assert(step.to == "Closed")
-    labels := [String?]{}
-    loop label in close_fn.markers[0].arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
-    assert(labels == [String?]{None, Val("->")})
-    required: entry02_func(p, "read").state_requires ?? panic("required state")
-    assert(required.name == "Closed")
-    formatted: entry02_format(src)
-    assert(formatted.contains("#State(_ -> Open)"))
-    assert(formatted.contains("#State(Open -> Closed)"))
+// `#State` is retired. Its two shapes still parse, and each owner's markers
+// are one E0175 whose edit writes the states into the signatures and the
+// moves into the state list; a marker with no owner in the file has no edit.
+#Test("state_marker_is_retired_with_one_edit_per_owner") {
+    src: "Door: struct {{\n    state {{ Open, Closed }}\n    id: Int\n\n    #State(_ -> Open) open: fn(id: Int) -> Door {{ Door{{id: id}} }}\n    #State(Open -> Closed) close: fn(&&self) -> Self {{ self }}\n    #State(Closed) id_of: fn(self) -> Int {{ self.id }}\n}}\n"
+    retired: entry02_diag(entry02_errors(src), "E0175")
+    edit: retired.edit ?? panic("state marker migration edit")
+    assert(edit.new_text == "state {{\n        Open -> Closed\n        Closed\n    }}\n    id: Int\n\n    open: fn(id: Int) -> Door.Open {{ Door{{id: id}} }}\n    close: fn(self: &&Door.Open) -> Door.Closed {{ self }}\n    id_of: fn(self: Door.Closed")
+    ownerless: entry02_diag(entry02_errors("#State(Open -> Closed)\nwork: fn() {{}}\n"), "E0175")
+    assert(ownerless.edit == None)
     assert(entry02_errors("#State(Open -> Closed -> Gone)\nwork: fn() {{}}\n").len() > 0)
     _: entry02_diag(entry02_errors("#State(_)\nwork: fn() {{}}\n"), "E0930")
     _: entry02_diag(entry02_errors("#State(Open -> _)\nwork: fn() {{}}\n"), "E0930")

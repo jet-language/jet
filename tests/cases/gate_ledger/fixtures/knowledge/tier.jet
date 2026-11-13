@@ -6,12 +6,15 @@
 }
 
 Reservation: struct {
-    state { Pending, Confirmed }
+    state {
+        Pending -> Confirmed
+        Confirmed
+    }
     guest: String
 
-    #State(_ -> Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
+    book: fn(guest: String) -> Reservation.Pending { {guest: guest.copy()} }
 
-    #State(Pending -> Confirmed) pay: fn(self: &&Reservation) -> Reservation { self }
+    pay: fn(self: &&Reservation.Pending) -> Reservation.Confirmed { self }
 }
 
 #Scrub(Input) clean: fn(raw: #Input String) -> String { raw.copy() }

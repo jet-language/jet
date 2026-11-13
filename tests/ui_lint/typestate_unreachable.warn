@@ -1,26 +1,26 @@
 Warning [jet.UnreachableState]: `Flow.State.Orphan` is unreachable from every entry transition.
-  --> tests/ui_lint/typestate_unreachable.jet:2:26
+  --> tests/ui_lint/typestate_unreachable.jet:5:9
     |
-  2 |     state { Start, Done, Orphan }
-    |                          ^^^^^^
+  5 |         Orphan
+    |         ^^^^^^
  Why: When a state graph has entry transitions, no entry path reaches this state. It may be an unused branch or a state name that is not connected to the protocol.
  Fix: Add an entry or transition path to `Orphan`, or remove it from the declaration.
 More: jet-lang.dev/e/L0153
 
 Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --> tests/ui_lint/typestate_unreachable.jet:4:48
+  --> tests/ui_lint/typestate_unreachable.jet:8:35
     |
-  4 |     #State(_ -> Start) start: fn() -[]> Flow { return Flow{} }
-    |                                                ^^^^^^
+  8 |     start: fn() -[]> Flow.Start { return Flow{} }
+    |                                   ^^^^^^
  Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
  Fix: Remove the final `return` and leave the expression as the block tail
 More: jet-lang.dev/e/L0530
 
 Warning [jet.RedundantFinalReturn]: An explicit `return` is used on the final value line
-  --> tests/ui_lint/typestate_unreachable.jet:5:62
+  --> tests/ui_lint/typestate_unreachable.jet:9:51
     |
-  5 |     #State(Start -> Done) done: fn(self: &&Flow) -[]> Flow { return self }
-    |                                                              ^^^^^^
+  9 |     done: fn(self: &&Flow.Start) -[]> Flow.Done { return self }
+    |                                                   ^^^^^^
  Why: An unadorned expression on the final value line is Jet's implicit return; `return` is for early exits
  Fix: Remove the final `return` and leave the expression as the block tail
 More: jet-lang.dev/e/L0530

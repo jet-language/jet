@@ -1,7 +1,7 @@
 // One compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
 use {
-    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, MARKER_ALLOW, MARKER_SCRUB, NameLedger, StructureFact, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
+    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, MARKER_ALLOW, MARKER_SCRUB, NameLedger, StructureFact, Program, Item, Func, Expr, Stmt, Span, StateDecl, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
     jet_foundation.[Diagnostic, Type, StrPart, ast_program, diagnostic_registry_row]
     jet_lexer.[Token]
     jet_parser.[jfmt_format_program_with_tokens]
@@ -142,6 +142,7 @@ sema_gate_items: fn(source: String, items: [Item], ledger: &GateLedger, context:
                         sema_gate_function(source, function, ledger, context)
                     }
                 }
+                if definition.state == .Val(state) -> sema_gate_state_moves(source, state, ledger)
                 sema_gate_statements(source, definition.validate_block, ledger, context)
                 loop field in definition.fields {
                     if field.computed == .Val(expression) {
@@ -153,6 +154,7 @@ sema_gate_items: fn(source: String, items: [Item], ledger: &GateLedger, context:
                 }
             }
             .Enum(definition) -> {
+                if definition.state == .Val(state) -> sema_gate_state_moves(source, state, ledger)
                 loop function in definition.methods {
                     sema_gate_function(source, function, ledger, context)
                 }
@@ -211,17 +213,23 @@ sema_gate_template: fn(source: String, body: [DeriveBodyItem], ledger: &GateLedg
     }
 }
 
+// Each move a state list declares, `Pending -> Confirmed`, is one recorded
+// state transition.
+sema_gate_state_moves: fn(source: String, state: StateDecl, ledger: &GateLedger) Never! {
+    loop arrow in state.arrows {
+        loop target in arrow.to {
+            spelling: "{arrow.from.name} -> {target.name}"
+            gate_ledger_push(ledger, gate_source_entry(GateKind.StateTransition, "knowledge", "type", source, Span{start: arrow.from.span.start, end: target.span.end}, spelling, Val(spelling), "state transition {spelling}", "recorded"))
+        }
+    }
+}
+
 sema_gate_function: fn(source: String, function: Func, ledger: &GateLedger, context: Shared<SemaGateContext>) Never! {
     if !function.compiler_generated {
         sema_gate_structure_name(source, function.name, function.name_span, ledger)
     }
     loop parameter_index in 0..<function.params.len() {
         sema_gate_structure_name(source, function.params[parameter_index].name, function.params[parameter_index].name_span, ledger)
-    }
-    if function.state_transition == .Val(transition) {
-        from: transition.from ?? "_"
-        spelling: "#State({from} -> {transition.to})"
-        gate_ledger_push(ledger, gate_source_entry(GateKind.StateTransition, "knowledge", "function", source, transition.span, spelling, Val(spelling), "state transition {from} -> {transition.to}", "recorded"))
     }
     if function.scrub_tag == .Val(scrubbed) {
         span := function.name_span

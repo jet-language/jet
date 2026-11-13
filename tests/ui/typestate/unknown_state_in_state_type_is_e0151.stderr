@@ -1,0 +1,17 @@
+Error [jet.TypestateUnknownState]: `Stuffed` is not a declared state of `Crate`
+  --> tests/ui/typestate/unknown_state_in_state_type_is_e0151.jet:9:19
+    |
+  9 |     get: fn(self: Crate.Stuffed) -[]> Int {
+    |                   ^^^^^^^^^^^^^
+ Why: Typestate: `Crate: struct { state { … } }` defines the valid state labels; `Stuffed` is not among them — a typo here would silently create a phantom state that no transition reaches
+ Fix: Add `Stuffed` inside `Crate: struct { state { … } }`, or correct the spelling
+More: jet-lang.dev/e/E0151
+
+Error [jet.TypestateWrongState]: `get` needs `Crate.Stuffed`, but `b` is `Crate.Full`
+  --> tests/ui/typestate/unknown_state_in_state_type_is_e0151.jet:16:13
+    |
+ 16 |     print(b.get())
+    |             ^^^
+ Why: Typestate: `get` takes only `Crate.Stuffed`; calling it with `Crate` in another state is the out-of-order bug the state list rules out
+ Fix: Bring `b` to `Crate.Stuffed` before calling `get`
+More: jet-lang.dev/e/E0150

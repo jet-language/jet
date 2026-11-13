@@ -1,11 +1,15 @@
 Build: struct {
-    state { Queued, Running, Finished }
+    state {
+        Queued -> Running
+        Running -> Finished
+        Finished
+    }
     name: String
 
-    #State(_ -> Queued) queue: fn(name: String) -> Build { Build{name: name.copy()} }
-    #State(Queued -> Running) start: fn(self: &&Build) -> Build { self }
-    #State(Running -> Finished) finish: fn(self: &&Build) -> Build { self }
-    #State(Finished) report: fn(self) -> String { "finished:{self.name}" }
+    queue: fn(name: String) -> Build.Queued { Build{name: name.copy()} }
+    start: fn(self: &&Build.Queued) -> Build.Running { self }
+    finish: fn(self: &&Build.Running) -> Build.Finished { self }
+    report: fn(self: Build.Finished) -> String { "finished:{self.name}" }
 }
 run: fn() {
     build := Build.queue("compile")

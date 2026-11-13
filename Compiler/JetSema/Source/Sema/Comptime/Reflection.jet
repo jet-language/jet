@@ -33,6 +33,7 @@ use jet_foundation.[
     Program,
     STATE_ARROW_LABEL,
     Span,
+    StateDecl,
     Stmt,
     StrPart,
     StructDef,
@@ -418,34 +419,34 @@ sema_comptime_reflection_state_info: fn(owner: String, name: String, graph: Sema
     })
 }
 
-sema_comptime_reflection_transition_info: fn(owner: String, method: Func) -> TComptimeValue? {
-    transition: method.state_transition ?? return None
-    from: transition.from ?? "_"
-    Val(sema_comptime_reflection_struct("TransitionInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "operation", value: TComptimeValue.String{value: method.name}},
-        SemaComptimeReflectionField{name: "from", value: sema_comptime_reflection_state_ref(owner, from)},
-        SemaComptimeReflectionField{name: "to", value: sema_comptime_reflection_state_ref(owner, transition.to)},
-    }))
-}
-
-sema_comptime_reflection_append_method_transitions: fn(owner: String, methods: [Func], values: &[TComptimeValue]) Never! {
-    loop method in methods {
-        transition: sema_comptime_reflection_transition_info(owner, method) ?? next
-        values.push(transition)
+// The entries and moves the owner's own methods declare by their state
+// types, in declaration order.
+sema_comptime_reflection_state_transitions: fn(owner: String, state: StateDecl?, methods: [Func]) -> [TComptimeValue] Never! {
+    declaration: state ?? return [TComptimeValue]{}
+    state_names: loop member in declaration.states -> member.name
+    entries := [String]{}
+    found := [SemaStateGraphTransition]{}
+    sema_state_graph_add_typed_transitions(methods, owner, state_names, entries, found)
+    values := [TComptimeValue]{}
+    loop transition in found {
+        from: transition.from ?? "_"
+        values.push(sema_comptime_reflection_struct("TransitionInfo", [SemaComptimeReflectionField]{
+            SemaComptimeReflectionField{name: "operation", value: TComptimeValue.String{value: transition.operation}},
+            SemaComptimeReflectionField{name: "from", value: sema_comptime_reflection_state_ref(owner, from)},
+            SemaComptimeReflectionField{name: "to", value: sema_comptime_reflection_state_ref(owner, transition.to)},
+        }))
     }
+    values
 }
 
-// Preserve declaration order and use the checked graph only for the terminal
-// and reachability facts it owns. The transition list follows reflection's
-// struct-local method surface, including nested trait implementations.
+// The states keep declaration order; the checked graph supplies only the
+// terminal and reachability facts it owns.
 sema_comptime_reflection_state_view: fn(definition: StructDef, graph: SemaStateGraphFact?) -> SemaComptimeReflectionStateView Never! {
     states := [TComptimeValue]{}
     if definition.state == .Val(declaration) {
         loop state in declaration.states -> states.push(sema_comptime_reflection_state_info(definition.name, state.name, graph))
     }
-    transitions := [TComptimeValue]{}
-    sema_comptime_reflection_append_method_transitions(definition.name, definition.methods, transitions)
-    loop implementation in definition.trait_impls -> sema_comptime_reflection_append_method_transitions(definition.name, implementation.methods, transitions)
+    transitions: sema_comptime_reflection_state_transitions(definition.name, definition.state, definition.methods)
     SemaComptimeReflectionStateView{states: TComptimeValue.List{values: states}, transitions: TComptimeValue.List{values: transitions}}
 }
 
@@ -2363,9 +2364,7 @@ sema_comptime_reflection_enum_type_info: fn(
     type_params := (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
     marker_views: sema_comptime_reflection_marker_views(definition.type_markers, definition.serde_markers, definition.derives, registry)
     traits: sema_comptime_reflection_trait_contracts(registration, caller, registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
-    transitions := [TComptimeValue]{}
-    sema_comptime_reflection_append_method_transitions(definition.name, definition.methods, transitions)
-    loop implementation in definition.trait_impls -> sema_comptime_reflection_append_method_transitions(definition.name, implementation.methods, transitions)
+    transitions: sema_comptime_reflection_state_transitions(definition.name, definition.state, definition.methods)
     sema_comptime_reflection_type_info_fields(
         definition.name,
         "{registered_module.module_path}.{definition.name}",

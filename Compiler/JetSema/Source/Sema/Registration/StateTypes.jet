@@ -173,17 +173,19 @@ SemaStateTypeFound: struct {
     states: [String]
 }
 
-// `Owner.Name` is a state type when `Owner` has a state list; a union is
-// one when every member is one of the same owner. A group expands to its
-// members; a name that is neither a state nor a group is kept as written.
+// `Owner.Name` is a state type when `Owner` has a state list; the owner may
+// itself be dotted (`Payment.Client.S0`). A union is one when every member is
+// one of the same owner. A group expands to its members; a name that is
+// neither a state nor a group is kept as written.
 sema_state_types_split: fn(ty: Type, owners: [String:SemaStateTypeOwner]) -> SemaStateTypeFound? Never! {
     if ty == .Named(name) {
         parts: name.split(".").to_list()
-        if parts.len() != 2 -> return None
-        owner: owners.get(parts[0]) ?? return None
+        if parts.len() < 2 -> return None
+        owner_name: (loop index in 0..<(parts.len() - 1) -> parts[index]).join(".")
+        owner: owners.get(owner_name) ?? return None
         states := [String]{}
-        sema_state_types_expand(owner, parts[1], states)
-        return Val(SemaStateTypeFound{owner: parts[0].copy(), states: states})
+        sema_state_types_expand(owner, parts[parts.len() - 1], states)
+        return Val(SemaStateTypeFound{owner: owner_name, states: states})
     }
     if ty == .Union(members) {
         if members.len() == 0 -> return None

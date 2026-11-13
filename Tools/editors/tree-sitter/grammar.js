@@ -375,7 +375,7 @@ module.exports = grammar({
 
 
     // ── Markers (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────────────
-    // `#Test`, `#State(A -> B)` (arguments are the following group),
+    // `#Test`, `#Scrub(Input)` (arguments are the following group),
     // `#!Rule`, `#[Rule, Rule(args)]`, lowercase `@allow`, and `#package`.
     attribute: (_) =>
       token(seq("#", optional("!"), /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/)),

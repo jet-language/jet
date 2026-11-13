@@ -1,15 +1,18 @@
 Door: struct {
-    state { Closed, Open }
+    state {
+        Closed -> Open
+        Open -> Closed
+    }
 
     name: String
 
-    #State(_ -> Closed) new: fn(name: String) -[]> Door { Door{name: name.copy()} }
+    new: fn(name: String) -[]> Door.Closed { Door{name: name.copy()} }
 
-    #State(Closed -> Open) open: fn(self: &&Door) -[]> Door { self }
+    open: fn(self: &&Door.Closed) -[]> Door.Open { self }
 
-    #State(Open -> Closed) close: fn(self: &&Door) -[]> Door { self }
+    close: fn(self: &&Door.Open) -[]> Door.Closed { self }
 
-    #State(Open) label: fn(self) -[]> String { "{self.name} is open" }
+    label: fn(self: Door.Open) -[]> String { "{self.name} is open" }
 }
 
 run: fn() {

@@ -1,9 +1,13 @@
 
 Door: struct {
-    state { Closed, Open, Orphan }
+    state {
+        Closed -> Open
+        Open
+        Orphan
+    }
 
-    #State(_ -> Closed) close: fn() -> Door { Door{} }
-    #State(Closed -> Open) open: fn(self: &&Door) -> Door { self }
-    #State(Closed -> Closed) hold: fn(self: &&Door) -> Door { self }
+    close: fn() -> Door.Closed { Door{} }
+    open: fn(self: &&Door.Closed) -> Door.Open { self }
+    hold: fn(self: &&Door.Closed) -> Door.Closed { self }
 }
 run: fn() {}

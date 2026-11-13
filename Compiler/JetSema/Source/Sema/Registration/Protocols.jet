@@ -1,7 +1,8 @@
 // (`expand_module_protocols`): a `protocol Name { … }` declares an ordered
 // message exchange. Before registration it becomes two `#SingleUse` handle
-// structs, `Name.Client` and `Name.Server`, with one state per exchange step,
-// and `#State(A -> B)` impl methods: the sending side's `message(self, fields…)`
+// structs, `Name.Client` and `Name.Server`, whose state list runs one step
+// per message (`S0 -> S1`, …), and impl methods typed by those states: the
+// sending side's `message(self: &&Name.Client.S0, fields…) -> Name.Client.S1`
 // and the receiving side's `recv_message(self)`. The fragment goes through the
 // ordinary front end; one that does not parse is E0153 at the protocol's name.
 use {
@@ -34,7 +35,11 @@ sema_protocols_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
             } else {
                 generated := parsed.program.items
                 sema_protocol_mark_generated(generated, declaration.name)
-                loop value in generated -> expanded.push(value)
+                // Written state types are rewritten before any module
+                // registers; the generated handles name theirs here.
+                owners := [String:SemaStateTypeOwner]{}
+                sema_state_types_collect(generated, owners)
+                loop value in sema_state_types_rewrite_items(generated, owners) -> expanded.push(value)
             }
         }
         expanded.push(item.copy())
@@ -43,8 +48,8 @@ sema_protocols_expand: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     loop item in expanded -> items.push(item)
 }
 
-// The generated transition methods are compiler scaffolding: they keep their
-// declared returns raw. The fragment declares the handles by their leaf names
+// The generated methods are compiler scaffolding: they keep their declared
+// returns raw. The fragment declares the handles by their leaf names
 // (`Client: struct`); they take the protocol's qualified names
 // (`Payment.Client`) here, because a written struct name is one identifier.
 sema_protocol_mark_generated: fn(items: &[Item], protocol: String) Never! {
@@ -72,21 +77,22 @@ sema_protocol_mark_generated: fn(items: &[Item], protocol: String) Never! {
 }
 
 sema_protocol_mark_methods: fn(methods: &[Func]) Never! {
-    loop index in 0..<methods.len() {
-        if methods[index].state_transition != None -> methods[index].compiler_generated = true
-    }
+    loop index in 0..<methods.len() -> methods[index].compiler_generated = true
 }
 
 sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     client: "{declaration.name}.Client"
     server: "{declaration.name}.Server"
     states: loop index in 0..<(declaration.messages.len() + 1) -> "S{index}"
-    state_list: states.join(", ")
+    lines := [String]{}
+    loop index in 0..<declaration.messages.len() -> lines.push("        {states[index]} -> {states[index + 1]}\n")
+    lines.push("        {states[declaration.messages.len()]}\n")
+    state_list: lines.join("")
     out := [String]{}
-    out.push("#SingleUse Client: struct {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
-    out.push("#SingleUse Server: struct {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
+    out.push("#SingleUse Client: struct {{\n    state {{\n{state_list}    }}\n\n    _token: Int\n}}\n\n")
+    out.push("#SingleUse Server: struct {{\n    state {{\n{state_list}    }}\n\n    _token: Int\n}}\n\n")
     out.push("impl {client} {{\n")
-    out.push("    #State(_ -> S0) client: fn() -> {client} {{ {{_token: 0}} }}\n\n")
+    out.push("    client: fn() -> {client}.S0 {{ {{_token: 0}} }}\n\n")
     loop (index, message) in declaration.messages {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
@@ -97,7 +103,7 @@ sema_protocol_source: fn(declaration: ProtocolDecl) -> String Never! {
     }
     out.push("}}\n\n")
     out.push("impl {server} {{\n")
-    out.push("    #State(_ -> S0) server: fn() -> {server} {{ {{_token: 0}} }}\n\n")
+    out.push("    server: fn() -> {server}.S0 {{ {{_token: 0}} }}\n\n")
     loop (index, message) in declaration.messages {
         terminal: index + 1 == declaration.messages.len()
         if message.direction == ProtocolDirection.ClientToServer {
@@ -115,15 +121,15 @@ sema_protocol_send_method: fn(handle: String, states: [String], index: Int, mess
     to: states[index + 1]
     fields: sema_protocol_fields(message)
     suffix: if fields == "" -> "" else -> ", {fields}"
-    if terminal -> return "    #State({from} -> {to}) {message.name}: fn(self: &&{handle}{suffix}) {{}}\n\n"
-    "    #State({from} -> {to}) {message.name}: fn(self: &&{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    {message.name}: fn(self: &&{handle}.{from}{suffix}) {{}}\n\n"
+    "    {message.name}: fn(self: &&{handle}.{from}{suffix}) -> {handle}.{to} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_recv_method: fn(handle: String, states: [String], index: Int, message: ProtocolMessage, terminal: Bool) -> String Never! {
     from: states[index]
     to: states[index + 1]
-    if terminal -> return "    #State({from} -> {to}) recv_{message.name}: fn(self: &&{handle}) {{}}\n\n"
-    "    #State({from} -> {to}) recv_{message.name}: fn(self: &&{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
+    if terminal -> return "    recv_{message.name}: fn(self: &&{handle}.{from}) {{}}\n\n"
+    "    recv_{message.name}: fn(self: &&{handle}.{from}) -> {handle}.{to} Err! {{ Ok(self) }}\n\n"
 }
 
 sema_protocol_fields: fn(message: ProtocolMessage) -> String Never! {

@@ -47,7 +47,7 @@ sema_raw_protocol_trait: fn(trait_name: String?) -> Bool Never! {
 // reference's `uses_raw_protocol_function_return`).
 sema_raw_protocol_function_return: fn(trait_name: String?, implementation_generated: Bool, func: Func) -> Bool Never! {
     if sema_raw_protocol_trait(trait_name) -> return true
-    func.compiler_generated && (implementation_generated || func.state_transition != None)
+    func.compiler_generated && (implementation_generated || func.state_types.len() > 0)
 }
 
 // A callable's checked return: a raw protocol return keeps its declared type

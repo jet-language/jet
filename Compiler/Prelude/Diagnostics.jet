@@ -2179,19 +2179,14 @@ StateSectionNotAllowed: struct {
     }
 }
 
-TypestateMarkerWithoutStates: struct {
-    type: String
-
+RetiredTypestateMarkerWithoutStates: struct {
     impl Diagnostic {
         code: "E0159"
-        safety_class: .Opinion
-        safety_reason: "A marker with no state set could be ignored safely, and Jet refuses it because nothing can check it."
-        meaning: "Typestate marker on an owner without a state section"
-        detail: true
-        fix_next: "Add a `state {{ ... }}` section inside the owning struct, or remove the typestate marker."
-        what: fn(self) -> String { "`{self.type}` has a `#State` marker but no `state {{ … }}` section" }
-        why: fn(self) -> String { "Markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected" }
-        fix: fn(self) -> String { "Add one `state {{ Name, … }}` section inside `{self.type}: struct`, or remove the typestate marker" }
+        status: .Retired
+        no_fix: None
+        what: fn(self) -> String { "*Retired* (was: typestate marker on an owner without a state section)" }
+        why: fn(self) -> String { "`#State` markers are retired; E0175 reports each one with its migration" }
+        fix: fn(self) -> String { "Follow the guidance for E0175" }
     }
 }
 
@@ -2340,6 +2335,25 @@ TypestateMoveWithoutArrow: struct {
         what: fn(self) -> String { "`{self.type}` has no `{self.from} -> {self.to}` in its state list" }
         why: fn(self) -> String { "`{self.op}` takes `{self.type}.{self.from}` and returns `{self.type}.{self.to}`, so it is a move, and every move is an arrow in the state list" }
         fix: fn(self) -> String { "Add `{self.from} -> {self.to}` to the state list of `{self.type}`, or start from a state that has that arrow" }
+    }
+}
+
+TypestateMarkerRetired: struct {
+    type: String
+
+    impl Diagnostic {
+        code: "E0175"
+        stage: [.Parse]
+        safety_class: .Opinion
+        safety_reason: "A retired marker's facts are written as state types, which Jet checks; the marker alone could be ignored safely, and Jet refuses it so its facts are not lost."
+        meaning: "Typestate: a retired `#State` marker"
+        detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`#State` markers on `{self.type}` are retired" }
+        why: fn(self) -> String { "State types carry these facts: a parameter typed `{self.type}.A` requires `A`, a result typed `{self.type}.B` moves the value to `B`, and the state list names each move as `A -> B`" }
+        fix: fn(self) -> String { "Run `jet fix` to write each marker's states into its signature and its moves into the state list of `{self.type}`" }
     }
 }
 

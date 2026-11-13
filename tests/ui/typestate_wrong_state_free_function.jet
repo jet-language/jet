@@ -1,15 +1,18 @@
 // D-STATE1: free-function typestate checks use the tracked first argument.
 // `bounce_ready` requires `Unit`, but `v` starts in `Raw`.
 Vec3: struct {
-    state { Raw, Unit }
+    state {
+        Raw -> Unit
+        Unit
+    }
     x: Float
 }
 
-#State(_ -> Raw) vec3: fn(x: Float) -> Vec3 { Vec3{x: x} }
+vec3: fn(x: Float) -> Vec3.Raw { Vec3{x: x} }
 
-#State(Raw -> Unit) normalize: fn(v: &&Vec3) -> Vec3 { v }
+normalize: fn(v: &&Vec3.Raw) -> Vec3.Unit { v }
 
-#State(Unit) bounce_ready: fn(normal: Vec3) -> Bool { true }
+bounce_ready: fn(normal: Vec3.Unit) -> Bool { true }
 
 run: fn() {
     v := vec3(Float{3.0})

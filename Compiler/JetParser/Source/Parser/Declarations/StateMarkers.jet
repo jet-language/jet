@@ -1,0 +1,284 @@
+// Retired `#State` markers. State types carry what `#State(S)` and
+// `#State(A -> B)` said: `self: &&Owner.A` requires `A`, `-> Owner.B` moves
+// the value to `B`, and the owner's state list names the move `A -> B`. After
+// a file parses, the markers on each owner are reported once (E0175) with one
+// edit that rewrites the owner's state list and every marked signature; a
+// marker whose owner, list or signature the edit cannot settle is reported
+// without one.
+use {
+    jet_foundation.[
+        Diagnostic,
+        Func,
+        Item,
+        MARKER_STATE,
+        Marker,
+        Program,
+        Span,
+        StateDecl,
+        TextEdit,
+        Type,
+        diagnostic_from_registry,
+        diagnostic_with_edit,
+    ]
+}
+
+StateMarkerOwner: struct {
+    state: StateDecl?
+    generic: Bool
+}
+
+// One marker and the function it sits on. A free function's owner is read
+// from its signature once the file has markers at all.
+StateMarkerSite: struct {
+    owner: String
+    free: Bool
+    function: Func
+    marker: Marker
+    paths: [String]
+}
+
+parser_state_marker_migration: fn(program: Program, source: [U8], diagnostics: &[Diagnostic]) Never! {
+    sites := [StateMarkerSite]{}
+    parser_state_marker_sites(program.items, sites)
+    if sites.len() == 0 -> return
+    owners := [String:StateMarkerOwner]{}
+    parser_state_marker_owners(program.items, owners)
+    order := [String]{}
+    loop index in 0..<sites.len() {
+        if sites[index].free -> sites[index].owner = parser_state_marker_free_owner(sites[index].function, owners)
+        if {
+            sites[index].owner == "" -> diagnostics.push(parser_state_marker_report(sites[index].function.name, false, sites[index].marker.span, None))
+            !order.contains(sites[index].owner) -> order.push(sites[index].owner.copy())
+            else -> {}
+        }
+    }
+    loop owner in order {
+        group: loop site in sites if site.owner == owner -> site.copy()
+        edit: parser_state_marker_edit(owner, owners.get(owner), group, source)
+        diagnostics.push(parser_state_marker_report(owner, true, group[0].marker.span, edit))
+    }
+}
+
+parser_state_marker_sites: fn(items: [Item], sites: &[StateMarkerSite]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> parser_state_marker_function_sites(function, "", true, sites)
+            .Struct(definition) -> {
+                loop method in definition.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> parser_state_marker_function_sites(method, definition.name, false, sites)
+                }
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods -> parser_state_marker_function_sites(method, implementation.type_name, false, sites)
+            }
+            .CodeModule(row) -> {
+                if row.body == .Val(body) -> parser_state_marker_sites(body, sites)
+            }
+            .GenericModule(row) -> parser_state_marker_sites(row.body, sites)
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+parser_state_marker_function_sites: fn(function: Func, owner: String, free: Bool, sites: &[StateMarkerSite]) Never! {
+    loop marker in function.markers {
+        if marker.name != MARKER_STATE || marker.declaration_module != None -> next
+        paths: parser_state_marker_paths(marker) ?? next
+        sites.push(StateMarkerSite{owner: owner.copy(), free: free, function: function.copy(), marker: marker.copy(), paths: paths})
+    }
+}
+
+parser_state_marker_owners: fn(items: [Item], owners: &[String:StateMarkerOwner]) Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> owners[definition.name] = StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0}
+            .Enum(definition) -> owners[definition.name] = StateMarkerOwner{state: definition.state.copy(), generic: definition.type_params.len() > 0}
+            .CodeModule(row) -> {
+                if row.body == .Val(body) -> parser_state_marker_owners(body, owners)
+            }
+            .GenericModule(row) -> parser_state_marker_owners(row.body, owners)
+            .Func(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+// A free function belongs to the type of its first parameter, else to the
+// type it returns, when the file declares that type.
+parser_state_marker_free_owner: fn(function: Func, owners: [String:StateMarkerOwner]) -> String Never! {
+    if function.params.len() > 0 && function.params[0].ty == .Named(name) && owners.get(name) != None -> return name
+    if function.return_type == .Val(result) {
+        if result == .Named(name) && owners.get(name) != None -> return name
+        if result == .Result(ok, _) && ok == .Named(name) && owners.get(name) != None -> return name
+    }
+    ""
+}
+
+parser_state_marker_report: fn(subject: String, owned: Bool, span: Span, edit: TextEdit?) -> Diagnostic Never! {
+    what: "`#State` markers on `{subject}` are retired"
+    why: "state types carry these facts: a parameter typed `Owner.A` requires `A`, a result typed `Owner.B` moves the value to `B`, and the owner's state list names each move as `A -> B`"
+    if edit == .Val(rewrite) {
+        return diagnostic_with_edit(diagnostic_from_registry("E0175", Val(span), what, why, "run `jet fix` to write each marker's states into its signature and its moves into the state list of `{subject}`"), rewrite)
+    }
+    if owned -> return diagnostic_from_registry("E0175", Val(span), what, why, "write the states into the signature (`self: &&{subject}.A`, `-> {subject}.B`), add `A -> B` to the state list of `{subject}`, and delete the marker")
+    diagnostic_from_registry("E0175", Val(span), what, why, "type the parameter and result by their owner's states (`Owner.A`, `-> Owner.B`), add `A -> B` to the owner's state list, and delete the marker")
+}
+
+// The one edit for an owner: every marker deleted, every marked signature
+// typed by its states, and the state list rewritten one state per line with
+// its moves. None when the owner has no plain state list of its own in this
+// file, or when a signature is not written by the owner's name.
+parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [StateMarkerSite], source: [U8]) -> TextEdit? Never! {
+    found: info ?? return None
+    if found.generic -> return None
+    state: found.state ?? return None
+    if state.groups.len() > 0 || !parser_state_marker_text_is(source, state.span.start, "state") -> return None
+    open: parser_state_marker_skip_space(source, state.span.start + 5)
+    if !parser_state_marker_text_is(source, open, "{{") -> return None
+    if parser_state_marker_text(source, state.span.start, state.span.end).contains("//") -> return None
+    names: loop member in state.states -> member.name
+    moves := [String:[String]]{}
+    loop arrow in state.arrows {
+        if !names.contains(arrow.from.name) -> return None
+        targets := moves.get(arrow.from.name) ?? [String]{}
+        loop target in arrow.to {
+            if !targets.contains(target.name) -> targets.push(target.name)
+        }
+        moves[arrow.from.name] = targets
+    }
+    edits := [TextEdit]{}
+    loop site in group {
+        if site.marker.inside || !parser_state_marker_text_is(source, site.marker.span.start, "#") -> return None
+        edits.push(TextEdit{span: Span{start: site.marker.span.start, end: parser_state_marker_skip_space(source, site.marker.span.end)}, new_text: ""})
+        from := String?{None}
+        if site.paths.len() == 1 || site.paths[0] != "_" -> from = Val(parser_state_marker_leaf(site.paths[0]))
+        if from == .Val(name) {
+            if !names.contains(name) -> return None
+            edits.push(parser_state_marker_param_edit(site.function, owner, name, source) ?? return None)
+        }
+        if site.paths.len() == 2 {
+            to: parser_state_marker_leaf(site.paths[1])
+            if !names.contains(to) -> return None
+            edits.push(parser_state_marker_result_edit(site.function, owner, to, source) ?? return None)
+            if from == .Val(name) && name != to {
+                targets := moves.get(name) ?? [String]{}
+                if !targets.contains(to) -> targets.push(to.copy())
+                moves[name] = targets
+            }
+        }
+    }
+    edits.push(TextEdit{span: state.span, new_text: parser_state_marker_list(state, moves, source)})
+    parser_state_marker_combine(edits, source)
+}
+
+// The first parameter takes the state: a bare `self` or `&&self` is written
+// out as `self: &&Owner.A`, and a parameter typed by the owner's name or
+// `Self` takes `Owner.A`.
+parser_state_marker_param_edit: fn(function: Func, owner: String, state: String, source: [U8]) -> TextEdit? Never! {
+    if function.params.len() == 0 -> return None
+    param: function.params[0]
+    if param.declared_footprint != None -> return None
+    if param.ty_span.start == param.name_span.start && param.ty_span.end == param.name_span.end {
+        end: param.name_span.end
+        if param.name != "self" || end < 4 || parser_state_marker_text(source, end - 4, end) != "self" -> return None
+        start := end - 4
+        loop start > 0 && Int.from_u8(source[start - 1]) == 38 -> start -= 1
+        caps: parser_state_marker_text(source, start, end - 4)
+        return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
+    }
+    start := param.ty_span.start
+    loop start < param.ty_span.end && (Int.from_u8(source[start]) == 38 || parser_state_marker_blank(source[start])) -> start += 1
+    written: parser_state_marker_text(source, start, param.ty_span.end)
+    if written != owner && written != "Self" -> return None
+    Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
+}
+
+// The result names the state it moves to: a result written from the owner's
+// name or `Self` (`Owner Err!`, `Self?`) takes `Owner.B` there.
+parser_state_marker_result_edit: fn(function: Func, owner: String, state: String, source: [U8]) -> TextEdit? Never! {
+    span: function.return_type_span ?? return None
+    prefixes: [String]{owner, "Self"}
+    loop prefix in prefixes {
+        end: span.start + prefix.len()
+        if end > span.end || parser_state_marker_text(source, span.start, end) != prefix -> next
+        if end < span.end && parser_state_marker_ident_byte(source[end]) -> next
+        return Val(TextEdit{span: Span{start: span.start, end: end}, new_text: "{owner}.{state}"})
+    }
+    None
+}
+
+// `state {` and one line per state, `Draft -> Confirmed, Cancelled` for a
+// state with moves, closed at the indentation of the line it starts on.
+parser_state_marker_list: fn(state: StateDecl, moves: [String:[String]], source: [U8]) -> String Never! {
+    line_start := state.span.start
+    loop line_start > 0 && Int.from_u8(source[line_start - 1]) != 10 -> line_start -= 1
+    indent_end := line_start
+    loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) -> indent_end += 1
+    indent: parser_state_marker_text(source, line_start, indent_end)
+    lines := [String]{"state {{"}
+    loop member in state.states {
+        targets: moves.get(member.name) ?? [String]{}
+        line: if targets.len() == 0 -> "{indent}    {member.name}" else -> "{indent}    {member.name} -> {targets.join(", ")}"
+        lines.push(line)
+    }
+    lines.push("{indent}}}")
+    lines.join("\n")
+}
+
+// The edits as one replacement of the source from the first to the last;
+// None when two of them overlap.
+parser_state_marker_combine: fn(edits: [TextEdit], source: [U8]) -> TextEdit? Never! {
+    sorted := [TextEdit]{}
+    loop edit in edits {
+        at := sorted.len()
+        loop at > 0 && sorted[at - 1].span.start > edit.span.start -> at -= 1
+        sorted.insert(at, edit.copy())
+    }
+    if sorted.len() == 0 -> return None
+    start: sorted[0].span.start
+    cursor := start
+    parts := [String]{}
+    loop edit in sorted {
+        if edit.span.start < cursor -> return None
+        parts.push(parser_state_marker_text(source, cursor, edit.span.start))
+        parts.push(edit.new_text.copy())
+        cursor = edit.span.end
+    }
+    Val(TextEdit{span: Span{start: start, end: cursor}, new_text: parts.join("")})
+}
+
+parser_state_marker_leaf: fn(path: String) -> String Never! {
+    parts: path.split(".").to_list()
+    parts[parts.len() - 1].copy()
+}
+
+parser_state_marker_text: fn(source: [U8], start: Int, end: Int) -> String Never! {
+    if start < 0 || end > source.len() || start >= end -> return ""
+    String.from_bytes(source.slice(start, end)) ?? ""
+}
+
+parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Never! {
+    parser_state_marker_text(source, at, at + word.len()) == word
+}
+
+parser_state_marker_skip_space: fn(source: [U8], at: Int) -> Int Never! {
+    end := at
+    loop end < source.len() && (parser_state_marker_blank(source[end]) || Int.from_u8(source[end]) == 10 || Int.from_u8(source[end]) == 13) -> end += 1
+    end
+}
+
+parser_state_marker_blank: fn(byte: U8) -> Bool Never! {
+    value: Int.from_u8(byte)
+    value == 32 || value == 9
+}
+
+parser_state_marker_ident_byte: fn(byte: U8) -> Bool Never! {
+    value: Int.from_u8(byte)
+    (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95
+}

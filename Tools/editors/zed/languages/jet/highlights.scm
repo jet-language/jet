@@ -26,7 +26,7 @@
 (type_identifier) @type
 (primitive_type) @type.builtin
 
-; Applied rules (#Test, #State(A -> B), #[Codable], @allow) and $facts
+; Applied rules (#Test, #Scrub(Input), #[Codable], @allow) and $facts
 (attribute) @attribute
 (lower_attribute) @attribute
 (meta_name) @variable.special

@@ -1,9 +1,14 @@
 
 Flow: struct {
-    state { Start, Done, Cancelled, Orphan }
+    state {
+        Start -> Done, Cancelled
+        Done
+        Cancelled
+        Orphan
+    }
 
-    #State(_ -> Start) start: fn() -[]> Flow { return Flow{} }
-    #State(Start -> Done) done: fn(self: &&Flow) -[]> Flow { return self }
-    #State(Start -> Cancelled) cancel: fn(self: &&Flow) -[]> Flow { return self }
+    start: fn() -[]> Flow.Start { return Flow{} }
+    done: fn(self: &&Flow.Start) -[]> Flow.Done { return self }
+    cancel: fn(self: &&Flow.Start) -[]> Flow.Cancelled { return self }
 }
     run: fn() {}

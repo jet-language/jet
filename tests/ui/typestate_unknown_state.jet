@@ -1,14 +1,13 @@
-// D-STATE-HOME1=A: a `#State(X)` or `#State(A -> B)` marker that references a
-// state name not declared in the owning `state { … }` section is E0151. Here
-// `#State(Stuffed)` on `Crate::get` references `Stuffed`, but the section only
-// declares `Full` and `Empty`. Close enough to `Full` to get a typo suggestion.
+// D-STATE-HOME1=A: a state type that names a state not declared in its
+// owner's `state { … }` list is E0151. Here `Crate.Stuffed` on `Crate.get`
+// names `Stuffed`, but the list only declares `Full` and `Empty`.
 Crate: struct {
     state { Full, Empty }
     data: Int
 
-    #State(_ -> Full) fill: fn(data: Int) -> Crate { return Crate{data: data} }
+    fill: fn(data: Int) -> Crate.Full { return Crate{data: data} }
 
-    #State(Stuffed) get: fn(self) -> Int { return self.data }
+    get: fn(self: Crate.Stuffed) -> Int { return self.data }
 }
 
 run: fn() {

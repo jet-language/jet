@@ -1771,13 +1771,14 @@ arbitrary-precision base-10 `Decimal` in `core.math`; default-on lint L0504
 fires when a money-named field holds a float (`#[allow(float_money)]`
 suppresses).
 
-**D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in one
+**D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL; the `#State` markers are
+retired by D-MACHINE1=A)*: states declared in one
 `state { A, B, C }` section inside their named `struct` body;
 `#State(S) m: fn(self)` requires state S; `#State(From -> To) fn` advances
 it (`_` from-state = entry constructor). Wrong-state call E0150; markers erase
 in codegen. Ordering falls out of the transition graph.
 
-**D-STATE-ARROW1=A** *(card #4302)*: the transition marker is
+**D-STATE-ARROW1=A** *(card #4302; retired by D-MACHINE1=A)*: the transition marker was
 `#State(From -> To)`, one marker for both typestate facts. `From` may be `_`
 (the entry constructor); `To` may not. One arrow only: a chain
 `#State(A -> B -> C)` is a parse error at the second arrow, and `#State(_)`,
@@ -1807,8 +1808,15 @@ parameter's state type is E0150, and the fix lists the moves from the current
 state. A value never changes state in place: the call's result carries the new
 one. Inside an enum table arm, the tested local is in the arm's case. State
 types erase to the plain type before registration, so struct states cost
-nothing at run time. Proof: `Examples/Types/StateLists.jet` with
-`Examples/Types/StateLists.out`.
+nothing at run time. A `#State(S)` or `#State(A -> B)` marker is retired: one
+E0175 per owner carries one `jet fix` edit that writes each marker's states
+into its signature (`self: &&Order.A`, `-> Order.B`) and its moves into the
+state list, and deletes the markers; a marker the edit cannot settle (no owner,
+a generic owner, no state list, or a signature not written with the owner's
+name) is reported without one. A marker in another shape is still E0930. Only
+a spawned task moves in place, through its compiler-owned row. Proof:
+`Examples/Types/StateLists.jet` with `Examples/Types/StateLists.out`, and
+`tests/cases/typestate/state_marker_fix_writes_state_types.case`.
 
 **D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
 `#Invariant("value >= lo && value < hi")` spelling is retired. Use

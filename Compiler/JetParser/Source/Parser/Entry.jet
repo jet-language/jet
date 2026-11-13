@@ -250,6 +250,7 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
     program.fenced_statements = prepared.fenced_statements
     program.used_import_names = parser_used_import_names(state.tokens, state.tables[0], program.imports, program.items)
     program.debug_sites = parser_debug_trace_sites(state.tokens, state.tables[0], source)
+    parser_state_marker_migration(program, source, state.diagnostics)
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
@@ -589,6 +590,7 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     program.fenced_statements = prepared.fenced_statements
     program.used_import_names = parser_used_import_names(taken.tokens, taken.tables, program.imports, program.items)
     program.debug_sites = parser_debug_trace_sites(taken.tokens, taken.tables, source)
+    parser_state_marker_migration(program, source, diagnostics)
     ParseResult{program: program, diagnostics: diagnostics}
 }
 

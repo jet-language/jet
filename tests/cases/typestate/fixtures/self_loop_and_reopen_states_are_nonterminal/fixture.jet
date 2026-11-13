@@ -1,11 +1,14 @@
 
 Gate: struct {
-    state { Closed, Reopened }
+    state {
+        Closed -> Reopened
+        Reopened
+    }
     w: Int
 
-    #State(_ -> Closed) new: fn(w: Int) -[]> Gate { return Gate{ w: w } }
-    #State(Closed -> Closed) hold: fn(self: &&Gate) -[]> Gate { return self }
-    #State(Closed -> Reopened) reopen: fn(self: &&Gate) -[]> Gate { return self }
+    new: fn(w: Int) -[]> Gate.Closed { return Gate{ w: w } }
+    hold: fn(self: &&Gate.Closed) -[]> Gate.Closed { return self }
+    reopen: fn(self: &&Gate.Closed) -[]> Gate.Reopened { return self }
 }
 
 run: fn() {

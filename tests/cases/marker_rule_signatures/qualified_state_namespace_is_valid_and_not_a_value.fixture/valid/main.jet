@@ -1,5 +1,9 @@
-Door: struct { state { Closed, Open }
-#State(Door.State.Closed) close: fn(self) {}
-#State(Door.State.Closed -> Door.State.Open) open: fn(self) {}
+Door: struct {
+    state {
+        Closed -> Open
+        Open
+    }
+    close: fn(self: Door.Closed) {}
+    open: fn(self: &&Door.Closed) -> Door.Open { self }
 }
 run: fn() {}
