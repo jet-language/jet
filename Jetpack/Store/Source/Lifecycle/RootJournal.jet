@@ -1,11 +1,11 @@
-// The C3 lifecycle-root journal (Rust Store/Lifecycle.rs). Producers replace
-// roots in two durable steps. Each transition is one checksummed transaction
-// member `<sequence:020>-<checksum16>.txn` in the pinned journal directory,
-// published by exclusive create, file sync, no-replace rename and directory
-// sync. Recovery removes abandoned partials; replay authenticates every
-// member, applies transactions after the newest snapshot, and compaction
-// folds a long history into one snapshot. Every public operation holds the
-// Hangar lock for its whole read-modify-write.
+// The C3 lifecycle-root journal. Producers replace roots in two durable steps.
+// Each transition is one checksummed transaction member
+// `<sequence:020>-<checksum16>.txn` in the pinned journal directory, published
+// by exclusive create, file sync, no-replace rename and directory sync.
+// Recovery removes abandoned partials; replay authenticates every member,
+// applies transactions after the newest snapshot, and compaction folds a long
+// history into one snapshot. Every public operation holds the Hangar lock for
+// its whole read-modify-write.
 
 STORE_LIFECYCLE_DB_DIR: "lifecycle-db"
 STORE_LIFECYCLE_JOURNAL_DIR: "journal"

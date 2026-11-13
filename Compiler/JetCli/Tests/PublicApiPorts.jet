@@ -1,11 +1,10 @@
-// Ports of the deleted public-API producer tests (#6096 c13, c24, c62) from
-// tests/pkg.rs:5903-6268. The Rust extract_public_api_for_package(source,
-// path, package) maps to jet_cli_publish_public_api over a one-file package
-// with that name, ApiFreeze snapshots map to the api_version 4 text
-// pkg_api_snapshot_render writes and publication_api_snapshot_items reads
-// back, and diff_public_api maps to publication_diff_public_api. The
-// Rust-era `^T` take sigil is `&&T`. A test marked expected_fail states a
-// behavior the producer does not have yet; its comment names the gap.
+// The Rust extract_public_api_for_package(source, path, package) maps to
+// jet_cli_publish_public_api over a one-file package with that name, ApiFreeze
+// snapshots map to the api_version 4 text pkg_api_snapshot_render writes and
+// publication_api_snapshot_items reads back, and diff_public_api maps to
+// publication_diff_public_api. The Rust-era `^T` take sigil is `&&T`. A test
+// marked expected_fail states a behavior the producer does not have yet; its
+// comment names the gap.
 use {
     jet_cli.[jet_cli_publish_public_api]
     jet_foundation.[PublicAPIItem]
@@ -69,7 +68,6 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     publication_diff_public_api(old, new)
 }
 
-// tests/pkg.rs:5903 capability_sigil_frozen_in_public_api.
 #Test("capability_sigil_frozen_in_public_api") {
     root: pap_root("sigil")
     owner: PapFixtureRoot{path: root}
@@ -81,7 +79,6 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     assert(pap_changes(read_api, write_api).len() > 0, "a read -> write capability drift on a public fn is a breaking change")
 }
 
-// tests/pkg.rs:5949 cli_typed_default_is_not_frozen_as_positional (c62).
 // A typed default keeps its field a flag (`= _`), and the required field's
 // bare positional is frozen: declaration order is part of the command
 // interface (spec.md "Field mapping").
@@ -97,7 +94,6 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     assert_eq(required, "field Config.required: Int [positional 0]")
 }
 
-// tests/pkg.rs:5967 physical_unit_api_freeze_and_semver_share_one_canonical_signature (c24).
 // Only the families a package declares are its rows: a package that names
 // the standard Length family through a bound freezes its `keep`, not the
 // core.units family, so moving `keep` to a Time bound is one change.
@@ -127,7 +123,6 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     assert(keep_changes.len() == 1, "{keep_changes.len()} changes\nLength API:\n{pap_text(length_api)}\nTime API:\n{pap_text(time_api)}")
 }
 
-// tests/pkg.rs:6066 soft_public_names_are_not_semver_promises (c24).
 // An underscore name is soft-public and carries no SemVer promise, so it is
 // never frozen.
 #Test("soft_public_names_are_not_semver_promises") {
@@ -142,7 +137,6 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     assert_eq(pap_changes(old_api, new_api).len(), 0)
 }
 
-// tests/pkg.rs:6086 inferred_public_effect_drift_is_breaking (c24).
 #Test("inferred_public_effect_drift_is_breaking") {
     root: pap_root("effect-drift")
     owner: PapFixtureRoot{path: root}
@@ -182,7 +176,6 @@ pap_cap_source: fn(receipt: String) -> String {
     assert_eq(loop change in pap_changes(published, widened) -> change.item_name.copy(), [String]{"Receipt"})
 }
 
-// tests/pkg.rs:6136 v2_snapshot_upgrade_matches_duplicate_inline_leaves (c13).
 // The api_version 2 reader is gone under the greenfield rule (a registry
 // snapshot that is not api_version 4 is refused), so the port keeps the
 // behavior that survives: two inline modules' same-named leaves stay two
@@ -199,7 +192,6 @@ pap_cap_source: fn(receipt: String) -> String {
     assert_eq(pap_changes(previous, current).len(), 0)
 }
 
-// tests/pkg.rs:6179 public_effect_metadata_preserves_symbolic_rows (c13).
 #Test("public_effect_metadata_preserves_symbolic_rows") {
     root: pap_root("open-row")
     owner: PapFixtureRoot{path: root}
@@ -209,7 +201,6 @@ pap_cap_source: fn(receipt: String) -> String {
     assert(invoke.contains("-[..E]>"), invoke)
 }
 
-// tests/pkg.rs:6194 public_trait_effect_contract_drift_is_breaking (c13).
 #Test("public_trait_effect_contract_drift_is_breaking") {
     root: pap_root("trait-effect")
     owner: PapFixtureRoot{path: root}
@@ -223,7 +214,6 @@ pap_cap_source: fn(receipt: String) -> String {
     assert(pap_changes(old_api, new_api).len() > 0, "trait method effect drift is breaking")
 }
 
-// tests/pkg.rs:6218 physical_unit_trait_methods_use_canonical_dimensions (c13).
 // The prelude `Meter` is spelled with its canonical dimension, so it and a
 // local same-named nominal family (which shadows the prelude member) are
 // different public types; the frozen snapshot keeps

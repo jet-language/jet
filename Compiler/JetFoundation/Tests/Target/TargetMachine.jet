@@ -412,8 +412,8 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(errors.is_empty())
 }
 
-// Rust target_machines.rs sensor_machine: board.sensor_v1 with the MMIO range
-// the compile-path volatile tests use and an explicit linker and allocator.
+// The `board.sensor_v1` machine with the MMIO range the compile-path volatile
+// tests use and an explicit linker and allocator.
 target_test_sensor_machine: fn() -> TargetMachine Never! {
     machine := jet_target_machine_board_sensor_v1("0.0.1")
     machine.memory = [MemoryRegion]{
@@ -499,7 +499,6 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     panic("missing {code} diagnostic")
 }
 
-// Rust jet-sema TargetMachine.rs target_machine_rows_are_registered_and_stable.
 #Test("target_machine_rows_are_registered_and_stable") {
     machine := jet_target_machine_wasm_no_os("0.0.1")
     target_test_assert_row(jet_target_machine_diagnostics(machine, jet_target_machine_use_from_core_apis([String]{"core.files"})), "E3310",
@@ -532,7 +531,6 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
         "Select a complete typed target profile and correct the `target triple` declaration.")
 }
 
-// Rust target_machines.rs target_provider_fact_matrix_covers_present_missing_and_malformed.
 #Test("target_provider_fact_matrix_covers_present_missing_and_malformed") {
     names: [String]{"MMIO", "Time.Wall", "Time.Monotonic", "Time.ZoneData", "Time.Sleep", "Rand.Entropy", "Target.Scheduler", "IO.Read", "IO.Write", "Panic.Report", "Target.Allocator", "Target.Startup"}
     capabilities: [TargetCapability]{.MMIO, .TimeWall, .TimeMonotonic, .TimeZoneData, .TimeSleep, .Entropy, .Scheduler, .IORead, .IOWrite, .PanicReport, .Allocator, .Startup}
@@ -561,7 +559,6 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     }
 }
 
-// Rust target_machines.rs panic_policy_matrix_covers_explicit_missing_and_malformed.
 #Test("panic_policy_matrix_covers_explicit_missing_and_malformed") {
     usage: jet_target_machine_use_default()
     present := target_test_sensor_machine()
@@ -578,8 +575,7 @@ target_test_assert_row: fn(diagnostics: [Diagnostic], code: String, what: String
     assert(target_test_has_code(jet_target_machine_diagnostics(malformed, usage), "E3312"))
 }
 
-// Rust target_machines.rs no_os_machine_rejects_dev_explicitly (data half):
-// a no-OS machine refuses the Dev tier and keeps AOT; hosted keeps both.
+// A no-OS machine refuses the Dev tier and keeps AOT; hosted keeps both.
 #Test("no_os_machine_rejects_dev_explicitly") {
     sensor: target_test_sensor_machine()
     assert_eq(jet_target_machine_supports_execution_tier(sensor, .Dev), TargetMachineError?{Val(.ExecutionTierUnsupported{tier: "dev", machine: "board.sensor_v1"})})

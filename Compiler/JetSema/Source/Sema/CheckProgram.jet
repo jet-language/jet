@@ -339,7 +339,7 @@ SemaComptimeItemSource: struct {
     dependencies: [String]
     checked_text: SemaCheckedTextEvaluation?
     // A FieldDefault of a struct that bakes its defaults (Codable, Decode,
-    // Encode, CLI): Rust CheckerMarkers reports E2414 when it cannot evaluate.
+    // Encode, CLI): a default that cannot be evaluated reports E2414.
     baked_default: Bool{false}
     // An immutable module-level `NAME: expr` whose value is not literal data:
     // computed while building when its evaluation is pure and succeeds, and
@@ -4137,8 +4137,8 @@ sema_check_foreign_handle_adapter_key: fn(module_row: SemaRegistrationModule, pr
 
 // The Program-level forms the module checker does not support yet, by name.
 // Fenced statements are formatter metadata: sema checks their ordinary
-// expanded statements in `items`, as the Rust checker does. A script body is
-// not one of them: finalization rejects it with E0620/E0621. `#HTML(page)`
+// expanded statements in `items`. A script body is not one of them:
+// finalization rejects it with E0620/E0621. `#HTML(page)`
 // (html_path) is not one either: it names the web output's companion page,
 // which a native build has no use for. Nor is a web ceiling
 // (`#Target(Wasm|JS)`): the web partition (WebPartition.jet)
@@ -7951,9 +7951,9 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
                 }
                 if field_symbol != None {
                     symbol: field_symbol ?? return
-                    // Rust CheckerMarkers evaluates every `field: T{expr}`
-                    // default opportunistically; construction lowers the default
-                    // expression itself, so only a baked default must evaluate.
+                    // T{expr}` default opportunistically; construction lowers
+                    // the default expression itself, so only a baked default
+                    // must evaluate.
                     if field.default != None && field.default_ct == None {
                         expression: field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}
                         destination_key := symbol.id.key
@@ -7962,8 +7962,8 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
                         sema_comptime_add_source(sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
                         if sources.items.len() > added -> sources.items[added].baked_default = sema_comptime_struct_bakes_defaults(definition.derives)
                     }
-                    // A field marker's argument has its rule's own parameter type
-                    // (Rust CheckerMarkers `constant_for_source(0)`), never the field's.
+                    // A field marker's argument has its rule's own parameter
+                    // type, never the field's.
                     loop marker in field.serde_markers -> sema_comptime_add_marker_source(sources, graph, source_module.module_identity, symbol.id.key, marker, None)
                 }
             }
@@ -8024,8 +8024,7 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
     }
 }
 
-// Rust CheckerMarkers `needs_baked_default`: a decode/CLI shape fills a missing
-// field from its compile-time default value.
+// A decode/CLI shape fills a missing field from its compile-time default value.
 sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
     loop marker in derives {
         if owned_trait_codec_marker(marker.name) || marker.name == MARKER_CLI -> return true
@@ -10777,9 +10776,9 @@ sema_finalize_side_claimed: fn(shared_state: Shared<SemaFinalizeSideShared>, que
     claimed
 }
 
-// Rust CheckerCore `Stmt::Live`: a terminal block is impure (IO), so each
-// one in a `-[]>` function is E3401, reported like an impure call. Nested
-// `#Unsafe` gates are skipped as sema_unsafe_nested_bodies does.
+// A terminal block is impure (IO), so each one in a `-[]>` function is E3401,
+// reported like an impure call. Nested `#Unsafe` gates are skipped as
+// sema_unsafe_nested_bodies does.
 sema_check_pure_live_blocks: fn(name: String, body: [Stmt], diagnostics: &[Diagnostic]) Never! {
     loop statement in body {
         if statement == .Live(_, span) -> diagnostics.push(sema_pure_root_diagnostic(name, "#Live {{ … }}", [String]{}, span))

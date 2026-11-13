@@ -1807,9 +1807,7 @@ jet_driver_comptime_flush: fn(
         }
         jet_driver_record_eval_result(trace, eval_result)
         if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {
-            // Rust CheckerMarkers an unevaluable field default lands
-            // no value and construction lowers its expression; only a struct
-            // that bakes its defaults needs the value (E2414).
+            // Only a struct that bakes its defaults needs the value (E2414).
             if source.baked_default {
                 name_parts := source.name.split(".").to_list()
                 field_name: name_parts.pop() ?? source.name

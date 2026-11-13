@@ -1,6 +1,6 @@
-// Registry.rs trust/cache acceptance. Pure naming/wire/identity proof is not
-// the native proof: original refresh, root trust and offline closures stay
-// executable and gated by #3593/#3595/#3597/#4409/#4262 (env mutation #4427).
+// Pure naming/wire/identity proof is not the native proof: original refresh,
+// root trust and offline closures stay executable and gated by
+// #3593/#3595/#3597/#4409/#4262 (env mutation #4427).
 use {
     jet_pkg_model.[PublicationRegistryConfig]
     jetpack_foundation.[foundation_hardened_git_command, foundation_open_directory_authority]
@@ -86,7 +86,7 @@ publication_trust_cache_test_git: fn(args: [String], cwd: String) -[Env, Exec, T
     output: foundation_hardened_git_command().args_extend(args).cwd(cwd).run() ?? panic("real git process")
     assert(output.success)
 }
-// Original tests/pkg.rs:8033-8080; no have_git skip or fake process closure.
+// No have_git skip or fake process closure.
 #Test("registry refresh failure preserves previous cache") {
     root: files.join(sys.temp_dir(), "jet-registry-cache-test-{publication_registry_unique_suffix()}")
     bare: files.join(root, "registry.git")

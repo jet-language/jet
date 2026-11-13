@@ -5,33 +5,33 @@
 //    under Tools/ci/ has a reader: some tracked source file other than the
 //    table itself names it. Docs and Markdown describe tables; they do not
 //    read them.
-// 2. No line of a tracked text file under Compiler/ or Core/ names a `.rs`
-//    file. The Rust sources are gone, so such a name points nowhere. Two
-//    kinds stay: a path into the pinned upstream Rust library (`library/std/`,
-//    `library/core/`, `library/alloc/`), a real external input; and the
-//    foreign-binding code, which writes and reads real Rust crates.
+// 2. No comment in a tracked Jet or C source under Compiler/, Core/ or
+//    Jetpack/ cites deleted Rust code: it names no `.rs` file and says no
+//    "Rust code", "Rust crate", "Rust prelude" or "Rust checker". The Rust
+//    sources are gone, so such a citation points nowhere. A path into the
+//    pinned upstream Rust library (`library/std/`, `library/core/`,
+//    `library/alloc/`) stays: it is a real external input. Code and strings
+//    are not comments: the foreign bindings write and read real Rust files.
 //
 // Usage (from the repository root): jet Tools/agent/RustEraRatchet.jet
 use {
     process: core.process
-    regex: core.regex
     term: core.term
 }
 
 DATA_ROOTS: [String]{"tests", "Tools/ci"}
 DATA_SUFFIXES: [String]{".tsv", ".txt"}
-CITATION_ROOTS: [String]{"Compiler", "Core"}
-// Foreign-binding code: the Rust crates it names are real files it writes,
-// builds or reads.
-FOREIGN_BINDING: [String]{
-    "Compiler/JetCli/Source/Cli/RustForeign.jet",
-}
+CITATION_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
+SOURCE_SUFFIXES: [String]{".jet", ".c", ".h"}
 
-// git grep -E pattern (POSIX ERE): a line naming `<word>.rs`, line numbers
-// glued on (`Layout.rs61-85`) included.
+// git grep -i -E prefilter (POSIX ERE): a line naming `<word>.rs`, line
+// numbers glued on (`Layout.rs61-85`) included, or naming a Rust code body.
 CITATION_GREP: "[A-Za-z0-9_]\\.rs([^A-Za-z_]|$)"
+PHRASE_GREP: "rust (code|crate|prelude|checker)"
 UPSTREAM_LIBRARY: Regex{"library/(?:std|core|alloc)/"}
 CITATION: Regex{"\w\.rs(?:[^A-Za-z_]|$)"}
+// Matched against the lowercased comment.
+PHRASE: Regex{"\brust (?:code\b|crates?\b|prelude|checker)"}
 
 #Error
 RatchetError: struct {
@@ -90,25 +90,61 @@ unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     Ok(unread)
 }
 
-// Whether `path` is foreign-binding code.
-exempt: fn(path: String) -> Bool Never! {
-    FOREIGN_BINDING.contains(path)
+is_source: fn(path: String) -> Bool Never! {
+    loop suffix in SOURCE_SUFFIXES {
+        if path.ends_with(suffix) -> return true
+    }
+    false
 }
 
-// `path:line:text` rows of git grep -n whose text names a deleted Rust source.
+// Whether `prefix`, the code before a `//`, leaves no string literal open.
+closes_strings: fn(prefix: String) -> Bool Never! {
+    plain: prefix.replace("\\\\", "").replace("\\\"", "")
+    (plain.split("\"").len() - 1) % 2 == 0
+}
+
+// The comment of a source line: from the first `//` that starts the line or
+// follows whitespace outside a string literal, else "".
+comment_text: fn(line: String) -> String Never! {
+    prefix := ""
+    comment := ""
+    first := true
+    loop part in line.split("//") {
+        if comment != "" {
+            comment = "{comment}//{part}"
+            next
+        }
+        starts: prefix.trim() == "" || prefix.ends_with(" ") || prefix.ends_with("\t")
+        if !first && starts && closes_strings(prefix) {
+            comment = "//{part}"
+            next
+        }
+        prefix = if first -> part.copy() else -> "{prefix}//{part}"
+        first = false
+    }
+    comment
+}
+
+// Whether a comment cites deleted Rust code.
+cites_rust: fn(comment: String) -> Bool Never! {
+    if CITATION.is_match(comment) && !UPSTREAM_LIBRARY.is_match(comment) -> return true
+    PHRASE.is_match(comment.lower())
+}
+
+// `path:line:text` rows of git grep -n whose comment cites deleted Rust code.
 stale_citations: fn(rows: [String]) -> [String] Never! {
     stale := [String]{}
     loop row in rows {
         location: row.partition(":")
         rest: location.tail.partition(":")
-        if exempt(location.head) || !CITATION.is_match(rest.tail) || UPSTREAM_LIBRARY.is_match(rest.tail) -> next
+        if !is_source(location.head) || !cites_rust(comment_text(rest.tail)) -> next
         stale.push(row.copy())
     }
     stale
 }
 
 citation_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
-    argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", CITATION_GREP, "--"}
+    argv := [String]{"git", "grep", "-n", "-I", "-i", "-E", "-e", CITATION_GREP, "-e", PHRASE_GREP, "--"}
     loop root in CITATION_ROOTS -> argv.push(root)
     git_lines(argv, true)
 }
@@ -117,11 +153,11 @@ rust_era_main: fn() -[Exec, IO, Time.Wait]> Int RatchetError! {
     unread: unread_tables() ?? return Err(err)
     stale: stale_citations(citation_rows() ?? return Err(err))
     if unread.len() == 0 && stale.len() == 0 {
-        print("rust-era-ratchet: ok (every harness table has a reader; Compiler and Core name no deleted .rs source)")
+        print("rust-era-ratchet: ok (every harness table has a reader; no comment in Compiler, Core or Jetpack cites deleted Rust code)")
         return Ok(0)
     }
     loop table in unread -> term.eprint("{table}: no tracked source reads this table; delete it or add its reader")
-    loop row in stale -> term.eprint("{row}: names a deleted Rust source; name the live Jet owner or drop it")
+    loop row in stale -> term.eprint("{row}: cites deleted Rust code; name the live Jet owner or drop it")
     term.eprint("rust-era-ratchet: {unread.len()} unread table(s), {stale.len()} stale citation(s)")
     Ok(1)
 }
@@ -146,7 +182,16 @@ run: fn() {
     assert(!is_reader("tests/a.tsv", "README.md"))
 }
 
-#Test("names of deleted Rust sources are stale; upstream library and foreign binding are not") {
+#Test("a comment starts at a // outside string literals") {
+    assert_eq(comment_text("// whole line"), "// whole line")
+    assert_eq(comment_text("    x: 1 // trailing // twice"), "// trailing // twice")
+    assert_eq(comment_text("    url: \"https://a.rs/x\""), "")
+    assert_eq(comment_text("    url: \"https://a\" // note"), "// note")
+    assert_eq(comment_text("    q: \"say \\\"// no\\\"\" // yes"), "// yes")
+    assert_eq(comment_text("    path: a//b"), "")
+}
+
+#Test("comments citing deleted Rust code are stale; code, strings and the upstream library are not") {
     rows: [String]{
         "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12",
         "Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.",
@@ -154,9 +199,14 @@ run: fn() {
         "Compiler/D.jet:7:    seed: \"crates/x/src/Layout.rs\"",
         "Compiler/E.jet:2:// The term rs.trust is unrelated.",
         "Compiler/F.jet:1:// Layout.rs61-85: native fields.",
-        "Compiler/JetCli/Source/Cli/RustForeign.jet:5:    write(src, \"lib.rs\")",
-        "Compiler/JetDebug/Source/A.jet:2:    rust_file: dir.join(\"prog.rs\")",
-        "Compiler/JetDebugger/B.jet:2:// Engine.rs:4",
+        "Jetpack/G.jet:5:    write(src, \"lib.rs\") // the generated crate root",
+        "Jetpack/H.jet:2:// Ported from the Rust code of the old store.",
+        "Jetpack/I.jet:8:    x: 1 // as the rust crate did",
+        "Core/J.c:3:// Matches the Rust prelude's rounding.",
+        "Compiler/K.jet:4:// Rust CheckerMarkers order.",
+        "Compiler/L.jet:6:// An `extern rust` crate builds with cargo.",
+        "Jetpack/M.jet:3:// Rust codegen is a foreign binding.",
+        "Jetpack/N.md:1:// Layout.rs",
     }
-    assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/D.jet:7:    seed: \"crates/x/src/Layout.rs\"|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Compiler/JetDebug/Source/A.jet:2:    rust_file: dir.join(\"prog.rs\")|Compiler/JetDebugger/B.jet:2:// Engine.rs:4")
+    assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Jetpack/H.jet:2:// Ported from the Rust code of the old store.|Jetpack/I.jet:8:    x: 1 // as the rust crate did|Core/J.c:3:// Matches the Rust prelude's rounding.|Compiler/K.jet:4:// Rust CheckerMarkers order.")
 }

@@ -1,9 +1,7 @@
-// Workspace entries inside the unified `.jet/lock` the
-// write path, ported from jetpack WorkspaceLock.rs. The read path is
-// PackageModel's `pkg_workspace_lock_load`. Writing holds the project's
-// `workspace-lock` process lock and revalidates every authority input it
-// read, so a stale or partial workspace lock never masquerades as a valid
-// index.
+// Workspace entries inside the unified `.jet/lock` the write path. The read
+// path is PackageModel's `pkg_workspace_lock_load`. Writing holds the project's
+// `workspace-lock` process lock and revalidates every authority input it read,
+// so a stale or partial workspace lock never masquerades as a valid index.
 
 use {
     jetpack_foundation.[env_runtime_project_lock]
@@ -21,8 +19,8 @@ use {
 // is returned to the caller.
 // Reuse the command's declaration cache when checking the plan's authority.
 env_workspace_lock_write: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
-    // crates/jetpack/src/WorkspaceLock.rs:25-49: refusal precedes the
-    // process lock too, whose acquisition can create filesystem state.
+    // Refusal precedes the process lock too, whose acquisition can create
+    // filesystem state.
     pkg_check_workspace_overlay_gates(cache, workspace_root, plan.overlay_policy) ?? return Err(EnvironmentError.Gate(err))
     if env_workspace_lock_write_locked(cache, workspace_root, plan) == .Err(error) {
         return Err(EnvironmentError.Other("could not write workspace lock: {error.message()}"))

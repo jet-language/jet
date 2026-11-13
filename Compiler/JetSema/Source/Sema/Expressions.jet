@@ -4495,8 +4495,8 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                     index += 1
                     next
                 }
-                // Rust expr.rs: formatting a value that holds an observable
-                // Clock reads ambient time (E3403 `Clock formatting` in a pure body).
+                // Formatting a value that holds an observable Clock reads ambient
+                // time (E3403 `Clock formatting` in a pure body).
                 if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
                     _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock formatting", checked.span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: checked.span}}, diagnostics)
                 }
@@ -5731,10 +5731,10 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
     sema_expr_check_copy_typed(checked, span, expected, environment, program, context, diagnostics, sema_expr_copy_string_view(value, scopes), false)
 }
 
-// Copying a value that holds an observable Clock (Rust expr.rs, the Copy arm)
-// reads ambient time (E3403 `Clock copy` in a pure body). A part's copy
-// inside a rebuild, or inside a type's generated fork function, is the same
-// copy as the one that called it, already recorded there.
+// Copying a value that holds an observable Clock reads ambient time (E3403
+// `Clock copy` in a pure body). A part's copy inside a rebuild, or inside a
+// type's generated fork function, is the same copy as the one that called it,
+// already recorded there.
 sema_expr_copy_record_clock: fn(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if context.fork_copy_rebuilding.len() > 0 || sema_expr_in_fork_function(context) || !sema_copy_observable_clock(ty, environment, program, context.generic_params) -> return
     _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)

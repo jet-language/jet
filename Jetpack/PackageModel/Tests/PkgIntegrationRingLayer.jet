@@ -1,4 +1,4 @@
-// Original tests/ring_layer.rs:15-46,241-290; exact package/lock layer predicates.
+// Exact package/lock layer predicates.
 use {
     jet_pkg_model.[
         LockFile, LockSource, LockedPackage, PackageFacts, pkg_lock_parse, pkg_lock_write,
@@ -22,7 +22,6 @@ use {
     }
     assert(manifest_matches)
 }
-// Rust: tests/ring_layer.rs:28
 #Test("manifest refuses an unknown runtime ceiling") {
     raw: "name: \"x\"\nversion: \"1\"\nruntime: heap\n"
     invalid: if PackageFacts.parse(raw, "test") == {
@@ -34,7 +33,6 @@ use {
     }
     assert(invalid)
 }
-// Rust: tests/ring_layer.rs:38
 #Test("manifest refuses the retired std runtime spelling") {
     raw: "name: \"x\"\nversion: \"1\"\nruntime: std\n"
     invalid: if PackageFacts.parse(raw, "test") == {
@@ -46,7 +44,6 @@ use {
     }
     assert(invalid)
 }
-// Rust: tests/ring_layer.rs:240
 #Test("lock roundtrip retains explicit and inferred runtime layers") {
     package: LockedPackage{name: "embed", version: "0.1.0", source: LockSource.Root, layer: Val(RuntimeLayer.Alloc), inferred_layer: Val(RuntimeLayer.Std)}
     lock := LockFile.empty()

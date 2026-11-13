@@ -1,4 +1,4 @@
-// Persisted Receipt records (Rust crates/jet-store/src/receipt.rs).
+// Persisted Receipt records.
 //
 // A Receipt is keyed on the invocation closure digest: the verb, the options
 // that change what the verb checks, the compiler identity, and the digest of
@@ -28,9 +28,8 @@ STORE_RECEIPT_SECTION_ORIGINS: 4
 STORE_RECEIPT_SECTION_DIAGNOSTICS: 5
 STORE_RECEIPT_SECTION_FACTS: 6
 
-// One leaf read by a recorded check: a project-relative path (or a stable
-// label such as `<corelib>/…`) and the SHA-256 of its exact bytes
-// (Rust receipt.rs:35).
+// One leaf read by a recorded check: a project-relative path (or a stable label
+// such as `<corelib>/…`) and the SHA-256 of its exact bytes.
 ReceiptInput: struct {
     path: String
     digest: String
@@ -42,7 +41,7 @@ ReceiptFact: struct {
     value: String
 }
 
-// The typed result of one recorded invocation (Rust receipt.rs:42).
+// The typed result of one recorded invocation.
 ReceiptRecord: struct {
     schema: String
     verb: String
@@ -58,18 +57,17 @@ ReceiptRecord: struct {
     // (Rust `BTreeMap<String, String>`).
     facts: [ReceiptFact]
 
-    // Rust receipt.rs:60 `ReceiptRecord::new`: inputs sorted and deduplicated,
-    // facts keyed by name in name order (a later fact replaces an earlier one).
+    // Inputs sorted and deduplicated, facts keyed by name in name order (a
+    // later fact replaces an earlier one).
     new: fn(verb: String, closure: String, modules: [ReceiptInput], inputs: [ReceiptInput], diagnostics: [Diagnostic], facts: [ReceiptFact]) -> ReceiptRecord Never! {
         ReceiptRecord{schema: STORE_RECEIPT_SCHEMA, verb: verb, closure: closure, modules: store_receipt_sorted_inputs(modules), inputs: store_receipt_sorted_inputs(inputs), diagnostics: diagnostics, facts: store_receipt_sorted_facts(facts)}
     }
 
-    // Encode the record. Diagnostic origins whose source is one of the
-    // recorded modules are stored by revision only; the reader supplies the
-    // bytes from the same closure. Any other origin source is embedded. A
-    // diagnostic payload the codec does not carry is an error; the caller then
-    // leaves the invocation unrecorded so the next one checks fresh
-    // (Rust receipt.rs:90 `to_bytes`).
+    // Encode the record. Diagnostic origins whose source is one of the recorded
+    // modules are stored by revision only; the reader supplies the bytes from
+    // the same closure. Any other origin source is embedded. A diagnostic
+    // payload the codec does not carry is an error; the caller then leaves the
+    // invocation unrecorded so the next one checks fresh.
     to_bytes: fn(self) -> [U8] StoreDiagnosticRecordError! {
         revisions := [String]{}
         loop recorded in self.modules {
@@ -99,8 +97,7 @@ ReceiptRecord: struct {
     }
 
     // Decode a record. `source_for_revision` returns the exact source text for
-    // a module revision in the caller's current closure
-    // (Rust receipt.rs:127 `from_bytes`).
+    // a module revision in the caller's current closure.
     from_bytes: fn(bytes: [U8], source_for_revision: fn(String) -> String?) -> ReceiptRecord StoreDiagnosticRecordError! {
         opened: record_open_schema(bytes, STORE_RECEIPT_SCHEMA)
         reader: opened.reader ?? return Err(store_diagnostic_error(opened.problem ?? "receipt is not a record"))
@@ -141,7 +138,6 @@ store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
     sorted
 }
 
-// Rust receipt.rs:164 `encode_inputs`.
 store_receipt_encode_inputs: fn(inputs: [ReceiptInput]) -> [RecordValue] Never! {
     values := [RecordValue]{}
     loop input in inputs {
@@ -160,7 +156,6 @@ store_receipt_text: fn(value: RecordValue, name: String) -> String StoreDiagnost
     Ok(text.value ?? return Err(store_diagnostic_error(text.problem ?? "record field `{name}` is not a string")))
 }
 
-// Rust receipt.rs:176 `decode_inputs`.
 store_receipt_decode_inputs: fn(values: [RecordValue]) -> [ReceiptInput] StoreDiagnosticRecordError! {
     inputs := [ReceiptInput]{}
     loop value in values -> inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
@@ -172,15 +167,14 @@ store_receipt_elements: fn(reader: RecordReader, id: Int) -> [RecordValue] Store
     Ok(decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "record section {id} is missing")))
 }
 
-// `.jet/receipts/<sha256 of the closure>` (Rust receipt.rs:243).
+// `.jet/receipts/<sha256 of the closure>`.
 store_receipt_pointer_path: fn(workspace_root: String, closure: String) -> String Never! {
     files.join(files.join(store_project_state_dir(workspace_root), "receipts"), ArtifactDigest.hash(closure.bytes()).to_hex())
 }
 
 impl ArtifactStore {
     // Publish the typed record for `closure` and point the closure at it. The
-    // record blob is immutable; only the per-closure pointer moves
-    // (Rust receipt.rs:197 `publish_receipt`).
+    // record blob is immutable; only the per-closure pointer moves.
     publish_receipt: fn(self, workspace_root: String, record: ReceiptRecord) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         payload: record.to_bytes() ?? return Err(ArtifactStoreError.Config("receipt is not recordable: {err.message}"))
         object: self.publish_blob(payload)
@@ -189,7 +183,7 @@ impl ArtifactStore {
 
     // Load the newest record for `closure`. A missing pointer or blob is a
     // miss; a record that fails to decode is removed from the pointer so the
-    // next invocation checks fresh and republishes (Rust receipt.rs:214).
+    // next invocation checks fresh and republishes.
     receipt: fn(self, workspace_root: String, closure: String, source_for_revision: fn(String) -> String?) -[FS, Env, Exec, Time, Rand]> ReceiptRecord? ArtifactStoreError! {
         pointer: store_receipt_pointer_path(workspace_root, closure)
         object: if self.read_build_pointer(pointer) == {

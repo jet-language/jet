@@ -1,15 +1,14 @@
-// Original Publish/mod.rs:357-374,561-641 and tests/pkg.rs:6518-6568,
-// 7666-7867,8481-8730. Advisory.rs has no embedded tests.
-// #4262 composed registry_fetch_applies_verified_advisory_freshness_before_hangar_ingest:
-// canonical JP-FETCH/CLI-45 must return (LockFile, dep_dirs); reject E2609 before
-// .jet/build/deps/freshlib exists; exact source exception returns freshlib in
-// dep_dirs AND real Hangar provenance source-policy-exception=id=JSA-2026-0001;
-// mature resolution returns freshlib in lock+dep_dirs AND Hangar provenance
-// advisory-feed=sequence=1,maturity=86400s; expired feed exact-lock reuse returns
-// SAME dep_dirs object and retains SAME Hangar receipt. No guessed Fetch API.
-// #4262 composed cli_signed_advisory_feed_receipt_and_tamper_fail_closed:
-// inspect audit exits 0 + "feed sequence 1 verified" + "no advisories found";
-// key-only env cannot replace missing local trust; weakened/rollback/revoked/
+// Canonical JP-FETCH/CLI-45 must return (LockFile, dep_dirs); reject E2609
+// before .jet/build/deps/freshlib exists; exact source exception returns
+// freshlib in dep_dirs AND real Hangar provenance
+// source-policy-exception=id=JSA-2026-0001; mature resolution returns freshlib
+// in lock+dep_dirs AND Hangar provenance
+// advisory-feed=sequence=1,maturity=86400s; expired feed exact-lock reuse
+// returns SAME dep_dirs object and retains SAME Hangar receipt. No guessed
+// Fetch API. #4262 composed
+// cli_signed_advisory_feed_receipt_and_tamper_fail_closed: inspect audit exits
+// 0 + "feed sequence 1 verified" + "no advisories found"; key-only env cannot
+// replace missing local trust; weakened/rollback/revoked/
 // fork/stale/immature/tampered feeds exit 1 with original CLI goldens; active
 // source and feed exact exceptions exit 0 and source summary is printed.
 // Canonical inspect-advisory command is a CLI-lane prerequisite, NOT the
@@ -135,8 +134,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     assert(diagnostic.fix.contains("mylib#1.0.3"))
 }
 // Main ruling: canonical registry + shared renderer owns sentence casing.
-// Original Publish/mod.rs:629-639 lowercase what/why/fix fixture remains in
-// read-only Rust: rebless after tandem. No local casing override in Advisory.
+// Rebless after tandem. No local casing override in Advisory.
 #Test("publication malformed_supply_metadata_diagnostic_is_pinned") {
     diagnostic: publication_e2607("advisory feed", "line 2 has an invalid fixed version")
     assert_eq(diagnostic.code, "E2607")
@@ -353,8 +351,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Original Publish/mod.rs:416-436,460-558: foreign bridges are dependencies,
-// never root/path maturity exemptions.
+// Foreign bridges are dependencies, never root/path maturity exemptions.
 #Test("publication audit_lockfile_includes_foreign_rust_bridge_packages") {
     lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: .Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
     feed: publication_advisory_test_feed("advisory|RUSTSEC-TEST|base64|^0.22||bridge advisory|high\n")

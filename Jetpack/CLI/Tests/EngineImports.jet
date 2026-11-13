@@ -18,7 +18,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     false
 }
 
-// ported from jetpack_engine.rs:1908-2010
 #Test("real_cargo_project_import_preserves_lock_facts_and_migration_findings") {
     project: files.tmpdir("jet-engine-real-cargo-") ?? panic("project fixture")
     files.write(files.join(project, "Cargo.toml"), "[package]\nname = \"real-app\"\nversion = \"0.4.0\"\nlicense = \"MIT\"\nbuild = \"build.rs\"\n\n[dependencies]\nserde = \"1\"\n\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n\n[dev-dependencies]\ninsta = \"1\"\n") ?? panic("manifest fixture")
@@ -53,7 +52,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     files.remove_all(project).drop("fixture cleanup")
 }
 
-// ported from jetpack_engine.rs:2012-2033
 #Test("cargo_import_keeps_unlocked_target_identity_without_duplicate_selector_facts") {
     plan: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[target.'cfg(unix)'.dependencies]\ncc = \"1\"\n", "")
     assert_eq(plan.deps[0].provider_ref, "cc@cargo#platform=cfg(unix)")
@@ -63,7 +61,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert(!plan.emit_pkg_jet().contains("cc:"))
 }
 
-// ported from jetpack_engine.rs:2272-2351
 #Test("real_project_import_reports_lossy_npm_requests_without_generated_refs") {
     project: files.tmpdir("jet-engine-real-npm-") ?? panic("project fixture")
     files.write(files.join(project, "package.json"), "{{\n  \"name\": \"web-app\",\n  \"version\": \"1.2.3\",\n  \"dependencies\": {{\"vite\": \"^5.4.0\"}},\n  \"devDependencies\": {{\"typescript\": \"~5.5.0\"}},\n  \"optionalDependencies\": {{\"fsevents\": \"2.3.3\"}},\n  \"peerDependencies\": {{\"react\": \"^18.0.0\"}},\n  \"bundledDependencies\": [\"local-tool\"],\n  \"scripts\": {{\"build\": \"vite build\"}}\n}}\n") ?? panic("native fixture")
@@ -98,7 +95,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     files.remove_all(project).drop("fixture cleanup")
 }
 
-// ported from jetpack_engine.rs:2353-2371
 #Test("cargo_import_reports_ambiguous_lock_identity_without_generation") {
     plan: cli_import_cargo("[package]\nname = \"app\"\nversion = \"0.1.0\"\n[dependencies]\nserde = \"1\"\n", "[[package]]\nname = \"serde\"\nversion = \"1.0.200\"\nsource = \"registry+one\"\n[[package]]\nname = \"serde\"\nversion = \"1.0.201\"\nsource = \"registry+two\"\n")
     assert(!plan.emit_pkg_jet().contains("serde:"))
@@ -111,7 +107,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert(engine_import_todo(plan, "Cargo.lock", "conflicts"))
 }
 
-// ported from jetpack_engine.rs:10059-10125
 #Test("provider_conformance_real_path_preserves_registry_npm_and_cargo_facts") {
     npm_document: "{{\"name\":\"web\",\"version\":\"1.0.0\",\"license\":\"MIT\",\"dependencies\":{{\"vite\":\"5.4.0\"}},\"scripts\":{{\"build\":\"vite build\"}},\"repository\":{{\"type\":\"git\",\"url\":\"https://example.invalid/web.git\"}}}}"
     npm: cli_import_npm(npm_document)
@@ -148,7 +143,6 @@ engine_import_report_conflict: fn(report: ProviderFactReport, word: String) -> B
     assert_eq(locked, shared)
 }
 
-// ported from jetpack_engine.rs:10127-10180
 #Test("provider_conformance_real_path_refuses_mutable_missing_and_conflicting_facts") {
     npm: cli_import_npm("{{\"name\":\"web\",\"version\":\"1.0.0\",\"dependencies\":{{\"vite\":\"^5\"}}}}")
     npm_facts: npm.provider_facts.get("vite@npm") ?? panic("mutable npm facts")

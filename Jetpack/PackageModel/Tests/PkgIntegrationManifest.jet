@@ -1,9 +1,9 @@
-// Assertion-for-assertion ports of tests/pkg.rs. The input strings retain
-// the originals' bytes, including intentionally historical manifest forms.
+// The input strings retain the originals' bytes, including intentionally
+// historical manifest forms.
 // PENDING-SEAM(package-tests): these tests require the PackageModel test package.
 use jet_pkg_model.[pkg_add_dep, pkg_check_toolchain, pkg_effect_enforce, pkg_new_template, pkg_remove_dep]
 
-// Ported from pkg.rs:279-293; braces escape Jet interpolation only.
+// Braces escape Jet interpolation only.
 pkg_integration_min_manifest: fn(name: String, version: String) -> String Never! {
     "name: \"{name}\"\nversion: \"{version}\"\njet: \">=a0.0.43\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
 }
@@ -26,7 +26,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     }
 }
 
-// Ported from pkg.rs:1570-1590.
 #Test("pkg integration manifest_parse_valid_fields") {
     raw: "name:    \"myapp\"\nversion: \"1.2.3\"\njet:     \">=a0.0.43\"\ndescription: \"A test package\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"https://example.com\"\ndeps: {{\n}}\n"
     mf: Manifest.parse("package.jet", raw) ?? panic("valid manifest should parse")
@@ -39,7 +38,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(mf.boundaries.len(), 0)
 }
 
-// Ported from pkg.rs:1593-1610.
 #Test("pkg integration manifest_parse_import_boundaries") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nboundaries: {{\n    deny: [\n        {{ from: \"app.ui\", to: \"app.db\" }},\n        {{ from: \"app.api.*\", to: \"app.db.*\" }},\n    ],\n}}\n"
     mf: Manifest.parse("package.jet", raw) ?? panic("boundary policy should parse")
@@ -50,7 +48,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(!mf.boundaries[1].matches("app.web", "app.db.users"))
 }
 
-// Ported from pkg.rs:1613-1648; all seven invalid inputs are retained.
+// All seven invalid inputs are retained.
 #Test("pkg integration manifest_parse_import_boundaries_rejects_malformed_patterns") {
     patterns: [String]{"app.ui", "app.*.ui", "app.**"}
     loop pattern in patterns {
@@ -71,20 +69,17 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     }
 }
 
-// Ported from pkg.rs:1848-1854.
 #Test("pkg integration manifest_parse_dep_path") {
     mf: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,")) ?? panic("path dep should parse")
     dep: mf.dependencies.get("helpers") ?? panic("missing helpers dep")
     assert(dep == DepSpec.Path{path: "../helpers"})
 }
 
-// Ported from pkg.rs:1857-1862.
 #Test("pkg integration manifest_rejects_traversal_dependency_name") {
     error: pkg_integration_manifest_error(pkg_integration_manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\","))
     assert_eq(error.diagnostic.code, "E1215")
 }
 
-// Ported from pkg.rs:1865-1881.
 #Test("pkg integration manifest_parse_dep_git_tag") {
     mf: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},")) ?? panic("git tag dep should parse")
     dep: mf.dependencies.get("parsekit") ?? panic("missing parsekit")
@@ -95,18 +90,16 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(valid)
 }
 
-// Ported from pkg.rs:1884-1899.
 #Test("pkg integration manifest_parse_foreign_package_dep") {
     mf: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    plotly: js@\"plotly@npm#version=2.35.0\",")) ?? panic("foreign package dep should parse")
     assert_eq(mf.dependencies.get("plotly"), Val(DepSpec.Foreign{language: ForeignLanguage.JS, reference: "plotly@npm#version=2.35.0"}))
 }
 
-// Ported from pkg.rs:2058-2065.
 #Test("pkg integration manifest_parse_e1215_missing_required_field") {
     assert_eq(pkg_integration_manifest_error("version: \"0.1.0\"\n").diagnostic.code, "E1215")
 }
 
-// Ported from pkg.rs:2068-2076; the bytes of tests/ui/manifest_unknown_field/package.jet are inlined.
+// The bytes of tests/ui/manifest_unknown_field/package.jet are inlined.
 #Test("pkg integration manifest_parse_e1215_unknown_field") {
     raw: "// The retired `payload:` wrapper is a normal\n// unknown-field error now — there is no second parser that still accepts it.\npayload: {{\n    name: \"myapp\",\n    version: \"0.1.0\",\n}}\n"
     error: pkg_integration_manifest_error(raw)
@@ -114,13 +107,11 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(error.diagnostic.what.contains("payload"))
 }
 
-// Ported from pkg.rs:2079-2084.
 #Test("pkg integration manifest_parse_e1209_reserved_nonempty") {
     error: pkg_integration_manifest_error("{pkg_integration_min_manifest("myapp", "0.1.0")}\ndev_deps: {{\n    testlib: ../testlib,\n}}\n")
     assert_eq(error.diagnostic.code, "E1209")
 }
 
-// Ported from pkg.rs:2091-2105.
 #Test("pkg integration manifest_parse_effects_block") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{\n    allow: [FS, Time], deny: [Net, Panic],\n}}\n"
     pm: PackageFacts.parse(raw, "test") ?? panic("authority holds should parse")
@@ -129,7 +120,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(pm.effects_deny, Val([String]{"Net", "Panic"}))
 }
 
-// Ported from pkg.rs:2108-2130; no weaker reuse of the existing budget test.
+// No weaker reuse of the existing budget test.
 #Test("pkg integration manifest_panic_budget_names_the_dependency_stop_site") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ deny: [Panic] }}\n"
     manifest: PackageFacts.parse(raw, "test") ?? panic("Panic should be a manifest effect root")
@@ -144,14 +135,12 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(diagnostics[0].span, Val(Span{start: 4, end: 12}))
 }
 
-// Ported from pkg.rs:2133-2141.
 #Test("pkg integration manifest_parse_grants_block") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ grants: {{ \"pdf-lib\": [Net] }} }}\n"
     pm: PackageFacts.parse(raw, "test") ?? panic("grants block should parse")
     assert_eq(pm.grants, [PackageGrant]{PackageGrant{package: "pdf-lib", rights: [String]{"Net"}}})
 }
 
-// Ported from pkg.rs:2144-2179.
 #Test("pkg integration manifest_parse_authority_block_holds_grants_trust_and_providers") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{\n    allow: [Net, DB.Read], deny: [Exec],\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }} }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n"
     pm: PackageFacts.parse(raw, "test") ?? panic("one authority block should parse")
@@ -181,7 +170,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(trust.require, Val(ProvenanceRequirement.Attested))
 }
 
-// Ported from pkg.rs:2182-2210.
 #Test("pkg integration manifest_parse_authority_trust_block") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ postgres: prompt }}, require: attested }} }}\n"
     pm: PackageFacts.parse(raw, "test") ?? panic("authority.trust block should parse")
@@ -192,7 +180,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(policy.require, Val(ProvenanceRequirement.Attested))
 }
 
-// Ported from pkg.rs:2213-2221.
 #Test("pkg integration manifest_authority_trust_rejects_unknown_decision") {
     error: pkg_integration_package_error("{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ trust: {{ default: maybe }} }}\n")
     bad: if error == {
@@ -202,14 +189,12 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(bad)
 }
 
-// Ported from pkg.rs:2224-2230.
 #Test("pkg integration manifest_no_effects_block_disables_enforcement") {
     pm: PackageFacts.parse(pkg_integration_min_manifest("app", "0.1.0"), "test") ?? panic("valid manifest should parse")
     assert(!pm.effects_enabled)
     assert_eq(pm.effects_allow, None)
 }
 
-// Ported from pkg.rs:2233-2244.
 #Test("pkg integration manifest_parse_effects_e1221_unknown_effect") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ allow: [NotAnEffect] }}\n"
     error: pkg_integration_package_error(raw)
@@ -221,13 +206,11 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(bad)
 }
 
-// Ported from pkg.rs:2247-2252.
 #Test("pkg integration manifest_parse_effects_e1221_unknown_field") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ nope: [FS] }}\n"
     assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
 }
 
-// Ported from pkg.rs:2590-2594.
 #Test("pkg integration manifest_toolchain_ok") {
     mf: Manifest.parse("package.jet", pkg_integration_min_manifest("myapp", "0.1.0")) ?? panic("parse manifest")
     if pkg_check_toolchain(mf, "package.jet") == {
@@ -236,7 +219,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     }
 }
 
-// Ported from pkg.rs:2597-2602.
 #Test("pkg integration manifest_toolchain_e1208_future_version") {
     mf: Manifest.parse("package.jet", "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n") ?? panic("parse manifest")
     if pkg_check_toolchain(mf, "package.jet") == {
@@ -245,7 +227,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     }
 }
 
-// Ported from pkg.rs:2609-2619.
 #Test("pkg integration manifest_template_plain_parses") {
     mf: Manifest.parse("package.jet", pkg_new_template("myapp", false)) ?? panic("plain template should parse")
     assert_eq(mf.package.name, "myapp")
@@ -253,14 +234,12 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(mf.package.jet_constraint != None)
 }
 
-// Ported from pkg.rs:2622-2632.
 #Test("pkg integration manifest_template_annotated_has_dep_comments") {
     raw: pkg_new_template("myapp", true)
     assert(raw.contains("// Jet package dependencies:"))
     _: Manifest.parse("package.jet", raw) ?? panic("annotated template should parse")
 }
 
-// Ported from pkg.rs:2639-2653.
 #Test("pkg integration manifest_add_dep_inserts_in_existing_table") {
     raw: "{pkg_integration_min_manifest("root", "0.1.0")}\ndeps: {{\n}}\n"
     updated: pkg_add_dep(raw, "helpers", DepSpec.Path{path: "../helpers"})
@@ -268,7 +247,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(mf.dependencies.get("helpers"), Val(DepSpec.Path{path: "../helpers"}))
 }
 
-// Ported from pkg.rs:2656-2671.
 #Test("pkg integration manifest_add_dep_creates_table_when_absent") {
     updated: pkg_add_dep(pkg_integration_min_manifest("root", "0.1.0"), "helpers", DepSpec.Path{path: "../helpers"})
     assert(updated.contains("deps:"))
@@ -276,7 +254,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(mf.dependencies.get("helpers"), Val(DepSpec.Path{path: "../helpers"}))
 }
 
-// Ported from pkg.rs:2674-2690.
 #Test("pkg integration manifest_add_dep_expands_inline_empty_table") {
     raw: "{pkg_integration_min_manifest("root", "0.1.0")}\ndeps: {{}}\n"
     updated: pkg_add_dep(raw, "helpers", DepSpec.Path{path: "../helpers"})
@@ -285,7 +262,6 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert(updated.contains("deps: {{\n    helpers: ../helpers,\n}}\n"))
 }
 
-// Ported from pkg.rs:2693-2706.
 #Test("pkg integration manifest_remove_dep_removes_correct_entry") {
     raw: "{pkg_integration_min_manifest("root", "0.1.0")}\ndeps: {{\n    helpers: ../helpers,\n    other: ../other,\n}}\n"
     updated: pkg_remove_dep(raw, "helpers")

@@ -1,5 +1,5 @@
-// jetpack WorkspaceLock.rs unit tests: the write path and its round trip
-// through PackageModel's `pkg_workspace_lock_load`.
+// Workspace lock claims: the write path and its round trip through
+// PackageModel's `pkg_workspace_lock_load`.
 
 use {
     jetpack_foundation.[CONFIG_DEFAULT_DIR, PACKAGE_FILE, SOURCE_ROOT_DIR, UNIFIED_LOCK_FILE, WORKSPACE_FILE]
@@ -204,8 +204,8 @@ env_wlock_test_lock_text: fn(root: String) -[FS]> String {
     files.remove_all(root).drop("test cleanup")
 }
 
-// tests/gate_law.rs:88-101: Force and dependency grant checks precede
-// process locking as well as publication; no managed directory is created.
+// Force and dependency grant checks precede process locking as well as
+// publication; no managed directory is created.
 #Test("workspace policy refuses force pins and build grants before any lock write") {
     loop key in ([PolicyKey]{PolicyKey.ForcePin, PolicyKey.DependencyGrant}) {
         root: env_wlock_test_dir("gate-forbidden")

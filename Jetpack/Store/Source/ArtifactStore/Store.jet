@@ -453,9 +453,9 @@ ArtifactStore: struct {
         Ok(record)
     }
 
-    // Read one action record without recording the use in the journal. A
-    // caller that reads many records in one run records the uses together
-    // with `touch_actions` (Rust lib.rs:876).
+    // Read one action record without recording the use in the journal. A caller
+    // that reads many records in one run records the uses together with
+    // `touch_actions`.
     get_action_untouched: fn(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         key: ArtifactEntryKey.Action(action.key())
         path: self.action_path(action)
@@ -479,7 +479,7 @@ ArtifactStore: struct {
     }
 
     // Record one use of each stored action record under one lock and one
-    // journal write. A failure only costs eviction order (Rust lib.rs:898).
+    // journal write. A failure only costs eviction order.
     touch_actions: fn(self, actions: [ActionHandle]) Never! -[FS, Env, Time, Rand]> {
         if actions.len() == 0 -> return
         lock: self.acquire_lock() ?? return
@@ -499,15 +499,14 @@ ArtifactStore: struct {
         self.publish_action_batch(records, true)
     }
 
-    // `publish_actions` for records that only cache recomputable results:
-    // each record is written without its own disk syncs. A read verifies
-    // every record against its digest, so a record a crash lost or tore reads
-    // as missing and its result is recomputed (Rust lib.rs:931).
+    // `publish_actions` for records that only cache recomputable results: each
+    // record is written without its own disk syncs. A read verifies every
+    // record against its digest, so a record a crash lost or tore reads as
+    // missing and its result is recomputed.
     publish_cache_actions: fn(self, records: [ArtifactActionPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.publish_action_batch(records, false)
     }
 
-    // Rust lib.rs:935 `publish_action_batch`.
     publish_action_batch: fn(self, records: [ArtifactActionPublication], durable: Bool) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         if records.len() == 0 -> return
         self.ensure_layout()
@@ -1019,10 +1018,10 @@ ArtifactStore: struct {
         self.append_journal_entries_locked([ArtifactJournalAppend]{ArtifactJournalAppend{operation: operation, key: key, length: length}}, durable)
     }
 
-    // One journal line per entry after one read of the journal's final line
-    // and one write, synced when `durable` (Rust lib.rs:1464): touches and
-    // cache entries are not. Only a torn or corrupt tail compacts; full
-    // readers (status, prune, compaction) verify every line.
+    // One journal line per entry after one read of the journal's final line and
+    // one write, synced when `durable`: touches and cache entries are not. Only
+    // a torn or corrupt tail compacts; full readers (status, prune, compaction)
+    // verify every line.
     append_journal_entries_locked: fn(self, entries: [ArtifactJournalAppend], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
         if entries.len() == 0 -> return
         journal_path: files.join(self.root(), "journal")

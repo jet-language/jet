@@ -1,6 +1,6 @@
-// JP-PUB-TUF composed CLI claims (tests/pkg.rs:6781-6872,6874-6979,6981-7272):
-// publish through the real rebuilt engine, then fetch into Hangar. They read
-// the Store, so they prove in the Engine unit, not the Publication package.
+// JP-PUB-TUF composed CLI claims: publish through the real rebuilt engine, then
+// fetch into Hangar. They read the Store, so they prove in the Engine unit, not
+// the Publication package.
 use publication_tuf_test_process: core.process
 
 registry_cli_test_root: fn(label: String) -[FS, Env]> String Never! {
@@ -131,8 +131,8 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/pkg.rs:6981-7272. Compose through the real CLI, and inspect the SAME
-// canonical lock/Hangar models as Rust rather than accept a second cache path.
+// Compose through the real CLI, and inspect the SAME canonical lock/Hangar
+// models as Rust rather than accept a second cache path.
 #Test("publication tuf original registry_fetch_installs_verified_artifact_in_hangar_and_locked_reuses_it") {
     verification := StoreVerification.new()
     root: registry_cli_test_root("locked-reuse")
@@ -246,10 +246,10 @@ publication_tuf_test_command: fn(root: String, project: String, bare: String, st
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/pkg.rs:7666-7869. A verified advisory feed gates the registry fetch
-// before Hangar ingest: an immature release fails E2609 and writes nothing, an
-// exact source exception or a mature clock admits it, and an expired feed
-// still lets an exact lock reuse the same Hangar object.
+// A verified advisory feed gates the registry fetch before Hangar ingest: an
+// immature release fails E2609 and writes nothing, an exact source exception or
+// a mature clock admits it, and an expired feed still lets an exact lock reuse
+// the same Hangar object.
 registry_cli_test_fetch: fn(root: String, consumer: String, bare: String, store: String, now: String) -[Env, Exec, Time]> ProcessReceipt Never! {
     spec: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch"}).env("JET_ADVISORY_NOW", now)
     spec.env_remove("JET_ADVISORY_DB").env_remove("JET_ADVISORY_TRUST").env_remove("JET_ADVISORY_PUBLIC_KEY").run() ?? panic("fetch at {now}")

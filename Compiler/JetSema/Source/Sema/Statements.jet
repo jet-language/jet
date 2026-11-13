@@ -8317,8 +8317,8 @@ sema_stmt_check_dead_value_tail: fn(tail: Expr, return_type: Type?, environment:
 }
 
 sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
-    // E1403: a statement list is one source nesting level
-    // below its owner, as each of its statements is in the Rust checker.
+    // E1403: a statement list is one source nesting level below its owner,
+    // as each of its statements is.
     entered_nesting := false
     loop first in statements {
         if !sema_enter_source_nesting(context, sema_compiler_index_stmt_span(first), diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -9239,12 +9239,9 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// Rust CheckerCore `Stmt::ContextBlock` each field
-// value is checked once in the enclosing scope (`deadline` is an Int
-// epoch-millis instant, `allocator` an `Arena`, `Bump`, `Pool` or `Fixed`
-// handle, `logger` any value; the parser already rejected unknown fields,
-// E0761), then the body is an ordinary nested block. Lowering installs the
-// guards around the body (jet_codegen_lower_context_block).
+// The parser already rejected unknown fields, E0761), then the body is an
+// ordinary nested block. Lowering installs the guards around the body
+// (jet_codegen_lower_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // Rust binds the block's `#Context` application first; fields that do
     // not bind (E0930) get no E0762 of their own.
@@ -9294,15 +9291,14 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust CheckerCore `check_comptime_if`
-// `#if` selects a branch while building. Its condition is compile-time
-// code, like `name: #run value` (sema_stmt_check_prepared_binding): a
-// value already known here selects at once; any other value is staged through
-// the body comptime evaluator, and the branch is selected when the owner body
-// is checked again. The selected arm is an ordinary nested block emitted
-// inline; the dropped arm is checked for name resolution only (its other
-// reports and everything it did to the scope, the context and the ownership
-// state are rolled back). False while the arm is unselected or incomplete.
+// Its condition is compile-time code, like `name: #run value`
+// (sema_stmt_check_prepared_binding): a value already known here selects at
+// once; any other value is staged through the body comptime evaluator, and the
+// branch is selected when the owner body is checked again. The selected arm is
+// an ordinary nested block emitted inline; the dropped arm is checked for name
+// resolution only (its other reports and everything it did to the scope, the
+// context and the ownership state are rolled back). False while the arm is
+// unselected or incomplete.
 sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // `#if T == Int { … }` is the one-arm type test,
     // which already keeps its arm only in the `Int` instance.
@@ -9361,12 +9357,10 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     true
 }
 
-// Rust CheckerCore `check_comptime_block`
-// `#run { … }` is compile-time code and emits no runtime code. Its
-// statements are staged through the body comptime evaluator like a
-// `#if` condition (sema_stmt_check_prep_if), reading the prepared
-// locals before it; once the run lands, the owner body is checked again and
-// the block leaves nothing behind. A failed check or a panic stops the build.
+// Its statements are staged through the body comptime evaluator like a `#if`
+// condition (sema_stmt_check_prep_if), reading the prepared locals before it;
+// once the run lands, the owner body is checked again and the block leaves
+// nothing behind. A failed check or a panic stops the build.
 // False while the block is staged.
 sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), span, span) != None -> return true

@@ -15,7 +15,6 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
     }
 }
 
-// ported from jetpack_engine.rs:1779-1810
 #Test("package_policy_authorizes_spdx_and_source_mapping_through_publish_seam") {
     manifest: Manifest.parse("package.jet", "\nname: \"consumer\"\nversion: \"0.1.0\"\nlicense: \"MIT\"\npolicy: {{\n    licenses: .Allow([\"MIT\", \"Apache-2.0\"]),\n    sources: {{ \"Acme.*\": [\"internal\"] }},\n}}\n") ?? panic("policy manifest")
     assert_eq(manifest.policy.licenses, Val([String]{"MIT", "Apache-2.0"}))
@@ -25,7 +24,6 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
     assert(publication_policy_receipt_summary(receipt).contains("fingerprint=sha256-"))
 }
 
-// ported from jetpack_engine.rs:1812-1842
 #Test("package_policy_parses_exact_expiring_source_exception") {
     manifest: Manifest.parse("package.jet", "\nname: \"consumer\"\nversion: \"0.1.0\"\npolicy: {{\n    exceptions: [PolicyException{{\n        id: \"JSA-2026-0001\",\n        scope: \"Acme.Widget#1.2.3\",\n        reason: \"urgent security fix\",\n        expires: 9999999999,\n    }}],\n}}\n") ?? panic("source policy exception")
     assert_eq(manifest.policy.exceptions.len(), 1)
@@ -39,7 +37,6 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
     assert(invalid.why.contains("PolicyException.scope"))
 }
 
-// ported from jetpack_engine.rs:1844-1865
 #Test("package_policy_drops_expired_source_exception_from_receipt") {
     policy := PackagePolicy.default()
     policy.exceptions = [PackagePolicyException]{PackagePolicyException{id: "JSA-EXPIRED", scope: "Acme.Widget#1.2.3", reason: "old waiver", expires_at: 0}}
@@ -48,7 +45,6 @@ engine_policy_manifest_error: fn(raw: String) -> Diagnostic {
     assert(!publication_policy_receipt_summary(receipt).contains("exception="))
 }
 
-// ported from jetpack_engine.rs:1867-1906
 #Test("package_policy_rejects_unmapped_or_non_spdx_candidates_before_ingest") {
     policy := PackagePolicy.default()
     policy.licenses = Val([String]{"MIT"})

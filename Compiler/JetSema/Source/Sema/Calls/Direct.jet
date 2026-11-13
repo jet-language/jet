@@ -304,12 +304,12 @@ sema_call_try_knowledge_builtin: fn(call: Call, expected: Type?, environment: Se
     }
 }
 
-// The readable prelude's builtin rows (Rust `CorePrelude` Builtin targets
-// `print`, `panic`, `assert`, `assert_eq`), checked by one dispatcher
-// with the Rust checker's arity and argument rules (check_*_call). A user
-// function or local of the same name shadows every row. `#NoPrelude`
-// print/input refusal (E0429) runs before this dispatcher. The ambient
-// `input` is a value (sema_call_check_ambient_input), not a function.
+// The readable prelude's builtin rows (`print`, `panic`, `assert`,
+// `assert_eq`), checked by one dispatcher with per-builtin arity and
+// argument rules. A user function or local of the same name shadows every
+// row. `#NoPrelude` print/input refusal (E0429) runs before this
+// dispatcher. The ambient `input` is a value (sema_call_check_ambient_input),
+// not a function.
 sema_call_try_ambient_prelude: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {

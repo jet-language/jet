@@ -1,5 +1,5 @@
-// JP-PUB-INDEX: Index.rs and NamePolicy.rs embedded tests, plus Tier.rs's
-// carrier/review tests. Native publication retains real Registry dependencies:
+// JP-PUB-INDEX: index, name policy and tier carrier/review claims. Native
+// publication retains real Registry dependencies:
 // JP-PUB-REG-VERIFY, JP-PUB-REG-REFERRERS; authority operations owe Core #3593.
 // Rust InvalidData refusals report InvalidInput until Core has InvalidData (CORE-GAPS 11).
 // The pure name/wire proof is NOT proof of the native publication acceptance.
@@ -180,8 +180,8 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
 }
 
 #Test("publication name usize max threshold retains mathematical distance") {
-    // Rust NamePolicy.rs:216 overflows row+limit+1 for usize::MAX. Preserve
-    // the bounded Levenshtein contract, not that debug panic/release wrap.
+    // Preserve the bounded Levenshtein contract, not that debug panic/release
+    // wrap.
     maximum: 18446744073709551615
     assert_eq(publication_edit_distance_at_most("kitten", "sitting", maximum), Val(3))
     assert_eq(publication_edit_distance_at_most("", "é", maximum), Val(1))
@@ -289,8 +289,8 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     assert_eq(publication_package_names(repo) ?? panic("names"), [String]{"textkit"})
     files.remove_all(repo) ?? panic("cleanup")
 }
-// Rust with_index_lock (Index.rs:346-404): a lock older than 300s is removed
-// and the create is retried; the reclaimed lock is released after the action.
+// Rust with_index_lock: a lock older than 300s is removed and the create is
+// retried; the reclaimed lock is released after the action.
 #Test("publication index lock reclaims a stale lock and releases it") {
     repo: publication_index_test_root("stale-lock")
     lock: files.join(files.join(repo, "index"), ".textkit.lock")
@@ -394,7 +394,7 @@ publication_index_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.remove_all(repo) ?? panic("cleanup")
 }
 
-// Source/Publish/mod.rs:662-753: retain evidence ordering and digest refusal.
+// Retain evidence ordering and digest refusal.
 #Test("publication registry_publish_writes_and_rejects_tampered_oci_referrers") {
     root: publication_index_test_root("referrers")
     repo: files.join(root, "registry")

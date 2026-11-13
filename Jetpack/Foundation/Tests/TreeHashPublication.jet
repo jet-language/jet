@@ -1,8 +1,7 @@
-// JP-PUBLISH: SHA256.rs rooted_authority::write (340-462, 713-755) and
-// Authority (468-644), CmdPkg.rs write_package_source (107-162), and Store.rs
-// replacement (868-964). Checked edits validate through the ORIGINAL held
+// JP-PUBLISH: rooted authority writes, package source writes and store
+// replacement. Checked edits validate through the ORIGINAL held
 // FoundationFileAuthority, which also refuses a source renamed away or
-// replaced at its path (Authority.rs revalidate_file checks the handle only).
+// replaced at its path, not only a changed handle.
 // These are native behavioral cases, retained for Core #3593: no pathname
 // publication fallback and no fake Directory/FileWriter provider.
 use {
@@ -453,8 +452,8 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// SHA256.rs rooted_read_rejects_final_path_swap: the held file is no longer
-// the object bound at its path once a link replaces it.
+// The held file is no longer the object bound at its path once a link replaces
+// it.
 #Test("rooted read rejects final path swap") {
     if !sys.is_unix() -> return
     fixture: foundation_publication_test_root("rooted-read-final-swap")
@@ -475,7 +474,6 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.remove_all(fixture) ?? panic("cleanup")
 }
 
-// SHA256.rs rooted_read_rejects_ancestor_path_swap.
 #Test("rooted read rejects ancestor path swap") {
     if !sys.is_unix() -> return
     fixture: foundation_publication_test_root("rooted-read-ancestor-swap")
@@ -497,7 +495,6 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     files.remove_all(fixture) ?? panic("cleanup")
 }
 
-// SHA256.rs rooted_read_rejects_multiply_linked_input.
 #Test("rooted read rejects multiply linked input") {
     if !sys.is_unix() -> return
     fixture: foundation_publication_test_root("rooted-read-hardlink")

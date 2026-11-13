@@ -132,8 +132,7 @@ static void watch(IntNode *node) {
 // An unhazarded final drop frees its node at once; a node a reader has
 // hazarded is retired instead, and the reader's clearing reclaims it, once.
 // The checked heap (every C host that links the runtime object runs it) traps
-// a double free itself. Ported from the retired Rust int-hazard-fixture.rs
-// onto the hazard domain's C ABI.
+// a double free itself. The fixture drives the hazard domain's C ABI.
 static void hazard_fixture(void) {
     hazard_check(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1, "the checked heap observer was not installed");
     int64_t raw = jet_int_owned_from_i64(INT64_MAX);

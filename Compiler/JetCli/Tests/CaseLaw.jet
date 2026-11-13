@@ -1,15 +1,13 @@
-// Port of the case-law gate of tests/diagnostics_format.rs:184-218 and its
-// checker tests/support/case_law.rs: labels take title case, prose takes sentence case. The
+// The case law: labels take title case, prose takes sentence case. The
 // strings come from their live producers: the diagnostic rows, and the CLI
-// registry that feeds help, man and completions. The Rust REPL and hybrid-help
-// renderers have no Jet producer, so their sources retire with them.
+// registry that feeds help, man and completions.
 use {
     jet_cli.[JET_CLI_PALETTE_CATEGORIES, jet_cli_action_help_summary, jet_cli_group_label, jet_cli_usage_page]
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, diagnostic_registry_rows]
     jetpack_foundation.[JET_KEYWORD_LIST]
 }
 
-// The one closed list of title-case minor words (case_law.rs:687-690).
+// The one closed list of title-case minor words.
 CASE_LAW_MINOR_WORDS: [String]{"a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of", "on", "to", "via"}
 
 // The binary names a user types; a line that IS a command keeps them lowercase.
@@ -35,20 +33,18 @@ case_law_is_alnum: fn(byte: U8) -> Bool {
 
 case_law_is_space: fn(byte: U8) -> Bool { byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) }
 
-// Whether a lowercase-led token keeps its own case (case_law.rs:762-804): a
-// keyword, a flag or ref, a typed command word, or a token carrying a digit or
-// structural punctuation. The uppercase-led exclusions there (types, Core
-// names, codes, CamelCase) never reach this check: an uppercase start is
-// already sentence case.
+// Whether a lowercase-led token keeps its own case: a keyword, a flag or ref, a
+// typed command word, or a token carrying a digit or structural punctuation.
+// Uppercase-led tokens (types, Core names, codes, CamelCase) never reach this
+// check: an uppercase start is already sentence case.
 case_law_keeps_case: fn(token: String) -> Bool {
     if JET_KEYWORD_LIST.contains(token) || CASE_LAW_COMMAND_WORDS.contains(token) -> return true
     if token.starts_with("-") || token.starts_with("#") || token.starts_with("@") -> return true
     token.bytes().any(fn(byte) { (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{95}) || byte == (U8{47}) || byte == (U8{92}) || byte == (U8{64}) || byte == (U8{35}) || byte == (U8{46}) })
 }
 
-// case_law.rs:620-651: the FIRST thing on the line opens in sentence case. A
-// line that opens with code, a quote or a `{placeholder}` keeps its case.
-// "" when the line conforms.
+// The FIRST thing on the line opens in sentence case. A line that opens with
+// code, a quote or a `{placeholder}` keeps its case. "" when the line conforms.
 case_law_sentence_violation: fn(value: String) -> String {
     bytes: value.bytes()
     offset := 0
@@ -67,9 +63,9 @@ case_law_sentence_violation: fn(value: String) -> String {
     "sentence prose starts with lowercase `{token}` at byte {offset} in \"{value}\""
 }
 
-// case_law.rs:653-682: every word starts uppercase, except a minor word that
-// is neither first nor last, which stays lowercase. A `<metavariable>` keeps
-// the spelling the user types. "" when the label conforms.
+// Every word starts uppercase, except a minor word that is neither first nor
+// last, which stays lowercase. A `<metavariable>` keeps the spelling the user
+// types. "" when the label conforms.
 case_law_title_violation: fn(value: String) -> String {
     if value.starts_with("<") && value.ends_with(">") -> return ""
     words := [String]{}
@@ -96,7 +92,7 @@ case_law_push: fn(sources: &[CaseLawSource], name: String, value: String, kind: 
     sources.push(CaseLawSource{name: name.copy(), value: value.copy(), kind: kind.copy()})
 }
 
-// case_law.rs:44-137: the strings each live producer shows a user.
+// The strings each live producer shows a user.
 case_law_sources: fn() -> [CaseLawSource] {
     sources := [CaseLawSource]{}
     loop row in diagnostic_registry_rows() {

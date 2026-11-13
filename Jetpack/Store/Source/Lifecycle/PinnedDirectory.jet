@@ -1,4 +1,4 @@
-// The lifecycle journal's pinned directory (Rust Store/Lifecycle/Directory.rs).
+// The lifecycle journal's pinned directory.
 // Every path component from the filesystem root down is opened without
 // following links and the final directory stays held, so every later member
 // operation names an entry relative to that held directory. A component that
@@ -119,8 +119,8 @@ PinnedPathParts: struct {
     names: [String]
 }
 
-// Directory.rs `absolute`: join a relative path to the current directory and
-// refuse any `.` or `..` component.
+// Join a relative path to the current directory and refuse any `.` or `..`
+// component.
 store_pinned_absolute: fn(path: String) -[FS, Env]> String StoreError! {
     absolute: if files.is_abs(path) -> path else -> files.join(files.cwd(), path)
     segments: files.split_slash(absolute)
@@ -146,7 +146,7 @@ store_pinned_components: fn(absolute: String) -> PinnedPathParts StoreError! {
     Ok(PinnedPathParts{anchor, names})
 }
 
-// Directory.rs `valid_name`: one plain member name.
+// One plain member name.
 store_pinned_valid_name: fn(name: String) StoreError! {
     invalid: name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.bytes().contains(U8{0})
     if invalid -> return Err(StoreError.InvalidInput("invalid pinned-directory member name"))

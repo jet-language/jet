@@ -1,5 +1,5 @@
-// Rust crates/jetpack/src/JetOS/types.rs:4-79. JetOS owns these carriers;
-// system/service/option plans remain the canonical EnvModel carriers.
+// JetOS owns these carriers; system/service/option plans remain the canonical
+// EnvModel carriers.
 JETOS_CACHYOS_KERNEL_PACKAGE: "cachyos-kernel"
 JETOS_SYSTEMD_INIT_PACKAGE: "systemd"
 JETOS_GNOME_DESKTOP_PACKAGES: [String]{"gdm", "gnome-session", "gnome-shell"}
@@ -35,8 +35,8 @@ JetOSGeneration: struct {
     created_at: Int
 }
 
-// Rust store_realize.rs:11-17. The held lease and original identity are not
-// flattened into metadata; realization/consumption owns their lifecycle.
+// The held lease and original identity are not flattened into metadata;
+// realization/consumption owns their lifecycle.
 JetOSRealizedPackage: struct {
     entry: StoreEntry
     lease: CacheLease
@@ -44,8 +44,8 @@ JetOSRealizedPackage: struct {
     original_reference_text: String
     consumption_override: String?
 
-    // Rust store_realize.rs:41-49; the held lease remains authoritative: a
-    // durable member is consumed only after the lease revalidates it.
+    // The held lease remains authoritative: a durable member is consumed only
+    // after the lease revalidates it.
     consumption_path: fn(self, path: String) -[FS, Env, Rand]> String IOError! {
         if self.consumption_override == .Val(root) {
             relative: store_path_strip_prefix(path, self.entry.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("package member escapes realized output")}))
@@ -56,8 +56,8 @@ JetOSRealizedPackage: struct {
         Ok(path)
     }
 
-    // Rust store_realize.rs:55-60: provenance names durable provider output,
-    // never a process-scoped consumption projection.
+    // Provenance names durable provider output, never a process-scoped
+    // consumption projection.
     original_output: fn(self) -> String Never! { self.original_out }
     original_reference: fn(self) -> String Never! { self.original_reference_text }
 }
@@ -95,7 +95,7 @@ JetOSResolvedOption: struct {
     priority: Int
     contenders: [JetOSOptionContender]
 
-    // Rust options_rendering.rs:52-78: field and contender order are stable.
+    // Field and contender order are stable.
     to_json: fn(self) -> String Never! {
         rows := [Dyn]{}
         loop contender in self.contenders {

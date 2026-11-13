@@ -315,8 +315,8 @@ sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: 
     Val(SemaExpressionResolvedType{ty: resolved_ty, owner: resolved_owner})
 }
 
-// Rust CheckerItems::atomic_field_inner: only supported Atomic
-// fields take a scalar initializer. Ordinary generic owners keep their type.
+// Only supported Atomic fields take a scalar initializer. Ordinary generic
+// owners keep their type.
 sema_atomic_field_inner: fn(ty: Type) -> Type? Never! {
     if ty == .Apply(name, args) {
         if sema_atomic_type_name(name) && args.len() > 0 && jet_target_layout_atomic_scalar_type(args[0]) -> return Val(args[0])

@@ -1,5 +1,4 @@
-// Registry.rs:3177-3337; original tests/pkg.rs:9027-9145 and credential
-// diagnostic assertions :7964-8029. Real Sign/Index/Tuf dependencies only.
+// Real Sign/Index/Tuf dependencies only.
 // Native keygen/takeover and registry composition retain #3593/#3597/#4262.
 use {
     jet_foundation.[diagnostic_render]
@@ -147,7 +146,7 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 }
 
 #Test("publication registry original takeover_requires_review_and_resigning") {
-    // tests/pkg.rs:9082-9145. Full protected FS and CSPRNG acceptance retained.
+    // Full protected FS and CSPRNG acceptance retained.
     scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.get("HOME") ?? panic("HOME"), ".cache"), "jet-dev"))
     root: files.join(scratch, "registry-verify-takeover-{sys.pid()}")
     files.remove_all(root).drop("fixture absent")
@@ -189,8 +188,8 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 }
 
 #Test("publication registry original keygen sign_verify_roundtrip_and_tamper_e1246") {
-    // tests/pkg.rs:9027-9064; the pure deterministic test above is additional,
-    // not a replacement for generated-key/held-source acceptance (#3593/#3597).
+    // The pure deterministic test above is additional, not a replacement for
+    // generated-key/held-source acceptance (#3593/#3597).
     scratch: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.get("HOME") ?? panic("HOME"), ".cache"), "jet-dev"))
     root: files.join(scratch, "registry-verify-roundtrip-{sys.pid()}")
     files.remove_all(root).drop("fixture absent")
@@ -214,8 +213,8 @@ publication_verify_test_refusal: fn(all: [PublicationIndexEntry], entry: Publica
 }
 
 #Test("publication registry original transport rejects and redacts embedded credentials") {
-    // tests/pkg.rs:7964-8029. RegistryTransport and protected clone service are
-    // queued mandatory dependencies (#4262/#3593/#3594); no test skip or mock.
+    // RegistryTransport and protected clone service are queued mandatory
+    // dependencies (#4262/#3593/#3594); no test skip or mock.
     loop url in ([String]{
         "https://user:super-secret@example.invalid/registry.git",
         "https://example.invalid/registry.git?access_token=super-secret",

@@ -1,6 +1,5 @@
 // Exact engine conformance claims; PENDING-SEAM(package-tests), no runtime proof claimed.
 
-// ported from jetpack_engine.rs:2035-2075
 #Test("jet_registry_dependency_roles_features_and_constraints_round_trip") {
     native: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-rolekit\",\"dependencies\":{{\"runtime\":\"^1.0\"}},\"build_dependencies\":{{\"cc\":{{\"require\":\"^1.0\",\"strict\":true}}}},\"dev_dependencies\":{{\"insta\":\"^1.0\"}},\"optional_dependencies\":{{\"trace\":\"^1.0\"}},\"peer_dependencies\":{{\"host\":\"^2.0\"}},\"features\":{{\"default\":[\"trace\"]}},\"constraints\":{{\"runtime\":{{\"prefer\":\"1.0.1\",\"reject\":[\"1.0.2\"],\"strict\":true}}}}}}"
     report: provider_normalize_document(ProviderFamily.JetRegistry, native)
@@ -16,7 +15,6 @@
     assert(facts.facts.has_key("provider.registry.constraints"))
 }
 
-// ported from jetpack_engine.rs:2077-2134
 #Test("provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier") {
     if true { // Independent original NuGet matrix entry.
         native: "<package><metadata><id>widget</id><version>1.2.3</version><licenseExpression>MIT</licenseExpression><repository type=\"git\" url=\"https://example.invalid/widget\" /></metadata></package>"
@@ -54,7 +52,6 @@
     assert(provider_test_has(malformed.conflicts, [String]{"conflicting version fields"}))
 }
 
-// ported from jetpack_engine.rs:2136-2218
 #Test("provider_conformance_homebrew_github_binary_uses_shared_production_carrier") {
     if true { // Independent original Homebrew matrix entry.
         native: "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\"}},\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"x86_64_linux\":{{\"url\":\"https://example.invalid/jq.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\"\"}}"
@@ -101,7 +98,6 @@
     assert(binary_report.shared_facts().facts.has_key("provider.binary.provenance"))
 }
 
-// ported from jetpack_engine.rs:2220-2270
 #Test("provider_conformance_homebrew_github_binary_reports_loss_and_conflict_without_defaults") {
     homebrew: provider_normalize_document(ProviderFamily.Homebrew, "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}")
     assert(provider_test_has(homebrew.conflicts, [String]{"conflicting version"}))
@@ -131,7 +127,6 @@
     assert(matched_binary)
 }
 
-// ported from jetpack_engine.rs:5880-5939
 #Test("provider_conformance_pypi_swiftpm_maven_round_trips_the_production_carrier") {
     if true { // Independent original PyPI matrix entry.
         native: "{{\"info\":{{\"name\":\"sample-pkg\",\"version\":\"2.4.1\",\"license\":\"MIT\",\"requires_python\":\">=3.10\",\"requires_dist\":[\"httpx>=0.27\"],\"classifiers\":[\"Programming Language :: Python :: 3\"]}},\"urls\":[{{\"filename\":\"sample_pkg-2.4.1.tar.gz\",\"digests\":{{\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"yanked\":false}}],\"vulnerabilities\":[{{\"id\":\"PYSEC-0000\"}}]}}"
@@ -171,7 +166,6 @@
     }
 }
 
-// ported from jetpack_engine.rs:5941-5987
 #Test("provider_conformance_reports_loss_and_conflict_without_defaults") {
     missing_version: provider_normalize_document(ProviderFamily.PyPI, "{{\"info\":{{\"name\":\"sample-pkg\"}},\"urls\":[]}}")
     assert(provider_test_has(missing_version.losses, [String]{"exact version"}))

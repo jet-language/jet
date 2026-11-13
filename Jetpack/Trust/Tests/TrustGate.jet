@@ -1,5 +1,4 @@
-// Claims ported from crates/jetpack/src/Trust.rs #[cfg(test)]. Each claim
-// uses its own scratch directory from `files.tmpdir`.
+// Each claim uses its own scratch directory from `files.tmpdir`.
 use {
     jet_pkg_model.[PackageGateError, RefSource, RefSpec, SourceTable]
     jet_env_model.[SecretSpec]
@@ -223,8 +222,8 @@ trust_test_secret: fn(name: String) -> SecretSpec {
     assert(trust_is_trusted(store, dir, hash))
 }
 
-// tests/gate_law.rs:65-75: every writer returns E3415 before creating the
-// store or its parent; an existing store also remains byte-identical.
+// Every writer returns E3415 before creating the store or its parent; an
+// existing store also remains byte-identical.
 trust_test_write_refusal: fn(error: PackageGateError, site: String, root: String) -[FS]> {
     assert_eq(error.diagnostics.len(), 1)
     diagnostic: error.diagnostics[0]
@@ -279,8 +278,8 @@ trust_test_write_refusal: fn(error: PackageGateError, site: String, root: String
     files.remove_all(root).drop("test cleanup")
 }
 
-// Ported from tests/jetpack_trust_root.rs: a repo build grant authorizes only
-// its exact identity, and a hostile identity is never run through a shell.
+// A repo build grant authorizes only its exact identity, and a hostile identity
+// is never run through a shell.
 #Test("core_build_hook_requires_the_exact_trust_identity") {
     dir: trust_test_gate_dir("core-build-trust")
     store: files.join(dir, "trust")

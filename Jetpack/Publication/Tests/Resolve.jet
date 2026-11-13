@@ -1,5 +1,4 @@
-// Original Source/Publish/Resolve.rs:513-648 and Publish/mod.rs:312-355,
-// plus every candidate-policy/proof/ordering branch. Real SemVer + Diagnostic.
+// Real SemVer + Diagnostic.
 // Full closure proof retains #4313/#4403, #4303 borrowed trim ABI, and
 // #4414 String.split iterator next() returning None. No acceptance case removed.
 use {
@@ -290,8 +289,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
     assert_eq(absent.len(), 1)
     assert_eq(absent[0].code, "E2602")
     loop cause in ([String]{"one", "two", "three"}) -> assert(absent[0].why.contains("`{cause}`"))
-    // No disjoint pair exists, so the proof must not claim one (lead ruling:
-    // reuse the existing Rust whole-set reason, Resolve.rs:292).
+    // No disjoint pair exists, so the proof must not claim one.
     assert((absent[0].detail ?? "").contains("PubGrub proof tree:\n- foo: no published candidate satisfies every requirement"))
     assert(!(absent[0].detail ?? "").contains("two requirements have no overlapping version"))
     assert_eq(publication_check_conflicts([PublicationVersionConstraint]{constraints[0], constraints[1]}, [String: [PublicationSemVer]]{}).len(), 0)

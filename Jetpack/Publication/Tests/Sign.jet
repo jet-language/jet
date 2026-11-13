@@ -1,4 +1,3 @@
-// Original Sign.rs tests are retained, including provider-gated native cases.
 // Pure codec/env/frame proof does not claim entropy or protected publication.
 use {
     jet_foundation.[diagnostic_registry_row, diagnostic_render]
@@ -129,8 +128,8 @@ publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(root) ?? panic("create fixture")
     root
 }
-// Original Sign.rs :507. #3593: canonical protected publication needs force
-// replacement of the symlink BINDING, never following its attacker target.
+// Canonical protected publication needs force replacement of the symlink
+// BINDING, never following its attacker target.
 #Test("publication sign force_keygen_replaces_a_symlink_without_following_it") {
     root: publication_sign_test_root("seed")
     target: files.join(root, "attacker-target")
@@ -144,8 +143,8 @@ publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
     assert_eq(((files.stat(path) ?? panic("seed stat")).mode).bit_and(4095), 384)
     files.remove_all(root) ?? panic("cleanup")
 }
-// Original tests/pkg.rs :9148. Entropy #3597 and exact held-directory
-// create-new/0600/0644/force contracts #3593; no cargo-existence skip.
+// Entropy #3597 and exact held-directory create-new/0600/0644/force contracts
+// #3593; no cargo-existence skip.
 #Test("publication sign keygen_refuses_existing_key_e1248") {
     root: publication_sign_test_root("keygen")
     previous: sys.get("JET_KEYS_DIR")
@@ -167,11 +166,11 @@ publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Original Sign.rs :499 (#6117). Rust's private volatile_zeroize wiped only the
-// retired helper-process stdout and seed temporaries; Core secret owners now
-// wipe on Close. `crypto.wipe` is Core's public in-place erase: every element
-// and the spare capacity take stores the optimizer cannot drop, and the length
-// stays. Plain zero assignments would not prove it.
+// Rust's private volatile_zeroize wiped only the retired helper-process stdout
+// and seed temporaries; Core secret owners now wipe on Close. `crypto.wipe` is
+// Core's public in-place erase: every element and the spare capacity take
+// stores the optimizer cannot drop, and the length stays. Plain zero
+// assignments would not prove it.
 #Test("publication sign secret_temporary_zeroization_clears_every_byte") {
     secret := [U8]{}
     expected := [U8]{}

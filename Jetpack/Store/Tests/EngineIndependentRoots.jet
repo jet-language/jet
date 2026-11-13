@@ -1,6 +1,5 @@
 use engine_paths: core.files.path
 // Exact independent-root engine claims; PENDING-SEAM(package-tests), no runtime proof claimed.
-// Fixture ported from support/jetpack_fixtures.rs:681-711 without weaker stand-ins.
 engine_independent_root_fixture: fn() -> (base: String, roots: HangarRoots, repo: String, table: SourceTable, spec: RefSpec, ctx: ProviderCtx) {
     base: files.tmpdir("jet-engine-independent-root-") ?? panic("base fixture")
     repo: files.join(base, "jet-pkgs")
@@ -27,7 +26,6 @@ engine_independent_root_cleanup: fn(base: String) {
     files.remove_all(base).drop("fixture cleanup")
 }
 
-// ported from jetpack_engine.rs:8851-8895
 #Test("independent_root_runner_promotes_only_agreed_source_output") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()
@@ -46,7 +44,6 @@ engine_independent_root_cleanup: fn(base: String) {
     engine_independent_root_cleanup(fixture.base)
 }
 
-// ported from jetpack_engine.rs:8897-8954
 #Test("independent_root_runner_rejects_divergence_before_registration") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()
@@ -78,7 +75,6 @@ engine_independent_root_cleanup: fn(base: String) {
     engine_independent_root_cleanup(fixture.base)
 }
 
-// ported from jetpack_engine.rs:8956-8993
 #Test("independent_root_runner_cancellation_leaves_no_store_result") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()

@@ -121,14 +121,13 @@ pkg_cbind_bind_files: fn(header_src: String, lib: String, overlay: HandleOverlay
 // The binder schema a C binding's identity and provenance name.
 C_BINDER_SCHEMA: "jet-c-bind-v1"
 
-// The `<stem>.provenance` record of one header bind (Rust CFFI.rs
-// write_c_binding_provenance). Its identity covers the header, the cache, the
-// handle facts, the link closure, the package's declared C dependency
-// `dependency` (None when it declares none) and each local archive in
-// `archives` that dependency links, so a changed archive makes the binding
-// stale (pkg_cbind_stale_input). The rows then name the same inputs with
-// their digests, the boundary row the cache stamps, and the cache and
-// metadata artifacts.
+// The `<stem>.provenance` record of one header bind. Its identity covers the
+// header, the cache, the handle facts, the link closure, the package's declared
+// C dependency `dependency` (None when it declares none) and each local archive
+// in `archives` that dependency links, so a changed archive makes the binding
+// stale (pkg_cbind_stale_input). The rows then name the same inputs with their
+// digests, the boundary row the cache stamps, and the cache and metadata
+// artifacts.
 pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_path: String, header_src: String, cache_path: String, dependency: String?, archives: [ArchiveInput]) -[Env]> String ForeignBridgeError! {
     descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
     language: (ForeignLanguage.C).root()

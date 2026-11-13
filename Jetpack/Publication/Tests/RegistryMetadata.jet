@@ -1,4 +1,3 @@
-// Registry.rs:2397-2804. Original metadata acceptance from tests/pkg.rs:
 // registry_fetch_applies_artifact_dependency_roles_features_and_constraints
 // (7404-7663) and registry_feature_cycle_fails_before_staging (8152-8176).
 // Full fetch/locked replay/tamper-before-Hangar and staging depend on the
@@ -299,7 +298,7 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Missing artifact/hash consumers, ported from tests/pkg.rs:8083-8148.
+// Missing artifact/hash consumers.
 #Test("publication registry_corrupt_artifact_is_rejected_before_install original") {
     root: publication_metadata_test_root("corrupt-artifact")
     repo: files.join(root, "registry")
@@ -351,7 +350,6 @@ publication_metadata_test_root: fn(label: String) -[FS, Env]> String Never! {
         files.remove_all(root) ?? panic("cleanup")
     }
 }
-// tests/pkg.rs:8179-8210 registry_interrupted_artifact_stage_leaves_no_partial.
 // The Rust io::ErrorKind::InvalidData is IOError.InvalidInput here; Jet's
 // IOError has no separate InvalidData kind.
 #Test("publication registry_interrupted_artifact_stage_leaves_no_partial original") {

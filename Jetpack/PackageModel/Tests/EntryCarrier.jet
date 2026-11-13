@@ -1,6 +1,5 @@
-// Loader.rs carrier/discovery regressions; tests/inline_package.rs:53-115,
-// 118-193,345-435,547-563. Compiler execution/graph checks remain in their
-// compiler lane; these assertions exercise the canonical composed facts API.
+// Compiler execution/graph checks remain in their compiler lane; these
+// assertions exercise the canonical composed facts API.
 use {
     jetpack_foundation.[WORKSPACE_FILE]
     jet_pkg_model.[
@@ -172,7 +171,6 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/inline_package.rs `inline_package_conflicts_with_manifest_for_every_entry`.
 #Test("inline manifest conflict applies to every entry and retains stock span") {
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("other-conflict")
@@ -190,7 +188,6 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/inline_package.rs `nested_manifest_stops_outer_inline_package_discovery`.
 #Test("nested conventional manifest stops outer inline discovery") {
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("nested-manifest")
@@ -298,7 +295,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/inline_package.rs path escape regression: retain the original input.
+// Retain the original input.
 #Test("inline Config path escape fails before state mutation") {
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("path-escape")
@@ -315,7 +312,6 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/inline_package.rs duplicate carrier regression.
 #Test("duplicate inline Package rejects before changing source") {
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("duplicate")
@@ -335,7 +331,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Loader.rs:6110-6152. Filename-independent workspace declaration boundaries.
+// Filename-independent workspace declaration boundaries.
 #Test("declaration resolved workspace stops both outer carrier walks") {
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("declared-boundary")
@@ -405,7 +401,6 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Loader.rs:6155-6190, package-facts portion of explicit shared authority test.
 #Test("explicit shared package manifest keeps declared application authority") {
     if !sys.is_unix() -> return
     cache := WorkspaceDeclarationCache.new()
@@ -439,7 +434,6 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// tests/inline_package.rs:387-435, held metadata/no hidden host mutation.
 #Test("inline symlinked Config fails without changing host state") {
     if !sys.is_unix() -> return
     cache := WorkspaceDeclarationCache.new()

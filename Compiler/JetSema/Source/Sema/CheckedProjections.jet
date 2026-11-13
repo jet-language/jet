@@ -26,8 +26,8 @@ sema_checked_layout_projections: fn(registration: SemaRegistrationGraph, module_
 sema_origin_optional_int: fn(value: Int?) -> TComptimeValue Never! {
     if value == .Val(number) -> TComptimeValue.Present{value: TComptimeValue.Int{value: number}} else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Int}}}
 }
-// Rust CheckerInfer Origin / Comptime::build_origin_option: moved/untracked
-// locals answer None; a readable tracked origin retains its actual source site.
+// Moved/untracked locals answer None; a readable tracked origin retains its
+// actual source site.
 sema_fact_local_origin: fn(origin: SemaOriginFact?) -> TComptimeValue Never! {
     fact: origin ?? return TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}
     TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "OriginInfo", fields: [TComptimeField]{

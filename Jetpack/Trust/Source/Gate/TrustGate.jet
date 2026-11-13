@@ -80,7 +80,7 @@ trust_gate_build_identity: fn(theme: Theme, store: String, project_dir: String, 
 }
 
 trust_gate_with_hash: fn(theme: Theme, store: String, project_dir: String, refs: [RefSpec], secrets: [SecretSpec], bypass: Bool, hash: String, typed: Bool, lifecycle_hooks: Bool) -[IO, FS, Env, Time.Wait]> Int? {
-    // Trust.rs:1039: the session gate precedes the non-sensitive fast path.
+    // The session gate precedes the non-sensitive fast path.
     if bypass {
         pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
     }
@@ -136,7 +136,7 @@ trust_project_policy_decision: fn(project_dir: String) -[FS, Env]> TrustDecision
 // The trust gate for a foreign flake/devenv file (U16), keyed on the file's
 // content. Ad-hoc `-p` packages are ordinary refs in the normal gate.
 trust_gate_flake: fn(theme: Theme, store: String, project_dir: String, flake_path: String, bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
-    // Trust.rs:1174: refuse the bypass before reading foreign source.
+    // Refuse the bypass before reading foreign source.
     if bypass {
         pkg_check_project_gate(project_dir, PolicyKey.SessionFlag, "--trust") ?? return Val(trust_report_gate_failure(theme, err))
     }
@@ -158,7 +158,7 @@ trust_gate_flake: fn(theme: Theme, store: String, project_dir: String, flake_pat
     None
 }
 
-// Trust.rs `report_gate_failure`: preserve each diagnostic's coded card.
+// Preserve each diagnostic's coded card.
 trust_report_gate_failure: fn(theme: Theme, error: PackageGateError) -[IO, Time.Wait]> Int Never! {
     loop diagnostic in error.diagnostics {
         theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)

@@ -62,8 +62,8 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         theme.error("no image `{name}`", cli_declared_images(declared_plan), "declare `image.<name>: module {{ … }}`, or build an existing image.")
         return EXIT_USAGE
     }
-    // U14: disk images ride the gated jetos installer tier; `jet image`
-    // builds only `.Oci` containers (Rust add_remove_push_image.rs).
+    // U14: disk images ride the gated jetos installer tier; `jet image` builds
+    // only `.Oci` containers.
     if image.kind != ImageKind.OCI {
         theme.error("`{name}` is a `.Iso` disk image, not a container", "U14: `.Iso`/`.Qcow`/`.Raw` disk images ride the jetos installer tier, which is gated (Phase D, owner greenlight required) — `jet image` only builds `.Oci` containers today.", "build an `.Oci` image instead, or track the jetos realization tier for disk images.")
         return EXIT_USAGE

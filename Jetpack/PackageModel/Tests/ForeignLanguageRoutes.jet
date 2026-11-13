@@ -1,6 +1,3 @@
-// Ports of the foreign language registry and route tests from the deleted
-// tests/cffi.rs (#6096 cffi-language-routes, cffi-namespace-model).
-//
 // The Rust route plan (`jet::Foreign::route_plan`) paired the descriptor with a
 // `ForeignHost` and the binding cache, type-stub and provenance paths. In Jet the
 // canonical descriptor table (pkg_foreign_binders) is the only routing record:
@@ -26,7 +23,6 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
     assert_eq(language.bindings_subdir(), "bindings/{root}")
 }
 
-// tests/cffi.rs:488
 #Test("unified_foreign_binder_registry_routes_active_and_planned_languages") {
     expected: [(language: ForeignLanguage, root: String, status: BinderStatus)]{
         (language: ForeignLanguage.C, root: "c", status: BinderStatus.Active),
@@ -62,10 +58,10 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
     }
 }
 
-// tests/cffi.rs:646. Not ported: `ForeignNamespace::from_module_path` and its
-// display round trip; Jet has no dotted foreign-path model beside the root
-// table, so the port checks the root table and its declaration order, which
-// is the FFI effect's case order.
+// Not ported: `ForeignNamespace::from_module_path` and its display round trip;
+// Jet has no dotted foreign-path model beside the root table, so the port
+// checks the root table and its declaration order, which is the FFI effect's
+// case order.
 #Test("unified_foreign_namespace_model_recognizes_every_registered_root") {
     roots: [(root: String, language: ForeignLanguage)]{
         (root: "go", language: ForeignLanguage.Go),
@@ -104,65 +100,54 @@ flr_route: fn(root: String, language: ForeignLanguage, status: BinderStatus, run
     assert(ForeignLanguage.from_root("unknown") == None, "unknown is not a foreign root")
 }
 
-// tests/cffi.rs:692: every registered root, planned ones included, through the
-// shared selective-import check of ForeignSelectiveImport.jet (which covers the
-// active binders for tests/lib_use.rs).
+// Every registered root, planned ones included, through the shared
+// selective-import check of ForeignSelectiveImport.jet.
 #Test("foreign_namespace_selective_imports_reuse_ordinary_parser_path") {
     loop language in ForeignLanguage.all() -> pkg_test_selective_import(language)
 }
 
-// tests/cffi.rs:980. Not ported: ForeignHost NativeJsWasmComponent/BrowserJsEngine
-// per ForeignTarget (no host enum in Jet; TargetDispatchedJs is the route).
+// Not ported: ForeignHost NativeJsWasmComponent/BrowserJsEngine per
+// ForeignTarget (no host enum in Jet; TargetDispatchedJs is the route).
 #Test("foreign_interop_routes_js_with_target_dispatched_host_and_dts_stub") {
     flr_route("js", ForeignLanguage.JS, BinderStatus.Active, BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, ForeignStubFile.Suffix("d.ts"))
 }
 
-// tests/cffi.rs:1015
 #Test("foreign_interop_routes_swift_as_planned_c_abi_bridge") {
     flr_route("swift", ForeignLanguage.Swift, BinderStatus.Planned, BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1042
 #Test("foreign_interop_routes_dart_as_active_api_dl_host") {
     flr_route("dart", ForeignLanguage.Dart, BinderStatus.Active, BinderRuntime.DartAPIDl, BindingStubKind.DartContract, ForeignStubFile.StemSuffix("_host.dart"))
 }
 
-// tests/cffi.rs:1066
 #Test("foreign_interop_routes_powershell_as_active_supervised_worker") {
     flr_route("pwsh", ForeignLanguage.PowerShell, BinderStatus.Active, BinderRuntime.SupervisedPowerShell, BindingStubKind.PowerShellScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1091
 #Test("foreign_interop_routes_perl_as_active_supervised_worker") {
     flr_route("perl", ForeignLanguage.Perl, BinderStatus.Active, BinderRuntime.SupervisedPerl, BindingStubKind.PerlScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1110
 #Test("foreign_interop_routes_ruby_as_active_supervised_worker") {
     flr_route("ruby", ForeignLanguage.Ruby, BinderStatus.Active, BinderRuntime.SupervisedRuby, BindingStubKind.RubyScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1129
 #Test("foreign_interop_routes_php_as_active_supervised_pool") {
     flr_route("php", ForeignLanguage.Php, BinderStatus.Active, BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1148
 #Test("foreign_interop_routes_r_as_active_supervised_worker") {
     flr_route("r", ForeignLanguage.R, BinderStatus.Active, BinderRuntime.SupervisedR, BindingStubKind.RScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1167
 #Test("foreign_interop_routes_python_as_active_supervised_sidecar") {
     flr_route("py", ForeignLanguage.Py, BinderStatus.Active, BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1194
 #Test("foreign_interop_routes_octave_as_active_supervised_worker") {
     flr_route("octave", ForeignLanguage.Octave, BinderStatus.Active, BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, ForeignStubFile.NoStub)
 }
 
-// tests/cffi.rs:1213
 #Test("foreign_interop_routes_com_as_active_windows_automation") {
     flr_route("com", ForeignLanguage.Com, BinderStatus.Active, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, ForeignStubFile.NoStub)
 }

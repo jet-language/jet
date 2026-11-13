@@ -469,8 +469,8 @@ sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: Sem
     diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
 }
 
-// The Rust checker reported the condition from its leftmost operand's own
-// span: a field operand (`flag.ready == false`) starts at its member name.
+// The condition is reported from its leftmost operand's own span: a field
+// operand (`flag.ready == false`) starts at its member name.
 sema_shared_access_condition_span: fn(condition: Expr) -> Span Never! {
     if condition == .Binary(_, left, _, span, _) -> return Span{start: sema_shared_access_condition_span(left).start, end: span.end}
     expr_span(condition)

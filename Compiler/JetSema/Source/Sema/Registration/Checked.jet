@@ -1710,8 +1710,8 @@ sema_checked_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
     module_identity: module_row.module_identity
     key: if rust_owner -> sema_checked_foreign_key(module_identity, registered.declaration.rust_path) else -> sema_checked_foreign_key(module_identity, registered.declaration.name)
     symbol: if rust_owner -> key else -> registered.declaration.rust_path
-    // A Rust crate is resolved by the foreign-crate build, not by an IR link
-    // unit; only C providers own link rows.
+    // An `extern rust` crate is resolved by the foreign-crate build, not by an
+    // IR link unit; only C providers own link rows.
     link_key: if rust_owner -> None else -> Val("c::{registered.foreign_library}")
     close_key: sema_checked_foreign_registered_close_key(module_row, registered.declaration.close)
     undo_key: sema_checked_foreign_named_key(module_identity, registered.declaration.undo)

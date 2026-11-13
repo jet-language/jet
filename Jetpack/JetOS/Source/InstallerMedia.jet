@@ -1,8 +1,4 @@
-// Rust crates/jetpack/src/JetOS/installer_media.rs:131-172 and :481-506, with
-// the payload copiers they call: root_projection.rs:126-191
-// (copy_dir_recursive_deref) and generation_files.rs:1263-1270
-// (copy_runtime_symlink). Rust copy_runtime_file_filtered is exactly
-// copy_file_replace, so the payload copies call jetos_copy_file_replace.
+// Every installer payload file is copied by jetos_copy_file_replace.
 jetos_render_installed_limine_conf: fn(system: SystemPlan, generation: JetOSGeneration) -> String Never! {
     "timeout: 1\nserial: yes\ngraphics: no\nverbose: yes\n/{jetos_release_label(false)} — {system.name} verify\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 rdinit=/jetos/init init=/jetos/init jetos.mode=verify jetos.host={system.name} jetos.generation={generation.name} root=LABEL=jetos-root rw\n"
 }

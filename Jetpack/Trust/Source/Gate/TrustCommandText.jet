@@ -70,19 +70,19 @@ trust_parse_grant_selector: fn(selector: String, scope: String) -> TrustGrant Tr
     Ok(TrustGrant{authority: TrustAuthority.infer(trimmed).label(), subject: trimmed, scope})
 }
 
-// crates/jetpack/src/Trust.rs:680: gate before even reading the store.
+// Gate before even reading the store.
 trust_grant_hash: fn(store: String, project_dir: String, hash: String) -[FS, Env]> Bool PackageGateError! {
     pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "hash:{hash} -> {store}")
     Ok(trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}"))
 }
 
-// crates/jetpack/src/Trust.rs:691; false only when already present.
+// False only when already present.
 trust_add_pattern: fn(store: String, project_dir: String, pattern: String) -[FS, Env]> Bool PackageGateError! {
     pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "pattern:{pattern} -> {store}")
     Ok(trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}"))
 }
 
-// crates/jetpack/src/Trust.rs:703; keep the complete gate diagnostics.
+// Keep the complete gate diagnostics.
 trust_add_grant: fn(store: String, project_dir: String, grant: TrustGrant) -[FS, Env]> Bool PackageGateError! {
     pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "{grant.key()} -> {store}")
     Ok(trust_store_add_line(store, grant.line()))

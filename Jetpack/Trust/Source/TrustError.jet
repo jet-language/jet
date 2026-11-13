@@ -1,10 +1,9 @@
-// The Trust area's one error carrier. Every variant keeps the exact message
-// text of its Rust source: `FlakeGraphError` (SemanticLock) and the string
-// errors of Trust.rs and Secrets.rs. `Rejected` is a semantic lock write
-// refused by revalidation (Rust `LockCommitError` without I/O); `Io` carries
-// boundary failures whose text is already final (Rust `LockCommitError::io`,
-// `FlakeGraphError::Io`). TrustRoot failures stay `TrustRootError` (its own
-// area below Store) and convert here unchanged in text.
+// The Trust area's one error carrier. Every variant keeps its exact message
+// text: `FlakeGraphError` (SemanticLock) and the string errors of the trust
+// store and repository secrets. `Rejected` is a semantic lock write refused
+// by revalidation; `IO` carries boundary failures whose text is already
+// final. TrustRoot failures stay `TrustRootError` (its own area below Store)
+// and convert here unchanged in text.
 use {
     jetpack_trust_root.[TrustRootError]
     jet_foundation.[Diagnostic]
@@ -24,13 +23,13 @@ TrustError: enum {
     StaleSemanticLock(String)
     IO(String)
     Rejected([ValidationIssue])
-    // ── Trust store grants (Trust.rs `Result<_, String>`) ──
+    // ── Trust store grants ──
     Grant(String)
-    // ── Repository secrets (Secrets.rs `Result<_, String>`) ──
+    // ── Repository secrets ──
     Secret(String)
     // ── TUF trust root (TrustRoot area) ──
     Root(TrustRootError)
-    // ── Self-toolchain pin diagnostics (JetPin.rs `Diagnostic`) ──
+    // ── Self-toolchain pin diagnostics ──
     Pin(Diagnostic)
 
     message: fn(self) -> String Never! {

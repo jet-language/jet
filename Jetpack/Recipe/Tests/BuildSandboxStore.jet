@@ -1,11 +1,10 @@
-// Ported from tests/build_sandbox.rs:1496-1658 via the public Store boundary.
 // PENDING-SEAM(package-tests): Jetpack/Recipe has no package.jet.
 
 recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     ProviderCtx{fixtures: None, store_dir: roots.hangar_dir(), offline: false, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
 }
 
-// Ported from build_sandbox.rs:1496-1569. The build.rs marker must never be written.
+// The Cargo build-script marker must never be written.
 #Test("Core Cargo refuses before unavailable sandbox can run build script") {
     // Without cargo the build refuses earlier, for the missing toolchain, so
     // the sandbox refusal under test needs cargo present.
@@ -39,7 +38,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:1572-1658. A successful build has a private consumable lease.
+// A successful build has a private consumable lease.
 #Test("Core Cargo build is private and not published to shared cache") {
     if !sys.is_linux() -> return
     // The build runs cargo inside the bubblewrap sandbox.

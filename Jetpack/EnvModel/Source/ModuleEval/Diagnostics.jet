@@ -22,8 +22,8 @@ envmodel_error: fn(code: String, what: String, why: String, fix: String, span: S
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
 }
 
-// E3402 (Rust Sema/Purity.rs `e3402`): ambient I/O or network access
-// attempted during a sandboxed package build or module-value evaluation.
+// E3402: ambient I/O or network access attempted during a sandboxed package
+// build or module-value evaluation.
 envmodel_e3402: fn(call_name: String, span: Span?) -> Diagnostic Never! {
     diagnostic_from_registry("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled", "compute this value at compile time or pass it in as a parameter")
 }

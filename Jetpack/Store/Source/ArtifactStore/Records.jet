@@ -1,4 +1,4 @@
-// Persisted compiler record kinds (Rust crates/jet-store/src/records.rs).
+// Persisted compiler record kinds.
 // Every record uses the one binary record codec. Action kinds are addressed
 // by a caller-computed key (the package check key, the program key, or the
 // compiled-output key). Blob kinds are content addressed: their key is the
@@ -28,7 +28,6 @@ ArtifactRecordKind: enum {
     // Action record under one compile-time constant's evaluation key.
     ComptimeValue
 
-    // Rust records.rs:50.
     schema: fn(self) -> String Never! {
         if self == {
             .PkgCheck -> "jet.pkg-check/v1"
@@ -43,7 +42,6 @@ ArtifactRecordKind: enum {
         }
     }
 
-    // Rust records.rs:64.
     from_schema: fn(schema: String) -> ArtifactRecordKind? Never! {
         loop kind in STORE_ARTIFACT_RECORD_KINDS {
             if kind.schema() == schema -> return Val(kind)
@@ -52,7 +50,7 @@ ArtifactRecordKind: enum {
     }
 
     // True for kinds addressed by a caller key; false for content-addressed
-    // blobs (Rust records.rs:70).
+    // blobs.
     is_action: fn(self) -> Bool Never! {
         if self == {
             .PkgCheck | .Program | .PkgObject | .ItemCheck | .ComptimeValue -> true
@@ -60,8 +58,7 @@ ArtifactRecordKind: enum {
         }
     }
 
-    // The action handle of `key` under this kind: SHA-256 of `schema \0 key`
-    // (Rust records.rs:77).
+    // The action handle of `key` under this kind: SHA-256 of `schema \0 key`.
     action: fn(self, key: String) -> ActionHandle Never! {
         framed := self.schema().bytes()
         framed.push(U8{0})
@@ -70,7 +67,6 @@ ArtifactRecordKind: enum {
     }
 }
 
-// Rust `RecordKind::ALL` (records.rs:38).
 STORE_ARTIFACT_RECORD_KINDS: #run { [ArtifactRecordKind]{
     ArtifactRecordKind.PkgCheck, ArtifactRecordKind.Iface, ArtifactRecordKind.Diags, ArtifactRecordKind.Items,
     ArtifactRecordKind.Body, ArtifactRecordKind.Program, ArtifactRecordKind.PkgObject, ArtifactRecordKind.ItemCheck,
@@ -86,8 +82,7 @@ ArtifactRecordPublication: struct {
 impl ArtifactStore {
     // Publish one record. For a blob kind `key` must be the SHA-256 hex of
     // `bytes`. An action key that already holds different bytes is a
-    // `Conflict`: the same inputs recomputed to a different record
-    // (Rust records.rs:90).
+    // `Conflict`: the same inputs recomputed to a different record.
     put_record: fn(self, kind: ArtifactRecordKind, key: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         if record_open_schema(bytes, kind.schema()).problem == .Val(problem) {
             return Err(ArtifactStoreError.Config("{kind.schema()} record is not publishable: {problem}"))
@@ -99,8 +94,7 @@ impl ArtifactStore {
         }
     }
 
-    // Load one record. A missing, corrupt, or undecodable record is `None`
-    // (Rust records.rs:109).
+    // Load one record. A missing, corrupt, or undecodable record is `None`.
     record: fn(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         bytes: if kind.is_action() -> self.get_action(kind.action(key)) else -> {
             digest: if ArtifactDigest.from_hex(key) == {
@@ -114,9 +108,8 @@ impl ArtifactStore {
         Ok(Val(payload))
     }
 
-    // Load one action record without recording its use; a run that reads
-    // many records records their uses together with `touch_records`
-    // (Rust records.rs:123).
+    // Load one action record without recording its use; a run that reads many
+    // records records their uses together with `touch_records`.
     record_untouched: fn(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         if !kind.is_action() -> return self.record(kind, key)
         bytes: self.get_action_untouched(kind.action(key)) ?? return Ok(None)
@@ -124,8 +117,7 @@ impl ArtifactStore {
         Ok(Val(bytes))
     }
 
-    // Record one use of each action record `keys` names, in one journal
-    // write (Rust records.rs:133).
+    // Record one use of each action record `keys` names, in one journal write.
     touch_records: fn(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Time, Rand]> {
         if !kind.is_action() -> return
         actions := [ActionHandle]{}
@@ -134,8 +126,7 @@ impl ArtifactStore {
     }
 
     // Publish many action records of one kind in one store transaction.
-    // Bytes that do not decode as the kind's schema are skipped
-    // (Rust records.rs:142).
+    // Bytes that do not decode as the kind's schema are skipped.
     put_records: fn(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         if !kind.is_action() -> return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
         actions := [ArtifactActionPublication]{}

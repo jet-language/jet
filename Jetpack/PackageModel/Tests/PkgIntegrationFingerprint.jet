@@ -1,8 +1,6 @@
-// Ported from tests/pkg.rs:2770-2804 over the public lock fingerprint API.
 // PENDING-SEAM(package-tests); no fabricated fingerprint oracle.
 use jet_pkg_model.[pkg_lock_compute_fingerprint]
 
-// Ported from pkg.rs:2770-2775.
 #Test("pkg integration fingerprint_is_deterministic") {
     fp1: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{"sha256-ddeeff"}, "")
     fp2: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{"sha256-ddeeff"}, "")
@@ -10,14 +8,13 @@ use jet_pkg_model.[pkg_lock_compute_fingerprint]
     assert(fp1.starts_with("sha256-"))
 }
 
-// Ported from pkg.rs:2778-2785.
 #Test("pkg integration fingerprint_changes_with_deps") {
     fp1: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "")
     fp2: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{"sha256-ddeeff"}, "")
     assert(fp1 != fp2)
 }
 
-// Ported from pkg.rs:2791-2804; public capability spelling is verbatim.
+// Public capability spelling is verbatim.
 #Test("pkg integration fingerprint_changes_with_capability_digest") {
     fp_read: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "pkg\nscale: fn(v: Vec3)")
     fp_write: pkg_lock_compute_fingerprint("sha256-aabbcc", [String]{}, "pkg\nscale: fn(v: &Vec3)")

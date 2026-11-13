@@ -69,12 +69,11 @@ publication_snapshot_verified_artifact: fn(repo: String, entry: PublicationIndex
     Ok(PublicationArtifactSnapshot{source: snapshot})
 }
 
-// e576819c1 (Source/Publish/Registry.rs:1447-1502,1524-1669,2241-2395) over the
-// held-authority artifact store: the source is snapshotted once, its registry
-// metadata and expected hash are checked on that snapshot, and the artifact is
-// staged in a private sibling, re-hashed and renamed into place. An existing
-// artifact must hold the same bytes. A failure removes the stage and any OCI
-// referrer state this publish created.
+// e576819c1 over the held-authority artifact store: the source is snapshotted
+// once, its registry metadata and expected hash are checked on that snapshot,
+// and the artifact is staged in a private sibling, re-hashed and renamed into
+// place. An existing artifact must hold the same bytes. A failure removes the
+// stage and any OCI referrer state this publish created.
 publication_ensure_real_directory_if_present: fn(path: String, label: String) IOError! -[FS, Env]> {
     if files.stat(path) == {
         .Ok(_) -> publication_ensure_real_directory(path, label)

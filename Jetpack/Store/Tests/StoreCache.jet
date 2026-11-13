@@ -1,6 +1,5 @@
-// Cache verification, quarantine, and lease claims ported from
-// crates/jetpack/src/Store/Tests.rs. Rust released a lease on `drop`; the
-// port releases it explicitly with `lease.release()`.
+// Cache verification, quarantine, and lease claims. A lease is released
+// explicitly with `lease.release()`.
 
 #Test("store cache candidate preflight does not read closure graph") {
     verification := StoreVerification.new()
@@ -561,7 +560,7 @@ store_test_verified_lease: fn(verification: &StoreVerification, roots: HangarRoo
     store_test_drop_roots(roots)
 }
 
-// Reuse.rs:507-545,1014-1093: exercise the real lease/copy/proof chain.
+// Exercise the real lease/copy/proof chain.
 // Native filesystem/handle gates remain #3593/#3594; no provider substitutes.
 #Test("store profile receipt copy and proof preserve native io errors") {
     verification := StoreVerification.new()

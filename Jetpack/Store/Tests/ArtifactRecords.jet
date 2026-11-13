@@ -1,5 +1,4 @@
-// Compiler record kinds, receipts and workspace stamps (Rust jet_store
-// records.rs, receipt.rs and project_state.rs tests).
+// Compiler record kinds, receipts and workspace stamps.
 
 store_records_test_root: fn(label: String) -[Env, Rand]> String {
     token: random.token_hex(8) ?? panic("draw a test store name")
@@ -29,7 +28,6 @@ store_records_test_refused: fn(published: Bool) {
     assert(!published)
 }
 
-// Rust records.rs:173 `records_round_trip_by_kind_and_key`.
 #Test("records round trip by kind and key") {
     root: store_records_test_root("round-trip")
     store: ArtifactStore.new(root) ?? panic("store opens")
@@ -82,7 +80,6 @@ store_records_test_origin: fn(display: String, path: String, source: String) -> 
     DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
 }
 
-// Rust receipt.rs:267 `rich_diagnostic`.
 store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrigin) -> Diagnostic {
     Diagnostic{
         moment: DiagnosticMoment.Compile,
@@ -105,7 +102,6 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
     }
 }
 
-// Rust receipt.rs:312 `receipt_round_trips_typed_diagnostics_through_the_store`.
 #Test("receipt round trips typed diagnostics through the store") {
     root: store_records_test_root("receipt")
     store: ArtifactStore.new(root) ?? panic("store opens")
@@ -145,7 +141,6 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
     files.remove_all(root).drop("test scratch")
 }
 
-// Rust project_state.rs:215 `priors_and_stamps_round_trip_and_rehash_changed_files`.
 #Test("stamps round trip and rehash changed files") {
     root: store_records_test_root("stamps")
     files.create_dir_all(root) ?? panic("create root")

@@ -1,6 +1,6 @@
-// Loader.rs:77-91,237-386,3034-3198. Entry and directory views share the
-// existing inline extractor, Package parser, Config composer and no-follow
-// authority resolver. The caller owns one declaration cache per operation.
+// Entry and directory views share the existing inline extractor, Package
+// parser, Config composer and no-follow authority resolver. The caller owns one
+// declaration cache per operation.
 use {
     jet_foundation.[Span, diagnostic_from_registry]
     jetpack_foundation.[DEFAULT_ENTRY_FILE]
@@ -52,8 +52,8 @@ pkg_entry_read_error: fn(entry: String, error: AuthorityError) -> ManifestError 
     }
 }
 
-// Loader.rs `manifest_path_checked`: only a missing canonical manifest is
-// absence; retired, malformed, linked and unreadable metadata stay errors.
+// Only a missing canonical manifest is absence; retired, malformed, linked and
+// unreadable metadata stay errors.
 pkg_manifest_path_checked: fn(root: String) -[FS, Env]> String? ManifestError! {
     resolver: AuthorityResolver.open(root) ?? {
         if err.is_missing() -> return Ok(None)
@@ -87,14 +87,12 @@ PkgPackageRoots: struct {
     inline: String?
 }
 
-// Loader.rs `find_manifest_root_checked` and, when `inline`,
-// `find_inline_package_root_checked`, in one climb: both walks visit the same
-// directories, so each is opened, and its workspace and manifest resolved,
-// once. Declaration-resolved workspaces stop discovery even when their
-// filenames are not workspace.jet, and a nearer manifest or a checked
-// workspace prevents a parent stock entry from becoming authority. The inline
-// walk ends at or below the manifest walk's end; its failure is reported only
-// when the manifest walk completes without one, as if it ran second.
+// Both walks visit the same directories, so each is opened, and its workspace
+// and manifest resolved, once. Declaration-resolved workspaces stop discovery
+// even when their filenames are not workspace.jet, and a nearer manifest or a
+// checked workspace prevents a parent stock entry from becoming authority. The
+// inline walk ends at or below the manifest walk's end; its failure is reported
+// only when the manifest walk completes without one, as if it ran second.
 pkg_find_package_roots_checked: fn(cache: &WorkspaceDeclarationCache, start: String, inline: Bool) -[FS, Env]> PkgPackageRoots ManifestError! {
     dir := AuthorityResolver.authority_walk_root(start) ?? return Err(pkg_entry_authority_error(err))
     seeking_inline := inline
@@ -163,7 +161,6 @@ pkg_package_roots_found: fn(manifest: String?, inline: String?, inline_error: Ma
     Ok(PkgPackageRoots{manifest: manifest, inline: inline})
 }
 
-// Loader.rs `find_manifest_root_checked`.
 pkg_find_manifest_root_checked: fn(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
     if pkg_find_package_roots_checked(cache, start, false) == {
         .Ok(roots) -> Ok(roots.manifest)
@@ -171,8 +168,8 @@ pkg_find_manifest_root_checked: fn(cache: &WorkspaceDeclarationCache, start: Str
     }
 }
 
-// Loader.rs `checked_inline_package_entry`: run.jet, then src/run.jet. A
-// stock entry with no carrier does not hide the second candidate's carrier.
+// run.jet, then src/run.jet. A stock entry with no carrier does not hide the
+// second candidate's carrier.
 pkg_checked_inline_package_entry: fn(resolver: AuthorityResolver) -[FS, Env]> CheckedFile? ManifestError! {
     candidates: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     loop relative in candidates {
@@ -220,8 +217,7 @@ pkg_entry_load_conventional: fn(root: String) -[FS, Env]> PackageFacts? Manifest
     Ok(Val(facts))
 }
 
-// Loader.rs `package_facts_from_entry_source` and
-// `complete_inline_package_facts`. Never reopen the held entry by pathname.
+// Never reopen the held entry by pathname.
 pkg_package_facts_from_checked_entry: fn(resolver: AuthorityResolver, entry: CheckedFile, origin: String, manifest_root: String?) -[FS, Env]> PackageFacts? ManifestError! {
     resolver.revalidate_file(entry) ?? return Err(pkg_entry_authority_error(err))
     source: entry.text() ?? return Err(pkg_entry_authority_error(err))
@@ -260,8 +256,8 @@ pkg_package_facts_from_checked_entry: fn(resolver: AuthorityResolver, entry: Che
     Ok(loaded)
 }
 
-// Loader.rs `inline_manifest_conflict_loader_error`: retain the stock
-// carrier's whole-block span when a different entry exposed the conflict.
+// Retain the stock carrier's whole-block span when a different entry exposed
+// the conflict.
 pkg_inline_root_conflict: fn(root: String) -[FS, Env]> ManifestError ManifestError! {
     resolver: AuthorityResolver.open(root) ?? return Err(pkg_entry_authority_error(err))
     found: pkg_checked_inline_package_entry(resolver)
@@ -279,9 +275,8 @@ pkg_inline_root_conflict: fn(root: String) -[FS, Env]> ManifestError ManifestErr
     Ok(pkg_inline_manifest_conflict(Val(inline.span)))
 }
 
-// Loader.rs `package_facts_for_root`. The supplied root is the explicit
-// authority boundary; stock inline entry takes precedence only in the
-// absence of a discovered conventional carrier.
+// The supplied root is the explicit authority boundary; stock inline entry
+// takes precedence only in the absence of a discovered conventional carrier.
 pkg_package_facts_for_root: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> PackageFacts? ManifestError! {
     resolver: AuthorityResolver.open(root) ?? return Err(pkg_entry_authority_error(err))
     manifest_root: pkg_find_manifest_root_checked(cache, resolver.root)
@@ -301,8 +296,8 @@ pkg_package_facts_for_root: fn(cache: &WorkspaceDeclarationCache, root: String) 
     Ok(facts)
 }
 
-// Loader.rs `package_facts_for_entry`. A non-stock entry may inherit a
-// parent's stock inline Package only when it has no carrier of its own.
+// A non-stock entry may inherit a parent's stock inline Package only when it
+// has no carrier of its own.
 pkg_package_facts_for_entry: fn(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts? ManifestError! {
     parent: pkg_authority_effective_root(pkg_path_parent(entry))
     resolver: AuthorityResolver.open(parent) ?? return Err(pkg_entry_read_error(entry, err))

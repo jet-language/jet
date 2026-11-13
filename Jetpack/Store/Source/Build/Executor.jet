@@ -1,11 +1,10 @@
-// The sandboxed build executor, ported 1:1 from crates/jet-comptime
-// Build/execution_runtime.rs `execute_build_plan` (front end complete, no
-// remote binding, no compiler runner: the entry `jet cc` / `jet c++` use).
+// The sandboxed build executor (front end complete, no remote binding, no
+// compiler runner: the entry `jet cc` / `jet c++` use).
 // Every action and probe runs through the one native child boundary
 // (Foundation NativeSandbox: Linux Bubblewrap, macOS Seatbelt); there is no
 // unsandboxed fallback. The actions of one batch run at once, each in its
 // own child; every member still runs and the batch reports its first error
-// in action order, as the Rust join does.
+// in action order.
 
 use {
     jet_foundation.[DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, foundation_json_quote]

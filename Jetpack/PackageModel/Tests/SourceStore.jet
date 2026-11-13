@@ -110,19 +110,18 @@ pkg_source_store_test_root: fn(label: String) -[FS, Env]> String Never! {
     files.remove_all(root) ?? panic("fixture cleanup")
 }
 
-// tests/pkg.rs:2811: a store entry is named <name>-<version>-<fingerprint without sha256->.
+// A store entry is named <name>-<version>-<fingerprint without sha256->.
 #Test("store_path_format_name_version_fp") {
     assert_eq(files.basename(pkg_source_store_path("mylib", "1.0.0", "sha256-deadbeef")), "mylib-1.0.0-deadbeef")
 }
 
-// tests/pkg.rs:2821
 #Test("store_path_strips_sha256_prefix") {
     assert_eq(pkg_source_store_path("mylib", "1.0.0", "sha256-deadbeef"), pkg_source_store_path("mylib", "1.0.0", "deadbeef"))
 }
 
-// tests/pkg.rs:3074: a store entry edited after install fails verification
-// with E1204. The entry is written under a held scratch root instead of
-// installing into the user's default store.
+// A store entry edited after install fails verification with E1204. The entry
+// is written under a held scratch root instead of installing into the user's
+// default store.
 #Test("content_hash_mismatch_after_tamper") {
     root: pkg_source_store_test_root("tamper")
     entry: files.join(root, "mylib-0.1.0-bbbb")

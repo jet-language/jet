@@ -954,7 +954,7 @@ sema_marker_rules_menu_candidate: fn(path: String, menu: TAppliedRuleArgumentMen
 }
 
 // A `.Variant` argument is underlined from the rule name; a bare or labeled
-// argument from the `#`, as the Rust checker's snapshots pin.
+// argument from the `#`.
 sema_marker_rules_unknown_variant_error: fn(marker: Marker, menu: TAppliedRuleArgumentMenu, written: String, argument: Expr) -> Diagnostic {
     variants := (loop variant in menu.variants -> "`{variant}`")
     choices := variants.join(", ")
@@ -2023,7 +2023,7 @@ sema_marker_rules_builtin_type: fn(name: String) -> Type? {
 // bare name is read as a value anywhere in the bundle (E0918) needs a real
 // function to point at. Statements count transitively through nested blocks
 // but not through a lambda body, which compiles to its own closure. Only
-// direct self-recursion is checked, exactly as in the Rust checker.
+// direct self-recursion is checked.
 SEMA_INLINE_ALWAYS_MAX_STMTS: 40
 
 SemaInlineAlwaysScan: struct {

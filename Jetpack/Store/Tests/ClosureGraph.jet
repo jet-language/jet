@@ -1,5 +1,4 @@
-// Closure registration claims ported from crates/jetpack/src/Store/Closure.rs
-// (registration_tests).
+// Closure registration claims.
 
 store_test_closure_ingest: fn(verification: &StoreVerification, roots: HangarRoots, name: String, references: [String], payload: String, provenance: String) -> IngestedObject Never! {
     source: files.join(roots.root, "fixture-{name}")
@@ -311,9 +310,8 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     store_test_drop_roots(roots)
 }
 
-// Closure.rs transitive_references/transitive_referrers: pop the pending
-// digest before extending the worklist; cycles exclude the root, shared
-// members are visited once, and the result is sorted.
+// Pop the pending digest before extending the worklist; cycles exclude the
+// root, shared members are visited once, and the result is sorted.
 #Test("store closure walk consumes pending members before following cycles") {
     index: [String: [String]]{
         "root": [String]{"z", "a", "z", "root"},
@@ -330,8 +328,8 @@ store_test_assert_hashed_at_most_once: fn(verification: &StoreVerification, entr
     assert_eq(index["root"], [String]{"z", "a", "z", "root"})
 }
 
-// Closure.rs:2235-2298: all outputs and dependency facts must share the
-// decoded producer without consuming its optional payload per output.
+// All outputs and dependency facts must share the decoded producer without
+// consuming its optional payload per output.
 #Test("store descriptor shares one producer across named outputs and dependencies") {
     verification := StoreVerification.new()
     roots: store_test_temp_roots()

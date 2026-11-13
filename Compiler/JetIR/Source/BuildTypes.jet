@@ -2282,10 +2282,10 @@ ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, l
     dst
 }
 
-// Fixed-width `a.pow(n)` (Rust Prelude jet_pow, the trapping mode): both
-// operands widen to exact Ints, jet_int_pow raises (a negative exponent stops),
-// and jet_int_checked_fixed narrows the power back to the base's width,
-// stopping when it leaves the range as a multiplication does.
+// Fixed-width `a.pow(n)`: both operands widen to exact Ints, jet_int_pow raises
+// (a negative exponent stops), and jet_int_checked_fixed narrows the power back
+// to the base's width, stopping when it leaves the range as a multiplication
+// does.
 ir_fixed_power: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, site: Int, span: Span) -> Int Never! {
     target: b.f.slot_type[left]
     row: m.types[target]

@@ -1,5 +1,5 @@
-// Ported from tests/build_sandbox.rs. These tests invoke the public recipe API,
-// not an adapter: the caller owns the explicit source/output/tools boundary.
+// These tests invoke the public recipe API, not an adapter: the caller owns the
+// explicit source/output/tools boundary.
 // PENDING-SEAM(package-tests): Jetpack/Recipe has no package.jet.
 
 recipe_sandbox_test_restore_env: fn(name: String, previous: String?) -[Env]> {
@@ -30,7 +30,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool, args}}}
 }
 
-// Ported from build_sandbox.rs:209-249. No unavailable-backend success alternative.
+// No unavailable-backend success alternative.
 #Test("build hook does not inherit host credentials") {
     if sys.is_windows() -> return
     if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
@@ -51,7 +51,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:252-307. Every original backend receipt predicate retained.
+// Every original backend receipt predicate retained.
 #Test("native Linux recipe blocks host escape and records backend receipt") {
     if !sys.is_linux() -> return
     _: kit_require_tool("bwrap") ?? return
@@ -75,7 +75,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.remove_all(host_dir).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:310-365. This is the logged production executor.
+// This is the logged production executor.
 #Test("logged recipe sandbox blocks host escape") {
     if !sys.is_linux() -> return
     base: recipe_test_scratch("logged-native-linux")
@@ -101,7 +101,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.remove_all(host_dir).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:376-433. Windows availability is not a skip predicate.
+// Windows availability is not a skip predicate.
 #Test("Windows AppContainer permits declared output and records receipt") {
     if !sys.is_windows() -> return
     base: recipe_test_scratch("native-windows-output")
@@ -129,7 +129,7 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:526-569. Reject the directory link before launch.
+// Reject the directory link before launch.
 #Test("Windows AppContainer rejects a reparse parent before launch") {
     if !sys.is_windows() -> return
     assert_eq(env_detect_sandbox().level, SandboxLevel.Strong)
@@ -149,7 +149,6 @@ recipe_sandbox_test_exec: fn(tool: String, args: [String]) -> BuildRecipe {
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:572-612.
 #Test("Windows AppContainer blocks sibling write before publication") {
     if !sys.is_windows() -> return
     base: recipe_test_scratch("native-windows-escape")
@@ -177,7 +176,6 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:615-661.
 #Test("unavailable Windows AppContainer refuses before recipe tool launch") {
     if !sys.is_windows() -> return
     base: recipe_test_scratch("windows-unavailable")
@@ -186,7 +184,6 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     recipe_sandbox_test_unavailable(base, ctx, [String]{"/C", "echo launched>\"{marker}\" & echo launched>\"%JET_BUILD_OUTPUT%\\marker\""}, "cmd", marker)
 }
 
-// Ported from build_sandbox.rs:855-901.
 #Test("unavailable native backend refuses before recipe tool launch") {
     if !sys.is_linux() -> return
     base: recipe_test_scratch("unavailable")
@@ -195,7 +192,7 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     recipe_sandbox_test_unavailable(base, ctx, [String]{"-c", "printf launched > '{marker}'; printf launched > \"$JET_BUILD_OUTPUT/marker\""}, "sh", marker)
 }
 
-// Ported from build_sandbox.rs:904-958. Keep the executor failure, not validation failure.
+// Keep the executor failure, not validation failure.
 #Test("failed recipe preserves previous output and removes partial stage") {
     if sys.is_windows() -> return
     if sys.is_linux() { _: kit_require_tool("bwrap") ?? return }
@@ -216,7 +213,6 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:999-1039.
 #Test("macOS native sandbox records Seatbelt policy") {
     if !sys.is_macos() -> return
     base: recipe_test_scratch("macos-receipt")
@@ -231,7 +227,6 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:1042-1082.
 #Test("unavailable macOS backend refuses before recipe tool launch") {
     if !sys.is_macos() -> return
     base: recipe_test_scratch("macos-unavailable")
@@ -240,7 +235,6 @@ recipe_sandbox_test_unavailable: fn(base: String, ctx: RecipeBuildContext, args:
     recipe_sandbox_test_unavailable(base, ctx, [String]{"-c", "printf launched > '{marker}'"}, "bash", marker)
 }
 
-// Ported from build_sandbox.rs:961-996 (shared attack helper).
 recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env, Exec, Net, Rand, Time.Wait]> {
     base: recipe_test_scratch(label)
     ctx: recipe_sandbox_test_ctx(base, "bash", "/bin/bash")
@@ -254,19 +248,16 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:1084-1091.
 #Test("macOS native sandbox blocks host read") {
     if !sys.is_macos() -> return
     recipe_sandbox_test_macos_attack("macos-host-read", "if IFS= read -r value < \"{{HOST}}\"; then printf '%s' \"$value\" > \"{{OUTSIDE}}\"; exit 0; else exit 77; fi")
 }
 
-// Ported from build_sandbox.rs:1093-1100.
 #Test("macOS native sandbox blocks sibling write") {
     if !sys.is_macos() -> return
     recipe_sandbox_test_macos_attack("macos-sibling-write", "if printf escape > \"{{OUTSIDE}}\"; then exit 0; else exit 77; fi")
 }
 
-// Ported from build_sandbox.rs:1102-1139.
 #Test("macOS native sandbox blocks source symlink escape") {
     if !sys.is_macos() -> return
     base: recipe_test_scratch("macos-symlink")
@@ -282,7 +273,7 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
     files.remove_all(base).drop("test cleanup")
 }
 
-// Ported from build_sandbox.rs:1142-1160; each attack is a separate recipe invocation.
+// Each attack is a separate recipe invocation.
 #Test("macOS native sandbox blocks undeclared process network and device") {
     if !sys.is_macos() -> return
     recipe_sandbox_test_macos_attack("macos-process", "if /bin/echo escaped >/dev/null; then exit 0; else exit 77; fi")
@@ -290,7 +281,7 @@ recipe_sandbox_test_macos_attack: fn(label: String, template: String) -[FS, Env,
     recipe_sandbox_test_macos_attack("macos-device", "if test -r /dev/zero; then exit 0; else exit 77; fi")
 }
 
-// Ported from build_sandbox.rs:33-52; retain the original manifest bytes and rewrite count.
+// Retain the original manifest bytes and rewrite count.
 #Test("sandbox target manifest runs") {
     source: "\nname: \"mathkit\"\nversion: \"0.1.0\"\npackages: {{\n    mathkit: sandbox {{ export: \"mathkit\" }},\n}}\n"
     facts: PackageFacts.parse(source, "package.jet") ?? panic("sandbox target manifest should parse")

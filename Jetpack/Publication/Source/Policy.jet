@@ -1,4 +1,4 @@
-// Source/Publish/Policy.rs: package metadata evidence before Hangar ingest.
+// Package metadata evidence before Hangar ingest.
 // SPDX operators bind WITH > AND > OR. Identifiers include WITH exceptions.
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
@@ -259,7 +259,7 @@ publication_matching_source_rule: fn(rules: [PolicySourceMap], package: String) 
     winner
 }
 
-// Tier.rs:233-309. Signature errors close the gate, never bypass it.
+// Signature errors close the gate, never bypass it.
 // Native closure retains #3593 filesystem/error variants and #3598 parser
 // providers; canonical Lock Parse codec fallible defaults retain #4326.
 publication_community_gate_status: fn(project_root: String, all_entries: [PublicationIndexEntry], candidate: PublicationIndexEntry, registry_name: String, live_signature_chain: Bool, name_policy: PublicationNamePolicyDecision) -[FS, Env, Time]> PublicationGateStatus Never! {
@@ -281,7 +281,7 @@ publication_advisory_gate_status: fn(project_root: String) -[FS, Env, Time]> Pub
     report: publication_audit_advisory_feed(lock, feed, trust, publication_advisory_now()) ?? return PublicationGateState.Blocked
     if report.matches.len() == 0 && report.maturity.len() == 0 -> PublicationGateState.Passed else -> PublicationGateState.Blocked
 }
-// Canonical community refusal MOVE from Registry/Verify: Tier.rs:257-273.
+// The canonical community-tier refusal.
 publication_community_gate_error: fn(package: String, version: String, status: PublicationGateStatus) -> Diagnostic Never! {
     reasons: publication_blocked_reasons(status).join(", ")
     required: "#935 live signature chain, #431 advisory audit, #1912 name policy, #1913 maintainer liveness"

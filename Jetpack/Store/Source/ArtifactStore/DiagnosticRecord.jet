@@ -1,4 +1,4 @@
-// Typed diagnostics as record values (Rust crates/jet-store/src/diagnostic_record.rs).
+// Typed diagnostics as record values.
 // The Receipt and the per-package `jet.diags` record carry diagnostics in
 // this one encoding. Every field keeps its type (code, severity, spans,
 // origins, fixes, causes) so each invocation renders them for its own
@@ -37,17 +37,15 @@ store_diagnostic_error: fn(message: String) -> StoreDiagnosticRecordError Never!
     StoreDiagnosticRecordError{message: message}
 }
 
-// The two record sections one diagnostic list encodes to
-// (Rust diagnostic_record.rs:23 `DiagnosticSections`).
+// The two record sections one diagnostic list encodes to.
 StoreDiagnosticSections: struct {
     origins: [RecordValue]
     diagnostics: [RecordValue]
 }
 
-// Encode diagnostics. `closure_revisions` holds the source revisions the
-// reader can resolve itself. A diagnostic payload the codec does not carry is
-// an error; the caller then leaves the result unrecorded
-// (Rust diagnostic_record.rs:31 `encode_diagnostics`).
+// Encode diagnostics. `closure_revisions` holds the source revisions the reader
+// can resolve itself. A diagnostic payload the codec does not carry is an
+// error; the caller then leaves the result unrecorded.
 store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [String]) -> StoreDiagnosticSections StoreDiagnosticRecordError! {
     table := [DiagnosticOrigin]{}
     encoded := [RecordValue]{}
@@ -65,10 +63,9 @@ store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [Stri
     Ok(StoreDiagnosticSections{origins: origins, diagnostics: encoded})
 }
 
-// Decode diagnostics. `source_for_revision` returns the exact source text for
-// a revision in the caller's current closure; an origin it cannot resolve
-// makes the whole list undecodable (a miss, never a replay against different
-// bytes) (Rust diagnostic_record.rs:67 `decode_diagnostics`).
+// Decode diagnostics. `source_for_revision` returns the exact source text for a
+// revision in the caller's current closure; an origin it cannot resolve makes
+// the whole list undecodable (a miss, never a replay against different bytes).
 store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue], source_for_revision: fn(String) -> String?) -> [Diagnostic] StoreDiagnosticRecordError! {
     table := [DiagnosticOrigin]{}
     loop origin in origins {
@@ -88,8 +85,7 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
     Ok(out)
 }
 
-// Rust diagnostic_record.rs:100 `OriginTable::index`: one row per distinct
-// origin value.
+// One row per distinct origin value.
 store_diagnostic_origin_index: fn(origin: DiagnosticOrigin?, table: &[DiagnosticOrigin]) -> RecordValue Never! {
     value: origin ?? return RecordValue.Null
     loop (index, existing) in table {
@@ -150,7 +146,6 @@ store_diagnostic_parse_applicability: fn(value: String) -> DiagnosticFixApplicab
     }
 }
 
-// Rust Report.rs `FixSafety::as_str`.
 store_diagnostic_safety_name: fn(safety: DiagnosticFixSafety) -> String Never! {
     if safety == {
         .Formatting -> "formatting"
@@ -176,7 +171,6 @@ store_diagnostic_no_fix_kind_name: fn(kind: DiagnosticNoFixReasonKind) -> String
     }
 }
 
-// Rust Report.rs `NoFixReason::try_new` over `NoFixReasonKind::parse`.
 store_diagnostic_parse_no_fix: fn(kind: String, next: String) -> DiagnosticNoFixReason StoreDiagnosticRecordError! {
     parsed: if kind == {
         "behavior" -> DiagnosticNoFixReasonKind.Behavior
@@ -194,7 +188,6 @@ STORE_DIAGNOSTIC_CRYPTO_REASONS: #run { [DiagnosticCryptoMisuseReason]{
     .LaneCount, .MemoryTimeCost, .RawNonce, .RawAlgorithm, .DeterministicEntropy,
 } }
 
-// Rust diagnostic_record.rs:176 `crypto_reason_name`.
 store_diagnostic_crypto_name: fn(reason: DiagnosticCryptoMisuseReason) -> String Never! {
     if reason == {
         .InvalidLength -> "invalid_length"
@@ -264,7 +257,6 @@ store_diagnostic_build_error: fn(report: JetErrorReport) -> DiagnosticBuildError
     DiagnosticBuildError{code: report.code, message: report.message, typed_identity: report.typed_identity, causes: causes, context_frames: frames, source_journey: journey, conversion_history: conversions, details: details}
 }
 
-// Rust diagnostic_record.rs:218 `encode_structured`.
 store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue Never! {
     if structured == {
         .SuggestedEdits(edits) -> {
@@ -297,7 +289,6 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
     }
 }
 
-// Rust diagnostic_record.rs:250 `encode_diagnostic`.
 store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
     labels := [RecordValue]{}
     loop label in diagnostic.labels {
@@ -375,7 +366,6 @@ store_diagnostic_strings: fn(value: RecordValue, name: String) -> [String] Store
     Ok(decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "record field `{name}` is not a string list")))
 }
 
-// Rust diagnostic_record.rs:356 `decode_span`.
 store_diagnostic_decode_span: fn(value: RecordValue) -> Span StoreDiagnosticRecordError! {
     decoded: record_value_as_list(value)
     pair: decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "diagnostic span must be a [start, end] pair"))
@@ -388,7 +378,6 @@ store_diagnostic_decode_optional_span: fn(value: RecordValue) -> Span? StoreDiag
     Ok(Val(store_diagnostic_decode_span(value)))
 }
 
-// Rust diagnostic_record.rs:371 `decode_origin`.
 store_diagnostic_decode_origin: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> DiagnosticOrigin? StoreDiagnosticRecordError! {
     if record_value_is_null(value) -> return Ok(None)
     index: store_diagnostic_offset(value)
@@ -400,7 +389,6 @@ store_diagnostic_decode_edit: fn(value: RecordValue) -> TextEdit StoreDiagnostic
     Ok(TextEdit{span: store_diagnostic_decode_span(store_diagnostic_field(value, "span")), new_text: store_diagnostic_text(value, "text")})
 }
 
-// Rust diagnostic_record.rs:392 `decode_structured`.
 store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructured StoreDiagnosticRecordError! {
     kind: store_diagnostic_text(value, "kind")
     if kind == {
@@ -430,7 +418,6 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
     }
 }
 
-// Rust diagnostic_record.rs:422 `decode_diagnostic`.
 store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> Diagnostic StoreDiagnosticRecordError! {
     labels := [DiagnosticLabel]{}
     loop label in store_diagnostic_list(value, "labels") {

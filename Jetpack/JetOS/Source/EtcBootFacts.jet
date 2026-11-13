@@ -1,6 +1,6 @@
-// Rust crates/jetpack/src/JetOS/etc_boot_facts.rs. Native generation writes
-// require canonical RootProjection/StoreRealize (#4262); no copier or realized
-// package substitute lives here. Compiler protocol JSON integration is #4262.
+// Native generation writes require canonical RootProjection/StoreRealize
+// (#4262); no copier or realized package substitute lives here. Compiler
+// protocol JSON integration is #4262.
 jetos_write_etc_tree: fn(dir: String, system: SystemPlan) IOError! -[FS]> {
     etc: files.join(dir, "etc")
     files.create_dir_all(etc)
@@ -149,8 +149,8 @@ jetos_kernel_package_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
     ])
 }
 
-// Rust kernel_source_json: original_output() is store_realize.rs:55-57's
-// original_out, NEVER the lease projection or consumption_override.
+// The kernel source names the package's original output, NEVER the lease
+// projection or consumption_override.
 jetos_kernel_source_dyn: fn(entry: JetOSRealizedPackage) -[FS]> Dyn Never! {
     out: entry.original_output()
     facts: [(name: String, relative: String)]{
@@ -191,13 +191,13 @@ jetos_missing_kernel_source_files: fn(entry: JetOSRealizedPackage) -[FS, Env, Ra
     None
 }
 
-// Rust write_boot_facts: copy_file_replace is the canonical RootProjection
-// service (#4262/#3593), never a private copy_kernel or weakened byte copier.
-// Required root_projection.rs:100-105 contract: best-effort remove destination,
-// native fs::copy preserving source permissions without creating parents, then
-// metadata/set_readonly(false)/set_permissions with their actual IO failures.
-// Core files.copy2 cannot provide this contract; its byte-only auto-parent
-// behavior must not be substituted while the canonical provider is #3593.
+// copy_file_replace is the canonical RootProjection service (#4262/#3593),
+// never a private copy_kernel or weakened byte copier. Its contract: a
+// best-effort remove of the destination, a native copy preserving source
+// permissions without creating parents, then metadata, set_readonly(false)
+// and set_permissions with their actual IO failures. Core files.copy2 cannot
+// provide this contract; its byte-only auto-parent behavior must not be
+// substituted while the canonical provider is #3593.
 jetos_write_boot_facts: fn(dir: String, system: SystemPlan, realized: [JetOSRealizedPackage]) IOError! -[FS, Env, Rand]> {
     boot: jetos_boot_profile(system)
     boot_dir: files.join(dir, "boot")
@@ -245,9 +245,8 @@ jetos_write_boot_payload: fn(boot_dir: String, system: SystemPlan, boot: JetOSBo
     }
 }
 
-// root_projection.rs copy_file_replace: best-effort removal of the
-// destination, a native copy that never creates parents, then the source's
-// permission bits with the write bits set (Rust `set_readonly(false)`).
+// Best-effort removal of the destination, a native copy that never creates
+// parents, then the source's permission bits with the write bits set.
 jetos_copy_file_replace: fn(source: String, destination: String) IOError! -[FS]> {
     if files.remove(destination) == {
         .Ok(_) -> {}

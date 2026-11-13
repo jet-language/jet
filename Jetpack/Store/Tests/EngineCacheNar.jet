@@ -13,7 +13,6 @@ engine_cache_nar_regular_entry: fn(out: &[U8], name: String) {
     loop field in fields -> engine_cache_nar_string(out, field)
 }
 
-// ported from jetpack_engine.rs:1168-1252
 #Test("binary_cache_nar_codec_rejects_noncanonical_and_malicious_input") {
     nar := [U8]{}
     fields: [String]{"nix-archive-1", "(", "type", "regular", "contents", "payload", "executable", "", ")"}
@@ -47,7 +46,6 @@ engine_cache_nar_regular_entry: fn(out: &[U8], name: String) {
     files.remove_all(destination).drop("destination cleanup")
 }
 
-// ported from jetpack_engine.rs:1254-1275
 #Test("binary_cache_narinfo_reads_standard_uncompressed_fields") {
     hash: store_nar_digest("payload".bytes())
     reference: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tool"
