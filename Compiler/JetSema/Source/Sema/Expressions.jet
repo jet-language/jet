@@ -3072,7 +3072,8 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
             owner_signature: sema_type_resolve_declared_with_generics(graph, function.signature, graph.modules[owner_index].module_identity, generics)
             method_signature: sema_inference_substitute_type_bindings(owner_signature, owner_inference.substitutions)
             method_ref := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-            candidate: sema_call_method_candidate_from_registration(method_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, type_args, span, diagnostics) ?? next
+            method_type_args: sema_expr_restated_type_args(function.generic_params, owner_inference.substitutions, type_args)
+            candidate: sema_call_method_candidate_from_registration(method_signature, function.generic_params, program.registration_graph, caller_module, caller_package, environment.generic_params, Val(owner_type), function.parameters[0].convention, 1, method_ref, method_type_args, span, diagnostics) ?? next
             if function.impl_conditions.len() > 0 -> sema_expr_impl_conditions_check(graph, function, owner_inference.substitutions, environment.generic_params, span, diagnostics)
             candidates.push(candidate)
         }
@@ -3083,6 +3084,23 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     }
     if !found_owner -> return sema_call_local_method_candidates(environment, program, method, owner_type_args, type_args)
     candidates
+}
+
+// The type arguments of a method call whose method's type parameters each
+// restate one of its owner's (a generated codec's `encode<T: Encode>` on
+// `Boxed<T>`): the receiver's arguments, as if the call wrote
+// `row.encode<Item>()`, so the method's bounds are checked against them.
+// The signature already reads a restated parameter as the owner's. The
+// written arguments stand when the call writes some or the method declares
+// a parameter of its own.
+sema_expr_restated_type_args: fn(params: [SemaRegistrationGenericParam], owner: [SemaInferenceBinding], written: [Type]) -> [Type] Never! {
+    if written.len() > 0 || params.len() == 0 -> return written.copy()
+    args := [Type]{}
+    loop param in params {
+        binding: sema_inference_binding_at(owner, param.name) ?? return written.copy()
+        args.push(binding.ty.copy())
+    }
+    args
 }
 
 // A method of a conditional impl answers only where the receiver's type

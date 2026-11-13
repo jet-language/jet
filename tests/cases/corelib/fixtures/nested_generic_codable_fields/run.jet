@@ -1,0 +1,34 @@
+// A derived codec whose fields are generic structs: `Boxed<Item>` carries
+// its argument on the wire, `Slot<Item>` only names it (a phantom
+// parameter). Both encode through the field's own derived codec and decode
+// back.
+use json: core.encoding.json
+
+#Codable
+Boxed: struct<T> {
+    value: T
+}
+
+#Codable
+Slot: struct<T> {
+    slot: U32
+}
+
+#Codable
+Item: struct {
+    name: String
+}
+
+#Codable
+Holder: struct {
+    boxed: Boxed<Item>
+    slot: Slot<Item>
+}
+
+run: fn() {
+    holder: Holder{boxed: Boxed<Item>{value: Item{name: "a"}}, slot: Slot<Item>{slot: 3}}
+    text: json.to_string(holder) ?? panic("encode: {err}")
+    print(text)
+    back: json.decode<Holder>(text) ?? panic("decode failed")
+    print("{back.boxed.value.name} {back.slot.slot}")
+}

@@ -1,0 +1,13 @@
+# A derived codec whose fields are generic structs, one carrying its type
+# argument on the wire and one phantom, encodes each field through the
+# field's own derived codec and decodes back, at every optimization level.
+fixture: fixtures/nested_generic_codable_fields
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "{\"boxed\":{\"value\":{\"name\":\"a\"}},\"slot\":{\"slot\":3}}\na 3\n"
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "{\"boxed\":{\"value\":{\"name\":\"a\"}},\"slot\":{\"slot\":3}}\na 3\n"
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "{\"boxed\":{\"value\":{\"name\":\"a\"}},\"slot\":{\"slot\":3}}\na 3\n"
