@@ -1,0 +1,26 @@
+// A derive reads a reflected method's facts through `reflect()` while it
+// expands, as the type's own facts are read.
+MethodFacts: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            method: info.methods[0].name
+            effects: info.methods[0].reflect().effects.values.len()
+            sendable: info.methods[0].reflect().sendability.known
+            method_facts: fn(self) -> String { "{method}:{effects}:{sendable}" }
+        }
+    }
+}
+
+#MethodFacts
+Report: struct {
+    label: String
+
+    show: fn(self) -> String { self.label.copy() }
+}
+
+run: fn() {
+    print(Report{label: "r"}.method_facts())
+}

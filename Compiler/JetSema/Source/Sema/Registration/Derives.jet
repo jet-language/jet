@@ -271,7 +271,9 @@ sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -
                 .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Closure(_) -> None
             }
         }
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> CtValue?{None}
+        // `value == None` and `value == .Name` read as pattern tests.
+        .PatternTest(subject, pattern, _, _) -> sema_derive_static_pattern_test(expansion, subject, pattern)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> CtValue?{None}
     }
 }
 
@@ -304,6 +306,34 @@ sema_derive_ct_absent: fn(value: CtValue) -> Bool? Never! {
         .Failed(_) -> Val(true)
         .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .Str(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Unit | .Closure(_) -> None
     }
+}
+
+// Whether `value` is a scalar a literal spells exactly.
+sema_derive_ct_scalar: fn(value: CtValue) -> Bool Never! {
+    if value == {
+        .Int(_) | .Bool(_) | .Str(_) | .Char(_) -> true
+        .Float(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> false
+    }
+}
+
+// `value == None` over a known-time Option is whether it is absent;
+// `value == .Name` over a known-time unit variant compares the variant (a
+// written owner `Kind.Name` must agree with the value's).
+sema_derive_static_pattern_test: fn(expansion: SemaDeriveExpansion, subject: Expr, pattern: Pattern) -> CtValue? Never! {
+    if pattern == .Variant(variant, bindings, _, _) {
+        if bindings.len() != 0 -> return None
+        value: sema_derive_static_value(expansion, subject) ?? return None
+        if variant == "None" {
+            missing: sema_derive_ct_absent(value) ?? return None
+            return Val(CtValue.Bool{value: missing})
+        }
+        parts: variant.split(".").to_list()
+        owner: if parts.len() > 1 -> parts[parts.len() - 2].copy() else -> ""
+        written: CtValue.Enum{type_name: owner, variant: parts[parts.len() - 1].copy(), args: [CtEnumArg]{}}
+        equal: sema_derive_ct_scalar_equal(value, written) ?? return None
+        return Val(CtValue.Bool{value: equal})
+    }
+    None
 }
 
 sema_derive_static_length: fn(owner: CtValue) -> CtValue? Never! {
@@ -471,8 +501,13 @@ sema_derive_named_row: fn(owner: CtValue, rows: String, name: String) -> CtValue
 
 // `handle.reflect().read` over a reflected handle without a direct
 // field reads the handle's homed fact row of that name; the fact value keeps
-// its detail under the same name.
+// its detail under the same name. A callable's `effects` is the EffectInfo
+// its signature carries.
 sema_derive_fact_read: fn(owner: CtValue, read: String) -> CtValue? Never! {
+    if read == "effects" {
+        signature: sema_derive_struct_field(owner, "signature") ?? return None
+        return sema_derive_struct_field(signature, "effects")
+    }
     fact: sema_derive_named_row(owner, "facts", read) ?? return None
     value: sema_derive_struct_field(fact, "value") ?? return None
     if sema_derive_struct_field(value, read) == .Val(.Present(detail)) -> return Val(detail)
@@ -1038,6 +1073,13 @@ sema_derive_expand_expr_node: fn(expansion: &SemaDeriveExpansion, expression: Ex
                 folded: sema_derive_reflect_literal(expansion, receiver, method_span)
                 if folded == .Val(literal) -> return literal
             }
+            // A known-time scalar read (`m.signature.params.len()`) is its
+            // literal.
+            if sema_derive_static_method(expansion, receiver, method, args) == .Val(value) {
+                if sema_derive_ct_scalar(value) {
+                    if sema_derive_literal_expr(value, method_span) == .Val(literal) -> return literal
+                }
+            }
             return Expr.MethodCall{receiver: sema_derive_expand_expr(expansion, receiver), method: sema_derive_expand_name(expansion, method, method_span), method_span: method_span, owner_type_args: sema_derive_expand_types(expansion, owner_type_args), type_args: sema_derive_expand_types(expansion, type_args), args: sema_derive_expand_call_args(expansion, args), id: node}
         }
         .OptMethodCall(receiver, method, method_span, type_args, args, span, node) -> return Expr.OptMethodCall{receiver: sema_derive_expand_expr(expansion, receiver), method: sema_derive_expand_name(expansion, method, method_span), method_span: method_span, type_args: sema_derive_expand_types(expansion, type_args), args: sema_derive_expand_call_args(expansion, args), span: span, id: node}
@@ -1154,12 +1196,11 @@ sema_derive_expand_field: fn(expansion: &SemaDeriveExpansion, base: Expr, member
         }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
-    // `left.index` over a reflected template value is that value's literal.
-    if binding == .Val(name) {
-        if sema_derive_scope_index(expansion, name) == .Val(owner_index) {
-            if sema_derive_struct_field(expansion.scope[owner_index].value, member) == .Val(value) {
-                if sema_derive_literal_expr(value, span) == .Val(literal) -> return literal
-            }
+    // `left.index` over a known-time template value (`f.type.name` too) is
+    // that value's literal.
+    if sema_derive_static_value(expansion, base) == .Val(owner) {
+        if sema_derive_struct_field(owner, member) == .Val(value) {
+            if sema_derive_literal_expr(value, span) == .Val(literal) -> return literal
         }
     }
     // A pasted member `x.#{name}` splices its binding; any other member stays
