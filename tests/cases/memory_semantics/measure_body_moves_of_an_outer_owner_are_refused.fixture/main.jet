@@ -1,0 +1,40 @@
+consume: fn(&&s: String) -> Int {
+    s.len()
+}
+
+run: fn() {
+    print("run")
+}
+
+// `.measure` runs its body over and over: the second run would move a value
+// the first already gave away.
+#Test("a measured body moves an outer owner") {
+    s: "abc".repeat(3)
+    .measure {
+        assert_eq(consume(s.move()), 9)
+    }
+}
+
+// An owner the body declares is a new one on every run.
+#Test("a measured body moves its own owner") {
+    .measure {
+        s: "abc".repeat(3)
+        assert_eq(consume(s.move()), 9)
+    }
+}
+
+// A copy leaves the outer owner standing for the next run.
+#Test("a measured body moves a copy of an outer owner") {
+    s: "abc".repeat(3)
+    .measure {
+        assert_eq(consume(s.copy()), 9)
+    }
+}
+
+// Reading an outer owner moves nothing.
+#Test("a measured body reads an outer owner") {
+    s: "abc".repeat(3)
+    .measure {
+        assert_eq(s.len(), 9)
+    }
+}

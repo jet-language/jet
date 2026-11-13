@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `s` was consumed by `consume`, so it can't be used here
+  --> tests/ui/measure_move_reuse_next_run.jet:14:27
+    |
+ 14 |         assert_eq(consume(s.move()), 9)
+    |                           ^
+  --> tests/ui/measure_move_reuse_next_run.jet:14:27
+    |
+ 14 |         assert_eq(consume(s.move()), 9)
+    |                           ^ `s` moved to `consume` here on an earlier loop iteration
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `s` after the move, or give `consume` a copy with `s.copy()` where it moved.
+More: jet-lang.dev/e/E0121

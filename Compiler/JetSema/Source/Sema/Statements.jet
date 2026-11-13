@@ -6975,7 +6975,16 @@ sema_stmt_check_scope_member: fn(name: String, args: [Expr], args_span: Span?, b
         }
         else -> {}
     }
+    // `.measure` runs its body over and over, as a loop runs its body: a move
+    // of a binding declared outside it, still standing where the body ends,
+    // gives the value away again on the next run (the loop's back-edge rule).
+    repeats: name == "measure"
+    moved_before: if repeats -> state.moved.copy() else -> [SemaOwnershipMovedPlace]{}
+    entry_depth: state.scope_depth
     nested := if name == "setup" -> sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "scope-member@{span.start}", loop_depth)
+    if repeats && nested.complete && sema_stmt_tree_block_can_fall_through(nested.value) {
+        sema_ownership_check_loop_move_backedge(state, SemaLoopValueFrame{label: None, kind: SemaLoopValueKind.Effect, ty: None, moved_before: moved_before, scope_depth: entry_depth}, diagnostics)
+    }
     if !nested.complete || kind == None -> return None
     member: kind ?? return None
     Val(TStmt.ScopeMember{kind: member, body: nested.value, span: span})

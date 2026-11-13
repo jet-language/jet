@@ -1,0 +1,16 @@
+// E0121: a `.measure` body runs over and over, so a move of a binding declared
+// outside it moves the value again on the next run, as in a loop body.
+consume: fn(&&s: String) -> Int {
+    s.len()
+}
+
+run: fn() {
+    print("run")
+}
+
+#Test("a measured body moves an outer owner") {
+    s: "abc".repeat(3)
+    .measure {
+        assert_eq(consume(s.move()), 9)
+    }
+}

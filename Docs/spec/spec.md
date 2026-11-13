@@ -4905,6 +4905,9 @@ but only `jet test` executes them. (D-DOTSCOPE1)
   the region. A first `.skip` skips the entire claim; a later one skips only
   its region.
 - `.measure { ... }` marks the containing claim for the measurement harness.
+  The harness runs the region many times, so it is checked as a loop body:
+  moving a binding declared outside it is E0121 at the move, as a move a
+  `loop` body repeats is.
 
 `jet new <name>` creates a new simple project directory and refuses an existing
 path. It writes `package.jet`, a print-only `run.jet` with one test claim, a
