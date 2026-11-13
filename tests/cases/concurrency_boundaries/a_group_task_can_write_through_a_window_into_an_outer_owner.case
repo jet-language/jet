@@ -1,0 +1,36 @@
+# A task in a `task.group` may capture a read view or a write window into
+# storage whose owner outlives the group. The capture is a loan held until the
+# join: tasks writing disjoint windows (split_write halves, constant ranges)
+# run and their writes reach the owner on every tier. Two tasks holding one
+# written window, or a read of the owner inside the group, are refused.
+fixture: a_group_task_can_write_through_a_window_into_an_outer_owner.fixture
+env: NO_COLOR=1
+step split_o0: jet run --optimize=none split.jet
+exit: 0
+stdout: = "6\n"
+step split_o1: jet run --optimize=basic split.jet
+exit: 0
+stdout: = "6\n"
+step split_o2: jet run --optimize=full split.jet
+exit: 0
+stdout: = "6\n"
+step ranges_o0: jet run --optimize=none ranges.jet
+exit: 0
+stdout: = "6\n"
+step ranges_o2: jet run --optimize=full ranges.jet
+exit: 0
+stdout: = "6\n"
+step read_o0: jet run --optimize=none read.jet
+exit: 0
+stdout: = "10\n1\n"
+step read_o2: jet run --optimize=full read.jet
+exit: 0
+stdout: = "10\n1\n"
+step overlap: jet check overlap.jet
+exit: 1
+stderr: ~ "Error [jet.ConcurrentCaptureNotOwned]: `a` is already lent to another task" # the second task is refused; the snapshot is tests/ui/taskgroup_window_lent_to_two_writing_tasks
+stderr: ~ "overlap.jet:6:21" # at the second task
+step owner: jet check owner.jet
+exit: 1
+stderr: ~ "cannot be read while `a` is lent to a task in `g`" # the parent read is refused; the snapshot is tests/ui/taskgroup_window_owner_read_inside_group
+stderr: ~ "owner.jet:6:16" # at the index read of the owner

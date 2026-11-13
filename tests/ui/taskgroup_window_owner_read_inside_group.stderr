@@ -1,0 +1,8 @@
+Error [jet.ConcurrentCaptureNotOwned]: `v[…]` cannot be read while `a` is lent to a task in `g`
+  --> tests/ui/taskgroup_window_owner_read_inside_group.jet:6:16
+    |
+  6 |         print(v[0])
+    |                ^^^
+ Why: `a` is an exclusive write borrow held by a running child, so reading `v[…]` here would race that task's writes
+ Fix: Read `v[…]` after the `g` block ends, give it away with `task &&a`, freeze it with `freeze`, or share it with `Shared{…}`
+More: jet-lang.dev/e/E1101

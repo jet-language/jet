@@ -530,11 +530,21 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
         borrowed := Bool?{None}
+        // A view or write window cannot be copied, but a `task.group` child
+        // that does not move it borrows the place it looks into until the
+        // join, as it borrows any other place.
+        window_element := Type?{None}
+        if taken && !frozen && !sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source) -> window_element = sema_taskgroup_view_element(capture.ty)
         // A read window the body materializes still names the place it lends
         // from, so a `task.group` child borrows that place like Rust's
         // `admit_scoped_borrow`, which runs before any view materialization.
-        if !taken && !frozen {
+        if (!taken || window_element != None) && !frozen {
             borrowed = sema_taskgroup_admit_capture_borrow(capture, lambda.capture_facts, span, scopes, state, context, diagnostics)
+        }
+        // The task reaches a lent window's elements, so they must be sendable.
+        if borrowed == (Val(true)) && window_element == .Val(element) {
+            element_problem: sema_ownership_crossing_problem(element, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context)
+            if element_problem == .Val(value) -> diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, element, value, SemaSendCrossing.TaskCapture, span))
         }
         // A scoped `task.group` borrow is admitted, but a detached task could
         // outlive it (Rust `view_borrow_escape_tasks`).
@@ -579,6 +589,15 @@ sema_taskgroup_shared_capture: fn(ty: Type) -> Bool Never! {
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     shared || sema_function_reactive_handle_type(ty) || sema_cell_guard_contained(ty)
+}
+
+// The element type of a `View<T>` or `ViewMut<T>` capture.
+sema_taskgroup_view_element: fn(ty: Type) -> Type? Never! {
+    if ty == .Apply(name, args) {
+        // copy: the element is a payload of read parameter `ty`; the Val carrier owns this one
+        if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
 }
 
 sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {

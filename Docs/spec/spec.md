@@ -3905,6 +3905,13 @@ write borrows require a proof of non-overlap. Distinct fields and distinct
 constant indexes are disjoint, while dynamic places are overlapping. Two
 children reaching one place report **E1101**.
 
+A view or write window whose owner outlives the group is borrowed the same
+way: a child that captures it holds a loan on the place it looks into until
+the join, and its elements must be sendable. The halves of `split_write` and
+windows over constant ranges that do not meet are disjoint. Two children
+holding one written window, or a parent read of the lent place inside the
+group, report **E1101** (D-TASK-WINDOW1=A).
+
 An owner declared inside the group drops before the group can join it, and a
 `Group` passed as a parameter joins in another frame; both cases report
 **E1102**. Channels and task bodies still require sendable owned values

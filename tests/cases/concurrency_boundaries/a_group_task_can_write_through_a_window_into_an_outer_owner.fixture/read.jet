@@ -1,0 +1,11 @@
+run: fn() {
+    v := [Int]{1, 2, 3, 4}
+    task.group g {
+        a: v[0..<2]
+        b: v[2..<4]
+        left: task { a[0] + a[1] }
+        right: task { b[0] + b[1] }
+        print((left.join() ?? 0) + (right.join() ?? 0))
+    }
+    print(v[0])
+}

@@ -1,0 +1,8 @@
+Error [jet.ConcurrentCaptureNotOwned]: `a` is already lent to another task
+  --> tests/ui/taskgroup_window_lent_to_two_writing_tasks.jet:6:21
+    |
+  6 |         right: task { a[1] = a[1] + 1 }
+    |                     ^^^^^^^^^^^^^^^^^^^
+ Why: Children of a task group run concurrently, so overlapping places cannot include a write borrow
+ Fix: Give the task owned data, freeze it, use `Shared{…}`, or borrow provably separate fields
+More: jet-lang.dev/e/E1101

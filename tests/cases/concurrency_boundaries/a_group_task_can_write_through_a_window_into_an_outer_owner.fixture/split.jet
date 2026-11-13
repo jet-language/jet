@@ -1,0 +1,11 @@
+run: fn() {
+    v := [Int]{1, 2, 3, 4}
+    task.group g {
+        { left: a, right: b }: v.split_write(2) ?? panic("split")
+        left: task { a[0] = a[0] + 1 }
+        right: task { b[0] = b[0] + 1 }
+        left.join() ?? panic("left")
+        right.join() ?? panic("right")
+    }
+    print(v[0] + v[2])
+}
