@@ -1517,3 +1517,243 @@ mitigation and card. *(card)* means Main files a card or criterion.
 
 Once G12Docs-5 closes items 1–28, a fourth round needs to check only those
 items and re-run the kit.
+
+# Round 4: revision 4 of the proposal
+
+Date: 2026-11-13. Reviewer: Claude Opus, lane G6. The reviewer did not
+write any revision and built no part of the shape.
+
+Subject: revision 4 of `Docs/proposals/2026-11-13-web-app-framework-shape.md`
+as submitted in G12Docs-webshape-r4 (6,620 lines, base dev `93380f43ef`,
+patch SHA-256 `18d4b2e0…01bd`). That patch replaced `635b016f…acb7` in
+place, and the only change is the criterion numbers Main filed. Line
+numbers in this round refer to revision 4. As round 3 asked, this round
+checks the 28 round-three items (R3-6) and re-runs the kit. It attacks the
+C3 safety fixes first, because C3 was the claim that failed. D-BOUND-METHOD1
+is withdrawn: closures are the target form. So the round also checks that
+nothing in revision 4 still relies on bound method values.
+
+**Overall verdict for round 4: fails, narrowly.** Revision 4 closes 23 of
+the 28 round-three items, and five only partly: 4, 11, 12, 13 and 15. Every
+file reproduces on seed-b14 and matches the document byte for byte. No file
+uses a bound method value. C1, C2, C4, C5 and C6 hold. Three gaps keep C3
+from holding:
+
+1. **Uploads.** The new spooling order reads the body before the row policy
+   runs, which #6813 c3 forbids.
+2. **Invitation expiry.** The members policy does not check that an
+   invitation has not lapsed, though the text says it does.
+3. **The creator rule.** It is not tied to the project row.
+
+All three are text and code fixes in the proposal, and none needs a new
+card. R4-5 lists eight items in one pass.
+
+## R4-1. Method
+
+- **Reproduction.** The reviewer copied G12Docs-5's kit to the G6 scratch
+  and ran `node build.mjs` (48 files). It then ran `check.sh` with seed-b14
+  (`jet@a0.0.45#1e8010c1…`), checking one file at a time under a memory
+  cap, with a dev checkout as the toolchain root. `report.mjs` printed all
+  48 rows, and every error and every clean result matches A.3:
+  - b1–b6 each report their seeded error at line 10;
+  - `drag.jet` reports `jet.UninferableTypeArgument` at line 20;
+  - `cl1_server_only.jet` reports `jet.UnknownFunction` at lines 9 and 10;
+  - the other 40 files are clean.
+
+  One cell differs. A.3 gives `crewboard/Logic/model.jet` 240 lines, but
+  the checked file has 224 (R4-5 item 8).
+- **Bound method values.** Every `app.live` closure (seven, in 3.3) and
+  every `app.enqueue` closure (three, in `crew.jet`) has a body that is one
+  call with its arguments. No labeled block names a method without
+  calling it, and the seed would refuse one (`jet.UnknownField`, R3-1). 7.12
+  and 7.13 make the closure the target form and drop #6824 as a
+  dependency. #6445 c8 now requires the one-call body that keys the
+  subscription. Nothing in revision 4 relies on bound method values.
+- **Cards.** The reviewer read these cards in Tower:
+  - #3709 c22–c26;
+  - #6445 c7 and c8;
+  - #6555 c7;
+  - #6813 c1–c5;
+  - #6820 c1–c4;
+  - #6825 c1–c5;
+  - #6826 c1–c5;
+  - #6827 c2 and c3.
+
+  Each criterion that 0.2 asks for exists with the text 0.2 gives, and
+  the body cites each one by number.
+
+## R4-2. The 28 round-three items
+
+| # | Verdict | Evidence or residual |
+|---|---|---|
+| 1 | closed | `db.Op`; reads, inserts and deletes are judged on one row and updates on both (802–807, 2716–2723); the creator rule (809–811); tests "creating a project makes the caller its owner" and "a member can't make itself an owner". Residuals: which writes "before the write" excludes, and the creator rule's scope (R4-5 items 1 and 2) |
+| 2 | closed | `project_policy` (854–859): members read, only an owner updates or deletes |
+| 3 | closed | `new_webhook_key` stores `app.random_key()` (`-[Rand]>`, 256 bits) and returns it once in `WebhookSetup`; projects start with `None`; `None` is 401 (1334–1340, #6820 c4). `Project` is not `#Codable`, so no reply carries the stored key |
+| 4 | **partly** | `accept_invite` deletes the invitation and refuses a lapsed one (1264–1272); `drop_expired_invites` runs nightly; `verified_email` lowercases, and the `join` helper's `Bob@Example.com` exercises it. Residual: the members policy ignores `expires` (R4-5 item 3) |
+| 5 | closed | `set_role`, `remove_member`, `leave`, `keep_an_owner`, `unassign`, and membership checks in both pushing jobs; tests for the last owner and for leaving (#6826 c5) |
+| 6 | closed | `viewers` reads the task first; #3709 c25 |
+| 7 | closed | UUIDv7-only decoders (425–429); `Exists` only for a readable row (636–645); the test "an outsider can't probe for a task ID" |
+| 8 | closed | `ProjectDraft`, `InviteDraft` and `TaskBatch` are in `model.jet`, and the endpoints take them. The hand copy is gone; `InviteDraft` refuses an Owner invitation |
+| 9 | closed | the only `field_error` left names `assignee`, a field of the decoded `draft`. Residual: the batch path (R4-5 item 8) |
+| 10 | closed | 3300–3304; #6825 c5 |
+| 11 | **partly** | at least once, with a key per queued call (#6825 c1). Residual: a scheduled run that sends several pushes (R4-5 item 4) |
+| 12 | **partly** | the upload is spooled before the transaction; retries read the staged bytes; a rolled-back blob is deleted (#6813 c5). Residual: spooling now comes before the policy check that #6813 c3 requires (R4-5 item 5) |
+| 13 | **partly** | #6827 c2 and c3 count the policies' statements, and `limit` counts after the policy. Residual: 837–838 and 977–979 say that every policy is a key lookup on `members`, which is false (R4-5 item 6) |
+| 14 | closed | 3169–3182 give every handler a destination, and #6445 c7 lists them; the invitations read and "also viewing" show their failures. Residual for CL7: `native.background`'s notice reaches only a log (R4-3) |
+| 15 | **partly** | step 10 and #3709 c26 name the notice list. Residual: what version a replayed edit carries (R4-5 item 7) |
+| 16 | closed | 4.6 predicts creates with a client-made ID and lists `app.enqueue` among the steps a prediction skips; #6555 c7 |
+| 17 | closed | "Share…" in `card_menu` (`examples/tray.jet`), and the 5.1 row and 5.1.7 point to it |
+| 18 | closed | 4541 names `ui.draggable`, `ui.drop_zone`, the keyboard pick-up and the long press |
+| 19 | closed | 4.15 states the loss, `unescape` takes the apostrophe off on import, and the remaining cost is named |
+| 20 | closed | 2954: #6826 c1 |
+| 21 | closed | 794: #3709 c22 |
+| 22 | closed | 812–815 |
+| 23 | closed | "a member who leaves sees nothing of the project" checks `mine`, `search` and `my_projects` |
+| 24 | closed | A.7 calls the kit transient, and every file is in the text; A.3 defines "clean" |
+| 25–28 | closed by withdrawal | no bound method values remain (R4-1) |
+
+## R4-3. C3 safety, attacked again
+
+The policies were attacked through every write path in `crew.jet`, with
+the rule from 802–807: the policy's own reads see the store before the
+write.
+
+- **Self-promotion.** `set_role` by a Member to Owner is refused. `member_policy`'s
+  `.Update` asks `role_of` before the write and finds Member. An Owner
+  invitation is refused by the decoder, and `accept_invite` copies the
+  role the invitation grants. This holds.
+- **Removal.** A Member's `remove_member` of another member is refused at
+  the delete, before `unassign` is queued. Two owners who demote each other
+  at once conflict under serializable transactions, so the retried call
+  sees one owner and gets `LastOwner`. This holds.
+- **ID probing.** An outsider who adds a taken ID under its own project
+  gets `NotAllowed`, and the test shows it. This holds.
+- **The webhook key.** It is 256 bits and stored as `#Secret`. The project
+  row is not codable, so it leaves the server only in `WebhookSetup`. A
+  retried `new_webhook_key` makes a new key, and the reply carries the one
+  that committed. This holds.
+- **Uploads (fails).** 988–991 and the `Upload` stub (5499–5502) spool the
+  body "after the session check and the size cap" and before the
+  transaction. The policy then refuses a non-member inside it (403).
+  #6813 c3 requires that `attach` apply the row policy "before it reads
+  the body, so a signed-in caller who is not a member gets 403". So any
+  signed-in account can make the server write `max_upload` bytes to disk
+  per call to a project it cannot see. Revision 3 had the opposite
+  defect. The fix must keep both orders: the policy runs on the task
+  before spooling, and the write runs in the transaction after.
+- **Invitation expiry (partly).** 1000–1002 says the members policy admits
+  the insert "only when an unexpired invitation" grants it. But `invited`
+  (913–917) compares the role and never reads `expires`. Only the method
+  (1268) checks the date. The policies are where 812–813 says no method
+  can forget a rule. As written, a future endpoint that inserts a member
+  from an invitation admits a lapsed one until the nightly job runs.
+- **The creator rule (partly).** `first_owner` (908–911) admits an Owner
+  insert for any project ID with no member rows. It does not ask whether
+  the project row exists, or whether the caller made it. No endpoint in
+  Crewboard reaches a project with no members, because `keep_an_owner`
+  stops that. But the rule is wider than its text ("a project with no
+  members yet"). It becomes a takeover the day account deletion (#6826)
+  removes member rows: the next account to insert itself becomes the
+  owner. Tie it to the transaction that inserted the project, or to a
+  `created_by` field the policy checks.
+- **"Before the write".** 805 does not say whether a policy sees the
+  transaction's earlier writes. `accept_invite` (insert, then delete) and
+  `create_project` (two inserts) pass under either reading, but the rule
+  must be one. Postgres evaluates `WITH CHECK` against the transaction's
+  own earlier writes.
+
+**CL7.** `native.background`'s notice goes to "the app's log with the run's
+time" (3174–3176). Nobody reads a phone's log, so a background sync that
+fails every night is silent to the person. CL7 claims what Elm does: no
+failure is silent. Either add the notice to the notice list from step 10
+once a run fails, or name the background run as CL7's exception.
+
+## R4-4. Transactions, jobs and cost
+
+- **Push keys.** "Each queued call has a key" (3310) covers `tell_assignee`.
+  `remind_due_today` is a scheduled run, not a queued call, and it sends
+  one push per task in a loop (1364–1372). One key per run, used as
+  `apns-collapse-id` and as the FCM collapse key, makes a person's
+  pushes about three tasks due today replace each other: the phone shows
+  one. The key must be per push and stable across a re-run, for example
+  the run's key with the recipient and the `open:` value.
+- **Query counts.** 837–838 ("Every policy here reads `members` by key, so
+  the database joins it") and 977–979 do not hold:
+  - `invite_policy` calls `auth.verified_email` for each row it reads;
+  - `member_policy`'s `.Insert` counts members with a filter, in
+    `first_owner`;
+  - `invited` reads `invites`.
+
+  Under #6827 c2's own rule, these run per row, memoized. That costs
+  nothing for `my_projects` and `board`, whose policies are key lookups.
+  But the comment must list which policy joins and which runs per row.
+- **The import.** `TaskBatch` caps the batch at 500 (506), and the
+  decoder runs `validate`. The text does not say whether decoding a
+  `[TaskDraft]` runs each element's `validate`, or how the field path names
+  the row (`tasks[3].title`). `import_tasks` (1144–1149) calls
+  `create_task`, whose `check_assignee` answers `at: "assignee"` with no
+  row. For a 500-row import, the person cannot tell which row was refused.
+  The text also does not say that calling one endpoint from another joins
+  the caller's transaction.
+
+## R4-5. Gaps for G12Docs-5, in one pass
+
+**Safety**
+
+1. State that a policy's reads see the transaction's earlier writes but not
+   the write being judged. *(text; #3709 c22 reads either way)*
+2. Tie the creator rule to the project row. `first_owner` admits an Owner
+   insert only for a project that this transaction inserted, or whose
+   `created_by` is the caller.
+3. Make `invited` refuse a lapsed invitation (`found.expires >= today`,
+   with `Time` in the policy's effects). Otherwise, change 1000–1002 to say
+   that the method checks the expiry, and say why the policy does not.
+4. Give each push its own key: the run's key with the recipient and the
+   `open:` value. Then `remind_due_today`'s pushes do not collapse into
+   one, and a re-run still replaces each push. *(text, and #6825 c1's
+   wording)*
+5. Run the row policy on the target row before the body is spooled, as
+   #6813 c3 requires, and keep the spool before the transaction, as #6813
+   c5 requires. Fix 988–991, the `attach` comment (1190–1194) and the
+   `Upload` stub comment (5499–5502). Say how long a staged file lives
+   when the call fails.
+
+**Cost and text**
+
+6. Fix 837–838 and 977–979: name which policies are key lookups and join
+   into the query (`task_policy`, `attachment_policy`, `project_policy`,
+   and `member_policy`'s read), and which run per row, memoized
+   (`invite_policy`, and `member_policy`'s insert).
+7. Say what a replayed edit carries in step 10. If it keeps the version it
+   was made with, it is refused as `Conflict`, and Ana gets a second
+   notice. If it is re-derived from the server's copy, it overwrites Ben's
+   change, and the version check no longer protects anything. Pick the
+   first, and state it in #3709 c26. *(criterion wording)*
+8. State that decoding a list runs each element's `validate`, with an
+   indexed path (`tasks[3].title`). Make `import_tasks` report
+   `check_assignee`'s refusal with the row it applies to. Say that an
+   endpoint called from another method joins its transaction. Then either
+   route `native.background`'s failure to the notice list, or name it in
+   CL7 (R4-3). Fix A.3's line count for `model.jet` (224, not 240).
+
+## R4-6. Verdicts
+
+| Claim or criterion | Round 4 verdict |
+|---|---|
+| C1 logic once | **holds.** The drafts are in `Logic`, and the endpoints take them |
+| C2 seamless | **holds** |
+| C3 safety | **fails, narrowly.** Self-promotion, removal, ID probing and the webhook key hold. Spooling before the policy (item 5), the policy without the expiry (item 3) and the creator rule (item 2) do not |
+| C4 performance | **holds within limits.** #6827 counts the policies; the comments overstate which policies join (item 6) |
+| C5 completeness (c6) | **met.** `native.share` is restored |
+| C6 styling (c7) | **met.** The floor "as easy as HTML and CSS" is still left to measure 5 on #6817 |
+| c8 probe and matrix | **met.** CL2 and CL4 pass their next tests. CL7 passes once the background run has a destination a person sees (item 8) |
+| CL2 | holds: matches ASP.NET Core and FastAPI |
+| CL4 | holds: matches Meteor and Zero |
+| CL7 | matches Elm, except `native.background` (item 8) |
+| Bound method values | none used; the closure is the target form, and #6445 c8 keys it |
+| #6792 c1 | met |
+| #6792 c2 | met |
+| #6792 c3 | **open.** Round 4 fails narrowly on C3; a fifth round checks items 1–8 only |
+| #6792 c6 | met |
+| #6792 c7 | met |
+| #6792 c8 | met |
