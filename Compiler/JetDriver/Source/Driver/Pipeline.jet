@@ -2205,16 +2205,20 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
         slot: module_index(graph_module.module_identity)
         if module_rows[slot] == -1 -> module_rows[slot] = index
     }
+    // `row\nkey` of every function a row holds, read once per row the first
+    // time a staged function names it: a staged function its module already
+    // holds (checked by the body pass, or staged before it) is skipped.
+    held := [String:Bool]{}
+    keyed := (loop _ in 0..<graph.modules.len() -> false)
     loop checked in functions {
         function: checked.function ?? return Val("staged function `{checked.function_key}` of `{module_text(table, checked.module_identity)}` has no checked body")
         row: module_rows[module_index(checked.module_identity)]
         if row < 0 -> return Val("staged function `{function.key}` names module `{module_text(table, checked.module_identity)}`, which the checked graph does not hold")
-        duplicate := false
-        loop existing_index in 0..<graph.modules[row].functions.len() {
-            existing: graph.modules[row].functions[existing_index]
-            if existing.key == function.key -> duplicate = true
+        if !keyed[row] {
+            loop existing in graph.modules[row].functions -> held["{row}\n{existing.key}"] = true
+            keyed[row] = true
         }
-        if duplicate -> next
+        if held.get("{row}\n{function.key}") != None -> next
         if !checked.complete {
             reasons := ""
             loop reason in checked.incomplete_reasons -> reasons = if reasons == "" -> reason.copy() else -> "{reasons}; {reason}"
@@ -2222,6 +2226,7 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, table: Modu
             return Val("staged function `{function.key}` did not finish checking{if reasons == "" -> "" else -> ": {reasons}"}")
         }
         if !sema_comptime_append_checked_function_to_module(checked, graph.modules[row]) -> return Val("staged function `{function.key}` could not join module `{module_text(table, checked.module_identity)}`")
+        held["{row}\n{function.key}"] = true
         loop fact in checked.call_facts -> graph.call_facts.push(fact.copy())
         loop request in checked.calls -> graph.comptime_requests.push(request.copy())
     }
@@ -4666,16 +4671,20 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     // The merge reads unchanged registration name facts. The bundle's names
     // are built from the merged modules only for the steps below that read
-    // them (the checked projection, `jet doc`'s ledger, the build program's
-    // reflection); a run, build or test lowers without them. Declaration
+    // them (the checked projection, `jet doc`'s pages and ledger, the build
+    // program's reflection); a run, build or test lowers without them, and
+    // so does the runtime-library seam (`jet doc` stopped before lowering:
+    // Request.jet jet_cli_runtime_library), which packages the lowering
+    // inputs and builds no pages. Declaration
     // consumers below apply values only when they need the resolved graph.
     // The build program's reflection is snapshotted only when a source
     // outside Core spells `program` or `compiler`, the only names its
     // readers can use.
     reflect_program: request.capture_build_program && load.spells_program
+    doc_pages: request.mode == JetDriverCompileMode.Doc && !capture.stop_before_lowering
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.merge")
     merged: jet_driver_merge_checked_text_functions(checked_graph, registration_graph.module_table, comptime_functions)
-    if checked_projection || request.mode == JetDriverCompileMode.Doc || reflect_program {
+    if checked_projection || doc_pages || reflect_program {
         registration_graph = jet_driver_merged_names(checked_graph, registration_graph, request.compiler_threads)
     }
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.merge", comptime_functions.len())
@@ -4701,8 +4710,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     if request.mode == JetDriverCompileMode.Doc {
         resolved_registration := sema_comptime_graph_with_values(registration_graph, comptime_values)
-        load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity, false, capture)
-        if request.capture_gate_ledger -> jet_driver_doc_gate_projection(load.doc_modules, checked_graph, resolved_registration, request, load.packages)
+        if doc_pages {
+            load.doc_modules = jet_driver_doc_modules(request, load, checked_graph, resolved_registration, comptime_values, canonical_effect_module_identity, false, capture)
+            if request.capture_gate_ledger -> jet_driver_doc_gate_projection(load.doc_modules, checked_graph, resolved_registration, request, load.packages)
+        }
         registration_graph = resolved_registration.move()
     }
     // No source outside Core names the view, so no body can read it: the
