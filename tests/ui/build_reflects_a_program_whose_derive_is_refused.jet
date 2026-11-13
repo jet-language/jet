@@ -1,0 +1,33 @@
+// @programmable_build
+// @cli_build
+// A derive whose template binding is refused leaves the program's
+// registration incomplete. A build that reflects over the program reports
+// that refusal, not an internal compiler error.
+build: fn(b: Build) {
+    loop info in b.program.types() {
+        if info.name == "" -> panic("a type with no name")
+    }
+    app: b.add_executable("app", ["build_reflects_a_program_whose_derive_is_refused.jet"], [])
+    b.default(app)
+}
+
+Summarize: struct {
+    impl Marker {
+        sites: [.Type]
+
+        expand: fn(self, target: Target) {
+            info: target.reflect()
+            effects: info.methods[0].reflect().effects.values.len()
+            summary: fn(self) -> Int { effects }
+        }
+    }
+}
+
+#Summarize
+Widget: struct {
+    label: String
+
+    show: fn(self) -> String { self.label.copy() }
+}
+
+run: fn() { print(Widget{label: "w"}.show()) }
