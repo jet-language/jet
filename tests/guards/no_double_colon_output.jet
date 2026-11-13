@@ -1,7 +1,8 @@
 // No Jet output spells `::`: Jet paths are dotted. The UI snapshots, the
 // golden outputs and the expectation lines of the cases under `tests` and
-// `Examples` hold a `::` only inside a foreign subject: an IPv6 address, a
-// Rust path, a PowerShell static call or a GitHub Actions workflow command.
+// `Examples` hold a `::` only inside a foreign subject (an IPv6 address, a
+// Rust path, a PowerShell static call or a GitHub Actions workflow command)
+// or a deep-check scope, whose package ends at a `::` (`--deep-checks=tree::run`).
 // The JetCli and JetSemIndex sources write `::` only on the closed list
 // below, each row a foreign spelling the file emits or reads; a new one
 // fails here, and a row whose spelling goes fails until it shrinks or goes.
@@ -15,6 +16,9 @@ DC_RUST_ROOTS: [String]{"std", "rust"}
 // The commands of a GitHub Actions workflow annotation
 // (`::error file=…,line=…::message`).
 DC_WORKFLOW_COMMANDS: [String]{"::error ", "::warning ", "::notice "}
+
+// The spellings of a line that writes or explains a deep-check scope.
+DC_DEEP_CHECK_SUBJECTS: [String]{"--deep-checks=", "deep-check scope"}
 
 // The case lines that spell expected output.
 DC_CASE_EXPECTATIONS: [String]{"stdout:", "stderr:", "json:", "file:"}
@@ -96,11 +100,15 @@ dc_foreign: fn(bytes: [U8], at: Int) -> Bool {
     DC_RUST_ROOTS.contains(dc_text(bytes, root, first))
 }
 
-// Whether `text` spells a `::` that no foreign subject explains.
+// Whether `text` spells a `::` that no foreign subject or deep-check scope
+// explains.
 dc_spells: fn(text: String) -> Bool {
     trimmed: text.trim()
     loop command in DC_WORKFLOW_COMMANDS {
         if trimmed.starts_with(command) -> return false
+    }
+    loop subject in DC_DEEP_CHECK_SUBJECTS {
+        if text.contains(subject) -> return false
     }
     bytes: text.bytes()
     at := 0
@@ -237,6 +245,9 @@ dc_source_findings: fn(found: [String:Int]) -> [String] {
     assert(!dc_spells("  3 |     mutate: fn(left: Int, right: Int) -> Int = \"std::cmp::max\""))
     assert(!dc_spells("[System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)"))
     assert(!dc_spells("::error file=src/run.jet,line=2,col=15,title=Jet E2907::over budget"))
+    assert(!dc_spells("`--deep-checks=tree::run` selects `tree::run`, and none of them holds a deep check."))
+    assert(!dc_spells(" Why: A deep-check scope is a package name, alone or then `::` and module, type and function names joined by `.`"))
+    assert(dc_spells("selects `tree::run`, and none of them holds a deep check"))
     assert((dc_case_expected("stderr: ~ \"through dep::greet\" # the path") ?? "") == "through dep::greet")
     assert((dc_case_expected("stdout: = \"aGk=\\n\" # the bridged base64::encode(\"hi\")") ?? "") == "aGk=\\n")
     assert((dc_case_expected("stdout: = \"say \\\"a::b\\\"\" # quoted") ?? "") == "say \\\"a::b\\\"")
