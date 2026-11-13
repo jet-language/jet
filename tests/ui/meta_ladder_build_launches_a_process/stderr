@@ -1,8 +1,8 @@
 Error [jet.ComptimeEffectWithoutImpure]: The `meta.events` handler hears the root's `Compiler` value and launches a process through meta.events handler → start → core.process.call
   --> tests/ui/meta_ladder_build_launches_a_process/run.jet:11:43
     |
- 11 |     meta.events(watch: .Calls{to: print}, (event) -> { start() })
-    |                                           ^^^^^^^^^^^^^^^^^^^^^^
+ 11 |     meta.events(watch: .Calls{to: print}, fn(event) { start() })
+    |                                           ^^^^^^^^^^^^^^^^^^^^^
  Why: Code handed the `Compiler` value runs while the build runs and acts only through the value; a process it launched would run another program, such as a second compiler, with authority of its own
  Fix: Act through the `Compiler` value, or declare the process as a build step (`b.run`) in the root's `build: fn`
  Denial: invocation
