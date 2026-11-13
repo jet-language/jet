@@ -923,7 +923,7 @@ sema_failure_domain_mismatch: fn(expr: Expr?, span: Span, source: Type, target: 
     // A written conversion names one type on each side, so a list domain
     // (`[FieldError]`) on either side has no conversion `impl` to suggest.
     convertible: !sema_failure_list_domain(source) && !sema_failure_list_domain(target)
-    conversion_fix: if convertible -> ", or add `impl {source_name} -> {target_name} {{ … }}`" else -> ""
+    conversion_fix: if convertible -> ", or add `impl {target_name}.From({source_name}) {{ … }}`" else -> ""
     diagnostic: sema_error(
         "E2404",
         span,
@@ -937,7 +937,7 @@ sema_failure_domain_mismatch: fn(expr: Expr?, span: Span, source: Type, target: 
     repair: context.failure_repair ?? return detailed
     retyped: diagnostic_with_edit_grade(detailed, TextEdit{span: repair.return_span, new_text: "{type_name(repair.success)} {source_name}!"}, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
     if !convertible -> return retyped
-    conversion: "\n\nimpl {source_name} -> {target_name} {{\n    convert: fn(error: {source_name}) -> {target_name} {{\n    }}\n}}"
+    conversion: "\n\nimpl {target_name}.From({source_name}) {{\n    from: fn(error: {source_name}) -> {target_name} {{\n    }}\n}}"
     diagnostic_with_alternative_edit(retyped, TextEdit{span: Span{start: repair.declaration_end, end: repair.declaration_end}, new_text: conversion})
 }
 
@@ -955,16 +955,16 @@ sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnost
 sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
     name: type_name(error)
     // An impl of a generic type names the type bare, so `Unsent<Int>` is
-    // converted by `impl Unsent -> Err`.
+    // converted by `impl Err.From(Unsent)`.
     written := name.copy()
     if sema_expr_unwrap_tag(error) == .Apply(head, _) -> written = sema_error_conversion_leaf(head)
     // A written conversion source is one named type, so a list of errors has
-    // no `impl … -> Err` to suggest.
+    // no `impl Err.From(…)` to suggest.
     listed: sema_failure_list_domain(error)
-    route: if listed -> "a conversion source is one named type, so `{name}` has no `impl … -> Err`" else -> "`{name}` can reach `Err` only through `impl {written} -> Err`"
-    conversion: if listed -> "" else -> ", add `impl {written} -> Err {{ … }}`"
+    route: if listed -> "a conversion source is one named type, so `{name}` has no `impl Err.From(…)`" else -> "`{name}` can reach `Err` only through `impl Err.From({written})`"
+    conversion: if listed -> "" else -> ", add `impl Err.From({written}) {{ … }}`"
     if implicit -> return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; {route}", "handle this call locally with `??`{conversion}, or change the return type")
-    fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl {written} -> Err {{ … }}` before this function, or change the return type"
+    fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl Err.From({written}) {{ … }}` before this function, or change the return type"
     sema_error("E2402", span, "`?` can't convert `{name}` into `Err` — no declared conversion exists", "`?` uses the declared conversion rail; {route}", fix)
 }
 

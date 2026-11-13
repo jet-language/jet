@@ -1,8 +1,8 @@
 
-SourceErr: enum { One }
-TargetErr: enum { One }
+#Error SourceErr: enum { One }
+#Error TargetErr: enum { One }
 
-impl SourceErr -> TargetErr { return TargetErr.One }
-impl TargetErr -> SourceErr { return SourceErr.One }
+impl TargetErr.From(SourceErr) { from: fn(error: SourceErr) -> TargetErr { TargetErr.One } }
+impl SourceErr.From(TargetErr) { from: fn(error: TargetErr) -> SourceErr { SourceErr.One } }
 
 run: fn() {}

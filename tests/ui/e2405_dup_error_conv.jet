@@ -1,15 +1,15 @@
-// E2405: two `impl Source -> Target` blocks for the same (Source, Target) pair.
+// E2405: two `impl Target.From(Source)` blocks for the same (Source, Target) pair.
 ParseErr: enum {
     Empty
 }
 
-AppErr: enum {
+#Error AppErr: enum {
     Parse(ParseErr)
 }
 
-impl ParseErr -> AppErr { return AppErr.Parse(self) }
+impl AppErr.From(ParseErr) { from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) } }
 
-impl ParseErr -> AppErr { return AppErr.Parse(self) }
+impl AppErr.From(ParseErr) { from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) } }
 
 run: fn() {
 

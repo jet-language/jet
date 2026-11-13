@@ -14060,8 +14060,8 @@ MissingErrorConversion: struct {
         detail: true
         fix_next: "Declare an error conversion into `Err`, or change the enclosing fallible return type."
         what: fn(self) -> String { "A fallible call cannot convert `{self.err}` into `Err` — no declared conversion exists" }
-        why: fn(self) -> String { "A fallible call uses the declared conversion rail; `{self.err}` can reach `Err` only through `impl {self.err} -> Err`." }
-        fix: fn(self) -> String { "Add `impl {self.err} -> Err {{ … }}` before this function, or change the enclosing return type to `T !{self.err}`." }
+        why: fn(self) -> String { "A fallible call uses the declared conversion rail; `{self.err}` can reach `Err` only through `impl Err.From({self.err})`." }
+        fix: fn(self) -> String { "Add `impl Err.From({self.err}) {{ … }}` before this function, or change the enclosing return type to `T !{self.err}`." }
     }
 }
 
@@ -14086,7 +14086,7 @@ ErrorNotPropagatable: struct {
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`{self.callee}` fails with `{self.source}`, which can't propagate into `{self.target}` here" }
         why: fn(self) -> String { "`{self.callee}` is defined at `{self.definition}` with effective failure contract `{self.contract}`; the caller's `{self.caller}` contract has no route from `{self.source}` to `{self.target}`" }
-        fix: fn(self) -> String { "Declare the caller with `{self.source}` as its failure domain, or add `impl {self.source} -> {self.target} {{ … }}`; otherwise handle `{self.callee}` locally with `??`" }
+        fix: fn(self) -> String { "Declare the caller with `{self.source}` as its failure domain, or add `impl {self.target}.From({self.source}) {{ … }}`; otherwise handle `{self.callee}` locally with `??`" }
     }
 }
 
@@ -14102,9 +14102,9 @@ DuplicateErrorConversion: struct {
         stage: [.Compile]
         meaning: "An error conversion declared twice"
         detail: true
-        what: fn(self) -> String { "`impl {self.source} -> {self.target}` is already declared." }
+        what: fn(self) -> String { "`impl {self.target}.From({self.source})` is already declared." }
         why: fn(self) -> String { "There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected." }
-        fix: fn(self) -> String { "Remove one of the two `impl … -> …` blocks." }
+        fix: fn(self) -> String { "Remove one of the two `impl Target.From(Source)` blocks." }
     }
 }
 
@@ -14121,7 +14121,7 @@ OrphanErrorConversion: struct {
         meaning: "An error conversion between two foreign types"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "Can't declare `impl {self.source} -> {self.target}` — neither type is defined in this program." }
+        what: fn(self) -> String { "Can't declare `impl {self.target}.From({self.source})` — neither type is defined in this program." }
         why: fn(self) -> String { "Typed-target error conversions obey the same orphan rule as trait impls; only the default `Err` target may name a foreign source." }
         fix: fn(self) -> String { "Define one of these types locally, or convert the foreign source into `Err`." }
     }
@@ -14157,7 +14157,7 @@ ErrorConversionCycle: struct {
         meaning: "Error conversions that form a cycle"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "Error conversion cycle: `impl {self.source} -> {self.target}` would make conversion loop" }
+        what: fn(self) -> String { "Error conversion cycle: `impl {self.target}.From({self.source})` would make conversion loop" }
         why: fn(self) -> String { "Error conversions must form an acyclic route so a failure has one finite meaning." }
         fix: fn(self) -> String { "Remove this edge or choose a target that is not already reachable back to the source." }
     }

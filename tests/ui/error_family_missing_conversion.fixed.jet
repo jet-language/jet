@@ -8,7 +8,7 @@ AppErr: enum {
     File(FileErr)
 }
 
-impl FileErr -> AppErr { AppErr.File(self) }
+impl AppErr.From(FileErr) { from: fn(error: FileErr) -> AppErr { AppErr.File(error) } }
 
 read_config: fn(path: String) -> String FileErr! {
     if path == "" -> return Err(FileErr.NotFound)

@@ -1,12 +1,12 @@
 
-RootErr: enum { One }
-LeftErr: enum { One }
-RightErr: enum { One }
-TargetErr: enum { One }
+#Error RootErr: enum { One }
+#Error LeftErr: enum { One }
+#Error RightErr: enum { One }
+#Error TargetErr: enum { One }
 
-impl RootErr -> LeftErr { return LeftErr.One }
-impl RootErr -> RightErr { return RightErr.One }
-impl LeftErr -> TargetErr { return TargetErr.One }
-impl RightErr -> TargetErr { return TargetErr.One }
+impl LeftErr.From(RootErr) { from: fn(error: RootErr) -> LeftErr { LeftErr.One } }
+impl RightErr.From(RootErr) { from: fn(error: RootErr) -> RightErr { RightErr.One } }
+impl TargetErr.From(LeftErr) { from: fn(error: LeftErr) -> TargetErr { TargetErr.One } }
+impl TargetErr.From(RightErr) { from: fn(error: RightErr) -> TargetErr { TargetErr.One } }
 
 run: fn() {}

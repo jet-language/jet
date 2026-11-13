@@ -189,7 +189,7 @@ sema_schema_changed: fn(name: String, field: String, old: String, current: Strin
     sema_error("E0910", span, "the published record `{name}` changed `{field}` from `{old}` to `{current}`, with no migration to bridge it", "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read", "add `migration {name} {{ change {field}: {old} -> {current} via {{ fn(old) {{ … }} }} }}`, or bump the major version")
 }
 sema_schema_no_converter: fn(name: String, field: String, old: String, current: String, span: Span) -> Diagnostic Never! {
-    sema_error("E0910", span, "the `change {field}: {old} -> {current}` migration on `{name}` has no converter", "a type change needs a way to turn an old value into a new one — old data already on disk is read through it", "add an inline `via {{ fn(old) {{ … }} }}` to the `change` op, or declare `impl {old} -> {current} {{ … }}` in scope")
+    sema_error("E0910", span, "the `change {field}: {old} -> {current}` migration on `{name}` has no converter", "a type change needs a way to turn an old value into a new one — old data already on disk is read through it", "add an inline `via {{ fn(old) {{ … }} }}` to the `change` op, or declare `impl {current}.From({old}) {{ … }}` in scope")
 }
 sema_schema_added: fn(name: String, field: String, span: Span) -> Diagnostic Never! {
     sema_error("E0910", span, "the published record `{name}` added `{field}`, but old data has no value for it", "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in", "add `migration {name} {{ add {field}: <Type> = <default> }}` to supply the value, or bump the major version")
