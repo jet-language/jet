@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101021,
+    "rev": 101025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22772,12 +22772,12 @@
         },
         {
           "n": 2,
-          "text": "From #2253 c5: Valid binparse O2 measurements independently show Jet/Rust, Jet/C, Jet/Zig and Jet/Go <1.00 where required, and Jet/ceiling <=1.00 against the asm-parity reference. Run/dev comparisons use criterion 15. Beating the peers is the floor; the asm-parity ceiling is the target.",
+          "text": "Valid binparse O2 measurements show Jet/Rust, Jet/C, Jet/Zig and Jet/Go each below 1.00 on wall time and peak memory, and the Jet/ceiling ratio against the binparse asm-parity reference is measured and reported. Run/dev comparisons use criterion 15. Proof: `node Tools/gauntlet/harness/run.mjs --entry binparse` reports a peer-floor win on every peer.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "at": "2026-11-13T02:20:13.943Z"
         },
         {
           "n": 4,
@@ -22862,12 +22862,12 @@
         },
         {
           "n": 17,
-          "text": "Every required in-group performance cell and metric independently records Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference; a cell without a reference is uncovered and fails. No average or missing, wrong, unavailable, uncovered, mismatched, or inconclusive required evidence passes. Outside-group results cannot fail this performance gate.",
+          "text": "Every required in-group performance cell and metric independently records Jet/peer < 1.00 for every peer, Rust included (no parity band), and reports its Jet/ceiling ratio in cycles and bytes against the cell's Tools/perf/asm-parity reference. No average or missing, wrong, unavailable, mismatched or inconclusive required peer evidence passes. Outside-group results cannot fail this gate. Proof: `node Tools/gauntlet/harness/run.mjs` (all entries, with `--ceiling-results` from `node Tools/perf/asm-parity/asm-parity.mjs`) exits 0 with no peer loss on a required cell.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-03T10:47:46.080Z"
+          "at": "2026-11-13T02:20:15.378Z"
         },
         {
           "n": 18,
@@ -23711,7 +23711,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-12T23:33:57.170Z",
+      "updated": "2026-11-13T02:20:15.378Z",
       "updatedBy": "Main",
       "probe": null,
       "claimedAt": "2026-11-12T23:33:57.169Z",
@@ -24886,12 +24886,12 @@
         },
         {
           "n": 9,
-          "text": "Jet proof: `JETPACK_WORKER=b19entry Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area CLI --tests` prints JETPACK CHECK OK (check, default run, AOT test) with the entry claims (duplicate warm refs, partial-cache hole realization, same-stat seal tamper invalidation, offline missing requirement fails before child start, atomic hook replacement) passing.",
+          "text": "Jet proof: `JETPACK_WORKER=b19entry JET=jet jet Jetpack/Bootstrap/Check.jet --area CLI` prints JETPACK CHECK OK, and `jet test Compiler --profile packages --filter entry` passes the entry claims (duplicate warm refs, partial-store hole realization, same-stat seal tamper invalidation, offline missing requirement fails before child start, atomic hook replacement).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:03:41.687Z"
+          "at": "2026-11-13T02:20:16.827Z"
         }
       ],
       "refs": [
@@ -24919,7 +24919,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-10T22:18:36.858Z",
-      "updated": "2026-11-09T19:52:51.110Z",
+      "updated": "2026-11-13T02:20:16.827Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-09T19:52:51.110Z",
       "goals": [
@@ -26160,12 +26160,12 @@
         },
         {
           "n": 9,
-          "text": "(was #2301 c1) The frozen TIR contract carries types, integer bounds, exclusivity, purity, and comptime values from sema through one typed fact channel [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #4741 c17)",
+          "text": "Sema facts (types, integer bounds, exclusivity, purity and comptime values) reach JetIR through one typed fact channel, with no second side table. Proof: `jet test Compiler --profile cases --filter jetir_facts` has one case per fact class that fails when the fact is dropped.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:54:02.049Z"
+          "at": "2026-11-13T02:20:18.333Z"
         },
         {
           "n": 10,
@@ -26203,7 +26203,7 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-10T23:23:09.423Z",
-      "updated": "2026-11-13T01:54:03.692Z",
+      "updated": "2026-11-13T02:20:18.333Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-11T12:44:52.246Z",
       "goals": [
@@ -197685,6 +197685,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:20:18.333Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01k5lts",
+      "note": "#9: TIR is gone from dev (`git grep -cw TIR -- Compiler` finds nothing; the IR is JetIR in 92 files). The criterion came from #4741 c17 in ops-F and needs a current noun and a proof.; was: (was #2301 c1) The frozen TIR contract carries types, integer bounds, exclusivity, purity, and comptime values from sema through one typed fact channel [precut audit: no dev test, golden, case or snap"
+    },
+    {
+      "at": "2026-11-13T02:20:16.827Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c00f7ono",
+      "note": "#9: Jetpack/Bootstrap/check.sh, Tools/agent/jet-env and scripts/ do not exist on dev; the bootstrap proof is Jetpack/Bootstrap/Check.jet (header lines 6-25) and Jetpack claims run in `jet test Compiler --profile packages` (Check.jet:23-25).; was: Jet proof: `JETPACK_WORKER=b19entry Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area CLI --tests` prints JETPACK CHECK OK (check, default run, AOT test) with the entry claims (duplicate warm"
+    },
+    {
+      "at": "2026-11-13T02:20:15.378Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0hs3czc",
+      "note": "#17: AGENTS.md performance gate (lines 197-203, mirrored as CEILING_POLICY.ceiling_gate = 'reported_until_hill_climbing_opens' in Tools/gauntlet/harness/run.mjs:102-114 and 3365-3366): until the owner opens hill climbing, a cell passes on the peer floor and its Jet/ceiling ratio is measured and reported but fails nothing. A 'Jet/ceiling <= 1.00' pass condition contradicts that; the ceiling work lives in G13 (#6461, #6414).; was: Every required in-group performance cell and metric independently records Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's T"
+    },
+    {
+      "at": "2026-11-13T02:20:13.943Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0hs3czc",
+      "note": "#2: AGENTS.md performance gate (lines 197-203, mirrored as CEILING_POLICY.ceiling_gate = 'reported_until_hill_climbing_opens' in Tools/gauntlet/harness/run.mjs:102-114 and 3365-3366): until the owner opens hill climbing, a cell passes on the peer floor and its Jet/ceiling ratio is measured and reported but fails nothing. A 'Jet/ceiling <= 1.00' pass condition contradicts that; the ceiling work lives in G13 (#6461, #6414).; was: From #2253 c5: Valid binparse O2 measurements independently show Jet/Rust, Jet/C, Jet/Zig and Jet/Go <1.00 where required, and Jet/ceiling <=1.00 against the asm-parity reference. Run/dev comparisons "
+    },
     {
       "at": "2026-11-13T02:20:08.822Z",
       "by": "Main",
