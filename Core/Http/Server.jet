@@ -349,7 +349,7 @@ HTTPServer: struct {
         }
         report: HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: __completed(self.__state), cancelled: __live(self.__state)}
         __server_finish(self, report)
-        self.__done.send(1)
+        __server_signal_done(self.__done).drop("the server holds its own finish end")
         if failure == .Val(error) -> return Err(error)
         Ok(report)
     }
@@ -365,10 +365,16 @@ HTTPServer: struct {
         if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
         if phase == 1 {
             _: self.__finished.receive() ?? 0
-            self.__done.send(1)
+            __server_signal_done(self.__done).drop("the server holds its own finish end")
         }
         Ok(__server_report(self))
     }
+}
+
+// The finish signal; the server holds the receiving end, so only a cancelled
+// wait refuses it.
+__server_signal_done: fn(done: Sender<Int>) Err! {
+    done.send(1)
 }
 
 __server_begin: fn(server: HTTPServer) -> Bool Never! {

@@ -122,9 +122,19 @@ cli_dashboard_forward_keys: fn(sender: Sender<DashboardKey>) -[IO, Time.Wait]> {
             .Enter | .Backspace | .Tab | .Delete | .Insert | .Up | .Down | .Left | .Right | .Home | .End | .PageUp | .PageDown | .Shift | .Control | .Alt | .Super | .CapsLock | .F(_) | .Unknown -> DashboardKey.Other
         }
         quits: cli_dashboard_key_quits(key)
-        sender.send(key)
+        cli_dashboard_send_key(sender, key).drop("a closed dashboard reads no keys")
         if quits -> break
     }
+}
+
+// One key to the dashboard; a refused send means it has closed.
+cli_dashboard_send_key: fn(sender: Sender<DashboardKey>, key: &&DashboardKey) Err! {
+    sender.send(key)
+}
+
+// One load result to its loader; a refused send means the loader is gone.
+cli_dashboard_send_result: fn(sender: Sender<DashboardLoadResult>, result: &&DashboardLoadResult) Err! {
+    sender.send(result)
 }
 
 // One typed character: a single byte keeps its raw meaning (ESC, Ctrl-C,
@@ -178,14 +188,14 @@ DashboardLoader: struct {
         // A borrowed owner cannot cross into the detached task; a copy of the
         // owner shares its locked verification ledger.
         ledger := verification.copy()
-        task &&ledger { sender.send(cli_dashboard_load_snapshot(ledger)) }
+        task &&ledger { cli_dashboard_send_result(sender, cli_dashboard_load_snapshot(ledger)).drop("a superseded load has no reader") }
         DashboardLoader{result: receiver, held: None}
     }
 
     // A load that has already finished with `result`.
     completed: fn(result: DashboardLoadResult) -> DashboardLoader Never! {
         (sender, receiver): channel<DashboardLoadResult>(capacity: 1)
-        sender.send(result.copy())
+        cli_dashboard_send_result(sender, result.copy()).drop("the loader holds the receiver")
         DashboardLoader{result: receiver, held: None}
     }
 

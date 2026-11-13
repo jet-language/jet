@@ -262,10 +262,15 @@ sema_call_concurrency_check_sender: fn(receiver: Expr, receiver_value: TExpr, ar
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_function_reactive_note_channel(context, updated_args[0].expr, payload_ty)
     lowered := [TExpr]{payload}
+    // A refused send (the receivers are gone, or the task was cancelled
+    // while it waited) fails with core.prelude's `SendError<T>`, whose
+    // `value` is the payload handed back unsent.
+    send_error: Type.Apply{name: sema_core_source_type_name(program, "core.prelude", "SendError"), args: [Type]{payload_ty}}
+    result_type: Type.Result{ok: Type.Named{name: "Unit"}, err: send_error}
     // Rust `receiver_effect_leaf("Sender", "send")`: a send may block on a
     // bounded channel, so it records `Time.Wait`.
-    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "Sender.send", span, Type.Named{name: "Unit"}, "Time.Wait", diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
+    if !sema_stream_handle_effect_fact(environment, program, scopes, context, "Sender.send", span, result_type, "Time.Wait", diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    built := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.SenderSend, args: lowered}, span)
     checked := sema_expr_expected(built, expected, environment, program, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }

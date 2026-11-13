@@ -1,0 +1,22 @@
+// A send the channel refuses fails with `SendError<T>`, whose `value` is the
+// payload handed back unsent.
+
+// A bare send propagates: `relay` fails with `SendError<String>`.
+relay: fn(tx: Sender<String>, text: &&String) {
+    tx.send(text)
+}
+
+// Through the default Err, a refused send reads "send on a closed channel".
+forward: fn(tx: Sender<String>, text: &&String) Err! {
+    tx.send(text)
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<String>(capacity: 4)
+    tx.send("first") ?? print("refused {err.value}")
+    print(rx.receive() ?? "closed")
+    rx.close()
+    tx.send("second") ?? print("refused {err.value}")
+    relay(tx, "third") ?? print("relay kept {err.value}")
+    forward(tx, "fourth") ?? print("forward: {err}")
+}

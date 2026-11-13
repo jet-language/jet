@@ -1,0 +1,14 @@
+// closed.jet with the send handled: a refusal returns the value it kept, so
+// the function's only failure is the closed receive.
+pass_on: fn(rx: Receiver<Int>, tx: Sender<Int>) -> Int Closed! {
+    value: rx.receive()
+    tx.send(value) ?? return err.value
+    value
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
+    tx.send(5) ?? print("refused {err.value}")
+    print(pass_on(rx, tx) ?? -1)
+    print(rx.receive() ?? -1)
+}

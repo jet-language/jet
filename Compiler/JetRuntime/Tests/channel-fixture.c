@@ -28,7 +28,7 @@ extern void jet_rt_thread_detach(void);
 #define jet_rt_thread_detach() ((void)0)
 #endif
 extern void jet_rt_native_channel(uint8_t,int64_t,W*,W*);
-extern void jet_rt_native_sender_send(W,W,const Meta*);
+extern int64_t jet_rt_native_sender_send(W,W,const Meta*);
 extern void jet_rt_native_sender_close(W);
 extern W jet_rt_native_sender_clone(W);
 extern void jet_rt_native_sender_drop(W);
@@ -143,7 +143,7 @@ static void queue_tests(void) {
     W value=7;jet_rt_native_sender_send(alias,(W)&value,&word_meta);jet_rt_native_sender_drop(alias);assert(receive(rx)==7);closed(rx);assert(jet_rt_native_receiver_is_ready(rx));jet_rt_native_receiver_drop(rxa);jet_rt_native_receiver_drop(rx);
     jet_rt_native_channel(0,0,&tx,&rx);
     unsigned before=atomic_load(&drops);for(W i=0;i<11;i++)jet_rt_native_sender_send(tx,(W)&i,&owned_meta);
-    jet_rt_native_receiver_close(rx);W rejected=99;jet_rt_native_sender_send(tx,(W)&rejected,&owned_meta);assert(atomic_load(&drops)==before+1);jet_rt_native_sender_drop(tx);jet_rt_native_receiver_drop(rx);assert(atomic_load(&drops)==before+12);
+    jet_rt_native_receiver_close(rx);W rejected=99;assert(jet_rt_native_sender_send(tx,(W)&rejected,&owned_meta)==0);assert(rejected==99&&atomic_load(&drops)==before);jet_rt_native_sender_drop(tx);jet_rt_native_receiver_drop(rx);assert(atomic_load(&drops)==before+11);
     jet_rt_native_channel(0,0,&tx,&rx);
     W iter=jet_rt_native_receiver_iter(rx,0,&word_meta);jet_rt_native_iter_drop(iter);jet_rt_native_sender_close(tx);closed(rx);jet_rt_native_sender_drop(tx);jet_rt_native_receiver_drop(rx);
     puts("queue/close/owners ok");

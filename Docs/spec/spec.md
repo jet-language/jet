@@ -3821,6 +3821,11 @@ value: rx.receive() ?? panic("channel closed")
 A second sender is made with `tx.copy()`; there is no combined channel value from
 which to fetch one. `send` moves its value into the channel, and
 `receive() -> T !Closed` waits until a value arrives or all senders close.
+A send the channel refuses, because every receiver has closed or the waiting
+sender was cancelled, fails with core.prelude's `SendError<T> { value: T }`,
+which hands the unsent value back: `tx.send(job) ?? retry(err.value)`. A bare
+send propagates it, and it converts to the default `Err` as
+`send on a closed channel` (D-SEND-ERROR1=A).
 Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a
 bounded buffer of `N >= 1` values; a literal capacity below 1 is **E0395** and a
 run-time capacity below 1 stops the program, never clamping. Seed a channel with

@@ -101,6 +101,15 @@ SourceLocation: struct {
 
     impl Display { display: fn(self) -> String { "{self.file}:{self.line}:{self.column}" } }
 }
+// A send the channel refused: its receiving end is gone, or the sending task
+// was cancelled while it waited. `value` is the payload, handed back unsent,
+// so `tx.send(job) ?? retry(err.value)` keeps the job. A program never has to
+// spell it: `tx.send(v)` fails with `SendError<T>` for the channel's `T`, and
+// passes it up as the default `Err` like any Core error.
+#Error
+SendError: struct<T> {
+    value: T
+}
 // The phase of the compiled copy an expression runs in: `#phase` is
 // `.Preparation` in preparation and compile-time code and in a function's
 // compile-time copy, `.Build` in the copy a package's `fn build` runs, and

@@ -1159,6 +1159,11 @@ kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: 
 kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int, done: Sender<KitEntryRun>) {
     entry_task: task kit_execute_entry(index, item.copy(), options.copy(), env.copy(), known.copy(), root.copy(), run_scratch.copy(), guard)
     run := entry_task.join() ?? KitEntryRun{index: index, suite: item.suite.copy(), ran: true, done: false, results: [KitCaseResult]{}}
+    kit_execute_send(done, run).drop("nobody collects a stopped run")
+}
+
+// One entry's report to the collector; a refused send means it is gone.
+kit_execute_send: fn(done: Sender<KitEntryRun>, run: &&KitEntryRun) Err! {
     done.send(run)
 }
 

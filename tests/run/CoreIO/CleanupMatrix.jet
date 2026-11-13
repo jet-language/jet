@@ -37,6 +37,11 @@ stop_process: fn(code: Int) {
     }
 }
 
+// Readiness to the winner, which holds the receiver until it cancels.
+signal_ready: fn(ready: Sender<Int>) Err! {
+    ready.send(1)
+}
+
 body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int CaseFail! {
     first := Resource{name: "first"}
     defer close(first)
@@ -51,7 +56,7 @@ body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int Case
         "cancel" -> {
             started: ready ?? panic("missing cancellation readiness channel")
             waiting: blocked ?? panic("missing cancellation blocking channel")
-            started.send(1)
+            signal_ready(started) ?? panic("the winner stopped listening")
             // No sender releases this wait. The winner cancels it only after
             // receiving readiness, so the resources above are provably live.
             _: waiting.receive() ?? panic("cancellation wait was released")

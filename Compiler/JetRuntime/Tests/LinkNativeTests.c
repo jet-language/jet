@@ -17,7 +17,7 @@ extern void jet_rt_native_shared_read(W, W, W, W);
 extern void jet_rt_native_shared_edit(W, W, W, W);
 extern void jet_rt_native_shared_drop(W);
 extern void jet_rt_native_channel(W, W, W, W);
-extern void jet_rt_native_sender_send(W, W, W);
+extern W jet_rt_native_sender_send(W, W, W);
 extern W jet_rt_native_receiver_clone(W);
 extern void jet_rt_native_sender_drop(W);
 extern void jet_rt_native_receiver_drop(W);

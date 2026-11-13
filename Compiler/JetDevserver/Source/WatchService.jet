@@ -53,7 +53,11 @@ PathStamp: struct {
 }
 WatchWake: struct {
     sender: mpsc.Sender<()>
-    wake: fn(self) -> () { _: self.sender.send(_) }
+    wake: fn(self) -> () { watch_wake_send(self.sender).drop("a gone waiter needs no wake") }
+}
+// One wake to the waiter; a refused send means the waiter is gone.
+watch_wake_send: fn(sender: mpsc.Sender<()>) Err! {
+    sender.send(_)
 }
 // Waits for a change under the watched paths or a wake. Every host watches
 // through core.watcher; one poll per WATCH_POLL_INTERVAL_MS reports whether

@@ -54,12 +54,13 @@ use {
 // payload-free `CryptoError` and `FileCryptoError`, and `AllocError`, whose
 // conversion allocates nothing. `TaskFailure` and component types stay
 // outside on purpose. The typed decode's `[FieldError]` list is the one
-// member that is not a named type (sema_core_error_family_source).
+// member that is not a named type, and the refused send's `SendError<T>` the
+// one generic member (sema_core_error_family_source).
 JET_CORE_ERROR_FAMILY: #run { [String]{
     "AllocError", "AppError", "ArchiveError", "Base32Error", "Base64Error", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
     "EncodingError", "EnvError", "FileCryptoError", "HTTPError", "HexError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
     "PluginError",
-    "RangeError", "RegexError", "TextError", "TimeError", "UIHostError", "URLError", "UTF8Error", "UUIDError", "WsError", "XMLError",
+    "RangeError", "RegexError", "SendError", "TextError", "TimeError", "UIHostError", "URLError", "UTF8Error", "UUIDError", "WsError", "XMLError",
 } }
 
 // Every Core type that may be named as the error side
@@ -89,20 +90,34 @@ sema_core_error_family_member: fn(name: String) -> Bool Never! {
 }
 
 // Whether `source` reaches the default `Err` by the standard library's own
-// conversion: a family member, or the `[FieldError]` list every Core typed
-// decode fails with, so `run: fn()` passes a failed decode up as it passes a
-// failed read.
+// conversion: a family member (any instance of the generic `SendError<T>`),
+// or the `[FieldError]` list every Core typed decode fails with, so
+// `run: fn()` passes a failed decode up as it passes a failed read.
 sema_core_error_family_source: fn(source: Type) -> Bool Never! {
     if source == .List(.Named(name)) -> return sema_error_conversion_leaf(name) == "FieldError"
+    if source == .Apply(name, _) -> return sema_core_error_family_member(name)
     sema_core_error_family_member(type_name(source))
 }
 
-// The source a Prelude conversion parses under: the member's leaf, or for the
-// `[FieldError]` list its element's, since a written conversion source is one
-// named type. The routine binds the exercised source type either way.
+// The source a Prelude conversion parses under: the member's leaf, for the
+// `[FieldError]` list its element's, and for a generic member its head's,
+// since a written conversion source is one named type. The routine binds the
+// exercised source type either way.
 sema_prelude_conversion_spelling: fn(source: Type) -> String Never! {
     if source == .List(element) -> return sema_error_conversion_leaf(type_name(element))
+    if source == .Apply(name, _) -> return sema_error_conversion_leaf(name)
     sema_error_conversion_leaf(type_name(source))
+}
+
+// The message a Prelude conversion gives the default `Err`, as its
+// Prelude/Errors.jet declaration writes it: a refused send's names no
+// payload, which need not be printable; a refused allocation reports without
+// allocating (static text, never the formatted AllocError); every other
+// member shows itself.
+sema_prelude_conversion_message: fn(leaf: String) -> String Never! {
+    if leaf == "SendError" -> return "send on a closed channel"
+    if leaf == "AllocError" -> return "memory allocation refused"
+    "{{self}}"
 }
 
 sema_core_error_type: fn(name: String) -> Bool Never! {
@@ -337,10 +352,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypePa
 // finds it.
 sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> Func? {
     leaf: sema_prelude_conversion_spelling(source)
-    // A refused allocation reports without allocating: static text, never
-    // the formatted AllocError.
-    message: if leaf == "AllocError" -> "memory allocation refused" else -> "{{self}}"
-    parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{message}\")\n}}\n".bytes()) ?? return None
+    parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{sema_prelude_conversion_message(leaf)}\")\n}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 {
         loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
         return None

@@ -87,20 +87,25 @@ kit_steps_recv_valid: fn(text: String) -> Bool {
     true
 }
 
+// One chunk to the session's reader; a refused send means the reader is gone.
+kit_steps_send_chunk: fn(out: Sender<[U8]>, chunk: &&[U8]) Err! {
+    out.send(chunk)
+}
+
 // Drains the child's captured stdout into `out`; an empty chunk marks its end.
 // Cancellation also ends the read empty, so only the task's own return (not a
 // cancelled join) means the stream really ended.
 kit_steps_session_pull: fn(stream: ProcessStdoutStream, out: Sender<[U8]>) -> String Never! {
     loop {
         chunk: stream.read(65536) ?? {
-            out.send([U8]{})
+            kit_steps_send_chunk(out, [U8]{}).drop("nobody reads a gone session")
             return "{err}"
         }
         if chunk.len() == 0 {
-            out.send([U8]{})
+            kit_steps_send_chunk(out, [U8]{}).drop("nobody reads a gone session")
             return ""
         }
-        out.send(chunk)
+        kit_steps_send_chunk(out, chunk).drop("nobody reads a gone session")
     }
     ""
 }
@@ -386,20 +391,26 @@ kit_steps_send_result: fn(step: KitStep, context: KitStepCtx, state: KitStepStat
     if result.verdict.status == "PASS" -> "" else -> result.verdict.detail
 }
 
+// One report to the parallel group's collector; a refused send means the
+// collector is gone.
+kit_steps_send_message: fn(sender: Sender<String>, message: &&String) Err! {
+    sender.send(message)
+}
+
 kit_steps_send_report: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
-    sender.send(kit_steps_send_result(step, context, state))
+    kit_steps_send_message(sender, kit_steps_send_result(step, context, state)).drop("nobody collects a gone group")
 }
 
 kit_steps_parallel_start: fn(group: Group, steps: [KitStep], index: Int, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
     if index >= steps.len() -> return
     original: steps[index]
     if original.action != "send" {
-        sender.send("parallel contains a non-send action")
+        kit_steps_send_message(sender, "parallel contains a non-send action").drop("nobody collects a gone group")
         kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
         return
     }
     step: kit_steps_resolve_step(original, context, state) ?? {
-        sender.send("parallel send token unavailable")
+        kit_steps_send_message(sender, "parallel send token unavailable").drop("nobody collects a gone group")
         kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
         return
     }
@@ -408,7 +419,7 @@ kit_steps_parallel_start: fn(group: Group, steps: [KitStep], index: Int, context
     // Start all remaining sends before joining this one, preserving concurrency.
     kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
     worker.join() ?? {
-        sender.send("parallel task join failed")
+        kit_steps_send_message(sender, "parallel task join failed").drop("nobody collects a gone group")
         return
     }
 }

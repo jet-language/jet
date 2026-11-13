@@ -3522,6 +3522,11 @@ JetDriverCoreIdentifierDemand: struct {
     // core.encoding too. A `FieldError` value or type alone is
     // compiler-owned and loads nothing.
     codec_decode: Bool{false}
+    // A `.send(…)` receiver call: `Sender.send` fails with core.prelude's
+    // `SendError<T>`, a type the source need not spell, so core.prelude
+    // loads. Syntactic, as for `.abs`: Sema alone decides whether the
+    // receiver is a Sender.
+    channel_send: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core: core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (hmac_sha256). Natively that member's
@@ -3589,6 +3594,7 @@ JetDriverCoreDemandNames: struct {
     migration_name: Int
     field_error_name: Int
     input_name: Int
+    send_name: Int
     field_error_under_name: Int
     bare: [Int]
     bare_alias: [[Int]]
@@ -3652,7 +3658,7 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
     context_fields := [Int]{}
     loop field in SEMA_CONTEXT_CORE_FIELDS -> context_fields.push(jet_driver_core_demand_name(tables, field))
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), send_name: jet_driver_core_demand_name(tables, "send"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
 }
 
 // The words besides its name that demand a bare Core type's module: `url`
@@ -3757,6 +3763,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
+            if name == names.send_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.channel_send = true
             if name == names.timeout_name && index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.task_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && !demand.source_modules.contains("core.time") -> demand.source_modules.push("core.time")
             if name == names.input_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) {
                 method: token_decoded(tables, tokens[index + 2])
@@ -3872,6 +3879,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.test_suite -> demand.test_suite = true
         if output.stream_event_time -> demand.stream_event_time = true
         if output.codec_decode -> demand.codec_decode = true
+        if output.channel_send -> demand.channel_send = true
         if output.unit_family -> demand.unit_family = true
         if output.rounded_conversion -> demand.rounded_conversion = true
         loop bare in output.bare_names {
@@ -4211,8 +4219,8 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
 //   original error module (Items.jet sema_registration_original_error_module,
 //   whose copy `jet build Compiler` regenerates: Toolchain/PreludeSources.jet);
 // - an `impl X -> Err` conversion is a Core error family row: the compiler
-//   injects the `return Err("{self}")` routine for a family member
-//   (FailureLaw.jet), so X must be one and the target `Err`.
+//   injects the routine for a family member (FailureLaw.jet
+//   sema_prelude_error_conversion), so X must be one and the target `Err`.
 jet_driver_parse_prelude_source: fn(text: String, threads: CompilerThreads) -> JetDriverParsedUnit {
     unit := jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
     unit.parsed.program.items = jet_driver_prelude_checked_items(unit.parsed.program.items, "", text, unit.parsed.diagnostics)
@@ -5420,6 +5428,17 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             jet_driver_reach_open(reach, "core.prelude")
             prelude_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if prelude_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    pending.push(index)
+                }
+            }
+        }
+        // `tx.send(v)` fails with core.prelude's `SendError<T>`, laid out
+        // from its declaration, even when the caller names neither.
+        if demand.channel_send && !defers {
+            send_error_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if send_error_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)

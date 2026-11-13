@@ -101,7 +101,12 @@ state_label: fn(delivery: &&Delivery) -[DB, Env, Time]> String Never! {
 load_user: fn(address: String, tx: Sender<Int>) Never! {
     started: time.now()
     _response: http_client.get("http://{address}/health") ?? return
-    tx.send(time.now() - started)
+    report_latency(tx, time.now() - started).drop("the load test stopped collecting")
+}
+
+// One latency sample; a refused send means the load test stopped collecting.
+report_latency: fn(tx: Sender<Int>, latency: Int) Err! {
+    tx.send(latency)
 }
 
 load_test: fn(address: String) Never! {

@@ -42,9 +42,16 @@ sema_data_nominal_is: fn(name: String, leaf: String) -> Bool Never! {
 }
 
 sema_data_source_type_name: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
+    sema_core_source_type_name(program, "core.data", leaf)
+}
+
+// The checked name of the type `leaf` that Core module `module_name`
+// declares (`<corelib>/core.data::DataJoin`); just `leaf` for a
+// compiler-owned row, or when the load holds no such declaration.
+sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
         loop module_row_index in 0..<graph.modules.len() {
-            if graph.modules[module_row_index].module_name != "core.data" -> next
+            if graph.modules[module_row_index].module_name != module_name -> next
             loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
                 if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
                     if graph.modules[module_row_index].nominals[nominal_index].compiler_owned -> return "{leaf}"

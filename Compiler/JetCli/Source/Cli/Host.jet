@@ -457,6 +457,11 @@ jet_cli_test_members_run: fn(heading: String, names: [String], argvs: [[String]]
 jet_cli_test_member_report: fn(index: Int, argv: [String], env: [String], done: Sender<JetCLITestMemberRun>) {
     member: task jet_cli_test_member(index, argv.copy(), env.copy())
     run := member.join() ?? JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: the run of `{argv.join(" ")}` stopped before it reported\n"}
+    jet_cli_test_member_send(done, run).drop("nobody collects a stopped test run")
+}
+
+// One member's report to the collector; a refused send means it is gone.
+jet_cli_test_member_send: fn(done: Sender<JetCLITestMemberRun>, run: &&JetCLITestMemberRun) Err! {
     done.send(run)
 }
 

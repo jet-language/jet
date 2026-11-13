@@ -1067,6 +1067,7 @@ jet_driver_reach_core_demands: fn(reach: &JetDriverReach, unit: Int, demand: Jet
         reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "migration"), dotted: false, module_name: "core.encoding", bare: false, open: true, followed: false})
     }
     if demand.option_or_err -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "or_err"), dotted: false, module_name: "core.prelude", bare: false, open: true, followed: false})
+    if demand.channel_send -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, "send"), dotted: true, module_name: "core.prelude", bare: false, open: false, followed: false})
     loop at in 0..<path_words.len() -> reach.demands.push(JetDriverReachDemand{unit: unit, word: jet_driver_reach_word(reach, path_words[at]), dotted: true, module_name: path_modules[at].copy(), bare: false, open: false, followed: false})
 }
 

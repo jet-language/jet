@@ -229,7 +229,11 @@ kit_test_pool_entry: fn(env: KitEnv, root: String, index: Int) -> KitRun {
 kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int>) {
     entry: task kit_test_pool_entry(env.copy(), root.copy(), index)
     run: entry.join() ?? kit_exec_failed("the entry task stopped")
-    done.send(run.code)
+    kit_test_pool_send(done, run.code).drop("nobody collects a stopped pool")
+}
+
+kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
+    done.send(code)
 }
 
 // Every running entry holds two scheduler workers, its reporting task and its own, and

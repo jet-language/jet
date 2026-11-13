@@ -189,6 +189,12 @@ impl RegexError -> Err {
     return Err("{self}")
 }
 
+// `SendError<T>`, a refused send, is a member whatever its `T`: its message
+// names no payload, so an unprintable one is never shown.
+impl SendError -> Err {
+    return Err("send on a closed channel")
+}
+
 impl TextError -> Err {
     return Err("{self}")
 }

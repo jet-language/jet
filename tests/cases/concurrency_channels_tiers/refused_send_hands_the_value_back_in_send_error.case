@@ -1,0 +1,25 @@
+# `tx.send(v)` fails with core.prelude's `SendError<T>` when the channel
+# refuses the value, and `err.value` hands the value back: a send after the
+# receiver closed is recovered with `??`, a bare send propagates out of an
+# inferred function and converts to the default Err with a fixed message, on
+# O0, O1 and O2. closed.jet sends inside a `Closed` contract, which a
+# `SendError<Int>` does not fit; handled.jet handles that send and checks.
+fixture: refused_send_hands_the_value_back_in_send_error.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "first\nrefused second\nrelay kept third\nforward: send on a closed channel\n"
+step: jet check closed.jet
+exit: 1
+stderr: ~ "E0403" # the send's failure does not fit the Closed contract
+stderr: ~ "SendError" # the report names the refused send's error
+step: jet run --optimize=none handled.jet
+exit: 0
+stdout: = "5\n5\n"

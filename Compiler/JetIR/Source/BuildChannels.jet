@@ -113,9 +113,9 @@ ir_channel_capacity_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity
 }
 
 // An endpoint method: close on either endpoint, send on a Sender (an owned
-// copy of the value moves into the channel), is_ready, the timer metadata
-// reads, try_receive and receive on a Receiver. None leaves any other
-// operation to ir_handle_method.
+// copy of the value moves into the channel, or back out in the `SendError`
+// of a refused send), is_ready, the timer metadata reads, try_receive and
+// receive on a Receiver. None leaves any other operation to ir_handle_method.
 ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     receiver_ty: ir_ty(p, b, receiver)
     sender: ir_channel_element(receiver_ty, "Sender")
@@ -140,6 +140,10 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
         }
         .SenderSend -> {
             if args.len() != 1 -> return Val(ir_fail_slot(b, span, "Sender.send with {args.len()} arguments"))
+            err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return Val(ir_fail_slot(b, span, "Sender.send as {ir_type_name(ty)}")) }
+            err_row: ir_value_type(m, p, err_ty) ?? return Val(ir_type_fail(b, span, err_ty))
+            if m.types[err_row].kind != .Aggregate -> return Val(ir_fail_slot(b, span, "Sender.send failing with {ir_type_name(err_ty)}"))
+            member: ir_member_of_row(m, p, err_row, "value") ?? return Val(ir_fail_slot(b, span, "{ir_type_name(err_ty)} without its value"))
             value: ir_expr(m, p, b, args[0])
             if ir_failed(b) || value < 0 -> return Val(-1)
             owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
@@ -151,7 +155,25 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             slot: ir_lazy_value_slot(m, b, owned)
             meta: ir_lazy_meta(m, p, b, element, span)
             if meta < 0 -> return Val(-1)
-            _: ir_runtime(m, b, "jet_rt_native_sender_send", [Int]{handle, slot, meta}, -1)
+            // The runtime answers 1 when the channel took the value, the
+            // Result's selector. On 0 it kept nothing, and the value comes
+            // back as the error's `value` (as ir_task_outcome).
+            boxed: ir_result_box(m, p, b, ty, true, -1)
+            word_row: ir_word_row(m)
+            verdict: ir_runtime(m, b, "jet_rt_native_sender_send", [Int]{handle, slot, meta}, word_row)
+            ir_emit(b.f, IROp.Store, -1, boxed, 0, verdict, b.line)
+            zero: ir_word_const(m, b, 0)
+            refused: ir_bool_op(m, b, IROp.Eq, verdict, zero)
+            ir_open_if(b.f, refused, b.line)
+            storage: ir_fresh_temp(m, b, err_row)
+            ir_emit(b.f, IROp.StackAddress, storage, m.types[err_row].size, 8, -1, b.line)
+            b.fresh[owned] = true
+            ir_member_write(m, p, b, storage, member, owned, -1)
+            ir_store_at(m, p, b, boxed, 8, storage)
+            ir_end(b.f, b.line)
+            b.fresh[owned] = false
+            b.fresh[boxed] = true
+            result = boxed
         }
         .ChannelIsReady | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelDelayMs -> {
             row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))

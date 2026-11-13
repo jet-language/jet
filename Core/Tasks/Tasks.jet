@@ -43,7 +43,7 @@ scheduler: module {
 
     #Test("scheduler channel preserves its named sender and receiver") {
         pair: channel<Int>()
-        pair.sender.send(41)
+        __test_send(pair.sender, 41) ?? panic("channel closed")
         assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
         pair.sender.close()
     }
@@ -56,9 +56,14 @@ scheduler: module {
 
     #Test("scheduler bounded channel preserves its named sender and receiver") {
         pair: bounded<Int>(0)
-        pair.sender.send(42)
+        __test_send(pair.sender, 42) ?? panic("bounded channel closed")
         assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
         pair.sender.close()
+    }
+
+    // A test's send; the test holds the receiver, so a refusal is its bug.
+    __test_send: fn(sender: Sender<Int>, value: Int) Err! {
+        sender.send(value)
     }
 }
 

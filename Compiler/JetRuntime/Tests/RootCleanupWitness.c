@@ -22,7 +22,7 @@ extern void jet_rt_host_arguments(int64_t, int64_t, int64_t);
 extern void jet_rt_scheduler_control_retain(int64_t);
 extern int64_t jet_rt_native_task_spawn(int64_t, Text *, int64_t, int64_t, int64_t, int64_t);
 extern void jet_rt_native_channel(int64_t, int64_t, int64_t, int64_t);
-extern void jet_rt_native_sender_send(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_native_sender_send(int64_t, int64_t, int64_t);
 extern void jet_rt_native_sender_drop(int64_t);
 extern void jet_rt_native_receiver_drop(int64_t);
 extern int64_t jet_rt_native_task_join(int64_t, int64_t, int64_t);

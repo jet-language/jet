@@ -232,11 +232,14 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     sync_store(rx, channel)
 }
 
-#Export(c) jet_rt_native_sender_send: fn(channel: I64, slot: I64, meta: I64) {
+// 1 when the channel took the value at `slot`, else 0: the receivers are
+// gone or the task was cancelled while it waited, and the value stays at
+// `slot`, owned by the caller (the sender's `SendError`).
+#Export(c) jet_rt_native_sender_send: fn(channel: I64, slot: I64, meta: I64) -> I64 {
     park := I64{0}
     node := I64{0}
     reason := I64{0}
-    accepted := false
+    accepted := I64{0}
     loop {
         if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_root_cancel_observed()) { break }
         sync_mutex_lock(channel)
@@ -259,7 +262,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
             channel_wake_one(channel, false)
             channel_update(channel)
             sync_mutex_unlock(channel)
-            accepted = true
+            accepted = I64{1}
             break
         }
         if (park == I64{0}) {
@@ -280,11 +283,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
     if (park != I64{0}) { sync_park_drop(park) }
     if (reason != I64{0}) { jet_rt_string_drop(reason) }
-    if !accepted {
-        jet_rt_session_shield_enter()
-        coll_slot_drop(slot, meta)
-        jet_rt_session_shield_leave()
-    }
+    accepted
 }
 
 #Export(c) jet_rt_native_sender_close: fn(channel: I64) { channel_close(channel, false) }
