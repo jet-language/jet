@@ -1,0 +1,18 @@
+// `approx` of a big Int temporary drops that temporary: four million
+// conversions of a fresh 2^68-scale Int, and `math.sin_pi`, whose reduction
+// converts one, each in a constant amount of memory.
+use {
+    math: core.math
+}
+
+run: fn() {
+    sum := 0.0
+    loop i in 0..<4_000_000 {
+        sum = sum + approx((i + 0x1000_0000_0000_0000) << 8)
+    }
+    turns := 0.0
+    loop i in 0..<4_000_000 {
+        turns = turns + math.sin_pi(Float{0.1} + Float{i} * Float{1e-8})
+    }
+    print("{sum > 0.0} {turns > 0.0}")
+}

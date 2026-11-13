@@ -1,0 +1,25 @@
+# `approx(value)` borrows its operand, so a fresh big Int operand is dropped
+# after the conversion. Four million `approx` calls on a fresh 2^68-scale Int,
+# then four million `math.sin_pi` calls (its reduction converts one), run in
+# a 256 MiB address space (`limit: memory=` is RLIMIT_AS in KiB). The leak
+# held about 1.1 GB here and stopped on "memory allocation failed" (#6700 c1:
+# the F32 sin_pi/cos_pi scan was OOM-killed). Built programs only: under
+# `jet run` the limit would be the compiler's.
+fixture: approx_of_a_temporary_big_int_frees_it.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --optimize=none main.jet
+exit: 0
+step o0: built
+limit: memory=262144
+exit: 0
+stdout: = "true true\n"
+stderr: empty
+step: jet build --release main.jet
+exit: 0
+step o2: built
+limit: memory=262144
+exit: 0
+stdout: = "true true\n"
+stderr: empty

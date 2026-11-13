@@ -3994,7 +3994,14 @@ ir_numeric_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     value: ir_expr(m, p, b, receiver)
     if ir_failed(b) || value < 0 -> return -1
     if operation == {
-        .CastAs(_) -> return ir_numeric_cast(m, p, b, value, target, span)
+        .CastAs(_) -> {
+            // The cast borrows its operand (an exact Int crosses through the
+            // borrowing jet_int_owned_to_* adapters), so a fresh operand,
+            // `approx(a << k)`'s big Int, is dropped here.
+            result: ir_numeric_cast(m, p, b, value, target, span)
+            ir_release(m, b, value)
+            return result
+        }
         .ToShow -> return ir_render(m, p, b, receiver_ty, value, IRRender.Display, span)
         .InlineRange(lo, hi, checked) -> {
             // A runtime value is Ok in lo..hi, else Err (the route
