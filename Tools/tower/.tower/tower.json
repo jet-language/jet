@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100325,
+    "rev": 100350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29907,6 +29907,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Ruling: the c30-c34 proofs live as tests/cases rows (ui rows for diagnostics); the tests/ratified/P02.jet suite named in them was only proposed and is not required. Each test name stays as written."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c35's five decisions now each have a build row: D-STACKBOUND1 #3645, D-PIN1 #4620, D-AUTHORITY-MEM2 #4268, D-MEM-HARDEN1 #6011, D-HOTSTATE1 #6625."
@@ -30434,7 +30439,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-09T20:48:26.957Z",
+      "updated": "2026-11-13T01:53:33.593Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -35274,12 +35279,12 @@
         },
         {
           "n": 5,
-          "text": "the syntax registry (Compiler/JetFoundation/Data/Syntax) entry updated",
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (constructor-form settings defaults). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-21T23:44:51.647Z"
+          "at": "2026-11-13T01:53:17.104Z"
         },
         {
           "n": 6,
@@ -35301,12 +35306,12 @@
         },
         {
           "n": 9,
-          "text": "Proof: `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` prints `JETPACK CHECK OK (check, default run, AOT test)` with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://api.example.com\"}` and the E1206 rejection of `tls: Bool = true`; and `jet test Compiler --profile cases package_outputs/typed_settings_preserves_tier_parity_and_cli_override` and `jet test Compiler --profile cases package_outputs/computed_build_contribution_records_lock_and_matches_explain_golden` pass on the migrated examples.",
+          "text": "`jet test Compiler --profile packages --filter PackageFacts` passes with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://...\"}` and the rejection of the old equals form, and `JET=jet jet Jetpack/Bootstrap/Check.jet --area PackageModel --deps-from-head` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:09:13.729Z"
+          "at": "2026-11-13T01:53:18.382Z"
         }
       ],
       "refs": [
@@ -35331,7 +35336,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:57:27.055Z",
-      "updated": "2026-11-13T01:49:46.141Z",
+      "updated": "2026-11-13T01:53:18.382Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -36502,12 +36507,12 @@
         },
         {
           "n": 3,
-          "text": "System APIs pass failure/effect and applicable-tier proof with no semantic Rust shim.",
+          "text": "System APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core --filter <module>`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:55.521Z"
+          "at": "2026-11-13T01:53:19.743Z"
         },
         {
           "n": 4,
@@ -36637,7 +36642,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-13T01:49:48.348Z",
+      "updated": "2026-11-13T01:53:19.743Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-13T01:49:48.348Z",
       "goals": [
@@ -37299,12 +37304,12 @@
         },
         {
           "n": 3,
-          "text": "Specialized APIs pass failure/effect and applicable-tier proof with no semantic Rust shim.",
+          "text": "Specialized APIs pass failure/effect proof on O0, O1 and O2 through their Core/<module> Jet bodies (Core #Tests under `jet test Compiler --profile core`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-22T00:15:59.550Z"
+          "at": "2026-11-13T01:53:21.074Z"
         },
         {
           "n": 4,
@@ -37326,12 +37331,12 @@
         },
         {
           "n": 6,
-          "text": "After each specialized module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member its `source_module` owns, and `node Tools/agent/check-core-surface-ledger.mjs` passes. `jet test Compiler --profile golden tooling/compute_`, `jet test Compiler --profile golden ui/`, `jet test Compiler --profile golden game/`, `jet test Compiler --profile cases core_compute_solve/` and `jet test Compiler --profile cases core_testing_history/` pass with identical output on O0, O1 and O2 (and web where the example declares it).",
+          "text": "After each specialized module cutover, Compiler/Prelude/Core.jet has no dispatcher_row for a member its source_module owns, and `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:22:16.650Z"
+          "at": "2026-11-13T01:53:22.501Z"
         },
         {
           "n": 7,
@@ -37443,7 +37448,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:05.017Z",
-      "updated": "2026-11-13T01:49:50.563Z",
+      "updated": "2026-11-13T01:53:22.501Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-13T01:49:50.563Z",
       "goals": [
@@ -41423,12 +41428,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Every semantic item listed in the body lives in the named Core/*.jet home; the Rust Prelude keeps only policy-free provider leaves, and duplicated Rust policy is deleted in the same cutover.",
+          "text": "Every semantic item listed in the body lives in its Core/*.jet home; the runtime keeps only policy-free provider leaves (`git grep -n 'HTTPClientNew\\|jet_http_client_new_impl' -- Compiler Core` is empty, as c11 states).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T11:08:58.552Z"
+          "at": "2026-11-13T01:53:24.031Z"
         },
         {
           "n": 2,
@@ -41540,12 +41545,12 @@
         },
         {
           "n": 14,
-          "text": "Jet runtime parses resolver servers from resolv.conf text through a text-taking function; #Tests port the resolv.conf half of 7c301d390a:tests/corelib_parts/net.rs core_net_dns_platform_resolver_parsers_accept_native_fixtures and ..._reject_noise_and_malformed_entries, with their fixtures (meets #6096 c67). The scutil and Get-DNSClientServerAddress halves are out of scope: owner standing order, no macOS or Windows work.",
+          "text": "The Jet runtime parses resolver servers from resolv.conf text through a text-taking function; Core #Tests cover native fixtures and reject noise and malformed lines (`jet test Compiler --profile core --filter resolv`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-05T00:30:17.517Z"
+          "at": "2026-11-13T01:53:25.423Z"
         },
         {
           "n": 15,
@@ -41648,7 +41653,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-13T01:51:45.921Z",
+      "updated": "2026-11-13T01:53:25.423Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -41783,12 +41788,12 @@
         },
         {
           "n": 5,
-          "text": "AOT: a built binary dispatches the same jobs with the same output (blocked on the AOT SourceSharedInterop ICE).",
+          "text": "A built binary dispatches the same jobs with the same output as `jet jobs` (a jetpack_tasks case; `jet test Compiler --profile cases --filter jetpack_tasks`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T15:53:16.619Z"
+          "at": "2026-11-13T01:53:27.925Z"
         },
         {
           "n": 6,
@@ -41922,7 +41927,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-09-28T15:53:06.743Z",
-      "updated": "2026-11-13T01:49:59.453Z",
+      "updated": "2026-11-13T01:53:27.925Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -42041,12 +42046,12 @@
         },
         {
           "n": 6,
-          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"The two-client example passes on every applicable tier: `JET_GOLDEN_FILTER=web/sync_two_clients Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and the web tier is proved by `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`.\". Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
+          "text": "A tests/cases row proves the two-client example (offline edit, reconnect, server rejects one write and the client rolls back) on O0, O1 and O2 and the web tier (`jet test Compiler --profile cases --filter sync_two_clients`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:15:10.232Z"
+          "at": "2026-11-13T01:53:30.250Z"
         },
         {
           "n": 7,
@@ -42134,7 +42139,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T01:50:01.831Z",
+      "updated": "2026-11-13T01:53:30.250Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -45213,6 +45218,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Ruling: the c1-c10 proofs live as tests/cases rows (ui rows for diagnostics); the tests/ratified/P04.jet suite named in them was only proposed and is not required. Each test name stays as written."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). c20/c23/c24 name Linux proofs (Windows is out of scope). c34/c35 name guard proofs; c35 is not clean on dev (PackageViews.jet:238, architecture.md:1878, syntax-decisions.md:3975). c44 drops the retired capability/plugin words. New row: D-AUTHORITY-MEM2 (from #3239 c35). Moved out (A2): c15, c16, c28 to G3 #6748 (crypto), c37-c40 to G5 #6386 (console attach), c47-c49 to G3 #5976 (netrc). The sandbox guest rows (c5, c41, c42, c44) need a sandbox target that jet build no longer builds (E1258/E1259 retired in d0499f032b) and that D-PORTABLE1=A replaces; owner choice C-G10-2."
@@ -45535,6 +45545,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T20:44:34.305Z"
+        },
+        {
+          "n": 51,
+          "text": "(was #2047 c1) Survey names every current consumer of the effect roots (checker, #Caps, facts, diagnostics, audit, repl deny flags) and what each would do with sub-scoping, implication, or prohibition data [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #3418 c13)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:13.066Z"
+        },
+        {
+          "n": 52,
+          "text": "(was #2047 c2) Each proposed field arrives with a concrete consumer and use case attached; fields with no consumer are explicitly rejected (YAGNI) [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #3418 c14)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:14.400Z"
+        },
+        {
+          "n": 53,
+          "text": "(was #2047 c3) Report recommends adopt/defer per field and raises ballots only for surface-visible changes [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #3418 c15)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:15.781Z"
         }
       ],
       "refs": [],
@@ -45548,12 +45585,12 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-02T18:24:05.406Z",
-      "updated": "2026-11-09T20:47:49.765Z",
+      "updated": "2026-11-13T01:53:35.714Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 50
+      "criteriaLastN": 53
     },
     {
       "id": "c0jm0xjt",
@@ -49426,12 +49463,12 @@
         },
         {
           "n": 5,
-          "text": "Both compilers read one generated character table; a parity fixture over boundary scalars passes identically (shares #4426's pinned UCD).",
+          "text": "The lexer and the casing check read one generated character table; a parity fixture over boundary scalars passes (shares #4426's pinned UCD).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.274Z"
+          "at": "2026-11-13T01:53:34.680Z"
         },
         {
           "n": 6,
@@ -49471,12 +49508,12 @@
         },
         {
           "n": 10,
-          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (the D-IDENT-CHARS1 identifier rule). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T22:39:40.202Z"
+          "at": "2026-11-13T01:53:37.034Z"
         },
         {
           "n": 11,
@@ -49545,7 +49582,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-13T01:50:21.774Z",
+      "updated": "2026-11-13T01:53:37.034Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -49588,12 +49625,12 @@
         },
         {
           "n": 2,
-          "text": "If A: probe F warns once for `nickname` (never read) and once for `Legacy` (never built), each with a delete-or-rename fix; `jet run` output unchanged.",
+          "text": "Probe F warns once for `nickname` (never read) and once for `Legacy` (never built), each with a delete-or-rename fix; `jet run` output is unchanged (UI snapshot).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:47.924Z"
+          "at": "2026-11-13T01:53:38.904Z"
         },
         {
           "n": 3,
@@ -49648,7 +49685,7 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-13T01:50:23.949Z",
+      "updated": "2026-11-13T01:53:38.905Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -50100,12 +50137,12 @@
         },
         {
           "n": 7,
-          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (the D-STR-ESCAPE1 escapes). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-07T20:23:10.065Z"
+          "at": "2026-11-13T01:53:40.727Z"
         },
         {
           "n": 8,
@@ -50151,7 +50188,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:52.711Z",
-      "updated": "2026-11-13T01:50:28.450Z",
+      "updated": "2026-11-13T01:53:40.727Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -50217,12 +50254,12 @@
         },
         {
           "n": 4,
-          "text": "Frames are coloured against the declared D-GAME-BUDGET1 budget, and a frame critical path reuses the #2528 computation.",
+          "text": "Frames are coloured against the declared D-GAME-BUDGET1 budget, and the frame critical path is computed from the trace's task dependencies (a golden on a two-task frame names the critical task).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-05T21:07:53.383Z"
+          "at": "2026-11-13T01:53:42.545Z"
         },
         {
           "n": 5,
@@ -50262,7 +50299,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:53.383Z",
-      "updated": "2026-11-13T01:50:30.847Z",
+      "updated": "2026-11-13T01:53:42.545Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -55287,12 +55324,12 @@
         },
         {
           "n": 19,
-          "text": "D-ZERO-LEAKS1=A (ratified 2026-11-01) is met: the native compiler reports zero leaks, zero double frees and zero use-after-free on the lircheck harness and the full 129-program corpus, and every static leak report is cleared or proven false. Proof: the verify batch runs both and its receipt shows the zero counts.",
+          "text": "D-ZERO-LEAKS1=A is met: the native compiler reports zero leaks, zero double frees and zero use-after-free on the verify batch leak witness and the full program corpus, and every static leak report is cleared or proven false. Proof: the verify batch runs both and its receipt shows the zero counts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:44:49.981Z"
+          "at": "2026-11-13T01:53:31.437Z"
         }
       ],
       "refs": [],
@@ -55302,7 +55339,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-09T20:48:50.695Z",
+      "updated": "2026-11-13T01:53:31.437Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -56831,6 +56868,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-17T23:30:06.429Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #5051) Jetpack reaches the compiler through one `jet check --listen=-` session; delete `jet __jetpack`: The EnvModel and ProjectEntry service tests pass with exactly one `jet` child per Jetpack command (moved from #4720 c5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:44.414Z"
         }
       ],
       "refs": [
@@ -56851,9 +56897,10 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-17T23:30:06.429Z",
-      "updated": "2026-10-28T11:22:03.481Z",
+      "updated": "2026-11-13T01:53:44.414Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [],
+      "criteriaLastN": 7
     },
     {
       "id": "c0hnphts",
@@ -89420,21 +89467,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "vbatch.sh builds an s2 from the batch's s1 (or reuses one at the same commit) and runs the backend_ice cases plus a process-exit-code golden against it, failing the batch on any row that differs from s1",
+          "text": "`jet Tools/agent/Land.jet batch` builds an s2 from the batch s1 (or uses one at the same commit) and runs the backend_ice cases plus a process-exit-code golden against it, failing the batch on any row that differs from s1.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T21:54:15.339Z"
+          "at": "2026-11-13T01:53:26.692Z"
         },
         {
           "n": 2,
-          "text": "A batch on a commit carrying a known self-compile difference (the a0_030 ICE exit) reports it as a batch failure naming the s1/s2 split",
+          "text": "A Land.jet batch on a commit carrying a known self-compile difference (the a0_030 ICE exit) reports it as a batch failure naming the s1/s2 split.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-06T21:54:16.163Z"
+          "at": "2026-11-13T01:53:29.088Z"
         }
       ],
       "refs": [],
@@ -89445,7 +89492,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:54:09.666Z",
-      "updated": "2026-11-07T04:02:38.603Z",
+      "updated": "2026-11-13T01:53:29.088Z",
       "updatedBy": "Main"
     },
     {
@@ -97060,6 +97107,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:34:28.869Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #6221) JetDevserver and JetDebug parse, check and run their tests under a gate (or are deleted by owner decision) (moved from #4148 c9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:32.552Z"
+        },
+        {
+          "n": 23,
+          "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into; `jet debug --dap` drives the same session from VS Code (DAP fixture test). (moved from #4720 c9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:53:46.092Z"
         }
       ],
       "refs": [],
@@ -97070,9 +97135,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T15:15:33.693Z",
-      "updated": "2026-11-12T08:21:40.176Z",
+      "updated": "2026-11-13T01:53:46.092Z",
       "updatedBy": "Main",
-      "criteriaLastN": 21
+      "criteriaLastN": 23
     },
     {
       "id": "c0x3vq4p",
@@ -201249,6 +201314,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T01:53:46.092Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#23 `jet debug prog.jet --break file:line` stops there, prints l"
+    },
+    {
+      "at": "2026-11-13T01:53:44.414Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07bi8ml",
+      "note": "#7 (was #5051) Jetpack reaches the compiler through one `jet ch"
+    },
+    {
+      "at": "2026-11-13T01:53:42.545Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0x5guom",
+      "note": "#4: The '#2528 computation' was explain-build on #2514, closed obsolete (cross-run build reuse).; was: Frames are coloured against the declared D-GAME-BUDGET1 budget, and a frame critical path reuses the #2528 computation."
+    },
+    {
+      "at": "2026-11-13T01:53:40.727Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0m1e5o0",
+      "note": "#7: Syntax trio folded into one criterion: tests/guards/grammar.jet (editor_grammars_have_generated_sections) and tests/guards/syntax_reconciliation.jet already enforce the generated grammar sections and the syntax-decisions/LexicalLedger consistency, and `jet devtools grammars` is now `jet self devtools grammars` (Compiler/JetCli/Source/Cli/EditorGrammars.jet:1), so the registry row, the decision-log line and the regenerated grammars land and are proved together.; was: Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)"
+    },
+    {
+      "at": "2026-11-13T01:53:38.905Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0eve9h3",
+      "note": "#2: D-MEMBER-LIVE1 ratified A: drop 'If A'.; was: If A: probe F warns once for `nickname` (never read) and once for `Legacy` (never built), each with a delete-or-rename fix; `jet run` output unchanged."
+    },
+    {
+      "at": "2026-11-13T01:53:37.035Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#10: Syntax trio folded into one criterion: tests/guards/grammar.jet (editor_grammars_have_generated_sections) and tests/guards/syntax_reconciliation.jet already enforce the generated grammar sections and the syntax-decisions/LexicalLedger consistency, and `jet devtools grammars` is now `jet self devtools grammars` (Compiler/JetCli/Source/Cli/EditorGrammars.jet:1), so the registry row, the decision-log line and the regenerated grammars land and are proved together.; was: Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)"
+    },
+    {
+      "at": "2026-11-13T01:53:35.714Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c052rw8k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T01:53:34.680Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0441rvj",
+      "note": "#5: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check. 'Both compilers' becomes the lexer and the casing check.; was: Both compilers read one generated character table; a parity fixture over boundary scalars passes identically (shares #4426's pinned UCD)."
+    },
+    {
+      "at": "2026-11-13T01:53:33.593Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T01:53:32.552Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06vkd04",
+      "note": "#22 (was #6221) JetDevserver and JetDebug parse, check and run t"
+    },
+    {
+      "at": "2026-11-13T01:53:31.437Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0mj3ijb",
+      "note": "#19: The lircheck harness was Rust-era and does not exist on dev.; was: D-ZERO-LEAKS1=A (ratified 2026-11-01) is met: the native compiler reports zero leaks, zero double frees and zero use-after-free on the lircheck harness and the full 129-program corpus, and every stati"
+    },
+    {
+      "at": "2026-11-13T01:53:30.250Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#6: The quoted proof uses `Tools/agent/jet-env cargo test`, retired with the Rust implementation (The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check.).; was: Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"The two-client example passes on every applicable tier: `JET_"
+    },
+    {
+      "at": "2026-11-13T01:53:29.088Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c078tv7g",
+      "note": "#2: vbatch.sh does not exist; the batch runner is Land.jet batch.; was: A batch on a commit carrying a known self-compile difference (the a0_030 ICE exit) reports it as a batch failure naming the s1/s2 split"
+    },
+    {
+      "at": "2026-11-13T01:53:27.925Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c077ihdp",
+      "note": "#5: The 'blocked on the AOT SourceSharedInterop ICE' note is stale status text; c6 holds the same proof in detail.; was: AOT: a built binary dispatches the same jobs with the same output (blocked on the AOT SourceSharedInterop ICE)."
+    },
+    {
+      "at": "2026-11-13T01:53:26.692Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c078tv7g",
+      "note": "#1: vbatch.sh does not exist; the batch runner is Land.jet batch.; was: vbatch.sh builds an s2 from the batch's s1 (or reuses one at the same commit) and runs the backend_ice cases plus a process-exit-code golden against it, failing the batch on any row that differs from "
+    },
+    {
+      "at": "2026-11-13T01:53:25.423Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#14: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check. Drops the pointer to the deleted tests/corelib_parts/net.rs.; was: Jet runtime parses resolver servers from resolv.conf text through a text-taking function; #Tests port the resolv.conf half of 7c301d390a:tests/corelib_parts/net.rs core_net_dns_platform_resolver_parse"
+    },
+    {
+      "at": "2026-11-13T01:53:24.031Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c047t3lg",
+      "note": "#1: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check. Today Compiler/JetFoundation/Source/Facts/Body.jet:556 still has HTTPClientNew.; was: Every semantic item listed in the body lives in the named Core/*.jet home; the Rust Prelude keeps only policy-free provider leaves, and duplicated Rust policy is deleted in the same cutover."
+    },
+    {
+      "at": "2026-11-13T01:53:22.501Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c025w7rd",
+      "note": "#6: Tools/agent/check-core-surface-ledger.mjs is gone; its Jet twin is Tools/agent/CoreSurfaceLedger.jet (with tests/guards/core_surface_ledger.jet).; was: After each specialized module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member its `source_module` owns, and `node Tools/agent/check-core-surface-ledger.mjs` passes. `jet te"
+    },
+    {
+      "at": "2026-11-13T01:53:21.074Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c025w7rd",
+      "note": "#3: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check.; was: Specialized APIs pass failure/effect and applicable-tier proof with no semantic Rust shim."
+    },
+    {
+      "at": "2026-11-13T01:53:19.743Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fi6uj5",
+      "note": "#3: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check.; was: System APIs pass failure/effect and applicable-tier proof with no semantic Rust shim."
+    },
+    {
+      "at": "2026-11-13T01:53:18.382Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#9: Jetpack/Bootstrap/check.sh, Tools/agent/jet-env and scripts/ do not exist on dev; the bootstrap proof is Jetpack/Bootstrap/Check.jet (header lines 6-25) and Jetpack claims run in `jet test Compiler --profile packages` (Check.jet:23-25).; was: Proof: `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` prints `JETPACK CHECK OK (check, default run, AOT test)` with PackageF"
+    },
+    {
+      "at": "2026-11-13T01:53:17.104Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0l5ld15",
+      "note": "#5: Syntax trio folded into one criterion: tests/guards/grammar.jet (editor_grammars_have_generated_sections) and tests/guards/syntax_reconciliation.jet already enforce the generated grammar sections and the syntax-decisions/LexicalLedger consistency, and `jet devtools grammars` is now `jet self devtools grammars` (Compiler/JetCli/Source/Cli/EditorGrammars.jet:1), so the registry row, the decision-log line and the regenerated grammars land and are proved together.; was: the syntax registry (Compiler/JetFoundation/Data/Syntax) entry updated"
+    },
+    {
+      "at": "2026-11-13T01:53:15.781Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c052rw8k",
+      "note": "#53 (was #2047 c3) Report recommends adopt/defer per field and r"
+    },
+    {
+      "at": "2026-11-13T01:53:14.400Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c052rw8k",
+      "note": "#52 (was #2047 c2) Each proposed field arrives with a concrete c"
+    },
+    {
+      "at": "2026-11-13T01:53:13.066Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c052rw8k",
+      "note": "#51 (was #2047 c1) Survey names every current consumer of the ef"
+    },
     {
       "at": "2026-11-13T01:53:11.382Z",
       "by": "Main",
