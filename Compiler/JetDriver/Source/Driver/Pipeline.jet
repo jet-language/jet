@@ -4061,6 +4061,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         counting,
         request.compiler_threads,
     )
+    // The seeded Core modules come finalized: their results and body packets
+    // are the record's, taken, not checked (jet_driver_core_record_take).
+    if request.core_record == .Val(record) {
+        _: jet_driver_core_record_take(registration_graph, record) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
+    }
     output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
     output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> registration_graph.diagnostics.push(diagnostic)
@@ -4224,6 +4229,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         }
         return jet_driver_doc_failure(result, request.mode, jet_driver_doc_graph_facts(request.mode, checked_graph.registration_graph))
     }
+    if jet_driver_core_record_seeded_problem(checked_graph) == .Val(problem) -> return jet_driver_compile_internal_result(load, trace, problem)
     // Finalization returns the same graph; undo the staged edits before
     // subsequent passes read the registration facts.
     finalized_graph := checked_graph.registration_graph.move()
@@ -4267,6 +4273,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     returned_registration := body_run.registration.move()
     body_run.registration = None
     registration_graph = returned_registration.move() ?? return jet_driver_compile_internal_result(load, trace, "comptime body rechecking lost the registration graph")
+    if jet_driver_core_record_seeded_problem(body_run.graph) == .Val(problem) -> return jet_driver_compile_internal_result(load, trace, problem)
     if body_run.soft_stop {
         return jet_driver_compile_result(load, load.diagnostics, None, false, trace)
     }

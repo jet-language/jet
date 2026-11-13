@@ -25,6 +25,7 @@ use {
         sema_graph_trail_init,
         sema_graph_trail_undo,
         sema_finalize_graph,
+        sema_finalize_seeded_taken,
         sema_local_splice_demand_swap,
         sema_local_value_land,
         sema_local_value_splice,
@@ -615,8 +616,10 @@ jet_driver_recheck_comptime_bodies: fn(
 // passes after finalization (jet_driver_orchestrate_comptime_bodies) take
 // its sites as before. A clean run whose splice does not hold goes to
 // `refused`, so the first of those passes takes its results instead of
-// running it again. The registration graph moves in and comes back with no
-// edit; `values`, `functions` and `trace` take what the landed passes add.
+// running it again. A taken seeded module's sites
+// (sema_finalize_seeded_taken) are the Core record's, final as taken: none
+// lands again. The registration graph moves in and comes back with no edit;
+// `values`, `functions` and `trace` take what the landed passes add.
 jet_driver_land_local_values: fn(
     graph: &&SemaRegistrationGraph,
     bodies: &SemaFinalizeBodies,
@@ -631,9 +634,14 @@ jet_driver_land_local_values: fn(
     // The `module\nkey` of every site a pass took: a site pending again
     // ends the landing, so it ends.
     tried := [String:Bool]{}
+    taken := [String:Bool]{}
+    loop index in 0..<sema_finalize_seeded_taken(registration) -> taken[bodies.modules[index].module_identity.copy()] = true
     loop {
         if !jet_driver_local_values_open(bodies, stage, functions) -> break
-        pending := jet_driver_pending_comptime_body_sources(bodies.modules, values)
+        pending := [SemaComptimeBodySource]{}
+        loop source in jet_driver_pending_comptime_body_sources(bodies.modules, values) {
+            if taken.get(source.module_identity) == None -> pending.push(source.copy())
+        }
         if pending.len() == 0 -> break
         again := false
         loop source in pending {

@@ -423,6 +423,9 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         false,
         input.request.compiler_threads,
     )
+    if input.request.core_record == .Val(record) {
+        _: jet_driver_core_record_take(registration, record) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
+    }
     if input.retain_projection -> registration.retain_programs = true
     registration.plugin_facts = jet_driver_plugin_facts(input.request)
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
@@ -511,6 +514,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         jet_driver_comptime_diagnostics_add(load.diagnostics, graph.diagnostics)
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization did not return every registered module"))
     }
+    if jet_driver_core_record_seeded_problem(graph) == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     schema_check := jet_driver_check_schema_migrations(input.request, registration, graph, input.retain_projection)
     registration = schema_check.registration.move()
     loop diagnostic in schema_check.diagnostics -> load.diagnostics.push(diagnostic)
@@ -532,6 +536,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     returned_registration := body_run.registration.move()
     body_run.registration = None
     registration = returned_registration.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val("comptime body rechecking lost the registration graph"))
+    if jet_driver_core_record_seeded_problem(body_run.graph) == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, Val(problem))
     if body_run.soft_stop -> return jet_driver_compiler_check_failure(load, JetDriverStage.Comptime, None)
     if !body_run.complete {
         if body_run.internal_problem == None {
