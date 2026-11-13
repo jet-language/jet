@@ -20,7 +20,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | --- | --- |
 | `:` | immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {…}`, `name: module {…}` |
 | `:=` | mutable binding |
-| `use { … } / use alias: path` | import block (#6542): one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
+| `use { … } / use alias: path` | import block: one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `Name: enum { A, B(T) } / .A / Name.A` | enum declaration: its cases are written bare and separated as struct fields are; a value or pattern names a case with its leading dot where the type is known (`.A`) or with the enum's name (`Name.A`); a dotted declaration is not Jet syntax |
