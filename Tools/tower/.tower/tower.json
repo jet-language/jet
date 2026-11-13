@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6778,
-    "rev": 101319,
+    "rev": 101320,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93248,7 +93248,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:52:19.959Z",
-      "updated": "2026-11-13T08:34:23.929Z",
+      "updated": "2026-11-13T08:49:54.799Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -195393,6 +195393,218 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T07:31:16.570Z"
+    },
+    {
+      "id": "D-HOST-NONCE2",
+      "cardId": "c0mf9ybj",
+      "group": "effects",
+      "title": "Jet's reads of a started child's or a stale lock owner's /proc entry: count them as part of the operation, declare FS.Read, or remove them",
+      "situation": "D-HOST-NONCE1 said that some small host reads belong to the operation that makes them. These reads only make a unique name, find the program a process start runs, or look at the running program itself. Two reads found since then look at a different process. When you start a program with a memory or open-file limit, Jet reads that child's /proc entry to tell which limit stopped it. When a secrets-vault write finds a lock left behind, Jet reads the /proc entry of the program that left it to tell whether that program is still running. The rule does not name either read. So a denial of FS.Read does not cover them, and the host-read page lists them as open. You are asked whether these two reads also belong to their operation, must declare FS.Read, or should be removed. We recommend that they belong to their operation.",
+      "gist": "Are Jet's reads of a started child's or a lock owner's /proc entry part of the process start or vault write that makes them?",
+      "lesson": "Some operations look at the host to do their job. A process start with a memory limit watches the child it started. A vault write that finds an old lock checks whether the program that left it is still running. This vote decides whether those looks are part of the operation or need a permission of their own.",
+      "explainer": "Words used here. /proc is a folder Linux fills with live facts about each running program, one entry per process id (pid). An effect is a permission that a function's row names, such as Exec to start programs, Secret to use the secrets vault, or FS.Read to read files. A denial such as --deny=FS.Read refuses every call whose row needs that effect.\n\nA host read under another effect is a read the runtime makes while the public call names a different effect. Docs/spec/reference/host-reads.md lists each one and says whether a denial covers it. A row that is still open there means no page may claim that a denial blocks every read of its kind.",
+      "story": "Ravi's grading helper starts each student's program with process.cmd(...).memory_limit(32 MiB). His package allows Exec and IO, and he runs it with FS.Read denied. When a student's program uses too much memory, he wants the error to say ResourceLimit(.Memory), not just that the program failed.\n\nUnder A and D this keeps working, and the host-read page says why. Under B every process start in his helper needs FS.Read, so his denial refuses it. Under C the kernel still refuses memory past the limit, but Jet no longer stops the student's program. It ends however its own code handles the failed allocation, and the error no longer says which limit stopped it.",
+      "inWild": "// Python's subprocess module documents no permission model at all: a\n// resource-limited child is watched with whatever the parent can read.\nimport resource, subprocess\ndef cap(): resource.setrlimit(resource.RLIMIT_AS, (32 << 20, 32 << 20))\nsubprocess.run([\"./student\"], preexec_fn=cap)",
+      "detail": "What this ballot decides. Whether two runtime reads of another process's /proc entry belong to the effect of the operation that makes them.\n\nThe first read, H22. HostSpawn sets the kernel limits (RLIMIT_AS, RLIMIT_NOFILE) in the child before it runs, with no read. While a child started with memory_limit or open_file_limit runs, the parent's collector wakes every millisecond. Each time, Compiler/JetRuntime/Source/ProcessExecutionLimits.jet reads /proc/<child>/status (VmSize) and lists /proc/<child>/fd. The public calls are core.process starts and runs (Exec).\n\nProcessExecutionCollect.jet and ProcessPipeline.jet act on the result. When VmSize comes within 1 MiB of memory_limit, or the open descriptors reach open_file_limit, Jet stops the child itself. The run then fails with IOError.ResourceLimit(.Memory) or IOError.ResourceLimit(.OpenFiles).\n\nSo the read does more than name the cause: it decides when Jet ends the child. It is also a sample, so a child that jumps past the limit between two samples meets the kernel limit first and gets no typed error. The kernel reports neither limit by a signal, unlike the CPU limit's SIGXCPU. Without the read, Jet cannot tell these two limits from any other failure.\n\nThe second read, H23. The vault's lock is the file .jet/.secrets.age.lock, created with O_EXCL. VaultLinux.jet vault_process_start reads a process start time from /proc/<pid>/stat. A vault write reads its own entry when it takes the lock, and records its pid and start time in the file. The public calls are core.crypto.vault prepare and commit calls (Secret).\n\nWhen the lock file already exists, the write treats the lock as held unless three things are true. The file is at least ten minutes old by the wall clock, it belongs to the same user, and it names this vault's id, revision and hash. Only then does the write read the recorded owner's entry and open a pidfd. It calls the lock stale when the owner is gone or its start time differs.\n\nWhat the rules say today. spec.md \"Effects\" gained D-HOST-NONCE1=A. A read that only makes a collision-avoiding name, finds the program an Exec call starts, or inspects the running process belongs to the calling operation's effect. host-reads.md lists H22 and H23 as open because neither is the running process. The own-entry half of H23 already fits the rule, since it inspects the running process. Effect rows are static, so a row cannot depend on whether a particular call set a limit or met a stale lock.\n\nWhat a kernel lock would need. The runtime can already take a lock the kernel drops when its holder exits. core.files locks use flock (HostFileLock.jet), and core.db takes F_OFD_SETLK locks through fcntl (HostDbVfs.jet). Either fits the vault lock without a /proc read. A Jet from before that change would still use the O_EXCL file alone. So during an upgrade, two toolchains writing one vault would not see each other's locks.\n\nRelation to other ballots. D-HOST-NONCE1=A is the rule this one extends. D-NET-HOSTREADS1=A covers TLS reads and is unaffected.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Count both reads as part of their operation",
+          "detail": "The D-HOST-NONCE1 rule gains two named cases. A read of the /proc entry of a child the operation started belongs to the operation's effect. So does a read of the owner recorded in a lock file the operation's own protocol writes. The child read is part of Exec, and the stale-lock check is part of Secret. Nothing changes for programs. host-reads.md lists both rows as ruled.\n\nThe cost of A. A denial of FS.Read does not stop these two reads. Each read returns only the operation's own outcome, such as which limit stopped the child or whether the lock is stale. Neither read hands file contents to the program.",
+          "technical": "spec.md \"Effects\" extends the D-HOST-NONCE1 sentence with the two cases by name. host-reads.md H22 and H23 move to ruled. No runtime, IR route or Core row changes. A new read of another process's /proc entry still declares its own effect unless it is one of these two cases.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// A: a student program over 32 MiB prints its ResourceLimit(.Memory) error.\n// Reading the child's /proc entry is part of Exec."
+        },
+        {
+          "key": "B",
+          "name": "Declare FS.Read on the operations that make them",
+          "detail": "Each operation that can make one of these reads names FS.Read in its row. Rows are fixed in the source, not chosen while the program runs. So every core.process start and run that can carry a limit names FS.Read, and so does every vault prepare and commit call that can meet a stale lock. A package that allows Exec but not FS.Read can no longer start a program, even one with no limit.",
+          "technical": "core.process command start and run entry points, the pipeline runners, and the core.crypto.vault prepare and commit entry points add FS.Read to their rows. The compiler-side call effect rows (CoreSourceRows.jet call_effect) and the IR route effects follow. Callers whose rows were written by hand gain FS.Read. host-reads.md H22 and H23 become declared.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// B: refused before it runs; process starts now need FS.Read, limit or not."
+        },
+        {
+          "key": "C",
+          "name": "Remove both reads",
+          "detail": "The child read goes. The kernel still enforces memory_limit and open_file_limit, but Jet no longer stops the child itself. A child that hits a limit sees a failed allocation or open and ends however its own code handles that, or keeps running if it recovers. The parent reports that exit as usual, without ResourceLimit(.Memory) or ResourceLimit(.OpenFiles), because the kernel reports neither limit by a signal. The CPU limit keeps its typed error, since the kernel signals it with SIGXCPU.\n\nThe vault lock becomes a lock the kernel drops when its holder exits: flock, as core.files locks use, or an F_OFD_SETLK lock, as core.db takes. The writer holds it on .jet/.secrets.age.lock while it writes. A lock file nobody holds is stale at once, so a writer that crashed no longer blocks the vault for ten minutes. No pid, start time or /proc read is involved.",
+          "technical": "Delete ProcessExecutionLimits.jet's /proc polling and the parent-side stop it drives. Delete the ResourceLimit(.Memory) and ResourceLimit(.OpenFiles) results that depend on it, and update the process_sessions cases and docs that expect them. host-reads.md H22 and H23 become fixed.\n\nIn VaultLinux.jet, a kernel lock on the lock file replaces the pid and start-time fields and vault_process_start. That is flock (the HostFileLock.jet leaf) or fcntl F_OFD_SETLK (the HostDbVfs.jet leaf). A stale lock is one whose kernel lock can be taken, so the ten-minute age check goes too. The revision and hash checks that choose the current or backup store stay.\n\nA lock file written by an older Jet carries no kernel lock. So a vault written by two toolchain versions at once is unprotected until both are upgraded.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// C: the limit still holds, but an over-limit student program reports its own\n// exit, not ResourceLimit(.Memory)."
+        },
+        {
+          "key": "D",
+          "name": "Count the child read, and replace the stale-lock read with a kernel lock",
+          "detail": "H22 is decided as in A: reading the /proc entry of a child the operation started belongs to the operation's effect, so typed memory and open-file errors stay. H23 is decided as in C: the vault lock becomes a lock the kernel drops when its holder exits, so the vault reads no other process's entry. The rule grows by one case, not two.\n\nThe cost of D. The vault lock changes now, with the upgrade gap C names. A Jet from before the change does not take the kernel lock, so two toolchain versions writing one vault at once do not see each other's locks.",
+          "technical": "spec.md \"Effects\" extends the D-HOST-NONCE1 sentence with the started-child case only. host-reads.md H22 moves to ruled. VaultLinux.jet takes flock (HostFileLock.jet) or F_OFD_SETLK (HostDbVfs.jet) on .jet/.secrets.age.lock. It drops vault_process_start, the pid and start-time fields and the ten-minute age check, and keeps the revision and hash checks. host-reads.md H23 becomes fixed. No Core row changes.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// D: as A, ResourceLimit(.Memory). A crashed vault writer's lock is free at\n// once, and no vault call reads another process's /proc entry."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno's --allow-run grants starting programs. Once a child runs, Deno applies no permission to it, and Deno gives no limit or watching of its own. Reading a child's /proc entry needs --allow-read like any file (docs.deno.com/runtime/fundamentals/security).",
+          "code": "const child = new Deno.Command(\"./student\").spawn();\nawait Deno.readTextFile(`/proc/${child.pid}/status`); // needs --allow-read"
+        },
+        {
+          "lang": "Rust",
+          "note": "std::process has no limits or permissions. Crates that enforce limits set rlimits before exec and learn the outcome from the exit status, as in C. File locks such as fs2's lock_exclusive use flock, which the kernel releases when the holder exits, as the vault lock in C and D would.",
+          "code": "let file = File::create(\".secrets.age.lock\")?;\nfile.lock_exclusive()?;   // released by the kernel if this process dies"
+        },
+        {
+          "lang": "systemd",
+          "note": "A unit's MemoryMax is enforced by cgroups, and systemd learns from the cgroup's memory.events file that the limit stopped the unit. It reads host state on the unit's behalf to report the cause, as A does.",
+          "code": "systemd-run --scope -p MemoryMax=32M ./student\n# result: oom-kill, read from the cgroup's memory.events"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Both reads serve only the operation the caller asked for: one watches the child that Exec call started, and the other checks a lock the vault's own protocol wrote. They give the program nothing but the operation's own outcome. B would make every process start and vault write need FS.Read, and C would lose the typed limit errors that programs use today.",
+        "gains": [
+          "Programs keep ResourceLimit(.Memory) and ResourceLimit(.OpenFiles), and stale vault locks still recover.",
+          "Exec and Secret grants keep working with FS denied.",
+          "host-reads.md has no open rows, so its classification is complete.",
+          "No runtime or row change."
+        ],
+        "losses": [
+          {
+            "loss": "A denial of FS.Read does not stop these two reads.",
+            "mitigation": "host-reads.md names both reads, and each returns only the operation's own result, never file contents."
+          },
+          {
+            "loss": "The rule now reaches past the running process, so later reads could try to claim it.",
+            "mitigation": "Only two cases are added, each by name: the child the Exec call started, and the owner recorded in a lock the same operation wrote. Any other read of another process declares its own effect."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Rows are static, so B charges FS.Read to every process start and every vault write, even ones with no limit and no stale lock. That breaks the common Exec-only grant."
+          },
+          {
+            "key": "C",
+            "reason": "C drops the typed memory and open-file errors that the process_sessions cases and programs rely on, and Jet would no longer stop an over-limit child itself. Its vault half, a kernel-released file lock, removes the reads without that cost and can still be done later under A, because removing a read never needs a ballot."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the rule to one new case, but it changes the vault lock now. During an upgrade, two toolchain versions writing one vault would not see each other's locks. A gives the same result for programs today, and D's vault half can land later with a migration, since removing a read never needs a ballot."
+          }
+        ],
+        "tradeoff": "Two named reads stay under Exec and Secret, so an FS.Read denial is truthful except for those two listed reads."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. G9Web-1-2, a fresh agent (the author was G5DevX-2), checked every claim against the code, corrected a wrong kernel-stop claim in C, and added option D. The recommendation stays A."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Are Jet's reads of a started child's or a stale lock owner's /proc entry part of the operation?",
+        "lesson": "A process start with a memory limit watches its child, and a vault write checks whether an old lock's owner is still running. Both read another program's /proc entry. This vote decides whether that is part of the operation or needs its own permission.",
+        "trio": {
+          "current": {
+            "note": "Today the reads run under Exec and Secret, and the host-read page lists them as open.",
+            "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// over the limit: ResourceLimit(.Memory), even with FS.Read denied"
+          },
+          "wild": {
+            "lang": "systemd",
+            "note": "systemd reads a unit's cgroup files to report that its memory limit stopped it.",
+            "code": "systemd-run --scope -p MemoryMax=32M ./student\n# result: oom-kill"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Part of the operation",
+            "gist": "The child read counts as Exec and the stale-lock check counts as Secret, each listed by name.",
+            "gains": [
+              "Typed limit errors and lock recovery keep working.",
+              "No program changes."
+            ],
+            "losses": [
+              "An FS.Read denial does not stop these two reads."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// with FS.Read denied: ResourceLimit(.Memory)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Declare FS.Read",
+            "gist": "Process starts and vault writes name FS.Read in their rows.",
+            "gains": [
+              "An FS.Read denial stops every /proc read."
+            ],
+            "losses": [
+              "Every process start needs FS.Read, limit or not.",
+              "Every vault write needs FS.Read."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// with FS.Read denied: refused before it runs"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Remove the reads",
+            "gist": "Limits are enforced without the typed memory and open-file errors, and the vault lock becomes a kernel-released file lock.",
+            "gains": [
+              "No read of another process at all."
+            ],
+            "losses": [
+              "ResourceLimit(.Memory) and ResourceLimit(.OpenFiles) are gone."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// over the limit: the child's own exit, not ResourceLimit(.Memory)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Split the two reads",
+            "gist": "The child read counts as Exec, and the vault lock becomes a file lock the system drops when its holder exits.",
+            "gains": [
+              "Typed limit errors keep working.",
+              "The vault reads no other program's entry."
+            ],
+            "losses": [
+              "Old and new versions writing one vault miss each other's locks."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// with FS.Read denied: ResourceLimit(.Memory), as in A"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Both reads serve only the operation that makes them and give the program nothing else. B and C each break something programs use today, and D changes the vault lock now for the same result.",
+          "gains": [
+            "Exec and Secret grants keep working with FS denied.",
+            "The host-read page has no open rows."
+          ],
+          "losses": [
+            {
+              "loss": "An FS.Read denial does not stop these two reads.",
+              "mitigation": "Both are listed by name and return only the operation's own result."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every process start and vault write would need FS.Read."
+            },
+            {
+              "key": "C",
+              "reason": "The typed memory and open-file errors would be lost."
+            },
+            {
+              "key": "D",
+              "reason": "The vault lock would change now, with a gap while versions mix."
+            }
+          ],
+          "tradeoff": "Two named reads stay under Exec and Secret."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T08:49:54.799Z"
     }
   ],
   "questions": [
@@ -198660,6 +198872,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T08:49:54.799Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-HOST-NONCE2",
+      "note": "Jet's reads of a started child's or a stale lock owner's /proc entry: count them as part of the operation, declare FS.Read, or remove them"
+    },
     {
       "at": "2026-11-13T08:47:51.811Z",
       "by": "Main",
