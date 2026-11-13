@@ -1,0 +1,12 @@
+use plugin: core.plugin
+
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    guest: plugin.load("guest.wat", policy)
+    pair: guest.pair() ?? panic("pair failed")
+    print("pair:{pair.part0} {pair.part1} sum={pair.part0 + pair.part1}")
+    { part0: left, part1: right }: guest.pair() ?? panic("pair failed")
+    print("parts:{left} {right}")
+    scored: guest.scored() ?? panic("scored failed")
+    print("scored:{scored.part0} {scored.part1}")
+}

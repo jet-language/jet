@@ -46,8 +46,9 @@ sema_casing_check: fn(name: String, span: Span, category: String, case: SemaName
         .Screaming -> "ALL_CAPS"
     }
     fixed: sema_casing_canonical(name, case)
-    // The respelling can equal the name (`type_`): never suggest identical text.
-    fix: if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
+    // The respelling can equal the name (`type_`, `_0`): never suggest
+    // identical text, and name the rule the written name breaks.
+    fix: if sema_casing_underscore_digit(name) -> "rename it to a word: a leading underscore followed by a digit is not a valid binding name" else -> if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
     diagnostics.push(sema_error(
         "E0357",
         span,
@@ -55,6 +56,12 @@ sema_casing_check: fn(name: String, span: Span, category: String, case: SemaName
         "Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants",
         fix,
     ))
+}
+
+// `_0`, `_12`: a leading underscore followed by a digit.
+sema_casing_underscore_digit: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
+    bytes.len() >= 2 && bytes[0] == 95 && bytes[1] >= 48 && bytes[1] <= 57
 }
 
 // E0358: a type-like declaration keeps every lexicon acronym

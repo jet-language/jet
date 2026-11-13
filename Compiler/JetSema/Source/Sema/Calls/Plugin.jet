@@ -154,6 +154,29 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
     }
 }
 
+// A plugin export's result descriptor. A tuple result crosses as its fields,
+// each a scalar the runtime reads from the export's return area in Component
+// order, which the interface fact records as `order`: the field at position N
+// fills the member `order[N]`.
+sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, order: [String]) -> ComponentTypeDescriptor? {
+    members: if ty == .Tuple(found) -> found else -> { return sema_plugin_component_descriptor(graph, environment, program, ty, [String]{}) }
+    if members.len() != order.len() -> return None
+    fields := [ComponentTypeField]{}
+    loop (index, name) in order {
+        member: loop candidate in members {
+            if candidate.name == name {
+                break candidate
+            }
+        } ?? return None
+        descriptor: sema_plugin_component_descriptor(graph, environment, program, member.ty, [String]{}) ?? return None
+        if descriptor == {
+            .Int | .Float | .Bool | .String -> fields.push(ComponentTypeField{index: index, name: name, ty: descriptor})
+            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> return None
+        }
+    }
+    Val(ComponentTypeDescriptor.Tuple{fields: fields})
+}
+
 sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
 }
@@ -278,7 +301,7 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         if !found -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if export_value.return_type != None -> result_type = sema_type_resolve_declared(graph, export_value.return_type ?? Type.Named{name: "Unit"}, environment.module_identity)
-    result_descriptor := sema_plugin_component_descriptor(graph, environment, program, result_type, [String]{})
+    result_descriptor := sema_plugin_result_descriptor(graph, environment, program, result_type, export_value.result_order)
     if result_descriptor == None {
         sema_plugin_unsupported_component_diagnostic(export_value.name, result_type, span, diagnostics)
         supported = false

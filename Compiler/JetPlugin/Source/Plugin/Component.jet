@@ -7,19 +7,23 @@
 // that calls the host (PluginHost.jet jet_plugin_host_import).
 use jet_wasm.[
     WasmComponent, WasmConstExpr, WasmCoreItem, WasmError, WasmFuncType, WasmLimits, WasmTableType,
-    WASM_CT_NONE, WASM_CT_PRIMITIVE, WASM_EXTERN_FUNC, WASM_EXTERN_MEMORY, WASM_EXTERN_TABLE,
+    WASM_CT_NONE, WASM_CT_PRIMITIVE, WASM_CT_RECORD, WASM_CT_TUPLE, WASM_EXTERN_FUNC, WASM_EXTERN_MEMORY, WASM_EXTERN_TABLE,
     WASM_F32, WASM_F64, WASM_I32, WASM_I64, WASM_OP_GLOBAL_GET, WASM_OP_REF_FUNC, WASM_OP_REF_NULL,
     WASM_ORIGIN_ALIAS, WASM_ORIGIN_IMPORT, WASM_ORIGIN_LIFT, WASM_ORIGIN_LOWER, WASM_PRIM_BOOL, WASM_PRIM_STRING,
     WASM_SEGMENT_ACTIVE, WASM_SORT_FUNC, wasm_validate_module,
 ]
 
 // The descriptor's value codes (PluginHost.jet): a primitive's code (0 bool
-// … 11 char, 12 string), 13 for any other type, -1 for no result.
+// … 11 char, 12 string), 13 for any other type, 14 for a result tuple or
+// record of scalars other than char (its fields' codes in the export's
+// `fields`), -1 for no result.
 PLUG_VALUE_U64: 8
 PLUG_VALUE_F32: 9
 PLUG_VALUE_F64: 10
+PLUG_VALUE_CHAR: 11
 PLUG_VALUE_STRING: 12
 PLUG_VALUE_UNSUPPORTED: 13
+PLUG_VALUE_TUPLE: 14
 PLUG_VALUE_NONE: -1
 
 // One function of the flat instance: a defined function of an instantiated
@@ -75,12 +79,14 @@ PlugElem: struct {
 }
 
 // A lifted export: its core function, the value codes of its params and
-// result, and its canonical options as flat indexes (-1 absent).
+// result (and of a tuple result's fields), and its canonical options as
+// flat indexes (-1 absent).
 PlugExport: struct {
     name: String
     fid: Int
     params: [Int]
     result: Int
+    fields: [Int]
     memory: Int
     realloc: Int
     post: Int
@@ -336,32 +342,58 @@ plug_flat_types: fn(code: Int) -> [Int] Never! {
 
 // Lifted export `name` (Component function `index`).
 plug_lift: fn(flat: &PlugFlat, name: String, index: Int) WasmError! {
-    export := PlugExport{name: name, fid: -1, params: [Int]{}, result: PLUG_VALUE_NONE, memory: -1, realloc: -1, post: -1, unsupported: true}
+    export := PlugExport{name: name, fid: -1, params: [Int]{}, result: PLUG_VALUE_NONE, fields: [Int]{}, memory: -1, realloc: -1, post: -1, unsupported: true}
     item: flat.c.funcs[index]
     if item.origin == WASM_ORIGIN_LIFT {
         if flat.c.func_type(index) == .Val(func) {
             fid: plug_core_item(flat, WASM_EXTERN_FUNC, item.target, None)
             export.fid = fid
             loop param in func.types -> export.params.push(plug_value_code(flat.c, param))
-            if func.ok != WASM_CT_NONE -> export.result = plug_value_code(flat.c, func.ok)
+            if func.ok != WASM_CT_NONE {
+                export.result = plug_value_code(flat.c, func.ok)
+                export.fields = plug_tuple_fields(flat.c, func.ok)
+                if export.fields.len() > 0 -> export.result = PLUG_VALUE_TUPLE
+            }
             if item.options.memory >= 0 -> export.memory = plug_core_item(flat, WASM_EXTERN_MEMORY, item.options.memory, None)
             if item.options.realloc >= 0 -> export.realloc = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.realloc, None)
             if item.options.post_return >= 0 -> export.post = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.post_return, None)
-            export.unsupported = !plug_lift_fits(export.params, export.result, flat.funcs[fid].ty)
+            export.unsupported = !plug_lift_fits(export, flat.funcs[fid].ty)
         }
     }
     flat.exports.push(export)
 }
 
-// Whether core type `ty` is the canonical flattening of the signature.
-plug_lift_fits: fn(params: [Int], result: Int, ty: WasmFuncType) -> Bool Never! {
+// The field codes of a tuple or record `ty` whose fields are all scalars
+// other than char; empty for any other type.
+plug_tuple_fields: fn(c: WasmComponent, ty: Int) -> [Int] Never! {
+    if ty < 0 -> return [Int]{}
+    resolved: c.resolve_type(ty) ?? return [Int]{}
+    if resolved.kind != WASM_CT_TUPLE && resolved.kind != WASM_CT_RECORD -> return [Int]{}
+    fields := [Int]{}
+    loop field in resolved.types {
+        code: plug_value_code(c, field)
+        if code == PLUG_VALUE_UNSUPPORTED || code == PLUG_VALUE_CHAR -> return [Int]{}
+        fields.push(code)
+    }
+    fields
+}
+
+// Whether core type `ty` is the canonical flattening of the export's
+// signature. A result that flattens to more than one core value is lifted
+// from the return area, so the core function returns its i32 address.
+plug_lift_fits: fn(export: PlugExport, ty: WasmFuncType) -> Bool Never! {
     flat := [Int]{}
-    loop code in params {
+    loop code in export.params {
         if code == PLUG_VALUE_UNSUPPORTED -> return false
         loop core in plug_flat_types(code) -> flat.push(core)
     }
-    if result == PLUG_VALUE_UNSUPPORTED || flat != ty.params -> return false
-    if result == PLUG_VALUE_NONE -> return ty.results.len() == 0
-    if result == PLUG_VALUE_STRING -> return ty.results == [Int]{WASM_I32}
-    ty.results == plug_flat_types(result)
+    if export.result == PLUG_VALUE_UNSUPPORTED || flat != ty.params -> return false
+    if export.result == PLUG_VALUE_NONE -> return ty.results.len() == 0
+    results := [Int]{}
+    codes: if export.result == PLUG_VALUE_TUPLE -> export.fields else -> [Int]{export.result}
+    loop code in codes {
+        loop core in plug_flat_types(code) -> results.push(core)
+    }
+    if results.len() > 1 -> return ty.results == [Int]{WASM_I32}
+    ty.results == results
 }

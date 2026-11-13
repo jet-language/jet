@@ -6,7 +6,7 @@ use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, number_argument_value]
-    jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
+    jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
 
@@ -2684,7 +2684,8 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
 
 // `plugin.export(args…)`: each argument joins the plugin's pending call
 // arguments (jet_plugin_arg_<kind>), then the call route runs the export by
-// its checked name and answers its `Result<T, PluginError>`.
+// its checked name and answers its `Result<T, PluginError>`. A tuple result
+// comes back through jet_plugin_call_words (ir_plugin_invoke_words).
 ir_plugin_invoke: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, export_name: String, signature: ComponentSignatureDescriptor, args: [Int], span: Span) -> Int Never! {
     if signature.params.len() != args.len() -> return ir_fail_slot(b, span, "plugin export {export_name} with {args.len()} of {signature.params.len()} arguments")
     plugin: ir_expr(m, p, b, receiver)
@@ -2701,14 +2702,54 @@ ir_plugin_invoke: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     }
     b.fresh[plugin] = owned
     ok: if ir_untag(ty) == .Result(success, _) -> success else -> { return ir_fail_slot(b, span, "plugin export {export_name} as {ir_type_name(ty)}") }
+    string_row: ir_string_row(m)
+    name: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, name, ir_intern_text(m, export_name), -1, -1, b.line)
+    if signature.result == .Tuple(fields) -> return ir_plugin_invoke_words(m, p, b, ty, ok, plugin, name, export_name, fields, span)
     symbol: if ir_unit_type(ok) -> "jet_plugin_call" else -> {
         kind: ir_plugin_value_kind(signature.result) ?? return ir_fail_slot(b, span, "plugin export {export_name} compound Component result")
         "jet_plugin_call_{kind}"
     }
-    string_row: ir_string_row(m)
-    name: ir_temp(m, b, string_row)
-    ir_emit(b.f, IROp.ConstText, name, ir_intern_text(m, export_name), -1, -1, b.line)
     ir_route(m, p, b, symbol, [Int]{plugin, name}, [Bool]{true, true}, ty, span)
+}
+
+// A tuple result: jet_plugin_call_words(plugin, name, out, words) writes one
+// word per field to `out` in Component order (an Int as its owned exact Int,
+// a Bool as 0 or 1, a Float as its bits, a String as its handle) and answers
+// 1, or writes the PluginError handle to `out` and answers 0. Each word lands
+// in the tuple member its field names, as a runtime route's labeled tuple
+// result does.
+ir_plugin_invoke_words: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ok: Type, plugin: Int, name: Int, export_name: String, fields: [ComponentTypeField], span: Span) -> Int Never! {
+    err: if ir_untag(ty) == .Result(_, failure) -> failure else -> { return ir_fail_slot(b, span, "plugin export {export_name} as {ir_type_name(ty)}") }
+    items := [IRRouteCarrier]{}
+    labels := [String]{}
+    loop field in fields {
+        carrier: if field.ty == {
+            .Int -> IRRouteCarrier.Word
+            .Float -> IRRouteCarrier.Float
+            .Bool -> IRRouteCarrier.Flag
+            .String -> IRRouteCarrier.Text
+            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> { return ir_fail_slot(b, span, "plugin export {export_name} tuple field {field.index + 1}") }
+        }
+        items.push(carrier)
+        labels.push(field.name)
+    }
+    words: if items.len() > 0 -> items.len() else -> 1
+    out: ir_out_slot(m, b, words)
+    count: ir_word_const(m, b, items.len())
+    word_row: ir_word_row(m)
+    selector: ir_runtime(m, b, "jet_plugin_call_words", [Int]{plugin, name, out, count}, word_row)
+    boxed: ir_result_box(m, p, b, ty, true, -1)
+    ir_emit(b.f, IROp.Store, -1, boxed, 0, selector, b.line)
+    zero: ir_word_const(m, b, 0)
+    ok_flag: ir_bool_op(m, b, IROp.Ne, selector, zero)
+    ir_open_if(b.f, ok_flag, b.line)
+    ir_route_store_tuple(m, p, b, boxed, 8, ok, items, labels, out, span)
+    ir_else(b.f, b.line)
+    ir_route_store_payload(m, p, b, boxed, 8, err, IRRouteCarrier.Handle{name: "PluginError"}, out, span)
+    ir_end(b.f, b.line)
+    b.fresh[boxed] = true
+    boxed
 }
 
 // The plugin call route suffix of a Component scalar; None for a compound
@@ -2719,7 +2760,7 @@ ir_plugin_value_kind: fn(descriptor: ComponentTypeDescriptor) -> String? Never! 
         .Float -> Val("float")
         .Bool -> Val("bool")
         .String -> Val("text")
-        .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> None
+        .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> None
     }
 }
 

@@ -5536,7 +5536,8 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                 if by_name.len() == fields.len() {
                     fields = by_name
                 } else {
-                    diagnostics.push(sema_stmt_tuple_destructure_by_name(elements, fields, ty, pattern_span))
+                    fixable: if binding.init == .Ident(_, _, id) -> id != AST_NODE_GENERATED else -> true
+                    diagnostics.push(sema_stmt_tuple_destructure_by_name(elements, fields, ty, pattern_span, fixable))
                 }
             }
         }
@@ -5593,13 +5594,43 @@ sema_stmt_vjp_run_positional_fields: fn(gradient: Type) -> [TypeTupleField] {
 }
 
 // A tuple destructure names its members; the first written name that is not a
-// member is reported with the member-name and rename forms.
-sema_stmt_tuple_destructure_by_name: fn(elements: [BindName], fields: [TypeTupleField], ty: Type, pattern_span: Span) -> Diagnostic {
+// member is reported with the member-name and rename forms. The rename keeps
+// the user's own names: a written member binds the local it names, and the
+// other members take the other written locals in order. It never binds one
+// name twice: a repeated or missing local binds the member's own name. A
+// written pattern (`fixable`, not a loop's) takes the rename as its fix.
+sema_stmt_tuple_destructure_by_name: fn(elements: [BindName], fields: [TypeTupleField], ty: Type, pattern_span: Span, fixable: Bool) -> Diagnostic {
     members := [String]{}
-    renames := [String]{}
+    assigned := [String]{}
     loop field in fields {
         members.push(field.name)
-        renames.push("{field.name}: name")
+        assigned.push("")
+    }
+    spare := [String]{}
+    loop element in elements {
+        matched := false
+        loop (index, member) in members {
+            if member == element.name && assigned[index] == "" {
+                assigned[index] = sema_stmt_bind_name_local(element)
+                matched = true
+                break
+            }
+        }
+        if !matched -> spare.push(sema_stmt_bind_name_local(element))
+    }
+    renames := [String]{}
+    used := [String]{}
+    next_spare := 0
+    loop (index, member) in members {
+        binding := assigned[index]
+        if binding == "" && next_spare < spare.len() {
+            binding = spare[next_spare]
+            next_spare += 1
+        }
+        if binding == "" || used.contains(binding) -> binding = member
+        loop used.contains(binding) -> binding = "{binding}_value"
+        renames.push("{member}: {binding}")
+        used.push(binding)
     }
     span := pattern_span
     written := ""
@@ -5610,7 +5641,15 @@ sema_stmt_tuple_destructure_by_name: fn(elements: [BindName], fields: [TypeTuple
             break
         }
     }
-    sema_error("E0313", span, "`{written}` isn't a member of {type_name(ty)}", "a tuple destructure binds each member by its name, never by position", "name the members, `({members.join(", ")}): …`, or rename them: `{{ {renames.join(", ")} }}: …`")
+    rename: "{{ {renames.join(", ")} }}"
+    diagnostic: sema_error("E0313", span, "`{written}` isn't a member of {type_name(ty)}", "a tuple destructure binds each member by its name, never by position", "name the members, `({members.join(", ")}): …`, or rename them: `{rename}: …`")
+    if !fixable -> return diagnostic
+    diagnostic_with_edit(diagnostic, TextEdit{span: pattern_span, new_text: rename})
+}
+
+// The local a destructure element binds: its rename, else its written name.
+sema_stmt_bind_name_local: fn(element: BindName) -> String {
+    if element.rename == .Val(local) -> local.name else -> element.name
 }
 
 // True when the initializer is itself a `<alias>.Fixed.<method>(…)` call;

@@ -1,0 +1,16 @@
+# Claim: a lifted export returning tuple<s64, s64> works through the return area: the host reads both fields as a (part0: Int, part1: Int); a tuple<string, f64> reads its string and float from their aligned offsets; on the default and release tiers
+# Each export's core function returns the address of its return area, as the canonical ABI lifts a result that flattens to more than one core value
+fixture: plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "pair:7 -9 sum=-2\nparts:7 -9\nscored:hello 2.5\n"
+step: jet build --release main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "pair:7 -9 sum=-2\nparts:7 -9\nscored:hello 2.5\n"

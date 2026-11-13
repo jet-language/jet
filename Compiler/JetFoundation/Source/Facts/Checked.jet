@@ -72,6 +72,9 @@ ComponentTypeDescriptor: enum {
     Option(inner: ComponentTypeDescriptor)
     Result(ok: ComponentTypeDescriptor, err: ComponentTypeDescriptor)
     Record(name: String, fields: [ComponentTypeField])
+    // A Component tuple: its fields in Component order, each `name` the Jet
+    // tuple member it fills.
+    Tuple(fields: [ComponentTypeField])
 }
 
 ComponentTypeField: struct {
@@ -87,12 +90,15 @@ ComponentSignatureDescriptor: struct {
 
 // One function export of a Component, read from the Component itself: its
 // name as a Jet method (`is-enabled` is `is_enabled`), its labeled parameters
-// and its result as Jet types, and `unsupported`, the first Component type it
-// uses that has no Jet spelling ("" when every type has one).
+// and its result as Jet types, `result_order`, the members of a tuple result
+// in Component order (empty for any other result), and `unsupported`, the
+// first Component type it uses that has no Jet spelling ("" when every type
+// has one).
 ComponentExportFact: struct {
     name: String
     params: [ComponentExportParam]
     result: Type?
+    result_order: [String]
     unsupported: String
 }
 

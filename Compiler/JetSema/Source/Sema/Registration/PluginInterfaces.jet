@@ -32,11 +32,13 @@ use {
 
 // `unsupported` is the first Component type the export uses that has no Jet
 // spelling ("" when every type has one); a call to it reports that type.
+// `result_order` lists a tuple result's members in Component order.
 SemaPluginInterfaceExport: struct {
     name: String
     signature: String
     params: [SemaPluginExportParam]
     return_type: Type?
+    result_order: [String]
     unsupported: String
 }
 
@@ -241,5 +243,5 @@ sema_plugin_component_export: fn(fact: ComponentExportFact) -> SemaPluginInterfa
     params: loop parameter in fact.params -> SemaPluginExportParam{convention: AccessConvention.Read, ty: parameter.ty}
     labels: loop parameter in fact.params -> "{parameter.name}: {type_name(parameter.ty)}"
     result: if fact.result == .Val(ty) -> " {type_name(ty)}" else -> ""
-    SemaPluginInterfaceExport{name: fact.name, signature: "{fact.name}: fn({labels.join(", ")}){result}", params: params, return_type: fact.result, unsupported: fact.unsupported}
+    SemaPluginInterfaceExport{name: fact.name, signature: "{fact.name}: fn({labels.join(", ")}){result}", params: params, return_type: fact.result, result_order: fact.result_order, unsupported: fact.unsupported}
 }

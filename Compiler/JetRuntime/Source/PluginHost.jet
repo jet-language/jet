@@ -9,8 +9,9 @@
 //
 // Descriptor words (offsets are relative to the descriptor start):
 //   0 version, 1-2 load error, 3-4 component name, 5-6 artifact bytes,
-//   7-8 exports (10 words: name, name len, thunk, param count, params,
-//       result, realloc, post-return, memory, reserved),
+//   7-8 exports (12 words: name, name len, thunk, param count, params,
+//       result, realloc, post-return, memory, unsupported, field count,
+//       fields: a tuple result's field codes in order),
 //   9-10 imports (8 words: name, name len, param count, params, result,
 //       memory, realloc, reserved), 11-12 memories (min, max),
 //   13-14 tables (min, max), 15-16 globals (init bits),
@@ -19,7 +20,8 @@
 //   21-22 functions (name, name len, module, module len, signature class),
 //   23-24 the loading package's `authority.needs` (one right per line).
 // Value codes: 0 bool, 1 s8, 2 u8, 3 s16, 4 u16, 5 s32, 6 u32, 7 s64, 8 u64,
-// 9 f32, 10 f64, 11 char, 12 string, 13 unsupported; result -1 is none.
+// 9 f32, 10 f64, 11 char, 12 string, 13 unsupported, 14 tuple (a tuple or
+// record of scalar fields); result -1 is none.
 
 PG_PLUGIN_RC: I64{0}
 PG_PLUGIN_GUEST: I64{8}
@@ -50,7 +52,9 @@ PG_INST_DESC: I64{72}
 PG_INST_PLUGIN: I64{80}
 PG_INST_DATA_DROPPED: I64{88}
 PG_INST_ELEM_DROPPED: I64{96}
-PG_INST_BYTES: I64{104}
+PG_INST_FUEL_RESERVE: I64{104}
+PG_INST_DEADLINE: I64{112}
+PG_INST_BYTES: I64{120}
 
 // Trap kinds in PG_INST_TRAP.
 PG_TRAP_GUEST: I64{1}
@@ -60,10 +64,16 @@ PG_TRAP_MEMORY: I64{4}
 PG_TRAP_TABLE: I64{5}
 PG_TRAP_DEFECT: I64{6}
 PG_TRAP_USER: I64{7}
+PG_TRAP_TIME: I64{8}
 
-// Budgets: fuel per call, linear-memory pages, table elements, trap frames,
-// and the bytes one string argument or result may carry across the wire.
+// Budgets: fuel per call, wall-clock time per call, linear-memory pages, table
+// elements, trap frames, and the bytes one string argument or result may carry
+// across the wire. Fuel is handed out in slices: the instance's fuel word holds
+// the current slice and the reserve the rest; the deadline is checked each
+// time a slice runs out.
 PG_FUEL: I64{10000000}
+PG_FUEL_SLICE: I64{4096}
+PG_TIME_NS: I64{1000000000}
 PG_MAX_PAGES: I64{256}
 PG_PAGE: I64{65536}
 PG_MAX_TABLE: I64{10000}
@@ -71,10 +81,14 @@ PG_MAX_FRAMES: I64{32}
 PG_MAX_FLAT: I64{16}
 PG_MAX_WIRE: I64{1048576}
 PG_U32: I64{4294967295}
+PG_VALUE_STRING: I64{12}
+PG_VALUE_TUPLE: I64{14}
+PG_EXPORT_BYTES: I64{96}
 
 PG_LIMIT_FUEL: I64{0}
 PG_LIMIT_MEMORY: I64{1}
 PG_LIMIT_TABLE: I64{2}
+PG_LIMIT_TIME: I64{3}
 PG_LIMIT_WIRE: I64{4}
 
 pg_word: fn(address: I64) -> I64 { dyn_word(address) }
@@ -214,6 +228,26 @@ pg_trap_text: fn(code: I64) -> I64 {
 pg_trap_at: fn(instance: I64, code: I64, fid: I64, offset: I64) -> I64 {
     jet_plugin_trap(instance, code, fid, offset)
     I64{0}
+}
+
+// The guest has spent its fuel slice. A call whose reserve is gone has spent
+// its fuel budget, and one past its deadline its time budget; either records
+// the trap with this frame. Otherwise the next slice comes out of the
+// reserve, with the unit that ran out already spent from it.
+#Export(c) jet_plugin_fuel: fn(instance: I64, fid: I64, offset: I64) {
+    reserve: pg_word(wrapping(instance + PG_INST_FUEL_RESERVE))
+    if (reserve <= I64{0}) {
+        jet_plugin_trap(instance, I64{9}, fid, offset)
+        return
+    }
+    if (time_host_monotonic_i64() > pg_word(wrapping(instance + PG_INST_DEADLINE))) {
+        pg_set_trap(instance, PG_TRAP_TIME, jet_rt_string_clone(rt_static_text("time budget exhausted")))
+        jet_plugin_frame(instance, fid, offset)
+        return
+    }
+    slice: if (reserve < PG_FUEL_SLICE) -> reserve else -> PG_FUEL_SLICE
+    pg_store(wrapping(instance + PG_INST_FUEL_RESERVE), reserve - slice)
+    pg_store(wrapping(instance + PG_INST_FUEL), slice - I64{1})
 }
 
 // ---- memories and tables -------------------------------------------------------
@@ -1008,7 +1042,9 @@ pg_reset: fn(instance: I64) {
     pg_store(wrapping(instance + PG_INST_TRAP), I64{0})
     jet_rt_string_drop(pg_word(wrapping(instance + PG_INST_MESSAGE)))
     pg_store(wrapping(instance + PG_INST_MESSAGE), I64{0})
-    pg_store(wrapping(instance + PG_INST_FUEL), PG_FUEL)
+    pg_store(wrapping(instance + PG_INST_FUEL), PG_FUEL_SLICE)
+    pg_store(wrapping(instance + PG_INST_FUEL_RESERVE), PG_FUEL - PG_FUEL_SLICE)
+    pg_store(wrapping(instance + PG_INST_DEADLINE), time_host_monotonic_i64() + PG_TIME_NS)
     pg_store(wrapping(instance + PG_INST_DEPTH), I64{0})
     pg_store(wrapping(instance + PG_INST_FRAME_COUNT), I64{0})
 }
@@ -1154,6 +1190,7 @@ pg_type_name: fn(code: I64) -> I64 {
     if (code == I64{10}) -> return rt_static_text("float64")
     if (code == I64{11}) -> return rt_static_text("char")
     if (code == I64{12}) -> return rt_static_text("string")
+    if (code == PG_VALUE_TUPLE) -> return rt_static_text("tuple")
     rt_static_text("unsupported type")
 }
 
@@ -1172,11 +1209,14 @@ pg_arg_fits: fn(kind: I64, value: I64, code: I64) -> Bool {
     false
 }
 
+// Whether result `code` is the one `want` lifts: -1 unit, 0 bool, 1 float,
+// 2 int, 3 text, 4 a tuple's words.
 pg_result_fits: fn(want: I64, code: I64) -> Bool {
     if (want == I64{-1}) -> return code == I64{-1}
     if (want == I64{0}) -> return code == I64{0}
     if (want == I64{1}) -> return code == I64{9} || code == I64{10}
-    if (want == I64{3}) -> return code == I64{12}
+    if (want == I64{3}) -> return code == PG_VALUE_STRING
+    if (want == I64{4}) -> return code == PG_VALUE_TUPLE
     code >= I64{1} && code <= I64{8}
 }
 
@@ -1187,7 +1227,7 @@ pg_find_export: fn(desc: I64, name: I64) -> I64 {
     data: rt_text_data(name)
     at := I64{0}
     loop at < count {
-        record: wrapping(records + at * I64{80})
+        record: wrapping(records + at * PG_EXPORT_BYTES)
         if (pg_word(wrapping(record + I64{8})) == length) {
             text: wrapping(desc + pg_word(record))
             same := true
@@ -1214,7 +1254,7 @@ pg_trap_failure: fn(instance: I64, kind: I64, name: I64, call: Bool) -> I64 {
     if (kind == PG_TRAP_GUEST) -> jet_rt_string_builder_push(detail, rt_static_text("guest trapped: "))
     jet_rt_string_builder_push(detail, message)
     jet_rt_string_drop(message)
-    keep: kind == PG_TRAP_GUEST || kind == PG_TRAP_FUEL || kind == PG_TRAP_MEMORY || kind == PG_TRAP_TABLE
+    keep: kind == PG_TRAP_GUEST || kind == PG_TRAP_FUEL || kind == PG_TRAP_TIME || kind == PG_TRAP_MEMORY || kind == PG_TRAP_TABLE
     count: if keep -> pg_word(wrapping(instance + PG_INST_FRAME_COUNT)) else -> I64{0}
     frames: jet_rt_record_seq_list_rec_plugin_frame_new(count)
     desc: pg_word(wrapping(instance + PG_INST_DESC))
@@ -1231,7 +1271,7 @@ pg_trap_failure: fn(instance: I64, kind: I64, name: I64, call: Bool) -> I64 {
         at += I64{1}
     }
     error_kind: if (kind == PG_TRAP_DENIED) -> PLUGIN_ERROR_DENIED else if (kind == PG_TRAP_DEFECT) -> PLUGIN_ERROR_DEFECT else if (kind == PG_TRAP_GUEST || kind == PG_TRAP_USER) -> PLUGIN_ERROR_GUEST else -> PLUGIN_ERROR_BUDGET
-    limit: if (kind == PG_TRAP_MEMORY) -> PG_LIMIT_MEMORY else if (kind == PG_TRAP_TABLE) -> PG_LIMIT_TABLE else -> PG_LIMIT_FUEL
+    limit: if (kind == PG_TRAP_MEMORY) -> PG_LIMIT_MEMORY else if (kind == PG_TRAP_TABLE) -> PG_LIMIT_TABLE else if (kind == PG_TRAP_TIME) -> PG_LIMIT_TIME else -> PG_LIMIT_FUEL
     export_name: if call -> name else -> rt_static_text("load")
     pg_failure(error_kind, if (error_kind == PLUGIN_ERROR_BUDGET) -> limit else -> I64{0}, export_name, call, detail, frames)
 }
@@ -1250,8 +1290,9 @@ pg_count_detail: fn(want: I64, got: I64) -> I64 {
 }
 
 // Runs the export `name` over the staged arguments. `want`: -1 unit, 0 bool,
-// 1 float, 2 int, 3 text. Returns 0 with the PluginError in `error`, or 1 with
-// the lifted result word in `error` (Text owned, Float bits, int raw).
+// 1 float, 2 int, 3 text, 4 tuple. Returns 0 with the PluginError in
+// `error`, or 1 with the lifted result word in `error` (Text owned, Float
+// bits, int raw, a tuple's buffer of field words from pg_lift_fields).
 pg_invoke: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
     failure: pg_word(wrapping(plugin + PG_PLUGIN_FAILURE))
     if (failure != I64{0}) {
@@ -1357,35 +1398,26 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
     _: pg_guest(plugin, pg_word(wrapping(record + I64{16})))
     if (pg_word(wrapping(instance + PG_INST_TRAP)) != I64{0}) -> return pg_call_trapped(plugin, name, error)
     raw: pg_word(area)
-    value := raw
-    if (result_code == I64{0}) {
-        value = if (raw.bit_and(PG_U32) != I64{0}) -> I64{1} else -> I64{0}
-    } else if (result_code == I64{1}) {
-        value = ((raw << I64{56}) >> I64{56})
-    } else if (result_code == I64{2}) {
-        value = raw.bit_and(I64{255})
-    } else if (result_code == I64{3}) {
-        value = ((raw << I64{48}) >> I64{48})
-    } else if (result_code == I64{4}) {
-        value = raw.bit_and(I64{65535})
-    } else if (result_code == I64{5}) {
-        value = ((raw << I64{32}) >> I64{32})
-    } else if (result_code == I64{6}) {
-        value = raw.bit_and(PG_U32)
-    } else if (result_code == I64{12}) {
-        memory_index: pg_word(wrapping(record + I64{64}))
-        length: pg_text_result_length(instance, memory_index, raw.bit_and(PG_U32))
-        if (length > PG_MAX_WIRE) {
-            pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
-            detail: jet_rt_string_builder_new()
-            jet_rt_string_builder_push(detail, rt_static_text("the string result"))
-            pg_store(error, pg_wire_failure(name, detail, length))
-            return I64{0}
+    value := pg_lift_flat(result_code, raw)
+    if (result_code == PG_VALUE_STRING || result_code == PG_VALUE_TUPLE) {
+        if (result_code == PG_VALUE_STRING) {
+            length: pg_text_result_length(instance, pg_word(wrapping(record + I64{64})), raw.bit_and(PG_U32))
+            if (length > PG_MAX_WIRE) {
+                pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
+                detail: jet_rt_string_builder_new()
+                jet_rt_string_builder_push(detail, rt_static_text("the string result"))
+                pg_store(error, pg_wire_failure(name, detail, length))
+                return I64{0}
+            }
         }
-        lifted: pg_lift_text(instance, memory_index, raw.bit_and(PG_U32))
+        lifted: if (result_code == PG_VALUE_STRING) -> pg_lift_text(instance, pg_word(wrapping(record + I64{64})), raw.bit_and(PG_U32)) else -> pg_lift_fields(instance, record, desc, raw)
         if (lifted == I64{0}) {
+            detail: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(detail, rt_static_text("returned an unsupported Component Model value ("))
+            jet_rt_string_builder_push(detail, pg_type_name(result_code))
+            rt_text_push_word(detail, I64{41}, I64{1})
             pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
-            pg_store(error, pg_call_failure(name, PLUGIN_ERROR_GUEST, jet_rt_string_clone(rt_static_text("returned an unsupported Component Model value (string)"))))
+            pg_store(error, pg_call_failure(name, PLUGIN_ERROR_GUEST, detail))
             return I64{0}
         }
         value = lifted
@@ -1395,7 +1427,8 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
         pg_store(area, raw)
         _: pg_guest(plugin, post)
         if (pg_word(wrapping(instance + PG_INST_TRAP)) != I64{0}) {
-            if (result_code == I64{12}) -> jet_rt_string_drop(value)
+            if (result_code == PG_VALUE_STRING) -> jet_rt_string_drop(value)
+            if (result_code == PG_VALUE_TUPLE) -> pg_drop_fields(record, desc, value, pg_word(wrapping(record + I64{80})))
             return pg_call_trapped(plugin, name, error)
         }
     }
@@ -1474,6 +1507,103 @@ pg_lift_text: fn(instance: I64, memory_index: I64, at: I64) -> I64 {
     rt_text_copy(wrapping(base + pointer), length)
 }
 
+// Scalar `code`'s value from its core word: an integer sign- or zero-extended
+// from its width, a bool 0 or 1, anything else the word itself.
+pg_lift_flat: fn(code: I64, raw: I64) -> I64 {
+    if (code == I64{0}) -> return if (raw.bit_and(PG_U32) != I64{0}) -> I64{1} else -> I64{0}
+    if (code == I64{1}) -> return ((raw << I64{56}) >> I64{56})
+    if (code == I64{2}) -> return raw.bit_and(I64{255})
+    if (code == I64{3}) -> return ((raw << I64{48}) >> I64{48})
+    if (code == I64{4}) -> return raw.bit_and(I64{65535})
+    if (code == I64{5}) -> return ((raw << I64{32}) >> I64{32})
+    if (code == I64{6}) -> return raw.bit_and(PG_U32)
+    raw
+}
+
+// A scalar field's canonical ABI alignment, which is also its size in
+// memory (a string is a 4-aligned pointer and length).
+pg_field_align: fn(code: I64) -> I64 {
+    if (code <= I64{2}) -> return I64{1}
+    if (code <= I64{4}) -> return I64{2}
+    if (code == I64{7} || code == I64{8} || code == I64{10}) -> return I64{8}
+    I64{4}
+}
+
+// A tuple result's fields as a buffer of words, one per field in order
+// (pg_lift_flat's value, a float's binary64 bits, a string owned), or 0 when
+// the guest's result does not hold them. Fields that flatten to one core
+// value arrive as the core result itself; more arrive in the return area the
+// core result points at, each field at its canonical ABI alignment.
+pg_lift_fields: fn(instance: I64, record: I64, desc: I64, raw: I64) -> I64 {
+    count: pg_word(wrapping(record + I64{80}))
+    codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
+    flat := I64{0}
+    align := I64{1}
+    at := I64{0}
+    loop at < count {
+        code: pg_word(wrapping(codes + at * I64{8}))
+        flat += if (code == PG_VALUE_STRING) -> I64{2} else -> I64{1}
+        if (pg_field_align(code) > align) -> align = pg_field_align(code)
+        at += I64{1}
+    }
+    if (count == I64{0}) -> return I64{0}
+    buffer: jet_rt_alloc(count * I64{8}, I64{8})
+    if (flat == I64{1}) {
+        // A lone float32 crosses the thunk already widened to binary64.
+        pg_store(buffer, pg_lift_flat(pg_word(codes), raw))
+        return buffer
+    }
+    memory_index: pg_word(wrapping(record + I64{64}))
+    area: raw.bit_and(PG_U32)
+    if (memory_index < I64{0} || area.bit_and(align - I64{1}) != I64{0}) {
+        jet_rt_free(buffer, count * I64{8}, I64{8})
+        return I64{0}
+    }
+    memory: pg_memory(instance, memory_index)
+    size: pg_word(wrapping(memory + I64{8}))
+    base: pg_word(memory)
+    offset := I64{0}
+    at = I64{0}
+    loop at < count {
+        code: pg_word(wrapping(codes + at * I64{8}))
+        field_align: pg_field_align(code)
+        offset = (offset + field_align - I64{1}).bit_and(I64{0} - field_align)
+        width: if (code == PG_VALUE_STRING) -> I64{8} else -> field_align
+        start: area + offset
+        target: wrapping(buffer + at * I64{8})
+        fits := pg_in_bounds(start, width, size)
+        if (fits && code == PG_VALUE_STRING) {
+            text: pg_lift_text(instance, memory_index, start)
+            fits = text != I64{0}
+            pg_store(target, text)
+        } else if fits {
+            field: wrapping(base + start)
+            loaded: if (width == I64{1}) -> rt_text_byte(field) else if (width == I64{2}) -> rt_text_byte(field).bit_or(rt_text_byte(wrapping(field + I64{1})) << I64{8}) else if (width == I64{4}) -> pg_u32(field) else -> pg_word(field)
+            pg_store(target, if (code == I64{9}) -> rt_f64_bits(jet_std_math_from_bits_f32(loaded)) else -> pg_lift_flat(code, loaded))
+        }
+        if !fits {
+            pg_drop_fields(record, desc, buffer, at)
+            return I64{0}
+        }
+        offset += width
+        at += I64{1}
+    }
+    buffer
+}
+
+// Frees a pg_lift_fields buffer and the strings among its first `lifted`
+// fields.
+pg_drop_fields: fn(record: I64, desc: I64, buffer: I64, lifted: I64) {
+    count: pg_word(wrapping(record + I64{80}))
+    codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
+    at := I64{0}
+    loop at < lifted {
+        if (pg_word(wrapping(codes + at * I64{8})) == PG_VALUE_STRING) -> jet_rt_string_drop(pg_word(wrapping(buffer + at * I64{8})))
+        at += I64{1}
+    }
+    jet_rt_free(buffer, count * I64{8}, I64{8})
+}
+
 pg_finish: fn(status: I64, slot: I64, ok: I64, err: I64) -> I64 {
     if (status == I64{0}) {
         pg_store(err, pg_word(slot))
@@ -1530,6 +1660,37 @@ pg_int_u64: fn(raw: I64) -> I64 {
     status: pg_invoke(plugin, name, I64{3}, slot)
     if (status != I64{0}) -> pg_store(ok, pg_word(slot))
     pg_finish(status, slot, ok, err)
+}
+
+// A tuple result: one word per field at `out` (an integer as its owned exact
+// Int, a bool 0 or 1, a float's binary64 bits, a string owned) and 1, or the
+// PluginError at `out` and 0. `count` is the host's field count.
+#Export(c) jet_plugin_call_words: fn(plugin: I64, name: I64, out: I64, count: I64) -> I64 {
+    slot: jet_rt_alloc(I64{8}, I64{8})
+    status := pg_invoke(plugin, name, I64{4}, slot)
+    if (status != I64{0}) {
+        desc: pg_word(wrapping(plugin + PG_PLUGIN_DESC))
+        record: pg_find_export(desc, name)
+        buffer: pg_word(slot)
+        fields: pg_word(wrapping(record + I64{80}))
+        if (fields != count) {
+            pg_drop_fields(record, desc, buffer, fields)
+            pg_store(slot, pg_call_failure(name, PLUGIN_ERROR_DEFECT, jet_rt_string_clone(rt_static_text("the export's tuple fields differ from the host's"))))
+            status = I64{0}
+        } else {
+            codes: wrapping(desc + pg_word(wrapping(record + I64{88})))
+            at := I64{0}
+            loop at < count {
+                code: pg_word(wrapping(codes + at * I64{8}))
+                raw: pg_word(wrapping(buffer + at * I64{8}))
+                word: if (code == I64{8} && raw < I64{0}) -> pg_int_u64(raw) else if (code >= I64{1} && code <= I64{8}) -> jet_int_owned_from_i64(raw) else -> raw
+                pg_store(wrapping(out + at * I64{8}), word)
+                at += I64{1}
+            }
+            jet_rt_free(buffer, count * I64{8}, I64{8})
+        }
+    }
+    pg_finish(status, slot, out, out)
 }
 
 // ---- host imports ----------------------------------------------------------------------

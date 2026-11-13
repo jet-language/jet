@@ -75,11 +75,14 @@ plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:I
     d.text(23, needs.join("\n"))
     export_names := [Int]{}
     export_params := [Int]{}
+    export_fields := [Int]{}
     loop export in flat.exports {
         at: d.bytes(export.name.bytes())
         export_names.push(at)
         params: d.words(export.params)
         export_params.push(params)
+        fields: d.words(export.fields)
+        export_fields.push(fields)
     }
     import_names := [Int]{}
     import_params := [Int]{}
@@ -120,6 +123,8 @@ plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:I
         d.word(plug_thunk_op(thunks, export.post))
         d.word(export.memory)
         d.word(if export.unsupported -> 1 else -> 0)
+        d.word(export.fields.len())
+        d.word(export_fields[k])
     }
     d.set(9, flat.imports.len())
     d.set(10, d.out.len())

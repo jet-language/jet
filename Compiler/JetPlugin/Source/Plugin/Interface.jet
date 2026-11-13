@@ -2,12 +2,14 @@
 // itself whenever a host program compiles (jet_driver_plugin_facts): each
 // function export as a Jet signature. The runtime binds an export with `-`
 // folded to `_` (PluginHost.jet), so `is-enabled` is the method `is_enabled`;
-// a parameter label folds the same way. An export whose types include one
-// with no Jet spelling (a record, variant, enum, flags, tuple or resource)
-// stays in the interface with `unsupported` naming that type, so a call to it
-// reports the type rather than a missing export.
+// a parameter label folds the same way. A result tuple of scalars is a Jet
+// tuple, which the runtime reads from the export's return area. An export
+// whose types include one with no Jet spelling (a record, variant, enum,
+// flags, resource, or a tuple anywhere else) stays in the interface with
+// `unsupported` naming that type, so a call to it reports the type rather
+// than a missing export.
 use {
-    jet_foundation.[ComponentExportFact, ComponentExportParam, Type]
+    jet_foundation.[ComponentExportFact, ComponentExportParam, Type, TypeTupleField]
     jet_wasm.[
         WasmComponent, WasmError, WASM_CT_BORROW, WASM_CT_ENUM, WASM_CT_FLAGS, WASM_CT_LIST, WASM_CT_NONE, WASM_CT_OPTION,
         WASM_CT_OWN, WASM_CT_PRIMITIVE, WASM_CT_RECORD, WASM_CT_RESOURCE, WASM_CT_RESULT, WASM_CT_TUPLE, WASM_CT_VARIANT,
@@ -31,13 +33,32 @@ jet_plugin_component_exports: fn(bytes: &&[U8]) -> [ComponentExportFact] WasmErr
             if unsupported == "" -> unsupported = plug_interface_gap(c, ty)
         }
         result := Type?{None}
+        result_order := [String]{}
         if func.ok != WASM_CT_NONE {
-            result = Val(plug_interface_type(c, func.ok))
-            if unsupported == "" -> unsupported = plug_interface_gap(c, func.ok)
+            tuple: plug_interface_result_tuple(c, func.ok)
+            if tuple == .Val(fields) -> result_order = loop field in fields -> field.name
+            result = Val(tuple.map(fields -> Type.Tuple{fields: fields}) ?? plug_interface_type(c, func.ok))
+            if unsupported == "" && tuple == None -> unsupported = plug_interface_gap(c, func.ok)
         }
-        exports.push(ComponentExportFact{name: export.name.replace("-", "_"), params: params, result: result, unsupported: unsupported})
+        exports.push(ComponentExportFact{name: export.name.replace("-", "_"), params: params, result: result, result_order: result_order, unsupported: unsupported})
     }
     Ok(exports)
+}
+
+// The fields of a result that is a Component tuple of scalars (Bool, Int,
+// Float, String) in Component order, or None. A Component tuple's fields
+// have no names, so the field at position N is the member `partN`.
+plug_interface_result_tuple: fn(c: WasmComponent, ty: Int) -> [TypeTupleField]? Never! {
+    if ty < 0 -> return None
+    resolved: c.resolve_type(ty) ?? return None
+    if resolved.kind != WASM_CT_TUPLE || resolved.types.len() == 0 -> return None
+    fields := [TypeTupleField]{}
+    loop (index, item) in resolved.types {
+        member: plug_interface_type(c, item)
+        if member != Type.Bool && member != Type.Int && member != Type.Float && member != Type.String -> return None
+        fields.push(TypeTupleField{name: "part{index}", ty: member})
+    }
+    Val(fields)
 }
 
 // The Jet type of Component value type `ty` (a primitive's negative code or

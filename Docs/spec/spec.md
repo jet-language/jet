@@ -6159,7 +6159,11 @@ parameter and result contracts before code generation. There is no dynamic
 export lookup or missing-export fallback. Each parameter and the result of an
 export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
 a recursively closed `#Codable` record, list, `Option`, or `Result` of those
-(E1260). A sandbox export must return a value; fixed widths, maps, tuples,
+(E1260). A result may also be a Component tuple of those scalars, such as
+`tuple<s64, s64>`; the host reads it from the export's return area as the Jet
+tuple `(part0: Int, part1: Int)`, the member `partN` holding the field at
+position N (D-COMPONENT-TUPLE1=A). A
+sandbox export must return a value; fixed widths, maps, tuple parameters,
 unions, handles, and generic applications do not cross the Component boundary.
 The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
 round trips, including a non-ASCII name; every named export the host uses comes
