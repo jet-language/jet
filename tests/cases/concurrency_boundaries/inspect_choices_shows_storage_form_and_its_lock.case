@@ -1,0 +1,29 @@
+# `jet inspect choices` lists the automatic choices the compiler made, by
+# kind, each with its reason. Storage form: a reactive signal that crosses
+# into a task is kept in synchronized storage, and the row names the binding,
+# its type and the crossing. A signal that never leaves its thread gets no
+# row, and the kind says none. `#Local` locks the one-thread form: the same
+# crossing then fails the build naming it (E1102; the UI snapshot is
+# tests/ui/reactive_local_pin_task.stderr).
+fixture: inspect_choices_shows_storage_form_and_its_lock.fixture
+env: NO_COLOR=1
+step crossing: jet inspect choices crossing.jet
+exit: 0
+stdout: ~ "choices: scope=" # the report header
+stdout: ~ "storage form: " # the storage form kind
+stdout: ~ "crossing.jet:4 in run: pending: Signal<Int> synchronized for task crossing" # where, what and why
+step quiet: jet inspect choices quiet.jet
+exit: 0
+stdout: ~ "storage form: none" # no crossing, no choice
+stdout: !~ "synchronized" # the signal stays on its thread
+step json: jet inspect choices crossing.jet --json
+exit: 0
+json: stdout doc $.action = "inspect.choices"
+json: stdout doc $.kinds[0] = "storage form"
+json: stdout doc $.choices[0].kind = "storage form"
+json: stdout doc $.choices[0].function = "run"
+json: stdout doc $.choices[0].choice = "pending: Signal<Int> synchronized for task crossing"
+step locked: jet check locked.jet
+exit: nonzero
+stderr: ~ "`pending` is pinned `#Local` and can't cross into a task" # the broken lock names the crossing
+stderr: ~ "locked.jet:6:" # at the task that crosses

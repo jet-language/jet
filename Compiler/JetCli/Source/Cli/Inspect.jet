@@ -59,7 +59,7 @@ use {
 }
 
 // `InspectPlane::ALL`, in order, then `target` (the target machine dossier).
-JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "target"}
+JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "choices", "target"}
 
 // `InspectScope`: `Target` is a source file or a package directory (a target
 // machine name for the `target` plane).
@@ -107,9 +107,9 @@ jet_cli_inspect_flag_takes_value: fn(argument: String) -> Bool Never! {
 
 // `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
 jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
-    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, or target"}
+    if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
     plane: argv[1]
-    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, or target"}
+    if !JET_CLI_INSPECT_PLANES.contains(plane) -> return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, or target"}
     target := String?{None}
     live := Int?{None}
     replay := String?{None}
@@ -181,7 +181,7 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
 // `"inspect"`: parse the plane request, then run its projection.
 jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
-        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates|memory> [TARGET] [--live PID | --replay ARTIFACT]` or `jet inspect target [machine]`", color, JET_DRIVER_EXIT_USAGE)
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates|memory|choices> [TARGET] [--live PID | --replay ARTIFACT]` or `jet inspect target [machine]`", color, JET_DRIVER_EXIT_USAGE)
         .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
     }
 }
@@ -201,7 +201,7 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             .File(path, notice) -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "replay", file: path, subject: Val(artifact), json: json, color: color, threads: threads, notice: notice, project: true}}
         }
     }
-    if plane == "decisions" || plane == "memory" -> return jet_cli_inspect_decisions(request, color, json, threads)
+    if plane == "decisions" || plane == "memory" || plane == "choices" -> return jet_cli_inspect_decisions(request, color, json, threads)
     if plane == "build" {
         loop option in request.options {
             if option == "--coverage" || option.starts_with("--coverage=") -> return jet_cli_inspect_coverage(json, color)
@@ -245,7 +245,7 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
     }
 }
 
-// `jet inspect decisions` and `jet inspect memory` up to the projection: the
+// `jet inspect decisions`, `memory` and `choices` up to the projection: the
 // profile name (`--release` wins over `--profile`, default `debug`, the name
 // a plain `jet build` compiles under), which with the build option flags over
 // it (`--inline=off`) selects the optimization level, the scope name, and the
@@ -387,7 +387,7 @@ JetCLIInspectJob: struct {
     depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
     root: String{""}
-    // `decisions` and `memory`: the profile name, the build options it
+    // `decisions`, `memory` and `choices`: the profile name, the build options it
     // compiles under (the profile's, with the build option flags over them),
     // and the scope name (`subject` is the named target).
     profile: String{"debug"}
@@ -1508,6 +1508,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     source: cli_files.read(job.file) ?? ""
     if job.action == "decisions" -> return jet_cli_inspect_decisions_host(job, source)
     if job.action == "memory" -> return jet_cli_inspect_memory_host(job, source)
+    if job.action == "choices" -> return jet_cli_inspect_choices_host(job, source)
     if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

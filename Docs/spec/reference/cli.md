@@ -1466,6 +1466,17 @@ counted; they are named on a `runtime frames not counted:` line. JSON uses the
 (`stack_bytes` is null when unbounded). This is a different report from
 `jet inspect audit memory`, which reads exercised memory witnesses.
 
+`jet inspect choices [<entry.jet>]` lists the automatic choices the compiler
+made for the checked program, by kind, each with the function it was made in
+and its reason. A kind with no choice prints `<kind>: none`. Storage form: a
+reactive handle (`Signal`, `Derived`, `Computed`) that crosses into a task, a
+channel, or a parallel worker, or that is pinned `#Shared`, is kept in
+synchronized storage, for example `storage form: main.jet:3 in run: pending:
+Signal<Int> synchronized for task crossing`. `#Local` locks the one-thread
+form; a crossing then fails the build with E1102, which names the crossing.
+JSON uses the `inspect.choices` status with `kinds` and one `choices` row
+(kind, file, line, function, choice) per choice.
+
 `jet inspect target [machine] [--json]` reads only the toolchain's machine
 table, never a project. With no name it lists every declared target machine
 with its triple, environment, and the tiers it runs at; `--json` prints one
