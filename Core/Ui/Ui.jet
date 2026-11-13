@@ -140,7 +140,7 @@ UINode: struct {
     priv role: UIAriaRole?
     priv kind: UINodeKind
     priv children: [UINode]
-    priv color: String?
+    priv color: Color?
     // The id the runtime's click registry keeps the handler under; 0 for none.
     priv click: Int
 }
@@ -248,7 +248,7 @@ node_accessibility: fn(n: UINode, metadata: UIAccessibility) -> UINode Never! {
     result
 }
 
-node_color: fn(label: String, width: Float, height: Float, color: String) -> UINode Never! {
+node_color: fn(label: String, width: Float, height: Float, color: Color) -> UINode Never! {
     leaf(label, width, height, Val(UIAriaRole.Label), UINodeKind.Custom, Val(color))
 }
 
@@ -1490,7 +1490,7 @@ priv internal: module {
         kept
     }
 
-    leaf: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, color: String?) -> UINode Never! {
+    leaf: fn(label: String, width: Float, height: Float, role: UIAriaRole?, kind: UINodeKind, color: Color?) -> UINode Never! {
         UINode{
             label: label, width: width, height: height, accessibility: None, ime: None, shortcut: None,
             role: role, kind: kind, children: [UINode]{}, color: color, click: 0,
@@ -1570,7 +1570,7 @@ priv internal: module {
         }
         place: rect_text(frame)
         if node.kind != .Text {
-            color: node.color ?? "#000000"
+            color: if node.color == .Val(fill) -> fill.to_hex() else -> "#000000"
             state.commands.push("fill({place}, {color})")
         }
         state.commands.push("text({place}, {node.label})")
@@ -1708,9 +1708,10 @@ priv internal: module {
     // A paint's web scene, one record per leaf in paint order: a box adds
     // none and stacks its children as a paint does. A record is its fields
     // separated by tabs, kind (Custom 0, Text 1, Box 2, Button 3, TextInput 4),
-    // click slot (0 for none), x, y, width, height, color (empty for none) and
-    // the label's UTF-8 byte length, then the label and a newline. A web
-    // build's host (JetWeb Host.jet) turns it into the page's elements.
+    // click slot (0 for none), x, y, width, height, color (its `to_hex` text,
+    // empty for none) and the label's UTF-8 byte length, then the label and a
+    // newline. A web build's host (JetWeb Host.jet) turns it into the page's
+    // elements.
     scene_records: fn(node: UINode, frame: Rect, &records: [String]) Never! {
         if node.kind == .Box {
             at := frame.y
@@ -1727,7 +1728,7 @@ priv internal: module {
             .Button -> 3
             .TextInput -> 4
         }
-        color: node.color ?? ""
+        color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
         place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
         records.push("{kind}\t{node.click}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n")
     }

@@ -11,15 +11,14 @@ package: {
 use {
     ui: core.ui
     reactive: core.reactive
+    core.color.[Color]
 }
 
 // Native and browser entry points compose the same canonical UiNode tree.
-// Browser-side wiring converts typed Color values to real CSS hex colors.
-// `Color` is a plain r/g/b struct — same flat shape as Apps/UI/UITypedStyle.jet.
-// `to_hex` is a REAL conversion (integer arithmetic, no shortcuts) that runs
-// in the browser and feeds `ui.node_color`'s paint pipeline directly: this is
-// the "typed style drives the actual paint" wiring UITypedStyle.jet could only
-// gesture at (there, `Style`/`Color` were built but never reached the backend).
+// Browser-side wiring hands typed `core.color` values straight to
+// `ui.node_color`, whose paint pipeline writes them as CSS hex colors: this is
+// the "typed style drives the actual paint" wiring Apps/UI/UITypedStyle.jet
+// shows natively.
 //
 // Organization note: tried grouping every browser-side function into ONE
 // `#Target(JS) browser: module { ... }` instead of a `#Target(JS)` tag on each one —
@@ -35,10 +34,6 @@ use {
 // copy that the identical code at file scope never needed). Both are
 // reported, not fixed here (out of scope for this pass) — so this file keeps
 // the original, verified-working per-function `#Target(JS)` tags below instead.
-// Truncating divide-by-16, computed via range comparison + subtraction
-// (never `/`) — deliberately sidesteps int-vs-float division semantics the
-// narrow JS backend doesn't distinguish (JS `/` is always float division;
-// Jet `Int / Int` truncates). Comparisons/sub/mul are exact under both.
 // `stat_card` builds typed data and `paint_stat_card` turns it into a UiNode.
 // ── Phase 5: motion — smoothstep tween, pure function of elapsed time ─────
 // Identical shape to Apps/UI/UIMotion.jet's `tween`: no imperative frame tick,
@@ -64,12 +59,6 @@ stat_line: fn(label: String, value: String) -> UINode { return ui.text("{label}:
 
 dashboard_view: fn(cards: [UINode]) -> UINode { return ui.box(cards) }
 
-Color: struct {
-    r: Int
-    g: Int
-    b: Int
-}
-
 StatCard: struct {
     label: String
     value: String
@@ -79,66 +68,16 @@ StatCard: struct {
 }
 
 #Target(JS)
-hex_digit: fn(n: Int) -> String Never! {
-    if n == 0 -> return "0"
-    if n == 1 -> return "1"
-    if n == 2 -> return "2"
-    if n == 3 -> return "3"
-    if n == 4 -> return "4"
-    if n == 5 -> return "5"
-    if n == 6 -> return "6"
-    if n == 7 -> return "7"
-    if n == 8 -> return "8"
-    if n == 9 -> return "9"
-    if n == 10 -> return "a"
-    if n == 11 -> return "b"
-    if n == 12 -> return "c"
-    if n == 13 -> return "d"
-    if n == 14 -> return "e"
-    return "f"
-}
+altitude_color: fn() -> Color { return Color{r: 51, g: 102, b: 255, a: 255} }
 
 #Target(JS)
-hi_nibble: fn(n: Int) -> Int Never! {
-    if n < 16 -> return 0
-    if n < 32 -> return 1
-    if n < 48 -> return 2
-    if n < 64 -> return 3
-    if n < 80 -> return 4
-    if n < 96 -> return 5
-    if n < 112 -> return 6
-    if n < 128 -> return 7
-    if n < 144 -> return 8
-    if n < 160 -> return 9
-    if n < 176 -> return 10
-    if n < 192 -> return 11
-    if n < 208 -> return 12
-    if n < 224 -> return 13
-    if n < 240 -> return 14
-    return 15
-}
+airspeed_color: fn() -> Color { return Color{r: 18, g: 184, b: 134, a: 255} }
 
 #Target(JS)
-hex_byte: fn(n: Int) -> String Never! {
-    hi := hi_nibble(n)
-    lo := n - hi * 16
-    return "{hex_digit(hi)}{hex_digit(lo)}"
-}
+fuel_color: fn() -> Color Never! { return Color{r: 232, g: 121, b: 12, a: 255} }
 
 #Target(JS)
-to_hex: fn(c: Color) -> String Never! { return "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}" }
-
-#Target(JS)
-altitude_color: fn() -> Color { return Color{r: 51, g: 102, b: 255} }
-
-#Target(JS)
-airspeed_color: fn() -> Color { return Color{r: 18, g: 184, b: 134} }
-
-#Target(JS)
-fuel_color: fn() -> Color Never! { return Color{r: 232, g: 121, b: 12} }
-
-#Target(JS)
-boost_color: fn() -> Color Never! { return Color{r: 136, g: 85, b: 238} }
+boost_color: fn() -> Color Never! { return Color{r: 136, g: 85, b: 238, a: 255} }
 
 #Target(JS)
 stat_card: fn(label: String, value: String, color: Color, x: Float, y: Float) -> StatCard {
@@ -147,8 +86,7 @@ stat_card: fn(label: String, value: String, color: Color, x: Float, y: Float) ->
 
 paint_stat_card: fn(card: StatCard) {
     backend: ui.null_backend()
-    hex := to_hex(card.color)
-    node: ui.node_color("{card.label}: {card.value}", 170.0, 74.0, hex)
+    node: ui.node_color("{card.label}: {card.value}", 170.0, 74.0, card.color)
     constraint: ui.constraint(0.0, 0.0, 400.0, 200.0)
     size: backend.measure(node, constraint)
     frame: ui.rect(card.x, card.y, size.width, size.height)
@@ -172,8 +110,7 @@ init_app: fn() -> Signal<Int> {
     counter_backend: ui.null_backend()
     ui.reactive_render(
         fn() {
-            hex := to_hex(boost_color())
-            node: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
+            node: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, boost_color())
             constraint: ui.constraint(0.0, 0.0, 400.0, 200.0)
             size: counter_backend.measure(node, constraint)
             frame: ui.rect(190.0, 90.0, size.width, size.height)
@@ -189,10 +126,10 @@ init_fuel: fn() -> Signal<Int> {
     backend: ui.null_backend()
     ui.reactive_render(
         fn() {
-            hex := to_hex(fuel_color())
+            color := fuel_color()
             value := tween(40.0, 95.0, elapsed.get(), 600)
             pct := Int.from_float(value) ?? 0
-            node: ui.node_color("Fuel: {pct}%", 170.0, 74.0, hex)
+            node: ui.node_color("Fuel: {pct}%", 170.0, 74.0, color)
             constraint: ui.constraint(0.0, 0.0, 400.0, 200.0)
             size: backend.measure(node, constraint)
             frame: ui.rect(0.0, 90.0, size.width, size.height)

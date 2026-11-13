@@ -392,14 +392,15 @@ index_body: fn() -> HTML {
           </div>
           <div class="code"><div class="code-head"><span>widget/counter.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> ui<span class="g">:</span> core.ui
     <span class="k">use</span> reactive<span class="g">:</span> core.reactive
+    <span class="k">use</span> core.color.[Color]
     <span class="g">#[Target(Web), HTML(Path{"shell.html"})]</span>
 
     <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         count<span class="g">:</span> reactive.<span class="f">signal</span>(<span class="n">0</span>)
         ui.<span class="f">reactive_render</span>(() <span class="g">-&gt;</span> {{
             n <span class="g">:=</span> count.<span class="f">get</span>()
-            color <span class="g">:=</span> <span class="s">"#2E2E33"</span>
-            <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = <span class="s">"#E8232A"</span>
+            color <span class="g">:=</span> Color{{r: <span class="n">46</span>, g: <span class="n">46</span>, b: <span class="n">51</span>, a: <span class="n">255</span>}}
+            <span class="k">if</span> n % <span class="n">2</span> == <span class="n">1</span> <span class="g">-&gt;</span> color = Color{{r: <span class="n">232</span>, g: <span class="n">35</span>, b: <span class="n">42</span>, a: <span class="n">255</span>}}
             backend<span class="g">:</span> ui.<span class="f">null_backend</span>()
             tree<span class="g">:</span> ui.<span class="f">box</span>([
                 ui.<span class="f">node_color</span>(<span class="s">"count: {{n}}"</span>, <span class="n">160.0</span>, <span class="n">40.0</span>, color),

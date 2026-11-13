@@ -3259,7 +3259,8 @@ Core's libraries take this one value (D-VERDICT-3288-1=A). In `core.tui`,
 `color_rgb(color)` is `TUIColor.RGB(color)`: a terminal shows no alpha, so the
 alpha is ignored, and a profile without true color shows the nearest ANSI 256
 or ANSI 16 color. `core.ui`'s drawing and image functions take and return a
-`Color`.
+`Color`, and `node_color` fills its node with one; a web page shows it as the
+CSS color its `to_hex` text names.
 
 ### `core.math.random` — deterministic pseudorandom values
 
@@ -4729,7 +4730,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `aria_role_button() -> UIAriaRole`, `aria_role_container() -> UIAriaRole` | role | Construct standard accessibility roles. |
 | `aria_role_label() -> UIAriaRole`, `aria_role_text_input() -> UIAriaRole` | role | Construct label or text-input roles. |
 | `node_accessibility(n: UINode, metadata: UIAccessibility) -> UINode` | node | Attach accessibility metadata. |
-| `node_color(label: String, width: Float, height: Float, color: String) -> UINode` | node | Construct a colored node. |
+| `node_color(label: String, width: Float, height: Float, color: Color) -> UINode` | node | Construct a node filled with a `core.color` color. |
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
 

@@ -3,6 +3,7 @@
 use {
     ui: core.ui
     reactive: core.reactive
+    core.color.[Color]
 }
 #[Target(Web), HTML(Path{"shell.html"})]
 
@@ -10,8 +11,8 @@ run: fn() {
     count: reactive.signal(0)
     ui.reactive_render(fn() {
         n := count.get()
-        color := "#2E2E33"
-        if n % 2 == 1 -> color = "#E8232A"
+        color := Color{r: 46, g: 46, b: 51, a: 255}
+        if n % 2 == 1 -> color = Color{r: 232, g: 35, b: 42, a: 255}
         backend: ui.null_backend()
         tree: ui.box([
             ui.node_color("count: {n}", 160.0, 40.0, color),

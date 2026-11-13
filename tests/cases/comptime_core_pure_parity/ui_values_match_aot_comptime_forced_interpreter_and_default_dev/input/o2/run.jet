@@ -1,5 +1,8 @@
 package: { name: "run", authority: { allow: [Browser] } }
-use ui: core.ui
+use {
+    ui: core.ui
+    core.color.[Color]
+}
 ui_value_view: fn() -> String {
     point: ui.point(1.5, -2.0)
     size: ui.size(80.0, 24.0)
@@ -7,7 +10,7 @@ ui_value_view: fn() -> String {
     constraint: ui.constraint(0.0, 1.0, 80.0, 24.0)
     plain: ui.node("plain", 5.0, 2.0)
     role: ui.node_role("save", 8.0, 1.0, ui.aria_role_button())
-    colored: ui.node_color("blue", 4.0, 1.0, "#0000ff")
+    colored: ui.node_color("blue", 4.0, 1.0, Color{r: 0, g: 0, b: 255, a: 255})
     row: ui.box([ui.text("hi"), ui.button("Save")])
     return "{point.x}:{point.y}|{size.width}:{size.height}|{rect.width}:{rect.height}|{constraint.min_height}:{constraint.max_width}|{plain.label}:{plain.width}:{plain.height}|{role.label}:{role.width}|{colored.label}:{colored.width}|{row.width}:{row.height}"
 }

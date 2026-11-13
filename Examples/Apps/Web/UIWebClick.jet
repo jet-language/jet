@@ -17,12 +17,13 @@ package: {
 use {
     ui: core.ui
     reactive: core.reactive
+    core.color.[Color]
 }
 
 render: fn(n: Int) {
     backend: ui.null_backend()
-    color := "#e8790c"
-    if n % 2 == 0 -> color = "#3366ff"
+    color := Color{r: 232, g: 121, b: 12, a: 255}
+    if n % 2 == 0 -> color = Color{r: 51, g: 102, b: 255, a: 255}
     node: ui.node_color("Clicks: {n}", 160.0, 40.0, color)
     constraint: ui.constraint(0.0, 0.0, 300.0, 100.0)
     size: backend.measure(node, constraint)
@@ -36,8 +37,8 @@ run: fn() {
     ui.reactive_render(
         fn() {
             n := count.get()
-            color := "#e8790c"
-            if n % 2 == 0 -> color = "#3366ff"
+            color := Color{r: 232, g: 121, b: 12, a: 255}
+            if n % 2 == 0 -> color = Color{r: 51, g: 102, b: 255, a: 255}
             backend: ui.null_backend()
             tree: ui.box(
                 [

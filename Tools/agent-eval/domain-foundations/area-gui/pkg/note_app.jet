@@ -7,6 +7,7 @@ use {
     ui: core.ui
     reactive: core.reactive
     fs: core.files
+    core.color.[Color]
 }
 
 shortcut_label: fn(code: String) -> String {
@@ -36,16 +37,16 @@ run: fn() {
 
     ui.reactive_render(fn() {
         rows := [UINode]{
-            ui.node_color("JET NOTES — {mode.get()} mode", 72.0, 1.0, "#161616"),
+            ui.node_color("JET NOTES — {mode.get()} mode", 72.0, 1.0, Color{r: 22, g: 22, b: 22, a: 255}),
             ui.node_role("* {meeting_title}", 28.0, 1.0, ui.aria_role_button()),
             ui.node_role("  {ideas_title}", 28.0, 1.0, ui.aria_role_button()),
-            ui.node_color("EDITOR — selected {selected.get()}", 72.0, 1.0, "#f3f0e8"),
+            ui.node_color("EDITOR — selected {selected.get()}", 72.0, 1.0, Color{r: 243, g: 240, b: 232, a: 255}),
             ui.node_role("{draft.get()}", 72.0, 4.0, ui.aria_role_text_input()),
             ui.button("Save", on_click: fn() { print("button: Save") }),
             ui.button("Undo", on_click: fn() { print("button: Undo") }),
             ui.button("Redo", on_click: fn() { print("button: Redo") }),
             ui.button("Toggle theme", on_click: fn() { print("button: Toggle theme") }),
-            ui.node_color("SETTINGS ({settings.get()})", 72.0, 1.0, "#f3f0e8"),
+            ui.node_color("SETTINGS ({settings.get()})", 72.0, 1.0, Color{r: 243, g: 240, b: 232, a: 255}),
             ui.text("Shortcuts: Ctrl+S · Ctrl+Z · Ctrl+Shift+Z · Ctrl+,"),
             ui.text("Accessible labels: Save, Undo, Redo, Toggle theme, Editor")
         }
