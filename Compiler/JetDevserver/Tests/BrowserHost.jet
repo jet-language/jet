@@ -15,27 +15,27 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     assert_eq(host.panels.len(), 1)
     stale_revision: if host.apply_event(browser_test_event("s1", 0, 2, "ready")) == {
         .Err(.StaleRevision(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(stale_revision)
     stale_sequence: if host.apply_event(browser_test_event("s1", 1, 1, "ready")) == {
         .Err(.StaleSequence(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(stale_sequence)
     wrong_session: if host.apply_event(browser_test_event("s2", 2, 2, "ready")) == {
         .Err(.WrongSession(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(wrong_session)
 }
 #Test("layout_and_selection_are_shared_but_open_state_is_placement_local") {
     host := BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 1, 1, "ready")) ?? panic("event")
-    _: host.dispatch(BrowserHostAction.OpenPanel(placement: BrowserPlacement.InApp, panel_id: "build")) ?? panic("open in-app")
-    _: host.dispatch(BrowserHostAction.OpenPanel(placement: BrowserPlacement.Workbench, panel_id: "build")) ?? panic("open workbench")
+    _: host.dispatch(BrowserHostAction.OpenPanel{placement: BrowserPlacement.InApp, panel_id: "build"}) ?? panic("open in-app")
+    _: host.dispatch(BrowserHostAction.OpenPanel{placement: BrowserPlacement.Workbench, panel_id: "build"}) ?? panic("open workbench")
     host.select("build", Val("source")) ?? panic("select")
-    _: host.dispatch(BrowserHostAction.DockPanel(placement: BrowserPlacement.Workbench, panel_id: "build", dock: DevtoolsDock.Right)) ?? panic("dock")
+    _: host.dispatch(BrowserHostAction.DockPanel{placement: BrowserPlacement.Workbench, panel_id: "build", dock: DevtoolsDock.Right}) ?? panic("dock")
     in_app: host.view_model(BrowserPlacement.InApp)
     workbench: host.view_model(BrowserPlacement.Workbench)
     assert(in_app.panels[0].open)
@@ -70,12 +70,12 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     assert_eq(retained.events[0].sequence, 255)
     expired: if host.resume_from(Val(BrowserReconnectCursor{sequence: 1})) == {
         .Err(.CursorExpired(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(expired)
     ahead: if host.resume_from(Val(BrowserReconnectCursor{sequence: MAX_RECONNECT_EVENTS + 3})) == {
         .Err(.CursorAhead(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(ahead)
 }
@@ -84,27 +84,27 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     host.apply_event(browser_test_event("s1", 7, 1, "ready")) ?? panic("event")
     location: BrowserSourceLocation{source_id: "src/main.jet", line: 4, column: 2, function: Val("main")}
     source: BrowserSourceGrant{session_id: "s1", revision: 7, panel_id: "build", node_id: "source", source: location}
-    navigated: if host.dispatch(BrowserHostAction.NavigateSource(placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", grant: source)) == {
+    navigated: if host.dispatch(BrowserHostAction.NavigateSource{placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", grant: source}) == {
         .Ok(.SourceNavigated(_, _, _, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(navigated)
     stale: BrowserSourceGrant{session_id: "s1", revision: 6, panel_id: "build", node_id: "source", source: location}
-    stale_rejected: if host.dispatch(BrowserHostAction.NavigateSource(placement: BrowserPlacement.Workbench, panel_id: "build", node_id: "source", grant: stale)) == {
+    stale_rejected: if host.dispatch(BrowserHostAction.NavigateSource{placement: BrowserPlacement.Workbench, panel_id: "build", node_id: "source", grant: stale}) == {
         .Err(.StaleRevision(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(stale_rejected)
     wrong: BrowserSourceGrant{session_id: "s2", revision: 7, panel_id: "build", node_id: "source", source: location}
-    wrong_rejected: if host.dispatch(BrowserHostAction.NavigateSource(placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", grant: wrong)) == {
+    wrong_rejected: if host.dispatch(BrowserHostAction.NavigateSource{placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", grant: wrong}) == {
         .Err(.WrongSession(_, _)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(wrong_rejected)
     action: BrowserActionGrant{session_id: "s1", revision: 7, panel_id: "build", node_id: "source", action_id: "source"}
-    action_rejected: if host.dispatch(BrowserHostAction.InvokeAction(placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", action_id: "source", grant: action)) == {
+    action_rejected: if host.dispatch(BrowserHostAction.InvokeAction{placement: BrowserPlacement.InApp, panel_id: "build", node_id: "source", action_id: "source", grant: action}) == {
         .Err(.ActionNotGranted(_)) -> true
-        else -> false
+        .Err(_) | .Ok(_) -> false
     }
     assert(action_rejected)
 }
