@@ -13,8 +13,8 @@ use {
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
-        OutputCallableAuthority, Span, SymbolKind, Type, compiler_threads_single,
-        failure_contract_of_function, jet_target_machine_hosted, module_intern, module_table, name_mangle, symbol_id,
+        OutputCallableAuthority, Span, SymbolKeys, SymbolKind, Type, compiler_threads_single,
+        failure_contract_of_function, jet_target_machine_hosted, module_intern, module_table, name_mangle, symbol_key_text, symbol_table_key,
     ]
 }
 
@@ -34,7 +34,7 @@ output_fixture_graph: fn(label: String, source: String, effects_source: String, 
     facts: SemaBuildFacts{package_name: "output-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "output-fixture", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
-    graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "output-fixture", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+    graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "output-fixture", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
         failures.push("{label}: registration failed: {err}")
         return None
     }
@@ -86,7 +86,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
         failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
         return
     }
-    key: symbol_id(SymbolKind.Function, "output-fixture::main", "", "launch").key
+    key: symbol_key_text(SymbolKind.Function, "output-fixture::main", "", "launch")
     solved := [String]?{None}
     settled_return := Type?{None}
     loop function in checked.modules[0].functions {
@@ -102,7 +102,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
     if expected.len() == 0 -> failures.push("solved effect publication: genuine print/call chain has no solved effects")
     declaration_span := Span?{None}
     loop function in graph.modules[0].functions {
-        if function.symbol.id.key == key -> declaration_span = function.declaration.return_type_span
+        if symbol_table_key(graph.symbols, function.symbol.id) == key -> declaration_span = function.declaration.return_type_span
     }
     settled_contract: failure_contract_of_function(settled_return, declaration_span)
     if checked.outputs.len() != 1 -> failures.push("solved output publication: the graph result lost its ordered Output row")
@@ -135,8 +135,9 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
         })
     }
     effect_inputs.reverse()
-    prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls)
-    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph.modules, graph.module_table), graph.decls, graph.module_table, [String:Bool]{}, compiler_threads_single(), false)
+    prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls, graph.symbols)
+    effect_symbols := graph.symbols.copy()
+    republished: sema_effects_check_modules(checked.modules, effect_inputs, prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, [[SemaEffectModuleCap]]{}, sema_effect_trait_caps(graph), graph.decls, effect_symbols, graph.module_table, [String:Bool]{}, compiler_threads_single(), false)
     if republished.memory_declarations.len() != 2 -> failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
@@ -196,7 +197,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     main_id: module_intern(table, "{main_package}::main")
-    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, edges, main_package, main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, [SymbolKeys]{}, edges, main_package, main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
         failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
         return
@@ -212,12 +213,12 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
             }
         }
         if !found -> failures.push("{label}: checked Output fact is missing")
-        expected_key: symbol_id(SymbolKind.Function, "{bank_package}::bank", "", function_name).key
+        expected_key: symbol_key_text(SymbolKind.Function, "{bank_package}::bank", "", function_name)
         function_references := 0
         loop reference in graph.output_name_references {
             if reference.kind == "function" {
                 function_references += 1
-                if reference.symbol.id.key != expected_key -> failures.push("{label}: function reference has the intermediary namespace's owner")
+                if symbol_table_key(graph.symbols, reference.symbol.id) != expected_key -> failures.push("{label}: function reference has the intermediary namespace's owner")
             }
         }
         if function_references != 1 -> failures.push("{label}: expected exactly one authenticated callable reference")

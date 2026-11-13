@@ -2,6 +2,7 @@
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
+    symbol_is_local,
     AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
@@ -1373,8 +1374,10 @@ sema_call_local_default_values: fn(target: SemaCallDirectTarget, binding: SemaCa
         }
     }
     defaults := [SemaCallDefaultValue]{}
+    // A body's own id is no registered owner a default names.
+    owner_key: if symbol_is_local(target.symbol.id) -> "" else -> sema_program_symbol_key(program, target.symbol.id)
     loop reference in binding.default_refs {
-        if reference.owner_key != target.symbol.id.key -> return None
+        if reference.owner_key != owner_key -> return None
         parameter_index: reference.parameter_index
         if parameter_index < 0 || parameter_index >= func.params.len() -> return None
         expression: func.params[parameter_index].default ?? return None
@@ -1697,7 +1700,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
     if !sema_call_direct_target_generic_ready(candidate, diagnostics, call.name_span) -> return None
     // The settled type arguments decide what the callee's crossings carry
     // across threads (Ownership/GenericCrossings.jet).
-    if candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(candidate.symbol.id.key, call.name, candidate.generic_substitutions, call.name_span, environment, program, scopes, context)
+    if candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(sema_symbol_key(program, context, candidate.symbol.id), call.name, candidate.generic_substitutions, call.name_span, environment, program, scopes, context)
     resolved_binding := binding
     resolved_defaults := defaults
     if binding.default_refs.len() > 0 {

@@ -1,4 +1,4 @@
-// The Core record's body packets (its section 5, schema `jet.core/v4`). The
+// The Core record's body packets (its section 5, schema `jet.core/v5`). The
 // record is written from a finalized Core check, whose module rows hold every
 // checked body with the facts all of them recorded, merged. At write time
 // each row is split: every body becomes one packet, a
@@ -23,7 +23,7 @@
 // the graph's as the body is taken (sema_core_body_rebase_tree).
 use {
     core_record_cbor: core.encoding.cbor
-    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclTable, FnBody, NodeKind, RecordReader, Span, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, record_element]
+    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclTable, FnBody, NodeKind, RecordReader, Span, SymbolID, SymbolTable, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, name_find, name_index, name_intern, name_table, record_element, symbol_find, symbol_table_key]
 }
 
 // The bounds a record row decodes under: a checked row nests as deep as its
@@ -39,10 +39,17 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     row := moved.move()
     owned := bodies.move()
     first: packets.len()
-    at := [String:Int]{}
+    // Each body's packet position, by the name its key interns as in `keys`.
+    keys := name_table()
+    at := [Int]{}
     spans := [Span]{}
     loop function in owned {
-        at[function.key.copy()] = packets.len()
+        name: name_index(name_intern(keys, function.key))
+        if name == at.len() {
+            at.push(packets.len())
+        } else {
+            at[name] = packets.len()
+        }
         spans.push(function.source_span.copy())
         packets.push(SemaComptimeFunctionResult{
             module_identity: row.module_identity,
@@ -64,15 +71,15 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     }
     loop owned.len() > 0 {
         function := owned.pop() ?? break
-        position: at[function.key]
+        position: at[name_index(name_find(keys, function.key) ?? panic("body `{function.key}` was interned above"))]
         packets[position].function = Val(function)
     }
     row.functions = [FnBody]{}
     call_facts := row.call_facts.move()
     row.call_facts = [SemaCallSiteFact]{}
     loop fact in call_facts {
-        if at.get(fact.caller_key) == .Val(position) {
-            packets[position].call_facts.push(fact)
+        if name_find(keys, fact.caller_key) == .Val(name) {
+            packets[at[name_index(name)]].call_facts.push(fact)
             next
         }
         row.call_facts.push(fact)
@@ -80,8 +87,8 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     failure_facts := row.failure_facts.move()
     row.failure_facts = [SemaFunctionFailureFacts]{}
     loop facts in failure_facts {
-        if at.get(facts.function_key) == .Val(position) {
-            packets[position].failure = Val(facts)
+        if name_find(keys, facts.function_key) == .Val(name) {
+            packets[at[name_index(name)]].failure = Val(facts)
             next
         }
         row.failure_facts.push(facts)
@@ -89,8 +96,8 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     compute_facts := row.compute_facts.move()
     row.compute_facts = [SemaComputeFunctionFacts]{}
     loop facts in compute_facts {
-        if at.get(facts.function_key) == .Val(position) {
-            packets[position].compute_facts = facts
+        if name_find(keys, facts.function_key) == .Val(name) {
+            packets[at[name_index(name)]].compute_facts = facts
             next
         }
         row.compute_facts.push(facts)
@@ -98,8 +105,8 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     sources := row.comptime_body_sources.move()
     row.comptime_body_sources = [SemaComptimeBodySource]{}
     loop source in sources {
-        if at.get(source.function_key) == .Val(position) {
-            packets[position].comptime_body_sources.push(source)
+        if name_find(keys, source.function_key) == .Val(name) {
+            packets[at[name_index(name)]].comptime_body_sources.push(source)
             next
         }
         row.comptime_body_sources.push(source)
@@ -169,14 +176,14 @@ SemaCoreBodyStore: struct {
     reader: RecordReader
     // The record section that holds the packets.
     section: Int
-    // Function key -> its packet, for the bodies of the modules the graph
-    // takes (sema_finalize_seeded_taken).
-    rows: [String:SemaCoreBodyRow]
+    // The packet of each function of the modules the graph takes
+    // (sema_finalize_seeded_taken), by the function's SymbolID.
+    rows: [U32:SemaCoreBodyRow]
     rebase: SemaCoreDeclRebase
-    // This finalization's: the keys it takes up front, in record order, and
-    // every key it took (sema_core_body_begin).
-    eager: [String]{[String]{}}
-    taken: [String:Bool]{[String:Bool]{}}
+    // This finalization's: the functions it takes up front, in record
+    // order, and every function it took (sema_core_body_begin).
+    eager: [SymbolID]{[SymbolID]{}}
+    taken: [U32:Bool]{[U32:Bool]{}}
 }
 
 // Where one packet is: its element in the store's section, and the graph
@@ -197,7 +204,7 @@ SemaCoreDeclRebase: struct {
 
 // A store over the packets `rows` of `reader`'s section `section`, whose
 // bodies name the declarations of `record_decls`.
-sema_core_body_store_new: fn(reader: RecordReader, section: Int, rows: [String:SemaCoreBodyRow], record_decls: DeclTable) -> SemaCoreBodyStore Never! {
+sema_core_body_store_new: fn(reader: RecordReader, section: Int, rows: [U32:SemaCoreBodyRow], record_decls: DeclTable) -> SemaCoreBodyStore Never! {
     SemaCoreBodyStore{reader: reader, section: section, rows: rows, rebase: sema_core_decl_rebase_new(record_decls)}
 }
 
@@ -209,34 +216,34 @@ sema_core_decl_rebase_new: fn(record_decls: DeclTable) -> SemaCoreDeclRebase Nev
 }
 
 // Starts a finalization's taking: none taken yet, and up front every packet
-// that is not `deferred` (the keys a keyed caller demands,
-// sema_core_demand_index), or every packet when `demand` is off.
-sema_core_body_begin: fn(graph: &SemaRegistrationGraph, demand: Bool, deferred: [String:Int]) Never! {
+// whose function is not `deferred` (the functions a keyed caller demands,
+// sema_core_demand_index, by SymbolID), or every packet when `demand` is off.
+sema_core_body_begin: fn(graph: &SemaRegistrationGraph, demand: Bool, deferred: [U32:Bool]) Never! {
     if &graph.core_bodies == .Val(store) {
-        store.taken = [String:Bool]{}
-        by_element := [Int:String]{}
+        store.taken = [U32:Bool]{}
+        by_element := [Int:U32]{}
         elements := [Int]{}
-        loop (key, row) in store.rows {
-            if demand && deferred.get(key) != None -> next
-            by_element[row.element] = key.copy()
+        loop (id, row) in store.rows {
+            if demand && deferred.get(id) != None -> next
+            by_element[row.element] = id
             elements.push(row.element)
         }
         elements.sort()
-        store.eager = loop element in elements -> by_element[element].copy()
+        store.eager = loop element in elements -> SymbolID{id: by_element[element]}
     }
 }
 
 // Takes the up-front packets of this finalization (sema_core_body_begin)
 // into `modules`. Returns how many it took.
 sema_core_body_take_eager: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult]) -> Int Never! {
-    keys := [String]{}
+    ids := [SymbolID]{}
     if &graph.core_bodies == .Val(store) {
-        keys = store.eager.copy()
-        store.eager = [String]{}
+        ids = store.eager.copy()
+        store.eager = [SymbolID]{}
     }
     took := 0
-    loop key in keys {
-        if sema_core_body_take(graph, modules, key) -> took += 1
+    loop id in ids {
+        if sema_core_body_take_id(graph, modules, id) -> took += 1
     }
     took
 }
@@ -260,14 +267,21 @@ sema_core_body_taken_count: fn(graph: SemaRegistrationGraph) -> Int Never! {
 // took already, takes none. A packet that can't be read leaves its module
 // incomplete, with the reason.
 sema_core_body_take: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], key: String) -> Bool Never! {
-    if &graph.core_bodies == .Val(store) -> return sema_core_body_take_from(store, graph.decls, modules, key)
+    id: symbol_find(graph.symbols, key) ?? return false
+    sema_core_body_take_id(graph, modules, id)
+}
+
+// sema_core_body_take of the function `id` names.
+sema_core_body_take_id: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], id: SymbolID) -> Bool Never! {
+    if &graph.core_bodies == .Val(store) -> return sema_core_body_take_from(store, graph.decls, graph.symbols, modules, id)
     false
 }
 
-sema_core_body_take_from: fn(store: &SemaCoreBodyStore, table: &DeclTable, modules: &[SemaGraphModuleResult], key: String) -> Bool Never! {
-    row: store.rows.get(key) ?? return false
-    if store.taken.get(key) != None -> return false
-    store.taken[key.copy()] = true
+sema_core_body_take_from: fn(store: &SemaCoreBodyStore, table: &DeclTable, symbols: SymbolTable, modules: &[SemaGraphModuleResult], id: SymbolID) -> Bool Never! {
+    row: store.rows.get(id.id) ?? return false
+    if store.taken.get(id.id) != None -> return false
+    store.taken[id.id] = true
+    key: symbol_table_key(symbols, id)
     if row.module_index < 0 || row.module_index >= modules.len() -> panic("the Core record's body `{key}` joins module {row.module_index}, which this finalization has no row for")
     identity: modules[row.module_index].module_identity
     packet := sema_core_body_read(store, table, row.element) ?? {

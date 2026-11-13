@@ -30,7 +30,6 @@ use jet_foundation.[
     measure_expression,
     measure_literal_value,
     owned_trait_bundle_marker,
-    symbol_id,
     type_identity_equal,
     type_name,
     module_is_core,
@@ -745,7 +744,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, env
                 member_ty: loop row in rows {
                     if row.name == written.name -> break row.ty.copy()
                 } ?? written.ty.copy()
-                members.push(TStructFieldValue{field: sema_expression_tuple_field_ref(record, written.name, member_ty), value: values[index], boxed: false})
+                members.push(TStructFieldValue{field: sema_expression_tuple_field_ref(written.name, member_ty), value: values[index], boxed: false})
             }
             return sema_expr_expected_owned(sema_tree_node(record, TExprKind.StructLit{fields: members}, span), expected, environment, program, diagnostics)
         }

@@ -43,7 +43,10 @@ use {
         name_rows,
         diagnostic_with_edit_grade,
         expr_span,
-        symbol_id,
+        symbol_find,
+        symbol_key_text,
+        symbol_none,
+        symbol_table,
         type_name,
         foundation_named_type,
         ModuleID,
@@ -474,7 +477,7 @@ sema_module_no_prelude: fn(environment: SemaScopeEnvironment, program: SemaProgr
 sema_prelude_error_conversion_key: fn(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
     if !sema_core_error_family_source(error) || sema_module_no_prelude(environment, program) -> return None
-    Val(symbol_id(SymbolKind.Function, sema_scope_environment_module_text(environment, program), "", sema_failure_conversion_function_name(error, target)).key)
+    Val(symbol_key_text(SymbolKind.Function, sema_scope_environment_module_text(environment, program), "", sema_failure_conversion_function_name(error, target)))
 }
 
 SemaPreludeConversionDemand: struct {
@@ -510,7 +513,7 @@ sema_prelude_conversion_demands_enter: fn(state: Shared<SemaPreludeDemandWalk>, 
 
 sema_prelude_conversion_demand_add: fn(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
     permit: state.guard_edit()
-    expected: symbol_id(SymbolKind.Function, permit.value.module_identity, "", sema_failure_conversion_function_name(source, target)).key
+    expected: symbol_key_text(SymbolKind.Function, permit.value.module_identity, "", sema_failure_conversion_function_name(source, target))
     if key != expected || target != (Type.Named{name: "Err"}) || !sema_core_error_family_source(source) -> return
     loop demand in permit.value.demands {
         if demand.key == key -> return
@@ -585,18 +588,22 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             reasons.push("{label}: its Prelude declaration did not parse into one conversion")
             next
         }
-        symbol: sema_item_symbol(Item.Func{value: conversion}, environment.module_identity, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+        symbol := sema_item_symbol(Item.Func{value: conversion}, environment.module_identity, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             complete = false
             reasons.push("{label}: its routine has no module symbol")
             next
         }
-        if !sema_scope_add_module_symbol(scopes, symbol) {
+        // The routine is injected after registration: a registered run finds
+        // its id, and a snapshot run has none, since its calls name the key.
+        key: symbol_key_text(SymbolKind.Function, module_identity, "", symbol.name)
+        symbol.id = sema_symbol_find(program, key) ?? symbol_none()
+        if !sema_scope_add_module_symbol(scopes, symbol, key) {
             complete = false
             diagnostics.push(sema_defined_twice(symbol.name, "module declarations share one name space with the error conversion routines", demand.site))
             next
         }
         before: diagnostics.len()
-        checked: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+        checked: sema_function_check(conversion, key, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
         // The routine is the shipped Prelude declaration checked under this
         // module's name: its spans are offsets into that generated text, not
         // into anything the author wrote, so its warnings and lints are dropped.
@@ -1242,7 +1249,8 @@ sema_check_never_fallthrough: fn(func: Func, environment: SemaScopeEnvironment, 
 sema_lint_inferred_never_return: fn(func: Func, owner_key: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || module_is_core(environment.module_identity) -> return
     if program.registration_graph == .Val(graph) {
-        if !sema_divergence_function_diverges(graph, owner_key) -> return
+        owner: symbol_find(graph.symbols, owner_key) ?? return
+        if !sema_divergence_function_diverges(graph, owner) -> return
     } else {
         return
     }

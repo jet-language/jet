@@ -6,6 +6,7 @@
 // liveness because importing a bridge can have link-time meaning even when no
 // Jet name is read; foreign bindings stay outside for the same reason.
 use jet_foundation.[
+    symbol_table_key,
     Diagnostic,
     Func,
     NameRows,
@@ -168,22 +169,21 @@ SemaLivenessCandidate: struct {
     private: Bool
 }
 
-// The candidates by symbol ID key: `keys` maps a key to its row in `rows`
-// and `reached` (an open-addressing hash, not a String-ordered map, since
-// every reference and call fact of the program looks its callee up here).
-// A later candidate of the same key replaces the earlier one in its row.
+// The candidates by symbol id: `ids` maps an id to its row in `rows` and
+// `reached`. A later candidate of the same id replaces the earlier one in
+// its row.
 SemaLivenessCandidates: struct {
-    keys: NameRows
+    ids: [U32:Int]
     rows: [SemaLivenessCandidate]
     reached: [Bool]
 }
 
-sema_liveness_add_candidate: fn(candidates: &SemaLivenessCandidates, key: String, candidate: &&SemaLivenessCandidate) Never! {
-    if name_rows_get_text(candidates.keys, key) == .Val(row) {
+sema_liveness_add_candidate: fn(candidates: &SemaLivenessCandidates, id: SymbolID, candidate: &&SemaLivenessCandidate) Never! {
+    if candidates.ids.get(id.id) == .Val(row) {
         candidates.rows[row] = candidate.move()
         return
     }
-    name_rows_set(candidates.keys, key, candidates.rows.len())
+    candidates.ids[id.id] = candidates.rows.len()
     candidates.rows.push(candidate)
     candidates.reached.push(false)
 }
@@ -219,15 +219,16 @@ sema_liveness_removable: fn(function: Func) -> Bool Never! {
     function.body.len() == 0 && function.meta == None && function.markers.len() == 0 && function.external_type == None && function.inline_foreign == None && function.undo == None && function.web_marker == None && function.pre.len() == 0 && function.post.len() == 0 && !function.compiler_generated && !function.is_unsafe && !function.is_pure && !function.is_reactive && !function.is_replayable && !function.is_job && function.every == None && !function.is_must_use && function.kernel == None
 }
 
-sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span, caller_key: String) Never! {
-    row: name_rows_get_text(candidates.keys, key) ?? return
+// `caller_key` is the calling body's key ("" when unknown).
+sema_liveness_note_site: fn(candidates: &SemaLivenessCandidates, graph: SemaRegistrationGraph, source_index: Int, id: SymbolID, site: Span, caller_key: String) Never! {
+    row: candidates.ids.get(id.id) ?? return
     candidate: candidates.rows[row]
     if source_index == candidate.module_index {
         // Specialization can carry a sibling's call site into this module's
         // checked rows. Byte offsets from two files are not caller identities.
         if candidate.private {
             if caller_key != "" {
-                if caller_key == key -> return
+                if caller_key == symbol_table_key(graph.symbols, id) -> return
             } else {
                 if site.start >= candidate.body.start && site.end <= candidate.body.end -> return
             }
@@ -244,7 +245,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
     // A skipped body (sema_checked_unusable_bodies) leaves its references
     // uncounted, so no verdict holds.
     if modules.len() != graph.modules.len() || graph.unusable_bodies.len() > 0 -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
-    candidates := SemaLivenessCandidates{keys: name_rows(), rows: [SemaLivenessCandidate]{}, reached: [Bool]{}}
+    candidates := SemaLivenessCandidates{ids: [U32:Int]{}, rows: [SemaLivenessCandidate]{}, reached: [Bool]{}}
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
         is_entry: module_row.module_identity == graph.entry_module_identity
@@ -254,25 +255,25 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             // A runtime binding is the jet.runtime interface's member: Core,
             // not the runtime package, calls a `priv` one (#6615).
             if sema_liveness_is_root(function.declaration, is_entry) || sema_guest_runtime_binding(module_row.package_identity, function.declaration) -> next
-            sema_liveness_add_candidate(candidates, symbol.id.key, SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0})
+            sema_liveness_add_candidate(candidates, symbol.id, SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0})
         }
         loop constant in module_row.constants {
             symbol: constant.symbol
             if symbol.visibility != 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
-            sema_liveness_add_candidate(candidates, symbol.id.key, SemaLivenessCandidate{module_index: module_index, body: symbol.span, package_identity: module_row.package_identity, private: false})
+            sema_liveness_add_candidate(candidates, symbol.id, SemaLivenessCandidate{module_index: module_index, body: symbol.span, package_identity: module_row.package_identity, private: false})
         }
     }
     loop (source_index, checked) in modules {
-        loop reference in checked.name_references -> sema_liveness_note_site(candidates, graph, source_index, reference.symbol.id.key, reference.span, "")
+        loop reference in checked.name_references -> sema_liveness_note_site(candidates, graph, source_index, reference.symbol.id, reference.span, "")
         loop call in checked.call_facts {
             callee: call.callee ?? next
-            sema_liveness_note_site(candidates, graph, source_index, callee.key, call.span, call.caller_key)
+            sema_liveness_note_site(candidates, graph, source_index, callee, call.span, call.caller_key)
         }
     }
     // An Output entry is an application root: the function it links (only
     // ever one visible to the Output's module) is consumed.
     loop reference in graph.output_name_references {
-        row: name_rows_get_text(candidates.keys, reference.symbol.id.key) ?? next
+        row: candidates.ids.get(reference.symbol.id.id) ?? next
         candidates.reached[row] = true
     }
     loop (module_index, module_row) in graph.modules {
@@ -288,7 +289,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         sema_liveness_unused_bindings(modules[module_index].diagnostics, module_row.source_file, verdicts)
         loop function in module_row.functions {
             symbol: function.symbol
-            row: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
+            row: candidates.ids.get(symbol.id.id) ?? next
             candidate: candidates.rows[row]
             if candidate.module_index != module_index || candidates.reached[row] -> next
             name: sema_inline_member_source_name(symbol.name)
@@ -302,7 +303,7 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
         }
         loop constant in module_row.constants {
             symbol: constant.symbol
-            row: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
+            row: candidates.ids.get(symbol.id.id) ?? next
             if candidates.rows[row].module_index != module_index || candidates.reached[row] -> next
             sema_liveness_unreachable_export(sema_inline_member_source_name(symbol.name), module_row.source_file, symbol.span, verdicts)
         }

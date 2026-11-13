@@ -102,6 +102,7 @@ use {
     jet_foundation.[
         Diagnostic,
         SourceFile,
+        SymbolKeys,
         module_text,
         source_file_id,
     ]
@@ -401,8 +402,12 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, load.diagnostics, input.request.core_sources, false)
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     core_seeds := [SemaRegistrationModule]{}
+    // A seeded Core module interns into the symbol range it had in the
+    // record's check, so the ids its taken rows name are the compile's.
+    core_symbols := [SymbolKeys]{}
     if input.request.core_record == .Val(record) {
         core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), false) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
+        if core_seeds.len() > 0 -> core_symbols = record.symbols.copy()
     }
     canonical_identity := canonical.module_identity
     registration_inputs.push(canonical)
@@ -417,6 +422,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     registration := sema_registration_prepare_graph(
         registration_inputs,
         core_seeds,
+        core_symbols,
         load.imports,
         load.package_identity,
         load.entry_module_identity,

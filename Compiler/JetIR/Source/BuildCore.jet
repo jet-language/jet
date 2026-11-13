@@ -18,7 +18,7 @@
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -100,8 +100,8 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{la
 // Core check's entry, JetCli CoreRecordCheck.jet: every other checked module
 // is Core's or the Prelude's) and every function they reach, on up to
 // `threads` threads; the other inputs as ir_build_program's.
-ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, threads: CompilerThreads) -> IRCoreLibrary Never! {
-    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, threads: CompilerThreads) -> IRCoreLibrary Never! {
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.sentries = true
     ir_foreign_index(p, foreign, decls)
     ir_core_library_from(p, entry_module, [IRBuildFailure]{}, threads)
@@ -117,24 +117,37 @@ ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&
 // fails the library.
 ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: [IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := program.move()
-    left_out := [String: Bool]{}
-    loop failure in skipped -> left_out[failure.key.copy()] = true
+    // By the first row of each key (ir_function_row): the skipped roots,
+    // then the ones this round builds.
+    left_out := (loop _ in 0..<p.functions.len() -> false)
+    loop failure in skipped {
+        if ir_function_row(p, failure.key) == .Val(row) -> left_out[row] = true
+    }
     roots := [IRWaveJob]{}
     keys := [String]{}
-    rooted := [String: Bool]{}
+    rooted := (loop _ in 0..<p.functions.len() -> false)
     loop row in 0..<p.functions.len() {
         function: p.functions[row]
         if function.module_identity == entry_module -> next
         if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
-        if left_out.get(function.key) != None -> next
+        first: ir_function_row(p, function.key) ?? row
+        if left_out[first] -> next
         roots.push(IRWaveJob{key: function.key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
         keys.push(function.key.copy())
-        rooted[function.key.copy()] = true
+        rooted[first] = true
     }
     kept := ir_build_waves_kept(p, roots, false, threads)
     built := kept.result.move()
     if built.failures.len() > 0 {
-        if built.failures.any(fn(failure) { rooted.get(failure.key) == None }) {
+        reached := false
+        loop failure in built.failures {
+            row: ir_function_row(kept.program, failure.key) ?? -1
+            if row < 0 || !rooted[row] {
+                reached = true
+                break
+            }
+        }
+        if reached {
             return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped}
         }
         more := skipped.copy()

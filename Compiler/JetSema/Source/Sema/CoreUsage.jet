@@ -42,7 +42,11 @@ use jet_foundation.[
     jet_ring_prelude_closure_layer,
     diagnostic_registry_row,
     boundary_head_owner_module,
-    symbol_id,
+    SymbolTable,
+    symbol_find,
+    symbol_is_local,
+    symbol_key_text,
+    symbol_table_key,
     ModuleID,
     ModuleTable,
     module_is_core,
@@ -450,7 +454,8 @@ sema_core_check_ui_capabilities: fn(call_facts: [SemaCallSiteFact], graph: SemaR
     reported := [String]{}
     loop fact in call_facts {
         callee: fact.callee ?? next
-        usage: sema_core_source_call_usage(callee.key, graph) ?? next
+        if symbol_is_local(callee) -> next
+        usage: sema_core_source_call_usage(symbol_table_key(graph.symbols, callee), graph) ?? next
         sema_core_check_ui_usage(usage, Val(fact.span), needs, reported, diagnostics)
     }
     loop index in 0..<usage_modules.len() {
@@ -705,19 +710,21 @@ sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [Se
 // The top-level functions of a Core source module that no other body of the
 // module calls. Self-recursion is not a sibling call: a wrapper's own
 // `core.ui.tui_backend()` may resolve to itself.
-sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, module_text: String, call_facts: [SemaCallSiteFact]) -> [String] Never! {
+sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, symbols: SymbolTable, module_text: String, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
     if !module_is_core(registration_module.module_identity) -> return unshared
-    called := [String:Bool]{}
+    called := [U32:Bool]{}
     loop fact in call_facts {
         callee: fact.callee ?? next
-        if fact.caller_key != callee.key -> called[callee.key] = true
+        if symbol_is_local(callee) -> next
+        if symbol_table_key(symbols, callee) != fact.caller_key -> called[callee.id] = true
     }
     loop item in registration_module.program.items {
         if item == {
             .Func(function) -> {
-                key: symbol_id(SymbolKind.Function, module_text, "", function.name).key
-                if called.get(key) == None -> unshared.push(function.name)
+                called_here := false
+                if symbol_find(symbols, symbol_key_text(SymbolKind.Function, module_text, "", function.name)) == .Val(id) -> called_here = called.get(id.id) != None
+                if !called_here -> unshared.push(function.name)
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -1318,7 +1325,7 @@ sema_core_module_context: fn(graph: SemaRegistrationGraph, registration_module: 
     }
     SemaCoreModuleContext{
         owner: owner,
-        unshared: sema_core_source_unshared_functions(registration_module, module_text(graph.module_table, registration_module.module_identity), call_facts),
+        unshared: sema_core_source_unshared_functions(registration_module, graph.symbols, module_text(graph.module_table, registration_module.module_identity), call_facts),
         imports: imports.move(),
         registered: registered.move(),
     }

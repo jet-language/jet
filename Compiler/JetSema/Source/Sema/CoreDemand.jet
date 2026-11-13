@@ -45,7 +45,10 @@ use jet_foundation.[
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
-    symbol_id,
+    symbol_find,
+    symbol_is_local,
+    symbol_key_text,
+    symbol_table_key,
     module_is_core,
     module_text,
 ]
@@ -68,7 +71,7 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
         loop module_index in 0..<graph.modules.len() {
             loop implementation in graph.modules[module_index].impls {
                 if sema_core_demand_impl_deferrable(implementation) -> next
-                loop method in implementation.methods -> eager[method.symbol.id.key] = true
+                loop method in implementation.methods -> eager[symbol_table_key(graph.symbols, method.symbol.id)] = true
             }
         }
         taken: sema_finalize_seeded_taken(graph)
@@ -81,7 +84,13 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
         }
     }
     graph.core_demand_rows = rows.move()
-    sema_core_body_begin(graph, enabled, taken_rows)
+    // The taken modules' deferred bodies, by their functions' SymbolIDs: the
+    // store keys its packets so (sema_core_body_begin).
+    deferred := [U32:Bool]{}
+    loop (key, _) in taken_rows {
+        if symbol_find(graph.symbols, key) == .Val(id) -> deferred[id.id] = true
+    }
+    sema_core_body_begin(graph, enabled, deferred)
 }
 
 // The deferred bodies of module `module_index`, each key mapped to the
@@ -93,7 +102,7 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
     identity_text: module_text(graph.module_table, identity)
     loop item in graph.modules[module_index].program.items {
         if item == .Func(func) {
-            key: symbol_id(SymbolKind.Function, identity_text, "", func.name).key
+            key: symbol_key_text(SymbolKind.Function, identity_text, "", func.name)
             if roots.get(key) == None -> rows[key] = module_index
         }
     }
@@ -102,14 +111,16 @@ sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int
         // top-level one: its methods sit among the nominal's own.
         nested: sema_core_demand_nested_trait_spans(nominal)
         loop method in nominal.methods {
-            if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
-            rows[method.symbol.id.key] = module_index
+            key: symbol_table_key(graph.symbols, method.symbol.id)
+            if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(key) != None || roots.get(key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
+            rows[key] = module_index
         }
     }
     loop implementation in graph.modules[module_index].impls {
         if !sema_core_demand_impl_deferrable(implementation) -> next
         loop method in implementation.methods {
-            if method.declaration.name != "close" && roots.get(method.symbol.id.key) == None -> rows[method.symbol.id.key] = module_index
+            key: symbol_table_key(graph.symbols, method.symbol.id)
+            if method.declaration.name != "close" && roots.get(key) == None -> rows[key] = module_index
         }
     }
 }
@@ -143,7 +154,7 @@ sema_core_demand_deferred: fn(graph: SemaRegistrationGraph, key: String) -> Bool
 sema_check_registered_item_deferred: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
         if graph.core_demand_rows.len() == 0 -> return false
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_core_demand_deferred(graph, symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name).key)
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_core_demand_deferred(graph, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name))
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -153,7 +164,7 @@ sema_check_registered_item_deferred: fn(environment: SemaScopeEnvironment, progr
 // current demand wave checks (graph.core_wave_rows).
 sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return graph.core_wave_rows.get(symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name).key) != None
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return graph.core_wave_rows.get(symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name)) != None
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -187,9 +198,9 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     seeds := [String]{}
     if graph.core_lowering_roots != None {
         loop result in comptime_functions {
-            if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, seeds)
+            if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, seeds)
             loop fact in result.call_facts {
-                if fact.callee == .Val(callee) -> seeds.push(callee.key)
+                if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, seeds)
             }
         }
     }
@@ -284,7 +295,7 @@ sema_check_core_demand_module_lent: fn(environment: &SemaScopeEnvironment, progr
     module_identity: sema_check_registered_module_identity(environment, program, module_index)
     before: result.functions.len()
     diagnostics_before: result.diagnostics.len()
-    return_view_rows := [String:Int]{}
+    return_view_rows := [U32:Int]{}
     ready := bodies.bodies.move()
     queries := [Int:SemaBodyMemoQuery]{}
     memo := SemaModuleMemo?{None}
@@ -328,10 +339,10 @@ sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphMo
     loop {
         keys := [String]{}
         loop module_index in 0..<modules.len() {
-            loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, keys)
+            loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, graph.symbols, keys)
             read_functions[module_index] = modules[module_index].functions.len()
             loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
-                if modules[module_index].call_facts[position].callee == .Val(callee) -> keys.push(callee.key)
+                if modules[module_index].call_facts[position].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, keys)
             }
             read_facts[module_index] = modules[module_index].call_facts.len()
         }
@@ -380,8 +391,9 @@ sema_core_demand_template_key: fn(key: String) -> String Never! {
 // Every function key checked body `function` names: its direct and method
 // calls, index hooks, functions named as values, shared globals'
 // initializers and declared error conversions, in its parameter defaults and
-// body. The expressions are walked from a work list.
-sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, keys: &[String]) Never! {
+// body. The expressions are walked from a work list. A body's own id names
+// no Core body, so it adds no key.
+sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, symbols: SymbolTable, keys: &[String]) Never! {
     pending := [Int]{}
     loop parameter in function.params {
         if parameter.default == .Val(value) -> pending.push(value)
@@ -391,35 +403,35 @@ sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, keys: &[Strin
     }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
-        sema_core_demand_expr_keys(function.tree, expression, decls, keys)
+        sema_core_demand_expr_keys(function.tree, expression, decls, symbols, keys)
         body_each_expr_child(function.tree, body_node(function.tree, expression), fn(child: Int) { pending.push(child) })
     }
 }
 
 // The function keys one checked expression names directly.
-sema_core_demand_expr_keys: fn(tree: BodyTree, expression: Int, decls: DeclTable, keys: &[String]) Never! {
+sema_core_demand_expr_keys: fn(tree: BodyTree, expression: Int, decls: DeclTable, symbols: SymbolTable, keys: &[String]) Never! {
     if body_node(tree, expression).kind == {
         .Call(callee, _, args) -> {
             sema_core_demand_decl_key(decls, callee, keys)
-            sema_core_demand_template_items(args, keys)
+            sema_core_demand_template_items(args, symbols, keys)
         }
         .MethodCall(_, method, _, args) -> {
-            keys.push(method.symbol.key)
-            sema_core_demand_template_items(args, keys)
+            sema_core_demand_symbol_key(symbols, method.symbol, keys)
+            sema_core_demand_template_items(args, symbols, keys)
         }
         .StaticCall(_, _, method, _, args) -> {
-            keys.push(method.symbol.key)
-            sema_core_demand_template_items(args, keys)
+            sema_core_demand_symbol_key(symbols, method.symbol, keys)
+            sema_core_demand_template_items(args, symbols, keys)
         }
         .Index(_, _, _, _, checked_call, _) -> {
-            if checked_call == .Val(symbol) -> keys.push(symbol.key)
+            if checked_call == .Val(symbol) -> sema_core_demand_symbol_key(symbols, symbol, keys)
         }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
                 if function == .Val(id) -> sema_core_demand_decl_key(decls, id, keys)
             }
         }
-        .ConstRef(symbol) -> keys.push(symbol.key)
+        .ConstRef(symbol) -> sema_core_demand_symbol_key(symbols, symbol, keys)
         .GlobalShared(initializer, _) -> sema_core_demand_decl_key(decls, initializer, keys)
         .Try(_, conversion, _) -> sema_core_demand_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_conversion_key(conversion, keys)
@@ -432,9 +444,14 @@ sema_core_demand_decl_key: fn(decls: DeclTable, id: DeclID, keys: &[String]) Nev
     if index < decls.rows.len() -> keys.push(decls.rows[id.row].key)
 }
 
-sema_core_demand_template_items: fn(args: [BodyCallArg], keys: &[String]) Never! {
+// The key of run-wide `id`; a body's own id names no Core body.
+sema_core_demand_symbol_key: fn(symbols: SymbolTable, id: SymbolID, keys: &[String]) Never! {
+    if !symbol_is_local(id) -> keys.push(symbol_table_key(symbols, id))
+}
+
+sema_core_demand_template_items: fn(args: [BodyCallArg], symbols: SymbolTable, keys: &[String]) Never! {
     loop argument in args {
-        loop item in argument.template_items -> keys.push(item.key)
+        loop item in argument.template_items -> sema_core_demand_symbol_key(symbols, item, keys)
     }
 }
 

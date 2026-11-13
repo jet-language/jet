@@ -8,6 +8,8 @@
 // validated against the machine's declared services, and a service it lacks
 // is E3311 where the code first uses it.
 use jet_foundation.[
+    symbol_is_local,
+    symbol_table_key,
     Diagnostic,
     Span,
     TargetMachineError,
@@ -37,7 +39,7 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
             if function.name == "run" && function.module_identity == graph.entry_module_identity -> roots.push(function.key)
         }
     }
-    loop reference in graph.output_name_references -> roots.push(reference.symbol.id.key)
+    loop reference in graph.output_name_references -> roots.push(symbol_table_key(graph.symbols, reference.symbol.id))
     // The functions the entry reaches through calls and function values,
     // in the order the walk first meets them.
     reached := [String]{}
@@ -82,7 +84,8 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
         loop call in modules[slot.module_index].call_facts {
             if call.caller_key != key -> next
             callee: call.callee ?? next
-            callee_slot: slots.get(callee.key) ?? next
+            if symbol_is_local(callee) -> next
+            callee_slot: slots.get(symbol_table_key(graph.symbols, callee)) ?? next
             callee_function: modules[callee_slot.module_index].functions[callee_slot.row]
             // A call into a program function reports inside that function.
             if !module_is_core(callee_function.module_identity) -> next

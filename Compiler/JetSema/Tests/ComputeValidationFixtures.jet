@@ -15,7 +15,7 @@ use {
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[
-        Diagnostic, Span, SymbolKind, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, symbol_id,
+        Diagnostic, Span, SymbolKeys, SymbolKind, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, symbol_key_text,
     ]
 }
 
@@ -35,7 +35,7 @@ compute_fixture_modules: fn(label: String, source: String, failures: &[String]) 
     facts: SemaBuildFacts{package_name: "compute-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "compute-fixture", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "compute-fixture", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "compute-fixture", main_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
         failures.push("{label}: registration failed {err}")
         return None
     }
@@ -67,7 +67,7 @@ compute_fixture_modules: fn(label: String, source: String, failures: &[String]) 
 }
 
 compute_fixture_key: fn(name: String) -> String Never! {
-    symbol_id(SymbolKind.Function, "compute-fixture::main", "", name).key
+    symbol_key_text(SymbolKind.Function, "compute-fixture::main", "", name)
 }
 
 compute_fixture_fact: fn(modules: &[SemaGraphModuleResult], name: String, safe_panic: Bool, unsafe_panic: Bool) {

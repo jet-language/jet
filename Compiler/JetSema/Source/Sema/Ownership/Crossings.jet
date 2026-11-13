@@ -423,7 +423,7 @@ sema_ownership_crossing_problem_for_name: fn(name: String, ty: Type, crossing: S
         loop fact_index in 0..<state.views.len() {
             if state.views[fact_index].active && sema_ownership_view_fact_matches_expr(state.views[fact_index], expr, scopes) -> return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.ViewBorrow))
         }
-        if (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.ChannelSend || crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.HTTPHandler) && sema_function_reactive_is_local(context, binding.symbol.id.key) && sema_function_reactive_handle_type(ty) {
+        if (crossing == SemaSendCrossing.TaskCapture || crossing == SemaSendCrossing.ChannelSend || crossing == SemaSendCrossing.ParallelWorker || crossing == SemaSendCrossing.HTTPHandler) && sema_function_reactive_is_local(context, binding.symbol.id) && sema_function_reactive_handle_type(ty) {
             return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.LocalReactive{name: type_name(ty)}))
         }
     }

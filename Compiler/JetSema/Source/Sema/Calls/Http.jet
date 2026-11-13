@@ -29,7 +29,6 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     core_call_typed_signature,
     core_unbuilt_call,
-    symbol_id,
     type_identity_equal,
     type_name,
 ]
@@ -353,7 +352,7 @@ sema_call_http_source_json_target: fn(target: SemaCallDirectTarget, environment:
     if program.registration_graph == .Val(graph) {
         index: sema_registration_module_index(graph, identity) ?? return false
         loop row in 0..<graph.modules[index].functions.len() {
-            if graph.modules[index].functions[row].symbol.id.key == target.symbol.id.key -> return true
+            if graph.modules[index].functions[row].symbol.id == target.symbol.id -> return true
         }
         return false
     } else {
@@ -659,7 +658,7 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
         action_module: action_function.symbol.module_identity
         action_parameter_type := sema_type_resolve_declared(graph, action_function.declaration.params[0].ty, action_module)
         action_row: sema_type_resolve_nominal_row(graph, action_parameter_type, action_module)
-        if action_row == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id.key == graph.modules[action_type.module_index].nominals[action_type.row].symbol.id.key
+        if action_row == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id == graph.modules[action_type.module_index].nominals[action_type.row].symbol.id
     }
     if !action_accepts_model {
         diagnostics.push(sema_error("E2474", args[action_index].span, "form action `{action_name}` does not accept `{model_name}`", "the form derives its fields from the model and the one server-function action must receive that exact input type", "change `{action_name}` to accept `{model_name}` as its only parameter"))

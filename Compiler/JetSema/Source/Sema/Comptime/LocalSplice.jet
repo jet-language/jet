@@ -51,6 +51,9 @@
 // demand wave checks what it names, where the landing's demand would check
 // it after the waves the finalization ran, in another order.
 use jet_foundation.[
+    symbol_find,
+    symbol_is_local,
+    symbol_table_key,
     CompilerThreads,
     CompilerTraceSink,
     DIAGNOSTIC_ERROR,
@@ -379,9 +382,9 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
     keys := [String]{}
     loop result in functions {
         if known.get("{result.module_identity.id}\n{result.function_key}") != None -> next
-        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, keys)
+        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, keys)
         loop fact in result.call_facts {
-            if fact.callee == .Val(callee) -> keys.push(callee.key)
+            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, keys)
         }
     }
     loop key in keys {
@@ -405,10 +408,10 @@ sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModule
     called := [String:Bool]{}
     loop module_rows in rows {
         loop function in module_rows.functions {
-            if owners.get(function.key) != None -> sema_core_demand_body_keys(function, graph.decls, keys)
+            if owners.get(function.key) != None -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, keys)
         }
         loop fact in module_rows.call_facts {
-            if fact.callee == .Val(callee) -> called[sema_core_demand_template_key(callee.key)] = true
+            if fact.callee == .Val(callee) && !symbol_is_local(callee) -> called[sema_core_demand_template_key(symbol_table_key(graph.symbols, callee))] = true
         }
     }
     loop keys.len() > 0 {
@@ -584,7 +587,8 @@ sema_local_splice_owners: fn(
         loop module_index in 0..<modules.len() {
             if modules[module_index].module_identity != result.module_identity -> next
             if sema_local_splice_slot(modules[module_index].functions, result.function_key) == None -> next
-            if graph.codec_method_rows.get(result.function_key) != None || graph.derive_method_rows.get(result.function_key) != None {
+            generated: if symbol_find(graph.symbols, result.function_key) == .Val(id) -> graph.codec_method_rows.get(id.id) != None || graph.derive_method_rows.get(id.id) != None else -> false
+            if generated {
                 sema_local_splice_refused(trace_sink, "generated", landed.len())
                 return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
             }

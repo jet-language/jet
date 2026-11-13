@@ -2,6 +2,7 @@
 // with one active scope. SymbolId remains the stable declaration identity;
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
+    symbol_keys_find,
     AccessConvention,
     AST_NODE_GENERATED,
     ArithmeticPolicyFact,
@@ -30,6 +31,14 @@ use jet_foundation.[
     Symbol,
     SymbolID,
     SymbolKind,
+    SymbolTable,
+    symbol_find,
+    symbol_is_local,
+    symbol_key_text,
+    symbol_keys_intern,
+    symbol_keys_text,
+    symbol_table,
+    symbol_table_key,
     TComptimeValue,
     TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
@@ -89,6 +98,9 @@ SemaScopeFrame: struct {
 SemaScopeBinding: struct {
     frame: Int
     symbol: Symbol
+    // The symbol's key text (the run's or the checking body's), by which the
+    // ownership facts name the binding.
+    key: String
     mutable: Bool
     access: AccessConvention
     integer_bounds: TIntegerBounds?
@@ -662,8 +674,8 @@ SemaCheckContext: struct {
     arrow_loop_body: Bool
     reactive_upgrades: [String]
     reactive_upgrade_names: [String]
-    reactive_local_keys: [String]
-    reactive_shared_keys: [String]
+    reactive_local_ids: [SymbolID]
+    reactive_shared_ids: [SymbolID]
     taskgroups: SemaTaskGroupState
     // `failure_carrier_root` is the one-shot token a
     // carrier consumer (`??`, `?`, an `.Ok`/`.Err` pattern) sets so its call
@@ -815,9 +827,9 @@ SemaCheckContext: struct {
     // dropped when the function is flattened.
     arena: BodyFlat{BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true}}
     // The field facts of the non-generic structs this check built literals
-    // of (sema_expression_struct_field_facts): owner key -> index of its
-    // first field's fact.
-    struct_field_fact_rows: [String:Int]{[String:Int]{}}
+    // of (sema_expression_struct_field_facts): owner symbol id -> index of
+    // its first field's fact.
+    struct_field_fact_rows: [U32:Int]{[U32:Int]{}}
     struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}}
     // Spans of the named-literal field values whose declared field type holds
     // a view (`View<T>`, `View<str>` or a struct that stores one): only these
@@ -912,10 +924,10 @@ SemaScopeTable: struct {
     // examined. None for an uncounted table.
     lookup_counters: SemaScopeLookupCounters?{None}
     // The inferred return-view provenance of this module's view-returning
-    // methods (sema_check_view_summaries), by registered method symbol key.
+    // methods (sema_check_view_summaries), by registered method symbol id.
     // A method call candidate carries the registered signature, which holds
     // only a declared `from` contract.
-    method_return_views: [String:ViewProvenanceMap]{[String:ViewProvenanceMap]{}}
+    method_return_views: [U32:ViewProvenanceMap]{[U32:ViewProvenanceMap]{}}
     // A body comptime site's staged check: the run-time locals and
     // parameters of the function around the site, which its compile-time
     // code can't read (SemaComptimeBodySource.runtime_locals).
@@ -978,16 +990,61 @@ SemaProgramTables: struct {
     // copy facts, walked once per tables. Landing comptime values never
     // changes a nominal's members, so these stay true.
     copy_facts: SemaCopyFactsTable
+    // The run's symbols of a check with no registration graph (one program,
+    // check_program); a graph's own table (SemaRegistrationGraph.symbols)
+    // is the run's otherwise.
+    symbols: SymbolTable{symbol_table()}
+}
+
+// The run-wide id of `key`, if a registration holds it.
+sema_symbol_find: fn(program: SemaProgramTables, key: String) -> SymbolID? Never! {
+    if program.registration_graph == .Val(graph) -> return symbol_find(graph.symbols, key)
+    symbol_find(program.symbols, key)
+}
+
+// The id of the declaration with this kind, module, owner and name: the
+// run-wide one when a registration holds its key, else one of the checking
+// body's own keys (`context.arena.tree.symbols`).
+sema_symbol_id: fn(program: SemaProgramTables, context: &SemaCheckContext, kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
+    sema_symbol_id_of(program, context, symbol_key_text(kind, module_name, owner, name))
+}
+
+// The id of the declaration keyed `key` (symbol_key_text), as sema_symbol_id.
+sema_symbol_id_of: fn(program: SemaProgramTables, context: &SemaCheckContext, key: String) -> SymbolID Never! {
+    if sema_symbol_find(program, key) == .Val(found) -> return found
+    symbol_keys_intern(context.arena.tree.symbols, key)
+}
+
+// The id keyed `key`, a run-wide one or one of the checking body's own; None
+// for a key no declaration holds.
+sema_symbol_lookup: fn(program: SemaProgramTables, context: SemaCheckContext, key: String) -> SymbolID? Never! {
+    if sema_symbol_find(program, key) == .Val(found) -> return Val(found)
+    symbol_keys_find(context.arena.tree.symbols, key)
+}
+
+// The key text of `id`, a run-wide id or one of the checking body's own.
+sema_symbol_key: fn(program: SemaProgramTables, context: SemaCheckContext, id: SymbolID) -> String Never! {
+    if symbol_is_local(id) -> return symbol_keys_text(context.arena.tree.symbols, id)
+    sema_program_symbol_key(program, id)
+}
+
+// The key text of the run-wide `id`.
+sema_program_symbol_key: fn(program: SemaProgramTables, id: SymbolID) -> String Never! {
+    if symbol_is_local(id) -> panic("a body's own symbol has no run-wide key")
+    if program.registration_graph == .Val(graph) -> return symbol_table_key(graph.symbols, id)
+    symbol_table_key(program.symbols, id)
 }
 
 // The DeclID a direct call to the registered callable `symbol` names (Cutover
 // B L2b). Every direct call target is a registered callable, so a target with
-// no row is a compiler bug, reported rather than lowered to a guessed callee.
+// no row (a body's own symbol has none) is a compiler bug, reported rather
+// than lowered to a guessed callee.
 sema_call_callee_decl: fn(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
+    key: if symbol_is_local(symbol) -> "" else -> sema_program_symbol_key(program, symbol)
     if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_id(graph, symbol.key) == .Val(id) -> return Val(id)
+        if !symbol_is_local(symbol) && sema_registration_callable_id(graph, key) == .Val(id) -> return Val(id)
     }
-    diagnostics.push(sema_error("E0003", span, "the call target `{symbol.key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
+    diagnostics.push(sema_error("E0003", span, "the call target `{key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
     None
 }
 
@@ -1163,7 +1220,7 @@ sema_scope_caller_index: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 
 sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        row: sema_type_graph_nominal_row(graph, owner.key) ?? return false
+        row: sema_type_graph_nominal_row(graph, owner) ?? return false
         module_identity: graph.modules[row.module_index].module_identity
         if sema_scope_checked_type_row(environment, program, module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name) == .Val(checked_row) -> return sema_checked_type_has_boxed_edge(program.checked_types[checked_row], edge)
         // Matched in place: a pattern on the indexed path copies the whole item.
@@ -1173,7 +1230,7 @@ sema_scope_environment_boxed_edge: fn(environment: SemaScopeEnvironment, program
             // module, so its edges are the ones keyed by the owner (what
             // sema_checked_boxed_edges looks up after resolving that name).
             if sema_registration_root_name(definition) == nominal.symbol.name {
-                edges: program.boxed_edges.get(owner.key) ?? return false
+                edges: program.boxed_edges.get(symbol_table_key(graph.symbols, owner)) ?? return false
                 return edges.contains(edge)
             }
             return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
@@ -1234,8 +1291,8 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         last_loop_result_type: None,
         reactive_upgrades: [String]{},
         reactive_upgrade_names: [String]{},
-        reactive_local_keys: [String]{},
-        reactive_shared_keys: [String]{},
+        reactive_local_ids: [SymbolID]{},
+        reactive_shared_ids: [SymbolID]{},
         taskgroups: sema_taskgroup_state_init(),
         failure_carrier_root: false,
         failure_success_view: false,
@@ -1308,8 +1365,8 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         arrow_loop_body: source.arrow_loop_body,
         reactive_upgrades: source.reactive_upgrades.copy(),
         reactive_upgrade_names: source.reactive_upgrade_names.copy(),
-        reactive_local_keys: source.reactive_local_keys.copy(),
-        reactive_shared_keys: source.reactive_shared_keys.copy(),
+        reactive_local_ids: source.reactive_local_ids.copy(),
+        reactive_shared_ids: source.reactive_shared_ids.copy(),
         taskgroups: sema_taskgroup_state_snapshot(source.taskgroups),
         failure_carrier_root: source.failure_carrier_root,
         failure_success_view: source.failure_success_view,
@@ -1342,9 +1399,11 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         fork_copy_rebuilding: source.fork_copy_rebuilding.copy(),
         return_view_declared: source.return_view_declared,
         // A snapshot's check continues the arena of the check it starts
-        // from: its rows follow that arena's rows, and its caller appends
-        // them there after the check (sema_arena_take_back).
-        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
+        // from: its rows follow that arena's rows, its symbol keys extend a
+        // copy of that arena's, and its caller appends the rows and adopts
+        // the keys after the check (sema_arena_take_back). A snapshot
+        // dropped instead drops the ids it minted with it.
+        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len(), symbols: source.arena.tree.symbols.copy()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
         next_expr_id: source.next_expr_id,
         fresh_expr_ids: source.fresh_expr_ids,
     }
@@ -1466,8 +1525,8 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             arrow_loop_body: context.arrow_loop_body,
             reactive_upgrades: context.reactive_upgrades.copy(),
             reactive_upgrade_names: context.reactive_upgrade_names.copy(),
-            reactive_local_keys: context.reactive_local_keys.copy(),
-            reactive_shared_keys: context.reactive_shared_keys.copy(),
+            reactive_local_ids: context.reactive_local_ids.copy(),
+            reactive_shared_ids: context.reactive_shared_ids.copy(),
             taskgroups: sema_taskgroup_state_snapshot(context.taskgroups),
             failure_carrier_root: context.failure_carrier_root,
             failure_success_view: context.failure_success_view,
@@ -1571,8 +1630,8 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
     context.arrow_loop_body = saved.arrow_loop_body
     context.reactive_upgrades = saved.reactive_upgrades.move()
     context.reactive_upgrade_names = saved.reactive_upgrade_names.move()
-    context.reactive_local_keys = saved.reactive_local_keys.move()
-    context.reactive_shared_keys = saved.reactive_shared_keys.move()
+    context.reactive_local_ids = saved.reactive_local_ids.move()
+    context.reactive_shared_ids = saved.reactive_shared_ids.move()
     context.taskgroups = saved.taskgroups.move()
     context.failure_carrier_root = saved.failure_carrier_root
     context.failure_success_view = saved.failure_success_view
@@ -1926,14 +1985,14 @@ sema_scope_join_hardware_paths: fn(table: &SemaScopeTable, before: SemaScopeHard
 
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
-sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
+sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol, key: String) -> Bool Never! {
     if sema_scope_name_slot(table, symbol.name) == .Val(slot) {
         loop index in table.name_positions[slot] {
             binding: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
         }
     }
-    sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     true
 }
 
@@ -1945,11 +2004,11 @@ sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool
 sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, func: Func) Never! {
     module_index: sema_registration_module_index_text(graph, func.definition_module) ?? return
     loop symbol in graph.modules[module_index].symbols {
-        if !func.site_names.contains(symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+        if !func.site_names.contains(symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: symbol_table_key(graph.symbols, symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     }
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if !func.site_names.contains(binding.symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            if !func.site_names.contains(binding.symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: binding.symbol, key: symbol_table_key(graph.symbols, binding.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         }
     }
 }
@@ -1958,9 +2017,9 @@ sema_scope_add_compiler_builtin: fn(table: &SemaScopeTable, graph: SemaRegistrat
     builtin: sema_registration_compiler_builtin_row(graph, "Err") ?? return true
     nominal: graph.modules[builtin.module_index].nominals[builtin.row]
     loop binding in table.bindings {
-        if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id.key == nominal.symbol.id.key -> return true
+        if binding.frame == 0 && binding.compiler_builtin && binding.symbol.id == nominal.symbol.id -> return true
     }
-    sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: nominal.symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
+    sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: nominal.symbol, key: symbol_table_key(graph.symbols, nominal.symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: true})
     true
 }
 
@@ -2254,6 +2313,12 @@ sema_scope_resolve: fn(table: SemaScopeTable, name: String) -> Symbol? {
     Val(table.bindings[index].symbol)
 }
 
+// The key text of the binding `name` resolves to (SemaScopeBinding.key).
+sema_scope_resolve_key: fn(table: SemaScopeTable, name: String) -> String? {
+    index: sema_scope_resolve_index(table, name) ?? return None
+    Val(table.bindings[index].key.copy())
+}
+
 // A body thread's own copy of the post-summary module scope `source` (the
 // shared read-only module scope of a parallel body pass). Rows, frames, name
 // positions and every small field are copied, but a row's function type is
@@ -2276,6 +2341,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
             bindings.push(SemaScopeBinding{
                 frame: binding.frame,
                 symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(sema_scope_light_function_type()), visibility: binding.symbol.visibility},
+                key: binding.key,
                 mutable: binding.mutable,
                 access: binding.access,
                 integer_bounds: binding.integer_bounds,
@@ -2421,7 +2487,7 @@ sema_scope_place_root: fn(place: Expr) -> String? Never! {
 
 // A false return leaves the old binding visible; this prevents a duplicate
 // declaration from silently changing the meaning of later references.
-sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool Never! {
+sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, key: String, mutable: Bool, access: AccessConvention, integer_bounds: TIntegerBounds?, string_view: Bool) -> Bool Never! {
     if symbol.name == "_" -> return true
     if sema_scope_has_loop_label(table, symbol.name) -> return false
     if sema_scope_resolve_index(table, symbol.name) == .Val(index) {
@@ -2429,7 +2495,7 @@ sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, mutable: Bo
         if sema_scope_name_blocks_binding(previous.kind) -> return false
     }
     frame: table.current
-    sema_scope_push_binding(table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
+    sema_scope_push_binding(table, SemaScopeBinding{frame: frame, symbol: symbol, key: key, mutable: mutable, access: access, integer_bounds: integer_bounds, string_view: string_view, compiler_builtin: false})
     true
 }
 
@@ -2520,9 +2586,9 @@ sema_scope_mark_binding_sigil: fn(table: &SemaScopeTable, name: String, sigil: S
 // A proven payload refines a stable Optional name for the rest
 // of its scope. The refinement shadows the carrier binding on purpose, so it
 // skips the duplicate-name rule that ordinary declarations obey.
-sema_scope_refine_local: fn(table: &SemaScopeTable, symbol: Symbol) Never! {
+sema_scope_refine_local: fn(table: &SemaScopeTable, symbol: Symbol, key: String) Never! {
     frame: table.current
-    sema_scope_push_binding(table, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    sema_scope_push_binding(table, SemaScopeBinding{frame: frame, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
 }
 
 // Where sema_scope_resolve_declaration finds the declaration `id` names. A
@@ -2541,19 +2607,19 @@ sema_scope_declaration_site: fn(environment: SemaScopeEnvironment, program: Sema
         // (earlier modules first, functions before nominals in one module).
         function_module := -1
         function_row := -1
-        if sema_registration_callable_row(graph, id.key) == .Val(callable) {
+        if sema_registration_callable_row_of(graph, id) == .Val(callable) {
             if callable == .Function(module_index, row) {
                 function_module = module_index
                 function_row = row
             }
         }
-        if graph.nominal_symbol_rows.get(id.key) == .Val(nominal) {
+        if graph.nominal_symbol_rows.get(id.id) == .Val(nominal) {
             if function_module < 0 || nominal.module_index < function_module -> return Val(SemaScopeDeclarationSite.Nominal{module_index: nominal.module_index, row: nominal.row})
         }
         if function_module >= 0 -> return Val(SemaScopeDeclarationSite.Function{module_index: function_module, row: function_row})
     }
     loop index in 0..<environment.declarations.len() {
-        if environment.declarations[index].symbol_id.key == id.key -> return Val(SemaScopeDeclarationSite.Local{index: index})
+        if environment.declarations[index].symbol_id == id -> return Val(SemaScopeDeclarationSite.Local{index: index})
     }
     None
 }

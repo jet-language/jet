@@ -73,12 +73,12 @@ sema_divergence_solve: fn(graph: &SemaRegistrationGraph) Never! {
 // The one writer of `Func.diverges` and of the graph's diverging set.
 sema_divergence_mark: fn(graph: &SemaRegistrationGraph, module_index: Int, row: Int) Never! {
     graph.modules[module_index].functions[row].declaration.diverges = true
-    graph.diverging_functions[graph.modules[module_index].functions[row].symbol.id.key.copy()] = true
+    graph.diverging_functions[graph.modules[module_index].functions[row].symbol.id.id] = true
 }
 
-// Whether the function of symbol `key` never returns to its caller.
-sema_divergence_function_diverges: fn(graph: SemaRegistrationGraph, key: String) -> Bool Never! {
-    graph.diverging_functions.get(key) != None
+// Whether the function `id` never returns to its caller.
+sema_divergence_function_diverges: fn(graph: SemaRegistrationGraph, id: SymbolID) -> Bool Never! {
+    graph.diverging_functions.get(id.id) != None
 }
 
 sema_divergence_param_names: fn(params: [Param]) -> [String] Never! {
@@ -401,8 +401,8 @@ sema_divergence_call_diverges: fn(graph: SemaRegistrationGraph, scope: SemaDiver
     loop local in scope.locals {
         if local == name -> return false
     }
-    key: sema_divergence_callee_key(graph, scope.module_index, name) ?? return false
-    sema_divergence_function_diverges(graph, key)
+    id: sema_divergence_callee(graph, scope.module_index, name) ?? return false
+    sema_divergence_function_diverges(graph, id)
 }
 
 // `alias.member(…)` through a module the scope's module imports.
@@ -420,22 +420,22 @@ sema_divergence_alias_call_diverges: fn(graph: SemaRegistrationGraph, scope: Sem
     // A name `use` brings in from a module is not that module.
     if binding.symbol.kind == SymbolKind.Function -> return false
     target: binding.target_module_index ?? return false
-    key: sema_divergence_module_function_key(graph, target, member) ?? return false
-    sema_divergence_function_diverges(graph, key)
+    id: sema_divergence_module_function(graph, target, member) ?? return false
+    sema_divergence_function_diverges(graph, id)
 }
 
-sema_divergence_callee_key: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String? Never! {
-    own: sema_divergence_module_function_key(graph, module_index, name)
+sema_divergence_callee: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SymbolID? Never! {
+    own: sema_divergence_module_function(graph, module_index, name)
     if own != None -> return own
     found: sema_registration_import_binding_named(graph.modules[module_index], name) ?? return None
     symbol: graph.modules[module_index].imports[found.import_index].bindings[found.binding].symbol
     if symbol.kind != SymbolKind.Function -> return None
-    Val(symbol.id.key.copy())
+    Val(symbol.id)
 }
 
-sema_divergence_module_function_key: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String? Never! {
+sema_divergence_module_function: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SymbolID? Never! {
     position: sema_registration_symbol_position(graph.modules[module_index], name, name_rows_hash(name)) ?? return None
     symbol: graph.modules[module_index].symbols[position]
     if symbol.kind != SymbolKind.Function -> return None
-    Val(symbol.id.key.copy())
+    Val(symbol.id)
 }

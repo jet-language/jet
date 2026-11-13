@@ -39,7 +39,7 @@ use {
         UnOp,
         expr_source_span,
         expr_span,
-        symbol_id,
+        symbol_key_text,
         checked_symbol_local,
         checked_user_local,
         core_call,
@@ -357,15 +357,16 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
     sema_scope_enter(scopes, state, owner)
     symbol_owner := sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
-    id := symbol_id(SymbolKind.Local, local_module, symbol_owner, name)
+    key: symbol_key_text(SymbolKind.Local, local_module, symbol_owner, name)
+    id := sema_symbol_id_of(program, context, key)
     symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named{name: "Group"}), visibility: 0}
     if {
-        !sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false) -> {
+        !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) -> {
             diagnostics.push(sema_already_defined(name, name_span))
             valid = false
         }
         else -> {
-            sema_ownership_declare_binding(state, symbol, false)
+            sema_ownership_declare_binding(state, symbol, key, false)
             group_ref: sema_check_expression(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, scopes, state, tail_store, context, diagnostics)
             if group_ref == None -> valid = false
         }
@@ -612,7 +613,7 @@ sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts,
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol: capture.local.symbol_id ?? return None
     loop binding_index in 0..<scopes.bindings.len() {
-        if scopes.bindings[binding_index].symbol.id.key == symbol.key && scopes.bindings[binding_index].symbol.name == name {
+        if scopes.bindings[binding_index].symbol.id == symbol && scopes.bindings[binding_index].symbol.name == name {
             if scopes.bindings[binding_index].access == AccessConvention.Write -> access = AccessConvention.Write
         }
     }
@@ -1112,7 +1113,8 @@ sema_readiness_check_head: fn(cond: Expr, table: &SemaReadinessTable, environmen
             }
             owner: sema_scope_local_owner_key(scopes)
             local_module: sema_scope_environment_module_text(environment, program)
-            id: symbol_id(SymbolKind.Local, local_module, owner, binding)
+            key: symbol_key_text(SymbolKind.Local, local_module, owner, binding)
+            id: sema_symbol_id_of(program, context, key)
             symbol: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_identity: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
             if checked == .Val(receiver) {
                 table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id, payload), receiver: receiver, ordinal: table.receivers}))
@@ -1120,7 +1122,7 @@ sema_readiness_check_head: fn(cond: Expr, table: &SemaReadinessTable, environmen
                 table.arms.push(None)
             }
             table.receivers += 1
-            return Val(SemaConditionBinding{symbol: symbol, window: false, sources: [Expr]{}})
+            return Val(SemaConditionBinding{symbol: symbol, key: key, window: false, sources: [Expr]{}})
         }
         .After(duration) -> {
             checked: sema_check_expression(duration, None, environment, program, scopes, state, tail_store, context, diagnostics)

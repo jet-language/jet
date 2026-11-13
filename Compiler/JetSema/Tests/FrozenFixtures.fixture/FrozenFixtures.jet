@@ -1,15 +1,16 @@
 // Freeze provenance and frozen-write checks over the production ownership state.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Span, Symbol, SymbolKind, Type, expr_span, module_none, symbol_id]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Span, Symbol, SymbolKind, Type, expr_span, module_none, symbol_key_text, symbol_keys_intern, symbol_local_keys]
 use jet_sema.[SemaOwnershipFreezeSite, sema_ownership_declare_binding, sema_ownership_fork, sema_ownership_fork_apply, sema_ownership_fork_base, sema_ownership_fork_close, sema_ownership_fork_path, sema_ownership_fork_rollback, sema_ownership_frozen_expr_site, sema_ownership_frozen_for_key, sema_ownership_join_paths, sema_ownership_note_undo, sema_ownership_path_join, sema_ownership_reject_frozen_write, sema_ownership_state_init, sema_ownership_state_snapshot, sema_scope_declare_local, sema_scope_init]
 
 run: fn() {
     scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
     span := Span{start: 0, end: 1}
-    key := symbol_id(SymbolKind.Local, "frozen-fixture", "run", "snapshot")
-    symbol := Symbol{id: key, kind: SymbolKind.Local, name: "snapshot", module_identity: module_none(), owner: Val("run"), span: span, ty: Val(Type.List{element: Type.Int}), visibility: 0}
-    if !sema_scope_declare_local(scopes, symbol, true, AccessConvention.Read, None, false) -> panic("fixture binding was not declared")
-    sema_ownership_declare_binding(state, symbol, false)
+    key := symbol_key_text(SymbolKind.Local, "frozen-fixture", "run", "snapshot")
+    locals := symbol_local_keys()
+    symbol := Symbol{id: symbol_keys_intern(locals, key), kind: SymbolKind.Local, name: "snapshot", module_identity: module_none(), owner: Val("run"), span: span, ty: Val(Type.List{element: Type.Int}), visibility: 0}
+    if !sema_scope_declare_local(scopes, symbol, key, true, AccessConvention.Read, None, false) -> panic("fixture binding was not declared")
+    sema_ownership_declare_binding(state, symbol, key, false)
     site := SemaOwnershipFreezeSite{span: Span{start: 10, end: 16}, line: 3, column: 5}
     state.declarations[0].frozen_site = Val(site)
     source := Expr.Ident{name: "snapshot", span: Span{start: 20, end: 28}, id: AST_NODE_GENERATED}
@@ -22,22 +23,22 @@ run: fn() {
     mutable_path := sema_ownership_state_snapshot(state)
     mutable_path.declarations[0].frozen_site = None
     sema_ownership_join_paths(state, before, before, mutable_path, true)
-    if sema_ownership_frozen_for_key(state, key.key) != None -> panic("one frozen branch is not a frozen-value proof")
+    if sema_ownership_frozen_for_key(state, key) != None -> panic("one frozen branch is not a frozen-value proof")
     sema_ownership_join_paths(state, before, before, before, true)
-    if sema_ownership_frozen_for_key(state, key.key) != Val(site) -> panic("two frozen branches lost their proof")
+    if sema_ownership_frozen_for_key(state, key) != Val(site) -> panic("two frozen branches lost their proof")
     fork: sema_ownership_fork(state)
     sema_ownership_note_undo(state, 0)
     state.declarations[0].frozen_site = None
     state.freeze_sites.push(site.copy())
     mutable_arm: sema_ownership_fork_path(state, fork)
     sema_ownership_fork_rollback(state, fork)
-    if sema_ownership_frozen_for_key(state, key.key) != Val(site) -> panic("fork rollback lost freeze provenance")
+    if sema_ownership_frozen_for_key(state, key) != Val(site) -> panic("fork rollback lost freeze provenance")
     if state.freeze_sites.len() != fork.freeze_sites.len() -> panic("fork rollback kept an arm's freeze sites")
     frozen_arm: sema_ownership_fork_base(fork)
     joined: sema_ownership_path_join(state, fork, frozen_arm, mutable_arm, true, state.share_found)
     sema_ownership_fork_apply(state, joined)
     sema_ownership_fork_close(state, fork)
-    if sema_ownership_frozen_for_key(state, key.key) != None -> panic("fork join kept a one-arm freeze proof")
+    if sema_ownership_frozen_for_key(state, key) != None -> panic("fork join kept a one-arm freeze proof")
     if state.freeze_sites.len() != 1 -> panic("fork join lost an arm's freeze site")
     print("frozen provenance and write checks: passed")
 }

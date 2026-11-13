@@ -48,7 +48,7 @@ use jet_foundation.[
     sema_reserved_type_name,
     boundary_head_owner_module,
     boundary_head_carrier_module,
-    symbol_id,
+    symbol_builtin,
     type_identity_equal,
     type_is_unit_callable_return,
     type_with_effective_fn_returns,
@@ -628,21 +628,21 @@ sema_type_is_erased_tensor: fn(ty: Type) -> Bool Never! {
     ty == (Type.Named{name: "Tensor"}) || ty == (Type.Named{name: "<corelib>/core.compute::Tensor"})
 }
 
-// The registered row of a type symbol, by SymbolId key (the first registered
-// row, kept current by `sema_registration_index_nominal_rows`). Callers read
-// the nominal in place (`graph.modules[row.module_index].nominals[row.row]`),
+// The registered row of a type symbol (the first registered row, kept
+// current by `sema_registration_index_nominal_rows`). Callers read the
+// nominal in place (`graph.modules[row.module_index].nominals[row.row]`),
 // so a lookup neither scans the registry nor copies fields, variants or the
-// source declaration.
-sema_type_graph_nominal_row: fn(graph: SemaRegistrationGraph, key: String) -> SemaRegistrationRowRef? {
-    graph.nominal_symbol_rows.get(key)
+// source declaration. A body's own id names no row.
+sema_type_graph_nominal_row: fn(graph: SemaRegistrationGraph, id: SymbolID) -> SemaRegistrationRowRef? {
+    graph.nominal_symbol_rows.get(id.id)
 }
 
 // The registered row of a resolved type symbol: the row the lookup found
-// beside the symbol, else the key map (import bindings and export rows
-// carry none). Both name the key's first registered row.
+// beside the symbol, else the id map (import bindings and export rows
+// carry none). Both name the id's first registered row.
 sema_type_graph_resolved_nominal_row: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SemaRegistrationRowRef? {
     if resolved.nominal_row == .Val(row) -> return Val(row)
-    graph.nominal_symbol_rows.get(sema_resolved_key(graph, resolved))
+    graph.nominal_symbol_rows.get(sema_resolved_id(graph, resolved).id)
 }
 
 sema_type_graph_canonical_symbol_name: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
@@ -793,12 +793,12 @@ sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAl
 // names an alias of the program's own, so no cycle runs through one.
 sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
     rows := [SemaTypeAliasCycleRow]{}
-    positions := [String:Int]{}
+    positions := [U32:Int]{}
     loop module_index in graph.seeded..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
             // Read in place: binding the row copied every nominal, methods included.
             if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias -> next
-            positions[graph.modules[module_index].nominals[row].symbol.id.key] = rows.len()
+            positions[graph.modules[module_index].nominals[row].symbol.id.id] = rows.len()
             rows.push(SemaTypeAliasCycleRow{module_index: module_index, row: row, edges: [Int]{}})
         }
     }
@@ -816,7 +816,7 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
                 }
                 if bound -> next
                 resolved: sema_type_graph_lookup_symbol(graph, nominal.symbol.module_identity, name) ?? next
-                target: positions.get(sema_resolved_key(graph, resolved)) ?? next
+                target: positions.get(sema_resolved_id(graph, resolved).id) ?? next
                 rows[at].edges.push(target)
             }
         }
@@ -1508,7 +1508,7 @@ sema_type_graph_trait_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, b
 sema_type_builtin_trait_symbol: fn(name: String) -> Symbol? {
     owned: owned_trait(name) ?? return None
     if !owned.bare_bound -> return None
-    Val(Symbol{id: symbol_id(SymbolKind.Trait, "", "", name), kind: SymbolKind.Trait, name: name, module_identity: module_none(), owner: None, span: Span{start: 0, end: 0}, ty: None, visibility: 2})
+    Val(Symbol{id: symbol_builtin(SymbolKind.Trait, name) ?? return None, kind: SymbolKind.Trait, name: name, module_identity: module_none(), owner: None, span: Span{start: 0, end: 0}, ty: None, visibility: 2})
 }
 
 // A generic bound's trait: the visible declaration of that name, else the
@@ -1546,37 +1546,37 @@ sema_type_graph_impl_matches_nominal: fn(graph: SemaRegistrationGraph, implement
         if implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name -> return Val(true)
     }
     if !graph.impl_traits_indexed {
-        target_key: sema_type_graph_impl_target_nominal_key(graph, implementation) ?? return None
-        return Val(target_key == nominal.symbol.id.key)
+        target: sema_type_graph_impl_target_nominal(graph, implementation) ?? return None
+        return Val(target == nominal.symbol.id)
     }
-    if implementation.target_nominal_key == .Val(target_key) -> return Val(target_key == nominal.symbol.id.key)
+    if implementation.target_nominal == .Val(target) -> return Val(target == nominal.symbol.id)
     None
 }
 
-// The symbol key of the nominal an impl's target type names from the impl's
-// module. The trait index stores it on each impl (`target_nominal_key`).
-sema_type_graph_impl_target_nominal_key: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> String? {
+// The symbol id of the nominal an impl's target type names from the impl's
+// module. The trait index stores it on each impl (`target_nominal`).
+sema_type_graph_impl_target_nominal: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> SymbolID? {
     row: sema_type_resolve_nominal_row(graph, implementation.target_type, implementation.source_module_identity) ?? return None
-    Val(graph.modules[row.module_index].nominals[row.row].symbol.id.key)
+    Val(graph.modules[row.module_index].nominals[row.row].symbol.id)
 }
 
 sema_type_graph_impl_matches_trait: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, trait_symbol: Symbol) -> Bool? {
     declared_trait: implementation.trait_symbol
-    if declared_trait == .Val(declared) -> return Val(declared.id.key == trait_symbol.id.key)
+    if declared_trait == .Val(declared) -> return Val(declared.id == trait_symbol.id)
     name: implementation.trait_name ?? return Val(false)
     resolved: sema_type_graph_trait_symbol(graph, implementation.source_module_identity, name) ?? return None
-    Val(resolved.id.key == trait_symbol.id.key)
+    Val(resolved.id == trait_symbol.id)
 }
 
-// The trait SymbolId key an impl implements: its registered trait symbol, or
-// its trait name resolved in the impl's module. An inherent impl or an
+// The trait symbol an impl implements: its registered trait symbol, or its
+// trait name resolved in the impl's module. An inherent impl or an
 // unresolved name has none and matches no bound
 // (`sema_type_graph_impl_matches_trait` false or None).
-sema_type_graph_impl_trait_key: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> String? {
-    if implementation.trait_symbol == .Val(declared) -> return Val(declared.id.key)
+sema_type_graph_impl_trait: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl) -> SymbolID? {
+    if implementation.trait_symbol == .Val(declared) -> return Val(declared.id.copy())
     name: implementation.trait_name ?? return None
     resolved: sema_type_graph_trait_symbol(graph, implementation.source_module_identity, name) ?? return None
-    Val(resolved.id.key)
+    Val(resolved.id.copy())
 }
 
 // Rust `register_struct_trait_impls` / `register_trait_impl_block`: a trait
@@ -1596,7 +1596,7 @@ sema_type_graph_inline_impl_matches_trait: fn(graph: SemaRegistrationGraph, nomi
 sema_type_graph_trait_blocks_match: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, blocks: [TraitImplBlock], trait_symbol: Symbol) -> Bool {
     loop block in blocks {
         resolved: sema_type_graph_trait_symbol(graph, module_identity, block.trait_name) ?? next
-        if resolved.id.key == trait_symbol.id.key -> return true
+        if resolved.id == trait_symbol.id -> return true
     }
     false
 }
@@ -1646,7 +1646,7 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
     unresolved_impl := false
     if graph.impl_traits_indexed {
         // Only the impls of this trait, from the registration index.
-        slot: graph.impl_trait_slots.get(trait_symbol.id.key)
+        slot: graph.impl_trait_slots.get(trait_symbol.id.id)
         if slot == .Val(found) {
             loop impl_row in graph.impl_trait_buckets[found] {
                 target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[impl_row.module_index].impls[impl_row.row], nominal) ?? {
@@ -1959,14 +1959,14 @@ sema_type_generic_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
     current: parameter ?? return None
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? sema_type_builtin_trait_symbol(bound_name) ?? return None
     loop bound in current.bounds {
-        if bound.key == trait_symbol.id.key -> return Val(true)
+        if bound == trait_symbol.id -> return Val(true)
     }
     // A bound on a trait that requires `bound_name` admits it: `T: Numeric`
     // has `+`, `-`, `*` and ordering.
     loop requirer in owned_trait_requirers(bound_name) {
         requirer_symbol: sema_type_graph_trait_symbol_at(graph, caller, requirer) ?? sema_type_builtin_trait_symbol(requirer) ?? next
         loop bound in current.bounds {
-            if bound.key == requirer_symbol.id.key -> return Val(true)
+            if bound == requirer_symbol.id -> return Val(true)
         }
     }
     return Val(false)
@@ -2086,7 +2086,7 @@ sema_type_associated_nominal: fn(graph: SemaRegistrationGraph, nominal: SemaRegi
     if nominal.source == .SourceAST(item) {
         loop block in sema_registration_item_trait_blocks(item) {
             trait_row: sema_checked_trait_nominal_row(graph, nominal.symbol.module_identity, block.trait_name) ?? next
-            if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id.key != trait_symbol.id.key -> next
+            if graph.modules[trait_row.module_index].nominals[trait_row.row].symbol.id != trait_symbol.id -> next
             loop associated in block.assoc_type_impls {
                 if associated.name != associated_name -> next
                 if resolved_type != None -> return None

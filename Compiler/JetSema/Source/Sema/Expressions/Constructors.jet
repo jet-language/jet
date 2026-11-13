@@ -45,7 +45,8 @@ use {
         core_type_modules,
         expr_span,
         boundary_head_owner_module,
-        symbol_id,
+        symbol_find,
+        symbol_table_key,
         type_identity_key,
         type_name,
         TLetTy,
@@ -344,12 +345,12 @@ sema_atomic_field_inner: fn(ty: Type) -> Type? Never! {
 
 // Reuse the canonical Atomic.new row so typed field construction reaches the
 // same IR carrier as an explicit constructor, without rechecking/moving twice.
-sema_atomic_field_initializer: fn(field_ty: Type, value: TExpr, source: Expr, context: &SemaCheckContext) -> TExpr? {
+sema_atomic_field_initializer: fn(field_ty: Type, value: TExpr, source: Expr, program: SemaProgramTables, context: &SemaCheckContext) -> TExpr? {
     inner: sema_atomic_field_inner(field_ty) ?? return Val(value)
     row: sema_call_builtin_static_row("Atomic", "new", "") ?? return None
     argument: CallArg{convention: row.parameter_convention, expr: source, span: expr_span(source), flags: ast_empty_call_arg_flags(), label: None, spread: false}
     bindings: [SemaInferenceBinding]{SemaInferenceBinding{name: row.type_params[0], ty: inner, source: "atomic field initializer"}}
-    kind: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument.move()}, bindings, value.span, 0, context) ?? return None
+    kind: sema_call_builtin_static_lowered(row, [TExpr]{value}, [CallArg]{argument.move()}, bindings, value.span, 0, program, context) ?? return None
     Val(sema_tree_node(field_ty, kind.move(), value.span))
 }
 
@@ -365,10 +366,11 @@ SemaStructFieldFact: struct {
     holds_view: Bool
 }
 
-sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaStructFieldFact {
+sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> SemaStructFieldFact {
     field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, field.ty, names), names, args)
-    field_id: symbol_id(SymbolKind.Field, sema_scope_module_text(environment, program, owner.module_identity), owner.id.key, field.name)
-    symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner.module_identity, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+    owner_key: sema_program_symbol_key(program, owner.id)
+    field_id: sema_symbol_id(program, context, SymbolKind.Field, sema_scope_module_text(environment, program, owner.module_identity), owner_key, field.name)
+    symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner.module_identity, owner: Val(owner_key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
     holds_view := false
     if program.registration_graph == .Val(graph) {
         seen := [String:Bool]{}
@@ -382,10 +384,13 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
 // struct this check meets resolves them, and every later one (a list of
 // thousands of record rows) reads them back.
 sema_expression_struct_field_facts: fn(owner: Symbol, fields: [Field], environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> Int {
-    if context.struct_field_fact_rows.get(owner.id.key) == .Val(known) -> return known
+    if context.struct_field_fact_rows.get(owner.id.id) == .Val(known) -> return known
     first: context.struct_field_facts.len()
-    loop field in fields -> context.struct_field_facts.push(sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program))
-    context.struct_field_fact_rows[owner.id.key] = first
+    loop field in fields {
+        fact: sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program, context)
+        context.struct_field_facts.push(fact)
+    }
+    context.struct_field_fact_rows[owner.id.id] = first
     first
 }
 
@@ -393,7 +398,7 @@ sema_expression_struct_field_facts: fn(owner: Symbol, fields: [Field], environme
 // against the field type with the owner's generic arguments substituted. Its
 // move is recorded at this point of the literal's evaluation order.
 sema_expression_struct_field_value: fn(field: Field, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
-    fact: sema_expression_struct_field_fact(field, owner, names, args, environment, program)
+    fact: sema_expression_struct_field_fact(field, owner, names, args, environment, program, context)
     sema_expression_struct_field_checked(fact, field_value, field_reference_span, atomic_payload, owner, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
@@ -427,7 +432,7 @@ sema_expression_struct_field_finish: fn(fact: SemaStructFieldFact, checked: TExp
     if fact.holds_view -> context.view_field_values.push(expr_span(field_value))
     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), field_ty)
     reference.boxed = fact.boxed
-    initialized: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, context) ?? return None else -> checked
+    initialized: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, program, context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
 }
 
@@ -445,7 +450,7 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScop
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if !window -> return
-        key: scopes.bindings[index].symbol.id.key
+        key: scopes.bindings[index].key
         loop fact in state.views {
             if !fact.active || fact.carrier_key != key -> next
             owner_name: fact.source.root
@@ -478,7 +483,7 @@ sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field
     inference := sema_inference_context(environment.module_identity, environment.package_identity, sema_inference_type_params(open), environment.generic_params, None)
     result: sema_infer_callable(program.registration_graph, inference, [Type]{declared}, None, [Type]{checked.ty}, [Type]{}, expr_span(field_value), diagnostics) ?? return None
     loop binding in result.substitutions -> bindings.push(binding)
-    fact: sema_expression_struct_field_fact(field, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program)
+    fact: sema_expression_struct_field_fact(field, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program, context)
     sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, true, owner, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
@@ -525,7 +530,7 @@ sema_expression_core_record_field_value: fn(owner_name: String, field: TypeTuple
         return None
     }
     if !sema_copy_site_record_move(field_value, "the struct literal", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
-    reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, field.name), name: field.name, ty: field.ty, boxed: false}
+    reference: TFieldRef{owner: None, name: field.name, ty: field.ty, boxed: false}
     Val(TStructFieldValue{field: reference, value: checked, boxed: false})
 }
 
@@ -939,8 +944,9 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         diagnostics.push(sema_enum_unknown_variant(resolved_name, variant, variant_names, span, variant_span))
         return None
     }
-    variant_id: symbol_id(SymbolKind.Variant, sema_scope_module_text(environment, program, owner.module_identity), owner.id.key, variant)
-    variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_identity: owner.module_identity, owner: Val(owner.id.key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
+    owner_key: sema_program_symbol_key(program, owner.id)
+    variant_id: sema_symbol_id(program, context, SymbolKind.Variant, sema_scope_module_text(environment, program, owner.module_identity), owner_key, variant)
+    variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_identity: owner.module_identity, owner: Val(owner_key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
     context.name_references.push(SemaNameReferenceFact{span: variant_span ?? span, symbol: variant_symbol, kind: "variant"})
     generic_names: loop parameter in enum_def.type_params -> parameter.name
     generic_args := type_args
@@ -1390,7 +1396,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
     string_backed := false
     if sema_expression_type_symbol(scopes, environment, program, name) == .Val(symbol) {
         if symbol.kind != SymbolKind.Type -> return None
-        if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(registered_row) {
+        if sema_type_graph_nominal_row(graph, symbol.id) == .Val(registered_row) {
             registered: graph.modules[registered_row.module_index].nominals[registered_row.row]
             owner = Val(registered.symbol)
             owner_row = Val(SemaRegistrationRowRef{module_index: registered_row.module_index, row: registered_row.row})
@@ -1709,27 +1715,29 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     functions := sema_comptime_reachable_function_keys(graph, context.call_facts)
     reachable := [String]{}
     loop key in functions {
+        id: symbol_find(graph.symbols, key) ?? next
         fact_index := fact_start
         loop fact_index < context.call_facts.len() {
             callee: context.call_facts[fact_index].callee
-            if callee == .Val(symbol) && symbol.key == key {
+            if callee == .Val(symbol) && symbol == id {
                 reachable.push(key)
                 break
             }
             fact_index += 1
         }
     }
-    loop method_key in ([String]{target.check.symbol.id.key, target.encode_hole.symbol.id.key}) {
+    loop method_key in ([String]{symbol_table_key(graph.symbols, target.check.symbol.id), symbol_table_key(graph.symbols, target.encode_hole.symbol.id)}) {
         if !reachable.contains(method_key) -> reachable.push(method_key)
     }
     dependencies := [String]{}
     loop reference_index in reference_start..<context.name_references.len() {
         reference := context.name_references[reference_index]
         if reference.symbol.kind != SymbolKind.Constant -> next
-        if !dependencies.contains(reference.symbol.id.key) -> dependencies.push(reference.symbol.id.key)
+        dependency: sema_registration_symbol_key(graph, reference.symbol.id)
+        if dependency != "" && !dependencies.contains(dependency) -> dependencies.push(dependency)
     }
     source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-    key := "{module_text(graph.module_table, environment.module_identity)}::checked-text::{target.owner.id.key}::{span.start}:{span.end}:{type_identity_key(head)}"
+    key := "{module_text(graph.module_table, environment.module_identity)}::checked-text::{symbol_table_key(graph.symbols, target.owner.id)}::{span.start}:{span.end}:{type_identity_key(head)}"
     evaluation := SemaCheckedTextEvaluation{
         module_identity: environment.module_identity,
         key: key,
@@ -1752,7 +1760,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         fix: "fix the body so it satisfies the type's declared text grammar",
     }
     context.comptime_requests.push(SemaComptimeRequest{
-        callee_key: target.check.symbol.id.key,
+        callee_key: symbol_table_key(graph.symbols, target.check.symbol.id),
         module_identity: target.implementation_module_identity,
         args: [TComptimeValue]{},
         span: span,
@@ -2073,7 +2081,7 @@ sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment
     if sema_expr_unwrap_tag(written) == .Named(written_name) {
         if program.registration_graph == .Val(graph) {
             symbol: sema_expression_type_symbol(scopes, environment, program, written_name) ?? return None
-            row: sema_type_graph_nominal_row(graph, symbol.id.key) ?? return None
+            row: sema_type_graph_nominal_row(graph, symbol.id) ?? return None
             nominal: graph.modules[row.module_index].nominals[row.row]
             if shorthand == .Val(field_name) {
                 loop field in nominal.fields {

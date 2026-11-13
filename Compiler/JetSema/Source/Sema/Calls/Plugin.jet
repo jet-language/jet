@@ -2,6 +2,7 @@
 // which the driver read from the artifact itself. These bodies consume those
 // immutable interface facts.
 use jet_foundation.[
+    symbol_table_key,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -125,7 +126,7 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
             }
             if type_args.len() != definition.generic_params.len() -> return None
-            key := "{nominal.symbol.id.key}|{type_name(ty)}"
+            key := "{symbol_table_key(graph.symbols, nominal.symbol.id)}|{type_name(ty)}"
             loop prior in seen {
                 if prior == key -> return None
             }

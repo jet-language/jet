@@ -45,7 +45,6 @@ use jet_foundation.[
     jet_target_layout_cache_line,
     jet_target_layout_cpu_features,
     jet_target_layout_pointer_size,
-    symbol_id,
     type_name,
     sema_casing_snake_words,
     sema_casing_marker_qualifier,
@@ -777,7 +776,7 @@ sema_fact_reflection_field: fn(base: TExpr, member: String, span: Span, context:
     }
     if !sema_fact_constant_path(base, context) -> return None
     field_ty: sema_fact_reflection_field_type(owner_name, member) ?? return None
-    reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: field_ty, boxed: false}
+    reference: TFieldRef{owner: None, name: member, ty: field_ty, boxed: false}
     Val(sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span))
 }
 
@@ -1150,7 +1149,7 @@ sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: 
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     registry := SemaScopeMembersMarkerRegistry?{None}
     loop registered in registered_module.functions {
-        if registered.symbol.id.key != symbol.id.key -> next
+        if registered.symbol.id != symbol.id -> next
         bindings := [SemaInferenceBinding]{}
         if args == .Val(written) {
             declared: registered.declaration.type_params.len()
@@ -1548,8 +1547,7 @@ sema_fact_read_check: fn(base: Expr, member: String, span: Span, expected: Type?
             return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.CtLit{value: value}, span), expected, environment, program, diagnostics)}
         }
         if sema_fact_constant_path(checked_base, context) {
-            owner_name: type_name(checked_base.ty)
-            reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: ty, boxed: false}
+            reference: TFieldRef{owner: None, name: member, ty: ty, boxed: false}
             return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, program, diagnostics)}
         }
         return sema_fact_read_no_value(member, span, diagnostics)

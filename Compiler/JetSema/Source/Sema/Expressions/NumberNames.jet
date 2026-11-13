@@ -181,7 +181,7 @@ sema_expr_number_constant_literal: fn(symbol: Symbol, program: SemaProgramTables
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id.key != symbol.id.key -> next
+            if constant.symbol.id != symbol.id -> next
             if constant.typed || constant.declaration.mutable || constant.declaration.is_persist || constant.declaration.is_comptime || constant.declaration.ct != None -> return None
             // A constant's value names no local, so no body scope is consulted.
             return sema_expr_number_literal_init(constant.declaration.value, sema_scope_init(module_none()))

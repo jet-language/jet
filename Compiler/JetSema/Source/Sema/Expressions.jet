@@ -94,7 +94,9 @@ use {
         expr_span,
         owned_trait_for_operator,
         owned_trait_for_operator_hook,
-        symbol_id,
+        symbol_is_local,
+        symbol_key_text,
+        symbol_table_key,
         pipe_value_name,
         checked_symbol_local,
         type_identity_equal,
@@ -150,16 +152,20 @@ sema_arena_adopt: fn(context: &SemaCheckContext, value: TExpr) -> Int Never! {
 // sema_check_context_snapshot) to the context's arena. Its rows continue
 // this arena's, so every index its nodes hold stays valid, and each row
 // moves once: no check copies the arena. The nested arena interned its own
-// types, so each moved type row is interned again here.
+// types, so each moved type row is interned again here. Its symbol keys
+// started as a copy of this arena's and only grew, so they replace them:
+// every id either check minted stays the same key.
 sema_arena_take_back: fn(context: &SemaCheckContext, rows: &&BodyFlat) Never! {
     nested := rows.move()
     if nested.tree.node_base != context.arena.tree.node_base + context.arena.tree.nodes.len() || nested.tree.stmt_base != context.arena.tree.stmt_base + context.arena.tree.stmts.len() -> panic("sema_arena_take_back: the enclosing check built nodes while a nested check ran")
+    if nested.tree.symbols.keys.texts.len() < context.arena.tree.symbols.keys.texts.len() -> panic("sema_arena_take_back: the enclosing check minted symbols while a nested check ran")
     compiler_transfer_rows<BodyNode>(context.arena.tree.nodes, nested.tree.nodes)
     loop row in nested.tree.expr_types {
         ty: type_table_intern(context.arena.tree.types, nested.tree.types.types[row.ty])
         context.arena.tree.expr_types.push(TExprType{id: row.id, ty: ty})
     }
     compiler_transfer_rows<StmtKind>(context.arena.tree.stmts, nested.tree.stmts)
+    context.arena.tree.symbols = nested.tree.symbols.move()
 }
 
 // (Rust `policy_call` and its lowering): under the function's or block's
@@ -905,7 +911,7 @@ sema_expr_operator_function_candidate: fn(graph: SemaRegistrationGraph, function
     specialized: if substitutions == .Val(bindings) -> sema_inference_substitute_type_bindings(reader, bindings) else -> reader
     candidate: sema_expr_operator_candidate_from_function(function, specialized, program.registration_graph, owner_type, receiver_owner, trait_symbol, trait_name, method, rhs, span, caller_module, caller_package, environment.generic_params, diagnostics) ?? return
     loop existing in candidates {
-        if existing.candidate.method.symbol.key == candidate.method.symbol.key && existing.candidate.method.operator_identity == candidate.method.operator_identity -> return
+        if existing.candidate.method.symbol == candidate.method.symbol && existing.candidate.method.operator_identity == candidate.method.operator_identity -> return
     }
     candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true, derived: function.declaration.compiler_generated})
 }
@@ -1836,7 +1842,7 @@ sema_expr_declared_distinct_facts: fn(ty: Type, admit_quantity: Bool, environmen
         value: definition_value.range ?? return None
         range = Val(TIntegerBounds{lo: value.lo, hi: value.hi})
     }
-    Val(SemaExprDistinctFacts{name: name, key: owner.id.key, base: base, numeric: numeric, range: range})
+    Val(SemaExprDistinctFacts{name: name, key: sema_program_symbol_key(program, owner.id), base: base, numeric: numeric, range: range})
 }
 
 sema_expr_check_distinct_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, left_facts: SemaExprDistinctFacts?, right_facts: SemaExprDistinctFacts?, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -2690,7 +2696,7 @@ sema_expr_check_selector_count: fn(checked: TExpr, parts: [StrPart], index: Int,
 
 sema_expr_call_callee: fn(program: SemaProgramTables, value: TExpr) -> SymbolID? {
     if value.kind == {
-        .Call(callee, _, _) -> return Val(SymbolID{key: sema_program_decl_key(program, callee)})
+        .Call(callee, _, _) -> return sema_symbol_find(program, sema_program_decl_key(program, callee))
         .MethodCall(_, method, _, _) -> return Val(method.symbol)
         // A call behind its generated argument pins keeps its callee.
         .InlineBlock(body) -> {
@@ -2713,21 +2719,23 @@ SemaExprComptimeTarget: struct {
     kind: String
 }
 
-sema_expr_comptime_method_target: fn(methods: [Func], owner_name: String, module_id: ModuleID, module_identity: String, symbol: SymbolID) -> SemaExprComptimeTarget? {
-    owner := symbol_id(SymbolKind.Type, module_identity, "", owner_name)
+sema_expr_comptime_method_target: fn(methods: [Func], owner_name: String, module_id: ModuleID, module_identity: String, symbol_key: String) -> SemaExprComptimeTarget? {
+    owner: symbol_key_text(SymbolKind.Type, module_identity, "", owner_name)
     loop method in methods {
-        candidate: symbol_id(SymbolKind.Function, module_identity, owner.key, method.name)
-        if candidate.key == symbol.key -> return Val(SemaExprComptimeTarget{module_identity: module_id, declaration: method, path: "{owner_name}.{method.name}", kind: "method"})
+        if symbol_key_text(SymbolKind.Function, module_identity, owner, method.name) == symbol_key -> return Val(SemaExprComptimeTarget{module_identity: module_id, declaration: method, path: "{owner_name}.{method.name}", kind: "method"})
     }
     None
 }
 
+// A body's own id names no declaration.
 sema_expr_comptime_local_method_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: SymbolID) -> SemaExprComptimeTarget? {
+    if symbol_is_local(symbol) -> return None
+    symbol_key: sema_program_symbol_key(program, symbol)
     module_text: sema_scope_environment_module_text(environment, program)
     loop row_index in 0..<environment.declarations.len() {
         target: if environment.declarations[row_index].item == {
-            .Struct(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, module_text, symbol)
-            .Enum(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, module_text, symbol)
+            .Struct(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, module_text, symbol_key)
+            .Enum(value) -> sema_expr_comptime_method_target(value.methods, value.name, environment.module_identity, module_text, symbol_key)
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
         }
         if target != None -> return target
@@ -2739,7 +2747,7 @@ sema_expr_comptime_target: fn(environment: SemaScopeEnvironment, program: SemaPr
     if program.registration_graph == .Val(graph) {
         // One keyed callable lookup (Rust `funcs.get`): top-level functions
         // and nominal methods are compile-time targets.
-        row: sema_registration_callable_row(graph, symbol.key) ?? return None
+        row: sema_registration_callable_row_of(graph, symbol) ?? return None
         if row == {
             .Function(module_index, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].functions[index].declaration, path: graph.modules[module_index].functions[index].symbol.name, kind: "function"})
             .NominalMethod(module_index, owner, index) -> return Val(SemaExprComptimeTarget{module_identity: graph.modules[module_index].module_identity, declaration: graph.modules[module_index].nominals[owner].methods[index].declaration, path: "{graph.modules[module_index].nominals[owner].symbol.name}.{graph.modules[module_index].nominals[owner].methods[index].symbol.name}", kind: "method"})
@@ -2763,7 +2771,7 @@ sema_expr_comptime_target: fn(environment: SemaScopeEnvironment, program: SemaPr
 // `#run`, read in place from the graph rows.
 sema_expr_comptime_target_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
     if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, symbol.key) ?? return false
+        row: sema_registration_callable_row_of(graph, symbol) ?? return false
         return if row == {
             .Function(module_index, index) -> graph.modules[module_index].functions[index].declaration.is_comptime
             .NominalMethod(module_index, owner, index) -> graph.modules[module_index].nominals[owner].methods[index].declaration.is_comptime
@@ -2881,7 +2889,8 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
         diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred IR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
     }
-    context.comptime_requests.push(SemaComptimeRequest{callee_key: symbol.key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
+    callee_key: sema_symbol_key(program, context, symbol)
+    context.comptime_requests.push(SemaComptimeRequest{callee_key: callee_key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
     true
 }
 
@@ -2898,14 +2907,14 @@ sema_expr_call_foreign_effect_root: fn(program: SemaProgramTables, callee: Symbo
     if program.registration_graph == .Val(graph) {
         abi: sema_registration_callable_abi(graph, symbol) ?? return None
         if !abi.is_extern -> return None
-        core: sema_expr_call_core_binding(symbol)
+        core: sema_expr_call_core_binding(graph, symbol)
         root := abi.foreign_effect_root ?? ""
         if root == "" {
             if !abi.is_c_abi || core -> return None
             root = "FFI.C"
         }
         if (root != "FFI.C" && root != "FFI") || core -> return Val(root)
-        if sema_registration_callable_row(graph, symbol.key) == .Val(.Foreign(module_index, index)) {
+        if sema_registration_callable_row_of(graph, symbol) == .Val(.Foreign(module_index, index)) {
             library: graph.modules[module_index].foreign_functions[index].foreign_library
             if graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule && effect_scope_argument_valid(library) -> return Val(effect_scope_name("FFI.C", library))
         }
@@ -2921,7 +2930,7 @@ sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?)
     symbol: callee ?? return false
     if program.registration_graph == .Val(graph) {
         abi: sema_registration_callable_abi(graph, symbol) ?? return false
-        return abi.is_extern && abi.is_c_abi && abi.foreign_effect_root == None && !sema_expr_call_core_binding(symbol)
+        return abi.is_extern && abi.is_c_abi && abi.foreign_effect_root == None && !sema_expr_call_core_binding(graph, symbol)
     }
     false
 }
@@ -2929,8 +2938,9 @@ sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?)
 // Whether `symbol` is declared in Core: Core's own bindings (the Jet SQLite engine, TLS) are
 // toolchain code whose public functions declare the rows they hold
 // (`core.db.open` is `-[DB]>`), so their calls are not open-world.
-sema_expr_call_core_binding: fn(symbol: SymbolID) -> Bool Never! {
-    parts: symbol.key.split(":").to_list()
+sema_expr_call_core_binding: fn(graph: SemaRegistrationGraph, symbol: SymbolID) -> Bool Never! {
+    if symbol_is_local(symbol) -> return false
+    parts: symbol_table_key(graph.symbols, symbol).split(":").to_list()
     parts.len() > 1 && sema_module_is_core_source(parts[1])
 }
 
@@ -2939,7 +2949,7 @@ sema_expr_call_core_binding: fn(symbol: SymbolID) -> Bool Never! {
 sema_expr_call_foreign_without_undo: fn(program: SemaProgramTables, callee: SymbolID?) -> Bool {
     symbol: callee ?? return false
     if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, symbol.key) ?? return false
+        row: sema_registration_callable_row_of(graph, symbol) ?? return false
         if row == {
             .Function(module_index, index) -> return graph.modules[module_index].functions[index].abi.is_extern && graph.modules[module_index].functions[index].declaration.undo == None
             .Foreign(module_index, index) -> return graph.modules[module_index].foreign_functions[index].declaration.undo == None
@@ -2956,7 +2966,7 @@ sema_expr_call_foreign_without_undo: fn(program: SemaProgramTables, callee: Symb
 sema_expr_call_replacement_hidden: fn(program: SemaProgramTables, scopes: SemaScopeTable, callee: SymbolID?, span: Span) -> Bool {
     symbol: callee ?? return false
     if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, symbol.key) ?? return false
+        row: sema_registration_callable_row_of(graph, symbol) ?? return false
         if row == .Function(module_index, index) {
             if graph.modules[module_index].functions[index].declaration.markers.len() == 0 -> return false
             payload: sema_lifecycle_marker(graph.modules[module_index].functions[index].declaration.markers, "") ?? return false
@@ -2990,7 +3000,7 @@ sema_expr_call_unsafe_foreign_name: fn(program: SemaProgramTables, callee: Symbo
 sema_expr_call_foreign_capability: fn(program: SemaProgramTables, callee: SymbolID?) -> SemaForeignCapability? {
     symbol: callee ?? return None
     if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, symbol.key) ?? return None
+        row: sema_registration_callable_row_of(graph, symbol) ?? return None
         if row == .Foreign(module_index, index) {
             if graph.modules[module_index].foreign_functions[index].owner != SemaRegistrationForeignOwner.ExternRust || graph.modules[module_index].foreign_functions[index].declaration.generated -> return None
             loop parameter in graph.modules[module_index].foreign_functions[index].declaration.params {
@@ -4452,11 +4462,15 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
         if !sema_scope_declaration_is(environment, program, owner.id, SemaScopeDeclarationKind.Enum) -> return sema_check_expression(written, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         phase_ty: sema_expression_field_owner_type(environment, program, owner.module_identity, Type.Named{name: owner.name}, [String]{})
         owner_text: sema_scope_module_text(environment, program, owner.module_identity)
+        owner_key: sema_symbol_key(program, context, owner.id)
+        preparation: sema_symbol_id(program, context, SymbolKind.Variant, owner_text, owner_key, "Preparation")
+        build: sema_symbol_id(program, context, SymbolKind.Variant, owner_text, owner_key, "Build")
+        runtime: sema_symbol_id(program, context, SymbolKind.Variant, owner_text, owner_key, "Runtime")
         copy_phase: NodeKind.CopyPhase{
             owner: owner.id,
-            preparation: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Preparation"),
-            build: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Build"),
-            runtime: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Runtime"),
+            preparation: preparation,
+            build: build,
+            runtime: runtime,
         }
         return sema_expr_expected(sema_node(context, phase_ty, copy_phase, span), expected, environment, program, diagnostics)
     }
@@ -4531,7 +4545,7 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     }
     // E0420: a `Type{ uninit }` binding read before
     // every path wrote it reports once, then the read resolves as usual.
-    if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].symbol.id.key) != None {
+    if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].key) != None {
         diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "assign `{name}` on every path before reading it; a fixed list needs every slot assigned"))
     }
     // The ambient `input`, when no binding shadows it: the program's lines.
@@ -7065,7 +7079,7 @@ sema_expr_mark_failed_call_reads: fn(expr: Expr, scopes: SemaScopeTable, state: 
     }
     loop name in names {
         index: sema_scope_resolve_index(scopes, name) ?? next
-        state.used_keys[scopes.bindings[index].symbol.id.key] = true
+        state.used_keys[scopes.bindings[index].key] = true
     }
 }
 

@@ -10,7 +10,7 @@
 // The record writer runs the same module map the other way: the Core check's
 // graph indexes become module key positions before a row is encoded.
 use {
-    jet_foundation.[Item, compiler_transfer_rows, module_text]
+    jet_foundation.[Item, compiler_transfer_rows, module_text, symbol_find]
     jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, sema_core_body_store_new]
 }
 
@@ -94,7 +94,7 @@ jet_driver_core_record_seeds: fn(modules: &[JetDriverLoadedModule], record_modul
 // jet_driver_core_record_seeds took from `record`) their finalized results
 // and the store their bodies are taken from: each result is the record's
 // module row with its module indexes rebased to the graph, and the store
-// keys the body packets of those modules by function key
+// keys the body packets of those modules by function SymbolID
 // (SemaRegistrationGraph.seeded_results, .core_bodies). Finalization then
 // takes the seeded modules as they are and checks none of their bodies.
 // The seeded modules' comptime values (section 8) are pushed to `values`, in
@@ -108,7 +108,7 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
     loop _ in 0..<record.module_names.len() -> graph_modules.push(-1)
     positions := [Int]{}
     loop index in 0..<graph.seeded {
-        position: record.module_rows.get(module_text(graph.module_table, graph.modules[index].module_identity)) ?? return Err("seeded module `{graph.modules[index].module_name}` isn't one of the Core record's")
+        position: record.module_rows.get(graph.modules[index].module_identity.id) ?? return Err("seeded module `{graph.modules[index].module_name}` isn't one of the Core record's")
         graph_modules[position] = index
         positions.push(position)
     }
@@ -120,13 +120,16 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
         module_values := jet_driver_core_record_values(record, position) ?? return Err(err)
         values.extend(module_values.move())
     }
-    rows := [String:SemaCoreBodyRow]{}
+    rows := [U32:SemaCoreBodyRow]{}
     loop index in 0..<record.body_keys.len() {
-        position: record.module_rows.get(record.body_modules[index]) ?? return Err("Core function `{record.body_keys[index]}` belongs to {record.body_modules[index]}, which the record doesn't key")
+        position: record.module_rows.get(record.body_modules[index].id) ?? return Err("Core function `{record.body_keys[index]}` belongs to {module_text(record.module_table, record.body_modules[index])}, which the record doesn't key")
         module_index: graph_modules[position]
         if module_index < 0 -> next
-        if rows.get(record.body_keys[index]) != None -> return Err("the Core record keys function `{record.body_keys[index]}` twice")
-        rows[record.body_keys[index].copy()] = SemaCoreBodyRow{element: index, module_index: module_index}
+        // The graph interned the record's symbol ranges, so every recorded
+        // body's key names its function there.
+        id: symbol_find(graph.symbols, record.body_keys[index]) ?? return Err("the Core record's function `{record.body_keys[index]}` has no symbol in its symbol ranges")
+        if rows.get(id.id) != None -> return Err("the Core record keys function `{record.body_keys[index]}` twice")
+        rows[id.id] = SemaCoreBodyRow{element: index, module_index: module_index}
     }
     decls: jet_driver_core_record_decls(record) ?? return Err(err)
     keyed: rows.len()

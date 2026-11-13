@@ -7,7 +7,7 @@
 // writes is a `&` parameter, from a second probe that checks each function
 // with its `:=` variables as `&` (sema_script_helper_writes).
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, SymbolKeys, TargetMachine]
     jet_sema.[
         SemaComptimeDeclarationStage, SemaForeignProviderInput, SemaRegistrationModule, SemaRegistrationPackagePolicy, SemaScriptVariable,
         sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_function, sema_script_function_hides,
@@ -258,7 +258,7 @@ jet_driver_script_probe_stage: fn(
     canonical := jet_driver_canonical_effect_module(request.canonical_effect_source, load.module_table) ?? return None
     canonical_identity := canonical.module_identity
     inputs.push(canonical)
-    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, load.module_table.copy(), providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads) ?? return None
+    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, [SymbolKeys]{}, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, load.module_table.copy(), providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads) ?? return None
     stage := sema_collect_comptime_declarations(graph, package_policies, request.compiler_threads, None) ?? return None
     Val(stage)
 }

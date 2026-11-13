@@ -200,7 +200,7 @@ sema_function_header_memo_config: fn(function: Func) -> SemaMemoConfig Never! {
 // instance, so no single store to report) or a non-function.
 sema_function_header_memo_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaMemoConfig? {
     if program.registration_graph == .Val(graph) {
-        row: sema_registration_callable_row(graph, target.key) ?? return None
+        row: sema_registration_callable_row_of(graph, target) ?? return None
         if row == .Function(module_index, index) {
             if graph.modules[module_index].functions[index].declaration.type_params.len() > 0 -> return None
             return Val(sema_function_header_memo_config(graph.modules[module_index].functions[index].declaration))

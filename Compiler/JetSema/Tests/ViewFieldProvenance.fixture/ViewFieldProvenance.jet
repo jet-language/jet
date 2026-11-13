@@ -1,5 +1,5 @@
 // Production stored-view bookkeeping and return checking; no host view carrier.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKind, Type, ViewSource, ViewSourceProjection, module_none, symbol_id]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKeys, SymbolKind, Type, ViewSource, ViewSourceProjection, module_none, symbol_key_text, symbol_keys_intern, symbol_local_keys]
 use jet_parser.[parse_source]
 use jet_sema.[SemaOwnershipMoveOrigin, SemaOwnershipMovedPlace, SemaSourceSegment, check_program, sema_check_context_init, sema_has_error_since, sema_ownership_clear_moved, sema_ownership_declare_binding, sema_ownership_place_exact, sema_ownership_place_from_expr_inner, sema_ownership_state_init, sema_scope_declare_local, sema_scope_init, sema_stmt_local_view_facts_for_expr, sema_stmt_record_binding_views, sema_stmt_record_return_views]
 
@@ -11,8 +11,13 @@ view_field_binding: fn(name: String, value: Expr, ty: Type, span: Span) -> Bindi
     Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: span, sigil_span: None, pattern: None, ty: Val(ty), ty_span: None, init: value, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}
 }
 
-view_field_symbol: fn(name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
-    Symbol{id: symbol_id(kind, "fixture", "window", name), kind: kind, name: name, module_identity: module_none(), owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
+view_field_key: fn(name: String, kind: SymbolKind) -> String Never! {
+    symbol_key_text(kind, "fixture", "window", name)
+}
+
+// A body symbol of the fixture's `window`, interned in the body's `keys`.
+view_field_symbol: fn(keys: &SymbolKeys, name: String, kind: SymbolKind, ty: Type, span: Span) -> Symbol Never! {
+    Symbol{id: symbol_keys_intern(keys, view_field_key(name, kind)), kind: kind, name: name, module_identity: module_none(), owner: Val("window"), span: span, ty: Val(ty), visibility: 0}
 }
 
 view_field_window: fn(value: Expr, span: Span) -> Expr Never! {
@@ -24,18 +29,21 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     use_span: Span{start: 30, end: 40}
     view_type: Type.Apply{name: "View", args: [Type]{Type.Named{name: "Int"}}}
     list_type: Type.List{element: Type.Named{name: "Int"}}
-    owner: view_field_symbol("values", if parameter -> SymbolKind.Parameter else -> SymbolKind.Local, list_type, span)
-    selected: view_field_symbol("selected", SymbolKind.Local, view_type, use_span)
+    owner_kind: if parameter -> SymbolKind.Parameter else -> SymbolKind.Local
+    context := sema_check_context_init()
+    owner: view_field_symbol(context.arena.tree.symbols, "values", owner_kind, list_type, span)
+    selected: view_field_symbol(context.arena.tree.symbols, "selected", SymbolKind.Local, view_type, use_span)
     scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
-    context := sema_check_context_init()
     diagnostics := [Diagnostic]{}
-    view_field_require(sema_scope_declare_local(scopes, owner, false, access, None, false), "owner is declared")
-    sema_ownership_declare_binding(state, owner, parameter)
-    if parameter -> context.return_view_parameter_keys.push(owner.id.key)
-    view_field_require(sema_scope_declare_local(scopes, selected, false, AccessConvention.Read, None, false), "range binding is declared")
+    owner_key: view_field_key("values", owner_kind)
+    selected_key: view_field_key("selected", SymbolKind.Local)
+    view_field_require(sema_scope_declare_local(scopes, owner, owner_key, false, access, None, false), "owner is declared")
+    sema_ownership_declare_binding(state, owner, owner_key, parameter)
+    if parameter -> context.return_view_parameter_keys.push(owner_key.copy())
+    view_field_require(sema_scope_declare_local(scopes, selected, selected_key, false, AccessConvention.Read, None, false), "range binding is declared")
     slice: Expr.Slice{base: Expr.Ident{name: "values", span: use_span, id: AST_NODE_GENERATED}, start: Expr.Int{value: 0, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, end: Expr.Int{value: 1, span: use_span, width: None, raw: None, id: AST_NODE_GENERATED}, range: None, span: use_span, id: AST_NODE_GENERATED}
-    sema_ownership_declare_binding(state, selected, false)
+    sema_ownership_declare_binding(state, selected, selected_key, false)
     view_field_require(sema_stmt_record_binding_views(view_field_binding("selected", slice, view_type, use_span), view_type, scopes, state, context, diagnostics), "production range binding records its owner")
     window: view_field_window(Expr.Ident{name: "selected", span: use_span, id: AST_NODE_GENERATED}, use_span)
     valid: sema_stmt_record_return_views(window, Type.Named{name: "Window"}, scopes, state, context, diagnostics)
@@ -125,10 +133,11 @@ view_pattern_reinitialization: fn() {
     // The state hook itself must retain the whole moved ancestor even when a
     // caller has already admitted the descendant assignment.
     span: Span{start: 10, end: 20}
-    owner: view_field_symbol("pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
+    locals := symbol_local_keys()
+    owner: view_field_symbol(locals, "pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
     scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
-    view_field_require(sema_scope_declare_local(scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
+    view_field_require(sema_scope_declare_local(scopes, owner, view_field_key("pair", SymbolKind.Local), true, AccessConvention.Read, None, false), "reinit owner declared")
     base: Expr.Field{base: Expr.Ident{name: "pair", span: span, id: AST_NODE_GENERATED}, member: "inner", span: span, id: AST_NODE_GENERATED}
     place: sema_ownership_place_from_expr_inner(base, scopes) ?? panic("missing ancestor place")
     state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "consume_inner", share_ty: None}})

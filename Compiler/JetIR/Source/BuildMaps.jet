@@ -21,7 +21,7 @@
 // frozen buffer (capacity 0: static, empty) has no trailer: its entries are
 // all in order, found by binary search, as every Map of other keys is.
 
-use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, Type, TBinaryOp, BodyMapEntry, BodyOrFallback, StmtKind, TypeTupleField, TPanicLoc, TPanicLocal, body_each_expr_child, body_each_stmt_child, name_rows_set, name_rows_value, symbol_none, type_carrier_identity]
 
 // The entry tuple `(key: K, value: V)` of a Map type, None for any other.
 ir_map_entry_type: fn(ty: Type) -> Type? Never! {
@@ -1508,7 +1508,7 @@ ir_map_take_variable: fn(p: IRProgram, b: IRBuilder, id: Int) -> TLocal? Never! 
 }
 
 ir_map_take_name: fn(local: TLocal) -> String Never! {
-    if local.symbol_id == .Val(id) -> return "{local.name}/{id.key}"
+    if local.symbol_id == .Val(id) -> return "{local.name}/{id.id}"
     local.name
 }
 
@@ -1581,7 +1581,7 @@ ir_map_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     entries: ir_load_word(m, b, map, 16)
     entry: ir_element_address(m, b, entries, at, shape.stride)
     value: ir_address_at(m, b, entry, shape.value.offset)
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     if m.types[value_row].kind != .Aggregate {
         b.bindings.push(IRBinding{name: local.name, slot: value, indirect: value_row, symbol: symbol})
         return

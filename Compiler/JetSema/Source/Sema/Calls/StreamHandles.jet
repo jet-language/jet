@@ -19,7 +19,6 @@ use jet_foundation.[
     TMethodRef,
     Type,
     core_source_owns_type,
-    symbol_id,
     ast_empty_call_arg_flags,
     expr_span,
 ]
@@ -386,14 +385,15 @@ sema_stream_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExp
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-sema_stream_handle_method_ref: fn(owner: String, method: String) -> TMethodRef Never! {
+sema_stream_handle_method_ref: fn(owner: String, method: String, program: SemaProgramTables, context: &SemaCheckContext) -> TMethodRef Never! {
     owner_module := sema_stream_handle_owner_module(owner)
-    TMethodRef{symbol: symbol_id(SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
+    TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
 sema_stream_handle_lines_value: fn(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
-    value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
+    method: sema_stream_handle_method_ref(owner, "lines", program, context)
+    value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
     // records no handle effect.

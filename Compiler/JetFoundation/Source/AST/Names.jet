@@ -30,9 +30,15 @@ NAME_TABLE_INITIAL_SLOTS: 1024
 
 // A table whose id 0 is the empty spelling (`name_empty`).
 name_table: fn() -> NameTable Never! {
-    slots := [Int]{}
-    loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> slots.push(0)
-    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
+    name_table_sized(NAME_TABLE_INITIAL_SLOTS)
+}
+
+// An empty table of `slots` slots (a power of two) to start; it grows as
+// `name_table` does. A small table (a body's own symbol keys) starts small.
+name_table_sized: fn(slots: Int) -> NameTable Never! {
+    initial := [Int]{}
+    loop _ in 0..<slots -> initial.push(0)
+    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: initial, mask: slots - 1}
     name_intern_bytes(table, [U8]{}, 0, 0)
     table
 }

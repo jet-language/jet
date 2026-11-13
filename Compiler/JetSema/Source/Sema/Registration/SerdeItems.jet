@@ -14,6 +14,7 @@
 // or call a check records (sema_codec_demand_type), or a wire field of a
 // demanded generated codec.
 use jet_foundation.[
+    symbol_table_key,
     AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
@@ -1547,12 +1548,12 @@ SemaCodecDemand: struct {
 // The generated codec methods by symbol key, so a checked call and a codec
 // wave find their impl rows directly.
 sema_serde_index_codec_methods: fn(graph: &SemaRegistrationGraph) {
-    rows := [String:SemaRegistrationRowRef]{}
+    rows := [U32:SemaRegistrationRowRef]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
             if !graph.modules[module_index].impls[row].declaration.is_generated_serde -> next
             loop method_index in 0..<graph.modules[module_index].impls[row].methods.len() {
-                rows[graph.modules[module_index].impls[row].methods[method_index].symbol.id.key] = SemaRegistrationRowRef{module_index: module_index, row: row}
+                rows[graph.modules[module_index].impls[row].methods[method_index].symbol.id.id] = SemaRegistrationRowRef{module_index: module_index, row: row}
             }
         }
     }
@@ -1637,7 +1638,7 @@ sema_codec_demand_call: fn(program: SemaProgramTables, callee: SymbolID?, value:
     if program.registration_graph == .Val(graph) {
         if graph.codec_method_rows.len() == 0 -> return
         if callee == .Val(id) {
-            if graph.codec_method_rows.get(id.key) == .Val(found) {
+            if graph.codec_method_rows.get(id.id) == .Val(found) {
                 trait_name: graph.modules[found.module_index].impls[found.row].trait_name ?? return
                 sema_codec_demand_add(graph.codec_demand, trait_name, [String]{graph.modules[found.module_index].impls[found.row].target_type_name})
                 return
@@ -1673,12 +1674,12 @@ sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row
     Val(sema_serde_items_method_body(generated, method))
 }
 
-// sema_codec_pending_body of the method keyed `key` of the impl of a nominal
+// sema_codec_pending_body of the method `id` of the impl of a nominal
 // named `type_name`, which a nominal's method row shares.
-sema_codec_pending_method_body: fn(graph: SemaRegistrationGraph, type_name: String, key: String) -> [Stmt]? Never! {
+sema_codec_pending_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: SymbolID) -> [Stmt]? Never! {
     loop reference in sema_registration_impl_rows_named(graph, type_name) {
         loop method in graph.modules[reference.module_index].impls[reference.row].methods {
-            if method.symbol.id.key == key -> return sema_codec_pending_body(graph, reference.module_index, reference.row, method.declaration.name)
+            if method.symbol.id == id -> return sema_codec_pending_body(graph, reference.module_index, reference.row, method.declaration.name)
         }
     }
     None
@@ -1808,7 +1809,7 @@ sema_codec_undo_body: fn(graph: &SemaRegistrationGraph, module_index: Int, row: 
 // same way. sema_derive_waves checks the demanded ones after the body pass;
 // a compile that checks every Core body (`jet check Core`) demands them all.
 sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
-    rows := [String:SemaDeriveMethodRow]{}
+    rows := [U32:SemaDeriveMethodRow]{}
     types := [String:[String]]{}
     loop module_index in 0..<graph.modules.len() {
         if graph.modules[module_index].source_file != SEMA_PRELUDE_ERROR_SOURCE_PATH && !module_is_core(graph.modules[module_index].module_identity) -> next
@@ -1816,8 +1817,9 @@ sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
             loop method in 0..<graph.modules[module_index].nominals[nominal].methods.len() {
                 declaration: graph.modules[module_index].nominals[nominal].methods[method].declaration
                 if !declaration.compiler_generated || (declaration.name != "equal" && declaration.name != "compare") -> next
-                key: graph.modules[module_index].nominals[nominal].methods[method].symbol.id.key
-                rows[key] = SemaDeriveMethodRow{module_index: module_index, nominal: nominal, method: method}
+                id: graph.modules[module_index].nominals[nominal].methods[method].symbol.id
+                key: symbol_table_key(graph.symbols, id)
+                rows[id.id] = SemaDeriveMethodRow{module_index: module_index, nominal: nominal, method: method}
                 leaf: sema_serde_named_leaf(graph.modules[module_index].nominals[nominal].symbol.name)
                 keys := types.get(leaf) ?? [String]{}
                 keys.push(key.copy())
@@ -1839,8 +1841,8 @@ sema_derive_demand_call: fn(program: SemaProgramTables, callee: SymbolID?) {
     if program.registration_graph == .Val(graph) {
         if graph.derive_method_rows.len() == 0 -> return
         id: callee ?? return
-        if graph.derive_method_rows.get(id.key) == None -> return
-        sema_derive_demand_add(graph.derive_demand, [String]{id.key})
+        if graph.derive_method_rows.get(id.id) == None -> return
+        sema_derive_demand_add(graph.derive_demand, [String]{symbol_table_key(graph.symbols, id)})
     }
 }
 

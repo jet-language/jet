@@ -72,6 +72,7 @@ use {
         effect_root_removed,
         ModuleID,
         ModuleTable,
+        module_find,
         module_intern,
         module_none,
         module_table,
@@ -4074,9 +4075,11 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row: request.core_sources[unit.file_index]
     if request.core_record == .Val(record) {
-        if jet_driver_core_record_loads(request, record) && record.module_rows.get(jet_driver_unit_module_identity(unit)) == .Val(index) {
-            bytes: jet_driver_core_record_registration_bytes(record, index) ?? panic("the Core record: {err}")
-            return JetDriverParseJob.Record{row: bytes, module_name: row.module_name, index: index}
+        if jet_driver_core_record_loads(request, record) && module_find(record.module_table, jet_driver_unit_module_identity(unit)) == .Val(recorded) {
+            if record.module_rows.get(recorded.id) == .Val(index) {
+                bytes: jet_driver_core_record_registration_bytes(record, index) ?? panic("the Core record: {err}")
+                return JetDriverParseJob.Record{row: bytes, module_name: row.module_name, index: index}
+            }
         }
     }
     JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: request.core_tests != "" && row.path == request.core_tests}

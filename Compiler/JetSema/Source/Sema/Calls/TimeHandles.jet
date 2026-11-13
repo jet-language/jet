@@ -352,7 +352,7 @@ sema_time_civil_method: fn(receiver: Expr, receiver_value: TExpr, owner: String,
         if typed.pin_arguments {
             borrowed: sema_ownership_places_from_expr_in_state(receiver, scopes, state).len() > 0
             pin_slot: -typed.values.len() - 1
-            symbol: sema_call_binder_ref_symbol(environment, program, sema_scope_function_owner_key(scopes), typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
+            symbol: sema_call_binder_ref_symbol(environment, program, context, sema_scope_function_owner_key(scopes), typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
             local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, receiver_value.ty)
             local.generated = true
             local.deref = borrowed
@@ -361,7 +361,7 @@ sema_time_civil_method: fn(receiver: Expr, receiver_value: TExpr, owner: String,
             pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
             pinned_receiver = sema_tree_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
         }
-        loop pin in sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, span) -> pins.push(pin)
+        loop pin in sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, context, span) -> pins.push(pin)
         packed: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, context, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         result: sema_time_civil_result(owner, method, packed.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
         values := [TExpr]{}

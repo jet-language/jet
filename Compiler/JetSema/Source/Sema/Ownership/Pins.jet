@@ -50,7 +50,7 @@ sema_pin_target: fn(ty: Type) -> Type? Never! {
 sema_pin_view_fact: fn(fact: SemaOwnershipViewFact, scopes: SemaScopeTable) -> Bool Never! {
     slot: sema_scope_name_slot(scopes, fact.carrier) ?? return false
     loop position in scopes.name_positions[slot] {
-        if scopes.bindings[position].symbol.id.key == fact.carrier_key {
+        if scopes.bindings[position].key == fact.carrier_key {
             ty: scopes.bindings[position].symbol.ty ?? return false
             return sema_pin_type(ty)
         }

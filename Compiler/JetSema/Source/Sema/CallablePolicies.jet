@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_CONTEXT_KEY, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_CONTEXT_KEY, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_key_text]
 
 sema_policy_builtin: fn(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -79,7 +79,7 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
     loop item in items {
         if item == .Func(target) {
             names: uses.get(target.name) ?? next
-            signature: sema_function_symbol_type(target, false, symbol_id(SymbolKind.Function, module_identity, "", target.name), source_file, origin, segments)
+            signature: sema_function_symbol_type(target, false, symbol_key_text(SymbolKind.Function, module_identity, "", target.name), source_file, origin, segments)
             loop used in names {
                 name: used.name
                 declaration := UserPolicyDecl?{None}
@@ -169,7 +169,7 @@ sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, 
 
 // The policy calls of a registered callable, read from its row in place.
 sema_policy_registered_calls: fn(graph: SemaRegistrationGraph, target: SymbolID) -> [Call]? Never! {
-    row: sema_registration_callable_row(graph, target.key) ?? return None
+    row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {
         .Function(module_index, index) -> Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
         .Foreign(_, _) -> None

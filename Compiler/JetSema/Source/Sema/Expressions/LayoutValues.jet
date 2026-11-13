@@ -18,7 +18,8 @@ use jet_foundation.[
     Type,
     checked_symbol_local,
     expr_span,
-    symbol_id,
+    symbol_key_text,
+    symbol_table_key,
     type_identity_equal,
     type_name,
     core_source_owns_type,
@@ -240,13 +241,14 @@ sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Sp
     layout_ty: Type.Named{name: "Layout"}
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
-    id: symbol_id(SymbolKind.Local, local_module, owner, name)
+    key: symbol_key_text(SymbolKind.Local, local_module, owner, name)
+    id: sema_symbol_id_of(program, context, key)
     symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: name_span, ty: Val(layout_ty), visibility: 0}
-    if !sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false) {
+    if !sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false) {
         diagnostics.push(sema_already_defined(name, name_span))
         return false
     }
-    sema_ownership_declare_binding(state, symbol, false)
+    sema_ownership_declare_binding(state, symbol, key, false)
     complete := true
     checked := [TStmt]{}
     seen := [String]{}
@@ -261,11 +263,11 @@ sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Sp
                 complete = false
                 next
             }
-            if sema_layout_element_key(expr) == .Val(key) {
-                if seen.contains(key) {
+            if sema_layout_element_key(expr) == .Val(element_key) {
+                if seen.contains(element_key) {
                     diagnostics.push(sema_lint("E2934", expr_span(expr), "This constraint repeats one already written in this `Layout{{ … }}` body", "An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "Remove the duplicate line, or change it if a different constraint was meant"))
                 } else {
-                    seen.push(key)
+                    seen.push(element_key)
                 }
             }
             checked.push(TStmt.ExprStmt{value: value, span: expr_span(expr)})
@@ -374,7 +376,7 @@ sema_expression_measurement_source_call: fn(function: String, values: [TExpr], r
     if program.registration_graph == .Val(graph) {
     source_index: sema_registration_module_index(graph, source_identity) ?? return None
     callee: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
-    callee_id: sema_registration_callable_id(graph, callee.symbol.id.key) ?? return None
+    callee_id: sema_registration_callable_id(graph, symbol_table_key(graph.symbols, callee.symbol.id)) ?? return None
     arguments: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
     type_args: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}

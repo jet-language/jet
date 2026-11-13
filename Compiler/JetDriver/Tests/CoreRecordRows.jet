@@ -12,7 +12,6 @@ use {
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[module_text]
 }
 
 core_record_rows_request: fn() -> JetDriverCompileRequest {
@@ -55,11 +54,11 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     record: jet_driver_core_record_open(bytes) ?? panic("the record doesn't open: {err}")
     row: jet_driver_core_record_module(record, 0) ?? panic("the first module row doesn't decode: {err}")
     assert_eq(row.module_name, record.module_names[0])
-    assert_eq(module_text(record.module_table, row.module_identity), record.module_identities[0])
+    assert(row.module_identity == record.module_identities[0])
     held := 0
     loop index in 0..<record.module_names.len() {
         values: jet_driver_core_record_values(record, index) ?? panic("module {index}'s value rows don't decode: {err}")
-        loop value in values -> assert_eq(module_text(record.module_table, value.module_identity), record.module_identities[index])
+        loop value in values -> assert(value.module_identity == record.module_identities[index])
         held += values.len()
     }
     assert_eq(held, landed)

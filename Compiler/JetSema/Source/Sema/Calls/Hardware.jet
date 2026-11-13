@@ -149,7 +149,7 @@ sema_hardware_expr_is_dma_start: fn(expression: Expr) -> Bool Never! {
     }
 }
 
-sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, scopes: &SemaScopeTable) -> Bool {
+sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, key: String, scopes: &SemaScopeTable) -> Bool {
     if !sema_hardware_expr_is_dma_start(init) -> return false
     init_span := expr_span(init)
     found := -1
@@ -163,7 +163,7 @@ sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, scopes: 
     if found < 0 -> return false
     fact := scopes.hardware_pending_transfers[found]
     _ := scopes.hardware_pending_transfers.remove(found, .Slot)
-    fact = sema_hardware_bind_dma_transfer_identity(fact, symbol.name, symbol.id.key, scopes.current)
+    fact = sema_hardware_bind_dma_transfer_identity(fact, symbol.name, key, scopes.current)
     scopes.hardware_transfers.push(fact.copy())
     scopes.hardware_definite_transfers.push(fact)
     true
@@ -249,7 +249,7 @@ sema_hardware_board_path: fn(expression: Expr, environment: SemaScopeEnvironment
         registered_module: graph.modules[module_index]
         loop import in registered_module.imports {
             loop binding in import.bindings {
-                if binding.local != alias || binding.symbol.id.key != visible.id.key || binding.symbol.kind != SymbolKind.Import -> next
+                if binding.local != alias || binding.symbol.id != visible.id || binding.symbol.kind != SymbolKind.Import -> next
                 profile_id := sema_hardware_import_module(graph, binding)
                 if !profile_id.starts_with("board.") -> return None
                 return Val(SemaHardwareBoardPath{profile_id: profile_id, segments: path})

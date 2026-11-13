@@ -6,6 +6,7 @@
 use {
     unicode: core.text
     jet_foundation.[
+        symbol_builtin_keys,
         AST_NODE_GENERATED,
         AccessConvention,
         CORE_SOURCE_OWNED_ROWS,
@@ -66,9 +67,12 @@ use {
         SerdeWireShape,
         Span,
         StructDef,
+        SYMBOL_LOCAL_BOUND,
         Symbol,
         SymbolID,
+        SymbolKeys,
         SymbolKind,
+        SymbolTable,
         TagMarker,
         TraitImplBlock,
         TraitMethodSig,
@@ -127,7 +131,18 @@ use {
         owned_trait_is_operator,
         owned_trait_keyed_by_argument,
         sema_reserved_type_name,
-        symbol_id,
+        checked_test_artifact_key,
+        symbol_find,
+        symbol_intern,
+        symbol_is_local,
+        symbol_key_text,
+        symbol_keys,
+        symbol_keys_empty,
+        symbol_mint,
+        symbol_none,
+        symbol_table_key,
+        symbol_table_of,
+        symbol_table_open,
         type_identity,
         type_identity_key,
         type_name,
@@ -513,10 +528,10 @@ SemaRegistrationImpl: struct {
     operator_marker: OperatorMarker?
     operator_rhs: Type?
     target_os: String?
-    // The symbol key of the nominal `target_type` names from the impl's
+    // The symbol id of the nominal `target_type` names from the impl's
     // module, resolved once when the trait index is built
     // (sema_registration_index_impl_traits); None while unresolved.
-    target_nominal_key: String?{None}
+    target_nominal: SymbolID?{None}
 }
 
 SemaRegistrationNominal: struct {
@@ -798,6 +813,11 @@ SemaRegistrationGraph: struct {
     // ModuleID index -> position in `modules`, -1 for an id with no row;
     // fixed at graph construction.
     module_rows: [Int]
+    // The run's symbols (Docs/spec/compiler-data.md): each module's range,
+    // reserved before the module is prepared, the Core record's ranges
+    // when the graph takes its rows, and the open range the serial passes
+    // after preparation intern into.
+    symbols: SymbolTable
     // The first `seeded` rows of `modules` came registered and finalized
     // (sema_registration_prepare_graph `seeds`): the registration passes
     // that bind, expand or edit a module start after them.
@@ -843,17 +863,17 @@ SemaRegistrationGraph: struct {
     nominal_row_buckets: [[SemaRegistrationRowRef]]
     impl_row_slots: [String:Int]
     impl_row_buckets: [[SemaRegistrationRowRef]]
-    // Nominal SymbolId key -> first registered nominal row. Kept current from
+    // Nominal SymbolID -> first registered nominal row. Kept current from
     // graph construction on: every nominal row pushed later (compiler
     // builtins, user templates, minted failure unions) is indexed as it lands.
-    nominal_symbol_rows: [String:SemaRegistrationRowRef]
+    nominal_symbol_rows: [U32:SemaRegistrationRowRef]
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
     compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
-    // Resolved trait SymbolId key -> the impl rows implementing it, in
+    // Resolved trait symbol id -> the impl rows implementing it, in
     // module/row order (Rust's keyed trait registry), built with the callable
     // index; a bound query before then (`impl_traits_indexed` false) scans
     // every impl.
-    impl_trait_slots: [String:Int]{[String:Int]{}}
+    impl_trait_slots: [U32:Int]{[U32:Int]{}}
     impl_trait_buckets: [[SemaRegistrationRowRef]]{[[SemaRegistrationRowRef]]{}}
     impl_traits_indexed: Bool{false}
     // Spelled trait name (an impl's `trait_name`, and its registered trait
@@ -874,10 +894,10 @@ SemaRegistrationGraph: struct {
     // the graph, so method lookup reads only the owning modules instead of
     // walking CORE_SOURCE_OWNED_ROWS for every module on every call.
     source_impl_owner_modules: [String:[Int]]{[String:[Int]]{}}
-    // The inferred never-return set: the symbol keys of the functions that never return to
+    // The inferred never-return set: the SymbolIDs of the functions that never return to
     // their caller, one fixed point once every declaration is registered
     // (sema_divergence_solve).
-    diverging_functions: [String:Bool]{[String:Bool]{}}
+    diverging_functions: [U32:Bool]{[U32:Bool]{}}
     // The symbol keys of the bodies that reach a nominal whose declared
     // member type names nothing (sema_checked_unusable_bodies): the check
     // skips them and records each as skipped, so it reports no follow-on
@@ -930,24 +950,24 @@ SemaRegistrationGraph: struct {
     // (JET_KEEP_GOING, `jet check Core`), so none waits for demand.
     every_core_body: Bool{false}
     // This rule demand (sema_serde_index_codec_methods): every generated
-    // codec impl registers its header only. `codec_method_rows` maps each
-    // generated codec method key to its impl row; `codec_demand` collects the
+    // codec impl registers its header only. `codec_method_rows` maps the
+    // SymbolID of each generated codec method to its impl row; `codec_demand` collects the
     // Encode/Decode requirements the checks reach (bound checks, codec calls,
     // nested wire fields), and `codec_wave_rows` ("{module}:{row}") names the
     // impls whose bodies the current codec wave checks (sema_codec_waves).
-    codec_method_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
+    codec_method_rows: [U32:SemaRegistrationRowRef]{[U32:SemaRegistrationRowRef]{}}
     codec_demand: Shared<SemaCodecDemand>
     codec_wave_rows: [String:Bool]{[String:Bool]{}}
     // Demand-checked derives (sema_derive_index_methods): the derived
     // `equal`/`compare` methods of compiler-owned modules (the Prelude error
     // module, Core) are checked only when a checked call names one or an
     // Equatable/Comparable bound is met at its type. `derive_method_rows`
-    // maps each such method key to its row, `derive_type_methods` each owner's
+    // maps each such method's SymbolID to its row, `derive_type_methods` each owner's
     // leaf name to its method keys, `derive_demand` collects the keys the
     // checks reach, `derive_wave_rows` names the methods the current derive
     // wave checks (sema_derive_waves), and `derive_checked` every method a
     // wave of this finalization checked.
-    derive_method_rows: [String:SemaDeriveMethodRow]{[String:SemaDeriveMethodRow]{}}
+    derive_method_rows: [U32:SemaDeriveMethodRow]{[U32:SemaDeriveMethodRow]{}}
     derive_type_methods: [String:[String]]{[String:[String]]{}}
     derive_demand: Shared<SemaDeriveDemand>
     derive_wave_rows: [String:Bool]{[String:Bool]{}}
@@ -1064,14 +1084,20 @@ sema_resolved_name: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationR
     }
 }
 
-// The symbol's SymbolId key.
-sema_resolved_key: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
+// The symbol's SymbolID.
+sema_resolved_id: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SymbolID Never! {
     if resolved.place == {
-        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].id.key
-        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.id.key
-        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.id.key
-        .Detached(symbol) -> symbol.id.key
+        .Declared(module_index, row) -> graph.modules[module_index].symbols[row].id
+        .Imported(module_index, import_index, binding) -> graph.modules[module_index].imports[import_index].bindings[binding].symbol.id
+        .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.id
+        .Detached(symbol) -> symbol.id
     }
+}
+
+// The symbol's key text (a registered symbol's: graph resolution yields no
+// body's own id).
+sema_resolved_key: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> String Never! {
+    symbol_table_key(graph.symbols, sema_resolved_id(graph, resolved))
 }
 
 sema_resolved_ty: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> Type? Never! {
@@ -1081,10 +1107,6 @@ sema_resolved_ty: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationRes
         .Nominal(module_index, row) -> graph.modules[module_index].nominals[row].symbol.ty
         .Detached(symbol) -> symbol.ty
     }
-}
-
-sema_resolved_id: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> SymbolID Never! {
-    SymbolID{key: sema_resolved_key(graph, resolved)}
 }
 
 sema_resolved_module_identity: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol) -> ModuleID Never! {
@@ -1278,18 +1300,18 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
     Type.Fn{params: params, ret: Val(ret), effect_bound: None, param_contract: sema_registration_extern_contract(function.params), call_metadata: Val(metadata), return_view_provenance: None}
 }
 
-sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner: SymbolID, signature: Type) -> [SemaRegistrationParameter] Never! {
+sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner_key: String, symbols: &SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in function.params {
         parameter_ty: if parameter.variadic -> Type.List{element: parameter.ty} else -> parameter.ty
         parameters.push(SemaRegistrationParameter{
             index: index,
             symbol: Symbol{
-                id: symbol_id(SymbolKind.Parameter, module_identity, owner.key, parameter.name),
+                id: symbol_mint(symbols, SymbolKind.Parameter, module_identity, owner_key, parameter.name),
                 kind: SymbolKind.Parameter,
                 name: parameter.name,
                 module_identity: module_id,
-                owner: Val(owner.key),
+                owner: Val(owner_key),
                 span: parameter.name_span,
                 ty: Val(parameter_ty),
                 visibility: 0,
@@ -1306,8 +1328,8 @@ sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID,
     parameters
 }
 
-sema_registration_function_signature: fn(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
-    projected: sema_function_symbol_type(func, raw_protocol_return, owner, fallback_source_file, fallback_source_origin, source_segments)
+sema_registration_function_signature: fn(func: Func, raw_protocol_return: Bool, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+    projected: sema_function_symbol_type(func, raw_protocol_return, owner_key, fallback_source_file, fallback_source_origin, source_segments)
     if func.declared_effects == None -> return projected
     if projected == {
         .Fn(params, ret, _, contract, metadata, provenance) -> Type.Fn{params: params, ret: ret, effect_bound: func.declared_effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
@@ -1331,7 +1353,7 @@ sema_registration_signature_metadata: fn(signature: Type) -> FunctionCallMetadat
     }
 }
 
-sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, module_identity: String, owner: SymbolID, signature: Type) -> [SemaRegistrationParameter] Never! {
+sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, module_identity: String, owner_key: String, symbols: &SymbolTable, signature: Type) -> [SemaRegistrationParameter] Never! {
     defaults: sema_registration_signature_metadata(signature).map(fn(row) { row.defaults }) ?? [FunctionDefaultRef?]{}
     parameters := [SemaRegistrationParameter]{}
     loop (index, parameter) in func.params {
@@ -1341,11 +1363,11 @@ sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, modul
         parameters.push(SemaRegistrationParameter{
             index: index,
             symbol: Symbol{
-                id: symbol_id(SymbolKind.Parameter, module_identity, owner.key, parameter.name),
+                id: symbol_mint(symbols, SymbolKind.Parameter, module_identity, owner_key, parameter.name),
                 kind: SymbolKind.Parameter,
                 name: parameter.name,
                 module_identity: module_id,
-                owner: Val(owner.key),
+                owner: Val(owner_key),
                 span: parameter.name_span,
                 ty: Val(parameter_ty),
                 visibility: 0,
@@ -1363,28 +1385,28 @@ sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, modul
 }
 
 // `module_id` is the declaring module and `module_identity` its identity
-// text, which the function's symbol keys spell.
-sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id: ModuleID, module_identity: String, owner: SymbolID?, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationFunction {
-    owner_key: owner.map(fn(value) { value.key }) ?? ""
-    id_owner: owner_key
+// text, which the function's symbol keys spell; `symbols` mints them.
+sema_registration_function: fn(func: Func, raw_protocol_return: Bool, module_id: ModuleID, module_identity: String, owner: SymbolID?, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationFunction {
+    owner_key: if owner == .Val(value) -> symbol_table_key(symbols, value) else -> ""
     symbol_kind: SymbolKind.Function
-    symbol_id_value: symbol_id(symbol_kind, module_identity, id_owner, func.name)
-    signature: sema_registration_function_signature(func, raw_protocol_return, symbol_id_value, fallback_source_file, fallback_source_origin, source_segments)
+    symbol_id_value: symbol_mint(symbols, symbol_kind, module_identity, owner_key, func.name)
+    key: symbol_key_text(symbol_kind, module_identity, owner_key, func.name)
+    signature: sema_registration_function_signature(func, raw_protocol_return, key, fallback_source_file, fallback_source_origin, source_segments)
     visibility: sema_registration_visibility(func.is_pub, func.is_package_pub)
     symbol: Symbol{
         id: symbol_id_value,
         kind: symbol_kind,
         name: func.name,
         module_identity: module_id,
-        owner: owner.map(fn(value) { value.key }),
+        owner: if owner == None -> None else -> Val(owner_key),
         span: func.name_span,
         ty: Val(signature),
         visibility: visibility,
     }
-    generic_params: sema_registration_generic_params(func.type_params, symbol.id.key, module_id, diagnostics)
-    generic_identity_key: sema_registration_generic_identity(symbol.id.key, generic_params)
+    generic_params: sema_registration_generic_params(func.type_params, key, module_id, diagnostics)
+    generic_identity_key: sema_registration_generic_identity(key, generic_params)
     abi: sema_registration_callable_abi_for_func(func)
-    parameters: sema_registration_function_parameters(func, module_id, module_identity, symbol.id, signature)
+    parameters: sema_registration_function_parameters(func, module_id, module_identity, key, symbols, signature)
     metadata: sema_registration_signature_metadata(signature)
     if metadata == .Val(row) {
         loop (index, parameter) in func.params {
@@ -1412,11 +1434,11 @@ sema_registration_foreign_visibility: fn(owner: SemaRegistrationForeignOwner) ->
     if owner == SemaRegistrationForeignOwner.CModule -> 2 else -> 0
 }
 
-sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction Never! {
+sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, module_identity: String, owner: SemaRegistrationForeignOwner, symbols: &SymbolTable, foreign_library: String, foreign_library_span: Span) -> SemaRegistrationForeignFunction Never! {
     signature: sema_registration_extern_signature(function, owner)
     // Foreign declarations are module-level: no owner segment in the id.
     symbol: Symbol{
-        id: symbol_id(SymbolKind.Function, module_identity, "", function.name),
+        id: symbol_mint(symbols, SymbolKind.Function, module_identity, "", function.name),
         kind: SymbolKind.Function,
         name: function.name,
         module_identity: module_id,
@@ -1425,7 +1447,8 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
         ty: Val(signature),
         visibility: sema_registration_foreign_visibility(owner),
     }
-    parameters: sema_registration_extern_parameters(function, module_id, module_identity, symbol.id, signature)
+    key: symbol_key_text(SymbolKind.Function, module_identity, "", function.name)
+    parameters: sema_registration_extern_parameters(function, module_id, module_identity, key, symbols, signature)
     SemaRegistrationForeignFunction{
         symbol: symbol,
         declaration: function,
@@ -1435,7 +1458,7 @@ sema_registration_foreign_function: fn(function: ExternFn, module_id: ModuleID, 
         identity: type_identity(signature),
         identity_key: sema_registration_function_identity_key(module_identity, "", signature),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol.id.key,
+        generic_identity_key: key,
         parameters: parameters,
         abi: sema_registration_callable_abi_for_extern(function, owner),
     }
@@ -1454,8 +1477,20 @@ sema_registration_callable_id: fn(graph: SemaRegistrationGraph, key: String) -> 
     decl_table_find(graph.decls, key)
 }
 
+// The key text of a run-wide symbol; a body's own id names none ("").
+sema_registration_symbol_key: fn(graph: SemaRegistrationGraph, id: SymbolID) -> String Never! {
+    if symbol_is_local(id) -> return ""
+    symbol_table_key(graph.symbols, id)
+}
+
+// The callable registered as `target`; a body's own id names none.
+sema_registration_callable_row_of: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaRegistrationCallableRow? Never! {
+    if symbol_is_local(target) -> return None
+    sema_registration_callable_row(graph, symbol_table_key(graph.symbols, target))
+}
+
 sema_registration_callable_abi: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaRegistrationCallableABI? {
-    row: sema_registration_callable_row(graph, target.key) ?? return None
+    row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {
         .Function(module_index, index) -> Val(graph.modules[module_index].functions[index].abi)
         .Foreign(module_index, index) -> Val(graph.modules[module_index].foreign_functions[index].abi)
@@ -1467,7 +1502,7 @@ sema_registration_callable_abi: fn(graph: SemaRegistrationGraph, target: SymbolI
 // The Jet declaration of the callable registered under `target`: one keyed
 // lookup instead of a scan of every module's callables. Foreign rows have none.
 sema_registration_callable_declaration: fn(graph: SemaRegistrationGraph, target: SymbolID) -> Func? {
-    row: sema_registration_callable_row(graph, target.key) ?? return None
+    row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {
         .Function(module_index, index) -> Val(graph.modules[module_index].functions[index].declaration)
         .Foreign(_, _) -> None
@@ -1476,13 +1511,13 @@ sema_registration_callable_declaration: fn(graph: SemaRegistrationGraph, target:
     }
 }
 
-// Records the first registered row of each nominal SymbolId key in
+// Records the first registered row of each nominal SymbolID in
 // `module_index` from `first_row` on, and appends the rows' base-name
-// buckets. Rows only append, so a key already present keeps its earlier row.
+// buckets. Rows only append, so an id already present keeps its earlier row.
 sema_registration_index_nominal_rows: fn(graph: &SemaRegistrationGraph, module_index: Int, first_row: Int) Never! {
     loop row in first_row..<graph.modules[module_index].nominals.len() {
-        key: graph.modules[module_index].nominals[row].symbol.id.key.copy()
-        if graph.nominal_symbol_rows.get(key) == None -> graph.nominal_symbol_rows.add(key, SemaRegistrationRowRef{module_index: module_index, row: row}).drop("checked absent above")
+        id: graph.modules[module_index].nominals[row].symbol.id.id
+        if graph.nominal_symbol_rows.get(id) == None -> graph.nominal_symbol_rows.add(id, SemaRegistrationRowRef{module_index: module_index, row: row}).drop("checked absent above")
     }
     sema_registration_index_nominal_names(graph, module_index, first_row)
 }
@@ -1557,17 +1592,15 @@ sema_registration_bucket_sorted_rows: fn(rows: [SemaRegistrationKeyedRow]) -> Se
     SemaRegistrationBuckets{slots: slots.move(), buckets: buckets.move()}
 }
 
-// Graph construction: every module's nominal SymbolId rows (the first row of
-// a key wins) and base-name buckets, in one sorted build each. Later rows
-// append through `sema_registration_index_nominal_rows`.
+// Graph construction: every module's nominal SymbolID rows (the first row of
+// an id wins) and base-name buckets. Later rows append through
+// `sema_registration_index_nominal_rows`.
 sema_registration_index_all_nominal_rows: fn(graph: &SemaRegistrationGraph) Never! {
-    symbol_rows := [SemaRegistrationKeyedRow]{}
     loop module_index in 0..<graph.modules.len() {
-        loop row in 0..<graph.modules[module_index].nominals.len() -> sema_registration_keyed_row_push(symbol_rows, graph.modules[module_index].nominals[row].symbol.id.key, module_index, row)
-    }
-    sema_registration_keyed_rows_sort(symbol_rows)
-    loop at in 0..<symbol_rows.len() {
-        if at == 0 || symbol_rows[at - 1].key != symbol_rows[at].key -> graph.nominal_symbol_rows[symbol_rows[at].key] = symbol_rows[at].reference
+        loop row in 0..<graph.modules[module_index].nominals.len() {
+            id: graph.modules[module_index].nominals[row].symbol.id.id
+            if graph.nominal_symbol_rows.get(id) == None -> graph.nominal_symbol_rows[id] = SemaRegistrationRowRef{module_index: module_index, row: row}
+        }
     }
     sema_registration_index_all_nominal_names(graph)
 }
@@ -1628,22 +1661,22 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
     callables := [SemaRegistrationCallableRow]{}
     loop (module_index, module_row) in graph.modules {
         loop (index, function) in module_row.functions {
-            _: decl_table_add(decls, function.symbol)
+            _: decl_table_add(decls, graph.symbols, function.symbol)
             callables.push(SemaRegistrationCallableRow.Function{module_index: module_index, row: index})
         }
         loop (index, function) in module_row.foreign_functions {
-            _: decl_table_add(decls, function.symbol)
+            _: decl_table_add(decls, graph.symbols, function.symbol)
             callables.push(SemaRegistrationCallableRow.Foreign{module_index: module_index, row: index})
         }
         loop (owner, nominal) in module_row.nominals {
             loop (index, method) in nominal.methods {
-                _: decl_table_add(decls, method.symbol)
+                _: decl_table_add(decls, graph.symbols, method.symbol)
                 callables.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
             }
         }
         loop (owner, implementation) in module_row.impls {
             loop (index, method) in implementation.methods {
-                _: decl_table_add(decls, method.symbol)
+                _: decl_table_add(decls, graph.symbols, method.symbol)
                 callables.push(SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
             }
         }
@@ -1667,15 +1700,15 @@ sema_registration_index_callables: fn(graph: &SemaRegistrationGraph) Never! {
 // name matches no bound, so it has no bucket. The CheckedText impls are
 // listed once more on their own (`checked_text_impl_rows`).
 sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
-    graph.impl_trait_slots = [String:Int]{}
+    graph.impl_trait_slots = [U32:Int]{}
     graph.impl_trait_buckets = [[SemaRegistrationRowRef]]{}
     graph.impl_trait_name_slots = [String:Int]{}
     graph.impl_trait_name_buckets = [[SemaRegistrationRowRef]]{}
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].impls.len() {
             // Resolved before the row is edited: the lookup reads the graph.
-            target_nominal_key: sema_type_graph_impl_target_nominal_key(graph, graph.modules[module_index].impls[row])
-            graph.modules[module_index].impls[row].target_nominal_key = target_nominal_key
+            target_nominal: sema_type_graph_impl_target_nominal(graph, graph.modules[module_index].impls[row])
+            graph.modules[module_index].impls[row].target_nominal = target_nominal
             reference: SemaRegistrationRowRef{module_index: module_index, row: row}
             // By spelled name: the declared trait name and the registered
             // trait symbol's name, once when both spell the same name. The
@@ -1688,11 +1721,11 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
             if symbol_name == .Val(name) {
                 if declared_name != Val((name)) -> sema_registration_impl_trait_name_push(graph, name, reference)
             }
-            trait_key: sema_type_graph_impl_trait_key(graph, graph.modules[module_index].impls[row]) ?? next
-            if graph.impl_trait_slots.get(trait_key) == .Val(slot) {
+            trait_id: sema_type_graph_impl_trait(graph, graph.modules[module_index].impls[row]) ?? next
+            if graph.impl_trait_slots.get(trait_id.id) == .Val(slot) {
                 graph.impl_trait_buckets[slot].push(reference)
             } else {
-                graph.impl_trait_slots[trait_key] = graph.impl_trait_buckets.len()
+                graph.impl_trait_slots[trait_id.id] = graph.impl_trait_buckets.len()
                 graph.impl_trait_buckets.push([SemaRegistrationRowRef]{reference})
             }
         }
@@ -1716,9 +1749,9 @@ sema_registration_impl_trait_name_push: fn(graph: &SemaRegistrationGraph, trait_
     }
 }
 
-sema_registration_named_symbol: fn(module_id: ModuleID, module_identity: String, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
+sema_registration_named_symbol: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, name: String, span: Span, kind: SymbolKind, ty: Type?, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
     Symbol{
-        id: symbol_id(kind, module_identity, "", name),
+        id: symbol_mint(symbols, kind, module_identity, "", name),
         kind: kind,
         name: name,
         module_identity: module_id,
@@ -1747,7 +1780,8 @@ sema_registration_variant_type: fn(payload: VariantPayload) -> Type? {
     }
 }
 
-sema_registration_struct_fields: fn(definition: StructDef, module_identity: String, owner: Symbol, diagnostics: &[Diagnostic]) -> [SemaRegistrationField] {
+sema_registration_struct_fields: fn(definition: StructDef, module_identity: String, owner: Symbol, symbols: &SymbolTable, diagnostics: &[Diagnostic]) -> [SemaRegistrationField] {
+    owner_key: symbol_table_key(symbols, owner.id)
     fields := [SemaRegistrationField]{}
     seen := [String:Bool]{}
     loop field_index in 0..<definition.fields.len() {
@@ -1756,13 +1790,13 @@ sema_registration_struct_fields: fn(definition: StructDef, module_identity: Stri
         if duplicate {
             diagnostics.push(sema_field_defined_twice(definition.fields[field_index].name, owner.name, definition.fields[field_index].name_span))
         }
-        field_id: symbol_id(SymbolKind.Field, module_identity, owner.id.key, definition.fields[field_index].name)
+        field_id: symbol_mint(symbols, SymbolKind.Field, module_identity, owner_key, definition.fields[field_index].name)
         field_symbol: Symbol{
             id: field_id,
             kind: SymbolKind.Field,
             name: definition.fields[field_index].name,
             module_identity: owner.module_identity,
-            owner: Val(owner.id.key),
+            owner: Val(owner_key),
             span: definition.fields[field_index].name_span,
             ty: Val(definition.fields[field_index].ty),
             visibility: sema_registration_visibility(definition.fields[field_index].is_pub, definition.fields[field_index].is_package_pub),
@@ -1771,7 +1805,7 @@ sema_registration_struct_fields: fn(definition: StructDef, module_identity: Stri
             symbol: field_symbol,
             ty: definition.fields[field_index].ty,
             identity: type_identity(definition.fields[field_index].ty),
-            identity_key: "{owner.id.key}:{definition.fields[field_index].name}:{type_identity_key(definition.fields[field_index].ty)}",
+            identity_key: "{owner_key}:{definition.fields[field_index].name}:{type_identity_key(definition.fields[field_index].ty)}",
             default: definition.fields[field_index].default,
             computed: definition.fields[field_index].computed != None,
         })
@@ -1779,7 +1813,8 @@ sema_registration_struct_fields: fn(definition: StructDef, module_identity: Stri
     fields
 }
 
-sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String, owner: Symbol, diagnostics: &[Diagnostic]) -> [SemaRegistrationVariant] {
+sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String, owner: Symbol, symbols: &SymbolTable, diagnostics: &[Diagnostic]) -> [SemaRegistrationVariant] {
+    owner_key: symbol_table_key(symbols, owner.id)
     variants := [SemaRegistrationVariant]{}
     seen := [String:Bool]{}
     loop variant_index in 0..<definition.variants.len() {
@@ -1790,11 +1825,11 @@ sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String
         }
         payload_ty: sema_registration_variant_type(definition.variants[variant_index].payload)
         variant_symbol: Symbol{
-            id: symbol_id(SymbolKind.Variant, module_identity, owner.id.key, definition.variants[variant_index].name),
+            id: symbol_mint(symbols, SymbolKind.Variant, module_identity, owner_key, definition.variants[variant_index].name),
             kind: SymbolKind.Variant,
             name: definition.variants[variant_index].name,
             module_identity: owner.module_identity,
-            owner: Val(owner.id.key),
+            owner: Val(owner_key),
             span: definition.variants[variant_index].name_span,
             ty: payload_ty,
             visibility: owner.visibility,
@@ -1804,13 +1839,13 @@ sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String
             symbol: variant_symbol,
             payload: definition.variants[variant_index].payload,
             payload_type: payload_ty,
-            identity_key: "{owner.id.key}:{definition.variants[variant_index].name}:{payload_key}",
+            identity_key: "{owner_key}:{definition.variants[variant_index].name}:{payload_key}",
         })
     }
     variants
 }
 
-sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protocol_return: Bool, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     params := [Type]{}
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
@@ -1832,7 +1867,7 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
         contract.push(CallContractRow{label: label, zone: parameter.zone})
         if label != "" || parameter.zone != ParamZone.Either -> has_contract = true
         if parameter.default == {
-            .Val(expression) -> defaults.push(Val(FunctionDefaultRef{source_file: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, expr_span(expression)), owner_key: owner.key, parameter_index: index, span: expr_span(expression)}))
+            .Val(expression) -> defaults.push(Val(FunctionDefaultRef{source_file: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, expr_span(expression)), owner_key: owner_key, parameter_index: index, span: expr_span(expression)}))
             .None -> defaults.push(None)
         }
     }
@@ -1847,11 +1882,13 @@ sema_registration_trait_method_signature: fn(method: TraitMethodSig, raw_protoco
     Type.Fn{params: params, ret: Val(return_type), effect_bound: effect_bound, param_contract: param_contract, call_metadata: metadata, return_view_provenance: method.return_view_provenance}
 }
 
-sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: String, owner: Symbol, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaRegistrationTraitMethod {
-    id: symbol_id(SymbolKind.Function, module_identity, owner.id.key, method.name)
+sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: String, owner: Symbol, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaRegistrationTraitMethod {
+    owner_key: symbol_table_key(symbols, owner.id)
+    id: symbol_mint(symbols, SymbolKind.Function, module_identity, owner_key, method.name)
+    key: symbol_key_text(SymbolKind.Function, module_identity, owner_key, method.name)
     // A protocol ABI trait's own method signature is raw at dispatch, as in
     // the Rust reference's trait-bound and trait-object method calls.
-    signature: sema_registration_trait_method_signature(method, sema_raw_protocol_trait(Val(owner.name)), id, fallback_source_file, fallback_source_origin, source_segments)
+    signature: sema_registration_trait_method_signature(method, sema_raw_protocol_trait(Val(owner.name)), key, fallback_source_file, fallback_source_origin, source_segments)
     parameters := [SemaRegistrationParameter]{}
     metadata: sema_registration_signature_metadata(signature) ?? FunctionCallMetadata{names: [String]{}, defaults: [FunctionDefaultRef?]{}, variadic: [Bool]{}, conventions: [AccessConvention]{}, policies: CallablePolicyChain{policies: [CallablePolicy]{}}}
     loop (index, parameter) in method.params {
@@ -1860,7 +1897,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
         default_ref: if index < metadata.defaults.len() -> metadata.defaults[index] else -> None
         parameters.push(SemaRegistrationParameter{
             index: index,
-            symbol: Symbol{id: symbol_id(SymbolKind.Parameter, module_identity, id.key, parameter.name), kind: SymbolKind.Parameter, name: parameter.name, module_identity: owner.module_identity, owner: Val(id.key), span: parameter.name_span, ty: Val(parameter_ty), visibility: 0},
+            symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Parameter, module_identity, key, parameter.name), kind: SymbolKind.Parameter, name: parameter.name, module_identity: owner.module_identity, owner: Val(key), span: parameter.name_span, ty: Val(parameter_ty), visibility: 0},
             ty: parameter_ty,
             convention: parameter.convention,
             zone: parameter.zone,
@@ -1870,22 +1907,19 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
             default_ref: default_ref,
         })
     }
-    symbol: Symbol{id: id, kind: SymbolKind.Function, name: method.name, module_identity: owner.module_identity, owner: Val(owner.id.key), span: method.name_span, ty: Val(signature), visibility: owner.visibility}
-    SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner.id.key, signature), parameters: parameters}
+    symbol: Symbol{id: id, kind: SymbolKind.Function, name: method.name, module_identity: owner.module_identity, owner: Val(owner_key), span: method.name_span, ty: Val(signature), visibility: owner.visibility}
+    SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner_key, signature), parameters: parameters}
 }
 
 // Hook callable identity is the operand pair, not the ordinary owner/name
 // key, and a conversion's is its target and source (`impl Celsius.From(Float)`
 // and `impl Celsius.From(Int)` each declare a `from`).
-sema_registration_operator_owner: fn(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
-    // copy: the operator owner is a new owned SymbolID. With no trait it equals `owner`, the
-    // caller's declaring symbol (a read parameter), which the caller keeps.
+sema_registration_operator_owner: fn(owner: SymbolID, symbols: &SymbolTable, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
     trait_value: trait_name ?? return owner.copy()
-    // copy: the operator owner is a new owned SymbolID. For an unchecked trait it equals `owner`,
-    // the caller's declaring symbol (a read parameter), which the caller keeps.
     if !owned_trait_keyed_by_argument(trait_value) -> return owner.copy()
     right: rhs ?? left
-    symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
+    owner_key: symbol_table_key(symbols, owner)
+    symbol_mint(symbols, SymbolKind.Impl, module_identity, owner_key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
 
 // Whether the struct or enum `item` writes an `impl` block of `trait_name`
@@ -1911,67 +1945,70 @@ sema_registration_item_trait_blocks: fn(item: Item) -> [TraitImplBlock] Never! {
 
 // `module_id` is the declaring module and `module_identity` its identity
 // text, which the nominal's symbol keys spell.
-sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
+sema_registration_nominal: fn(item: Item, module_id: ModuleID, module_identity: String, symbols: &SymbolTable, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
     if item == {
         .Struct(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params: sema_registration_generic_params(definition.type_params, symbol.id.key, module_id, diagnostics)
-            generic_identity_key: sema_registration_generic_identity(symbol.id.key, generic_params)
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            key: symbol_table_key(symbols, symbol.id)
+            generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
+            generic_identity_key: sema_registration_generic_identity(key, generic_params)
             methods := [SemaRegistrationFunction]{}
-            loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, diagnostics))
+            loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
             trait_methods: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    hook_owner: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
-                    methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, diagnostics))
+                    hook_owner: sema_registration_operator_owner(symbol.id, symbols, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, module_identity, symbol, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Struct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: sema_registration_struct_fields(definition, module_identity, symbol, symbols, diagnostics), variants: [SemaRegistrationVariant]{}, methods: methods, trait_methods: trait_methods, compiler_owned: definition.compiler_builtin_error, generated_provenance: if definition.compiler_builtin_error -> Val(sema_registration_compiler_owned_default_err_provenance()) else -> None})
         }
         .Enum(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params: sema_registration_generic_params(definition.type_params, symbol.id.key, module_id, diagnostics)
-            generic_identity_key: sema_registration_generic_identity(symbol.id.key, generic_params)
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            key: symbol_table_key(symbols, symbol.id)
+            generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
+            generic_identity_key: sema_registration_generic_identity(key, generic_params)
             methods := [SemaRegistrationFunction]{}
-            loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, diagnostics))
+            loop method in definition.methods -> methods.push(sema_registration_function(method, false, module_id, module_identity, Val(symbol.id), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
             trait_methods: [SemaRegistrationTraitMethod]{}
             loop block in definition.trait_impls {
                 loop method in block.methods {
-                    hook_owner: sema_registration_operator_owner(symbol.id, module_identity, ty, Val(block.trait_name), block.operator_rhs)
-                    methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), fallback_source_file, fallback_source_origin, source_segments, diagnostics))
+                    hook_owner: sema_registration_operator_owner(symbol.id, symbols, module_identity, ty, Val(block.trait_name), block.operator_rhs)
+                    methods.push(sema_registration_function(method, sema_raw_protocol_function_return(Val(block.trait_name), block.compiler_generated, method), module_id, module_identity, Val(hook_owner), symbols, fallback_source_file, fallback_source_origin, source_segments, diagnostics))
                 }
             }
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Enum, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: generic_identity_key, fields: [SemaRegistrationField]{}, variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics), methods: methods, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
         .Distinct(definition) -> {
             ty: Type.Named{name: definition.name}
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
             generic_params: [SemaRegistrationGenericParam]{}
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Distinct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Distinct, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .TypeAlias(definition) -> {
             ty: sema_registration_nominal_type(definition.name, definition.type_params)
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params: sema_registration_generic_params(definition.type_params, symbol.id.key, module_id, diagnostics)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.TypeAlias, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: sema_registration_generic_identity(symbol.id.key, generic_params), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            key: symbol_table_key(symbols, symbol.id)
+            generic_params: sema_registration_generic_params(definition.type_params, key, module_id, diagnostics)
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.TypeAlias, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: sema_registration_generic_identity(key, generic_params), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .Trait(definition) -> {
             ty: Type.Named{name: definition.name}
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Trait, None, definition.is_pub, definition.is_package_pub)
-            trait_methods: loop method in definition.methods -> sema_registration_trait_method(method, module_identity, symbol, fallback_source_file, fallback_source_origin, source_segments)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Trait, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Trait, None, definition.is_pub, definition.is_package_pub)
+            trait_methods: loop method in definition.methods -> sema_registration_trait_method(method, module_identity, symbol, symbols, fallback_source_file, fallback_source_origin, source_segments)
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Trait, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: trait_methods, compiler_owned: false, generated_provenance: None})
         }
         .Tag(definition) -> {
             ty: Type.Named{name: definition.name}
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Tag, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.Tag, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .UnitFamily(definition) -> {
             ty: Type.Named{name: definition.family}
-            symbol: sema_registration_named_symbol(module_id, module_identity, definition.family, definition.family_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.UnitFamily, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+            symbol: sema_registration_named_symbol(module_id, module_identity, symbols, definition.family, definition.family_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
+            Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.UnitFamily, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .Func(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
@@ -2063,10 +2100,10 @@ sema_registration_error_supplier_diagnostic: fn(detail: String) -> Diagnostic {
     sema_error_optional("E0003", None, detail, "default-error declarations retain their original compiler-private source owner", "retain the canonical Prelude source and its parsed declaration provenance")
 }
 
-sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_identity: String, reference: TraitRef) -> SemaRegistrationNominal {
+sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, reference: TraitRef) -> SemaRegistrationNominal {
     span: Span{start: 0, end: 0}
     ty: Type.Named{name: reference.name}
-    symbol: sema_registration_named_symbol(module_id, module_identity, reference.name, span, SymbolKind.Trait, None, true, false)
+    symbol: sema_registration_named_symbol(module_id, module_identity, symbols, reference.name, span, SymbolKind.Trait, None, true, false)
     SemaRegistrationNominal{
         symbol: symbol,
         kind: SemaRegistrationNominalKind.Trait,
@@ -2075,7 +2112,7 @@ sema_registration_compiler_owned_codec_trait: fn(module_id: ModuleID, module_ide
         identity: type_identity(ty),
         identity_key: sema_registration_identity_key(module_identity, ty),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol.id.key,
+        generic_identity_key: symbol_table_key(symbols, symbol.id),
         fields: [SemaRegistrationField]{},
         variants: [SemaRegistrationVariant]{},
         methods: [SemaRegistrationFunction]{},
@@ -2116,7 +2153,7 @@ sema_registration_compiler_owned_enum_variants: fn(name: String) -> [Variant]? {
     Val(variants)
 }
 
-sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: String, name: String, variants: [Variant]) -> SemaRegistrationNominal {
+sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: String, symbols: &SymbolTable, name: String, variants: [Variant]) -> SemaRegistrationNominal {
     span: Span{start: 0, end: 0}
     definition: EnumDef{
         span: span,
@@ -2139,7 +2176,7 @@ sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: 
         groups: [EnumGroup]{},
     }
     ty: Type.Named{name: name}
-    symbol: sema_registration_named_symbol(module_id, module_identity, name, span, SymbolKind.Type, Val(ty), true, false)
+    symbol: sema_registration_named_symbol(module_id, module_identity, symbols, name, span, SymbolKind.Type, Val(ty), true, false)
     diagnostics := [Diagnostic]{}
     SemaRegistrationNominal{
         symbol: symbol,
@@ -2149,9 +2186,9 @@ sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: 
         identity: type_identity(ty),
         identity_key: sema_registration_identity_key(module_identity, ty),
         generic_params: [SemaRegistrationGenericParam]{},
-        generic_identity_key: symbol.id.key,
+        generic_identity_key: symbol_table_key(symbols, symbol.id),
         fields: [SemaRegistrationField]{},
-        variants: sema_registration_enum_variants(definition, module_identity, symbol, diagnostics),
+        variants: sema_registration_enum_variants(definition, module_identity, symbol, symbols, diagnostics),
         methods: [SemaRegistrationFunction]{},
         trait_methods: [SemaRegistrationTraitMethod]{},
         compiler_owned: true,
@@ -2159,14 +2196,14 @@ sema_registration_compiler_owned_enum: fn(module_id: ModuleID, module_identity: 
     }
 }
 
-sema_registration_foreign_handle_nominal: fn(facts: SemaRegistrationForeignHandleFacts, module_id: ModuleID, module_identity: String, diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
+sema_registration_foreign_handle_nominal: fn(facts: SemaRegistrationForeignHandleFacts, module_id: ModuleID, module_identity: String, symbols: &SymbolTable, diagnostics: &[Diagnostic]) -> SemaRegistrationNominal? {
     if facts.library == "" || facts.typedef_name == "" || facts.jet_name == "" || facts.ownership == "" || facts.close == "" || (facts.close_source != "conventional" && facts.close_source != "overlay") || (facts.thread_safety != "unspecified" && facts.thread_safety != "safe" && facts.thread_safety != "unsafe") {
         diagnostics.push(sema_error("E3216", facts.source_span, "foreign handle registration facts are incomplete", "an opaque native handle needs its library, typedef, Jet identity, ownership, close provenance, and thread-safety facts before type checking", "retain the complete approved C binding metadata"))
         return None
     }
     ty: Type.Named{name: facts.jet_name}
-    symbol: sema_registration_named_symbol(module_id, module_identity, facts.jet_name, facts.source_span, SymbolKind.Type, Val(ty), true, false)
-    Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.ForeignHandle, source: SemaRegistrationNominalSource.ForeignHandle{value: facts}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol.id.key, fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
+    symbol: sema_registration_named_symbol(module_id, module_identity, symbols, facts.jet_name, facts.source_span, SymbolKind.Type, Val(ty), true, false)
+    Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.ForeignHandle, source: SemaRegistrationNominalSource.ForeignHandle{value: facts}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: [SemaRegistrationGenericParam]{}, generic_identity_key: symbol_table_key(symbols, symbol.id), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
 }
 
 sema_registration_nominal_source_item: fn(source: SemaRegistrationNominalSource) -> Item? {
@@ -2215,22 +2252,22 @@ sema_registration_root_span: fn(item: Item) -> Span Never! {
     }
 }
 
-sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Symbol? {
+sema_registration_root_symbol: fn(item: Item, module_id: ModuleID, module_identity: String, symbols: &SymbolTable, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Symbol? {
     if item == {
         // sema_registration_add_root registers a function through sema_registration_function.
         .Func(_) -> None
-        .Struct(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
-        .Enum(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
-        .Distinct(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
-        .TypeAlias(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
-        .Trait(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Trait, None, value.is_pub, value.is_package_pub))
-        .Tag(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
-        .UnitFamily(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.family, value.family_span, SymbolKind.Type, Val(Type.Named{name: value.family}), value.is_pub, value.is_package_pub))
-        .Const(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Constant, value.ty, value.is_pub, value.is_package_pub))
-        .Module(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Module, None, false, false))
-        .CodeModule(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
-        .GenericModule(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
-        .ModuleAlias(value) -> Val(sema_registration_named_symbol(module_id, module_identity, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
+        .Struct(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
+        .Enum(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
+        .Distinct(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
+        .TypeAlias(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(sema_registration_nominal_type(value.name, value.type_params)), value.is_pub, value.is_package_pub))
+        .Trait(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Trait, None, value.is_pub, value.is_package_pub))
+        .Tag(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Type, Val(Type.Named{name: value.name}), value.is_pub, value.is_package_pub))
+        .UnitFamily(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.family, value.family_span, SymbolKind.Type, Val(Type.Named{name: value.family}), value.is_pub, value.is_package_pub))
+        .Const(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Constant, value.ty, value.is_pub, value.is_package_pub))
+        .Module(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Module, None, false, false))
+        .CodeModule(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
+        .GenericModule(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
+        .ModuleAlias(value) -> Val(sema_registration_named_symbol(module_id, module_identity, symbols, value.name, value.name_span, SymbolKind.Module, None, value.is_pub, value.is_package_pub))
         .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
@@ -2310,7 +2347,7 @@ sema_registration_push_import_binding: fn(graph: &SemaRegistrationGraph, module_
     graph.modules[module_index].imports[import_index].bindings.push(binding.copy())
 }
 
-sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule, module_text: String, functions: [ExternFn], owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule, module_text: String, symbols: &SymbolTable, functions: [ExternFn], owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span, diagnostics: &[Diagnostic]) -> Bool {
     complete := true
     loop function in functions {
         if sema_registration_module_has_name(module_row, function.name) {
@@ -2318,7 +2355,7 @@ sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule,
             complete = false
             next
         }
-        registered: sema_registration_foreign_function(function, module_row.module_identity, module_text, owner, foreign_library, foreign_library_span)
+        registered: sema_registration_foreign_function(function, module_row.module_identity, module_text, owner, symbols, foreign_library, foreign_library_span)
         name_rows_set(module_row.symbol_positions, registered.symbol.name, module_row.symbols.len())
         module_row.symbols.push(registered.symbol)
         module_row.symbol_nominal_rows.push(-1)
@@ -2327,16 +2364,17 @@ sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule,
     complete
 }
 
-// `module_text` is the row's identity text, which its symbol keys spell.
-sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text: String, item: Item, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
+// `module_text` is the row's identity text, which its symbol keys spell;
+// `symbols` mints them.
+sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text: String, symbols: &SymbolTable, item: Item, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
     if item == {
         .ExternRust(block) -> {
-            complete: sema_registration_add_foreign_functions(module_row, module_text, block.functions, SemaRegistrationForeignOwner.ExternRust, block.crate_spec, block.crate_span, diagnostics)
+            complete: sema_registration_add_foreign_functions(module_row, module_text, symbols, block.functions, SemaRegistrationForeignOwner.ExternRust, block.crate_spec, block.crate_span, diagnostics)
             sema_registration_push_declaration(module_row, item)
             return complete
         }
         .CModule(block) -> {
-            complete: sema_registration_add_foreign_functions(module_row, module_text, block.functions, SemaRegistrationForeignOwner.CModule, block.lib, block.path_span, diagnostics)
+            complete: sema_registration_add_foreign_functions(module_row, module_text, symbols, block.functions, SemaRegistrationForeignOwner.CModule, block.lib, block.path_span, diagnostics)
             sema_registration_push_declaration(module_row, item)
             return complete
         }
@@ -2359,15 +2397,15 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
     }
     if !sema_registration_value_type_rules(module_row, item, diagnostics) -> return false
     function: if item == {
-        .Func(value) -> Val(sema_registration_function(value, false, module_row.module_identity, module_text, None, source_file, source_origin, source_segments, diagnostics))
+        .Func(value) -> Val(sema_registration_function(value, false, module_row.module_identity, module_text, None, symbols, source_file, source_origin, source_segments, diagnostics))
         .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
     symbol: if function == {
         // copy: the symbol table and the function row each own the symbol.
         Val(value) -> value.symbol.copy()
-        None -> sema_registration_root_symbol(item, module_row.module_identity, module_text, source_file, source_origin, source_segments, diagnostics) ?? return false
+        None -> sema_registration_root_symbol(item, module_row.module_identity, module_text, symbols, source_file, source_origin, source_segments, diagnostics) ?? return false
     }
-    nominal: sema_registration_nominal(item, module_row.module_identity, module_text, source_file, source_origin, source_segments, diagnostics)
+    nominal: sema_registration_nominal(item, module_row.module_identity, module_text, symbols, source_file, source_origin, source_segments, diagnostics)
     name_rows_set(module_row.symbol_positions, name, module_row.symbols.len())
     module_row.declaration_positions[name] = module_row.declarations.len()
     module_row.symbols.push(symbol.copy())
@@ -2377,8 +2415,8 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
     if nominal == .Val(value) -> module_row.nominals.push(value)
     if item == {
         .Const(value) -> {
-            if sema_ownership_is_static_root(value) -> module_row.static_roots.push(symbol.id.key)
-            if value.is_persist -> module_row.persist_roots.push(symbol.id.key)
+            if sema_ownership_is_static_root(value) -> module_row.static_roots.push(symbol_table_key(symbols, symbol.id))
+            if value.is_persist -> module_row.persist_roots.push(symbol_table_key(symbols, symbol.id))
             module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, typed: value.ty != None, identity_key: "{module_text}:{value.name}"})
         }
         // Each member type a unit family declared in this module mints
@@ -2388,7 +2426,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, module_text:
         .UnitFamily(family) -> {
             if family.resolved_owner == Val("core.units") -> return true
             loop definition in unit_family_distinct_defs(family) {
-                _ := sema_registration_add_root(module_row, module_text, Item.Distinct{value: definition}, source_file, source_origin, source_segments, diagnostics)
+                _ := sema_registration_add_root(module_row, module_text, symbols, Item.Distinct{value: definition}, source_file, source_origin, source_segments, diagnostics)
             }
         }
         .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -2493,13 +2531,13 @@ sema_registration_impl_rows: fn(module_row: SemaRegistrationModule) -> SemaRegis
 // `owner_rows` indexes `owner_row`'s nominals and `trait_rows` the impl
 // module's (sema_registration_impl_rows of each). `module_text` is
 // `module_row`'s identity text, which the impl's symbol keys spell.
-sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: String, definition: ImplDef, owner_row: SemaRegistrationModule, owner_rows: SemaRegistrationImplRows, trait_rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) -> SemaRegistrationImpl {
+sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: String, symbols: &SymbolTable, definition: ImplDef, owner_row: SemaRegistrationModule, owner_rows: SemaRegistrationImplRows, trait_rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) -> SemaRegistrationImpl {
     nominal_index: owner_rows.nominals.get(definition.type_name) ?? -1
     target_type := Type.Named{name: definition.type_name}
     target_identity := type_identity(target_type)
     target_identity_key := "{module_text}:{type_identity_key(target_type)}"
     target_module_identity := module_none()
-    owner_id := symbol_id(SymbolKind.Impl, module_text, "", "{definition.type_name}:{definition.span.start}:{definition.span.end}")
+    owner_id := symbol_none()
     if nominal_index >= 0 {
         nominal: owner_row.nominals[nominal_index]
         target_type = nominal.ty
@@ -2530,14 +2568,16 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
     }
     trait_key: definition.trait_name ?? ""
     identity_key: "{module_text}:impl:{definition.type_name}:{trait_key}:{definition.span.start}:{definition.span.end}"
-    if nominal_index < 0 -> owner_id = symbol_id(SymbolKind.Impl, module_text, "", identity_key)
-    symbol: Symbol{id: symbol_id(SymbolKind.Impl, module_text, "", identity_key), kind: SymbolKind.Impl, name: definition.type_name, module_identity: module_row.module_identity, owner: None, span: definition.type_span, ty: Val(target_type), visibility: 0}
+    impl_id: symbol_mint(symbols, SymbolKind.Impl, module_text, "", identity_key)
+    if nominal_index < 0 -> owner_id = impl_id
+    symbol: Symbol{id: impl_id, kind: SymbolKind.Impl, name: definition.type_name, module_identity: module_row.module_identity, owner: None, span: definition.type_span, ty: Val(target_type), visibility: 0}
+    impl_key: symbol_key_text(SymbolKind.Impl, module_text, "", identity_key)
     associated_types: loop declaration in definition.assoc_type_impls -> {
-        associated_symbol: Symbol{id: symbol_id(SymbolKind.Type, module_text, symbol.id.key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_identity: module_row.module_identity, owner: Val(symbol.id.key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
-        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{symbol.id.key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
+        associated_symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Type, module_text, impl_key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_identity: module_row.module_identity, owner: Val(impl_key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
+        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty, identity: type_identity(declaration.ty), identity_key: "{impl_key}:{declaration.name}:{type_identity_key(declaration.ty)}"}
     }
-    hook_owner: sema_registration_operator_owner(owner_id, module_text, target_type, definition.trait_name, definition.operator_rhs)
-    methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, module_text, Val(hook_owner), module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
+    hook_owner: sema_registration_operator_owner(owner_id, symbols, module_text, target_type, definition.trait_name, definition.operator_rhs)
+    methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, module_text, Val(hook_owner), symbols, module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
     // A conditional impl's methods carry its bounds. A list that does not
     // name a resolved type's parameters is E0003 and the impl applies as an
     // unconditional one. The type another package member declares resolves
@@ -2601,10 +2641,10 @@ sema_registration_impl_conditions_valid: fn(definition: ImplDef, declared: [Sema
 // `rows` indexes `module_row`'s nominals (sema_registration_impl_rows),
 // which no impl registration changes. `items` are the module's program items,
 // moved out of `module_row` while it is written.
-sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, module_text: String, item: Item, items: [Item], rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) {
+sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, module_text: String, symbols: &SymbolTable, item: Item, items: [Item], rows: SemaRegistrationImplRows, diagnostics: &[Diagnostic]) {
     if item == {
         .Impl(definition) -> {
-            row := sema_registration_impl(module_row, module_text, definition, module_row, rows, rows, diagnostics)
+            row := sema_registration_impl(module_row, module_text, symbols, definition, module_row, rows, rows, diagnostics)
             // In a package, the type may be declared by a
             // sibling member; sema_registration_attach_namespace_impls owns
             // that impl's E0301 once every member is registered.
@@ -2797,7 +2837,7 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
             // The first registration already reported the methods' own
             // diagnostics; re-keying them under the owner repeats nothing.
             repeated := [Diagnostic]{}
-            row: sema_registration_impl(graph.modules[module_index], module_text(graph.module_table, graph.modules[module_index].module_identity), definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
+            row: sema_registration_impl(graph.modules[module_index], module_text(graph.module_table, graph.modules[module_index].module_identity), graph.symbols, definition, graph.modules[owner_index], sema_registration_impl_rows(graph.modules[owner_index]), sema_registration_impl_rows(graph.modules[module_index]), repeated)
             // Only the attached registration knows the owner's parameters.
             if definition.type_params.len() > 0 {
                 refused := [Diagnostic]{}
@@ -2840,10 +2880,10 @@ sema_registration_declaration_for_symbol: fn(module_row: SemaRegistrationModule,
     None
 }
 
-sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModule, facts: SemaRegistrationForeignHandleFacts) -> String? {
+sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModule, symbols: SymbolTable, facts: SemaRegistrationForeignHandleFacts) -> String? {
     loop registered_index in 0..<module_row.foreign_functions.len() {
         if module_row.foreign_functions[registered_index].owner == SemaRegistrationForeignOwner.CModule && module_row.foreign_functions[registered_index].declaration.name == facts.close {
-            return Val(module_row.foreign_functions[registered_index].symbol.id.key)
+            return Val(symbol_table_key(symbols, module_row.foreign_functions[registered_index].symbol.id))
         }
     }
     None
@@ -2853,14 +2893,15 @@ sema_registration_foreign_handle_close_key: fn(module_row: SemaRegistrationModul
 // The prepared row of one module; its diagnostics are appended to `reported`.
 // The row is returned whole, so the graph takes it without a copy. The input
 // is consumed: its program moves into the row instead of being copied.
-// `module_text` is the input's identity text, which its symbol keys spell.
+// `module_text` is the input's identity text, which its symbol keys spell;
+// `symbols` holds the module's reserved range, which mints them.
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program. `policies` are its package's checked user
 // policy declarations (Rust Registration: one policy set per package).
 // `settings` are the build's declared settings, which module arguments may read.
 // `codecs` are the codecs the graph gives the types its declarations hold
 // (sema_derive_foreign_codecs).
-sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, module_text: String, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: [String:Bool], reported: &[Diagnostic]) -> SemaRegistrationModule {
+sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, module_text: String, symbols: &SymbolTable, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: [String:Bool], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := input.move()
     module_row := SemaRegistrationModule{
@@ -2917,7 +2958,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
             diagnostics.push(sema_defined_twice(facts.jet_name, "module declarations share one namespace", facts.source_span))
             next
         }
-        nominal: sema_registration_foreign_handle_nominal(facts, module_row.module_identity, module_text, diagnostics)
+        nominal: sema_registration_foreign_handle_nominal(facts, module_row.module_identity, module_text, symbols, diagnostics)
         if nominal == .Val(value) {
             name_rows_set(module_row.symbol_positions, value.symbol.name, module_row.symbols.len())
             module_row.symbols.push(value.symbol)
@@ -3006,7 +3047,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     items := module_row.program.items.move()
     module_row.program.items = [Item]{}
     loop index in 0..<items.len() {
-        if !sema_registration_add_root(module_row, module_text, items[index], row_source_file, row_source_origin, row_source_segments, diagnostics) {
+        if !sema_registration_add_root(module_row, module_text, symbols, items[index], row_source_file, row_source_origin, row_source_segments, diagnostics) {
             // The first declaration remains the lookup winner after a collision.
         }
     }
@@ -3028,7 +3069,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         source: module_row.nominals[nominal_index].source.copy()
         if source == .ForeignHandle(facts) {
             updated_facts := facts
-            updated_facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, updated_facts)
+            updated_facts.close_function_key = sema_registration_foreign_handle_close_key(module_row, symbols, updated_facts)
             module_row.nominals[nominal_index].source = SemaRegistrationNominalSource.ForeignHandle{value: updated_facts}
         }
     }
@@ -3041,7 +3082,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
     items = module_row.program.items.move()
     module_row.program.items = [Item]{}
     loop index in 0..<items.len() {
-        if items[index] == .Impl(_) -> sema_registration_add_impl(module_row, module_text, items[index], items, impl_rows, diagnostics)
+        if items[index] == .Impl(_) -> sema_registration_add_impl(module_row, module_text, symbols, items[index], items, impl_rows, diagnostics)
     }
     module_row.program.items = items.move()
     // Root exports are retained separately so private declarations never become
@@ -3217,28 +3258,44 @@ SemaRegistrationPrepareJob: struct {
     input: SemaRegistrationModuleInput
     // The input's module identity text, which its symbol keys spell.
     module_text: String
+    // The module's reserved symbol range, which its preparation interns
+    // into.
+    symbols: SymbolKeys
     templates: [SemaGenericModuleSource]
     policies: [UserPolicyDecl]
     settings: [SemaBuildSetting]
     codecs: [String:Bool]
 }
 
-// A prepared module row and the diagnostics its preparation reported.
+// A prepared module row, its symbol range and the diagnostics its
+// preparation reported.
 SemaRegistrationPreparedRow: struct {
     module_row: SemaRegistrationModule
+    symbols: SymbolKeys
     diagnostics: [Diagnostic]
 }
 
 sema_registration_prepare_job: fn(job: &&SemaRegistrationPrepareJob) -> SemaRegistrationPreparedRow {
     owned := job.move()
     input := owned.input.move()
+    symbols := symbol_table_open(owned.symbols.move())
     templates := owned.templates.move()
     policies := owned.policies.move()
     settings := owned.settings.move()
     codecs := owned.codecs.move()
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(input, owned.module_text, templates, policies, settings, codecs, diagnostics)
-    SemaRegistrationPreparedRow{module_row: module_row.move(), diagnostics: diagnostics.move()}
+    module_row := sema_registration_prepare_module_row(input, owned.module_text, symbols, templates, policies, settings, codecs, diagnostics)
+    keys := symbols.ranges.pop() ?? panic("a prepared module lost its symbol range")
+    SemaRegistrationPreparedRow{module_row: module_row.move(), symbols: keys.move(), diagnostics: diagnostics.move()}
+}
+
+// A module's share of the symbol ids sema_registration_prepare_graph hands
+// out: its source bytes, plus a floor for the declarations its preparation
+// generates and for each template it instantiates.
+SEMA_REGISTRATION_SYMBOL_WEIGHT_FLOOR: 4096
+
+sema_registration_symbol_weight: fn(input: SemaRegistrationModuleInput, templates: Int) -> Int Never! {
+    input.source.count_bytes() + SEMA_REGISTRATION_SYMBOL_WEIGHT_FLOOR * (1 + templates)
 }
 
 // The prepared row of each job, in job order. A module's preparation reads
@@ -4183,7 +4240,8 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
                 visibility: if import.declaration.is_pub -> 2 else -> 1
                 if !sema_registration_visible(visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return None
                 module_row_text: module_text(graph.module_table, module_row.module_identity)
-                symbol: Symbol{id: symbol_id(SymbolKind.Import, module_row_text, module_text(graph.module_table, import.target_module_identity), name), kind: SymbolKind.Import, name: name.copy(), module_identity: module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
+                id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, module_row_text, module_text(graph.module_table, import.target_module_identity), name)) ?? panic("the module import `{name}` of `{module_row_text}` has no symbol (sema_registration_mint_module_imports)")
+                symbol: Symbol{id: id, kind: SymbolKind.Import, name: name.copy(), module_identity: module_row.module_identity, owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
                 return Val(SemaRegistrationExport{name: name.copy(), symbol: symbol.move(), declaration: None, source_module_identity: import.target_module_identity, visibility: visibility})
             }
         }
@@ -4200,11 +4258,15 @@ sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index:
     }
     // Core's authoritative export ledger also owns runtime builtin carriers
     // that have no source nominal declaration. Keep their builtin identity,
-    // and never apply this rule to a user module with a Core-like name.
+    // and never apply this rule to a user module with a Core-like name. No
+    // registration declares such a carrier, so its symbol is a run-wide one
+    // only when a seeded record minted its key; otherwise it is none.
     private_native: module_is_core(requester_module) && (sema_reserved_type_name(name) || core_record_literal_fields(name) != None)
     if module_is_core(module_row.module_identity) && (core_module_has_type(module_row.module_name, name) || private_native) {
-        symbol: sema_registration_named_symbol(module_row.module_identity, module_text(graph.module_table, module_row.module_identity), name, Span{start: 0, end: 0}, SymbolKind.Type, Val(Type.Named{name: name}), true, false)
-        return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration: None, source_module_identity: module_row.module_identity, visibility: 2})
+        id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Type, module_text(graph.module_table, module_row.module_identity), "", name)) ?? symbol_none()
+        visibility: sema_registration_visibility(true, false)
+        symbol: Symbol{id: id, kind: SymbolKind.Type, name: name, module_identity: module_row.module_identity, owner: None, span: Span{start: 0, end: 0}, ty: Val(Type.Named{name: name}), visibility: visibility}
+        return Val(SemaRegistrationExport{name: name, symbol: symbol, declaration: None, source_module_identity: module_row.module_identity, visibility: visibility})
     }
     None
 }
@@ -4329,7 +4391,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     // A Core submodule binding names its module (`core.mem`), interned
                     // beside the loaded identities; a module not loaded has no row.
                     submodule_identity: module_intern(graph.module_table, submodule)
-                    module_symbol: Symbol{id: symbol_id(SymbolKind.Import, source_text, submodule, local), kind: SymbolKind.Import, name: local, module_identity: submodule_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
+                    module_symbol: Symbol{id: symbol_mint(graph.symbols, SymbolKind.Import, source_text, submodule, local), kind: SymbolKind.Import, name: local, module_identity: submodule_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
                     submodule_index: sema_registration_core_unit_index(graph, submodule)
                     sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: module_symbol, declaration: None, target_module_identity: submodule_identity, target_module_index: submodule_index, visibility: import_visibility})
                     next
@@ -4378,7 +4440,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             leaf_identity: graph.modules[target_index].module_identity
                             leaf_text: module_text(graph.module_table, leaf_identity)
                             import_visibility: graph.modules[module_index].imports[import_index].visibility
-                            leaf_symbol: Symbol{id: symbol_id(SymbolKind.Foreign, leaf_text, "", item.original), kind: SymbolKind.Foreign, name: local, module_identity: leaf_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
+                            leaf_symbol: Symbol{id: symbol_mint(graph.symbols, SymbolKind.Foreign, leaf_text, "", item.original), kind: SymbolKind.Foreign, name: local, module_identity: leaf_identity, owner: None, span: declaration.span, ty: None, visibility: import_visibility}
                             sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: leaf_symbol, declaration: None, target_module_identity: leaf_identity, target_module_index: Val(target_index), visibility: import_visibility})
                             next
                         }
@@ -4407,7 +4469,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     else -> {
                         import_visibility: graph.modules[module_index].imports[import_index].visibility
                         target_text: module_text(graph.module_table, target_identity)
-                        module_symbol: Symbol{id: symbol_id(SymbolKind.Import, source_text, target_text, declaration.alias), kind: SymbolKind.Import, name: declaration.alias, module_identity: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
+                        module_symbol: Symbol{id: symbol_find(graph.symbols, symbol_key_text(SymbolKind.Import, source_text, target_text, declaration.alias)) ?? panic("the module import `{declaration.alias}` of `{source_text}` has no symbol (sema_registration_mint_module_imports)"), kind: SymbolKind.Import, name: declaration.alias, module_identity: target_identity, owner: None, span: declaration.alias_span, ty: None, visibility: import_visibility}
                         sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: target_name, local: declaration.alias, symbol: module_symbol, declaration: None, target_module_identity: target_identity, target_module_index: Val(target_index), visibility: import_visibility})
                     }
                 }
@@ -4415,6 +4477,35 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
         }
     }
     if namespace_from >= import_count -> sema_registration_namespace_collisions(graph, module_index, import_count)
+}
+
+// The id of each file or module import's binding of the module at
+// `module_index`. A module that re-exports one
+// (sema_registration_resolve_export) may be read before its own imports
+// populate, so every module's are minted first, in module order.
+sema_registration_mint_module_imports: fn(graph: &SemaRegistrationGraph, module_index: Int) {
+    source_text: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    keys := [String]{}
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.kind == .Unqualified(_, _, _, _, _) -> next
+        keys.push(symbol_key_text(SymbolKind.Import, source_text, module_text(graph.module_table, import.target_module_identity), import.declaration.alias))
+    }
+    loop key in keys {
+        _ := symbol_intern(graph.symbols, key)
+    }
+}
+
+// The id of each `#Test` block's synthetic function in the module at
+// `module_index` (sema_check_test_function), keyed checked_test_artifact_key.
+sema_registration_mint_tests: fn(graph: &SemaRegistrationGraph, module_index: Int) {
+    source_text: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    keys := [String]{}
+    loop item in graph.modules[module_index].program.items {
+        if item == .Test(test) -> keys.push(checked_test_artifact_key(source_text, test))
+    }
+    loop key in keys {
+        _ := symbol_intern(graph.symbols, key)
+    }
 }
 
 // A package name binds after the module's own declarations
@@ -4515,7 +4606,8 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
         module_index: sema_registration_compiler_builtin_module(graph, name) ?? next
         module_identity := module_text(graph.module_table, graph.modules[module_index].module_identity)
         first_nominal: graph.modules[module_index].nominals.len()
-        graph.modules[module_index].nominals.push(sema_registration_compiler_owned_enum(graph.modules[module_index].module_identity, module_identity, name, variants))
+        nominal: sema_registration_compiler_owned_enum(graph.modules[module_index].module_identity, module_identity, graph.symbols, name, variants)
+        graph.modules[module_index].nominals.push(nominal)
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
         graph.compiler_builtin_rows[name] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
@@ -4524,7 +4616,8 @@ sema_registration_inject_compiler_builtins: fn(graph: &SemaRegistrationGraph) {
         module_index: sema_registration_compiler_builtin_module(graph, reference.name) ?? next
         module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
         first_nominal: graph.modules[module_index].nominals.len()
-        graph.modules[module_index].nominals.push(sema_registration_compiler_owned_codec_trait(graph.modules[module_index].module_identity, module_identity, reference))
+        nominal: sema_registration_compiler_owned_codec_trait(graph.modules[module_index].module_identity, module_identity, graph.symbols, reference)
+        graph.modules[module_index].nominals.push(nominal)
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
         graph.compiler_builtin_rows[reference.name] = SemaRegistrationRowRef{module_index: module_index, row: first_nominal}
     }
@@ -4536,6 +4629,33 @@ sema_registration_compiler_builtin_row: fn(graph: SemaRegistrationGraph, name: S
     graph.compiler_builtin_rows.get(name)
 }
 
+// The symbol ranges a graph prepared from `table`'s graph's rows of the
+// `seeded` modules reserves (sema_registration_prepare_graph): a seeded
+// module's range and every range of no module (the serial ones, the last
+// closed at its keys) with their keys, and every other module's bare, so a
+// module prepared again interns into the ids it had.
+sema_registration_reserved_symbols: fn(table: SymbolTable, seeded: [ModuleID]) -> [SymbolKeys] {
+    reserved := [SymbolKeys]{}
+    last: table.ranges.len() - 1
+    loop (index, range) in table.ranges {
+        kept := module_is_none(range.module_identity)
+        loop identity in seeded {
+            if identity == range.module_identity -> kept = true
+        }
+        if !kept {
+            bare := symbol_keys(range.base, range.bound)
+            bare.module_identity = range.module_identity
+            reserved.push(bare)
+            next
+        }
+        // copy: the reservation holds the keys `table` keeps.
+        keys := range.copy()
+        if index == last -> keys.bound = keys.keys.texts.len()
+        reserved.push(keys)
+    }
+    reserved
+}
+
 // `counting` sets the graph's `counting` (#4319 lookup counters). The inputs
 // are consumed: each program moves into its module row. The unit scans and
 // the module rows are prepared on up to `threads` compiler threads, with the
@@ -4543,8 +4663,10 @@ sema_registration_compiler_builtin_row: fn(graph: SemaRegistrationGraph, name: S
 // already registered and finalized (the precompiled Core record's, rebased to
 // this graph and its `module_table`): they take the first module indexes, in
 // order, and the passes that bind, expand or edit a module skip them
-// (`seeded`).
-sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], seeds: &&[SemaRegistrationModule], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
+// (`seeded`). `reserved_symbols` are the symbol ranges the caller fixed (the
+// Core record's): a seeded module's range with its keys, the record's serial
+// range, and the bare range a record module prepared here interns into.
+sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], seeds: &&[SemaRegistrationModule], reserved_symbols: &&[SymbolKeys], edges: [SemaRegistrationImportEdge], package_identity: String, entry_module_identity: ModuleID, canonical_effect_module_identity: ModuleID, module_table: &&ModuleTable, foreign_providers: [SemaForeignProviderInput], target_machine: TargetMachine, build_facts: SemaBuildFacts, counting: Bool, threads: CompilerThreads) -> SemaRegistrationGraph {
     modules := [SemaRegistrationModule]{}
     diagnostics := [Diagnostic]{}
     // Rust CheckInner `retain_error_prelude_module` runs first: the original
@@ -4612,6 +4734,29 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // declare: one fixed point over every parsed input before any module is
     // prepared, so each preparation still reads only its own job.
     codecs := sema_derive_foreign_codecs(prepared_inputs)
+    // Each module interns its symbols into its own id range, fixed before any
+    // thread runs, so every id is the same for any thread count
+    // (Docs/spec/compiler-data.md). A module the caller reserved a range for
+    // takes it; the others share three quarters of the ids after the
+    // reserved ones, each in proportion to its source and the templates it
+    // instantiates, and the serial passes intern after the last range.
+    reserved := reserved_symbols.move()
+    // A first graph starts the builtin range; a graph prepared again keeps
+    // the one its reservations carry.
+    if reserved.len() == 0 -> reserved.push(symbol_builtin_keys())
+    reserved_slots := [Int]{}
+    loop _ in 0..<module_count(table) -> reserved_slots.push(-1)
+    symbols_cursor := 0
+    loop (index, range) in reserved {
+        if !module_is_none(range.module_identity) -> reserved_slots[module_index(range.module_identity)] = index
+        if range.base + range.bound > symbols_cursor -> symbols_cursor = range.base + range.bound
+    }
+    taken := loop _ in reserved -> false
+    symbols_weight := 0
+    loop index in 0..<prepared_inputs.len() {
+        if reserved_slots[module_index(prepared_inputs[index].module_identity)] < 0 -> symbols_weight += sema_registration_symbol_weight(prepared_inputs[index], imported_templates[index].len())
+    }
+    symbols_share: (SYMBOL_LOCAL_BOUND - symbols_cursor) /% 4 * 3
     // Each input moves out of the list (front to back) into its prepare job.
     prepared_inputs.reverse()
     imported_templates.reverse()
@@ -4623,7 +4768,18 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         module_codecs := codecs.pop() ?? break
         policies: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
         input_text: module_text(table, input.module_identity)
-        jobs.push(SemaRegistrationPrepareJob{input: input.move(), module_text: input_text, templates: templates.move(), policies: policies, settings: build_facts.settings, codecs: module_codecs.move()})
+        slot: reserved_slots[module_index(input.module_identity)]
+        symbols := symbol_keys_empty()
+        if slot >= 0 {
+            symbols = symbol_keys(reserved[slot].base, reserved[slot].bound)
+            taken[slot] = true
+        } else {
+            bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
+            symbols = symbol_keys(symbols_cursor, bound)
+            symbols_cursor += bound
+        }
+        symbols.module_identity = input.module_identity
+        jobs.push(SemaRegistrationPrepareJob{input: input.move(), module_text: input_text, symbols: symbols.move(), templates: templates.move(), policies: policies, settings: build_facts.settings, codecs: module_codecs.move()})
     }
     prepared := sema_registration_prepare_rows(jobs, threads)
     // Each prepared row moves out (front to back) into its module row, after
@@ -4638,6 +4794,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         modules.push(seed)
     }
     seeded: modules.len()
+    // The reserved ranges no module prepared into (the seeded modules' and
+    // the serial one), then each prepared module's.
+    symbol_ranges := [SymbolKeys]{}
+    loop reserved.len() > 0 {
+        range := reserved.pop() ?? break
+        if !taken[reserved.len()] -> symbol_ranges.push(range)
+    }
     loop prepared.len() > 0 {
         row := prepared.pop() ?? break
         loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
@@ -4645,14 +4808,18 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         duplicate: module_rows[module_index(module_row.module_identity)] >= 0
         if !duplicate -> module_rows[module_index(module_row.module_identity)] = modules.len()
         if {
+            // A duplicate's keys are its first row's, which the graph holds.
             duplicate -> diagnostics.push(sema_defined_twice_optional(module_text(table, module_row.module_identity), "module identities must be unique in one declaration graph", None))
-            else -> modules.push(module_row)
+            else -> {
+                modules.push(module_row)
+                symbol_ranges.push(row.symbols.move())
+            }
         }
     }
     if package_identity == "" || module_is_none(entry_module_identity) {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))
     }
-    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [String:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
+    graph := SemaRegistrationGraph{package_identity: package_identity, entry_module_identity: entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, target_machine: target_machine, build_facts: build_facts, modules: modules, module_table: table.move(), module_rows: module_rows, symbols: symbol_table_of(symbol_ranges), edges: edges, foreign_providers: foreign_providers, core_builtin_owner_facts: sema_registration_core_builtin_owner_facts(), imports: [SemaRegistrationImport]{}, unit_facts: [SemaRegistrationUnitFact]{}, lookup_counters: Shared{SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0}}, counting: counting, internal_problem: None, diagnostics: diagnostics, complete: diagnostics.len() == 0, nominal_row_slots: [String:Int]{}, nominal_row_buckets: [[SemaRegistrationRowRef]]{}, impl_row_slots: [String:Int]{}, impl_row_buckets: [[SemaRegistrationRowRef]]{}, nominal_symbol_rows: [U32:SemaRegistrationRowRef]{}, codec_demand: Shared{SemaCodecDemand{keys: [String:Bool]{}, order: [String]{}}}, derive_demand: Shared{SemaDeriveDemand{keys: [String:Bool]{}}}}
     graph.seeded = seeded
     sema_registration_index_all_nominal_rows(graph)
     sema_registration_index_source_impls(graph)
@@ -4822,6 +4989,13 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         }
         module_index += 1
     }
+    // Each module's file and module import ids first
+    // (sema_registration_mint_module_imports).
+    module_index = graph.seeded
+    loop module_index < graph.modules.len() {
+        sema_registration_mint_module_imports(graph, module_index)
+        module_index += 1
+    }
     import_module_indices := [Int]{}
     module_index = graph.seeded
     loop module_index < graph.modules.len() {
@@ -4886,6 +5060,8 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     }
     sema_registration_index_canonical_nominals(graph)
     sema_divergence_solve(graph)
+    // Each test's id once the user templates have generated theirs.
+    loop row_index in graph.seeded..<graph.modules.len() -> sema_registration_mint_tests(graph, row_index)
     graph
 }
 
@@ -5167,10 +5343,11 @@ sema_registration_resolve_default: fn(graph: SemaRegistrationGraph, reference: F
             .Foreign(_, _) -> {}
         }
     }
+    owner: symbol_find(graph.symbols, reference.owner_key) ?? return None
     loop module_row_index in 0..<graph.modules.len() {
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
             loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].trait_methods.len() {
-                if graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.id.key == reference.owner_key -> return sema_registration_parameter_default(graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].parameters, reference)
+                if graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.id == owner -> return sema_registration_parameter_default(graph.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].parameters, reference)
             }
         }
     }
@@ -5205,7 +5382,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
     sema_scope_seed_unit_policy(scopes, graph, module_identity)
     if !sema_scope_add_compiler_builtin(scopes, graph) -> complete = false
     loop (position, symbol) in module_row.symbols {
-        if !sema_scope_add_module_symbol(scopes, symbol) {
+        if !sema_scope_add_module_symbol(scopes, symbol, symbol_table_key(graph.symbols, symbol.id)) {
             why: if symbol.kind == SymbolKind.Function -> "every function needs a unique name so calls aren't ambiguous" else -> "module declarations share one namespace"
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, why, symbol.span), module_row.source_segments))
             complete = false
@@ -5217,7 +5394,7 @@ sema_registration_apply_graph_module_rows: fn(graph: SemaRegistrationGraph, modu
     loop (import_index, import) in module_row.imports {
         if import_index == namespace_from && !sema_registration_apply_namespace(graph, module_index, scopes, diagnostics, waiting) -> complete = false
         loop (binding_index, binding) in import.bindings {
-            if !sema_scope_add_module_symbol(scopes, binding.symbol) {
+            if !sema_scope_add_module_symbol(scopes, binding.symbol, symbol_table_key(graph.symbols, binding.symbol.id)) {
                 diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(binding.local, "imported names share the module namespace", binding.symbol.span), module_row.source_segments))
                 complete = false
             } else if sema_comptime_symbol_waits(binding.symbol) {
@@ -5235,7 +5412,7 @@ sema_registration_apply_namespace: fn(graph: SemaRegistrationGraph, module_index
     complete := true
     loop owner_index in 0..<graph.modules[module_index].namespace_bindings.len() {
         symbol: graph.modules[graph.modules[module_index].namespace_bindings[owner_index].module_index].symbols[graph.modules[module_index].namespace_bindings[owner_index].row]
-        if !sema_scope_add_module_symbol(scopes, symbol) {
+        if !sema_scope_add_module_symbol(scopes, symbol, symbol_table_key(graph.symbols, symbol.id)) {
             diagnostics.push(sema_diagnostic_with_source_location(sema_defined_twice(symbol.name, "imported names share the module namespace", symbol.span), graph.modules[module_index].source_segments))
             complete = false
         } else if sema_comptime_symbol_waits(symbol) {

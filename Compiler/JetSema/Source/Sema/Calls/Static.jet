@@ -39,7 +39,8 @@ use jet_foundation.[
     expr_span,
     foundation_named_type,
     jet_target_layout_atomic_scalar_type,
-    symbol_id,
+    symbol_is_local,
+    symbol_key_text,
     type_identity_equal,
     type_name,
     ModuleID,
@@ -67,7 +68,7 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
     nominal_module: nominal.symbol.module_identity
     owner_module := nominal_module
     owner_package := ""
-    if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
+    if sema_type_graph_nominal_row(graph, nominal.symbol.id) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
         owner_package = graph.modules[owner_row.module_index].package_identity
     }
@@ -157,7 +158,7 @@ sema_call_static_local_generic_method_exists: fn(symbol: Symbol, method: String,
 
 sema_call_static_has_method: fn(targets: [SemaStaticMethodTarget], symbol: SymbolID) -> Bool Never! {
     loop target in targets {
-        if target.method.symbol.key == symbol.key -> return true
+        if target.method.symbol == symbol -> return true
     }
     false
 }
@@ -283,7 +284,7 @@ sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: S
     nominal_module: nominal.symbol.module_identity
     owner_module := nominal_module
     owner_package := ""
-    if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
+    if sema_type_graph_nominal_row(graph, nominal.symbol.id) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
         owner_package = graph.modules[owner_row.module_index].package_identity
     }
@@ -310,7 +311,7 @@ sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: S
 
 sema_call_static_nominal_declares: fn(nominal: SemaRegistrationNominal, symbol: SymbolID) -> Bool Never! {
     loop function in nominal.methods {
-        if function.symbol.id.key == symbol.key -> return true
+        if function.symbol.id == symbol -> return true
     }
     false
 }
@@ -342,10 +343,11 @@ sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, ow
 sema_call_static_local_target: fn(owner_symbol: Symbol, owner_name: String, declared_owner: Type, owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], function: Func, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaStaticMethodTarget? {
     if function.params.len() > 0 && function.params[0].name == "self" -> return None
     module_name: sema_scope_environment_module_text(environment, program)
-    method_id: symbol_id(SymbolKind.Function, module_name, owner_name, function.name)
-    signature: sema_function_symbol_type(function, false, method_id, environment.source_file, environment.source_origin, environment.source_segments)
+    method_key: symbol_key_text(SymbolKind.Function, module_name, owner_name, function.name)
+    method_id: sema_symbol_id_of(program, context, method_key)
+    signature: sema_function_symbol_type(function, false, method_key, environment.source_file, environment.source_origin, environment.source_segments)
     visibility: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
-    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_identity: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
+    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_identity: environment.module_identity, owner: Val(sema_symbol_key(program, context, owner_symbol.id)), span: function.name_span, ty: Val(signature), visibility: visibility}
     target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, program, span, diagnostics) ?? return None
     owner_result: sema_call_static_owner_resolution(sema_call_static_unshadowed_params(owner_params, target.generic_params, owner_type_args), owner_type_args, target.signature, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics) ?? return None
     owner_type: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)
@@ -390,8 +392,10 @@ sema_call_static_local_defaults: fn(target: SemaStaticMethodTarget, binding: Sem
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
     function: target.function ?? return None
     defaults := [SemaCallDefaultValue]{}
+    // A body's own id is no registered owner a default names.
+    owner_key: if symbol_is_local(target.method.symbol) -> "" else -> sema_program_symbol_key(program, target.method.symbol)
     loop reference in binding.default_refs {
-        if reference.owner_key != target.method.symbol.key -> return None
+        if reference.owner_key != owner_key -> return None
         parameter_index: reference.parameter_index
         if parameter_index < 0 || parameter_index >= function.params.len() -> return None
         expression: function.params[parameter_index].default ?? return None
@@ -697,7 +701,7 @@ sema_call_builtin_static_call_arg: fn(value: TExpr, argument: CallArg) -> TCallA
 
 // CoreCall rows lower through the registered Core route in the caller.
 // `line` is the call's source line, which a checked crossing stops at.
-sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, context: &SemaCheckContext) -> TExprKind? {
+sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, program: SemaProgramTables, context: &SemaCheckContext) -> TExprKind? {
     rest := [TExpr]{}
     loop index in 0..<values.len() {
         if index > 0 -> rest.push(values[index])
@@ -715,7 +719,7 @@ sema_call_builtin_static_lowered: fn(row: BuiltinStaticRow, values: [TExpr], arg
             }
             call_args := [TCallArg]{}
             loop index in 0..<values.len() -> call_args.push(sema_call_builtin_static_call_arg(values[index], args[index]))
-            reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
+            reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, row.module_name, path, row.method), name: row.method, mangled: false, trait_owner: None, operator_identity: None}
             Val(TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: rooted, path: path, generics: owner_args}, owner_type: None, method: reference, type_args: [Type]{}, args: call_args})
         }
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
@@ -843,7 +847,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
     if row.lowering == .Numeric(operation) && operation == .CheckedIntToFloat(_, _, _) && values.len() == 1 {
         if !sema_expr_float_literal_fits(values[0], result, values[0].span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    kind: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, sema_source_line_at(environment.source_segments, span) ?? 0, context) ?? {
+    kind: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, sema_source_line_at(environment.source_segments, span) ?? 0, program, context) ?? {
         diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no checked-tree construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -914,7 +918,7 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
                 // module-scope binding of the alias symbol; its statics are the
                 // target's, as for the qualified spelling below.
                 if symbol.kind == SymbolKind.Type && program.registration_graph == .Val(graph) {
-                    if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(row) {
+                    if sema_type_graph_nominal_row(graph, symbol.id) == .Val(row) {
                         if sema_call_static_alias_target(graph, row, owner_type_args) == .Val(target) -> return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, target.symbol), owner_type_args: target.owner_type_args})
                     }
                 }
@@ -1200,7 +1204,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
     generic_owner_method := false
     owner_param_names := [String]{}
     if program.registration_graph == .Val(graph) {
-        owner_row: sema_type_graph_nominal_row(graph, owner_symbol.id.key)
+        owner_row: sema_type_graph_nominal_row(graph, owner_symbol.id)
         if owner_row == .Val(row) {
             owner: graph.modules[row.module_index].nominals[row.row]
             targets = sema_call_static_registered_targets(graph, owner, method, static_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics)
@@ -1249,7 +1253,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                     }
                 }
                 if instance && program.registration_graph == .Val(graph) {
-                    if sema_type_graph_nominal_row(graph, owner_symbol.id.key) == .Val(row) && sema_call_static_registered_method_exists(graph, graph.modules[row.module_index].nominals[row.row], method, environment, program) -> instance = false
+                    if sema_type_graph_nominal_row(graph, owner_symbol.id) == .Val(row) && sema_call_static_registered_method_exists(graph, graph.modules[row.module_index].nominals[row.row], method, environment, program) -> instance = false
                 }
                 if instance {
                     diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{type_name}`", "instance methods need a value before the dot", "call it on a `{type_name}` value: `x.{method}(...)`"))
@@ -1271,7 +1275,7 @@ sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaS
     selected: sema_call_resolve_direct_candidates("{type_name}.{method}", args, direct_targets, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target := targets[0]
     loop candidate in targets {
-        if candidate.target.symbol.id.key == selected.symbol.id.key {
+        if candidate.target.symbol.id == selected.symbol.id {
             target = candidate
             break
         }

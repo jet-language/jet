@@ -30,7 +30,6 @@ use jet_foundation.[
     sema_collection_method_operation,
     sema_collection_method_result_type,
     sema_collection_receiver_element,
-    symbol_id,
     type_name,
 ]
 
@@ -446,7 +445,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             element: sema_collection_receiver_element(receiver_value.ty) ?? Type.Int
             if !sema_call_set_bits_ready(element, "bits()", span, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
             path: "std::collections::HashSet"
-            reference := TMethodRef{symbol: symbol_id(SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
+            reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
             argument := TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             sema_tree_node(result_type, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: false, path: path, generics: [TPreludeArg]{TPreludeArg.Jet{ty: element}}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
         }

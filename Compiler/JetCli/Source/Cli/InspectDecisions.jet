@@ -112,7 +112,7 @@ jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, th
     checks.harden = harden || profile == "hardened"
     timing_host := ""
     if body_fixed_timing(checked.functions) -> timing_host = if checks.harden -> "policy.harden refuses an unconfirmed host at start" else -> "an unconfirmed host runs it; policy.harden would refuse one at start"
-    built := ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, threads)
+    built := ir_build_program(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), checked.entry_key ?? "", checks, threads)
     unbuilt := [String]{}
     loop failure in built.failures -> unbuilt.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     loops: ir_loop_proof_rows(built.program)

@@ -34,7 +34,6 @@ use {
         diagnostic_registry_row,
         expr_source_span,
         expr_span,
-        symbol_id,
         checked_symbol_local,
         type_identity_equal,
         type_name,
@@ -587,7 +586,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
-        binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, args[index].expr) else -> [String]{}
+        binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
         self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required, scopes)
@@ -807,7 +806,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     reference_starts.push(context.name_references.len())
     // A name two take slots of one call receive has no last use in either.
     loop position in 0..<take_indices.len() {
-        twice := sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context)
+        twice := sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, program, context)
         loop earlier in 0..<position {
             if take_keys[earlier] == take_keys[position] -> twice = true
         }
@@ -852,8 +851,9 @@ sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg]
         required: sema_call_resolved_type(declared, environment, program)
         key: sema_ownership_note_implicit_take(state, args[index].expr, values[index].ty, required, environment, program, context.generic_params, scopes) ?? next
         twice := false
+        target: sema_symbol_lookup(program, context, key)
         loop reference in context.name_references {
-            if reference.symbol.id.key != key -> next
+            if target != .Val(reference.symbol.id) -> next
             loop other in index + 1..<args.len() {
                 other_span: expr_span(args[other].expr)
                 if reference.span.start >= other_span.start && reference.span.end <= other_span.end -> twice = true
@@ -1147,18 +1147,19 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
 // Whether an argument after `own` references the binding `key`: arguments
 // run in order, so an earlier one has read the name before the take.
 // `starts` holds each argument's first name reference and the end.
-sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
+sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], program: SemaProgramTables, context: SemaCheckContext) -> Bool Never! {
+    target: sema_symbol_lookup(program, context, key) ?? return false
     loop other in own + 1..<starts.len() - 1 {
         loop index in starts[other]..<starts[other + 1] {
-            if index < context.name_references.len() && context.name_references[index].symbol.id.key == key -> return true
+            if index < context.name_references.len() && context.name_references[index].symbol.id == target -> return true
         }
     }
     false
 }
 
-sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
+sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
     local_module: sema_scope_environment_module_text(environment, program)
-    id: symbol_id(SymbolKind.Local, local_module, owner, "binder_ref_{site}_{slot}")
+    id: sema_symbol_id(program, context, SymbolKind.Local, local_module, owner, "binder_ref_{site}_{slot}")
     Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
@@ -1168,22 +1169,22 @@ sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: Sema
 // unused binding. Each placeholder is declared at the default's first source
 // byte, so every read in it follows the declaration: a method chain or index
 // (`values.len()`, `values[0]`) is spanned after its base (jfmt_expr_start).
-sema_call_enter_binder_refs: fn(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, default_expr: Expr) -> [String] Never! {
+sema_call_enter_binder_refs: fn(refs: [BinderRef], site: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, default_expr: Expr) -> [SymbolID] Never! {
     span: Span{start: jfmt_expr_start(default_expr), end: expr_span(default_expr).end}
     owner: sema_scope_function_owner_key(scopes)
     _ := sema_scope_enter(scopes, state, owner)
-    keys := [String]{}
+    ids := [SymbolID]{}
     loop reference in refs {
-        symbol: sema_call_binder_ref_symbol(environment, program, owner, site, reference.slot, reference.name, reference.ty, span)
-        _ := sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false)
-        keys.push(symbol.id.key)
+        symbol: sema_call_binder_ref_symbol(environment, program, context, owner, site, reference.slot, reference.name, reference.ty, span)
+        _ := sema_scope_declare_local(scopes, symbol, sema_symbol_key(program, context, symbol.id), false, AccessConvention.Read, None, false)
+        ids.push(symbol.id)
     }
-    keys
+    ids
 }
 
-sema_call_binder_refs_read: fn(keys: [String], start: Int, context: SemaCheckContext) -> Bool Never! {
+sema_call_binder_refs_read: fn(ids: [SymbolID], start: Int, context: SemaCheckContext) -> Bool Never! {
     loop index in start..<context.name_references.len() {
-        if keys.contains(context.name_references[index].symbol.id.key) -> return true
+        if ids.contains(context.name_references[index].symbol.id) -> return true
     }
     false
 }
@@ -1217,9 +1218,9 @@ sema_call_default_ref_module: fn(program: SemaProgramTables, reference: Function
 // names. Its binder slots key under the calling function and module, as
 // sema_call_pin_binder_arguments reads them; a problem it reports is anchored
 // at the call.
-sema_call_check_owner_default: fn(owner_scope: &&SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, call_span: Span, binder_keys: &[String], diagnostics: &[Diagnostic]) -> TExpr? {
+sema_call_check_owner_default: fn(owner_scope: &&SemaDefaultOwnerScope?, argument: CallArg, expected: Type?, parameter: SemaCallParam, abi: SemaRegistrationCallableABI?, apply_lambda_escape_override: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, call_span: Span, binder_keys: &[SymbolID], diagnostics: &[Diagnostic]) -> TExpr? {
     scope := owner_scope.move() ?? return None
-    if argument.flags.binder_refs.len() > 0 -> binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, scope.scopes, scope.state, argument.expr)
+    if argument.flags.binder_refs.len() > 0 -> binder_keys = sema_call_enter_binder_refs(argument.flags.binder_refs, argument.flags.binder_site ?? call_span.start, environment, program, scope.scopes, scope.state, context, argument.expr)
     default_diagnostics := [Diagnostic]{}
     checked: if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(argument.expr, expected, scope.environment, program, scope.scopes, scope.state, tail_store, context, sema_call_lambda_escape_policy(parameter, abi), default_diagnostics) else -> sema_check_expression(argument.expr, expected, scope.environment, program, scope.scopes, scope.state, tail_store, context, default_diagnostics)
     loop diagnostic in default_diagnostics -> diagnostics.push(sema_default_use_site_diagnostic(diagnostic, call_span))
@@ -1231,7 +1232,7 @@ sema_call_check_owner_default: fn(owner_scope: &&SemaDefaultOwnerScope?, argumen
 // so binder references read the already-passed values. Methods and Fn calls
 // pin their receiver/callee first; this helper owns only argument pins.
 // Borrowed places are pinned as borrows, fresh values retain an owned pin.
-sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> [TStmt] Never! {
+sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaCallParam], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext, span: Span) -> [TStmt] Never! {
     bindings := [TStmt]{}
     if !typed.pin_arguments -> return bindings
     owner: sema_scope_function_owner_key(scopes)
@@ -1264,7 +1265,7 @@ sema_call_pin_binder_arguments: fn(typed: SemaCallTypedArguments, params: [SemaC
             access: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
             init = sema_tree_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
-        symbol: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
+        symbol: sema_call_binder_ref_symbol(environment, program, context, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
         local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, original.ty)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
@@ -1383,7 +1384,7 @@ sema_call_prepare_variadic_elements: fn(typed: SemaCallTypedArguments, params: [
             borrowed := false
             loop place in places {
                 loop binding in scopes.bindings {
-                    if binding.symbol.id.key == place.root_key && sema_ownership_binding_is_borrowed_param(binding) -> borrowed = true
+                    if binding.key == place.root_key && sema_ownership_binding_is_borrowed_param(binding) -> borrowed = true
                 }
             }
             copies_place: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
@@ -1486,7 +1487,7 @@ sema_call_check_bound_arguments_owned: fn(state: &SemaOwnershipState, callee: St
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, args, lowered, environment, program, scopes, state, context, diagnostics) -> return None
-    pins := sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, span)
+    pins := sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, context, span)
     packed := sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, context, span, diagnostics) ?? return None
     sema_call_compiler_handoffs(callee, packed, environment, program, scopes, span)
     Val((lowered: packed.move(), pins: pins.move()))

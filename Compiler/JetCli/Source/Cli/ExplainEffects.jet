@@ -20,6 +20,7 @@ use {
         JET_DRIVER_EXIT_USAGE,
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_display_path,
+        jet_driver_doc_callee_key,
     ]
     jet_foundation.[EffectRowEntry, Expr, Func, Item, ModuleCap, Span, Stmt, ast_visit_body, diagnostic_line_at]
     jet_sema.[sema_inline_decode_generated_suffix]
@@ -574,17 +575,21 @@ jet_cli_effects_span_reaches: fn(doc_module: JetDriverDocModule, key: String, sp
         if fact.caller_key != summary.raw_key -> next
         if fact.span.start < span.start || fact.span.end > span.end -> next
         if fact.foreign_effect_root == .Val(root) -> direct.push(EffectRowEntry{name: root.copy(), span: fact.span})
-        target: fact.callee ?? next
-        edges.push(EffectRowEntry{name: target.key.copy(), span: fact.span})
+        storage: doc_module.name_ledger ?? next
+        permit: storage.guard_read()
+        target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
+        edges.push(EffectRowEntry{name: target, span: fact.span})
     }
     jet_cli_effects_part_reaches(doc_module, key, direct, edges, summaries, modules, reaches)
 }
 
 // The span of the first call to `callee` inside `within`, else `within`.
 jet_cli_effects_call_span: fn(doc_module: JetDriverDocModule, callee: String, within: Span) -> Span Never! {
+    storage: doc_module.name_ledger ?? return Span{start: within.start, end: within.end}
+    permit: storage.guard_read()
     loop fact in doc_module.call_facts {
-        target: fact.callee ?? next
-        if target.key == callee && fact.span.start >= within.start && fact.span.end <= within.end -> return Span{start: fact.span.start, end: fact.span.end}
+        target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
+        if target == callee && fact.span.start >= within.start && fact.span.end <= within.end -> return Span{start: fact.span.start, end: fact.span.end}
     }
     Span{start: within.start, end: within.end}
 }

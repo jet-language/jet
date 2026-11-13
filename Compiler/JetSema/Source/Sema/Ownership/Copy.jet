@@ -5,6 +5,7 @@
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
+    symbol_table_key,
     Diagnostic,
     InternalTag,
     Span,
@@ -450,19 +451,23 @@ sema_copy_nominal_has_impl: fn(
     (known: false, value: false)
 }
 
-sema_copy_generic_bound: fn(param: TGenericParam, bound_name: String) -> Bool Never! {
-    loop bound in param.bounds {
-        if bound.key.ends_with(":{bound_name}") -> return true
+// Whether `param` is bounded by the trait named `bound_name`. A bound is a
+// registered trait id, so only a graph carries one.
+sema_copy_generic_bound: fn(param: TGenericParam, bound_name: String, graph: SemaRegistrationGraph?) -> Bool Never! {
+    if graph == .Val(registered) {
+        loop bound in param.bounds {
+            if symbol_table_key(registered.symbols, bound).ends_with(":{bound_name}") -> return true
+        }
     }
     false
 }
 
-sema_copy_generic_param_facts: fn(ty: Type, params: [TGenericParam]) -> SemaCopyTypeFacts? {
+sema_copy_generic_param_facts: fn(ty: Type, params: [TGenericParam], graph: SemaRegistrationGraph?) -> SemaCopyTypeFacts? {
     if ty == {
         .Named(name) -> {
             loop param in params {
                 if param.name == name {
-                    resource: sema_copy_generic_bound(param, "Close")
+                    resource: sema_copy_generic_bound(param, "Close", graph)
                     return Val(sema_copy_type_facts_known(false, !resource, false, false, resource, false, true))
                 }
             }
@@ -480,7 +485,7 @@ sema_copy_type_facts: fn(
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
-    if sema_copy_generic_param_facts(ty, generic_params) == .Val(facts) -> return facts
+    if sema_copy_generic_param_facts(ty, generic_params, graph) == .Val(facts) -> return facts
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .Measure(_) -> sema_copy_type_facts_known(true, true, false, false, false, false, true)
         .String -> sema_copy_type_facts_known(false, true, true, false, false, false, true)

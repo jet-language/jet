@@ -43,6 +43,12 @@ codec, a derived method, a closure, an instantiation) takes their ids from
 the symbol table in a fixed order. A parallel phase gives each worker its
 own range and renumbers the ranges at its deterministic merge.
 
+A key that a body names but no declaration registered is a local id. It
+carries the local bit (`0x80000000`) and indexes the body's own key table,
+so it never equals a run-wide id. A compile seeded from the Core record
+interns the record's symbol ranges before anything else, so an id in the
+record names the same declaration in the compile.
+
 Text exists only at the edges: diagnostics, emitted symbol names, and the
 key text a record or cache stores. The tables resolve an id to its text; no
 compiler record stores a copy of it.

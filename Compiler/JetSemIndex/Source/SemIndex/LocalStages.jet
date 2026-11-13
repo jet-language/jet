@@ -13,6 +13,7 @@ use {
         BodyTree,
         FnBody,
         Span,
+        TComptimeValue,
         TLocal,
         Type,
         ast_comptime_value_debug,
@@ -20,6 +21,7 @@ use {
         authority_is_deny_only,
         body_each_expr_child,
         body_node,
+        symbol_key,
         type_name,
     ]
     jet_sema.[
@@ -87,7 +89,12 @@ semindex_local_stage_start: fn(tree: BodyTree, row: Int) -> Int Never! {
 }
 
 semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [String: SemLocalStage], summaries: [SemSummary], by_raw_key: [String: Int], doc_module: JetDriverDocModule) -> SemLocalStage? Never! {
-    if sema_comptime_fold(function.tree, init, [SemaComptimeItemValue]{}) == .Val(value) {
+    folded := TComptimeValue?{None}
+    if doc_module.name_ledger == .Val(storage) {
+        permit: storage.guard_read()
+        folded = sema_comptime_fold(function.tree, init, [SemaComptimeItemValue]{}, permit.value.symbols)
+    }
+    if folded == .Val(value) {
         shown := ""
         // The source-like spelling: a string or character shows quoted.
         if sema_user_template_ct_value(value) == .Val(checked) -> shown = ast_comptime_value_debug(checked)
@@ -140,19 +147,23 @@ semindex_local_stage: fn(function: FnBody, local: TLocal, init: Int, stages: [St
 semindex_local_stage_effect: fn(function: FnBody, span: Span, summaries: [SemSummary], by_raw_key: [String: Int], doc_module: JetDriverDocModule) -> String? Never! {
     found := String?{None}
     found_at := 0
+    storage: doc_module.name_ledger ?? return None
+    permit: storage.guard_read()
     loop fact in doc_module.call_facts {
         if fact.caller_key != function.key || !semindex_local_stage_within(fact.span, span) -> next
         if found != None && fact.span.start >= found_at -> next
-        target: fact.callee ?? next
+        callee_id: fact.callee ?? next
+        // The fact's caller is `function`, so a local callee is one of its own.
+        target := symbol_key(permit.value.symbols, function.tree.symbols, callee_id)
         row := [String]{}
-        if by_raw_key.get(target.key) == .Val(index) {
+        if by_raw_key.get(target) == .Val(index) {
             row = summaries[index].solved.copy()
         } else if fact.facts.effect_bound == .Val(bound) {
             row = loop entry in bound -> entry.name.copy()
         }
         loop effect_name in row {
             if authority_is_deny_only(effect_name) -> next
-            callee: if semindex_function_key(target.key) == .Val(key) -> key.local else -> target.key.copy()
+            callee: if semindex_function_key(target) == .Val(key) -> key.local else -> target.copy()
             found = Val("it calls `{callee}`, which {authority_effect_action(effect_name)}")
             found_at = fact.span.start
             break

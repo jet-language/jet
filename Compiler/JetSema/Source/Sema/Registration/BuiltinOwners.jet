@@ -15,7 +15,7 @@ use jet_foundation.[
     TDeclarationOwnership,
     module_is_none,
     module_none,
-    symbol_id,
+    symbol_builtin,
     ModuleID,
 ]
 
@@ -32,7 +32,7 @@ sema_registration_core_builtin_sender_name: fn() -> String Never! {
 }
 
 sema_registration_core_builtin_owner_fact: fn(name: String) -> SemaRegistrationCoreBuiltinOwnerFact Never! {
-    symbol: symbol_id(SymbolKind.Type, "", "", name)
+    symbol: symbol_builtin(SymbolKind.Type, name) ?? panic("`{name}` is not a builtin owner type")
     SemaRegistrationCoreBuiltinOwnerFact{
         symbol: symbol,
         module_identity: module_none(),

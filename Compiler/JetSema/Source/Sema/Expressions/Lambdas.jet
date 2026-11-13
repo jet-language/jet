@@ -39,7 +39,8 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     ast_lambda_single_expr_span,
     expr_span,
-    symbol_id,
+    symbol_key_text,
+    symbol_none,
     checked_symbol_local,
     type_identity_equal,
     type_name,
@@ -491,7 +492,7 @@ sema_expression_lambda_effects: fn(lambda: &Lambda) -> TEffectFacts Never! {
     TEffectFacts{direct: direct, solved: lambda.meta.effect_solved, call_edges: lambda.meta.effect_call_edges, maximal: lambda.meta.effect_maximal, direct_spans: spans}
 }
 
-sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_call: Int, direct: &[String], edges: &[String], spans: &[TEffectSpan], maximal: &Bool) Never! {
+sema_expression_lambda_add_effect_facts: fn(program: SemaProgramTables, source: &SemaCheckContext, first_call: Int, direct: &[String], edges: &[String], spans: &[TEffectSpan], maximal: &Bool) Never! {
     index := first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
@@ -505,8 +506,8 @@ sema_expression_lambda_add_effect_facts: fn(source: &SemaCheckContext, first_cal
                 if fact.foreign_opaque -> maximal = true
             }
             fact.callee != None -> {
-                callee: fact.callee ?? SymbolID{key: ""}
-                sema_expression_lambda_append_name(edges, callee.key)
+                callee: fact.callee ?? symbol_none()
+                sema_expression_lambda_append_name(edges, sema_symbol_key(program, source, callee))
             }
             fact.facts.local_lambda != None -> {
                 if sema_expression_lambda_add_local_facts(fact.facts.local_lambda, fact.span, direct, edges, spans) -> maximal = true
@@ -922,7 +923,7 @@ sema_expression_lambda_bound_capture_escapes: fn(lambda: Lambda, written: [Strin
         candidate: scopes.bindings[index]
         index += 1
         active_index: sema_scope_resolve_index_at(scopes, candidate.symbol.name, lambda.span) ?? next
-        if scopes.bindings[active_index].symbol.id.key != candidate.symbol.id.key -> next
+        if scopes.bindings[active_index].symbol.id != candidate.symbol.id -> next
         skip_parameter := false
         loop parameter_name in parameter_names {
             if candidate.symbol.name == parameter_name -> skip_parameter = true
@@ -1006,7 +1007,7 @@ sema_expression_lambda_outer_binding_key: fn(key: String, frame: Int, scopes: &S
     index := 0
     loop index < scopes.bindings.len() {
         binding: scopes.bindings[index]
-        if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.id.key == key {
+        if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.key == key {
             return Val(index)
         }
         index += 1
@@ -1038,10 +1039,15 @@ sema_expression_lambda_collect_reference_keys: fn(state: &SemaOwnershipState, fi
 }
 
 sema_expression_lambda_collect_tree_capture_local: fn(local: TLocal, frame: Int, scopes: &SemaScopeTable, keys: &[String]) Never! {
-    if local.symbol_id == None -> return
     symbol: local.symbol_id ?? return
-    if sema_expression_lambda_outer_binding_key(symbol.key, frame, scopes) != None {
-        sema_expression_lambda_add_capture_key(keys, symbol.key)
+    index := 0
+    loop index < scopes.bindings.len() {
+        binding: scopes.bindings[index]
+        if binding.frame < frame && (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.id == symbol {
+            sema_expression_lambda_add_capture_key(keys, binding.key)
+            return
+        }
+        index += 1
     }
 }
 
@@ -1934,21 +1940,22 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         }
         parameter_owner := sema_scope_local_owner_key(lambda_scopes)
         parameter_module := sema_scope_environment_module_text(environment, program)
-        parameter_id := symbol_id(SymbolKind.Parameter, parameter_module, parameter_owner, parameter.name)
+        parameter_key: symbol_key_text(SymbolKind.Parameter, parameter_module, parameter_owner, parameter.name)
+        parameter_id := sema_symbol_id_of(program, lambda_context, parameter_key)
         parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_identity: environment.module_identity, owner: Val(parameter_owner), span: parameter.name_span, ty: Val(parameter_type), visibility: 0}
-        if !sema_scope_declare_local(lambda_scopes, parameter_symbol, (host_callback && host_write) || convention == AccessConvention.Write, convention, None, false) {
+        if !sema_scope_declare_local(lambda_scopes, parameter_symbol, parameter_key, (host_callback && host_write) || convention == AccessConvention.Write, convention, None, false) {
             diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
             return None
         }
         param_conventions.push(convention)
         if context.lambda_lending_views && parameter_type == .Apply(view_name, view_args) && view_name == "ViewMut" && view_args.len() == 1 {
-            sema_ownership_declare_binding(lambda_state, parameter_symbol, true)
+            sema_ownership_declare_binding(lambda_state, parameter_symbol, parameter_key, true)
             source: sema_ownership_place_from_expr_inner(Expr.Ident{name: parameter.name, span: parameter.name_span, id: AST_NODE_GENERATED}, lambda_scopes) ?? return None
             _ := sema_ownership_record_view_fact(lambda_state, parameter.name, parameter.name_span, source, [String]{}, AccessConvention.Write, lambda_scopes, -1)
-            lambda_context.lending_view_parameter_keys.push(parameter_id.key)
+            lambda_context.lending_view_parameter_keys.push(parameter_key.copy())
         }
         param_symbols.push(parameter_id.copy())
-        lambda_context.return_view_parameter_keys.push(parameter_id.key)
+        lambda_context.return_view_parameter_keys.push(parameter_key)
         param_types.push(parameter_type)
         param_names.push(parameter.name)
         index += 1
@@ -2160,7 +2167,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     effect_edges := [String]{}
     effect_spans := [TEffectSpan]{}
     effect_maximal := false
-    sema_expression_lambda_add_effect_facts(lambda_context, call_fact_start, direct_effects, effect_edges, effect_spans, effect_maximal)
+    sema_expression_lambda_add_effect_facts(program, lambda_context, call_fact_start, direct_effects, effect_edges, effect_spans, effect_maximal)
     effect_seed := [String]{}
     loop name in direct_effects -> sema_expression_lambda_append_name(effect_seed, name)
     lambda_work.meta.effect_direct = direct_effects
@@ -2227,7 +2234,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             diagnostics.push(sema_unknown_name(capture.name, capture.span))
             return None
         }
-        sema_expression_lambda_add_capture_key(capture_keys, lambda_scopes.bindings[outer_index ?? 0].symbol.id.key)
+        sema_expression_lambda_add_capture_key(capture_keys, lambda_scopes.bindings[outer_index ?? 0].key)
         sema_expression_lambda_append_name(lambda_work.meta.moved_captures, capture.name)
     }
     declared_mutable := [String]{}
@@ -2236,7 +2243,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     loop name in declared_mutable {
         outer_index := sema_expression_lambda_outer_binding(name, lambda.span, frame, lambda_scopes)
         if outer_index != None {
-            key: lambda_scopes.bindings[outer_index ?? 0].symbol.id.key
+            key: lambda_scopes.bindings[outer_index ?? 0].key
             sema_expression_lambda_add_capture_key(capture_keys, key)
             sema_expression_lambda_add_capture_key(mutable_keys, key)
         }
@@ -2283,7 +2290,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // Only a capture key can match; a capture-free lambda skips the table walk.
     loop capture_keys.len() > 0 && index < lambda_scopes.bindings.len() {
         binding: lambda_scopes.bindings[index]
-        key: binding.symbol.id.key
+        key: binding.key
         if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {
             sema_expression_lambda_add_capture_key(found_capture_keys, key)
             capture_ty: sema_scope_binding_type(environment, lambda_scopes, index) ?? return None

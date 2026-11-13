@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 
 use {
-    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -32,7 +32,8 @@ IRBuildKept: struct {
 // a variable a closure writes, kept in a frame cell); -1: the slot is the
 // variable itself. `owned`: the variable owns its value, which is dropped
 // when its scope ends (every other holder of the value has its own copy).
-// `symbol`: the checked symbol key of a variable that has one. `write`: an
+// `symbol`: the checked symbol of a variable that has one (an id of its body's
+// tree; symbol_none: none). `write`: an
 // aggregate write parameter (or receiver), whose slot addresses the caller's
 // storage, so a whole-value assignment writes there. `carrier`: the carrier
 // box slot a payload binding was read from (-1: none). `live`: for an owned
@@ -40,7 +41,7 @@ IRBuildKept: struct {
 // whether it still holds its value (-1: it does wherever it owns it).
 // `cleanup`: an entry that names no variable but a `defer` body, its row in
 // IRBuilder.defers, which runs where the entry would drop (-1: none).
-IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: String{""}, write: Bool{false}, carrier: Int{-1}, live: Int{-1}, cleanup: Int{-1} }
+IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: SymbolID{symbol_none()}, write: Bool{false}, carrier: Int{-1}, live: Int{-1}, cleanup: Int{-1} }
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`.
@@ -377,6 +378,9 @@ IRProgram: struct {
     functions: [FnBody]
     // Each function key's first row in `functions` (ir_first_function_rows).
     rows: NameRows
+    // The run's symbol table: the key of each run-wide SymbolID a checked
+    // declaration or body names (ir_symbol_key).
+    symbols: SymbolTable
     types: [TTypeDef]
     type_rows: [String:Int]
     // Checked constants (ConstRef / CtLit values): each key's row in
@@ -584,7 +588,7 @@ IRCaptureSlot: struct {
     close: Int{-1}
 }
 
-ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
+ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
     owned_sources: sources.move()
     programs := [IRProgram]{}
     // Past IR_SOURCE_INDEX_MIN_BYTES the sources are indexed on their own
@@ -593,7 +597,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     loop (_, text) in owned_sources -> total += text.count_bytes()
     if total < IR_SOURCE_INDEX_MIN_BYTES {
         index := ir_source_index(owned_sources)
-        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions)
+        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
         ir_program_bind(p, functions, decls)
         p.source_bytes = index.bytes.move()
         p.source_lines = index.lines.move()
@@ -602,7 +606,7 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     }
     task.group ir_program_sources {
         indexing: task ir_source_index(owned_sources)
-        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions)
+        p := ir_program_declared(type_defs, impl_defs, constant_defs, functions, symbols)
         ir_program_bind(p, functions, decls)
         index := indexing.join() ?? panic(compiler_threads_failure_text(err))
         p.source_bytes = index.bytes.move()
@@ -643,11 +647,25 @@ ir_function_row: fn(p: IRProgram, key: String) -> Int? Never! {
     name_rows_get_text(p.rows, key)
 }
 
+// The key of the run-wide symbol `id` (IRProgram.symbols).
+ir_symbol_key: fn(p: IRProgram, id: SymbolID) -> String Never! {
+    symbol_table_key(p.symbols, id)
+}
+
+// The key of symbol `id` a node of the builder's body names: a local of its
+// checked function's tree, or a run-wide one.
+ir_body_symbol_key: fn(p: IRProgram, b: IRBuilder, id: SymbolID) -> String Never! {
+    if !symbol_is_local(id) -> return symbol_table_key(p.symbols, id)
+    if b.row < 0 -> panic("{b.f.name}: local symbol {id.id} read without a checked body")
+    symbol_keys_text(p.functions[b.row].tree.symbols, id)
+}
+
 // A program over the checked declarations with no function bound yet
 // (ir_program_bind binds them): the constants by key, the types with the
 // compiler-owned ones and the union types the declarations and `functions`'
-// signatures name, and the host target's trait implementations.
-ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], constant_defs: &&[TConstantDef], functions: [FnBody]) -> IRProgram Never! {
+// signatures name, the host target's trait implementations, and the run's
+// `symbols`.
+ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], constant_defs: &&[TConstantDef], functions: [FnBody], symbols: &&SymbolTable) -> IRProgram Never! {
     types := type_defs.move()
     ir_add_compiler_owned_types(types)
     ir_add_union_types(types, functions)
@@ -717,7 +735,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         if method == "" -> next
         impl_methods.push(IRImplMethod{method: method, trait_short: trait_short, owner_key: owner_key})
     }
-    IRProgram{functions: [FnBody]{}, rows: name_rows(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
+    IRProgram{functions: [FnBody]{}, rows: name_rows(), symbols: symbols.move(), types: types.move(), type_rows: type_rows, constants: constants, constant_defs: defs.move(), render_impls: [String:Int]{}, close_methods: [String:Int]{}, trait_methods: [String:[Int]]{}, impl_slots: impl_slots, impl_traits: impl_traits, impl_methods: impl_methods, source_bytes: [[U8]]{}, source_lines: [[Int]]{}, source_rows: [String:Int]{}, foreign: [String:SemaCheckedForeignFunction]{}, intrinsics: [String:IRRuntimeIntrinsic]{}}
 }
 
 // Binds `functions` to `p` in place of the functions it had: their rows,
@@ -744,7 +762,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
                 if owner_methods.get(key) == None -> owner_methods[key] = index
             }
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                trait_short: ir_short_name(trait_name.key)
+                trait_short: ir_short_name(ir_symbol_key(p, trait_name))
                 owner_key: ir_render_type_key(p.type_rows, p.types, owner_type)
                 key: "{function.name}|{trait_short}|{owner_key}"
                 if owner_methods.get(key) == None -> owner_methods[key] = index
@@ -767,7 +785,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
         }
     }
-    p.trait_methods = ir_trait_methods(owned, p.type_rows, p.types, p.impl_slots, p.impl_traits)
+    p.trait_methods = ir_trait_methods(owned, p.symbols, p.type_rows, p.types, p.impl_slots, p.impl_traits)
     // A generic `T: Add` body's `+` (ir_operator_impl) runs the
     // instantiation's hook for its own right-hand type: a method of the
     // owner's operator-trait implementation, local trait or Core's.
@@ -1027,15 +1045,15 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
 // implementation's owner. It is checked as a TraitMethod when its trait
 // resolves in the implementing module, else as a plain Method of the owner,
 // which `impl_slots` (by "<module>|<owner key>|<method>") and `impl_traits`
-// name the traits of.
-ir_trait_methods: fn(functions: [FnBody], type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
+// name the traits of; `symbols` holds the TraitMethods' trait keys.
+ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [String:Int], types: [TTypeDef], impl_slots: [String:Int], impl_traits: [[String]]) -> [String:[Int]] Never! {
     slots := [String:Int]{}
     keys := [String]{}
     rows := [[Int]]{}
     loop (index, function) in functions {
         traits := [String]{}
         if function.kind == {
-            .TraitMethod(_, _, _, trait_name, _) -> traits.push(ir_short_name(trait_name.key))
+            .TraitMethod(_, _, _, trait_name, _) -> traits.push(ir_short_name(symbol_table_key(symbols, trait_name)))
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(type_rows, types, owner_type)
                 slot: impl_slots.get("{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
@@ -1330,8 +1348,8 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
 // non-generic function of checks.modules is a root too, so the image carries
 // the package's unreached functions.
-ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
     ir_foreign_index(p, foreign, decls)
@@ -1597,8 +1615,8 @@ ir_entry_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: I
 // Builds every checked non-generic function (a library or a coverage
 // census) on up to `threads` threads; generic functions are built per
 // instance their callers reach.
-ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], threads: CompilerThreads) -> IRBuildResult Never! {
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     ir_foreign_index(p, foreign, decls)
     roots := [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
@@ -2189,7 +2207,7 @@ ir_disown: fn(b: &IRBuilder, slot: Int) Never! {
     loop index in 0..<b.bindings.len() {
         binding: b.bindings[index]
         if binding.slot != slot || binding.indirect >= 0 || !binding.owned -> next
-        b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol.copy(), write: binding.write, carrier: binding.carrier}
+        b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol, write: binding.write, carrier: binding.carrier}
     }
 }
 
@@ -2223,7 +2241,7 @@ ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
 ir_set_own_state: fn(b: &IRBuilder, index: Int, state: IROwnState) Never! {
     row: b.bindings[index]
     if row.owned == state.owned && row.live == state.live -> return
-    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol.copy(), write: row.write, carrier: row.carrier, live: state.live, cleanup: row.cleanup}
+    b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol, write: row.write, carrier: row.carrier, live: state.live, cleanup: row.cleanup}
 }
 
 // Restores the ownership `states` of the variables bound before it.
@@ -2473,7 +2491,7 @@ ir_lookup_local: fn(b: IRBuilder, local: TLocal) -> IRBinding? Never! {
     if local.symbol_id == .Val(symbol) {
         index := b.bindings.len() - 1
         loop index >= 0 {
-            if b.bindings[index].symbol == symbol.key -> return Val(b.bindings[index].copy())
+            if b.bindings[index].symbol == symbol -> return Val(b.bindings[index].copy())
             index -= 1
         }
     }

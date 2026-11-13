@@ -3,7 +3,6 @@ use jet_foundation.[
     FnBody,
     Func,
     Item,
-    SymbolID,
     TFuncKind,
     TestDef,
     Type,
@@ -60,7 +59,8 @@ SemaTestFunctionCheckResult: struct {
 sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
     module_name: sema_scope_environment_module_text(environment, program)
     key := checked_test_artifact_key(module_name, test)
-    owner_id := SymbolID{key: key}
+    // Registration minted the id (sema_registration_mint_tests).
+    owner_id: sema_symbol_find(program, key) ?? panic("test `{key}` has no registered id")
     scopes := sema_scope_snapshot(module_scopes)
     // Names the synthetic body `__test_<name>`. A runtime stop inside the test
     // names it `test "<name>"` (JetIR ir_build_tests).
@@ -88,8 +88,8 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
             }
         }
         symbol.id = owner_id
-        symbol.ty = Val(sema_function_symbol_type(synthetic, false, owner_id, environment.source_file, environment.source_origin, environment.source_segments))
-        registered = sema_scope_add_module_symbol(scopes, symbol)
+        symbol.ty = Val(sema_function_symbol_type(synthetic, false, key, environment.source_file, environment.source_origin, environment.source_segments))
+        registered = sema_scope_add_module_symbol(scopes, symbol, key)
         if !registered -> temporary_name = "{temporary_name}_"
     }
     call_facts := [SemaCallSiteFact]{}
@@ -98,7 +98,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
     diagnostics := [Diagnostic]{}
     // The synthetic has no own generic parameters: its merged environment is
     // unchanged. The canonical read checker scopes and restores its name.
-    checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    checked := sema_function_check_shared(synthetic, key, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     function := FnBody?{None}
     if checked.value == .Val(value) {
         updated_value := value

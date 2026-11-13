@@ -29,7 +29,7 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
         .Checked(found, _, _) -> found
     }
     declarations := jet_driver_checked_declarations(inputs)
-    library := ir_build_core_library(inputs.functions.move(), inputs.decls, declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, compiler_threads)
+    library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, compiler_threads)
     issues := compiler_take_rows<String>(library.errors)
     loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     // The memory term is read now: the front end before this holds most of it.

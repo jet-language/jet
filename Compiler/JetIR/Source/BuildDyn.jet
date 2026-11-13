@@ -902,7 +902,7 @@ ir_codec_impl: fn(p: IRProgram, concrete: Type, codec: String, method: String) -
         if p.functions[row].kind == {
             .Method(_, owner_type) -> owner = Val(owner_type.copy())
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                if ir_short_name(trait_name.key) == codec -> owner = Val(owner_type.copy())
+                if ir_short_name(ir_symbol_key(p, trait_name)) == codec -> owner = Val(owner_type.copy())
             }
             .TopLevel -> {}
         }

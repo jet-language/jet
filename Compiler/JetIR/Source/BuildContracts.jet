@@ -4,7 +4,7 @@
 // clauses run on entry and whose `post` clauses run at every return, with the
 // returned carrier (or its success payload) bound to `result`.
 
-use jet_foundation.[Span, Type, BodyContract, TContractResult, TPanicLoc, TPanicLocal]
+use jet_foundation.[Span, Type, BodyContract, TContractResult, TPanicLoc, TPanicLocal, symbol_none]
 
 // An open contract scope: the result binding and the `post` clauses each
 // return checks.
@@ -142,13 +142,13 @@ ir_contract_bind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result: TContrac
     if slot < 0 -> return
     local: result.carrier_local
     _: ir_binder_holds(m, p, b, local, slot, span)
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: slot, owned: false, symbol: symbol})
 }
 
 ir_contract_bind_payload: fn(b: &IRBuilder, result: TContractResult, payload: Int) Never! {
     if payload < 0 -> return
     local: result.binding_local
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: payload, owned: false, symbol: symbol})
 }

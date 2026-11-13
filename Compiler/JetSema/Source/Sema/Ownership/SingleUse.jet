@@ -72,10 +72,11 @@ sema_single_use_is_task: fn(ty: Type) -> Bool Never! {
 
 // A binding that owns a `#SingleUse` value carries the consume duty.
 // The duty transfers on `y: x`: the move marks `x` consumed and `y` owns it.
-sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) {
+// `key` is the binding's symbol key.
+sema_single_use_note_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) {
     ty: symbol.ty ?? return
     if !sema_single_use_type(ty, environment, program) -> return
-    row: sema_ownership_last_row(state, symbol.id.key)
+    row: sema_ownership_last_row(state, key)
     if row < 0 -> return
     sema_ownership_set_single_use(state, row)
     if sema_single_use_is_task(ty) -> state.declarations[row].owes_join = true
@@ -101,7 +102,7 @@ sema_single_use_key: fn(state: SemaOwnershipState, key: String) -> Bool Never! {
 sema_single_use_argument: fn(state: SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> String? {
     if expr == .Ident(name, span, _) {
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-        if sema_single_use_key(state, scopes.bindings[index].symbol.id.key) -> return Val(name)
+        if sema_single_use_key(state, scopes.bindings[index].key) -> return Val(name)
     }
     None
 }
@@ -178,7 +179,7 @@ sema_single_use_note_drain: fn(state: &SemaOwnershipState, condition: Expr, body
         loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { drain.visit(expression) }, true)
         if drain.pops == 0 || drain.mentions != drain.reads -> return
         index: sema_scope_resolve_index_at(scopes, name, span) ?? return
-        row: sema_ownership_last_row(state, scopes.bindings[index].symbol.id.key)
+        row: sema_ownership_last_row(state, scopes.bindings[index].key)
         if row < 0 || !state.declarations[row].single_use -> return
         sema_ownership_note_undo(state, row)
         state.declarations[row].single_use = false

@@ -49,7 +49,12 @@ use jet_foundation.[
     sema_collection_method_contract,
     sema_collection_receiver_element,
     sema_reserved_type_name,
-    symbol_id,
+    symbol_builtin,
+    symbol_is_local,
+    symbol_is_none,
+    symbol_none,
+    symbol_key_text,
+    symbol_table_key,
     type_name,
     checked_symbol_local,
 ]
@@ -205,7 +210,7 @@ sema_call_try_authority_method: fn(receiver: Expr, receiver_value: TExpr, method
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Authority.{method}", span, [EffectRowEntry]{}, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     handle: TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     text: TCallArg{value: right, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    reference: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", "JetAuthority", method), name: method, mangled: false, trait_owner: None, operator_identity: None}
+    reference: TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, "", "JetAuthority", method), name: method, mangled: false, trait_owner: None, operator_identity: None}
     value: sema_tree_node(Type.Named{name: "Authority"}, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{handle, text}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
@@ -297,9 +302,9 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
     current: parameter ?? return unhandled
     hook_trait := String?{None}
     loop bound in current.bounds {
-        segments: bound.key.split(":").to_list()
+        segments: sema_program_symbol_key(program, bound).split(":").to_list()
         trait_name: segments[segments.len() - 1]
-        if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id.key == bound.key {
+        if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id == bound {
             if owned_trait_operator_hook(trait_name) == (Val(method)) {
                 hook_trait = Val(trait_name)
                 break
@@ -375,10 +380,13 @@ sema_call_method_owner_type: fn(name: String, type_args: [Type]) -> Type Never! 
     if type_args.len() > 0 -> Type.Apply{name: name, args: type_args} else -> Type.Named{name: name}
 }
 
-sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> SemaCallMethodCandidate? {
+// A local declaration's method: its id is the key the graph registered, or
+// the snapshot's table interned (sema_register_item).
+sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], program: SemaProgramTables) -> SemaCallMethodCandidate? {
     if func.params.len() == 0 || func.params[0].name != "self" -> return None
-    symbol: symbol_id(SymbolKind.Function, module_name, owner_name, func.name)
-    raw_signature: sema_function_symbol_type(func, sema_raw_protocol_function_return(trait_name, false, func), symbol, fallback_source_file, fallback_origin, source_segments)
+    key: symbol_key_text(SymbolKind.Function, module_name, owner_name, func.name)
+    symbol: sema_symbol_find(program, key) ?? symbol_none()
+    raw_signature: sema_function_symbol_type(func, sema_raw_protocol_function_return(trait_name, false, func), key, fallback_source_file, fallback_origin, source_segments)
     signature := raw_signature
     if raw_signature == {
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
@@ -398,7 +406,10 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
 
     mangled: trait_name == None
     trait_owner := SymbolID?{None}
-    if trait_name == .Val(trait_name_value) -> trait_owner = Val(symbol_id(SymbolKind.Trait, module_name, "", trait_name_value))
+    if trait_name == .Val(trait_name_value) {
+        trait_owner = sema_symbol_find(program, symbol_key_text(SymbolKind.Trait, module_name, "", trait_name_value))
+        if trait_owner == None -> trait_owner = symbol_builtin(SymbolKind.Trait, trait_name_value)
+    }
 
     reference: TMethodRef{symbol: symbol, name: func.name, mangled: mangled, trait_owner: trait_owner, operator_identity: None}
     SemaCallMethodCandidate{
@@ -414,9 +425,9 @@ sema_call_method_candidate_from_func: fn(func: Func, module_name: String, owner_
     }
 }
 
-sema_call_append_local_methods: fn(output: &[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) Never! {
+sema_call_append_local_methods: fn(output: &[SemaCallMethodCandidate], methods: [Func], module_name: String, owner_name: String, owner_type: Type, trait_name: String?, type_args: [Type], fallback_source_file: String, fallback_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], program: SemaProgramTables) Never! {
     loop method in methods {
-        if sema_call_method_candidate_from_func(method, module_name, owner_name, owner_type, trait_name, type_args, fallback_source_file, fallback_origin, source_segments) == .Val(candidate_value) {
+        if sema_call_method_candidate_from_func(method, module_name, owner_name, owner_type, trait_name, type_args, fallback_source_file, fallback_origin, source_segments, program) == .Val(candidate_value) {
             output.push(candidate_value)
         }
     }
@@ -429,15 +440,15 @@ sema_call_local_method_candidates: fn(environment: SemaScopeEnvironment, program
         if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 owner_type: sema_call_method_owner_type(value.name, owner_type_args)
-                sema_call_append_local_methods(candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments)
+                sema_call_append_local_methods(candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments, program)
             }
             .Enum(value) -> {
                 owner_type: sema_call_method_owner_type(value.name, owner_type_args)
-                sema_call_append_local_methods(candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments)
+                sema_call_append_local_methods(candidates, value.methods, module_name, value.name, owner_type, None, type_args, environment.source_file, environment.source_origin, environment.source_segments, program)
             }
             .Impl(value) -> {
                 owner_type: sema_call_method_owner_type(value.type_name, owner_type_args)
-                sema_call_append_local_methods(candidates, value.methods, module_name, value.type_name, owner_type, value.trait_name, type_args, environment.source_file, environment.source_origin, environment.source_segments)
+                sema_call_append_local_methods(candidates, value.methods, module_name, value.type_name, owner_type, value.trait_name, type_args, environment.source_file, environment.source_origin, environment.source_segments, program)
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -446,26 +457,26 @@ sema_call_local_method_candidates: fn(environment: SemaScopeEnvironment, program
     filtered
 }
 
+// The local declaration `target` names; a body's own id names none.
 sema_call_method_function_for_symbol: fn(target: SymbolID, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Func? {
+    if symbol_is_local(target) || symbol_is_none(target) -> return None
+    target_key: sema_program_symbol_key(program, target)
     module_name: sema_scope_environment_module_text(environment, program)
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
                 loop method in value.methods {
-                    candidate: symbol_id(SymbolKind.Function, module_name, value.name, method.name)
-                    if candidate.key == target.key -> return Val(method)
+                    if symbol_key_text(SymbolKind.Function, module_name, value.name, method.name) == target_key -> return Val(method)
                 }
             }
             .Enum(value) -> {
                 loop method in value.methods {
-                    candidate: symbol_id(SymbolKind.Function, module_name, value.name, method.name)
-                    if candidate.key == target.key -> return Val(method)
+                    if symbol_key_text(SymbolKind.Function, module_name, value.name, method.name) == target_key -> return Val(method)
                 }
             }
             .Impl(value) -> {
                 loop method in value.methods {
-                    candidate: symbol_id(SymbolKind.Function, module_name, value.type_name, method.name)
-                    if candidate.key == target.key -> return Val(method)
+                    if symbol_key_text(SymbolKind.Function, module_name, value.type_name, method.name) == target_key -> return Val(method)
                 }
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -487,8 +498,9 @@ sema_call_local_method_defaults: fn(candidate: SemaCallMethodCandidate, binding:
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
     func: sema_call_method_function_for_symbol(candidate.method.symbol, environment, program) ?? return None
     defaults := [SemaCallDefaultValue]{}
+    owner_key: sema_program_symbol_key(program, candidate.method.symbol)
     loop reference in binding.default_refs {
-        if reference.owner_key != candidate.method.symbol.key -> return None
+        if reference.owner_key != owner_key -> return None
         parameter_index: reference.parameter_index
         if parameter_index < 0 || parameter_index >= func.params.len() -> return None
         expression: func.params[parameter_index].default ?? return None
@@ -698,11 +710,11 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: loop _ in values -> -1})
 }
 
-// Whether `key` is a builtin trait identity (sema_type_builtin_trait_symbol).
-sema_call_builtin_trait_key: fn(key: String) -> Bool Never! {
-    parts: key.split(":").to_list()
+// Whether `owner` is a builtin trait (sema_type_builtin_trait_symbol).
+sema_call_builtin_trait: fn(graph: SemaRegistrationGraph, owner: SymbolID) -> Bool Never! {
+    parts: symbol_table_key(graph.symbols, owner).split(":").to_list()
     builtin: sema_type_builtin_trait_symbol(parts[parts.len() - 1]) ?? return false
-    builtin.id.key == key
+    builtin.id == owner
 }
 
 sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Expr, receiver_value: TExpr, candidate: SemaCallMethodCandidate, args: [CallArg], defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
@@ -710,7 +722,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     // registered identity's visibility here, never while filtering candidates.
     if program.registration_graph == .Val(graph) {
         visible := Bool?{None}
-        if sema_registration_callable_row(graph, candidate.method.symbol.key) == .Val(row) {
+        if sema_registration_callable_row_of(graph, candidate.method.symbol) == .Val(row) {
             visible = Val(if row == {
                 .Function(owner, index) -> sema_registration_visible(graph.modules[owner].functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
                 .Foreign(owner, index) -> sema_registration_visible(graph.modules[owner].foreign_functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
@@ -720,9 +732,9 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         } else if candidate.method.trait_owner == .Val(owner) {
             // A builtin trait owner (sema_type_builtin_trait_symbol: `Mul`
             // on an operator hook) has no row and is visible everywhere.
-            if sema_type_graph_nominal_row(graph, owner.key) == .Val(row) {
+            if sema_type_graph_nominal_row(graph, owner) == .Val(row) {
                 visible = Val(sema_call_trait_visible(graph, graph.modules[row.module_index].nominals[row.row], environment.module_identity, environment.package_identity))
-            } else if !sema_call_builtin_trait_key(owner.key) {
+            } else if !sema_call_builtin_trait(graph, owner) {
                 panic("selected trait method has no canonical owner row")
             }
         } else if candidate.method.mangled {
@@ -752,7 +764,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     if !sema_call_method_candidate_ready(resolved_candidate, diagnostics, span) -> return None
     // The settled type arguments decide what the method's crossings carry
     // across threads (Ownership/GenericCrossings.jet).
-    if resolved_candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(resolved_candidate.method.symbol.key, resolved_candidate.method.name, resolved_candidate.generic_substitutions, span, environment, program, scopes, context)
+    if resolved_candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(sema_symbol_key(program, context, resolved_candidate.method.symbol), resolved_candidate.method.name, resolved_candidate.generic_substitutions, span, environment, program, scopes, context)
     receiver_type: sema_call_method_receiver_candidate_type(resolved_candidate) ?? return None
     receiver_compatible: sema_call_type_assignable(receiver_type, receiver_value.ty, environment, program) ?? return None
     if !receiver_compatible {
@@ -809,7 +821,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         borrowed: access != AccessConvention.Move && sema_ownership_places_from_expr_in_state(receiver, scopes, state).len() > 0
         pin_slot: -typed.values.len() - 1
         owner: sema_scope_function_owner_key(scopes)
-        symbol: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
+        symbol: sema_call_binder_ref_symbol(environment, program, context, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
         local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, receiver_value.ty)
         local.generated = true
         local.mutable = access == AccessConvention.Write
@@ -820,7 +832,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         value: sema_tree_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
         pinned_receiver = if access == AccessConvention.Move -> sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span) else -> value
     }
-    loop pin in sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, span) -> pins.push(pin)
+    loop pin in sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, context, span) -> pins.push(pin)
     lowered = sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, context, span, diagnostics) ?? return None
     result_type_raw: sema_call_signature_return(resolved_candidate.signature) ?? return None
     result_type_declared: sema_call_resolved_type(result_type_raw, environment, program)
@@ -889,7 +901,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
 sema_call_method_summary_signature: fn(candidate: SemaCallMethodCandidate, scopes: SemaScopeTable) -> Type? {
     if candidate.signature == .Fn(params, ret, effects, contract, metadata, provenance) {
         if provenance == None {
-            if scopes.method_return_views.get(candidate.method.symbol.key) == .Val(summary) {
+            if scopes.method_return_views.get(candidate.method.symbol.id) == .Val(summary) {
                 // copy: the payloads belong to read parameter `candidate`, which keeps its signature;
                 // the summary stays published in `scopes`.
                 return Val(Type.Fn{params: params.copy(), ret: ret.copy(), effect_bound: effects.copy(), param_contract: contract.copy(), call_metadata: metadata.copy(), return_view_provenance: Val(summary.copy())})
@@ -1823,7 +1835,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         if param.name != type_name_value -> next
         bound_names := [String]{}
         loop bound in param.bounds {
-            segments: bound.key.split(":").to_list()
+            segments: sema_program_symbol_key(program, bound).split(":").to_list()
             bound_names.push("`{segments[segments.len() - 1]}`")
         }
         if sema_variadic_bound_slot_parameter(type_name_value) == .Val(pack) {

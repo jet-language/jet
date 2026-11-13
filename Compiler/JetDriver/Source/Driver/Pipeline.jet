@@ -67,7 +67,7 @@ use {
         sema_comptime_dependency_cycle_diagnostic,
         sema_comptime_environment,
         sema_comptime_environment_publish_body_values,
-        sema_comptime_fold,
+        sema_comptime_fold_in,
         sema_comptime_local_value_failure,
         sema_comptime_shared_payload,
         sema_comptime_graph_apply_sites,
@@ -151,6 +151,8 @@ use {
         OutputKind,
         Span,
         SymbolKind,
+        SymbolKeys,
+        SymbolTable,
         TComptimeReport,
         TComptimeValue,
         BodyExpr,
@@ -183,7 +185,8 @@ use {
         target_os_name,
         target_os_parse,
         source_file_id,
-        symbol_id,
+        symbol_key_text,
+        symbol_table_key,
         body_each_expr_child,
         body_each_stmt_child,
         body_node,
@@ -440,7 +443,11 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
     modules := [JetDriverDocModule]{}
     // copy: the shared name ledger owns its facts for the doc pass, and `graph` is the caller's
     // checked graph (a read parameter), which keeps its names for emission.
-    ledger: Shared{name_ledger_from_facts(graph.names.copy())}
+    names := name_ledger_from_facts(graph.names.copy())
+    // copy: the run's symbol table, which names the ids every doc module's
+    // facts carry (a call fact's callee, a body's constant).
+    names.symbols = registration.symbols.copy()
+    ledger: Shared{names.move()}
     memory: Shared{SemaCheckedMemoryFacts{declarations: graph.memory_declarations, projections: graph.memory_projections}}
     layout_engine: sema_comptime_reflection_layout_engine(registration)
     target_layout: jet_target_layout_from_machine(registration.target_machine)
@@ -538,7 +545,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
             physical_path: physical_path,
             alias: alias,
             source: source,
-            items: sema_checked_shape_defaults(graph.programs[index], registered, values).items,
+            items: sema_checked_shape_defaults(graph.programs[index], registered, registration.symbols, values).items,
             block_spans: graph.programs[index].block_spans,
             imports: graph.programs[index].imports,
             module_name: graph_module.module_name,
@@ -593,7 +600,7 @@ jet_driver_resolve_entry_key: fn(load: JetDriverLoadResult, table: ModuleTable, 
                     return None
                 }
                 owner_identity: semantic_graph.modules[output.module_id].module_identity
-                function_key: symbol_id(SymbolKind.Function, module_text(table, owner_identity), "", output.semantic_name).key
+                function_key: symbol_key_text(SymbolKind.Function, module_text(table, owner_identity), "", output.semantic_name)
                 if jet_driver_function_key_count(functions, function_key) != 1 {
                     diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_identity, "E0003", output.definition, "the selected Output entry has no unique checked function identity", "Output entry identity is retained from its registered callable", "retain the canonical function key through checking"))
                     return None
@@ -601,7 +608,7 @@ jet_driver_resolve_entry_key: fn(load: JetDriverLoadResult, table: ModuleTable, 
                 // An entry with its typed CLI parameter starts at the
                 // generated wrapper of its Output (Registration/CliEntry.jet).
                 if output.params.len() == 1 {
-                    wrapper_key: symbol_id(SymbolKind.Function, module_text(table, source_module.module_identity), "", sema_cli_entry_output_wrapper(output.address)).key
+                    wrapper_key: symbol_key_text(SymbolKind.Function, module_text(table, source_module.module_identity), "", sema_cli_entry_output_wrapper(output.address))
                     if jet_driver_function_key_count(functions, wrapper_key) == 1 -> return Val(wrapper_key)
                 }
                 return Val(function_key)
@@ -652,7 +659,7 @@ jet_driver_resolve_entry_key: fn(load: JetDriverLoadResult, table: ModuleTable, 
         diagnostics.push(jet_driver_diagnostic_at_source("E0003", entry.span, entry.source_path, 0, "the package entry target module is not present in semantic results", "entry identity is fixed by the native-authorized module graph and explicit package binding", "retain the resolved entry target module in the checked graph"))
         return None
     }
-    function_key: symbol_id(SymbolKind.Function, module_text(table, target_module_identity), "", entry.function_name).key
+    function_key: symbol_key_text(SymbolKind.Function, module_text(table, target_module_identity), "", entry.function_name)
     count: jet_driver_function_key_count(functions, function_key)
     if count == 1 -> return Val(function_key)
     if count > 1 {
@@ -676,8 +683,8 @@ jet_driver_function_key_count: fn(functions: [FnBody], key: String) -> Int Never
 // module's `run: fn`, when it takes no parameter, else the generated
 // `__jet_cli_run` of a typed `run: fn(args: T)`.
 jet_driver_default_run_key: fn(load: JetDriverLoadResult, functions: [FnBody]) -> String? Never! {
-    key: symbol_id(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "run").key
-    typed_key: symbol_id(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "__jet_cli_run").key
+    key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "run")
+    typed_key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", "__jet_cli_run")
     typed := false
     loop function in functions {
         if function.key == typed_key && function.params.len() == 0 -> typed = true
@@ -964,7 +971,7 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
     // Function values the body stores, Core source functions Sema rewrote a
     // Core call to, and the error conversions its `?` calls are lowered with
     // it, like its callees.
-    named: ir_named_function_keys(tree, roots, body, graph.decls)
+    named: ir_named_function_keys(tree, roots, body, graph.decls, graph.symbols)
     if named.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
         loop key in named {
@@ -978,7 +985,7 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
         if module_row.module_name != "core.math" -> next
         module_text_value: module_text(graph.module_table, module_row.module_identity)
         loop name in names {
-            key: symbol_id(SymbolKind.Function, module_text_value, "", name).key
+            key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
         }
     }
@@ -1001,7 +1008,7 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
         if !module_is_core(module_row.module_identity) || !module_row.source_file.ends_with("Core/Encoding/Encoding.jet") -> next
         module_text_value: module_text(graph.module_table, module_row.module_identity)
         loop name in ir_codec_decode_helpers() {
-            key: symbol_id(SymbolKind.Function, module_text_value, "", name).key
+            key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
             if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
         }
     }
@@ -1654,7 +1661,7 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction]) Never! {
     loop row in foreign {
         held: loop previous in batch.foreign {
-            if previous.symbol_id.key == row.symbol_id.key -> break true
+            if previous.symbol_id == row.symbol_id -> break true
         } ?? false
         if !held -> batch.foreign.push(row.copy())
     }
@@ -1795,7 +1802,7 @@ jet_driver_comptime_flush: fn(
         }
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.build", batch.entries[0].source.source_file, jet_driver_comptime_batch_names(batch))
-    built := jet_driver_comptime_ir_build(batch, staging, values, graph.decls, graph.module_table)
+    built := jet_driver_comptime_ir_build(batch, staging, values, graph.decls, graph.symbols, graph.module_table)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.build", batch.functions.len() + built.items.len())
     counters.programs_built += 1
     counters.functions_built += batch.functions.len() + built.items.len()
@@ -2365,7 +2372,7 @@ jet_driver_comptime_run: fn(
                 // folds; the program allocates its cell on the first read. A
                 // payload that is not literal data is refused.
                 if folded == None && source.module_value && sema_comptime_shared_payload(comptime_request.expression.tree, comptime_request.expression.root) == .Val(payload) {
-                    folded = sema_comptime_fold(comptime_request.expression.tree, payload, values)
+                    folded = sema_comptime_fold_in(programs[0], comptime_request.expression.tree, payload, values)
                     if folded == None {
                         jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, "a module `Shared` cell starts from literal data, and its value is not literal data", diagnostics)
                         refused_any = true
@@ -2374,7 +2381,7 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 if source.kind != SemaComptimeItemKind.CheckedText && (comptime_request.calls.len() == 0 || folded != None) {
-                    if folded == None -> folded = sema_comptime_fold(comptime_request.expression.tree, comptime_request.expression.root, values)
+                    if folded == None -> folded = sema_comptime_fold_in(programs[0], comptime_request.expression.tree, comptime_request.expression.root, values)
                     if folded == .Val(plain) {
                         values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression))
                         made_progress = true
@@ -3022,7 +3029,7 @@ jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table
                     next
                 }
                 owner: graph.modules[output.module_id]
-                function_key: symbol_id(SymbolKind.Function, module_text(table, owner.module_identity), "", output.semantic_name).key
+                function_key: symbol_key_text(SymbolKind.Function, module_text(table, owner.module_identity), "", output.semantic_name)
                 row: checked.get(function_key) ?? {
                     diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the selected Check Output entry has no unique checked function identity", "Check Outputs invoke their registered checked callable", "retain the canonical function key through checking"))
                     next
@@ -3065,10 +3072,10 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
                 if sema_marker_is_guest_export(marker) -> exported = true
             }
             if exported {
-                rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, exported: true, runtime_interface: None})
+                rows.push(JetDriverCExportRow{key: symbol_table_key(graph.symbols, row.symbol.id), name: row.declaration.name, exported: true, runtime_interface: None})
             } else if sema_guest_runtime_binding(registration_module.package_identity, row.declaration) {
                 symbol: parser_guest_import_symbol(row.declaration) ?? next
-                rows.push(JetDriverCExportRow{key: row.symbol.id.key, name: row.declaration.name, exported: false, runtime_interface: jet_driver_runtime_interface_row(row.declaration, symbol)})
+                rows.push(JetDriverCExportRow{key: symbol_table_key(graph.symbols, row.symbol.id), name: row.declaration.name, exported: false, runtime_interface: jet_driver_runtime_interface_row(row.declaration, symbol)})
             }
         }
     }
@@ -3100,7 +3107,7 @@ jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: Mod
             if !row.declaration.is_job || row.declaration.name.starts_with("__jet_") -> next
             metadata: row.declaration.job_metadata ?? ast_job_metadata()
             selectable: metadata.scope != .Internal && row.declaration.params.len() == 0
-            rows.push(JetDriverJobRow{key: row.symbol.id.key, name: row.declaration.name, shipped: metadata.scope == .Ship, selectable: selectable})
+            rows.push(JetDriverJobRow{key: symbol_table_key(graph.symbols, row.symbol.id), name: row.declaration.name, shipped: metadata.scope == .Ship, selectable: selectable})
         }
     }
     rows
@@ -3204,19 +3211,19 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
     loop identity in modules -> listed[identity.id] = true
     roots := [String:Bool]{}
     if entry_key == .Val(key) -> roots[key] = true
-    roots[symbol_id(SymbolKind.Function, module_text(graph.module_table, entry_module_identity), "", "run").key] = true
+    roots[symbol_key_text(SymbolKind.Function, module_text(graph.module_table, entry_module_identity), "", "run")] = true
     loop registration_module in graph.modules {
         if !listed.has_key(registration_module.module_identity.id) -> next
         loop row in registration_module.functions {
             declaration: row.declaration
-            if declaration.compiler_generated || declaration.name.starts_with("__jet_") || declaration.is_job || declaration.every != None || declaration.web_marker != None || declaration.markers.len() > 0 -> roots[row.symbol.id.key] = true
+            if declaration.compiler_generated || declaration.name.starts_with("__jet_") || declaration.is_job || declaration.every != None || declaration.web_marker != None || declaration.markers.len() > 0 -> roots[symbol_table_key(graph.symbols, row.symbol.id)] = true
         }
     }
     loop semantic_module in semantic_graph.modules {
         loop constant in semantic_module.constants {
             if constant.declaration.resolved_output == .Val(output) {
                 if !output.selected || output.kind == OutputKind.Check || output.module_id < 0 || output.module_id >= semantic_graph.modules.len() -> next
-                roots[symbol_id(SymbolKind.Function, module_text(graph.module_table, semantic_graph.modules[output.module_id].module_identity), "", output.semantic_name).key] = true
+                roots[symbol_key_text(SymbolKind.Function, module_text(graph.module_table, semantic_graph.modules[output.module_id].module_identity), "", output.semantic_name)] = true
             }
         }
         if listed.has_key(semantic_module.module_identity.id) {
@@ -3257,17 +3264,17 @@ jet_driver_core_lowering_roots: fn(graph: SemaRegistrationGraph) -> [String:Bool
         loop item in module_row.program.items {
             if item == .Func(func) {
                 source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, func.span)
-                if rooted || ir_core_lowered_by_name(true, source_file, func.name) -> roots[symbol_id(SymbolKind.Function, identity_text, "", func.name).key] = true
+                if rooted || ir_core_lowered_by_name(true, source_file, func.name) -> roots[symbol_key_text(SymbolKind.Function, identity_text, "", func.name)] = true
             }
         }
         loop nominal in module_row.nominals {
             loop method in nominal.methods {
-                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity_text, nominal.symbol.name, method.declaration.name) -> roots[method.symbol.id.key] = true
+                if ir_core_method_lowered_by_owner(method.declaration.name) || ir_core_decoding_read(identity_text, nominal.symbol.name, method.declaration.name) -> roots[symbol_table_key(graph.symbols, method.symbol.id)] = true
             }
         }
         loop implementation in module_row.impls {
             loop method in implementation.methods {
-                if ir_core_method_lowered_by_owner(method.declaration.name) -> roots[method.symbol.id.key] = true
+                if ir_core_method_lowered_by_owner(method.declaration.name) -> roots[symbol_table_key(graph.symbols, method.symbol.id)] = true
             }
         }
     }
@@ -3442,7 +3449,7 @@ jet_driver_keep_going_trap_body_row: fn(kg: &JetDriverKeepGoingLog, function: Fn
 // Under JET_KEEP_GOING a function whose check failed and whose own trap did
 // not check either (sema_keep_going_push_stub) is such a callee: each of its
 // callers lowers as a trap instead, and each is a census row.
-jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable) {
+jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, functions: &[FnBody], modules: [SemaGraphModuleResult], decls: DeclTable, symbols: SymbolTable) {
     // Whether each declaration (by DeclID row) has a checked function or
     // foreign row.
     targets := (loop _ in 0..<decls.rows.len() -> false)
@@ -3452,7 +3459,7 @@ jet_driver_keep_going_trap_unresolved_calls: fn(kg: &JetDriverKeepGoingLog, func
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
             if decl_table_find(decls, row.key) == .Val(id) -> targets[id.row.index()] = true
-            if decl_table_find(decls, row.symbol_id.key) == .Val(id) -> targets[id.row.index()] = true
+            if decl_table_find(decls, symbol_table_key(symbols, row.symbol_id)) == .Val(id) -> targets[id.row.index()] = true
         }
     }
     loop position in 0..<functions.len() {
@@ -3570,6 +3577,8 @@ JetDriverLoweringInputs: struct {
     modules: [SemaGraphModuleResult]
     // The run's declaration table: every direct call's callee is a row.
     decls: DeclTable
+    // The run's symbol table: every SymbolID the functions' bodies name.
+    symbols: SymbolTable
     sources: [String:String]
     entry_module_identity: ModuleID
     // The load's module identities: every ModuleID the rows name.
@@ -3918,12 +3927,12 @@ JetDriverRegisteredKeys: struct {
 jet_driver_registration_function_rows: fn(graph: SemaRegistrationGraph) -> [JetDriverModuleKeyRow] Never! {
     rows := [JetDriverModuleKeyRow]{}
     loop source_module in graph.modules {
-        loop function in source_module.functions -> jet_driver_push_module_key(rows, source_module.module_identity, function.symbol.id.key)
+        loop function in source_module.functions -> jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
         loop nominal in source_module.nominals {
-            loop function in nominal.methods -> jet_driver_push_module_key(rows, source_module.module_identity, function.symbol.id.key)
+            loop function in nominal.methods -> jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
         }
         loop implementation in source_module.impls {
-            loop function in implementation.methods -> jet_driver_push_module_key(rows, source_module.module_identity, function.symbol.id.key)
+            loop function in implementation.methods -> jet_driver_push_module_key(rows, source_module.module_identity, symbol_table_key(graph.symbols, function.symbol.id))
         }
     }
     rows
@@ -3940,12 +3949,12 @@ jet_driver_registered_function_keys: fn(graph: SemaRegistrationGraph) -> JetDriv
     registered := JetDriverRegisteredKeys{modules: [U32:Int]{}, keys: [NameRows]{}}
     loop source_module in graph.modules {
         at: jet_driver_registered_module(registered, source_module.module_identity)
-        loop function in source_module.functions -> name_rows_set_first(registered.keys[at], function.symbol.id.key, 0)
+        loop function in source_module.functions -> name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
         loop nominal in source_module.nominals {
-            loop function in nominal.methods -> name_rows_set_first(registered.keys[at], function.symbol.id.key, 0)
+            loop function in nominal.methods -> name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
         }
         loop implementation in source_module.impls {
-            loop function in implementation.methods -> name_rows_set_first(registered.keys[at], function.symbol.id.key, 0)
+            loop function in implementation.methods -> name_rows_set_first(registered.keys[at], symbol_table_key(graph.symbols, function.symbol.id), 0)
         }
     }
     registered
@@ -4066,8 +4075,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     release_programs: !(checked_projection || request.mode == JetDriverCompileMode.Doc)
     registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
     core_seeds := [SemaRegistrationModule]{}
+    // A seeded Core module interns into the symbol range it had in the
+    // record's check, so the ids its taken rows name are the compile's.
+    core_symbols := [SymbolKeys]{}
     if request.core_record == .Val(record) {
         core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), release_programs) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
+        if core_seeds.len() > 0 -> core_symbols = record.symbols.copy()
     }
     canonical_effect_module_identity := canonical_effect_module.module_identity
     registration_inputs.push(canonical_effect_module)
@@ -4083,6 +4096,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,
         core_seeds,
+        core_symbols,
         load.imports,
         load.package_identity,
         load.entry_module_identity,
@@ -4476,8 +4490,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     if request.mode == JetDriverCompileMode.Eval {
         selected_name: request.selected_entry ?? "run"
-        key: symbol_id(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", selected_name).key
-        loop diagnostic in check_pure_program_root(key, checked_graph.modules, registration_graph.decls) -> load.diagnostics.push(diagnostic)
+        key: symbol_key_text(SymbolKind.Function, module_text(load.module_table, load.entry_module_identity), "", selected_name)
+        loop diagnostic in check_pure_program_root(key, checked_graph.modules, registration_graph.decls, registration_graph.symbols) -> load.diagnostics.push(diagnostic)
     }
 
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.owners")
@@ -4594,6 +4608,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             }
             decls := registration_graph.decls.move()
             registration_graph.decls = DeclTable{}
+            symbols := registration_graph.symbols.move()
+            registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
             registration_modules := [SemaRegistrationModule]{}
             landed_values := [SemaComptimeItemValue]{}
             if request.every_core_body {
@@ -4602,7 +4618,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 landed_values = comptime_values.move()
                 comptime_values = [SemaComptimeItemValue]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.copy(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.copy(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
         }
         return result
     }
@@ -4650,6 +4666,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registered_modules: registration_graph.module_table.copy()
     decls := registration_graph.decls.move()
     registration_graph.decls = DeclTable{}
+    // The symbol table moves on with the declarations, in a one-row list
+    // core reachability lends its threads: late registration reads only the
+    // modules' foreign rows.
+    symbol_rows := [SymbolTable]{registration_graph.symbols.move()}
+    registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     late_registration := SemaRegistrationGraph?{None}
     if jet_driver_rust_foreign_present(registration_graph) -> late_registration = Val(registration_graph.move())
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.registration", c_export_rows.len())
@@ -4657,7 +4678,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // #3980: lower only the Core source bodies the program reaches (Rust
     // reference lowering's `should_lower_imported_core_body`).
     if request.trace_sink == .Val(sink) -> sink.begin("lower", "", -1, -1)
-    lowering_rows := ir_reachable_core_rows(checked_functions, decls, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads)
+    lowering_rows := ir_reachable_core_rows(checked_functions, decls, symbol_rows, lowering_candidates, prunable_modules, entry_roots, request.compiler_threads)
+    symbols := symbol_rows.pop() ?? panic("the run's symbol table left core reachability")
     sema_functions := [FnBody]{}
     unlowered_functions := [FnBody]{}
     jet_driver_partition_checked_functions(checked_functions, lowering_rows, sema_functions, unlowered_functions)
@@ -4665,7 +4687,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         jet_driver_keep_going_diagnostics(kg, "sema", load.diagnostics)
         if kg.skip.len() > 0 -> jet_driver_keep_going_trap_lowering(kg, sema_functions)
         // Only a failed check can leave a callee without a checked function.
-        if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(kg, sema_functions, runtime_semantic_modules, decls)
+        if kg.rows.len() > 0 -> jet_driver_keep_going_trap_unresolved_calls(kg, sema_functions, runtime_semantic_modules, decls, symbols)
         jet_driver_keep_going_flush(kg, request.trace_sink)
     }
     // The native executable route reads the checked functions; its entry
@@ -4684,7 +4706,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // An evaluation runs the entry module's selected function, never
         // the package's executable entry.
         selected_name: request.selected_entry ?? "run"
-        key: symbol_id(SymbolKind.Function, module_text(registered_modules, load.entry_module_identity), "", selected_name).key
+        key: symbol_key_text(SymbolKind.Function, module_text(registered_modules, load.entry_module_identity), "", selected_name)
         found := false
         loop function in sema_functions {
             if function.key == key -> found = true
@@ -4723,7 +4745,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy()})
     }
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = entry_effects.move()
@@ -4883,9 +4905,9 @@ jet_driver_effect_budget_name_spans: fn(load: JetDriverLoadResult, graph: SemaRe
             if package.identity == registered.package_identity -> built = true
         }
         if !built -> next
-        loop function in registered.functions -> spans[function.symbol.id.key] = function.symbol.span
+        loop function in registered.functions -> spans[symbol_table_key(graph.symbols, function.symbol.id)] = function.symbol.span
         loop nominal in registered.nominals {
-            loop method in nominal.methods -> spans[method.symbol.id.key] = method.symbol.span
+            loop method in nominal.methods -> spans[symbol_table_key(graph.symbols, method.symbol.id)] = method.symbol.span
         }
     }
     spans

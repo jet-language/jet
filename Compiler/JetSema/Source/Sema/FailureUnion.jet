@@ -15,6 +15,7 @@
 // (`sema_failure_reconcile_infallible`; lowering reads a callee's plain return
 // against the `Result` carrier its call site names, #3740).
 use jet_foundation.[
+    symbol_table_key,
     Call,
     CallLabel,
     Diagnostic,
@@ -270,7 +271,7 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     source_origin: graph.modules[module_index].source_origin.copy()
     register_diagnostics := [Diagnostic]{}
     registered_module: module_text(graph.module_table, graph.modules[module_index].module_identity)
-    if !sema_registration_add_root(graph.modules[module_index], registered_module, item, source_file, source_origin, segments, register_diagnostics) || register_diagnostics.len() > 0 {
+    if !sema_registration_add_root(graph.modules[module_index], registered_module, graph.symbols, item, source_file, source_origin, segments, register_diagnostics) || register_diagnostics.len() > 0 {
         sema_graph_module_rollback(graph.modules[module_index], mark, owned)
         loop diagnostic in register_diagnostics -> diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
@@ -390,13 +391,13 @@ sema_failure_function_row: fn(graph: SemaRegistrationGraph, module_index: Int, f
 // function. Every replaced row is recorded on `trail`.
 sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [SemaFailureProjection], trail: &SemaGraphTrail) {
     if projections.len() == 0 -> return
-    // Projected key -> its new symbol and item; per declaring module (slot
-    // `declaring_slot[module]`), its projected keys and name -> key, for the
-    // rows of that module.
-    symbols := [String:Symbol]{}
-    items := [String:Item]{}
-    slot_keys := [[String:Bool]]{}
-    slot_names := [[String:String]]{}
+    // Projected symbol id -> its new symbol and item; per declaring module
+    // (slot `declaring_slot[module]`), its projected ids and name -> id, for
+    // the rows of that module.
+    symbols := [U32:Symbol]{}
+    items := [U32:Item]{}
+    slot_keys := [[U32:Bool]]{}
+    slot_names := [[String:U32]]{}
     declaring := [Int]{}
     declaring_slot := [Int]{}
     loop _ in 0..<graph.modules.len() -> declaring_slot.push(-1)
@@ -407,30 +408,31 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
         updated := graph.modules[module_index].functions[projection.row].declaration.copy()
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
-        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, module_text(graph.module_table, graph.modules[module_index].module_identity), None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
+        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, module_text(graph.module_table, graph.modules[module_index].module_identity), None, graph.symbols, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
         if declaring_slot[module_index] < 0 {
             declaring_slot[module_index] = declaring.len()
             declaring.push(module_index)
-            slot_keys.push([String:Bool]{})
-            slot_names.push([String:String]{})
+            slot_keys.push([U32:Bool]{})
+            slot_names.push([String:U32]{})
         }
         slot: declaring_slot[module_index]
-        symbols[projection.key] = row.symbol
-        slot_keys[slot][projection.key] = true
-        slot_names[slot][updated.name] = projection.key
-        items[projection.key] = Item.Func{value: updated.move()}
+        id: row.symbol.id.id
+        symbols[id] = row.symbol
+        slot_keys[slot][id] = true
+        slot_names[slot][updated.name] = id
+        items[id] = Item.Func{value: updated.move()}
         trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
         graph.modules[module_index].functions[projection.row] = row.move()
     }
     loop (slot, module_index) in declaring {
         loop index in 0..<graph.modules[module_index].symbols.len() {
-            if slot_keys[slot].get(graph.modules[module_index].symbols[index].id.key) == None -> next
-            symbol: symbols.get(graph.modules[module_index].symbols[index].id.key) ?? next
+            if slot_keys[slot].get(graph.modules[module_index].symbols[index].id.id) == None -> next
+            symbol: symbols.get(graph.modules[module_index].symbols[index].id.id) ?? next
             trail.entries.push(SemaGraphUndo.SymbolRow{module_index: module_index, position: index, old: graph.modules[module_index].symbols[index]})
             graph.modules[module_index].symbols[index] = symbol
         }
         loop index in 0..<graph.modules[module_index].declarations.len() {
-            found := String?{None}
+            found := U32?{None}
             if graph.modules[module_index].declarations[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
             key: found ?? next
             item: items.get(key) ?? next
@@ -438,7 +440,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             graph.modules[module_index].declarations[index] = item
         }
         loop index in 0..<graph.modules[module_index].program.items.len() {
-            found := String?{None}
+            found := U32?{None}
             if graph.modules[module_index].program.items[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
             key: found ?? next
             item: items.get(key) ?? next
@@ -446,9 +448,9 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             graph.modules[module_index].program.items[index] = item
         }
         loop index in 0..<graph.modules[module_index].exports.len() {
-            if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.key) == None -> next
-            symbol: symbols.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
-            item: items.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
+            if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.id) == None -> next
+            symbol: symbols.get(graph.modules[module_index].exports[index].symbol.id.id) ?? next
+            item: items.get(graph.modules[module_index].exports[index].symbol.id.id) ?? next
             trail.entries.push(SemaGraphUndo.ExportRow{module_index: module_index, position: index, old: graph.modules[module_index].exports[index]})
             graph.modules[module_index].exports[index].symbol = symbol
             graph.modules[module_index].exports[index].declaration = Val(item)
@@ -457,8 +459,8 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
     loop importer_index in 0..<graph.modules.len() {
         loop import_index in 0..<graph.modules[importer_index].imports.len() {
             loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
-                symbol: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
-                item: items.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
+                symbol: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.id) ?? next
+                item: items.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.id) ?? next
                 trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].declaration = Val(item)
@@ -599,12 +601,12 @@ sema_failure_project_infallible: fn(graph: &SemaRegistrationGraph, solved: [Stri
 sema_failure_project_method_site: fn(graph: &SemaRegistrationGraph, site: SemaRegistrationCallableRow, trail: &SemaGraphTrail) {
     if site == {
         .NominalMethod(module_index, owner, index) -> {
-            projected: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index], graph.module_table)
+            projected: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index], graph.module_table, graph.symbols)
             trail.entries.push(SemaGraphUndo.NominalMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].nominals[owner].methods[index]})
             graph.modules[module_index].nominals[owner].methods[index] = projected.move()
         }
         .ImplMethod(module_index, owner, index) -> {
-            projected: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index], graph.module_table)
+            projected: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index], graph.module_table, graph.symbols)
             trail.entries.push(SemaGraphUndo.ImplMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].impls[owner].methods[index]})
             graph.modules[module_index].impls[owner].methods[index] = projected.move()
         }
@@ -614,12 +616,12 @@ sema_failure_project_method_site: fn(graph: &SemaRegistrationGraph, site: SemaRe
 
 // `method`'s registered row with the span-less `T Never!` return: its
 // declaration, signature, symbol type and identity.
-sema_failure_infallible_method_row: fn(method: SemaRegistrationFunction, module_row: SemaRegistrationModule, table: ModuleTable) -> SemaRegistrationFunction {
+sema_failure_infallible_method_row: fn(method: SemaRegistrationFunction, module_row: SemaRegistrationModule, table: ModuleTable, symbols: SymbolTable) -> SemaRegistrationFunction {
     // copy: the projected row is new; the old row stays on the trail.
     updated := method.copy()
     updated.declaration.return_type = Val(Type.Result{ok: sema_failure_union_success(method.declaration), err: Type.Named{name: "Never"}})
     updated.declaration.return_type_span = None
-    signature: sema_registration_function_signature(updated.declaration, method.raw_protocol_return, method.symbol.id, module_row.source_file, module_row.source_origin, module_row.source_segments)
+    signature: sema_registration_function_signature(updated.declaration, method.raw_protocol_return, symbol_table_key(symbols, method.symbol.id), module_row.source_file, module_row.source_origin, module_row.source_segments)
     updated.symbol.ty = Val(signature)
     updated.identity = type_identity(signature)
     updated.identity_key = sema_registration_function_identity_key(module_text(table, module_row.module_identity), method.symbol.owner ?? "", signature)

@@ -21,9 +21,10 @@ use {
         sema_core_body_packets, sema_finalize_graph, sema_graph_trail_init,
         sema_marker_rules_check_inline_always,
         sema_registration_module_index, sema_registration_prepare_graph,
+        sema_registration_reserved_symbols,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Diagnostic, FnBody, ModuleID, ModuleTable, Span, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[Diagnostic, FnBody, ModuleID, ModuleTable, Span, SymbolKeys, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
 SEEDS_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
@@ -69,14 +70,15 @@ registration_seeds_finalize: fn(graph: &&SemaRegistrationGraph) -> SemaGraphResu
 }
 
 // The finalized `seeds::main` module result of `source` checked beside the
-// canonical effect module; its finalized registration row goes to `seeds`
-// and the module table its ids index to `seeded_table`.
-registration_seeds_finalized: fn(source: String, seeds: &[SemaRegistrationModule], seeded_table: &ModuleTable) -> SemaGraphModuleResult {
+// canonical effect module; its finalized registration row goes to `seeds`,
+// the module table its ids index to `seeded_table` and the symbol ranges a
+// graph seeded with it reserves to `reserved`.
+registration_seeds_finalized: fn(source: String, seeds: &[SemaRegistrationModule], seeded_table: &ModuleTable, reserved: &[SymbolKeys]) -> SemaGraphModuleResult {
     table := module_table()
     main_id: module_intern(table, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, table) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(source, table), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(source, table), effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     checked := registration_seeds_finalize(first)
     assert(checked.complete)
     finalized := checked.registration_graph.move() ?? panic("finalization kept no registration graph")
@@ -84,18 +86,20 @@ registration_seeds_finalized: fn(source: String, seeds: &[SemaRegistrationModule
     index: sema_registration_module_index(finalized, main_id) ?? panic("the main module was not registered")
     module_result := checked.modules[index].copy()
     seeded_table = finalized.module_table.copy()
+    reserved = sema_registration_reserved_symbols(finalized.symbols, [ModuleID]{main_id})
     seeds = registration_seeds_take(finalized, main_id)
     module_result
 }
 
 // `seeds` with their finalized `results` taken by a graph of the canonical
-// effect module over the seeds' module `table`, finalized.
-registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&[SemaGraphModuleResult], table: &&ModuleTable) -> SemaGraphResult {
+// effect module over the seeds' module `table` and `reserved` symbol ranges,
+// finalized.
+registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&[SemaGraphModuleResult], table: &&ModuleTable, reserved: &&[SymbolKeys]) -> SemaGraphResult {
     owned := table.move()
     main_id: module_intern(owned, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, owned) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{effects}, seeds, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, owned, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{effects}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, owned, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(second.seeded, 1)
     second.seeded_results = results.move()
     registration_seeds_finalize(second)
@@ -117,12 +121,13 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     main_id: module_intern(table, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, table) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, table), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, table), effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(first.seeded, 0)
     first_complete: first.complete
     first_diagnostics: first.diagnostics.len()
     module_count: first.modules.len()
     seeded_table := first.module_table.copy()
+    reserved := sema_registration_reserved_symbols(first.symbols, [ModuleID]{main_id})
     seeds := registration_seeds_take(first, main_id)
     assert_eq(seeds.len(), 1)
     nominals: seeds[0].nominals.len()
@@ -130,7 +135,7 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     functions: seeds[0].functions.len()
     assert(nominals > 0)
     again := jet_driver_canonical_effect_module(SEEDS_EFFECTS, seeded_table) ?? panic("the canonical effect source does not parse")
-    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, seeds, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(second.seeded, 1)
     // The same modules (the retained Prelude error module among them), the
     // seeded one first.
@@ -154,12 +159,13 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     main_id: module_intern(table, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, table) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, table), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, table), effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     module_count: first.modules.len()
     seeded_table := first.module_table.copy()
+    reserved := sema_registration_reserved_symbols(first.symbols, [ModuleID]{main_id})
     seeds := registration_seeds_take(first, main_id)
     again := jet_driver_canonical_effect_module(SEEDS_EFFECTS, seeded_table) ?? panic("the canonical effect source does not parse")
-    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, seeded_table), again}, seeds, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN, seeded_table), again}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(second.seeded, 1)
     // The duplicate input adds no row.
     assert_eq(second.modules.len(), module_count)
@@ -176,15 +182,16 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     main_id: module_intern(table, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, table) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_INLINE, table), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_INLINE, table), effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     reported := [Diagnostic]{}
     assert(sema_marker_rules_check_inline_always(first, [SemaGraphModuleResult]{}, reported))
     assert_eq(reported.len(), 1)
     assert_eq(reported[0].code, "E0917")
     seeded_table := first.module_table.copy()
+    reserved := sema_registration_reserved_symbols(first.symbols, [ModuleID]{main_id})
     seeds := registration_seeds_take(first, main_id)
     again := jet_driver_canonical_effect_module(SEEDS_EFFECTS, seeded_table) ?? panic("the canonical effect source does not parse")
-    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, seeds, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(second.seeded, 1)
     // The marker check left the seeded row an empty list of its own.
     assert_eq(second.unknown_rule_diagnostics.len(), second.modules.len())
@@ -197,10 +204,11 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
 #Test("a seeded module's finalized result is taken as it is and not written") {
     seeds := [SemaRegistrationModule]{}
     seeded_table := module_table()
-    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table)
+    reserved := [SymbolKeys]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table, reserved)
     assert(module_result.functions.len() >= 2)
     taken := [SemaGraphModuleResult]{module_result.copy()}
-    checked := registration_seeds_refinalize(seeds, taken, seeded_table)
+    checked := registration_seeds_refinalize(seeds, taken, seeded_table, reserved)
     assert(checked.complete)
     // Finalizing against the same Core changes nothing on the taken slot.
     assert_eq(checked.seeded_writes, 0)
@@ -212,12 +220,13 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
 #Test("a taken seeded slot a finalization would change is counted, not written") {
     seeds := [SemaRegistrationModule]{}
     seeded_table := module_table()
-    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table)
+    reserved := [SymbolKeys]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table, reserved)
     // A stale effect row on a taken body: the solve finds another one.
     stale := module_result.copy()
     loop index in 0..<stale.functions.len() -> stale.functions[index].effects.solved.push("Stale")
     taken := [SemaGraphModuleResult]{stale.copy()}
-    checked := registration_seeds_refinalize(seeds, taken, seeded_table)
+    checked := registration_seeds_refinalize(seeds, taken, seeded_table, reserved)
     assert(checked.seeded_writes > 0)
     // The slot stays as it was given.
     assert_eq("{checked.modules[0].functions:Debug}", "{stale.functions:Debug}")
@@ -228,7 +237,7 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     main_id: module_intern(table, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, table) ?? panic("the canonical effect source does not parse")
     effect_identity: effects.module_identity
-    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_VALUE, table), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_VALUE, table), effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     stage := sema_collect_comptime_declarations(first, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
     collected := 0
     loop source in stage.sources {
@@ -241,17 +250,18 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     index: sema_registration_module_index(registered, main_id) ?? panic("the main module was not registered")
     declared := stage.modules[index].copy()
     seeded_table := registered.module_table.copy()
+    reserved := sema_registration_reserved_symbols(registered.symbols, [ModuleID]{main_id})
     seeds := registration_seeds_take(registered, main_id)
     // Seeded without its result, the module is not taken: its sources are
     // collected as before.
     kept_table := seeded_table.copy()
     again := jet_driver_canonical_effect_module(SEEDS_EFFECTS, kept_table) ?? panic("the canonical effect source does not parse")
     kept := seeds.copy()
-    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, kept, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, kept_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, kept, reserved.copy(), [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, kept_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(registration_seeds_sources(second, main_id), collected)
     // Taken with its result, it comes with its values: none is collected.
     third_effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, seeded_table) ?? panic("the canonical effect source does not parse")
-    third := sema_registration_prepare_graph([SemaRegistrationModuleInput]{third_effects}, seeds, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    third := sema_registration_prepare_graph([SemaRegistrationModuleInput]{third_effects}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, seeded_table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     third.seeded_results = [SemaGraphModuleResult]{declared.move()}
     assert_eq(registration_seeds_sources(third, main_id), 0)
 }
@@ -266,7 +276,8 @@ registration_seeds_sorted: fn(texts: &&[String]) -> [String] {
 #Test("a finalized module row splits into body packets that take back to the same row") {
     seeds := [SemaRegistrationModule]{}
     seeded_table := module_table()
-    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table)
+    reserved := [SymbolKeys]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table, reserved)
     whole := module_result.copy()
     bodies := whole.functions.move()
     whole.functions = [FnBody]{}

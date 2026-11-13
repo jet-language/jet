@@ -12,7 +12,7 @@ use {
         sema_registration_prepare_graph,
     ]
     jet_driver.[JetDriverLoadedModule, JetDriverParseJob, jet_driver_canonical_effect_module, jet_driver_core_record_seeds, jet_driver_parse_one]
-    jet_foundation.[Span, ast_program, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[Span, SymbolKeys, ast_program, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
 LOAD_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
@@ -29,7 +29,7 @@ core_record_load_row: fn() -> SemaRegistrationModule {
     segment: SemaSourceSegment{generated: Span{start: 0, end: LOAD_MAIN.len()}, source_file: "main.jet", source_start: 0, line_starts: parser_line_starts(LOAD_MAIN.bytes()), origin: SemaSourceOrigin.Snapshot}
     main: SemaRegistrationModuleInput{package_identity: "load", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: LOAD_MAIN}
     facts: SemaBuildFacts{package_name: "load", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "load", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main, effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "load", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     rows := graph.modules.move()
     loop rows.len() > 0 {
         row := rows.pop() ?? break

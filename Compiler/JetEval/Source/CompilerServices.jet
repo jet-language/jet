@@ -17,7 +17,7 @@ use {
         ast_program,
         type_name,
     ]
-    jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest]
+    jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, module_is_core, module_text, record_key_digest, symbol_find, symbol_is_local, symbol_table_key]
     jet_sema.[sema_compiler_identity, sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
@@ -701,10 +701,10 @@ jet_eval_compiler_services_error_diagnostic: fn(diagnostic: Diagnostic) -> Bool 
     diagnostic.severity == DIAGNOSTIC_ERROR
 }
 
-jet_eval_compiler_services_function_key: fn(function: Func, registration_module: SemaRegistrationModule) -> String? {
+jet_eval_compiler_services_function_key: fn(registration: SemaRegistrationGraph, function: Func, registration_module: SemaRegistrationModule) -> String? {
     loop registered in registration_module.functions {
         if registered.declaration.name == function.name && registered.declaration.name_span.start == function.name_span.start && registered.declaration.name_span.end == function.name_span.end {
-            return Val(registered.symbol.id.key)
+            return Val(symbol_table_key(registration.symbols, registered.symbol.id))
         }
     }
     None
@@ -736,7 +736,7 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         loop item in registration_module.program.items {
             if item == .Func(function) {
                 if function.name == "build" -> next
-                function_key := jet_eval_compiler_services_function_key(function, registration_module)
+                function_key := jet_eval_compiler_services_function_key(input.registration, function, registration_module)
                 // A failed check leaves the registration incomplete, with no
                 // marker registry; like the failed-check FunctionInfo
                 // (JetDriver ComptimeCompiler.jet), its markers then read empty.
@@ -747,8 +747,11 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         if checked_module == .Val(checked) {
             loop function in checked.functions {
                 declared := [String]?{None}
-                loop registered in registration_module.functions {
-                    if registered.symbol.id.key == function.key -> declared = sema_comptime_reflection_declared_effect_names(registered.declaration)
+                function_id := symbol_find(input.registration.symbols, function.key)
+                if function_id == .Val(id) {
+                    loop registered in registration_module.functions {
+                        if registered.symbol.id == id -> declared = sema_comptime_reflection_declared_effect_names(registered.declaration)
+                    }
                 }
                 effects.push(sema_comptime_reflection_effect_info(declared, Val(function.effects.solved)))
             }
@@ -831,10 +834,10 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                 .Distinct(definition) -> name = Val(definition.name)
                 .Func(function) -> {
                     if function.name == "build" {
-                        if jet_eval_compiler_services_function_key(function, module_row) == .Val(key) -> build_keys.push(key)
+                        if jet_eval_compiler_services_function_key(registration, function, module_row) == .Val(key) -> build_keys.push(key)
                         next
                     }
-                    key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_name}.{function.name}` is not registered")
+                    key: jet_eval_compiler_services_function_key(registration, function, module_row) ?? return .Missing(fact: "function `{module_row.module_name}.{function.name}` is not registered")
                     markers: sema_comptime_reflection_written_markers(registration, module_row.module_identity, module_row.program, catalog, function.markers, registry) ?? return .Missing(fact: "module `{module_row.module_name}` has no marker registry")
                     value: jet_eval_compiler_services_function_info(registration, module_index, function, doc_text, checked, Val(key), markers)
                     functions.push(value.copy())
@@ -927,7 +930,9 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
             loop call in checked.call_facts {
                 if build_keys.contains(call.caller_key) -> next
                 callee := call.intrinsic_api.copy() // copy: the checked graph keeps its call facts
-                if call.callee == .Val(id) -> callee = Val(id.key.copy()) // copy: the checked graph keeps its call facts
+                if call.callee == .Val(id) {
+                    if !symbol_is_local(id) -> callee = Val(symbol_table_key(registration.symbols, id))
+                }
                 name: callee ?? next
                 calls.push(TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
                     {name: "caller", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, call.caller_key))},

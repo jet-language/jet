@@ -212,7 +212,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
             if item == {
                 .Impl(_) -> {}
                 .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                    _ := sema_registration_add_root(module_row, row_text, item, source_file, source_origin, source_segments, problems)
+                    _ := sema_registration_add_root(module_row, row_text, graph.symbols, item, source_file, source_origin, source_segments, problems)
                 }
             }
         }
@@ -221,7 +221,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         // writes it, so they are read in place.
         items := module_row.program.items.move()
         module_row.program.items = [Item]{}
-        loop item in generated -> sema_registration_add_impl(module_row, row_text, item, items, impl_rows, problems)
+        loop item in generated -> sema_registration_add_impl(module_row, row_text, graph.symbols, item, items, impl_rows, problems)
         module_row.program.items = items.move()
         graph.modules[module_index] = module_row
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)

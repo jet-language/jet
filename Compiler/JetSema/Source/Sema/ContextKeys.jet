@@ -7,6 +7,7 @@
 // sema_stmt_check_context_block), and a task spawned inside sees what its
 // parent set (Runtime Context.jet). IR BuildTransact.jet lowers both.
 use jet_foundation.[
+    symbol_table_key,
     CONTEXT_ON_STOP_KEY,
     CallArg,
     CallLabel,
@@ -97,7 +98,7 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
         if name == "on_stop" {
             loop function in graph.modules[module_index].functions {
                 if function.symbol.name != "__stop_ignore" -> next
-                id: sema_registration_callable_id(graph, function.symbol.id.key) ?? return None
+                id: sema_registration_callable_id(graph, symbol_table_key(graph.symbols, function.symbol.id)) ?? return None
                 ty: sema_type_resolve_declared(graph, function.signature, graph.modules[module_index].module_identity)
                 return Val(SemaContextFieldKey{key: SemaContextKey{key: CONTEXT_ON_STOP_KEY, ty: ty}, default: SemaContextDefault.Function{function: id}})
             }
@@ -108,7 +109,7 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
             if !found -> next
             declared: constant.symbol.ty ?? constant.ty ?? return None
             ty: sema_type_resolve_declared(graph, declared, graph.modules[module_index].module_identity)
-            return Val(SemaContextFieldKey{key: SemaContextKey{key: constant.symbol.id.key, ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
+            return Val(SemaContextFieldKey{key: SemaContextKey{key: symbol_table_key(graph.symbols, constant.symbol.id), ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
         }
     }
     None
@@ -162,7 +163,7 @@ sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, pr
     symbol: sema_scope_binding_symbol(environment, scopes, index)
     if symbol.kind != SymbolKind.Constant || !sema_context_key_symbol(program, symbol) -> return None
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None
-    Val(SemaContextKey{key: symbol.id.key, ty: ty})
+    Val(SemaContextKey{key: sema_scope_resolve_key(scopes, name) ?? return None, ty: ty})
 }
 
 // Whether the constant `symbol` is declared with `#ContextKey`, read from
@@ -171,7 +172,7 @@ sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool 
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id.key == symbol.id.key -> return sema_context_key_declared(constant.declaration)
+            if constant.symbol.id == symbol.id -> return sema_context_key_declared(constant.declaration)
         }
     }
     false

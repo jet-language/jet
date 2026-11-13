@@ -1126,11 +1126,12 @@ sema_ownership_release_value_only_views: fn(state: &SemaOwnershipState, target: 
     }
 }
 
-sema_ownership_declare_binding: fn(state: &SemaOwnershipState, symbol: Symbol, parameter: Bool) Never! {
+// `key` is the binding's symbol key (SemaScopeBinding.key).
+sema_ownership_declare_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String, parameter: Bool) Never! {
     if symbol.name == "_" -> return
     depth := state.scope_depth
     sema_ownership_push_declaration(state, SemaOwnershipBindingFact{
-        key: symbol.id.key,
+        key: key,
         name: symbol.name,
         span: symbol.span,
         parameter: parameter,
@@ -1144,9 +1145,9 @@ sema_ownership_declare_binding: fn(state: &SemaOwnershipState, symbol: Symbol, p
 
 // A compiler-declared binding such as a fallback's `err`: tracked like any
 // local, never reported as unused.
-sema_ownership_declare_ambient_binding: fn(state: &SemaOwnershipState, symbol: Symbol) Never! {
+sema_ownership_declare_ambient_binding: fn(state: &SemaOwnershipState, symbol: Symbol, key: String) Never! {
     before: state.declarations.len()
-    sema_ownership_declare_binding(state, symbol, false)
+    sema_ownership_declare_binding(state, symbol, key, false)
     if state.declarations.len() > before -> state.declarations[state.declarations.len() - 1].ambient = true
 }
 
@@ -1166,10 +1167,10 @@ sema_ownership_declaration_index: fn(state: &SemaOwnershipState, key: String) ->
 // rather than manufacturing a second name-resolution table.
 sema_ownership_note_reference: fn(state: &SemaOwnershipState, name: String, use_span: Span, scopes: SemaScopeTable, kind: SemaOwnershipReferenceKind) -> Bool Never! {
     index: sema_scope_resolve_index_at(scopes, name, use_span) ?? return false
-    def_key: scopes.bindings[index].symbol.id.key
+    def_key: scopes.bindings[index].key
     declaration_index := sema_ownership_declaration_index(state, def_key)
     if declaration_index == None {
-        sema_ownership_declare_binding(state, scopes.bindings[index].symbol, scopes.bindings[index].symbol.kind == SymbolKind.Parameter)
+        sema_ownership_declare_binding(state, scopes.bindings[index].symbol, def_key, scopes.bindings[index].symbol.kind == SymbolKind.Parameter)
         declaration_index = sema_ownership_declaration_index(state, def_key)
     }
     fact_index: declaration_index ?? return false
@@ -1197,7 +1198,7 @@ sema_ownership_note_place_reference: fn(state: &SemaOwnershipState, expr: Expr, 
     if carrier_name != None {
         name: carrier_name ?? place.root
         carrier_index := sema_scope_resolve_index_at(scopes, name, use_span)
-        if carrier_index != None && scopes.bindings[carrier_index ?? 0].symbol.id.key != place.root_key {
+        if carrier_index != None && scopes.bindings[carrier_index ?? 0].key != place.root_key {
             if !sema_ownership_note_reference(state, name, use_span, scopes, kind) -> valid = false
         }
     }
@@ -1403,7 +1404,7 @@ sema_ownership_place_from_expr_inner: fn(expr: Expr, scopes: SemaScopeTable) -> 
             index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
             Val(SemaOwnershipPlace{
                 root: scopes.bindings[index].symbol.name,
-                root_key: scopes.bindings[index].symbol.id.key,
+                root_key: scopes.bindings[index].key,
                 root_span: scopes.bindings[index].symbol.span,
                 projections: [String]{},
                 typed_projections: [SemaOwnershipProjection]{},
@@ -1476,7 +1477,7 @@ sema_ownership_places_from_expr_in_state: fn(expr: Expr, scopes: SemaScopeTable,
     if named_root == .Val(root_name) {
         binding_index: sema_scope_resolve_index_at(scopes, root_name, expr_span(expr))
         if binding_index == .Val(found_index) {
-            carrier_key: scopes.bindings[found_index].symbol.id.key
+            carrier_key: scopes.bindings[found_index].key
             places := [SemaOwnershipPlace]{}
             typed: sema_ownership_typed_projection_facts(expr) ?? return [SemaOwnershipPlace]{}
             index := state.views.len() - 1
@@ -1613,7 +1614,7 @@ sema_ownership_arena_view_source: fn(binding: Binding) -> Expr? {
 
 sema_ownership_carrier_key: fn(scopes: SemaScopeTable, name: String, span: Span) -> String? {
     index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-    Val(scopes.bindings[index].symbol.id.key)
+    Val(scopes.bindings[index].key)
 }
 
 sema_ownership_matching_loan_seq: fn(state: &SemaOwnershipState, source: SemaOwnershipPlace, span: Span) -> Int Never! {
@@ -1904,7 +1905,7 @@ sema_ownership_view_source_projection: fn(projection: SemaOwnershipProjection) -
 
 sema_ownership_view_source_for_place: fn(place: SemaOwnershipPlace, receiver_key: String, parameter_keys: [String], scopes: SemaScopeTable) -> ViewSourcePath? {
     loop binding_index in 0..<scopes.bindings.len() {
-        if scopes.bindings[binding_index].symbol.id.key == place.root_key {
+        if scopes.bindings[binding_index].key == place.root_key {
             source := ViewSource?{None}
             if {
                 receiver_key != "" && receiver_key == place.root_key -> source = Val(ViewSource.Receiver)
@@ -2016,7 +2017,7 @@ sema_ownership_diag_view_return_boundary: fn(span: Span) -> Diagnostic {
 // caller's owner.
 sema_ownership_consumed_view_owner: fn(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
     loop binding_index in 0..<scopes.bindings.len() {
-        if scopes.bindings[binding_index].symbol.id.key != place.root_key -> next
+        if scopes.bindings[binding_index].key != place.root_key -> next
         if scopes.bindings[binding_index].access != AccessConvention.Move -> return false
         ty: scopes.bindings[binding_index].symbol.ty ?? return true
         if ty == {
@@ -2573,7 +2574,7 @@ sema_ownership_view_fact_matches_expr: fn(fact: SemaOwnershipViewFact, expr: Exp
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
     index: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    scopes.bindings[index].symbol.id.key == fact.carrier_key && sema_ownership_path_starts(output_path, fact.output_path)
+    scopes.bindings[index].key == fact.carrier_key && sema_ownership_path_starts(output_path, fact.output_path)
 }
 
 // An index or field write whose path steps into a `ViewMut` value writes
@@ -2603,7 +2604,7 @@ sema_ownership_view_fact_exact_expr: fn(fact: SemaOwnershipViewFact, expr: Expr,
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
     index: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    if scopes.bindings[index].symbol.id.key != fact.carrier_key || output_path.len() != fact.output_path.len() -> return false
+    if scopes.bindings[index].key != fact.carrier_key || output_path.len() != fact.output_path.len() -> return false
     sema_ownership_path_starts(output_path, fact.output_path)
 }
 
@@ -2628,7 +2629,7 @@ sema_ownership_report_arena_view_escape: fn(state: &SemaOwnershipState, expr: Ex
         .Ident(name, span, _) -> {
             index: sema_scope_resolve_index_at(scopes, name, span) ?? return false
             if !sema_ownership_is_allocator_view(scopes.bindings[index].symbol.ty) -> return false
-            key: scopes.bindings[index].symbol.id.key
+            key: scopes.bindings[index].key
             loop fact in state.views {
                 if !fact.active || fact.carrier_key != key || !fact.source.projections.contains("[fresh]") -> next
                 arena: sema_ownership_view_owner_name(fact.source)
@@ -2712,7 +2713,7 @@ sema_ownership_report_invalidated_view: fn(state: &SemaOwnershipState, expr: Exp
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
     binding_index: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    carrier_key: scopes.bindings[binding_index].symbol.id.key
+    carrier_key: scopes.bindings[binding_index].key
     index := state.views.len() - 1
     loop index >= 0 {
         fact: state.views[index]
@@ -2771,7 +2772,7 @@ sema_ownership_view_exists_for_expr: fn(state: &SemaOwnershipState, expr: Expr, 
 sema_ownership_view_reads_binding: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
     binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
     loop view in state.views {
-        if view.active && view.source.root_key == binding.symbol.id.key -> return true
+        if view.active && view.source.root_key == binding.key -> return true
     }
     false
 }
@@ -3012,11 +3013,11 @@ sema_ownership_binding_for_expr: fn(state: &SemaOwnershipState, expr: Expr, scop
 sema_ownership_place_is_static: fn(place: SemaOwnershipPlace, scopes: SemaScopeTable) -> Bool Never! {
     if sema_scope_name_slot(scopes, place.root) == .Val(slot) {
         loop position in scopes.name_positions[slot] {
-            if scopes.bindings[position].symbol.id.key == place.root_key -> return scopes.bindings[position].symbol.kind == SymbolKind.Constant
+            if scopes.bindings[position].key == place.root_key -> return scopes.bindings[position].symbol.kind == SymbolKind.Constant
         }
     }
     loop binding_index in 0..<scopes.bindings.len() {
-        if scopes.bindings[binding_index].symbol.id.key == place.root_key -> return scopes.bindings[binding_index].symbol.kind == SymbolKind.Constant
+        if scopes.bindings[binding_index].key == place.root_key -> return scopes.bindings[binding_index].symbol.kind == SymbolKind.Constant
     }
     false
 }
@@ -3207,7 +3208,7 @@ sema_ownership_type_owns_close: fn(ty: Type, environment: SemaScopeEnvironment, 
     }
     if ty == .Named(name) {
         loop param in environment.generic_params {
-            if param.name == name && sema_copy_generic_bound(param, "Close") -> return true
+            if param.name == name && sema_copy_generic_bound(param, "Close", program.registration_graph) -> return true
         }
     }
     false
@@ -3854,7 +3855,7 @@ sema_ownership_bind_closure_writes: fn(state: &SemaOwnershipState, key: String, 
 sema_ownership_closure_writes: fn(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable) -> [String] Never! {
     binding: sema_ownership_binding_for_expr(state, callee, scopes) ?? return [String]{}
     loop writes in state.closure_writes {
-        if writes.key == binding.symbol.id.key -> return writes.names.copy()
+        if writes.key == binding.key -> return writes.names.copy()
     }
     [String]{}
 }
@@ -3931,7 +3932,7 @@ sema_ownership_bind_closure_captures: fn(state: &SemaOwnershipState, key: String
         index: sema_scope_resolve_index(scopes, name) ?? -1
         if index < 0 -> next
         symbol: scopes.bindings[index].symbol
-        place: SemaOwnershipPlace{root: symbol.name, root_key: symbol.id.key, root_span: symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
+        place: SemaOwnershipPlace{root: symbol.name, root_key: scopes.bindings[index].key, root_span: symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
         // A capture already moved here was moved by the lambda's own body
         // (`name.move()`): that lambda runs once, which its own check enforces.
         if sema_ownership_place_moved(state, place) != None -> next
@@ -3946,7 +3947,7 @@ sema_ownership_check_closure_captures: fn(state: &SemaOwnershipState, callee: Ex
     if callee == .Ident(_, span, _) {
         binding: sema_ownership_binding_for_expr(state, callee, scopes) ?? return
         loop captured in state.closure_captures {
-            if captured.key != binding.symbol.id.key -> next
+            if captured.key != binding.key -> next
             loop place in captured.places {
                 if sema_ownership_place_moved(state, place) == .Val(origin) -> sema_ownership_report_moved(state, origin, place, span, diagnostics)
             }
@@ -3962,7 +3963,7 @@ sema_ownership_call_once_lambda: fn(state: &SemaOwnershipState, callee: Expr, sc
         binding: sema_ownership_binding_for_expr(state, callee, scopes) ?? return
         capture := String?{None}
         loop once in state.once_lambdas {
-            if once.key != "" && once.key == binding.symbol.id.key -> capture = Val(once.capture)
+            if once.key != "" && once.key == binding.key -> capture = Val(once.capture)
         }
         if capture == None -> return
         places: sema_ownership_places_from_expr_in_state(callee, scopes, state)
@@ -3990,12 +3991,12 @@ sema_ownership_note_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, ty
         // over borrowed storage) has nothing to hand over: the take is the
         // exact move, which refuses it (E0201). A call never copies on its own.
         if sema_ownership_binding_is_borrowed_param(binding) || binding.place_alias || binding.string_view -> return None
-        if sema_single_use_key(state, binding.symbol.id.key) -> return None
+        if sema_single_use_key(state, binding.key) -> return None
         if sema_ownership_binding_captured(scopes, binding) -> return None
         if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return None
         if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return None
         state.implicit_take_ok.push(span.copy())
-        return Val(binding.symbol.id.key)
+        return Val(binding.key)
     }
     None
 }
@@ -4612,7 +4613,7 @@ sema_ownership_capture_place_info: fn(state: SemaOwnershipState, expr: Expr, sco
             if !sema_ownership_walk_place_shape(expr, scopes) -> return None
             index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
             return Val(SemaOwnershipCapturePlace{
-                place: SemaOwnershipPlace{root: scopes.bindings[index].symbol.name, root_key: scopes.bindings[index].symbol.id.key, root_span: scopes.bindings[index].symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}},
+                place: SemaOwnershipPlace{root: scopes.bindings[index].symbol.name, root_key: scopes.bindings[index].key, root_span: scopes.bindings[index].symbol.span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}},
                 ty: scopes.bindings[index].symbol.ty,
                 stopped: false,
             })
@@ -4640,7 +4641,7 @@ sema_ownership_walk_root_is_view: fn(state: SemaOwnershipState, expr: Expr, scop
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false
     index: sema_scope_resolve_index_at(scopes, root, expr_span(expr)) ?? return false
-    key: scopes.bindings[index].symbol.id.key
+    key: scopes.bindings[index].key
     loop fact in state.views {
         if fact.active && fact.carrier_key == key -> return true
     }
@@ -6299,9 +6300,9 @@ sema_ownership_join_loop_value_paths: fn(state: &SemaOwnershipState, context: Se
 sema_ownership_check_binding: fn(state: &SemaOwnershipState, binding: Binding, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if !sema_ownership_consume_expression(state, binding.init, scopes, "the binding `{binding.name}`", diagnostics) -> return false
     if sema_scope_resolve_index_at(scopes, binding.name, binding.name_span) == .Val(symbol_index) {
-        symbol: scopes.bindings[symbol_index].symbol
-        if sema_ownership_declaration_index(state, symbol.id.key) == None {
-            sema_ownership_declare_binding(state, symbol, false)
+        key: scopes.bindings[symbol_index].key
+        if sema_ownership_declaration_index(state, key) == None {
+            sema_ownership_declare_binding(state, scopes.bindings[symbol_index].symbol, key, false)
         }
     }
     sema_ownership_record_binding_view(state, binding, scopes)
@@ -6444,9 +6445,9 @@ sema_ownership_check_statement: fn(state: &SemaOwnershipState, statement: Stmt, 
             fork: sema_ownership_fork(state)
             sema_ownership_enter_scope(state)
             if sema_scope_resolve_index_at(scopes, var, var_span) == .Val(loop_binding_index) {
-                loop_symbol: scopes.bindings[loop_binding_index].symbol
-                if sema_ownership_declaration_index(state, loop_symbol.id.key) == None {
-                    sema_ownership_declare_binding(state, loop_symbol, false)
+                loop_key: scopes.bindings[loop_binding_index].key
+                if sema_ownership_declaration_index(state, loop_key) == None {
+                    sema_ownership_declare_binding(state, scopes.bindings[loop_binding_index].symbol, loop_key, false)
                 }
             }
             nested: sema_ownership_check_statements(state, body, scopes, diagnostics)
@@ -6552,7 +6553,7 @@ sema_ownership_frozen_expr_site: fn(state: SemaOwnershipState, expr: Expr, scope
     if expr == {
         .Ident(name, span, _) -> {
             index: sema_scope_resolve_index_at(scopes, name, span) ?? return None
-            sema_ownership_frozen_for_key(state, scopes.bindings[index].symbol.id.key)
+            sema_ownership_frozen_for_key(state, scopes.bindings[index].key)
         }
         .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) | .Place(base, _, _, _) | .Paren(base, _, _) -> sema_ownership_frozen_expr_site(state, base, scopes)
         .Call(call, _) -> {
@@ -6636,7 +6637,7 @@ sema_ownership_carries_lending_view: fn(expr: Expr, name: String) -> Bool {
 sema_ownership_report_lending_view_escape: fn(expr: Expr, action: String, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     loop key in context.lending_view_parameter_keys {
         loop binding_index in 0..<scopes.bindings.len() {
-            if scopes.bindings[binding_index].symbol.id.key != key -> next
+            if scopes.bindings[binding_index].key != key -> next
             name: scopes.bindings[binding_index].symbol.name
             if !sema_ownership_carries_lending_view(expr, name) -> break
             diagnostics.push(sema_error("E0212", expr_span(expr), "the lent mutable view `{name}` cannot {action}", "the view is valid only while the current iteration or callback invocation is active", "use the view inside that scope, and keep only owned values outside it"))

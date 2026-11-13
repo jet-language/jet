@@ -1,7 +1,7 @@
 // 2: checked Output links and tool selection, ported. Resolve against the
 // existing registration graph; collect owned facts before publishing so no
 // graph read survives a write.
-use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, name_mangle, symbol_id]
+use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, name_mangle, symbol_find, symbol_key_text, symbol_none]
 
 SemaOutputIntent: enum {
     Check
@@ -124,7 +124,8 @@ sema_output_path: fn(value: Expr) -> (root: String, root_span: Span, members: [E
 sema_output_import_reference: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationModule, target_identity: ModuleID, name: String, span: Span, visibility: Int) -> SemaNameReferenceFact Never! {
     // An alias use names the declaring module's alias, not the target function.
     owner_text: module_text(graph.module_table, owner.module_identity)
-    symbol: Symbol{id: symbol_id(SymbolKind.Import, owner_text, module_text(graph.module_table, target_identity), name), kind: SymbolKind.Import, name: name.copy(), module_identity: owner.module_identity, owner: None, span: span, ty: None, visibility: visibility}
+    import_key: symbol_key_text(SymbolKind.Import, owner_text, module_text(graph.module_table, target_identity), name)
+    symbol: Symbol{id: symbol_find(graph.symbols, import_key) ?? symbol_none(), kind: SymbolKind.Import, name: name.copy(), module_identity: owner.module_identity, owner: None, span: span, ty: None, visibility: visibility}
     SemaNameReferenceFact{span: span, symbol: symbol.move(), kind: "import_alias"}
 }
 
@@ -193,7 +194,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 }
                 registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
             }
-            callable: if registered == .Val(found) -> sema_registration_callable_row(graph, sema_resolved_key(graph, found)) else -> None
+            callable: if registered == .Val(found) -> sema_registration_callable_row_of(graph, sema_resolved_id(graph, found)) else -> None
             if callable == .Val(row) {
                 if row == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: path.members[0].name.copy(), references: references.move()})
             }
@@ -289,7 +290,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
         return None
     }
     symbol: resolved ?? return None
-    callable: sema_registration_callable_row(graph, sema_resolved_key(graph, symbol)) ?? {
+    callable: sema_registration_callable_row_of(graph, sema_resolved_id(graph, symbol)) ?? {
         diagnostics.push(sema_output_error(expr_span(entry), "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
         return None
     }
@@ -653,11 +654,12 @@ sema_output_fact_with_solved_effects: fn(output: &&ResolvedOutput, graph: SemaRe
         }
         indexed[target] = true
     }
-    key: symbol_id(SymbolKind.Function, module_text(graph.module_table, modules[target].module_identity), "", fact.semantic_name).key
+    key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, modules[target].module_identity), "", fact.semantic_name)
     function_index: rows[target].get(key) ?? return fact
+    target_id: symbol_find(graph.symbols, key) ?? return fact
     declaration_span := Span?{None}
     loop declared_index in 0..<graph.modules[target].functions.len() {
-        if graph.modules[target].functions[declared_index].symbol.id.key == key {
+        if graph.modules[target].functions[declared_index].symbol.id == target_id {
             declaration_span = graph.modules[target].functions[declared_index].declaration.return_type_span
             break
         }

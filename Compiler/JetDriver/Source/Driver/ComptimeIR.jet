@@ -5,7 +5,7 @@
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
 use {
-    jet_foundation.[DeclTable, FnBody, ModuleTable, Span, StmtKind, SymbolKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, module_text, symbol_id]
+    jet_foundation.[DeclTable, FnBody, ModuleTable, Span, StmtKind, SymbolKind, SymbolTable, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, module_text, symbol_key_text, symbol_table]
     jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, ir_comptime_item_function, ir_program_declared]
     jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
@@ -13,6 +13,8 @@ use {
 
 // The declared IR program (ir_program_declared) over the type, impl and
 // constant rows of every module of a run's graph (jet_driver_comptime_stage).
+// It takes the run's symbol table at its first build
+// (jet_eval_ir_comptime_build_over).
 jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram Never! {
     type_defs := [TTypeDef]{}
     impls := [TImplDef]{}
@@ -22,17 +24,18 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
         loop definition in checked.declarations.impls -> impls.push(definition.copy())
         loop definition in checked.declarations.constants -> constants.push(definition.copy())
     }
-    ir_program_declared(type_defs, impls, constants, [FnBody]{})
+    ir_program_declared(type_defs, impls, constants, [FnBody]{}, symbol_table())
 }
 
 // The IR of `batch`'s entries: the batch's checked closure and each entry's
 // item function, a zero-parameter function that returns the entry's
-// expression, whose direct calls name `decls` rows. A batch that reaches no
-// declaration (JetDriverComptimeBatch.bare) builds with none; any other
+// expression, whose direct calls name `decls` rows and whose ids `symbols`
+// holds. A batch that reaches no declaration (JetDriverComptimeBatch.bare)
+// builds with none, and no symbol table; any other
 // builds over the run's declared program, whose constant rows the values
 // landed since its last build take over first (a key's first landed value
 // stands).
-jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, table: ModuleTable) -> JetEvalIRComptime {
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, symbols: SymbolTable, table: ModuleTable) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     loop entry in batch.entries {
@@ -45,7 +48,7 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDri
         keys.push(item.key.copy())
         functions.push(item)
     }
-    if batch.bare -> return jet_eval_ir_comptime_build(functions, decls, keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, batch.foreign.copy(), true)
+    if batch.bare -> return jet_eval_ir_comptime_build(functions, decls, symbol_table(), keys, [TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, batch.foreign.copy(), true)
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
         value: values[index]
@@ -53,12 +56,12 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDri
         if value.destination_key != value.key -> landed.push(jet_driver_comptime_value_row(value, value.destination_key, table))
     }
     staging.landed = values.len()
-    jet_eval_ir_comptime_build_over(staging.program.copy(), functions, decls, keys, landed, batch.foreign.copy(), staging.taken)
+    jet_eval_ir_comptime_build_over(staging.program.copy(), functions, decls, symbols, keys, landed, batch.foreign.copy(), staging.taken)
 }
 
 // The constant row of landed value `value` under `key`, named in `table`.
 jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String, table: ModuleTable) -> TConstantDef Never! {
-    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_id(SymbolKind.Constant, module_text(table, value.module_identity), "", key).key, span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
+    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_key_text(SymbolKind.Constant, module_text(table, value.module_identity), "", key), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
 }
 
 // A fn-build or fn-dev invocation's run (`result`): the checked entry
@@ -77,7 +80,7 @@ jet_driver_invocation_run: fn(inputs: &&JetDriverLoweringInputs, args: [TComptim
     if checked.entry_key == .Val(key) -> keys.push(key.copy())
     if keys.len() == 0 -> return JetDriverInvocationRun{result: None, problem: Val("the checked invocation lost its entry function")}
     declarations := jet_driver_checked_declarations(checked)
-    built := jet_eval_ir_comptime_build(checked.functions.move(), checked.decls, keys, declarations.type_defs.move(), declarations.impls.move(), declarations.constants.move(), declarations.foreign.move(), false)
+    built := jet_eval_ir_comptime_build(checked.functions.move(), checked.decls, checked.symbols.move(), keys, declarations.type_defs.move(), declarations.impls.move(), declarations.constants.move(), declarations.foreign.move(), false)
     if built.build_failures.len() > 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder refused the invocation's code: {built.build_failures.join("; ")}")}
     if built.items[0] < 0 -> return JetDriverInvocationRun{result: None, problem: Val("the IR builder did not build the invocation's entry function")}
     program := jet_eval_native_load(built, config)

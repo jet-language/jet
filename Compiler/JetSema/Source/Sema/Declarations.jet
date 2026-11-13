@@ -149,7 +149,7 @@ sema_function_param_contract: fn(func: Func) -> [CallContractRow]? {
     if has_contract -> Val(contract) else -> None
 }
 
-sema_function_call_metadata: fn(func: Func, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
+sema_function_call_metadata: fn(func: Func, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> FunctionCallMetadata {
     names := [String]{}
     defaults := [FunctionDefaultRef?]{}
     variadic := [Bool]{}
@@ -162,7 +162,7 @@ sema_function_call_metadata: fn(func: Func, owner: SymbolID, fallback_source_fil
             .Val(default_expr) -> {
                 span: expr_span(default_expr)
                 source_file: sema_source_file_at(source_segments, fallback_source_file, fallback_source_origin, span)
-                defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner.key, parameter_index: index, span: span}))
+                defaults.push(Val(FunctionDefaultRef{source_file: source_file, owner_key: owner_key, parameter_index: index, span: span}))
             }
             .None -> defaults.push(None)
         }
@@ -180,14 +180,14 @@ sema_function_call_metadata: fn(func: Func, owner: SymbolID, fallback_source_fil
 // calls bind to its raw scalar ABI return, which codegen emits unwrapped (the
 // Rust reference's `checked_return_types(.., sig.is_extern)` with
 // `is_extern: f.inline_foreign.is_some()`).
-sema_function_symbol_type: fn(func: Func, raw_protocol_return: Bool, owner: SymbolID, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
+sema_function_symbol_type: fn(func: Func, raw_protocol_return: Bool, owner_key: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Type {
     effect_bound: if func.is_pure -> Val([EffectRowEntry]{}) else -> None
     Type.Fn{
         params: sema_function_param_types(func),
         ret: Val(sema_checked_return_type(func.return_type, raw_protocol_return || func.inline_foreign != None)),
         effect_bound: effect_bound,
         param_contract: sema_function_param_contract(func),
-        call_metadata: Val(sema_function_call_metadata(func, owner, fallback_source_file, fallback_source_origin, source_segments)),
+        call_metadata: Val(sema_function_call_metadata(func, owner_key, fallback_source_file, fallback_source_origin, source_segments)),
         return_view_provenance: sema_function_signature_view_provenance(func),
     }
 }

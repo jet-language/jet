@@ -56,7 +56,7 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
         owner := Type?{None}
         if function.kind == {
             .TraitMethod(_, _, owner_type, trait_name, _) -> {
-                if ir_short_name(trait_name.key) == short -> owner = Val(owner_type.copy())
+                if ir_short_name(ir_symbol_key(p, trait_name)) == short -> owner = Val(owner_type.copy())
             }
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(p.type_rows, p.types, owner_type)
@@ -158,21 +158,22 @@ ir_trait_receiver: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethod
 // wins; else the generic owner's (`impl Point2.Trait` for a `Point2<Float, W>`
 // receiver), whose instance the call builds from the receiver's arguments.
 ir_method_key: fn(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) -> String Never! {
-    if ir_function_row(p, method.symbol.key) != None -> return method.symbol.key.copy()
-    owner: method.trait_owner ?? return method.symbol.key.copy()
+    method_key: ir_symbol_key(p, method.symbol)
+    if ir_function_row(p, method_key) != None -> return method_key
+    owner: method.trait_owner ?? return method_key
     concrete: ir_trait_identity(p, receiver)
-    candidates: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
     loop row in candidates {
         implementer: ir_trait_implementer(p, row, owner) ?? next
         if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
     }
-    head: ir_trait_head_identity(p, receiver) ?? return method.symbol.key.copy()
+    head: ir_trait_head_identity(p, receiver) ?? return method_key
     loop row in candidates {
         implementer: ir_trait_implementer(p, row, owner) ?? next
         implementer_head: ir_trait_head_identity(p, implementer) ?? ir_trait_identity(p, implementer)
         if implementer_head == head -> return p.functions[row].key.copy()
     }
-    method.symbol.key.copy()
+    method_key
 }
 
 // The identity of generic application `ty`'s nominal head, None for any
@@ -240,7 +241,7 @@ ir_trait_implementer: fn(p: IRProgram, row: Int, owner: SymbolID) -> Type? Never
     if p.functions[row].kind == {
         .Method(_, owner_type) -> return Val(owner_type.copy())
         .TraitMethod(_, _, owner_type, trait_name, _) -> {
-            if trait_name.key == owner.key -> return Val(owner_type.copy())
+            if trait_name == owner -> return Val(owner_type.copy())
         }
         .TopLevel -> {}
     }
@@ -317,7 +318,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     targets := [IRTraitTarget]{}
     returned := Type.Named{name: "Unit"}
     seen := [String:Bool]{}
-    candidates: p.trait_methods.get("{ir_short_name(owner.key)}|{method.name}") ?? [Int]{}
+    candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
     loop index in candidates {
         if p.functions[index].generic_params.len() > 0 -> next
         if ir_function_row(p, p.functions[index].key) != (Val(index)) -> next

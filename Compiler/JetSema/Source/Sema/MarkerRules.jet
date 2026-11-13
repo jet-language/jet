@@ -35,7 +35,8 @@ use jet_foundation.[
     diagnostic_with_label,
     expr_span,
     marker_hook_of_declaration,
-    symbol_id,
+    symbol_find,
+    symbol_key_text,
     type_name,
     module_text,
 ]
@@ -712,11 +713,12 @@ sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], env
     None
 }
 
-sema_marker_rules_constant_for_reference: fn(symbol: Symbol, references: [SemaNameReferenceFact], reference_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
+// `key` is the constant's key (a body's own constant has its body's key).
+sema_marker_rules_constant_for_reference: fn(symbol: Symbol, key: String, references: [SemaNameReferenceFact], reference_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> TComptimeValue? {
     found := false
     loop index in reference_start..<references.len() {
         reference := references[index]
-        if reference.symbol.id.key == symbol.id.key && reference.symbol.kind == SymbolKind.Constant {
+        if reference.symbol.id == symbol.id && reference.symbol.kind == SymbolKind.Constant {
             found = true
             break
         }
@@ -725,14 +727,14 @@ sema_marker_rules_constant_for_reference: fn(symbol: Symbol, references: [SemaNa
         return None
     }
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol.module_identity && value.key == symbol.id.key {
+        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol.module_identity && value.key == key {
             return Val(value.value)
         }
     }
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
-            if graph.modules[module_index].constants[constant_index].symbol.id.key == symbol.id.key {
+            if graph.modules[module_index].constants[constant_index].symbol.id == symbol.id {
                 value: graph.modules[module_index].constants[constant_index].declaration.ct ?? return None
                 return sema_checked_comptime(value)
             }
@@ -755,8 +757,9 @@ sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_inde
     }
     if checked.kind == .Flat(index) && context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .ConstRef(symbol) {
         loop reference in context.name_references {
-            if reference.symbol.id.key == symbol.key && reference.symbol.kind == SymbolKind.Constant {
-                return sema_marker_rules_constant_for_reference(reference.symbol, context.name_references, reference_start, environment, program, values)
+            if reference.symbol.id == symbol && reference.symbol.kind == SymbolKind.Constant {
+                key: sema_symbol_key(program, context, symbol)
+                return sema_marker_rules_constant_for_reference(reference.symbol, key, context.name_references, reference_start, environment, program, values)
             }
         }
     }
@@ -2243,10 +2246,10 @@ sema_inline_always_check_function: fn(function: Func, diagnostics: &[Diagnostic]
 // A seeded module's own bodies were checked when it was finalized; only the
 // program's references can take one of its functions' address.
 sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
-    address_taken := [String:Bool]{}
+    address_taken := [U32:Bool]{}
     loop module_result in modules {
         loop reference in module_result.name_references {
-            if reference.kind == "function" -> address_taken[reference.symbol.id.key] = true
+            if reference.kind == "function" -> address_taken[reference.symbol.id.id] = true
         }
     }
     found := false
@@ -2256,8 +2259,9 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
         loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
             if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
                 if own -> sema_inline_always_check_function(function, diagnostics)
-                key: symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name).key
-                if function.is_inline_always && address_taken.get(key) != None {
+                key: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name)
+                id: symbol_find(graph.symbols, key) ?? next
+                if function.is_inline_always && address_taken.get(id.id) != None {
                     name: function.name
                     diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))
                 }

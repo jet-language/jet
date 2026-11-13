@@ -1,4 +1,4 @@
-use jet_foundation.[InternalTag, Span, TagMarker, TLocal, Type]
+use jet_foundation.[InternalTag, Span, TagMarker, TLocal, Type, symbol_none]
 
 // ---------------------------------------------------------------------------
 // Views of the core.mem allocators (Arena, Bump, Pool, Fixed; built by
@@ -22,7 +22,7 @@ ir_allocator_view: fn(m: &IRModule, b: &IRBuilder, address: Int, row: Int) -> In
 // the variable owns nothing. False when `value` is no view.
 ir_bind_view: fn(m: &IRModule, b: &IRBuilder, local: TLocal, value: Int) -> Bool Never! {
     address: b.views.get(value) ?? return false
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     row: b.f.slot_type[value]
     if ir_kind_of(m, b, value) == .Aggregate {
         b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})

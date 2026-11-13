@@ -5,7 +5,7 @@
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
-    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
@@ -443,7 +443,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // value is built as an owned copy.
             piece: let_ty == .StrView || ir_body_node(p, b, init).kind == .OrFallback(_, _, _)
             if local.place_borrow && !piece && !b.fresh[value] && ir_place_borrow_type(m, p, b, value, span) {
-                symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+                symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
                 b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
                 return
             }
@@ -454,7 +454,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // free). It reads the place in place; sema rejects every move out
             // of such a binder (place alias, E0211).
             if local.generated && !b.fresh[value] && ir_has_drop(m, b, value) && !ir_owned_binding(b, value) && !ir_lent(b, value) && ir_row_lacks_clone(m, p, b.f.slot_type[value]) {
-                symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+                symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
                 b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
                 return
             }
@@ -970,7 +970,7 @@ ir_frame_cells: fn(m: &IRModule, b: &IRBuilder, count: Int) -> Int Never! {
 
 // Binds `local` to piece `slot`, which it does not own.
 ir_text_piece_bind: fn(b: &IRBuilder, local: TLocal, slot: Int) Never! {
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: slot, symbol: symbol})
 }
 
@@ -985,7 +985,7 @@ ir_bind_local: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, valu
     ir_store(m, p, b, slot, value)
     // A `:` variable bound to a lent value only borrows it.
     if !local.mutable && ir_lent(b, value) -> b.lent[slot] = true
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: slot, owned: ir_has_drop(m, b, slot), symbol: symbol})
     if b.cells.contains(local.name) && ir_kind_of(m, b, slot) != .Aggregate {
         _: ir_cell_binding(m, b, local.name)
@@ -1091,7 +1091,7 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
             alias_name: ir_intern_name(m, local.name)
             alias: ir_new_slot(b, value_row, IRSlotKind.Local, alias_name)
             ir_emit(b.f, IROp.Move, alias, value, -1, -1, b.line)
-            symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+            symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
             b.bindings.push(IRBinding{name: local.name, slot: alias, symbol: symbol})
             return
         }
@@ -1099,7 +1099,7 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
         bound: b.bindings[b.bindings.len() - 1].slot
         return ir_close_arm(m, p, b, bound, false, span)
     }
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
@@ -1113,7 +1113,7 @@ ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, p
     address: ir_place_address(m, p, b, place, backs, span)
     if ir_failed(b) || address < 0 -> return
     if backs.len() > 0 -> return ir_fail(b, span, "write window into a {ir_type_name(m.types[row].ty)} place outside a frame cell")
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
 }
 
@@ -1290,7 +1290,7 @@ ir_bind_uninit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty:
         data: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride)
         ir_emit(b.f, IROp.Store, -1, slot, 16, data, b.line)
     }
-    symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
+    symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
     fixed: ir_untag(ty) == .FixedList(_, _)
     b.bindings.push(IRBinding{name: local.name, slot: slot, owned: fixed && ir_has_drop(m, b, slot), symbol: symbol})
     if b.cells.contains(local.name) && m.types[row].kind != .Aggregate {
@@ -1315,7 +1315,7 @@ ir_field_destructure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, b
     closes: b.fresh[subject] && ir_close_glue(m, p, b, subject_row, false, span) >= 0
     if closes {
         owned: ir_has_drop(m, b, subject)
-        b.bindings.push(IRBinding{name: "#destructured", slot: subject, owned: owned, symbol: ""})
+        b.bindings.push(IRBinding{name: "#destructured", slot: subject, owned: owned})
         b.fresh[subject] = false
         ir_close_arm(m, p, b, subject, false, span)
     }
@@ -2124,7 +2124,11 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
         }
         .PreciseBuiltin(type_name, function, args) -> return ir_precise_builtin(m, p, b, expression_ty, type_name, function, args, span)
         .EnumLit(enum_type, variant, payload) -> return ir_enum_value(m, p, b, expression_ty, enum_type, variant, payload, span)
-        .EnumCtor(owner, variant, payload) -> return ir_enum_value(m, p, b, expression_ty, owner.key, variant.key, payload, span)
+        .EnumCtor(owner, variant, payload) -> {
+            owner_key: ir_body_symbol_key(p, b, owner)
+            variant_key: ir_body_symbol_key(p, b, variant)
+            return ir_enum_value(m, p, b, expression_ty, owner_key, variant_key, payload, span)
+        }
         .JSONLit(variant, argument, _) -> return ir_json_literal(m, p, b, expression_ty, variant, argument, span)
         .Present(value) -> return ir_present(m, p, b, expression_ty, value, span)
         .Absent -> {
@@ -2147,7 +2151,10 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             return ir_try(m, p, b, inner, conversion, Val(IRTrySite{note: note, file: file, line: line, function: function, fresh: fresh}), span)
         }
         .OrFallback(value, fallback, ambient) -> return ir_or_fallback(m, p, b, expression_ty, value, fallback, ambient, span)
-        .ConstRef(symbol) -> return ir_constant(m, p, b, expression_ty, symbol.key, span)
+        .ConstRef(symbol) -> {
+            key: ir_body_symbol_key(p, b, symbol)
+            return ir_constant(m, p, b, expression_ty, key, span)
+        }
         .GlobalShared(initializer, lifetime) -> return ir_shared_site(m, p, b, expression_ty, initializer, lifetime, span)
         .TraitConst(owner, trait_short, name) -> return ir_trait_constant(m, p, b, expression_ty, owner, trait_short, name, span)
         .NumberParam(param) -> {
@@ -2162,7 +2169,9 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             // compile-time copy (IRProgram.comptime_values), the build
             // entry's copy (IRProgram.invocation), and the program.
             variant: if p.comptime_values -> preparation else if p.invocation -> build else -> runtime
-            return ir_enum_value(m, p, b, expression_ty, owner.key, variant.key, BodyEnumPayload.Unit, span)
+            owner_key: ir_body_symbol_key(p, b, owner)
+            variant_key: ir_body_symbol_key(p, b, variant)
+            return ir_enum_value(m, p, b, expression_ty, owner_key, variant_key, BodyEnumPayload.Unit, span)
         }
         .CtLit(value) -> {
             // A literal that freezes is static data, read as a constant is;
@@ -2487,7 +2496,7 @@ ir_drop_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: S
         ir_drop_binding(m, b, binding)
         loop index in 0..<b.bindings.len() {
             if b.bindings[index].slot == binding.slot {
-                b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol.copy()}
+                b.bindings[index] = IRBinding{name: binding.name.copy(), slot: binding.slot, indirect: binding.indirect, owned: false, symbol: binding.symbol}
             }
         }
         return -1
@@ -3162,7 +3171,8 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
         result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
         return ir_route(m, p, b, symbol, slots, borrowed, result, span)
     }
-    row: ir_function_row(p, method.symbol.key) ?? return ir_fail_slot(b, span, "static call outside the checked program: {method.name}")
+    method_key: ir_body_symbol_key(p, b, method.symbol)
+    row: ir_function_row(p, method_key) ?? return ir_fail_slot(b, span, "static call outside the checked program: {method.name}")
     function: p.functions[row]
     expected: function.generic_params.len()
     if expected > 0 && type_args.len() > 0 && type_args.len() != expected -> return ir_fail_slot(b, span, "static call of {method.name} with {type_args.len()} of {expected} type arguments")
@@ -3181,7 +3191,7 @@ ir_static_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: T
         if ir_function_row(p, read.key) == None -> return ir_fail_slot(b, span, "missing Core decode read {read.key}")
         return ir_call(m, p, b, read.key, read.args, -1, [IRWriteBack]{}, args, span)
     }
-    ir_call(m, p, b, method.symbol.key, all, -1, [IRWriteBack]{}, args, span)
+    ir_call(m, p, b, method_key, all, -1, [IRWriteBack]{}, args, span)
 }
 
 // The arm of a valued `if`: its statements, then its value into `result`.
@@ -3622,7 +3632,7 @@ ir_note_binder_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, id: Symb
     if found -> return
     node: ir_body_node(p, b, expression)
     if node.kind == .Local(local) {
-        if local.symbol_id == .Val(named) && named.key == id.key {
+        if local.symbol_id == .Val(named) && named == id {
             found = true
             return
         }
@@ -4193,7 +4203,8 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     // `&total` of a `#Persist` binding: its module storage cell, written in
     // place (sema admits only `#Persist` module state as a write place).
     if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
-        at: p.constants.get(symbol.key) ?? return ir_fail_slot(b, span, "constant {symbol.key} without a declaration")
+        constant_key: ir_body_symbol_key(p, b, symbol)
+        at: p.constants.get(constant_key) ?? return ir_fail_slot(b, span, "constant {constant_key} without a declaration")
         if p.constant_defs[at].is_storage {
             definition: p.constant_defs[at]
             return ir_storage_address(m, p, b, definition, span)
@@ -5355,7 +5366,7 @@ ir_hide_condition_names: fn(b: &IRBuilder, from: Int, to: Int) Never! {
     loop index in from..<to {
         binding: b.bindings[index]
         if binding.name == "" -> next
-        b.bindings[index] = IRBinding{name: " condition", slot: binding.slot, indirect: binding.indirect, owned: binding.owned, symbol: "", write: binding.write, carrier: binding.carrier, live: binding.live}
+        b.bindings[index] = IRBinding{name: " condition", slot: binding.slot, indirect: binding.indirect, owned: binding.owned, write: binding.write, carrier: binding.carrier, live: binding.live}
     }
 }
 

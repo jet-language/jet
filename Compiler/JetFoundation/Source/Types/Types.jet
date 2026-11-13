@@ -429,10 +429,272 @@ SymbolKind: enum {
     Label
 }
 
-// The canonical key, rather than allocation order, is declaration identity.
-// Numeric IR IDs are derived separately during lowering.
+// A declaration's identity (#6793 S2, Docs/spec/compiler-data.md): a U32 row
+// of the run's `SymbolTable`, or, with SYMBOL_LOCAL_BIT, a row of the
+// checking body's own `SymbolKeys` (its locals and the keys it minted that
+// no registration holds). Equal ids are equal keys. Id 0 is no symbol, the
+// empty key. The key text (`symbol_key_text`) is resolved only at an edge:
+// a diagnostic, an IR function name, a record.
 SymbolID: struct {
-    key: String
+    id: U32
+}
+
+SYMBOL_LOCAL_BIT: U32{0x80000000}
+SYMBOL_LOCAL_BASE: 2147483648
+SYMBOL_LOCAL_BOUND: 2147483647
+
+// One id range: the key of id `base + n` is row `n` of `keys` (row 0, the
+// empty key, is never handed out above base 0). A registration module's
+// range is reserved before its rows are prepared, so a thread interns into
+// its own range and every id is the same for any thread count.
+// `module_identity` is the module whose keys the range holds; the serial
+// range has none.
+SymbolKeys: struct {
+    base: Int
+    bound: Int
+    keys: NameTable
+    module_identity: ModuleID{module_none()}
+}
+
+// The run's symbols: ranges in ascending base, and a hash index of the keys
+// the closed ranges hold. The last range is open: its one writer interns
+// there, and a lookup the closed keys miss reads its own keys.
+SymbolTable: struct {
+    ranges: [SymbolKeys]
+    // Open-addressing slots over each closed key's `name_hash`: 0 is empty,
+    // otherwise the key's id plus one. A probe compares the spelling the
+    // id's range holds, so the index stores no key text.
+    slots: [Int]{[Int]{0}}
+    mask: Int{0}
+}
+
+symbol_none: fn() -> SymbolID Never! {
+    SymbolID{id: U32{0}}
+}
+
+symbol_is_none: fn(id: SymbolID) -> Bool Never! {
+    id.id == U32{0}
+}
+
+symbol_is_local: fn(id: SymbolID) -> Bool Never! {
+    id.id.bit_and(SYMBOL_LOCAL_BIT) != U32{0}
+}
+
+// The key text of a declaration: its kind, module identity, owner key and
+// name.
+symbol_key_text: fn(kind: SymbolKind, module_name: String, owner: String, name: String) -> String Never! {
+    "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"
+}
+
+symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {
+    SymbolKeys{base: base, bound: bound, keys: name_table()}
+}
+
+// No range: what a registration row holds once the run's table took its
+// range.
+symbol_keys_empty: fn() -> SymbolKeys Never! {
+    SymbolKeys{base: 0, bound: 0, keys: name_table_sized(2)}
+}
+
+SYMBOL_LOCAL_INITIAL_SLOTS: 16
+
+// A checking body's own keys: few, so the table starts small.
+symbol_local_keys: fn() -> SymbolKeys Never! {
+    SymbolKeys{base: SYMBOL_LOCAL_BASE, bound: SYMBOL_LOCAL_BOUND, keys: name_table_sized(SYMBOL_LOCAL_INITIAL_SLOTS)}
+}
+
+// The core builtin owner types (`Task`, `Receiver`, `Sender`): declared by
+// no module, like the owned traits.
+SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender"}
+
+// The compiler-owned declarations no module declares: every owned trait
+// (OWNED_TRAITS, which a bound may name bare), the builtin owner types, then
+// each owned trait's declared methods. They are rows 1.. of the first range
+// of every table, in this order, so a builtin's id is one constant in every
+// run and a reader with no table names it (symbol_builtin,
+// symbol_builtin_method).
+symbol_builtin_keys: fn() -> SymbolKeys Never! {
+    keys := symbol_keys(0, SYMBOL_LOCAL_BOUND)
+    loop index in 0..<OWNED_TRAITS.len() -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Trait, "", "", OWNED_TRAITS[index].name))
+    loop name in SYMBOL_BUILTIN_TYPES -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Type, "", "", name))
+    loop index in 0..<OWNED_TRAITS.len() {
+        if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
+            loop declared in methods -> _ := symbol_keys_intern(keys, symbol_key_text(SymbolKind.Function, "", OWNED_TRAITS[index].name, declared.name))
+        }
+    }
+    keys.bound = keys.keys.texts.len()
+    keys
+}
+
+// The id of the owned trait or builtin owner type `name`
+// (symbol_builtin_keys).
+symbol_builtin: fn(kind: SymbolKind, name: String) -> SymbolID? Never! {
+    if kind == SymbolKind.Trait {
+        loop index in 0..<OWNED_TRAITS.len() {
+            if OWNED_TRAITS[index].name == name -> return Val(SymbolID{id: checked(U32{1 + index}) ?? return None})
+        }
+        return None
+    }
+    if kind != SymbolKind.Type -> return None
+    loop (index, builtin) in SYMBOL_BUILTIN_TYPES {
+        if builtin == name -> return Val(SymbolID{id: checked(U32{1 + OWNED_TRAITS.len() + index}) ?? return None})
+    }
+    None
+}
+
+// The id of owned trait `trait_name`'s declared method `method`
+// (symbol_builtin_keys).
+symbol_builtin_method: fn(trait_name: String, method: String) -> SymbolID? Never! {
+    row := 1 + OWNED_TRAITS.len() + SYMBOL_BUILTIN_TYPES.len()
+    loop index in 0..<OWNED_TRAITS.len() {
+        if OWNED_TRAITS[index].contract == .Methods(methods, _, _) {
+            loop declared in methods {
+                if OWNED_TRAITS[index].name == trait_name && declared.name == method -> return Val(SymbolID{id: checked(U32{row}) ?? return None})
+                row += 1
+            }
+        }
+    }
+    None
+}
+
+// The id of `key` in `keys`, interned when it is new.
+symbol_keys_intern: fn(keys: &SymbolKeys, key: String) -> SymbolID Never! {
+    row: name_index(name_intern(keys.keys, key))
+    if row >= keys.bound -> panic("symbol range at {keys.base} is full ({keys.bound} keys)")
+    SymbolID{id: checked(U32{keys.base + row}) ?? panic("symbol id out of range")}
+}
+
+symbol_keys_find: fn(keys: SymbolKeys, key: String) -> SymbolID? Never! {
+    name: name_find(keys.keys, key) ?? return None
+    Val(SymbolID{id: checked(U32{keys.base + name_index(name)}) ?? return None})
+}
+
+// The key of `id`, which `keys` holds.
+symbol_keys_text: fn(keys: SymbolKeys, id: SymbolID) -> String Never! {
+    keys.keys.texts[Int{id.id} - keys.base]
+}
+
+// A table of the builtin range (symbol_builtin_keys) and one open range
+// after it.
+symbol_table: fn() -> SymbolTable Never! {
+    symbol_table_of([SymbolKeys]{symbol_builtin_keys()})
+}
+
+// A table whose one range, open, is `keys`: a registration module's while
+// a thread prepares it.
+symbol_table_open: fn(keys: &&SymbolKeys) -> SymbolTable Never! {
+    SymbolTable{ranges: [SymbolKeys]{keys.move()}}
+}
+
+// The table of `ranges`, ordered by base, then an open range after the
+// last. Overlapping ranges, or a key held by two ranges, are an internal
+// error, since equal keys must be equal ids.
+symbol_table_of: fn(ranges: &&[SymbolKeys]) -> SymbolTable Never! {
+    owned := ranges.move()
+    owned.sort_by(fn(left: SymbolKeys, right: SymbolKeys) { left.base <=> right.base })
+    end := 0
+    loop range in owned {
+        if range.base < end -> panic("symbol range at {range.base} overlaps the range before it, which ends at {end}")
+        end = range.base + range.bound
+    }
+    count := 0
+    loop range in owned -> count += range.keys.texts.len()
+    capacity := 16
+    loop capacity < count * 2 -> capacity *= 2
+    table := SymbolTable{ranges: owned.move(), slots: (loop _ in 0..<capacity -> 0), mask: capacity - 1}
+    loop index in 0..<table.ranges.len() {
+        loop row in 1..<table.ranges[index].keys.texts.len() {
+            hash: table.ranges[index].keys.hashes[row]
+            slot := hash.bit_and(table.mask)
+            loop table.slots[slot] != 0 {
+                if symbol_table_holds(table, table.slots[slot] - 1, hash, table.ranges[index].keys.bytes, name_start(table.ranges[index].keys, row), table.ranges[index].keys.ends[row]) -> panic("symbol key `{table.ranges[index].keys.texts[row]}` is held by two ranges")
+                slot = (slot + 1).bit_and(table.mask)
+            }
+            table.slots[slot] = table.ranges[index].base + row + 1
+        }
+    }
+    table.ranges.push(symbol_keys(end, SYMBOL_LOCAL_BOUND - end))
+    table
+}
+
+// Whether the key of closed id `id` spells `bytes[start..<end]`, whose
+// `name_hash` is `hash`.
+symbol_table_holds: fn(table: SymbolTable, id: Int, hash: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    at: symbol_table_range_of(table, id)
+    name_bytes_equal(table.ranges[at].keys, id - table.ranges[at].base, hash, bytes, start, end)
+}
+
+// The range `table` holds for the keys of module `identity`.
+symbol_table_module_range: fn(table: SymbolTable, identity: ModuleID) -> Int? Never! {
+    loop (index, range) in table.ranges {
+        if range.module_identity == identity -> return Val(index)
+    }
+    None
+}
+
+// The id of `key`, if a range holds it.
+symbol_find: fn(table: SymbolTable, key: String) -> SymbolID? Never! {
+    if key == "" -> return Val(symbol_none())
+    bytes: key.bytes()
+    hash: name_hash(bytes, 0, bytes.len())
+    slot := hash.bit_and(table.mask)
+    loop table.slots[slot] != 0 {
+        id: table.slots[slot] - 1
+        if symbol_table_holds(table, id, hash, bytes, 0, bytes.len()) -> return Val(SymbolID{id: checked(U32{id}) ?? return None})
+        slot = (slot + 1).bit_and(table.mask)
+    }
+    open: table.ranges.len() - 1
+    name: name_find_bytes(table.ranges[open].keys, bytes, 0, bytes.len()) ?? return None
+    Val(SymbolID{id: checked(U32{table.ranges[open].base + name_index(name)}) ?? return None})
+}
+
+// The id of `key`, interned in the open range when no range holds it. Only
+// the table's one writer (a serial phase, or the thread preparing a
+// module's range) calls this.
+symbol_intern: fn(table: &SymbolTable, key: String) -> SymbolID Never! {
+    if symbol_find(table, key) == .Val(found) -> return found
+    symbol_keys_intern(table.ranges[table.ranges.len() - 1], key)
+}
+
+// The id of the declaration with this kind, module, owner and name,
+// interned as `symbol_intern` does.
+symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
+    symbol_intern(table, symbol_key_text(kind, module_name, owner, name))
+}
+
+// The range of `id`: the last one whose base is at most `id`.
+symbol_table_range: fn(table: SymbolTable, id: SymbolID) -> Int Never! {
+    symbol_table_range_of(table, Int{id.id})
+}
+
+// The range of id `value`: the last one whose base is at most `value`.
+symbol_table_range_of: fn(table: SymbolTable, value: Int) -> Int Never! {
+    low := 0
+    high := table.ranges.len() - 1
+    loop low < high {
+        middle: (low + high + 1) /% 2
+        if table.ranges[middle].base <= value -> low = middle else -> high = middle - 1
+    }
+    low
+}
+
+// The key of `id`; `locals` holds a local one.
+symbol_key: fn(table: SymbolTable, locals: SymbolKeys, id: SymbolID) -> String Never! {
+    if symbol_is_local(id) -> return symbol_keys_text(locals, id)
+    symbol_table_key(table, id)
+}
+
+// The key of a run-wide `id`.
+symbol_table_key: fn(table: SymbolTable, id: SymbolID) -> String Never! {
+    symbol_keys_text(table.ranges[symbol_table_range(table, id)], id)
+}
+
+// How many keys `table` holds (each range's empty row included). A run's
+// table only grows, so two of its states with one count are the same.
+symbol_table_count: fn(table: SymbolTable) -> Int Never! {
+    count := 0
+    loop range in table.ranges -> count += range.keys.texts.len()
+    count
 }
 
 Symbol: struct {
@@ -446,15 +708,11 @@ Symbol: struct {
     visibility: Int
 }
 
-symbol_id: fn(kind: SymbolKind, module_name: String, owner: String, name: String) -> SymbolID Never! {
-    SymbolID{key: "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"}
-}
-
 // A registered declaration in the run-wide table the registration freeze
-// fills (Cutover B L2b, s3 §1 SymbolId; spelled DeclID beside the SymbolID
-// text key): its row of `DeclTable.rows`. Facts name a registered
-// declaration by its DeclID; locals and parameters keep their SymbolID text
-// keys until L5 gives each one a FnFacts row.
+// fills (Cutover B L2b, s3 §1 SymbolId; spelled DeclID beside SymbolID):
+// its row of `DeclTable.rows`. Facts name a registered declaration by its
+// DeclID; locals and parameters keep their body's SymbolIDs until L5 gives
+// each one a FnFacts row.
 DeclID: struct {
     row: Row<DeclRow>
 }
@@ -484,9 +742,10 @@ DeclTableEntry: struct {
     id: DeclID
 }
 
-// Appends `symbol`'s row; `decl_table_index` keys it.
-decl_table_add: fn(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
-    decl_table_add_row(table, symbol.id.key, symbol.kind)
+// Appends `symbol`'s row, a run-wide one of `symbols`; `decl_table_index`
+// keys it.
+decl_table_add: fn(table: &DeclTable, symbols: SymbolTable, symbol: Symbol) -> DeclID Never! {
+    decl_table_add_row(table, symbol_table_key(symbols, symbol.id), symbol.kind)
 }
 
 // Appends the row of declaration `key` of kind `kind`; `decl_table_index`

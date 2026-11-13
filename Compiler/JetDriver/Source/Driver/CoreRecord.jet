@@ -1,4 +1,4 @@
-// The precompiled Core record, schema `jet.core/v4`: Core and the Prelude
+// The precompiled Core record, schema `jet.core/v5`: Core and the Prelude
 // checked alone as one closed program (`jet self devtools core-record`), in
 // the compiler's one record format (JetFoundation RecordCodec.jet). Each row
 // element is the canonical CBOR of a checked row's derived encoding, so the
@@ -32,6 +32,13 @@
 //     compile that takes the record's rows interns it first
 //     (jet_driver_core_record_intern_modules), so each row's ModuleIDs are
 //     the compile's own
+//  10 symbol ranges: one map per range of the check's symbol table a compile
+//     that takes the record reserves (sema_registration_reserved_symbols:
+//     each recorded module's and the serial ones with their keys, every
+//     other module's bare): its ModuleID (0 for a serial range), base and
+//     bound, in base order
+//  11 symbol keys: the keys of each range of section 10, row 1 onward, so
+//     each SymbolID a row names is the compile's id for the same key
 // A row names another module by its module key position (section 2), not by
 // the check's graph index, and a body names declarations by section 7's
 // rows; a graph that takes a row rebases its module indexes
@@ -40,11 +47,11 @@
 // SEMA_CORE_RECORD_CBOR, the one set of limits a record row reads under.
 use {
     core_record_cbor: core.encoding.cbor
-    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleTable, RecordField, RecordReader, RecordSection, RecordValue, decl_table_add_row, decl_table_index, module_count, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_str, record_value_field]
-    jet_sema.[SEMA_CORE_RECORD_CBOR, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaGraphModuleResult, SemaRegistrationModule, sema_core_body_packets, sema_core_record_field_errors]
+    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordSection, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_int, record_value_as_list, record_value_as_str, record_value_field, symbol_keys, symbol_keys_intern]
+    jet_sema.[SEMA_CORE_RECORD_CBOR, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaGraphModuleResult, SemaRegistrationModule, sema_core_body_packets, sema_core_record_field_errors, sema_registration_reserved_symbols]
 }
 
-JET_CORE_RECORD_SCHEMA: "jet.core/v4"
+JET_CORE_RECORD_SCHEMA: "jet.core/v5"
 JET_CORE_RECORD_HEADER: 1
 JET_CORE_RECORD_MODULE_KEYS: 2
 JET_CORE_RECORD_MODULE_ROWS: 3
@@ -54,21 +61,25 @@ JET_CORE_RECORD_REGISTRATION_ROWS: 6
 JET_CORE_RECORD_DECL_ROWS: 7
 JET_CORE_RECORD_VALUE_ROWS: 8
 JET_CORE_RECORD_MODULE_TABLE: 9
+JET_CORE_RECORD_SYMBOL_RANGES: 10
+JET_CORE_RECORD_SYMBOL_KEYS: 11
 
 // An open record: its verified reader and the two key columns, in element
-// order, with each module key's position by module identity, and the module
-// table its rows' ModuleIDs index.
+// order, with each module key's position by ModuleID, the module table its
+// rows' ModuleIDs index and the symbol ranges a compile that takes its rows
+// reserves.
 JetDriverCoreRecord: struct {
     reader: RecordReader
     compiler: String
     target: String
     core_digest: String
     module_names: [String]
-    module_identities: [String]
-    module_rows: [String:Int]
-    body_modules: [String]
+    module_identities: [ModuleID]
+    module_rows: [U32:Int]
+    body_modules: [ModuleID]
     body_keys: [String]
     module_table: ModuleTable
+    symbols: [SymbolKeys]
 }
 
 // What a round trip read back: each section's row count and the record's
@@ -90,25 +101,24 @@ JetDriverCoreRecordCounts: struct {
 // the same inputs give the same bytes.
 jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: String, target: String) -> [U8] Err! {
     entry_file := ""
-    module_order := [String]{}
-    module_at := [String:Int]{}
+    // Each Core module's row of `inputs.modules`, by name, then identity.
+    module_order := [Int]{}
+    checked := [U32:Bool]{}
     loop (index, module_row) in inputs.modules {
         if module_row.module_identity == inputs.entry_module_identity {
             entry_file = module_row.source_file.copy()
             next
         }
-        identity: module_text(inputs.module_table, module_row.module_identity)
-        order: "{module_row.module_name}\n{identity}"
-        if module_at.get(order) != None -> return Err("Core module `{module_row.module_name}` ({identity}) is checked twice")
-        module_at[order] = index
-        module_order.push(order)
+        if checked.get(module_row.module_identity.id) != None -> return Err("Core module `{module_row.module_name}` ({module_text(inputs.module_table, module_row.module_identity)}) is checked twice")
+        checked[module_row.module_identity.id] = true
+        module_order.push(index)
     }
-    module_order.sort()
+    module_order.sort_by(fn(left: Int, right: Int) { (inputs.modules[left].module_name <=> inputs.modules[right].module_name).then(module_text(inputs.module_table, inputs.modules[left].module_identity) <=> module_text(inputs.module_table, inputs.modules[right].module_identity)) })
     // The check's graph names modules by its own module index; the record
     // names them by module key position, so each row's indexes are rebased
     // to it (CoreRecordRebase.jet) before it is encoded.
     record_at := [U32:Int]{}
-    loop (position, order) in module_order -> record_at[inputs.modules[module_at[order]].module_identity.id] = position
+    loop (position, index) in module_order -> record_at[inputs.modules[index].module_identity.id] = position
     registration_at := [U32:Int]{}
     graph_modules := [Int]{}
     loop (index, registration) in inputs.registration_modules {
@@ -118,34 +128,35 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         registration_at[registration.module_identity.id] = index
     }
     if registration_at.len() != module_order.len() -> return Err("the Core check registered {registration_at.len()} modules but checked {module_order.len()}")
-    // Each Core body, by module identity, then key. Its packet (the body and
-    // the facts its check recorded) is split off its module's row
-    // (sema_core_body_packets) before the row is encoded.
-    body_order := [String]{}
-    body_at := [String:Int]{}
+    // Each Core body's row of `inputs.functions`, by module identity, then
+    // key. Its packet (the body and the facts its check recorded) is split
+    // off its module's row (sema_core_body_packets) before the row is
+    // encoded.
+    body_order := [Int]{}
     loop (index, function) in inputs.functions {
-        if function.module_identity == inputs.entry_module_identity -> next
-        identity: module_text(inputs.module_table, function.module_identity)
-        order: "{identity}\n{function.key}"
-        if body_at.get(order) != None -> return Err("Core function `{function.key}` of {identity} is checked twice")
-        body_at[order] = index
-        body_order.push(order)
+        if function.module_identity != inputs.entry_module_identity -> body_order.push(index)
     }
-    body_order.sort()
+    body_order.sort_by(fn(left: Int, right: Int) { (module_text(inputs.module_table, inputs.functions[left].module_identity) <=> module_text(inputs.module_table, inputs.functions[right].module_identity)).then(inputs.functions[left].key <=> inputs.functions[right].key) })
+    // A body checked twice sorts beside itself.
+    loop position in 1..<body_order.len() {
+        earlier: body_order[position - 1]
+        later: body_order[position]
+        if inputs.functions[earlier].module_identity == inputs.functions[later].module_identity && inputs.functions[earlier].key == inputs.functions[later].key -> return Err("Core function `{inputs.functions[later].key}` of {module_text(inputs.module_table, inputs.functions[later].module_identity)} is checked twice")
+    }
     module_bodies := [U32:[Int]]{}
-    loop (position, order) in body_order {
-        identity: inputs.functions[body_at[order]].module_identity.id
+    loop (position, index) in body_order {
+        identity: inputs.functions[index].module_identity.id
         if module_bodies.get(identity) == None -> module_bodies[identity] = [Int]{}
         module_bodies[identity].push(position)
     }
     packets := [Int:SemaComptimeFunctionResult]{}
     module_keys := [RecordValue]{}
     module_rows := [RecordValue]{}
-    loop order in module_order {
-        whole := inputs.modules[module_at[order]].copy()
+    loop index in module_order {
+        whole := inputs.modules[index].copy()
         positions: module_bodies.get(whole.module_identity.id) ?? [Int]{}
         bodies := [FnBody]{}
-        loop position in positions -> bodies.push(inputs.functions[body_at[body_order[position]]].copy())
+        loop position in positions -> bodies.push(inputs.functions[body_order[position]].copy())
         split := [SemaComptimeFunctionResult]{}
         row := sema_core_body_packets(whole, bodies, split)
         loop split.len() > 0 {
@@ -158,8 +169,8 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         module_rows.push(RecordValue.Bytes{value: bytes})
     }
     registration_rows := [RecordValue]{}
-    loop order in module_order {
-        identity: inputs.modules[module_at[order]].module_identity
+    loop module_row_index in module_order {
+        identity: inputs.modules[module_row_index].module_identity
         index: registration_at.get(identity.id) ?? return Err("Core module {module_text(inputs.module_table, identity)} is checked but has no registration module")
         registration := inputs.registration_modules[index].copy()
         _: jet_driver_core_record_rebase_registration(registration, graph_modules) ?? return Err(err)
@@ -185,26 +196,40 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         core_values += 1
     }
     value_rows := [RecordValue]{}
-    loop order in module_order {
-        module_row: inputs.modules[module_at[order]]
+    loop index in module_order {
+        module_row: inputs.modules[index]
         values: module_values.get(module_row.module_identity.id) ?? [SemaComptimeItemValue]{}
         bytes: core_record_cbor.to_bytes_canonical(values) ?? return Err("Core module `{module_row.module_name}` has comptime values with no record encoding: {err}")
         value_rows.push(RecordValue.Bytes{value: bytes})
     }
     body_keys := [RecordValue]{}
     body_rows := [RecordValue]{}
-    loop (position, order) in body_order {
-        packet: packets.get(position) ?? return Err("Core function `{order}` belongs to no recorded Core module")
+    loop (position, index) in body_order {
+        packet: packets.get(position) ?? return Err("Core function `{inputs.functions[index].key}` belongs to no recorded Core module")
         bytes: core_record_cbor.to_bytes_canonical(packet) ?? return Err("Core function `{packet.function_key}` has no record encoding: {err}")
         body_keys.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "module", value: RecordValue.Str{value: module_text(inputs.module_table, packet.module_identity)}}, RecordField{name: "key", value: RecordValue.Str{value: packet.function_key.copy()}}}})
         body_rows.push(RecordValue.Bytes{value: bytes})
     }
     // Row 0 is the empty identity no module has; every table interns it.
     table_rows: loop row in 1..<module_count(inputs.module_table) -> RecordValue.Str{value: inputs.module_table.identities.texts[row].copy()}
+    // The symbol ranges a compile that takes the record's modules reserves,
+    // each with its keys (sections 10 and 11).
+    recorded: loop index in module_order -> inputs.modules[index].module_identity
+    symbol_ranges := [RecordValue]{}
+    symbol_keys := [RecordValue]{}
+    loop range in sema_registration_reserved_symbols(inputs.symbols, recorded) {
+        symbol_ranges.push(RecordValue.Map{fields: [RecordField]{
+            RecordField{name: "module", value: RecordValue.Int{value: Int{range.module_identity.id}}},
+            RecordField{name: "base", value: RecordValue.Int{value: range.base}},
+            RecordField{name: "bound", value: RecordValue.Int{value: range.bound}},
+        }})
+        keys: loop row in 1..<range.keys.texts.len() -> RecordValue.Str{value: range.keys.texts[row].copy()}
+        symbol_keys.push(RecordValue.List{values: keys})
+    }
     header: RecordValue.Map{fields: [RecordField]{
         RecordField{name: "compiler", value: RecordValue.Str{value: compiler}},
         RecordField{name: "target", value: RecordValue.Str{value: target}},
-        RecordField{name: "core_digest", value: RecordValue.Str{value: jet_driver_core_record_digest(inputs.sources, entry_file)}},
+        RecordField{name: "core_digest", value: RecordValue.Str{value: jet_driver_core_record_digest(inputs, entry_file)}},
         RecordField{name: "modules", value: RecordValue.Int{value: module_order.len()}},
         RecordField{name: "bodies", value: RecordValue.Int{value: body_order.len()}},
         RecordField{name: "decls", value: RecordValue.Int{value: decl_rows.len()}},
@@ -220,29 +245,42 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordSection{id: JET_CORE_RECORD_DECL_ROWS, elements: decl_rows.move()},
         RecordSection{id: JET_CORE_RECORD_VALUE_ROWS, elements: value_rows.move()},
         RecordSection{id: JET_CORE_RECORD_MODULE_TABLE, elements: table_rows},
+        RecordSection{id: JET_CORE_RECORD_SYMBOL_RANGES, elements: symbol_ranges.move()},
+        RecordSection{id: JET_CORE_RECORD_SYMBOL_KEYS, elements: symbol_keys.move()},
     }
     encoded: record_encode(JET_CORE_RECORD_SCHEMA, sections)
     bytes: encoded.bytes ?? return Err(encoded.problem ?? "the Core record has no byte form")
     Ok(bytes)
 }
 
-// The digest of the Core and Prelude sources the record was checked from:
-// each source path and text, in path order, the check's entry file left out.
-jet_driver_core_record_digest: fn(sources: [String:String], entry_file: String) -> String Never! {
-    paths := sources.keys().to_list()
-    paths.sort()
+// One Core or Prelude source the record's digest reads.
+JetDriverCoreRecordSource: struct {
+    path: String
+    text: String
+}
+
+// The digest of the Core and Prelude sources the record was checked from
+// (`inputs.sources`): each source path and text, in path order, the check's
+// entry file left out.
+jet_driver_core_record_digest: fn(inputs: JetDriverLoweringInputs, entry_file: String) -> String Never! {
+    files := [JetDriverCoreRecordSource]{}
+    loop (path, text) in inputs.sources {
+        if path != entry_file -> files.push(JetDriverCoreRecordSource{path: path.copy(), text: text.copy()})
+    }
+    // Popped from the back, so the last path sorts first.
+    files.sort_by(fn(left: JetDriverCoreRecordSource, right: JetDriverCoreRecordSource) { right.path <=> left.path })
     fields := [String]{}
-    loop path in paths {
-        if path == entry_file -> next
-        fields.push(path.copy())
-        fields.push(sources[path].copy())
+    loop files.len() > 0 {
+        file := files.pop() ?? break
+        fields.push(file.path.move())
+        fields.push(file.text.move())
     }
     record_key_digest(fields)
 }
 
-// Opens a `jet.core/v4` record: the format and checksum are verified, and
-// the header, both key sections and the module table are read. No row is
-// decoded.
+// Opens a `jet.core/v5` record: the format and checksum are verified, and
+// the header, both key sections, the module table and the symbol ranges are
+// read. No row is decoded.
 jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
     opened: record_open_schema(bytes, JET_CORE_RECORD_SCHEMA)
     reader: opened.reader ?? return Err(opened.problem ?? "the Core record can't be opened")
@@ -253,30 +291,51 @@ jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
         target: jet_driver_core_record_text(header, "target") ?? return Err(err),
         core_digest: jet_driver_core_record_text(header, "core_digest") ?? return Err(err),
         module_names: [String]{},
-        module_identities: [String]{},
-        module_rows: [String:Int]{},
-        body_modules: [String]{},
+        module_identities: [ModuleID]{},
+        module_rows: [U32:Int]{},
+        body_modules: [ModuleID]{},
         body_keys: [String]{},
         module_table: module_table(),
-    }
-    loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_KEYS) {
-        key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_MODULE_KEYS, index) ?? return Err(err)
-        identity: jet_driver_core_record_text(key, "identity") ?? return Err(err)
-        if record.module_rows.get(identity) != None -> return Err("the Core record keys module {identity} twice")
-        record.module_rows[identity.copy()] = index
-        record.module_names.push(jet_driver_core_record_text(key, "name") ?? return Err(err))
-        record.module_identities.push(identity.copy())
-    }
-    loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_BODY_KEYS) {
-        key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_BODY_KEYS, index) ?? return Err(err)
-        record.body_modules.push(jet_driver_core_record_text(key, "module") ?? return Err(err))
-        record.body_keys.push(jet_driver_core_record_text(key, "key") ?? return Err(err))
+        symbols: [SymbolKeys]{},
     }
     loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_TABLE) {
         value: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_MODULE_TABLE, index) ?? return Err(err)
         text: record_value_as_str(value)
         identity: text.value ?? return Err(text.problem ?? "the Core record's module table row {index} is not text")
         if module_index(module_intern(record.module_table, identity)) != index + 1 -> return Err("the Core record's module table names `{identity}` twice")
+    }
+    loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_KEYS) {
+        key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_MODULE_KEYS, index) ?? return Err(err)
+        identity: jet_driver_core_record_module_id(record.module_table, key, "identity") ?? return Err(err)
+        if record.module_rows.get(identity.id) != None -> return Err("the Core record keys module {module_text(record.module_table, identity)} twice")
+        record.module_rows[identity.id] = index
+        record.module_names.push(jet_driver_core_record_text(key, "name") ?? return Err(err))
+        record.module_identities.push(identity)
+    }
+    loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_BODY_KEYS) {
+        key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_BODY_KEYS, index) ?? return Err(err)
+        record.body_modules.push(jet_driver_core_record_module_id(record.module_table, key, "module") ?? return Err(err))
+        record.body_keys.push(jet_driver_core_record_text(key, "key") ?? return Err(err))
+    }
+    ranges: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_SYMBOL_RANGES)
+    if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_SYMBOL_KEYS) != ranges -> return Err("the Core record has {ranges} symbol ranges but a different number of symbol key rows")
+    loop index in 0..<ranges {
+        range: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_SYMBOL_RANGES, index) ?? return Err(err)
+        owner: jet_driver_core_record_int(range, "module") ?? return Err(err)
+        base: jet_driver_core_record_int(range, "base") ?? return Err(err)
+        bound: jet_driver_core_record_int(range, "bound") ?? return Err(err)
+        keys := symbol_keys(base, bound)
+        keys.module_identity = ModuleID{id: checked(U32{owner}) ?? return Err("the Core record's symbol range at {base} names no module id ({owner})")}
+        listed: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_SYMBOL_KEYS, index) ?? return Err(err)
+        list: record_value_as_list(listed)
+        texts: list.value ?? return Err(list.problem ?? "the Core record's symbol keys of the range at {base} are not a list")
+        if texts.len() >= bound -> return Err("the Core record's symbol range at {base} holds {texts.len()} keys, past its bound {bound}")
+        loop (row, value) in texts {
+            text: record_value_as_str(value)
+            symbol: text.value ?? return Err(text.problem ?? "the Core record's symbol key {row} of the range at {base} is not text")
+            if (Int{symbol_keys_intern(keys, symbol).id}) != base + row + 1 -> return Err("the Core record's symbol range at {base} holds `{symbol}` twice")
+        }
+        record.symbols.push(keys)
     }
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of module rows")
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of registration rows")
@@ -365,14 +424,14 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
     record: jet_driver_core_record_open(bytes) ?? return Err(err)
     loop index in 0..<record.module_names.len() {
         row: jet_driver_core_record_module(record, index) ?? return Err(err)
-        if row.module_name != record.module_names[index] || module_text(record.module_table, row.module_identity) != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its row is `{row.module_name}`")
+        if row.module_name != record.module_names[index] || row.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its row is `{row.module_name}`")
         stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_MODULE_ROWS, index) ?? return Err(err)
         again: core_record_cbor.to_bytes_canonical(row) ?? return Err("Core module `{row.module_name}` doesn't encode again: {err}")
         if again != stored -> return Err("Core module `{row.module_name}` encodes to other bytes after a read")
     }
     loop index in 0..<record.body_keys.len() {
         packet: jet_driver_core_record_body(record, index) ?? return Err(err)
-        if packet.function_key != record.body_keys[index] || module_text(record.module_table, packet.module_identity) != record.body_modules[index] -> return Err("Core body key {index} names `{record.body_keys[index]}` but its packet is `{packet.function_key}`")
+        if packet.function_key != record.body_keys[index] || packet.module_identity != record.body_modules[index] -> return Err("Core body key {index} names `{record.body_keys[index]}` but its packet is `{packet.function_key}`")
         if packet.function == None -> return Err("Core body packet `{packet.function_key}` holds no body")
         stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_BODY_ROWS, index) ?? return Err(err)
         again: core_record_cbor.to_bytes_canonical(packet) ?? return Err("Core function `{packet.function_key}` doesn't encode again: {err}")
@@ -380,7 +439,7 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
     }
     loop index in 0..<record.module_names.len() {
         registration: jet_driver_core_record_registration(record, index) ?? return Err(err)
-        if registration.module_name != record.module_names[index] || module_text(record.module_table, registration.module_identity) != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its registration row is `{registration.module_name}`")
+        if registration.module_name != record.module_names[index] || registration.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its registration row is `{registration.module_name}`")
         stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
         again: core_record_cbor.to_bytes_canonical(registration) ?? return Err("Core module `{registration.module_name}`'s registration row doesn't encode again: {err}")
         if again != stored -> return Err("Core module `{registration.module_name}`'s registration row encodes to other bytes after a read")
@@ -398,7 +457,7 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
     loop index in 0..<record.module_names.len() {
         module_values: jet_driver_core_record_values(record, index) ?? return Err(err)
         loop value in module_values {
-            if module_text(record.module_table, value.module_identity) != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its value rows hold `{value.key}` of {module_text(record.module_table, value.module_identity)}")
+            if value.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its value rows hold `{value.key}` of {module_text(record.module_table, value.module_identity)}")
         }
         values += module_values.len()
         stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_VALUE_ROWS, index) ?? return Err(err)
@@ -430,4 +489,18 @@ jet_driver_core_record_text: fn(value: RecordValue, name: String) -> String Err!
     found: field.value ?? return Err(field.problem ?? "the Core record has no `{name}`")
     text: record_value_as_str(found)
     Ok(text.value ?? return Err(text.problem ?? "the Core record's `{name}` is not text"))
+}
+
+jet_driver_core_record_int: fn(value: RecordValue, name: String) -> Int Err! {
+    field: record_value_field(value, name)
+    found: field.value ?? return Err(field.problem ?? "the Core record has no `{name}`")
+    number: record_value_as_int(found)
+    Ok(number.value ?? return Err(number.problem ?? "the Core record's `{name}` is not an integer"))
+}
+
+// The ModuleID of field `name` of `value`, an identity of the record's
+// module `table`.
+jet_driver_core_record_module_id: fn(table: ModuleTable, value: RecordValue, name: String) -> ModuleID Err! {
+    identity: jet_driver_core_record_text(value, name) ?? return Err(err)
+    Ok(module_find(table, identity) ?? return Err("the Core record's `{name}` names {identity}, which its module table doesn't hold"))
 }

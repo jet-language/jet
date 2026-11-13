@@ -4,7 +4,7 @@
 // enum payloads hold. A trait's row is the union of its implementing types'
 // rows. Field types refer back to other types, so the rows are solved to a
 // fixed point, and a recursive type settles on the union of its cycle.
-use jet_foundation.[ModuleID, Span, Type]
+use jet_foundation.[ModuleID, Span, Type, symbol_table_key]
 
 // One source of a type's effects. A `method` names its function in
 // `function_key` and takes that function's solved row; a `field` carries the
@@ -50,9 +50,9 @@ sema_effect_type_shapes: fn(graph: SemaRegistrationGraph, source_module: SemaReg
     module_identity: source_module.module_identity
     shapes := [SemaEffectTypeShape]{}
     loop nominal in source_module.nominals {
-        key: nominal.symbol.id.key
+        key: symbol_table_key(graph.symbols, nominal.symbol.id)
         shape := SemaEffectTypeShape{key: key.copy(), span: nominal.symbol.span, sources: [SemaEffectTypeSource]{}}
-        loop function in nominal.methods -> shape.sources.push(sema_effect_type_method_source(function))
+        loop function in nominal.methods -> shape.sources.push(sema_effect_type_method_source(graph, function))
         loop field in nominal.fields -> sema_effect_type_add_held(graph, module_identity, field.symbol.name, field.symbol.span, field.ty, shape.sources)
         loop variant in nominal.variants {
             payload: variant.payload_type ?? next
@@ -62,26 +62,27 @@ sema_effect_type_shapes: fn(graph: SemaRegistrationGraph, source_module: SemaReg
         if nominal.source == .SourceAST(item) {
             loop block in sema_registration_item_trait_blocks(item) {
                 trait_symbol: sema_type_graph_trait_symbol(graph, module_identity, block.trait_name) ?? next
-                shapes.push(sema_effect_type_impl_shape(trait_symbol.id.key, key, nominal.symbol.name, nominal.symbol.span))
+                shapes.push(sema_effect_type_impl_shape(symbol_table_key(graph.symbols, trait_symbol.id), key, nominal.symbol.name, nominal.symbol.span))
             }
         }
     }
     loop implementation in source_module.impls {
-        target: implementation.target_nominal_key ?? next
+        target_id: implementation.target_nominal ?? next
+        target: symbol_table_key(graph.symbols, target_id)
         span: implementation.symbol.span
         shape := SemaEffectTypeShape{key: target.copy(), span: span, sources: [SemaEffectTypeSource]{}}
-        loop function in implementation.methods -> shape.sources.push(sema_effect_type_method_source(function))
+        loop function in implementation.methods -> shape.sources.push(sema_effect_type_method_source(graph, function))
         shapes.push(shape)
         trait_name: implementation.trait_name ?? next
         trait_symbol := implementation.trait_symbol
         if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, module_identity, trait_name)
-        if trait_symbol == .Val(symbol) -> shapes.push(sema_effect_type_impl_shape(symbol.id.key, target, implementation.target_type_name, span))
+        if trait_symbol == .Val(symbol) -> shapes.push(sema_effect_type_impl_shape(symbol_table_key(graph.symbols, symbol.id), target, implementation.target_type_name, span))
     }
     shapes
 }
 
-sema_effect_type_method_source: fn(function: SemaRegistrationFunction) -> SemaEffectTypeSource Never! {
-    SemaEffectTypeSource{kind: "method", label: function.symbol.name.copy(), effects: [String]{}, type_key: "", span: function.symbol.span, function_key: function.symbol.id.key.copy()}
+sema_effect_type_method_source: fn(graph: SemaRegistrationGraph, function: SemaRegistrationFunction) -> SemaEffectTypeSource Never! {
+    SemaEffectTypeSource{kind: "method", label: function.symbol.name.copy(), effects: [String]{}, type_key: "", span: function.symbol.span, function_key: symbol_table_key(graph.symbols, function.symbol.id)}
 }
 
 // A trait's shape holding one implementing type.
@@ -141,10 +142,10 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Mod
 sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, name: String, sources: &[SemaEffectTypeSource]) Never! {
     key := ""
     if sema_type_graph_lookup_symbol(graph, module_identity, name) == .Val(resolved) {
-        if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) -> key = graph.modules[row.module_index].nominals[row.row].symbol.id.key.copy()
+        if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) -> key = symbol_table_key(graph.symbols, graph.modules[row.module_index].nominals[row.row].symbol.id)
     }
     if key == "" {
-        if sema_type_graph_trait_symbol(graph, module_identity, name) == .Val(symbol) -> key = symbol.id.key.copy()
+        if sema_type_graph_trait_symbol(graph, module_identity, name) == .Val(symbol) -> key = symbol_table_key(graph.symbols, symbol.id)
     }
     if key == "" -> return
     sources.push(SemaEffectTypeSource{kind: "field type", label: label.copy(), effects: [String]{}, type_key: key, span: span})

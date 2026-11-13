@@ -121,7 +121,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
     handles: [SemaCheckedForeignHandle]{}
     valid := true
     loop parameter_index in 0..<function.params.len() {
-        if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [String]{}) {
+        if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [SymbolID]{}) {
             diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
             valid = false
         }
@@ -138,7 +138,7 @@ sema_guest_check_c_signature: fn(graph: SemaRegistrationGraph, module_index: Int
                 diagnostics.push(sema_error("E3202", return_span, row.what.replace("{{ty}}", type_name(return_type)), row.why, row.fix))
                 valid = false
             }
-            !sema_checked_foreign_type(graph, return_type, module_identity, true, false, handles, [String]{}) -> {
+            !sema_checked_foreign_type(graph, return_type, module_identity, true, false, handles, [SymbolID]{}) -> {
                 diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, true))
                 valid = false
             }

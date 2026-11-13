@@ -37,9 +37,10 @@ sema_call_local_value_defaults: fn(callee: Expr, binding: SemaCallBinding, envir
         }
     }
 
+    owner_key: sema_scope_resolve_key(scopes, name) ?? return None
     defaults := [SemaCallDefaultValue]{}
     loop reference in binding.default_refs {
-        if reference.owner_key != symbol.id.key -> return None
+        if reference.owner_key != owner_key -> return None
         parameter_index: reference.parameter_index
         if parameter_index < 0 || parameter_index >= func.params.len() -> return None
         expression: func.params[parameter_index].default ?? return None
@@ -113,7 +114,7 @@ sema_call_value_checked_from_type: fn(state: &SemaOwnershipState, callee: Expr, 
     if pins.len() > 0 {
         owner: sema_scope_function_owner_key(scopes)
         pin_slot: -checked_args.len() - 1
-        symbol: sema_call_binder_ref_symbol(environment, program, owner, span.start, pin_slot, "callee", callee_value.ty, span)
+        symbol: sema_call_binder_ref_symbol(environment, program, context, owner, span.start, pin_slot, "callee", callee_value.ty, span)
         local := checked_symbol_local("binder_ref_{span.start}_{pin_slot}", span, symbol.id, callee_value.ty)
         local.generated = true
         borrowed: sema_ownership_places_from_expr_in_state(callee, scopes, state).len() > 0

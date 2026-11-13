@@ -129,10 +129,10 @@ sema_call_taken_over_file_member: fn(alias: String, member: String, member_span:
     module_index: sema_scope_caller_index(environment, graph) ?? return None
     if !sema_registration_file_name_taken_over(graph.modules[module_index], alias) -> return None
     visible_index: sema_scope_resolve_index(scopes, alias) ?? return None
-    visible_key: scopes.bindings[visible_index].symbol.id.key
+    visible_id: scopes.bindings[visible_index].symbol.id
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            if binding.local == alias && binding.symbol.id.key == visible_key -> return Val(sema_taken_over_file_member(alias, member, member_span))
+            if binding.local == alias && binding.symbol.id == visible_id -> return Val(sema_taken_over_file_member(alias, member, member_span))
         }
     }
     None
@@ -182,7 +182,7 @@ sema_call_core_import_is_unshadowed: fn(environment: SemaScopeEnvironment, progr
                 .None -> binding.symbol.kind != SymbolKind.Import
             }
             if skip_binding -> next
-            if visible_symbol.id.key == binding.symbol.id.key -> return true
+            if visible_symbol.id == binding.symbol.id -> return true
         }
     }
     return false
@@ -334,7 +334,7 @@ sema_call_export_function_row: fn(environment: SemaScopeEnvironment, program: Se
     owner_index: sema_registration_module_index(graph, export.source_module_identity) ?? return None
     // Search by index so the function collection stays borrowed.
     loop index in 0..<graph.modules[owner_index].functions.len() {
-        if graph.modules[owner_index].functions[index].symbol.id.key == export.symbol.id.key -> return Val(SemaRegistrationRowRef{module_index: owner_index, row: index})
+        if graph.modules[owner_index].functions[index].symbol.id == export.symbol.id -> return Val(SemaRegistrationRowRef{module_index: owner_index, row: index})
     }
     return None
     } else {
@@ -463,7 +463,7 @@ sema_call_module_member_is_module: fn(environment: SemaScopeEnvironment, program
 sema_call_export_foreign_target: fn(graph: SemaRegistrationGraph, export: SemaRegistrationExport) -> SemaCallDirectTarget? {
     owner_index: sema_registration_module_index(graph, export.source_module_identity) ?? return None
     loop index in 0..<graph.modules[owner_index].foreign_functions.len() {
-        if graph.modules[owner_index].foreign_functions[index].symbol.id.key != export.symbol.id.key -> next
+        if graph.modules[owner_index].foreign_functions[index].symbol.id != export.symbol.id -> next
         symbol: graph.modules[owner_index].foreign_functions[index].symbol
         signature: symbol.ty ?? return None
         return Val(SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}})
@@ -1527,7 +1527,7 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
 sema_call_core_shared_initializer_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallDirectTarget) -> Bool Never! {
     if target.symbol.module_identity != environment.module_identity -> return false
     if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row(graph, target.symbol.id.key) == .Val(row) {
+        if sema_registration_callable_row_of(graph, target.symbol.id) == .Val(row) {
             if row == {
                 .Function(module_index, index) -> return sema_call_core_shared_initializer_shape(graph.modules[module_index].functions[index].declaration)
                 .Foreign(_, _) | .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> return false
@@ -1597,7 +1597,7 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     // The parameter marked `#ColumnOf` (`table.column("name", …)`) names a
     // field of the result's row type, checked against it (E2475).
     if program.registration_graph == .Val(graph) {
-        if sema_web_param_marker(graph, target.symbol.id.key, SEMA_WEB_MARKER_COLUMN_OF) == .Val(param) -> sema_call_web_table_column_schema(args, param, checked.value, environment, program, diagnostics)
+        if sema_web_param_marker(graph, sema_registration_symbol_key(graph, target.symbol.id), SEMA_WEB_MARKER_COLUMN_OF) == .Val(param) -> sema_call_web_table_column_schema(args, param, checked.value, environment, program, diagnostics)
     }
     Val(checked.value)
 }

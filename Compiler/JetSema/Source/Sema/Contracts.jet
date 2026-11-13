@@ -41,7 +41,8 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     expr_span,
-    symbol_id,
+    symbol_is_local,
+    symbol_key_text,
     checked_generated_local,
     checked_symbol_local,
     type_name,
@@ -84,12 +85,12 @@ sema_contract_result_mode: fn(carrier: Type, binding: Type) -> TContractResultMo
 
 // The binding local carries the symbol `#Post` reads of `result` resolve to,
 // so lowering binds the checked return value under that identity.
-sema_contract_result_for_function: fn(return_type: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String) -> TContractResult Never! {
+sema_contract_result_for_function: fn(return_type: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String) -> TContractResult Never! {
     carrier: sema_effective_return_type(return_type)
     binding: sema_contract_success_type(return_type)
     mode: sema_contract_result_mode(carrier, binding)
     binding_local := checked_generated_local("result", span, binding)
-    binding_local.symbol_id = Val(sema_contract_result_binding_symbol(environment, program, owner, binding, span).id)
+    binding_local.symbol_id = Val(sema_contract_result_binding_symbol(environment, program, context, owner, binding, span).id)
     carrier_local: if mode != TContractResultMode.Direct -> checked_generated_local("result_carrier", span, carrier) else -> binding_local
     TContractResult{carrier_ty: carrier, binding_ty: binding, carrier_local: carrier_local, binding_local: binding_local, mode: mode}
 }
@@ -113,7 +114,7 @@ sema_contract_site: fn(segments: [SemaSourceSegment], file: String, origin: Sema
 // module, whose source maps the clause spans; a call site's module may differ.
 sema_contract_pre_sites: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID, func: Func) -> [TContractSite] Never! {
     if program.registration_graph == .Val(graph) {
-        if sema_registration_callable_row(graph, target.key) == .Val(row) {
+        if sema_registration_callable_row_of(graph, target) == .Val(row) {
             module_index: if row == {
                 .Function(index, _) -> index
                 .Foreign(index, _) -> index
@@ -734,10 +735,10 @@ sema_contract_make: fn(kind: TContractKind, condition: TExpr, message: TExpr, en
 // `owner` is the function owner key plus a `post` segment: a body local named
 // `result` lives in the function frame itself, so the contract binding needs
 // an identity of its own once both are lowered by symbol.
-sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, ty: Type, span: Span) -> Symbol Never! {
+sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, ty: Type, span: Span) -> Symbol Never! {
     result_owner: "{owner}/post"
     module_name: sema_scope_environment_module_text(environment, program)
-    id: symbol_id(SymbolKind.Local, module_name, result_owner, "result")
+    id: sema_symbol_id(program, context, SymbolKind.Local, module_name, result_owner, "result")
     Symbol{id: id, kind: SymbolKind.Local, name: "result", module_identity: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
@@ -746,7 +747,7 @@ sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, 
     if program.registration_graph == .Val(graph) && declared_return == .Val(declared) {
         declared_return = Val(sema_type_resolve_declared_with_generics(graph, declared, environment.module_identity, environment.generic_params))
     }
-    result: sema_contract_result_for_function(declared_return, func.name_span, environment, program, sema_scope_function_owner_key(scopes))
+    result: sema_contract_result_for_function(declared_return, func.name_span, environment, program, context, sema_scope_function_owner_key(scopes))
     complete := true
     post := [TContract]{}
     pre := [TContract]{}
@@ -767,14 +768,15 @@ sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, 
         post_state := sema_ownership_state_snapshot(state)
         owner: sema_scope_function_owner_key(scopes)
         sema_scope_enter(post_scopes, post_state, owner)
-        result_symbol: sema_contract_result_binding_symbol(environment, program, owner, result.binding_ty, func.name_span)
+        result_symbol: sema_contract_result_binding_symbol(environment, program, context, owner, result.binding_ty, func.name_span)
+        result_key: sema_symbol_key(program, context, result_symbol.id)
         if {
-            !sema_scope_declare_local(post_scopes, result_symbol, false, AccessConvention.Read, None, false) -> {
+            !sema_scope_declare_local(post_scopes, result_symbol, result_key, false, AccessConvention.Read, None, false) -> {
                 diagnostics.push(sema_already_defined("result", func.name_span))
                 complete = false
             }
             else -> {
-                sema_ownership_declare_binding(post_state, result_symbol, false)
+                sema_ownership_declare_binding(post_state, result_symbol, result_key, false)
                 loop clause in func.post {
                     condition: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, program, post_scopes, post_state, reads, tail_store, context, diagnostics)
                     if condition == None -> complete = false
@@ -796,21 +798,21 @@ sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, 
     SemaContractDeclaration{complete: complete, post: post, pre: pre, result: result}
 }
 
-sema_contract_method_function_for_item: fn(item: Item, target: SymbolID, module_identity: String) -> Func? {
+sema_contract_method_function_for_item: fn(item: Item, target_key: String, module_identity: String) -> Func? {
     if item == {
         .Struct(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(method)
             }
         }
         .Enum(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(method)
             }
         }
         .Impl(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(method)
+                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key -> return Val(method)
             }
         }
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -819,16 +821,18 @@ sema_contract_method_function_for_item: fn(item: Item, target: SymbolID, module_
 }
 
 sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> Func? {
+    if symbol_is_local(target) -> return None
     if program.registration_graph == .Val(graph) {
         declaration: sema_registration_callable_declaration(graph, target)
         if declaration != None -> return declaration
     }
+    target_key: sema_program_symbol_key(program, target)
     loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].symbol_id.key == target.key {
+        if environment.declarations[declaration_index].symbol_id == target {
             // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
             if environment.declarations[declaration_index].item == .Func(value) -> return Val(value.copy())
         }
-        method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, sema_scope_environment_module_text(environment, program))
+        method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
     }
     None
@@ -870,7 +874,7 @@ sema_contract_callee_facts: fn(func: Func) -> SemaContractCalleeFacts Never! {
 }
 
 sema_contract_registered_facts: fn(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {
-    row: sema_registration_callable_row(graph, target.key) ?? return None
+    row: sema_registration_callable_row_of(graph, target) ?? return None
     if row == {
         .Function(module_index, index) -> Val(sema_contract_callee_facts(graph.modules[module_index].functions[index].declaration))
         .Foreign(_, _) -> None
@@ -879,21 +883,21 @@ sema_contract_registered_facts: fn(graph: SemaRegistrationGraph, target: SymbolI
     }
 }
 
-sema_contract_method_facts_for_item: fn(item: Item, target: SymbolID, module_identity: String) -> SemaContractCalleeFacts? {
+sema_contract_method_facts_for_item: fn(item: Item, target_key: String, module_identity: String) -> SemaContractCalleeFacts? {
     if item == {
         .Struct(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
             }
         }
         .Enum(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
             }
         }
         .Impl(value) -> {
             loop method in value.methods {
-                if symbol_id(SymbolKind.Function, module_identity, value.type_name, method.name).key == target.key -> return Val(sema_contract_callee_facts(method))
+                if symbol_key_text(SymbolKind.Function, module_identity, value.type_name, method.name) == target_key -> return Val(sema_contract_callee_facts(method))
             }
         }
         .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -904,15 +908,17 @@ sema_contract_method_facts_for_item: fn(item: Item, target: SymbolID, module_ide
 // The facts of the declaration `sema_contract_function_for_symbol` resolves
 // `target` to (same lookup order), without copying it.
 sema_contract_function_facts: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaContractCalleeFacts? {
+    if symbol_is_local(target) -> return None
     if program.registration_graph == .Val(graph) {
         registered: sema_contract_registered_facts(graph, target)
         if registered != None -> return registered
     }
+    target_key: sema_program_symbol_key(program, target)
     loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].symbol_id.key == target.key {
+        if environment.declarations[declaration_index].symbol_id == target {
             if environment.declarations[declaration_index].item == .Func(value) -> return Val(sema_contract_callee_facts(value))
         }
-        method: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target, sema_scope_environment_module_text(environment, program))
+        method: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target_key, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
     }
     None
@@ -925,14 +931,14 @@ sema_contract_function_checks_calls: fn(environment: SemaScopeEnvironment, progr
     facts.call_checks > 0
 }
 
-sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
+sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
     name: "contract_arg_{span.start}_{index}"
     module_name: sema_scope_environment_module_text(environment, program)
-    id: symbol_id(SymbolKind.Local, module_name, owner, name)
+    id: sema_symbol_id(program, context, SymbolKind.Local, module_name, owner, name)
     Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
-sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
+sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {
     original := argument.value
     init := original
     local := checked_generated_local("contract_arg_{call_span.start}_{index}", call_span, original.ty)
@@ -942,7 +948,7 @@ sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaP
         init = sema_tree_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         local.deref = true
     }
-    symbol: sema_contract_generated_argument_symbol(environment, program, owner, index, parameter_name, call_span, original.ty)
+    symbol: sema_contract_generated_argument_symbol(environment, program, context, owner, index, parameter_name, call_span, original.ty)
     local = checked_symbol_local(local.name, local.span, symbol.id, original.ty)
     local.generated = true
     local.mutable = argument.mut_borrow
@@ -951,8 +957,9 @@ sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaP
     replacement: if convention == AccessConvention.Move -> sema_tree_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
     argument.value = replacement
     bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: call_span})
-    sema_scope_declare_local(scopes, symbol, argument.mut_borrow, if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read, None, false)
-    sema_ownership_declare_binding(state, symbol, false)
+    key: sema_symbol_key(program, context, symbol.id)
+    sema_scope_declare_local(scopes, symbol, key, argument.mut_borrow, if argument.mut_borrow -> AccessConvention.Write else -> AccessConvention.Read, None, false)
+    sema_ownership_declare_binding(state, symbol, key, false)
     local
 }
 
@@ -981,7 +988,7 @@ sema_contract_check_call: fn(func: Func, target: SymbolID, recall: SemaContractR
         slot: slots[index]
         if slot < 0 || slot >= func.params.len() -> return None
         known: if any_required -> sema_expr_comptime_value(args[index].value, context) else -> None
-        _ := sema_contract_pin_argument(environment, program, owner, index, func.params[slot].name, func.params[slot].convention, args[index], call_span, checked_scopes, checked_state, bindings)
+        _ := sema_contract_pin_argument(environment, program, context, owner, index, func.params[slot].name, func.params[slot].convention, args[index], call_span, checked_scopes, checked_state, bindings)
         // A clause decided while building reads each argument the build knows.
         if known == .Val(value) {
             last: checked_scopes.bindings.len() - 1
@@ -1074,8 +1081,9 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         }
     }
     sema_scope_enter(scopes, state, owner)
-    result_symbol: sema_contract_result_binding_symbol(environment, program, owner, written.result_type, call_span)
-    if !sema_scope_declare_local(scopes, result_symbol, false, AccessConvention.Read, None, false) {
+    result_symbol: sema_contract_result_binding_symbol(environment, program, context, owner, written.result_type, call_span)
+    result_key: sema_symbol_key(program, context, result_symbol.id)
+    if !sema_scope_declare_local(scopes, result_symbol, result_key, false, AccessConvention.Read, None, false) {
         diagnostics.push(sema_already_defined("result", call_span))
         sema_scope_leave(scopes, state)
         return false
@@ -1085,7 +1093,7 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         sema_scope_note_binding_edit(scopes, last)
         scopes.bindings[last].prepared = Val(call_value.value)
     }
-    sema_ownership_declare_binding(state, result_symbol, false)
+    sema_ownership_declare_binding(state, result_symbol, result_key, false)
     condition: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, program, scopes, state, reads, tail_store, context, diagnostics)
     message: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, program, scopes, state, reads, tail_store, context, diagnostics)
     holds := condition != None && message != None

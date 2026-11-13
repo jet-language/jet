@@ -34,7 +34,7 @@
 //   happen (JetRuntime TestContracts.jet).
 
 use {
-    jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
+    jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, SymbolTable, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set, symbol_none]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -59,8 +59,8 @@ IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bo
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
-ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
-    p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
+ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
     p.contract_records = true
@@ -340,7 +340,7 @@ ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int,
     b.bounds = ir_bounds_mode(p, row)
     mark: b.bindings.len()
     loop (index, param) in p.functions[row].params {
-        symbol: if param.local.symbol_id == .Val(id) -> id.key else -> ""
+        symbol: if param.local.symbol_id == .Val(id) -> id else -> symbol_none()
         b.bindings.push(IRBinding{name: param.local.name, slot: values[index], owned: false, symbol: symbol})
     }
     bool_row: ir_type_row(m, Type.Bool) ?? 0

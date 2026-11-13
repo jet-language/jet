@@ -27,7 +27,8 @@ use jet_foundation.[
     body_node,
     body_type,
     expr_span,
-    symbol_id,
+    symbol_key_text,
+    symbol_table_key,
     checked_symbol_local,
     type_name,
     ModuleID,
@@ -124,12 +125,13 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     mux_name: "__jet_http_mount_mux_{span.start}"
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
-    mux_id: symbol_id(SymbolKind.Local, local_module, owner, mux_name)
+    mux_key: symbol_key_text(SymbolKind.Local, local_module, owner, mux_name)
+    mux_id: sema_symbol_id_of(program, context, mux_key)
     mux_symbol: Symbol{id: mux_id, kind: SymbolKind.Local, name: mux_name,
         module_identity: environment.module_identity, owner: Val(owner), span: span,
         ty: Val(receiver_value.ty), visibility: 0}
-    _ := sema_scope_declare_local(scopes, mux_symbol, false, AccessConvention.Read, None, false)
-    sema_ownership_declare_binding(state, mux_symbol, false)
+    _ := sema_scope_declare_local(scopes, mux_symbol, mux_key, false, AccessConvention.Read, None, false)
+    sema_ownership_declare_binding(state, mux_symbol, mux_key, false)
     mux_local: checked_symbol_local(mux_name, span, mux_id, receiver_value.ty)
     body.push(TStmt.Let{local: mux_local, let_ty: TLetTy.Inferred,
         init: receiver_value, gc_promotion: None, gc_transferred: false, span: span})
@@ -184,7 +186,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
                     meta := ast_empty_lambda_meta()
                     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
                     loop registered in nominal.methods {
-                        if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
+                        if registered.declaration.name == method.name -> meta.http_route_source = Val(symbol_table_key(graph.symbols, registered.symbol.id))
                     }
                     handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
                     marked.push(sema_http_mount_arg(handler, marker.span))
@@ -214,15 +216,15 @@ sema_http_mount_prefix: fn(text: String) -> String Never! {
     text.slice(0, end)
 }
 
-sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: &[String]) Never! {
+sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: &[SymbolID]) Never! {
     node: body_node(tree, expression)
     if node.kind == .InlineBlock(body) {
         loop statement in body {
             if tree.stmts[statement] == .Let(local, _, init, _, _, _) {
                 if !local.name.starts_with("__jet_http_mount_value_") -> next
                 row: sema_type_resolve_nominal_row(graph, body_type(tree, init), module_identity) ?? next
-                key: graph.modules[row.module_index].nominals[row.row].symbol.id.key
-                if !mounted.contains(key) -> mounted.push(key.copy())
+                id: graph.modules[row.module_index].nominals[row.row].symbol.id
+                if !mounted.contains(id) -> mounted.push(id.copy())
             }
         }
     }
@@ -232,7 +234,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 // One function body's mounts. Its own function so the visitor closure lends
 // the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
 // closure instead of copying the whole registration graph per function.
-sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: &[String]) Never! {
+sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: &[SymbolID]) Never! {
     loop statement in function.body {
         body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })
     }
@@ -256,7 +258,7 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     // Only a route method can be unmounted: a program without one skips the
     // walk of every checked function body for mounts.
     if !sema_http_has_route_method(graph) -> return [Diagnostic]{}
-    mounted := [String]{}
+    mounted := [SymbolID]{}
     loop module_row in modules {
         identity: module_row.module_identity
         loop function in module_row.functions -> sema_http_collect_mounted_body(function, graph, identity, mounted)
@@ -265,7 +267,7 @@ sema_http_unmounted_warnings: fn(graph: SemaRegistrationGraph, modules: [SemaGra
     loop module_row_index in 0..<graph.modules.len() {
         diagnostic_start: diagnostics.len()
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
-            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id.key) -> next
+            if mounted.contains(graph.modules[module_row_index].nominals[nominal_index].symbol.id) -> next
             loop method_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods.len() {
                 loop marker_index in 0..<graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers.len() {
                     if sema_http_route_marker_verb(graph.modules[module_row_index].nominals[nominal_index].methods[method_index].declaration.markers[marker_index], graph, graph.modules[module_row_index].module_identity) == None -> next

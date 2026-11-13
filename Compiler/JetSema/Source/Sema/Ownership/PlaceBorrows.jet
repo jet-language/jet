@@ -33,6 +33,7 @@ use jet_foundation.[
     BodyLambda,
     BodyPattern,
     BodyTree,
+    SymbolID,
     TIndexKind,
     TLetTy,
     TLetWrapper,
@@ -41,40 +42,42 @@ use jet_foundation.[
     body_each_node_kind_child,
     body_each_pattern_child,
     body_each_stmt_child,
+    symbol_is_none,
+    symbol_none,
 ]
 
-// The variables the body consumes or a closure names: by symbol key, and by
-// name for a local without a key, a window edit's root or a closure's name.
+// The variables the body consumes or a closure names: by symbol id, and by
+// name for a local without an id, a window edit's root or a closure's name.
 SemaPlaceBorrowCensus: struct {
-    keys: [String:Bool]
+    keys: [U32:Bool]
     names: [String:Bool]
     // A payload take (`p.move()`) moves out of a subject this walk does not name:
     // nothing in the body borrows.
     any: Bool
 }
 
-// The variables a place binding may borrow from (`roots`, by symbol key)
-// and the Let keys seen so far; a key declared twice (`blocked`) names no
+// The variables a place binding may borrow from (`roots`, by symbol id)
+// and the Let ids seen so far; an id declared twice (`blocked`) names no
 // single variable.
 SemaPlaceBorrowRoots: struct {
-    roots: [String:Bool]
-    seen: [String:Bool]
-    blocked: [String:Bool]
+    roots: [U32:Bool]
+    seen: [U32:Bool]
+    blocked: [U32:Bool]
 }
 
 // Marks the place-borrowing Lets of a checked function `body`. `receiver`
-// is the symbol key of an explicit read `self` ("" when none); `arena` holds
-// the rows of the body's flat nodes (sema_node).
-sema_place_borrow_function: fn(body: &[TStmt], params: [TParameter], receiver: String, arena: BodyTree) Never! {
-    census := SemaPlaceBorrowCensus{keys: [String:Bool]{}, names: [String:Bool]{}, any: false}
+// is the symbol id of an explicit read `self` (none when absent); `arena`
+// holds the rows of the body's flat nodes (sema_node).
+sema_place_borrow_function: fn(body: &[TStmt], params: [TParameter], receiver: SymbolID, arena: BodyTree) Never! {
+    census := SemaPlaceBorrowCensus{keys: [U32:Bool]{}, names: [String:Bool]{}, any: false}
     sema_place_borrow_census_list(body, arena, census)
-    table := SemaPlaceBorrowRoots{roots: [String:Bool]{}, seen: [String:Bool]{}, blocked: [String:Bool]{}}
+    table := SemaPlaceBorrowRoots{roots: [U32:Bool]{}, seen: [U32:Bool]{}, blocked: [U32:Bool]{}}
     loop param in params {
         if param.local.mutable -> next
         if param.convention != AccessConvention.Read -> next
-        if param.local.symbol_id == .Val(id) -> _ := table.roots.add(id.key, true)
+        if param.local.symbol_id == .Val(id) -> _ := table.roots.add(id.id, true)
     }
-    if receiver != "" -> _ := table.roots.add(receiver.copy(), true)
+    if !symbol_is_none(receiver) -> _ := table.roots.add(receiver.id, true)
     sema_place_borrow_statements(body, census, arena, table)
 }
 
@@ -82,26 +85,26 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
     loop index in 0..<body.len() {
         borrow := false
         if body[index] == .Let(local, let_ty, init, gc_promotion, gc_transferred, _) {
-            key: if local.symbol_id == .Val(id) -> id.key else -> ""
-            if key != "" {
-                if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
-                _ := table.seen.add(key.copy(), true)
+            key: local.symbol_id ?? symbol_none()
+            if !symbol_is_none(key) {
+                if table.seen.get(key.id) != None -> _ := table.blocked.add(key.id, true)
+                _ := table.seen.add(key.id, true)
             }
             piece: sema_place_borrow_piece_root(init, let_ty, arena)
-            if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty, piece) {
+            if !symbol_is_none(key) && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty, piece) {
                 if !sema_place_borrow_consumed(census, key, local.name) {
                     root: if {
-                        piece.key != "" -> piece
+                        !symbol_is_none(piece.key) -> piece
                         sema_place_borrow_place(init, false, arena) -> sema_place_borrow_root(init, arena)
-                        else -> SemaPlaceBorrowRoot{key: "", name: ""}
+                        else -> SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
                     }
-                    if root.key != "" && table.roots.get(root.key) != None && table.blocked.get(root.key) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
+                    if !symbol_is_none(root.key) && table.roots.get(root.key.id) != None && table.blocked.get(root.key.id) == None && !sema_place_borrow_consumed(census, root.key, root.name) -> borrow = true
                 }
                 // An owning immutable variable is a root for later places;
                 // a window (`r: &place`) aliases storage another variable
                 // may still change. A piece's bytes stay put while its root
                 // does.
-                if !sema_place_borrow_is_window(init, arena) -> _ := table.roots.add(key, true)
+                if !sema_place_borrow_is_window(init, arena) -> _ := table.roots.add(key.id, true)
             }
         }
         if borrow {
@@ -129,15 +132,15 @@ sema_place_borrow_plain_local: fn(local: TLocal, let_ty: TLetTy, piece: SemaPlac
     if let_ty == {
         .Inferred -> true
         .Annotated(_, wrapper) -> wrapper == TLetWrapper.Plain
-        .StrView -> piece.key != ""
+        .StrView -> !symbol_is_none(piece.key)
     }
 }
 
-// The root of a text piece Let's text (see the header), or an empty key
+// The root of a text piece Let's text (see the header), or a none id
 // for any other initializer. A string view's initializer is the view's
 // trim/after/before or slice of its text.
 sema_place_borrow_piece_root: fn(init: TExpr, let_ty: TLetTy, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
-    none: SemaPlaceBorrowRoot{key: "", name: ""}
+    none: SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
     if init.kind == .Flat(index) -> return sema_place_borrow_row_piece_root(arena, index, let_ty)
     if let_ty == .StrView {
         if init.kind == .BuiltinMethod(receiver, _, _) -> return sema_place_borrow_text_root(receiver, arena)
@@ -156,7 +159,7 @@ sema_place_borrow_piece_root: fn(init: TExpr, let_ty: TLetTy, arena: BodyTree) -
 
 // sema_place_borrow_piece_root of node row `index` of `tree`.
 sema_place_borrow_row_piece_root: fn(tree: BodyTree, index: Int, let_ty: TLetTy) -> SemaPlaceBorrowRoot Never! {
-    none: SemaPlaceBorrowRoot{key: "", name: ""}
+    none: SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
     kind: tree.nodes[index - tree.node_base].kind
     if let_ty == .StrView {
         if kind == .BuiltinMethod(receiver, _, _) -> return sema_place_borrow_row_text_root(tree, receiver)
@@ -170,24 +173,24 @@ sema_place_borrow_row_piece_root: fn(tree: BodyTree, index: Int, let_ty: TLetTy)
     none
 }
 
-// The root of the text a `split_once`/`cut_last` row cuts, or an empty key.
+// The root of the text a `split_once`/`cut_last` row cuts, or a none id.
 sema_place_borrow_row_cut_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
     if tree.nodes[index - tree.node_base].kind == .BuiltinMethod(receiver, operation, _) {
         if operation == .StringSplitOnce || operation == .StringCutLast -> return sema_place_borrow_row_text_root(tree, receiver)
     }
-    SemaPlaceBorrowRoot{key: "", name: ""}
+    SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
 }
 
 // The root of a piece's text: a keyed immutable variable itself, or a
 // place that reads one.
 sema_place_borrow_text_root: fn(text: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
     if sema_place_borrow_place(text, true, arena) -> return sema_place_borrow_root(text, arena)
-    SemaPlaceBorrowRoot{key: "", name: ""}
+    SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
 }
 
 sema_place_borrow_row_text_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
     if sema_place_borrow_row_place(tree, index, true) -> return sema_place_borrow_row_root(tree, index)
-    SemaPlaceBorrowRoot{key: "", name: ""}
+    SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
 }
 
 // Whether `place` reads an immutable keyed variable through at least one
@@ -220,41 +223,41 @@ sema_place_borrow_row_place: fn(tree: BodyTree, index: Int, stepped: Bool) -> Bo
     }
 }
 
-// The symbol key and name of the variable a checked place reads.
+// The symbol id and name of the variable a checked place reads.
 SemaPlaceBorrowRoot: struct {
-    key: String
+    key: SymbolID
     name: String
 }
 
 sema_place_borrow_root: fn(place: TExpr, arena: BodyTree) -> SemaPlaceBorrowRoot Never! {
     if place.kind == {
         .Flat(index) -> sema_place_borrow_row_root(arena, index)
-        .Local(local) -> SemaPlaceBorrowRoot{key: if local.symbol_id == .Val(id) -> id.key else -> "", name: local.name}
+        .Local(local) -> SemaPlaceBorrowRoot{key: local.symbol_id ?? symbol_none(), name: local.name}
         .Field(receiver, _) -> sema_place_borrow_root(receiver, arena)
         .Index(base, _, _, _, _, _) | .Slice(base, _, _, _, _) | .OptField(base, _, _) -> sema_place_borrow_root(base, arena)
         .Borrow(inner, _) | .Deref(inner) | .Move(inner) | .SharedGuardValue(inner) -> sema_place_borrow_root(inner, arena)
-        .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> SemaPlaceBorrowRoot{key: "", name: ""}
+        .IntLit(_, _) | .StrLit(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) -> SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
     }
 }
 
 // sema_place_borrow_root of node row `index` of `tree`.
 sema_place_borrow_row_root: fn(tree: BodyTree, index: Int) -> SemaPlaceBorrowRoot Never! {
     if tree.nodes[index - tree.node_base].kind == {
-        .Local(local) -> SemaPlaceBorrowRoot{key: if local.symbol_id == .Val(id) -> id.key else -> "", name: local.name}
+        .Local(local) -> SemaPlaceBorrowRoot{key: local.symbol_id ?? symbol_none(), name: local.name}
         .Field(receiver, _) -> sema_place_borrow_row_root(tree, receiver)
         .Index(base, _, _, _, _, _) | .Slice(base, _, _, _, _) | .OptField(base, _, _) -> sema_place_borrow_row_root(tree, base)
         .Borrow(inner, _) | .Deref(inner) | .Move(inner) | .SharedGuardValue(inner) -> sema_place_borrow_row_root(tree, inner)
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> SemaPlaceBorrowRoot{key: "", name: ""}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> SemaPlaceBorrowRoot{key: symbol_none(), name: ""}
     }
 }
 
-sema_place_borrow_consumed: fn(census: SemaPlaceBorrowCensus, key: String, name: String) -> Bool Never! {
-    census.any || census.keys.get(key) != None || census.names.get(name) != None
+sema_place_borrow_consumed: fn(census: SemaPlaceBorrowCensus, key: SymbolID, name: String) -> Bool Never! {
+    census.any || census.keys.get(key.id) != None || census.names.get(name) != None
 }
 
 sema_place_borrow_note_local: fn(census: &SemaPlaceBorrowCensus, local: TLocal) Never! {
     if local.symbol_id == .Val(id) {
-        _ := census.keys.add(id.key, true)
+        _ := census.keys.add(id.id, true)
         return
     }
     _ := census.names.add(local.name, true)
@@ -262,8 +265,8 @@ sema_place_borrow_note_local: fn(census: &SemaPlaceBorrowCensus, local: TLocal) 
 
 // The variable at the root of a consumed place.
 sema_place_borrow_note_root: fn(census: &SemaPlaceBorrowCensus, root: SemaPlaceBorrowRoot) Never! {
-    if root.key != "" {
-        _ := census.keys.add(root.key, true)
+    if !symbol_is_none(root.key) {
+        _ := census.keys.add(root.key.id, true)
         return
     }
     if root.name != "" -> _ := census.names.add(root.name, true)
@@ -684,9 +687,9 @@ sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, a
 // A loop variable is a root for its body's Lets (see the header) when it
 // is immutable and nothing consumes it.
 sema_place_borrow_loop_root: fn(variable: TLocal, census: SemaPlaceBorrowCensus, table: &SemaPlaceBorrowRoots) Never! {
-    key: if variable.symbol_id == .Val(id) -> id.key else -> return
-    if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
-    _ := table.seen.add(key.copy(), true)
+    key: variable.symbol_id ?? return
+    if table.seen.get(key.id) != None -> _ := table.blocked.add(key.id, true)
+    _ := table.seen.add(key.id, true)
     if variable.mutable || variable.deref || sema_place_borrow_consumed(census, key, variable.name) -> return
-    _ := table.roots.add(key, true)
+    _ := table.roots.add(key.id, true)
 }

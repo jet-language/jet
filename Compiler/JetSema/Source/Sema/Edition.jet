@@ -1,7 +1,7 @@
 // Lifecycle is a projection of resolved name/call sites. Adapted
 // deprecation_from_markers. Payloads belong to written markers or the checked
 // Core registry, never a name table.
-use jet_foundation.[CoreMarkerApplication, Diagnostic, MARKER_DEPRECATED, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_kind_name, type_identity_equal]
+use jet_foundation.[CoreMarkerApplication, Diagnostic, MARKER_DEPRECATED, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_is_local, symbol_kind_name, symbol_table_key, type_identity_equal]
 
 SemaLifecycleResult: struct {
     diagnostics: [Diagnostic]
@@ -43,10 +43,10 @@ sema_lifecycle_marker: fn(markers: [Marker], name: String) -> CoreMarkerApplicat
     None
 }
 
-sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[String:CoreMarkerApplication]) Never! {
+sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[U32:CoreMarkerApplication]) Never! {
     loop function in functions {
         payload: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
-        payloads[function.symbol.id.key] = payload
+        payloads[function.symbol.id.id] = payload
     }
 }
 
@@ -79,12 +79,12 @@ sema_lifecycle_same_call: fn(old: SemaRegistrationFunction, new: SemaRegistratio
 // them: some function of that name takes the same call
 // (sema_lifecycle_same_call). A replacement no declared function names
 // (a Core member, a method) has no entry.
-sema_lifecycle_renames: fn(graph: SemaRegistrationGraph, payloads: [String:CoreMarkerApplication]) -> [String:Bool] Never! {
-    renames := [String:Bool]{}
+sema_lifecycle_renames: fn(graph: SemaRegistrationGraph, payloads: [U32:CoreMarkerApplication]) -> [U32:Bool] Never! {
+    renames := [U32:Bool]{}
     loop module_index in 0..<graph.modules.len() {
         loop function_index in 0..<graph.modules[module_index].functions.len() {
             old: graph.modules[module_index].functions[function_index]
-            payload: payloads.get(old.symbol.id.key) ?? next
+            payload: payloads.get(old.symbol.id.id) ?? next
             parts: payload.replacement.split(".").to_list()
             leaf: parts[parts.len() - 1].trim()
             found := false
@@ -97,7 +97,7 @@ sema_lifecycle_renames: fn(graph: SemaRegistrationGraph, payloads: [String:CoreM
                     if sema_lifecycle_same_call(old, candidate) -> plain = true
                 }
             }
-            if found -> renames[old.symbol.id.key] = plain
+            if found -> renames[old.symbol.id.id] = plain
         }
     }
     renames
@@ -182,7 +182,7 @@ sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden:
 
 sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
     result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
-    payloads := [String:CoreMarkerApplication]{}
+    payloads := [U32:CoreMarkerApplication]{}
     editions := [String:String]{}
     loop policy in policies -> editions[policy.package_identity] = policy.edition
     loop graph_module_index in 0..<graph.modules.len() {
@@ -200,7 +200,7 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
                 }
             }
             payload: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next
-            payloads[graph.modules[graph_module_index].nominals[nominal_index].symbol.id.key] = payload
+            payloads[graph.modules[graph_module_index].nominals[nominal_index].symbol.id.id] = payload
         }
     }
     renames: sema_lifecycle_renames(graph, payloads)
@@ -214,9 +214,9 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
         // inside compiler-generated members have no source location.
         segments: graph_module.source_segments
         loop reference in checked.name_references {
-            payload: payloads.get(reference.symbol.id.key) ?? next
+            payload: payloads.get(reference.symbol.id.id) ?? next
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None -> next
-            sema_lifecycle_record(payload, renames.get(reference.symbol.id.key), false, graph_module.source_file, reference.span, edition, result, seen)
+            sema_lifecycle_record(payload, renames.get(reference.symbol.id.id), false, graph_module.source_file, reference.span, edition, result, seen)
         }
         loop call in checked.call_facts {
             // A Core member carries its resolved marker; a declared function
@@ -224,9 +224,9 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             declared := CoreMarkerApplication?{None}
             rename := Bool?{None}
             if call.callee == .Val(callee) {
-                if callee.key.starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
-                    declared = payloads.get(callee.key)
-                    rename = renames.get(callee.key)
+                if !symbol_is_local(callee) && symbol_table_key(graph.symbols, callee).starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
+                    declared = payloads.get(callee.id)
+                    rename = renames.get(callee.id)
                 }
             }
             if call.lifecycle != None -> rename = None

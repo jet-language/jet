@@ -29,12 +29,13 @@ ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], dec
     p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
     loop row in foreign -> ir_foreign_handle_note(p, row)
     loop row in foreign.move() {
-        if p.foreign.get(row.symbol_id.key) != None -> next
-        if decl_table_find(decls, row.symbol_id.key) == .Val(id) {
+        key: ir_symbol_key(p, row.symbol_id)
+        if p.foreign.get(key) != None -> next
+        if decl_table_find(decls, key) == .Val(id) {
             p.decl_foreign[id.row.index()] = p.foreign_rows.len()
             p.foreign_rows.push(row.copy())
         }
-        p.foreign[row.symbol_id.key.copy()] = row
+        p.foreign[key] = row
     }
 }
 
@@ -607,7 +608,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
     }
     problem: ir_asm_leaf(m, p, foreign, leaf_params, leaf_result)
     if problem != "" -> return ir_fail_slot(b, span, problem)
-    leaf: name_rows_value(m.function_rows, "{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(b, span, "inline asm leaf of {foreign.name} was not built")
+    leaf: name_rows_value(m.function_rows, "{ir_symbol_key(p, foreign.symbol_id)}#asm") ?? return ir_fail_slot(b, span, "inline asm leaf of {foreign.name} was not built")
     values := [Int]{}
     lowered := [Int]{}
     loop (index, arg) in args {
@@ -633,7 +634,7 @@ ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedF
 // checked span) assembled for its parameter names. Returns the problem
 // when the template is missing or does not assemble, else "".
 ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
-    key: "{foreign.symbol_id.key}#asm"
+    key: "{ir_symbol_key(p, foreign.symbol_id)}#asm"
     if name_rows_value(m.function_rows, key) != None -> return ""
     source: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
     names: loop param in foreign.params -> param.name

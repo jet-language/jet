@@ -5,7 +5,7 @@
 // probe finds which `&` script parameters a function's body writes
 // (sema_script_helper_writes).
 use {
-    jet_foundation.[Span, Type, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, type_name, type_unqualified_nominals]
+    jet_foundation.[Span, SymbolKeys, Type, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table, type_name, type_unqualified_nominals]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_sema.[
@@ -35,7 +35,7 @@ script_helper_probe: fn(source: String) -> ScriptHelperProbe {
     facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file, source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: "user", module_identity: script_id, module_name: "script", core_source_alias: "", module_path: "script.jet", source_file: file, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "user", script_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "user", script_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
     stage: sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}: {source}")
     ScriptHelperProbe{stage: stage, names: names}
 }

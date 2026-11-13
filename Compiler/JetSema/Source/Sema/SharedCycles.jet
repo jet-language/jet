@@ -17,6 +17,7 @@
 // built in place. A function held in a field of a struct the place holds is
 // not seen through: the struct's type decides, as for any other value.
 use jet_foundation.[
+    symbol_table_key,
     CallArg,
     Diagnostic,
     EnumLitArg,
@@ -54,7 +55,7 @@ sema_shared_cycle_frame_runs_once: fn(scopes: SemaScopeTable, frame: Int) -> Boo
 sema_shared_cycle_owner_key: fn(owner_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if program.registration_graph == .Val(graph) {
         row: sema_type_resolve_nominal_row(graph, owner_ty, environment.module_identity) ?? return None
-        return Val(graph.modules[row.module_index].nominals[row.row].symbol.id.key)
+        return Val(symbol_table_key(graph.symbols, graph.modules[row.module_index].nominals[row.row].symbol.id))
     }
     None
 }
@@ -277,7 +278,7 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: String, allowed: [Span], e
     // copy: checking the initializer below may edit the scope table that holds it.
     init: (scopes.bindings[row].fresh_cell ?? return false).copy()
     if !sema_shared_cycle_frame_runs_once(scopes, scopes.bindings[row].frame) -> return false
-    if !sema_shared_cycle_unread(state, scopes.bindings[row].symbol.id.key, allowed) -> return false
+    if !sema_shared_cycle_unread(state, scopes.bindings[row].key, allowed) -> return false
     within := allowed.copy()
     within.push(expr_source_span(init))
     sema_shared_cycle_fresh(init, None, owner, within, environment, program, scopes, state)

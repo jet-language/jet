@@ -7,7 +7,7 @@
 // this walk never runs a second checker. LSP hover and inlay text have no Jet
 // consumer and are not produced.
 use {
-    jet_driver.[JetDriverDocModule]
+    jet_driver.[JetDriverDocModule, jet_driver_doc_callee_key]
     jet_foundation.[
         ArithmeticPolicyFact,
         BindName,
@@ -1545,9 +1545,11 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
     boundary_by_caller := [String: Int]{}
     boundary_groups := [[SemBoundaryCall]]{}
     loop doc_module in modules {
+        storage: doc_module.name_ledger ?? next
+        permit: storage.guard_read()
         loop fact in doc_module.call_facts {
-            target: fact.callee ?? next
-            callee_key: semindex_function_key(target.key) ?? next
+            target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
+            callee_key: semindex_function_key(target) ?? next
             if module_aliases.get(callee_key.module_identity) != None -> next
             row: fact.facts.effect_bound ?? next
             group := boundary_by_caller.get(fact.caller_key) ?? -1
@@ -1639,10 +1641,12 @@ semindex_call_span: fn(summary: SemSummary, callee: String, modules: [JetDriverD
         }
     }
     loop doc_module in modules {
+        storage: doc_module.name_ledger ?? next
+        permit: storage.guard_read()
         loop fact in doc_module.call_facts {
             if fact.caller_key != summary.raw_key -> next
-            target: fact.callee ?? next
-            if target.key == raw_callee -> return Val(fact.span)
+            target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
+            if target == raw_callee -> return Val(fact.span)
         }
     }
     None
@@ -1746,15 +1750,17 @@ semindex_index: fn(summaries: [SemSummary], modules: [JetDriverDocModule]) -> Se
     by_caller := [String:Int]{}
     callers := [[SemCallTarget]]{}
     loop doc_module in modules {
+        storage: doc_module.name_ledger ?? next
+        permit: storage.guard_read()
         loop fact in doc_module.call_facts {
-            target: fact.callee ?? next
+            target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
             group := by_caller.get(fact.caller_key) ?? -1
             if group < 0 {
                 group = callers.len()
                 _ := by_caller.add(fact.caller_key, group)
                 callers.push([SemCallTarget]{})
             }
-            callers[group].push(SemCallTarget{key: target.key, span: fact.span})
+            callers[group].push(SemCallTarget{key: target, span: fact.span})
         }
     }
     SemEffectIndex{by_key: by_key, by_caller: by_caller, callers: callers}
@@ -1967,11 +1973,13 @@ semindex_call_targets: fn(db: &SemDB, modules: [JetDriverDocModule]) {
         has_fact := false
         loop doc_module in modules {
             if doc_module.path != db.refs[index].module_path -> next
+            storage: doc_module.name_ledger ?? next
+            permit: storage.guard_read()
             loop fact in doc_module.call_facts {
                 if fact.span.start != db.refs[index].span.start || fact.span.end != db.refs[index].span.end -> next
                 has_fact = true
-                callee: fact.callee ?? next
-                target = semindex_callee_anchor(db, modules, callee.key)
+                callee: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
+                target = semindex_callee_anchor(db, modules, callee)
                 break
             }
             break

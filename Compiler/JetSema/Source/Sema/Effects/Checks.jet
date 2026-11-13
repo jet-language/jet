@@ -58,6 +58,10 @@ use jet_foundation.[
     name_rows,
     name_rows_get_text,
     name_rows_set,
+    name_index,
+    name_intern,
+    name_table,
+    SymbolID,
     NodeKind,
     Span,
     Stmt,
@@ -84,7 +88,13 @@ use jet_foundation.[
     jet_frame_types,
     jet_frame_value_bytes,
     sema_effect_covers,
-    symbol_id,
+    symbol_is_local,
+    symbol_is_none,
+    symbol_key,
+    symbol_key_text,
+    symbol_none,
+    symbol_table,
+    symbol_table_key,
     type_name,
     TextEdit,
     diagnostic_with_migration_edit,
@@ -130,10 +140,9 @@ SemaEffectFunctionSource: struct {
     module_caps: [ModuleCap]{[ModuleCap]{}}
     // The `#FX(…)` cap of the struct or enum this method belongs to (E0749).
     type_cap: SemaEffectModuleCap?{None}
-    // The trait this impl method implements, `{module}|{trait}`
-    // (sema_effect_trait_cap_key), resolved where its `impl` block is
-    // written; "" for any other function (E0754).
-    trait_key: String{""}
+    // The trait this impl method implements, resolved where its `impl`
+    // block is written; None for any other function (E0754).
+    trait_symbol: SymbolID?{None}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -184,6 +193,8 @@ SemaEffectGraphResult: struct {
     // Solved rows that would have changed a taken seeded module's body
     // (sema_effects_check_modules `taken`); a final seeded body keeps 0.
     seeded_writes: Int{0}
+    // The run's symbol table the check borrowed, handed back to its graph.
+    symbols: SymbolTable
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
@@ -396,9 +407,8 @@ SemaEffectNode: struct {
     module_caps: [ModuleCap]{[ModuleCap]{}}
     // The `#FX(…)` cap of the struct or enum this method belongs to.
     type_cap: SemaEffectModuleCap?{None}
-    // `{module}|{trait}` of the trait this method implements
-    // (sema_effect_trait_cap_key), "" for any other function.
-    trait_key: String{""}
+    // The trait this method implements, None for any other function.
+    trait_symbol: SymbolID?{None}
     // The bounded callback slots this body fills with named functions and
     // with lambdas.
     callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
@@ -441,7 +451,7 @@ SemaEffectScopedCall: struct {
 
 sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
     SemaEffectFunctionSource{
-        key: symbol_id(SymbolKind.Function, module_identity, "", func.name).key,
+        key: symbol_key_text(SymbolKind.Function, module_identity, "", func.name),
         name: func.name,
         span: func.span,
         name_span: Val(func.name_span),
@@ -540,7 +550,7 @@ sema_effect_callee_module: fn(nodes: [SemaEffectNode], facts: SemaEffectCallInde
     module_none()
 }
 
-sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact, callee_module: ModuleID) -> String? {
+sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact, callee_module: ModuleID, tree: BodyTree, symbols: SymbolTable) -> String? {
     if !node.is_pure -> return None
     api := ""
     if expression.kind == .Call(_, _, _) {
@@ -548,7 +558,7 @@ sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode
         // this program; any other callee reports through its own effects.
         if !module_is_none(callee_module) && !module_is_core(callee_module) -> return None
         callee: fact.callee ?? return None
-        api = sema_effect_decl_label(callee.key)
+        api = sema_effect_decl_label(symbol_key(symbols, tree.symbols, callee))
     } else if expression.kind == .CoreCall(record, _, _, _, _, _) {
         api = sema_effect_member_label(record.module_name, record.member)
     }
@@ -604,8 +614,8 @@ sema_effect_report_nondeterministic_intrinsic: fn(nodes: &[SemaEffectNode], node
 // randomness is refused by the API it calls (E3403), before evaluation
 // reaches the host clock or random source. An intrinsic (`time.now`) has no
 // declared callee and is named by its API.
-sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    api: if fact.callee == .Val(callee) -> sema_effect_decl_label(callee.key) else -> fact.intrinsic_api ?? return
+sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    api: if fact.callee == .Val(callee) -> sema_effect_decl_label(sema_symbol_key(program, context, callee)) else -> fact.intrinsic_api ?? return
     row: fact.facts.effect_bound ?? return
     loop entry in row {
         if entry.name.starts_with("!") -> next
@@ -623,11 +633,12 @@ sema_effect_comptime_nondeterministic: fn(fact: SemaCallSiteFact, diagnostics: &
 // so any other callee whose effect row carries `Net` is refused (E3412). A
 // pure `core.net` helper (`mime.extension`) has no `Net` and evaluates. True
 // when it was refused.
-sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) -> Bool {
+sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, program: SemaProgramTables, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     callee: fact.callee ?? return false
-    owner: sema_effect_symbol_module(callee.key) ?? return false
+    callee_key: sema_symbol_key(program, context, callee)
+    owner: sema_effect_symbol_module(callee_key) ?? return false
     if owner != "<corelib>/core.net" && !owner.starts_with("<corelib>/core.net.") -> return false
-    method: sema_effect_symbol_leaf(callee.key)
+    method: sema_effect_symbol_leaf(callee_key)
     if method == "fetch" -> return false
     row: fact.facts.effect_bound ?? return false
     reaches_net := false
@@ -646,13 +657,13 @@ sema_effect_comptime_net_unavailable: fn(fact: SemaCallSiteFact, diagnostics: &[
 // E3411): the first of its call sites `facts` whose callee's effect row
 // carries an effect (sema_effect_comptime_callee_name); None when no call
 // carries one.
-sema_effect_comptime_call_name: fn(facts: [SemaCallSiteFact]) -> String? Never! {
+sema_effect_comptime_call_name: fn(facts: [SemaCallSiteFact], program: SemaProgramTables, context: SemaCheckContext) -> String? Never! {
     loop fact in facts {
         callee: fact.callee ?? next
         row: fact.facts.effect_bound ?? next
         loop entry in row {
             if entry.name.starts_with("!") -> next
-            return Val(sema_effect_comptime_callee_name(callee.key))
+            return Val(sema_effect_comptime_callee_name(sema_symbol_key(program, context, callee)))
         }
     }
     None
@@ -1301,7 +1312,7 @@ sema_effect_context_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, ro
 // name is prep code. The result holds, for each function the entries reach
 // that makes an input, the call path from an entry to it, entry first
 // (E0956).
-sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool]) -> [[Int]] Never! {
+sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRows, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prep_functions: [String:Bool], symbols: SymbolTable) -> [[Int]] Never! {
     paths := [[Int]]{}
     any: loop node in nodes {
         if node.comptime_inputs.len() > 0 -> break true
@@ -1311,7 +1322,9 @@ sema_effect_runtime_input_paths: fn(nodes: [SemaEffectNode], node_by_key: NameRo
     loop module_row in inputs {
         loop fact in modules[module_row.module_index].call_facts {
             if !fact.compile_time -> next
-            if fact.callee == .Val(callee) -> comptime_callees[callee.key] = true
+            callee: fact.callee ?? next
+            key: sema_effect_run_key(symbols, callee) ?? next
+            comptime_callees[key] = true
         }
     }
     named := (loop _ in nodes -> false)
@@ -1637,9 +1650,9 @@ sema_effect_module_ceiling_diagnostic: fn(node: SemaEffectNode, over: [String], 
 // the cap, reported at the field (E0755). Its row runs wherever a method
 // calls the field, so each calling method is E0749 too; this names the
 // field path itself, called or not.
-sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [String:SemaEffectTypeCap], diagnostics: &[Diagnostic]) {
+sema_effect_check_field_rows: fn(module_row: SemaRegistrationModule, caps: [U32:SemaEffectTypeCap], diagnostics: &[Diagnostic]) {
     loop nominal in module_row.nominals {
-        found: caps.get(nominal.symbol.id.key) ?? next
+        found: caps.get(nominal.symbol.id.id) ?? next
         cap: SemaEffectModuleCap{cap: found.cap.cap, site: None}
         ceiling: sema_effect_cap_ceiling(cap.cap)
         loop field in nominal.fields {
@@ -1716,27 +1729,28 @@ sema_effect_cap_entry_names: fn(cap: ModuleCap, diagnostics: &[Diagnostic]) {
 
 // The `#FX(…)` cap of every struct and enum in the graph, by the type's
 // nominal key, each with the `file:line` it is written at.
-sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:SemaEffectTypeCap] {
-    caps := [String:SemaEffectTypeCap]{}
+sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [U32:SemaEffectTypeCap] {
+    caps := [U32:SemaEffectTypeCap]{}
     loop module_row in graph_modules {
         loop nominal in module_row.nominals {
             cap: sema_effect_nominal_cap(nominal) ?? next
-            caps[nominal.symbol.id.key] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
+            caps[nominal.symbol.id.id] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
         }
     }
     caps
 }
 
-// The `#FX(…)` cap of every trait in the graph, by its
-// sema_effect_trait_cap_key, each with the `file:line` it is written at.
-sema_effect_trait_caps: fn(graph_modules: [SemaRegistrationModule], table: ModuleTable) -> [String:SemaEffectTypeCap] {
-    caps := [String:SemaEffectTypeCap]{}
-    loop module_row in graph_modules {
+// The `#FX(…)` cap of every trait in `graph`, by the trait's SymbolID, each
+// with the `file:line` it is written at.
+sema_effect_trait_caps: fn(graph: SemaRegistrationGraph) -> [U32:SemaEffectTypeCap] {
+    caps := [U32:SemaEffectTypeCap]{}
+    loop module_row in graph.modules {
         loop item in module_row.declarations {
             if item == .Trait(definition) {
                 cap: definition.cap ?? next
+                trait_id: sema_type_graph_trait_symbol(graph, module_row.module_identity, definition.name) ?? next
                 site: sema_effect_cap_site(module_row, cap.span)
-                caps["{module_text(table, module_row.module_identity)}|{definition.name}"] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(site)}}
+                caps[trait_id.id.id] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(site)}}
             }
         }
     }
@@ -1804,9 +1818,9 @@ sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Neve
 // Binds the cap of the type `nominal_key` names to a method of it declared
 // in `module_identity`. A cap written in the method's own module is labeled
 // where it is written; one in another module is named by `file:line`.
-sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:SemaEffectTypeCap], nominal_key: String?, module_identity: ModuleID) {
-    key: nominal_key ?? return
-    found: caps.get(key) ?? return
+sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [U32:SemaEffectTypeCap], nominal: SymbolID?, module_identity: ModuleID) {
+    id: nominal ?? return
+    found: caps.get(id.id) ?? return
     site: if found.module_identity == module_identity -> None else -> found.cap.site
     source.type_cap = Val(SemaEffectModuleCap{cap: found.cap.cap, site: site})
 }
@@ -1820,15 +1834,21 @@ sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges:
     loop (index, module_row) in graph_modules -> rows[module_row.module_identity.id] = index
     direct := (loop _ in graph_modules -> [SemaEffectModuleCap]{})
     parents := (loop _ in graph_modules -> [Int]{})
-    seen := [String:Bool]{}
+    // The file-module edges taken, by `source * modules + target`, each with
+    // the aliases (interned in `aliases`) it was taken under.
+    aliases := name_table()
+    seen := [Int:[Int]]{}
     loop edge in edges {
         if edge.declaration.kind == .File(_, _) {
             source: rows.get(edge.source_module_identity.id) ?? next
             target: rows.get(edge.target_module_identity.id) ?? next
-            key: "{source}:{target}:{edge.declaration.alias}"
-            if seen.get(key) != None -> next
+            pair: source * graph_modules.len() + target
+            alias: name_index(name_intern(aliases, edge.declaration.alias))
+            taken := seen.get(pair) ?? [Int]{}
+            if taken.contains(alias) -> next
             if !sema_effect_declares_file_module(graph_modules[source].program.items, edge.declaration.alias) -> next
-            seen[key] = true
+            taken.push(alias)
+            seen[pair] = taken
             parents[target].push(source)
             cap: sema_effect_file_module_cap(graph_modules[source].program.items, edge.declaration.alias) ?? next
             direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(graph_modules[source], cap.span))})
@@ -2099,7 +2119,7 @@ sema_effect_publish_diagnostics: fn(all: &[Diagnostic], source_segments: [SemaSo
     }
 }
 
-sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], diagnostics: &[Diagnostic]) -> SemaEffectNode {
+sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionSource], source_position: Int?, module_index: Int, library: [SemaLibraryEffectName], symbols: SymbolTable, diagnostics: &[Diagnostic]) -> SemaEffectNode {
     node := SemaEffectNode{
         key: function.key,
         name: function.name,
@@ -2145,7 +2165,9 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.owner_params = sema_effect_owner_params(function.kind)
     node.type_params = node.owner_params.copy()
     loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)
-    if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> node.trait_key = sema_effect_trait_cap_key(trait_symbol.key)
+    if function.kind == .TraitMethod(_, _, _, trait_symbol, _) {
+        if !symbol_is_local(trait_symbol) -> node.trait_symbol = Val(trait_symbol)
+    }
     node.path_first = function.params.len() > 0 && function.params[0].name == "path"
     at: source_position ?? {
         sema_effect_check_tfunc_unsafe(function, diagnostics)
@@ -2170,7 +2192,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     node.kernel = actual.kernel
     node.module_caps = actual.module_caps.copy()
     if actual.type_cap == .Val(type_cap) -> node.type_cap = Val(type_cap.copy())
-    if actual.trait_key != "" -> node.trait_key = actual.trait_key
+    if actual.trait_symbol != None -> node.trait_symbol = actual.trait_symbol.copy()
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -2278,7 +2300,7 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
     )
 }
 
-sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
     // A call through a `:` local bound to a lambda written in this body adds
     // nothing: that lambda's effects are already this function's where it is
     // written (sema_effect_merge_lambda). The call node itself skips its fact
@@ -2301,8 +2323,8 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, nod
         }
         return
     }
-    callee_key: fact.callee.map(fn(callee) { callee.key }) ?? ""
-    known_callee: callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None
+    callee_key: if fact.callee == .Val(callee) -> symbol_key(facts.symbols, tree.symbols, callee) else -> ""
+    known_callee: callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(nodes, node_index, callee_key)
     // One call site is one call: another body node with the call's span finds
     // the same fact, and a second row would count the callee's arena bytes
@@ -2375,14 +2397,18 @@ SemaEffectCallIndex: struct {
     // of every implementation of the method in the program, inherited
     // defaults included: the targets of a call through a trait value.
     dyn_impls: [String:[String]]{[String:[String]]{}}
-    // The `#FX(…)` cap of each capped trait (sema_effect_trait_caps).
-    trait_caps: [String:SemaEffectTypeCap]{[String:SemaEffectTypeCap]{}}
+    // The `#FX(…)` cap of each capped trait, by its SymbolID
+    // (sema_effect_trait_caps).
+    trait_caps: [U32:SemaEffectTypeCap]{[U32:SemaEffectTypeCap]{}}
     // The name of the node each `#Unsafe` function's key names
     // (`node_by_key`), so an unsafe-call check reads no node.
     unsafe_names: [String:String]{[String:String]{}}
     // The node of each registered declaration with a body, by DeclID row
     // (-1: none), so a direct call finds its callee's node without its key.
     node_by_decl: [Int]{[Int]{}}
+    // The run's symbol table: the key of a fact's or a body node's id (a
+    // walk reads a body's own ids from its tree).
+    symbols: SymbolTable{symbol_table()}
     // Each node's key, in node order, so a walk names its callee's node
     // without reading that node: a collecting thread holds only its own
     // node's row (sema_effect_collect_claimed).
@@ -2391,6 +2417,12 @@ SemaEffectCallIndex: struct {
     // (effect_scope_published_effect), read off its node before the walks:
     // a collecting thread holds only its own node's row.
     published_effects: [String:String]{[String:String]{}}
+}
+
+// The key of a run-wide `id`; a body's own id names no declaration here.
+sema_effect_run_key: fn(symbols: SymbolTable, id: SymbolID) -> String? Never! {
+    if symbol_is_local(id) -> return None
+    Val(symbol_table_key(symbols, id))
 }
 
 // The effect node of the declaration `callee`, -1 when it has no body here.
@@ -2611,16 +2643,17 @@ sema_effect_written_lambda: fn(tree: BodyTree, value: Int) -> Bool Never! {
     false
 }
 
-sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, expression: BodyNode) Never! {
+sema_effect_record_unresolved_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode) Never! {
     // A direct call and a shared global's initializer name their callee's
     // node through the callee's DeclID.
     if expression.kind == .Call(callee, _, _) -> return sema_effect_record_decl_call(nodes, facts, node_index, callee, expression.span)
     if expression.kind == .GlobalShared(initializer, _) -> return sema_effect_record_decl_call(nodes, facts, node_index, initializer, expression.span)
-    callee_key: if expression.kind == {
-        .MethodCall(_, method, _, _) -> method.symbol.key
-        .StaticCall(_, _, method, _, _) -> method.symbol.key
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> ""
+    callee: if expression.kind == {
+        .MethodCall(_, method, _, _) -> method.symbol.copy()
+        .StaticCall(_, _, method, _, _) -> method.symbol.copy()
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> symbol_none()
     }
+    callee_key: if symbol_is_none(callee) -> "" else -> symbol_key(facts.symbols, tree.symbols, callee)
     if {
         callee_key != "" && sema_effect_node_index(facts.node_by_key, callee_key) != None -> sema_effect_node_add_edge(nodes, node_index, callee_key)
         // A named callee with no body in this program has no effects.
@@ -2645,14 +2678,15 @@ sema_effect_record_decl_call: fn(nodes: &[SemaEffectNode], facts: SemaEffectCall
 // `attribute_fn_arg`: a named function passed to a function-typed parameter
 // flows its effects through to this caller, and the callee may invoke it any
 // number of times.
-sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
+sema_effect_record_function_arguments: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop argument in args {
         if body_type(tree, argument.value) == .Fn(_, _, _, _, _, _) {
             value: body_node(tree, argument.value)
             if value.kind == .ConstRef(symbol) {
-                if sema_effect_node_index(node_by_key, symbol.key) == None -> next
-                sema_effect_node_add_edge(nodes, node_index, symbol.key)
-                nodes[node_index].memory_calls.push(SemaMemoryCall{callee: symbol.key, span: value.span, executions: None})
+                key: symbol_key(facts.symbols, tree.symbols, symbol)
+                if sema_effect_node_index(facts.node_by_key, key) == None -> next
+                sema_effect_node_add_edge(nodes, node_index, key)
+                nodes[node_index].memory_calls.push(SemaMemoryCall{callee: key, span: value.span, executions: None})
             }
         }
     }
@@ -2786,8 +2820,9 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
                 .TraitObject(_) -> {}
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return
             }
-            trait_key: sema_effect_trait_cap_key(trait_owner.key)
-            if facts.trait_caps.get(trait_key) == .Val(found) {
+            owner_key: symbol_key(facts.symbols, tree.symbols, trait_owner)
+            trait_key: sema_effect_trait_cap_key(owner_key)
+            if facts.trait_caps.get(trait_owner.id) == .Val(found) {
                 // A bare `#FX` above the trait is the empty ceiling: the
                 // dispatch reaches nothing.
                 if sema_effect_cap_ceiling(found.cap.cap) == .Val(ceiling) {
@@ -2797,7 +2832,7 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
             }
             impls: facts.dyn_impls.get("{trait_key}::{method.name}") ?? [String]{}
             if impls.len() == 0 {
-                nodes[node_index].dispatches.push(TEffectSpan{name: "{sema_effect_symbol_leaf(trait_owner.key)}::{method.name}", span: fact.span})
+                nodes[node_index].dispatches.push(TEffectSpan{name: "{sema_effect_symbol_leaf(owner_key)}::{method.name}", span: fact.span})
                 return
             }
             loop impl_key in impls -> sema_effect_node_add_edge(nodes, node_index, impl_key)
@@ -2813,7 +2848,7 @@ sema_effect_record_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallI
 sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: Int, node: BodyNode) Never! {
     if node.kind == {
         .ConstRef(symbol) -> {
-            if body_type(tree, expression) == .Fn(_, _, _, _, _, _) -> sema_effect_node_add_value_edge(nodes, facts.node_by_key, node_index, symbol.key)
+            if body_type(tree, expression) == .Fn(_, _, _, _, _, _) -> sema_effect_node_add_value_edge(nodes, facts.node_by_key, node_index, symbol_key(facts.symbols, tree.symbols, symbol))
         }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
@@ -2826,8 +2861,9 @@ sema_effect_record_value_reads: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
         .MethodCall(receiver, method, _, _) -> {
             trait_owner: method.trait_owner ?? return
             if body_type(tree, receiver) == .TraitObject(_) {
-                trait_name: sema_effect_symbol_leaf(trait_owner.key)
-                trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
+                owner_key: symbol_key(facts.symbols, tree.symbols, trait_owner)
+                trait_name: sema_effect_symbol_leaf(owner_key)
+                trait_module: sema_effect_symbol_module(owner_key) ?? ""
                 owners: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
                 loop owner in owners {
                     if facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}#{owner}") == .Val(impl_key) -> sema_effect_node_add_value_edge(nodes, facts.node_by_key, node_index, impl_key)
@@ -2854,12 +2890,13 @@ sema_effect_record_static_dispatch: fn(nodes: &[SemaEffectNode], facts: SemaEffe
             trait_owner: method.trait_owner ?? return false
             receiver_type: body_type(tree, receiver)
             if receiver_type == .TraitObject(_) -> return false
-            if sema_effect_node_index(facts.node_by_key, method.symbol.key) != None -> return false
+            if sema_effect_node_index(facts.node_by_key, symbol_key(facts.symbols, tree.symbols, method.symbol)) != None -> return false
             sema_effect_record_memory_open(nodes, node_index, fact.span, "generic trait dispatch has no sealed target set")
             // Implementations group under the trait's own module, from
             // whichever module they are written in (sema_effect_add_trait_impls).
-            trait_name: sema_effect_symbol_leaf(trait_owner.key)
-            trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
+            trait_key: symbol_key(facts.symbols, tree.symbols, trait_owner)
+            trait_name: sema_effect_symbol_leaf(trait_key)
+            trait_module: sema_effect_symbol_module(trait_key) ?? ""
             impls_key: "{trait_module}|{trait_name}::{method.name}"
             if receiver_type == .Named(param) && nodes[node_index].type_params.contains(param) {
                 nodes[node_index].param_dispatches.push(SemaEffectParamDispatch{param: param, impls_key: impls_key})
@@ -2897,7 +2934,7 @@ sema_effect_add_dispatch_union: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
 // A call that binds type parameters: a method of a generic type (`t.run()`
 // with `t: Traced<Loud>`, or `Traced<Loud>.new()`) or a generic function
 // with its type arguments.
-sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) Never! {
+sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact, symbols: SymbolTable) Never! {
     callee: fact.callee ?? return
     owner_args := [Type]{}
     type_args := [Type]{}
@@ -2927,10 +2964,10 @@ sema_effect_record_instantiation: fn(nodes: &[SemaEffectNode], node_index: Int, 
     label := owner_label
     if type_args.len() > 0 {
         shown: (loop arg in type_args -> type_name(arg)).join(", ")
-        name: sema_effect_symbol_leaf(callee.key)
+        name: sema_effect_symbol_leaf(symbol_key(symbols, tree.symbols, callee))
         label = if owner_label == "" -> "{name}<{shown}>" else -> "{owner_label}.{name}<{shown}>"
     }
-    nodes[node_index].instantiations.push(SemaEffectInstantiation{callee: callee.key, owner_args: owner_args, type_args: type_args, label: label, span: fact.span})
+    nodes[node_index].instantiations.push(SemaEffectInstantiation{callee: symbol_key(symbols, tree.symbols, callee), owner_args: owner_args, type_args: type_args, label: label, span: fact.span})
 }
 
 // The owner type's parameters of a method, in the order a receiver's type
@@ -3182,7 +3219,8 @@ sema_effect_record_core_row: fn(nodes: &[SemaEffectNode], node_index: Int, recor
 // needs `FS.Read("assets/a.png")`. A run-time argument names no scope, so
 // that call needs the bare effect (EffectScope.jet).
 sema_effect_record_scope: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, node: BodyNode, fact: SemaCallSiteFact) Never! {
-    callee_key: fact.callee.map(fn(callee) { callee.key }) ?? return
+    callee: fact.callee ?? return
+    callee_key: symbol_key(facts.symbols, tree.symbols, callee)
     // A publisher with no body here, such as `core.http.get`, publishes by key.
     published: facts.published_effects.get(callee_key) ?? {
         effect_scope_published_effect(callee_key, false, [String]{}) ?? return
@@ -3283,7 +3321,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             if found == {
                 .Val(position) -> {
                     value: facts.modules[caller.module_index].facts[position]
-                    nondeterministic: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(nodes, facts, node))
+                    nondeterministic: sema_effect_nondeterministic_core(nodes[node_index], node, value, sema_effect_callee_module(nodes, facts, node), tree, facts.symbols)
                     if nondeterministic == .Val(api) {
                         // Rust returns before recording the call's effects, so
                         // the pure function reports E3403 instead of E3401.
@@ -3291,10 +3329,10 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                         diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
-                            sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
+                            sema_effect_record_fact(nodes, facts, tree, node_index, value, diagnostics)
                             sema_effect_record_scope(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
-                            sema_effect_record_instantiation(nodes, node_index, tree, node, value)
+                            sema_effect_record_instantiation(nodes, node_index, tree, node, value, facts.symbols)
                         }
                     }
                 }
@@ -3305,7 +3343,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                     if node.kind == .CoreCall(record, _, _, _, _, _) {
                         sema_effect_record_core_row(nodes, node_index, record, node.span)
                     } else if !sema_effect_is_compiler_intrinsic(node.kind) {
-                        sema_effect_record_unresolved_call(nodes, facts, node_index, node)
+                        sema_effect_record_unresolved_call(nodes, facts, tree, node_index, node)
                     }
                 }
             }
@@ -3314,14 +3352,14 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             found: sema_effect_find_exact_fact(facts, caller, node.span)
             if found == .Val(position) {
                 value: facts.modules[caller.module_index].facts[position]
-                if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) -> sema_effect_record_fact(nodes, facts.node_by_key, node_index, value, diagnostics)
+                if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) -> sema_effect_record_fact(nodes, facts, tree, node_index, value, diagnostics)
             }
         }
     }
     sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
     sema_effect_record_stop(nodes, node_index, node)
     if node.kind == {
-        .Call(_, _, args) | .IndirectCall(_, _, args, _) -> sema_effect_record_function_arguments(nodes, facts.node_by_key, node_index, tree, args)
+        .Call(_, _, args) | .IndirectCall(_, _, args, _) -> sema_effect_record_function_arguments(nodes, facts, node_index, tree, args)
         // `close(value)` runs the value type's own `Close.close`, so that
         // method's effects are this function's (codegen calls it directly).
         .Close(value) -> sema_effect_record_close(nodes, facts, node_index, body_type(tree, value))
@@ -3340,7 +3378,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         .List(values, _) | .ListLit(values) -> {
             if values.len() > 0 && !sema_effect_is_fixed_list(body_type(tree, expression)) -> sema_effect_push_memory_event(nodes, node_index, node.span, "list construction allocates backing storage", "alloc", None)
         }
-        .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
+        .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol_key(facts.symbols, tree.symbols, symbol), body_type(tree, expression), node.span)
         // A `[U8]{"…"}` byte value (one checked byte constant) builds the same
         // backing storage its per-element list spelling would.
         .CtLit(value) -> {
@@ -3404,7 +3442,7 @@ sema_effect_check_unsafe_enter: fn(nodes: &[SemaEffectNode], facts: SemaEffectCa
         found: sema_effect_find_fact(facts, caller, node.span)
         if found == .Val(position) {
             if facts.modules[caller.module_index].facts[position].callee == .Val(callee) {
-                if facts.unsafe_names.get(callee.key) == .Val(name) -> sema_effect_require_unsafe_call(name, true, audited, node.span, diagnostics)
+                if facts.unsafe_names.get(symbol_key(facts.symbols, tree.symbols, callee)) == .Val(name) -> sema_effect_require_unsafe_call(name, true, audited, node.span, diagnostics)
             }
             if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
                 _: sema_effect_require_unsafe_call(foreign, true, audited, node.span, diagnostics)
@@ -3834,7 +3872,7 @@ sema_effect_trait_bound_diagnostic: fn(bound: SemaEffectTraitBound, over: [Strin
 }
 
 // Every impl of a bounded trait method stays within the trait's row.
-sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in functions {
         // An owned operator or CheckedText trait (`impl Vec2.Add`) has no
@@ -3850,8 +3888,8 @@ sema_effect_check_trait_bounds: fn(module_row: SemaEffectModuleInput, functions:
         }
         node_index: sema_effect_node_index(node_by_key, function.key) ?? next
         trait_name := module_row.owned_trait_hooks.get(function.key) ?? ""
-        if nodes[node_index].trait_key.cut_last("|") == .Val(split) -> trait_name = split.after
-        if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> trait_name = sema_effect_symbol_leaf(trait_symbol.key)
+        if nodes[node_index].trait_symbol == .Val(trait_id) -> trait_name = sema_effect_symbol_leaf(symbol_table_key(symbols, trait_id))
+        if function.kind == .TraitMethod(_, _, _, trait_symbol, _) -> trait_name = sema_effect_symbol_leaf(symbol_key(symbols, function.tree.symbols, trait_symbol))
         if trait_name == "" -> next
         method: sema_effect_method_name(function, module_row.sources, source_index)
         loop bound in module_row.trait_bounds {
@@ -4354,7 +4392,8 @@ sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffec
             if closed -> sema_effect_stack_fn_value(kind, node_index, nodes, facts, values)
         } else if node.kind == .ConstRef(symbol) {
             if closed && body_type(tree, id) == .Fn(_, _, _, _, _, _) {
-                if sema_effect_node_index(facts.node_by_key, symbol.key) == None -> values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "`{sema_effect_symbol_leaf(symbol.key)}`"})
+                key: symbol_key(facts.symbols, tree.symbols, symbol)
+                if sema_effect_node_index(facts.node_by_key, key) == None -> values.bodiless.push(SemaStackTaken{node: node_index, target: -1, name: "`{sema_effect_symbol_leaf(key)}`"})
             }
         } else if node.kind == .MethodCall(receiver, method, _, _) {
             if method.trait_owner != None && body_type(tree, receiver) == .TraitObject(_) {
@@ -4377,8 +4416,9 @@ sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffec
 sema_effect_stack_impls: fn(method: TMethodRef, facts: SemaEffectCallIndex) -> [Int] Never! {
     targets := [Int]{}
     trait_owner: method.trait_owner ?? return targets
-    trait_name: sema_effect_symbol_leaf(trait_owner.key)
-    trait_module: sema_effect_symbol_module(trait_owner.key) ?? ""
+    trait_key: sema_effect_run_key(facts.symbols, trait_owner) ?? return targets
+    trait_name: sema_effect_symbol_leaf(trait_key)
+    trait_module: sema_effect_symbol_module(trait_key) ?? ""
     owners: facts.trait_implementers.get("{trait_module}|{trait_name}") ?? [String]{}
     loop owner in owners {
         impl_key: facts.trait_impls.get("{trait_module}|{trait_name}::{method.name}#{owner}") ?? next
@@ -5132,7 +5172,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // are taken seeded ones (sema_finalize_seeded_taken): their bodies keep the
 // rows their finalization solved, and a row this solve would change on one is
 // counted in the result's `seeded_writes`, not stamped.
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -5151,7 +5191,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             pair: row.cut_last("::") ?? next
             sema_effect_add_implementer(tables, "{module_identity}|{pair.before}", pair.after)
         }
-        sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, source_indices[module_index], tables)
+        sema_effect_add_trait_impls(modules[module_row.module_index].functions, module_row, source_indices[module_index], symbols, tables)
     }
     trait_implementers := [String:[String]]{}
     loop (group_row, trait_key) in tables.implementer_keys -> trait_implementers[trait_key] = tables.implementer_lists[group_row]
@@ -5180,7 +5220,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         if effect_scope_published_effect(key, nodes[node_index].path_first, nodes[node_index].declared) == .Val(published) -> published_effects[key] = published
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
-    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), published_effects: published_effects.move()}
+    calls := SemaEffectCallIndex{modules: owned_prepared.calls.move(), node_by_key: node_by_key.move(), trait_implementers: trait_implementers.move(), trait_impls: trait_impls.move(), dyn_impls: dyn_impls.move(), trait_caps: trait_caps.copy(), close_methods: close_methods.move(), unsafe_names: unsafe_names.move(), node_by_decl: node_by_decl.move(), node_keys: node_keys.move(), published_effects: published_effects.move(), symbols: symbols.move()}
     unsafe_node: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
@@ -5191,7 +5231,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     callers: sema_effect_callers(nodes, calls.node_by_key, table)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
-        sites := [String:SharedLifetime]{}
+        sites := [U32:SharedLifetime]{}
         site_diagnostics := [Diagnostic]{}
         facts := sema_effect_shared_facts(modules[inputs[module_index].module_index].call_facts)
         facts = loop fresh_item in facts -> fresh_item
@@ -5199,7 +5239,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         loop fact in facts {
             lifetime: fact.shared_lifetime ?? next
             initializer: fact.callee ?? panic("Core publication obligation has no initializer")
-            target: sema_effect_node_index(calls.node_by_key, initializer.key) ?? panic("Core publication initializer has no solved effect row")
+            target: sema_effect_node_index(calls.node_by_key, symbol_table_key(calls.symbols, initializer)) ?? panic("Core publication initializer has no solved effect row")
             // `Panic` is the deny-only stop row, not an effect
             // the published value can carry, so it does not make it impure.
             impure := false
@@ -5210,9 +5250,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
                 }
             }
             conflicting := false
-            if sites.get(initializer.key) == .Val(previous) -> conflicting = previous != lifetime
+            if sites.get(initializer.id) == .Val(previous) -> conflicting = previous != lifetime
             if impure || conflicting -> site_diagnostics.push(sema_call_core_shared_diagnostic(fact.shared_member, fact.span))
-            if sites.get(initializer.key) == None -> sites[initializer.key] = lifetime
+            if sites.get(initializer.id) == None -> sites[initializer.id] = lifetime
         }
         sema_effect_publish_diagnostics(diagnostics, inputs[module_index].source_segments, site_diagnostics)
     }
@@ -5272,7 +5312,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[path[path.len() - 1]].module_index].source_segments, state_diagnostics)
     }
     // No function a runtime entry reaches may make a comptime input.
-    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs, prep_functions) {
+    loop path in sema_effect_runtime_input_paths(nodes, calls.node_by_key, modules, inputs, prep_functions, calls.symbols) {
         maker: path[path.len() - 1]
         input_diagnostics := loop input in nodes[maker].comptime_inputs -> sema_effect_runtime_input_diagnostic(nodes, path, input)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[maker].module_index].source_segments, input_diagnostics)
@@ -5280,7 +5320,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
-        sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].functions, source_indices[module_index], nodes, calls.node_by_key, solved, bound_diagnostics)
+        sema_effect_check_trait_bounds(module_row, modules[module_row.module_index].functions, source_indices[module_index], nodes, calls.node_by_key, calls.symbols, solved, bound_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, bound_diagnostics)
     }
     // Every call path's stack, by the frame model; FnBody keeps each frame
@@ -5355,8 +5395,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         }
         loop cap in nodes[node_index].module_caps -> caps.push(SemaEffectModuleCap{cap: cap, site: None})
         if nodes[node_index].type_cap == .Val(type_cap) -> caps.push(type_cap.copy())
-        if nodes[node_index].trait_key != "" {
-            if calls.trait_caps.get(nodes[node_index].trait_key) == .Val(found) {
+        if nodes[node_index].trait_symbol == .Val(trait_id) {
+            if calls.trait_caps.get(trait_id.id) == .Val(found) {
                 site: if found.module_identity == nodes[node_index].module_identity -> None else -> found.cap.site
                 caps.push(SemaEffectModuleCap{cap: found.cap.cap, site: site})
             }
@@ -5372,7 +5412,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_check_module_regions(modules[inputs[module_index].module_index].functions, inputs[module_index], module_index, source_indices[module_index], solved, calls, nodes, diagnostics)
     }
     loop module_row in inputs {
-        sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, solved, diagnostics)
+        sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, calls.symbols, solved, diagnostics)
     }
     // All source reads are finished: stamp the solved rows in place, the
     // frame bound of each function a stack denial reaches, and each uncalled
@@ -5408,11 +5448,11 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // report when no single call carries it.
     loop (pending, node_index) in pure_nodes {
         pure_diagnostics := [Diagnostic]{}
-        pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
+        pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, calls.symbols, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), seeded_writes: seeded_writes}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), seeded_writes: seeded_writes, symbols: calls.symbols.move()}
 }
 
 // The rows of the effect graph each input module contributes on its own:
@@ -5433,16 +5473,16 @@ sema_effect_prepared_empty: fn() -> SemaEffectPrepared Never! {
 }
 
 // Every input module's rows, in input order.
-sema_effect_prepare_modules: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], decls: DeclTable) -> SemaEffectPrepared {
+sema_effect_prepare_modules: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], decls: DeclTable, symbols: SymbolTable) -> SemaEffectPrepared {
     prepared := sema_effect_prepared_empty()
-    loop (input_position, module_row) in inputs -> sema_effect_prepare_module(prepared, modules[module_row.module_index].functions, modules[module_row.module_index].call_facts, module_row, input_position, decls)
+    loop (input_position, module_row) in inputs -> sema_effect_prepare_module(prepared, modules[module_row.module_index].functions, modules[module_row.module_index].call_facts, module_row, input_position, decls, symbols)
     prepared
 }
 
 // Appends the rows of the input module at `input_position`.
-sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable) {
+sema_effect_prepare_module: fn(prepared: &SemaEffectPrepared, functions: [FnBody], call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, input_position: Int, decls: DeclTable, symbols: SymbolTable) {
     source_index := sema_effect_source_index(module_row.sources)
-    sema_effect_add_module_nodes(functions, module_row, input_position, source_index, prepared.nodes, prepared.node_keys, prepared.diagnostics)
+    sema_effect_add_module_nodes(functions, module_row, input_position, source_index, symbols, prepared.nodes, prepared.node_keys, prepared.diagnostics)
     loop function in functions {
         row: if decl_table_find(decls, function.key) == .Val(id) -> id.row.index() else -> -1
         prepared.node_decls.push(row)
@@ -5467,11 +5507,11 @@ sema_effect_prepared_join: fn(prepared: &SemaEffectPrepared, part: &&SemaEffectP
 
 // One graph node per function of the input module `module_index`, in order,
 // and its key in `node_keys` (node order).
-sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, nodes: &[SemaEffectNode], node_keys: &[String], diagnostics: &[Diagnostic]) {
+sema_effect_add_module_nodes: fn(functions: [FnBody], module_row: SemaEffectModuleInput, module_index: Int, source_index: SemaEffectSourceIndex, symbols: SymbolTable, nodes: &[SemaEffectNode], node_keys: &[String], diagnostics: &[Diagnostic]) {
     loop function in functions {
         function_diagnostics := [Diagnostic]{}
         node_keys.push(function.key)
-        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, module_row.library_effects, function_diagnostics))
+        nodes.push(sema_effect_node_from_source(function, module_row.sources, sema_effect_source_position(function, source_index), module_index, module_row.library_effects, symbols, function_diagnostics))
         sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, function_diagnostics)
     }
 }
@@ -5524,13 +5564,15 @@ sema_effect_add_implementer: fn(tables: &SemaEffectImplTables, trait_key: String
 // place in its method's trait-value group. The trait is the one its source
 // resolved where the `impl` block is written, so an `impl Trait` block in a
 // struct or enum body and an impl of another module's trait count too.
-sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, tables: &SemaEffectImplTables) {
+sema_effect_add_trait_impls: fn(functions: [FnBody], module_row: SemaEffectModuleInput, source_index: SemaEffectSourceIndex, symbols: SymbolTable, tables: &SemaEffectImplTables) {
     loop function in functions {
         trait_key := ""
-        if sema_effect_source_position(function, source_index) == .Val(at) -> trait_key = module_row.sources[at].trait_key
+        if sema_effect_source_position(function, source_index) == .Val(at) {
+            if module_row.sources[at].trait_symbol == .Val(trait_id) -> trait_key = sema_effect_trait_cap_key(symbol_table_key(symbols, trait_id))
+        }
         owner_type: if function.kind == {
             .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
-                if trait_key == "" -> trait_key = sema_effect_trait_cap_key(trait_symbol.key)
+                if trait_key == "" -> trait_key = sema_effect_trait_cap_key(symbol_key(symbols, function.tree.symbols, trait_symbol))
                 owner_type
             }
             .Method(_, owner_type) -> owner_type
@@ -5817,12 +5859,13 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffect
 }
 
 // A discarded call result of a function whose row has no outcome (E0433).
-sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
     discarded := [Diagnostic]{}
     loop fact in call_facts {
         if !fact.discarded -> next
         callee: fact.callee ?? next
-        node_index: sema_effect_node_index(node_by_key, callee.key) ?? next
+        callee_key: sema_effect_run_key(symbols, callee) ?? next
+        node_index: sema_effect_node_index(node_by_key, callee_key) ?? next
         // What the call binds the callee's type parameters to does its own
         // work (`measure(Square{…})` runs `Square::area`).
         if nodes[node_index].param_dispatches.len() > 0 -> next
@@ -5874,7 +5917,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             sema_effect_record_comptime_input(nodes, node_index, node)
             sema_effect_record_context(nodes, node_index, tree, node)
             if node.kind == {
-                .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
+                .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol_key(facts.symbols, tree.symbols, symbol), body_type(tree, expression), node.span)
                 .Lambda(value) -> sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)
                 .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
             }

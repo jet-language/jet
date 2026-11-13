@@ -1016,8 +1016,9 @@ sema_compiler_events_call_target: fn(target: Expr, program: SemaProgramTables, s
     if target == .Ident(name, _, _) {
         if sema_scope_resolve(scopes, name) == .Val(symbol) {
             if symbol.kind != SymbolKind.Function -> return None
-            graph: program.registration_graph ?? return Val(symbol.id.key.copy())
-            return Val(sema_compiler_identity(graph, symbol.id.key))
+            key: sema_scope_resolve_key(scopes, name) ?? return None
+            graph: program.registration_graph ?? return Val(key)
+            return Val(sema_compiler_identity(graph, key))
         }
         if SEMA_COMPILER_EVENTS_AMBIENT_CALLS.contains(name) -> return Val(name.copy())
     }

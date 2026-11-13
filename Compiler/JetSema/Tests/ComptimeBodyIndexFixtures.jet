@@ -28,6 +28,7 @@ use {
         ModuleID,
         ModuleTable,
         Span,
+        SymbolKeys,
         SymbolKind,
         TComptimeValue,
         TConstantDef,
@@ -39,7 +40,8 @@ use {
         module_intern,
         module_none,
         module_table,
-        symbol_id,
+        symbol_key_text,
+        symbol_table_key,
     ]
     jet_parser.[parse_source]
     jet_driver.[
@@ -352,7 +354,7 @@ body_index_publication_lifecycle: fn() {
     input: SemaRegistrationModuleInput{package_identity: "body-index", module_identity: body_index_module("mod::one"), module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "lifecycle.jet", source_segments: [SemaSourceSegment]{SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: "lifecycle.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
     facts: SemaBuildFacts{package_name: "body-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     canonical_identity: canonical.module_identity.copy()
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "body-index", body_index_module("mod::one"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "body-index", body_index_module("mod::one"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     body_index_require(graph.complete && graph.internal_problem == None, "the real publication-lifecycle graph registers")
     span: Span{start: 10, end: 20}
     site: Span{start: 3, end: 7}
@@ -478,7 +480,7 @@ body_index_constant_graph: fn(sources: [String]) -> SemaRegistrationGraph {
     canonical_identity: canonical.module_identity.copy()
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: "constant-index", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "constant-index", body_index_module("constant::0"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "constant-index", body_index_module("constant::0"), canonical_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
 }
 
 body_index_constant_value: fn(module_identity: String, key: String, number: Int) -> SemaComptimeItemValue {
@@ -501,7 +503,7 @@ body_index_linear_constant_rows: fn(graph: SemaRegistrationGraph, values: [SemaC
         staged_values := [String:SemaComptimeItemValue]{}
         staged_values[value.key] = value
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.id.key != value.key -> next
+            if symbol_table_key(graph.symbols, constant.symbol.id) != value.key -> next
             row: sema_checked_constant_with_values(graph, graph.modules[module_index], constant, staged_values, diagnostics) ?? next
             rows.push(row)
         }
@@ -513,9 +515,9 @@ body_index_constant_projection: fn() {
     graph := body_index_constant_graph([String]{"first: 0\nsecond: 1\n", "first: 2\n"})
     trail := sema_graph_trail_init()
     body_index_require(graph.complete && graph.internal_problem == None && graph.modules[0].constants.len() == 2 && graph.modules[1].constants.len() == 1, "real constant declarations register in their authored order")
-    first: body_index_constant_value("constant::0", graph.modules[0].constants[0].symbol.id.key, 7)
+    first: body_index_constant_value("constant::0", symbol_table_key(graph.symbols, graph.modules[0].constants[0].symbol.id), 7)
     duplicate: body_index_constant_value("constant::0", first.key, 99)
-    other: body_index_constant_value("constant::1", graph.modules[1].constants[0].symbol.id.key, 11)
+    other: body_index_constant_value("constant::1", symbol_table_key(graph.symbols, graph.modules[1].constants[0].symbol.id), 11)
     wrong_owner: body_index_constant_value("constant::1", first.key, 13)
     missing: body_index_constant_value("constant::0", "missing", 17)
     body: body_index_item(body_index_value("constant::0", "probe", Span{start: 1, end: 2}, Span{start: 3, end: 4}, 19), SemaComptimeItemKind.BodyExpression)
@@ -546,7 +548,7 @@ body_index_constant_projection: fn() {
     body_index_require(fresh.constant_rows[slot].get(first.key) == (Val(0)) && available.counted_values == values.len(), "replacement starts a fresh value generation without changing the retained prior frontier")
     duplicate_graph := body_index_constant_graph([String]{"repeated: 1\nrepeated: 2\n"})
     body_index_require(duplicate_graph.internal_problem == None, "duplicate-name invalid input still has an ordinary graph")
-    duplicate_key: symbol_id(SymbolKind.Constant, "constant::0", "", "repeated").key
+    duplicate_key: symbol_key_text(SymbolKind.Constant, "constant::0", "", "repeated")
     duplicate_values: [SemaComptimeItemValue]{body_index_constant_value("constant::0", duplicate_key, 23)}
     duplicate_available: sema_comptime_available_constants(duplicate_graph, duplicate_values)
     all_rows: sema_comptime_staged_constant_rows(duplicate_graph, duplicate_values, 0, duplicate_available)
@@ -566,7 +568,7 @@ body_index_constant_size: fn(size: Int) {
     loop module_row in graph.modules -> declaration_rows += module_row.constants.len()
     loop index in 0..<size {
         from: values.len()
-        values.push(body_index_constant_value("constant::0", graph.modules[0].constants[index].symbol.id.key, index + 1))
+        values.push(body_index_constant_value("constant::0", symbol_table_key(graph.symbols, graph.modules[0].constants[index].symbol.id), index + 1))
         sema_comptime_available_constants_add(available, values)
         rows: sema_comptime_staged_constant_rows(graph, values, from, available)
         linear: body_index_linear_constant_rows(graph, values, from)

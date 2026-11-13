@@ -45,7 +45,7 @@ use {
         record_decode,
         record_encode,
     ]
-    jet_foundation.[ModuleLayer, TComptimeValue]
+    jet_foundation.[ModuleLayer, TComptimeValue, SymbolTable, symbol_is_local, symbol_table_key]
     jet_sema.[
         SemaCallSiteFact,
         SemaNameReferenceFact,
@@ -136,7 +136,8 @@ JetDriverCompileMode: enum {
 // `jet doc` prints; `physical_path` is the snapshot file's canonical path,
 // which machine reports name. `module_name`, `functions`, `name_references`,
 // and `call_facts` are the module's checked rows (Rust `SemIndexEffectFacts`
-// summaries and the name ledger's references).
+// summaries and the name ledger's references); the name ledger's `symbols`
+// names the call facts' callee ids.
 JetDriverDocModule: struct {
     path: String
     physical_path: String
@@ -163,6 +164,14 @@ JetDriverDocModule: struct {
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
     // The `#FX(…)` written at the head of the file, when one is.
     file_cap: ModuleCap?{None}
+}
+
+// The key text of `fact`'s callee in the bundle's `symbols`; None when the
+// fact names no callee or calls through a local function value.
+jet_driver_doc_callee_key: fn(symbols: SymbolTable, fact: SemaCallSiteFact) -> String? Never! {
+    callee: fact.callee ?? return None
+    if symbol_is_local(callee) -> return None
+    Val(symbol_table_key(symbols, callee))
 }
 
 // The order of a documented item's kind among items of one qualified name:

@@ -587,7 +587,7 @@ ir_tx_snapshot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransac
 // method's declared return.
 ir_tx_method_expr: fn(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, method: TMethodRef, args: [BodyCallArg], span: Span) -> Int Never! {
     ret := Type.Named{name: "Unit"}
-    if ir_function_row(p, method.symbol.key) == .Val(row) {
+    if ir_function_row(p, ir_symbol_key(p, method.symbol)) == .Val(row) {
         ret = p.functions[row].ret ?? Type.Named{name: "Unit"}
     }
     receiver: ir_node(b, owner, NodeKind.Local{local: local}, span)
