@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101719,
+    "rev": 101725,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40862,21 +40862,21 @@
         },
         {
           "n": 22,
-          "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(T, db.Who, db.Store) -> db.Access): applied to every read and write, for live queries, endpoints, jobs and webhooks; a row the caller may not read is never returned; an outsider's search and my_projects in crewboard/Logic/logic_test.jet return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_guards_every_read_and_write`.",
+          "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(db.Op, db.Who, db.Store) -> Bool), applied to every read and write for live queries, endpoints, jobs and webhooks. A read is judged on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the store before the write. A row the caller may not read is never returned. A Member's update of its own member row to Owner is refused, create_project makes the caller its owner, and an outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:49.246Z"
+          "at": "2026-11-13T18:17:30.527Z"
         },
         {
           "n": 23,
-          "text": "A client-made UUIDv7 ID lets an offline create open its row at once; Table.add refuses a taken key with DBError.Exists and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_app/offline_create_with_client_id`.",
+          "text": "A client-made UUIDv7 ID lets an offline create open its row at once. An ID type's decoder accepts only UUIDv7 text (422 otherwise; a test sends \"t1\"). Table.add meeting a taken key answers DBError.Exists when the caller can read that row and Denied when it cannot, and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_app/offline_create_with_client_id`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T17:08:50.204Z"
+          "at": "2026-11-13T18:17:31.452Z"
         },
         {
           "n": 24,
@@ -40886,6 +40886,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T17:08:51.165Z"
+        },
+        {
+          "n": 25,
+          "text": "app.presence counts only accounts whose last read of that screen passed its policies: a refused reader is not counted. Proof: `jet test Compiler --profile cases --filter web_app/presence_counts_only_admitted_readers`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:32.389Z"
+        },
+        {
+          "n": 26,
+          "text": "A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app's notice list, kept until dismissed. Edits rebased on it replay, and each is judged on its own checks with its own notice. Proof: `jet test Compiler --profile cases --filter web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:33.444Z"
         }
       ],
       "refs": [
@@ -40910,12 +40928,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T17:08:51.165Z",
+      "updated": "2026-11-13T18:17:33.444Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 24
+      "criteriaLastN": 26
     },
     {
       "id": "c0o8f1p4",
@@ -82948,6 +82966,15 @@
           "verifiedBy": null,
           "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/web_app_graph/query_graph_facts_keep_explicit_key_and_dependency_identity.case PASS. This row is the proof the precut audit named for this criterion.",
           "at": "2026-11-07T03:48:03.541Z"
+        },
+        {
+          "n": 7,
+          "text": "A create with a client-made ID is predicted. A prediction skips app.enqueue, app.notify, app.mail and policies, and the server's answer replaces it. Proof: `jet test Compiler --profile cases --filter web_app/client_id_create_is_predicted`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:34.419Z"
         }
       ],
       "refs": [],
@@ -82961,9 +82988,9 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:32.073Z",
-      "updated": "2026-11-09T20:17:25.214Z",
+      "updated": "2026-11-13T18:17:34.419Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 7
     },
     {
       "id": "c0tjjr66",
@@ -97309,6 +97336,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T17:08:53.387Z"
+        },
+        {
+          "n": 4,
+          "text": "A signing-key method that returns None makes the delivery answer 401; it never skips the check. The key: string must name an #App.SigningKey method of the same service, or the build fails with a registered diagnostic. Proof: `jet test Compiler --profile cases --filter web_app/webhook_without_a_key_answers_401`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T18:17:35.428Z"
         }
       ],
       "refs": [],
@@ -97319,9 +97355,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:31.447Z",
-      "updated": "2026-11-13T17:08:53.387Z",
+      "updated": "2026-11-13T18:17:35.428Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c00xuadc",
@@ -203983,6 +204019,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:17:35.428Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0voqhky",
+      "note": "#4 A signing-key method that returns None makes the delivery an"
+    },
+    {
+      "at": "2026-11-13T18:17:34.419Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0manzdq",
+      "note": "#7 A create with a client-made ID is predicted. A prediction sk"
+    },
+    {
+      "at": "2026-11-13T18:17:33.444Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#26 A refused queued write whose screen is gone, or which is ref"
+    },
+    {
+      "at": "2026-11-13T18:17:32.389Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ttcd0k",
+      "note": "#25 app.presence counts only accounts whose last read of that sc"
+    },
+    {
+      "at": "2026-11-13T18:17:31.452Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#23: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 7); was: A client-made UUIDv7 ID lets an offline create open its row at once; Table.add refuses a taken key with DBError.Exists and the queue reports it. Proof: `jet test Compiler --profile cases --filter web_"
+    },
+    {
+      "at": "2026-11-13T18:17:30.527Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#22: #6792 r4 (G12Docs-webshape-r4, closing round-3 item 1, 2, 21); was: Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(T, db.Who, db.Store) -> db.Access): applied to every read and write, for live queries, endpoints, jobs and webhooks; a row the caller may not re"
+    },
     {
       "at": "2026-11-13T17:58:34.786Z",
       "by": "Main",
