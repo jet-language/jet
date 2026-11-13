@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6792,
-    "rev": 101488,
+    "rev": 101490,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91217,7 +91217,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c5 split (G10Safe-1, 2026-11-13): Linux lease, copy and tmpfs paths are built and proved on ext4 and tmpfs. Still open: the clone path needs a btrfs or XFS host (none on the dev machine), the Windows deny-write and APFS/ReFS clone paths, and the #Unsafe raw map (S3)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -91230,12 +91236,12 @@
         },
         {
           "n": 2,
-          "text": "A case truncates a mapped file from another process during safe access; the program gets a typed error or a registered fault with its diagnostic code, what/why/fix text and UI snapshot, never an unexplained SIGBUS exit, on every applicable tier.",
+          "text": "A case truncates and rewrites a mapped file from another process during safe access. The program keeps reading the bytes it mapped (including past the new end) with no SIGBUS or other fault and no change visible through the map, on every applicable tier, as D-MMAP-STABLE1=A requires.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-08T21:18:50.483Z"
+          "at": "2026-11-13T13:25:26.949Z"
         },
         {
           "n": 4,
@@ -91264,7 +91270,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-13T12:16:07.978Z",
+      "updated": "2026-11-13T13:25:27.857Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -200731,6 +200737,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T13:25:27.857Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vwlomv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T13:25:26.949Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0vwlomv",
+      "note": "#2: D-MMAP-STABLE1=A (ratified 2026-11-13) makes a mapping keep its bytes when another process writes or truncates the file, so no typed error or fault can arise; the criterion now states the ratified meaning.; was: A case truncates a mapped file from another process during safe access; the program gets a typed error or a registered fault with its diagnostic code, what/why/fix text and UI snapshot, never an unexp"
+    },
     {
       "at": "2026-11-13T13:24:51.367Z",
       "by": "Main",
