@@ -546,7 +546,16 @@ IRLambdaJob: struct {
 // One closure capture: the name the body reads, its byte offset in the box,
 // its value type row, and whether the box holds its address (a capture the
 // body writes) instead of its value.
-IRCaptureSlot: struct { name: String, offset: Int, row: Int, by_ref: Bool }
+IRCaptureSlot: struct {
+    name: String
+    offset: Int
+    row: Int
+    by_ref: Bool
+    // The row the box owns and drops when it isn't `row`, the row the body
+    // reads: a window the lambda keeps past its owner is held as a List of
+    // its elements, read through the same header.
+    owned_row: Int{-1}
+}
 
 ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
     owned_sources: sources.move()

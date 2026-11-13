@@ -1,0 +1,21 @@
+// An escaping lambda that captures a list window of a local that dies when
+// `make` returns: the lambda owns a copy of the window's elements, so it
+// still reads them after the list is gone and its memory is reused.
+make: fn() -> fn() -> String {
+    data := [Int]{}
+    loop i in 0..<4000 {
+        data.push(i)
+    }
+    w: data[1000..<3000]
+    () -> "{w.len()}|{w[0] == 1000 && w[1999] == 2999}|"
+}
+
+run: fn() {
+    f: make()
+    junk := [Int]{}
+    loop i in 0..<100000 {
+        junk.push(-1)
+    }
+    print(f())
+    print(junk.len())
+}

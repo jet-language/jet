@@ -7035,7 +7035,16 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
         by_ref: (!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name))
         value_row: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
         size: if by_ref -> 8 else -> ir_align8(m.types[value_row].size)
-        captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref})
+        owned_row := -1
+        // A window sema materialized for the lambda (it outlives the window's
+        // owner) is held as a List of the window's elements.
+        if !by_ref && (lambda.materialized_captures.contains(capture.source) || lambda.materialized_captures.contains(capture.local.name)) {
+            if ir_view_element(m.types[value_row].ty) == .Val(element) {
+                owned: Type.List{element: element}
+                owned_row = ir_value_type(m, p, owned) ?? return ir_type_fail(b, span, owned)
+            }
+        }
+        captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref, owned_row: owned_row})
         offset += size
     }
     boxed: ir_closure_box(m, b, row, offset, captures)
@@ -7048,9 +7057,15 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
             ir_emit(b.f, IROp.Store, -1, boxed, slot.offset, address, b.line)
         } else {
             // A capture copies the variable, which stays its own owner;
-            // the box owns the copy.
+            // the box owns the copy: a materialized window's own List of
+            // its elements, read through the window's header.
             captured: ir_read_binding(m, b, binding)
-            kept: if m.types[b.f.slot_type[captured]].kind == .Aggregate -> ir_copy_value(m, p, b, captured, span) else -> captured
+            kept: if {
+                slot.owned_row >= 0 -> ir_lambda_owned_window(m, p, b, captured, slot.owned_row, span)
+                m.types[b.f.slot_type[captured]].kind == .Aggregate -> ir_copy_value(m, p, b, captured, span)
+                else -> captured
+            }
+            if ir_failed(b) -> return -1
             ir_store_at(m, p, b, boxed, slot.offset, kept)
         }
     }
@@ -7067,6 +7082,16 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
     ir_emit(b.f, IROp.FunctionAddress, code, id, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, boxed, 8, code, b.line)
     boxed
+}
+
+// The window in `window` copied into a fresh List of row `list_row`: the
+// window's header read as the List's, its elements cloned.
+ir_lambda_owned_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, window: Int, list_row: Int, span: Span) -> Int Never! {
+    element_row: ir_list_element_of(m, p, list_row) ?? return ir_fail_slot(b, span, "materialized window of {ir_type_name(m.types[list_row].ty)}")
+    if m.types[b.f.slot_type[window]].kind != m.types[list_row].kind || m.types[b.f.slot_type[window]].size != m.types[list_row].size -> return ir_fail_slot(b, span, "window materialized as {ir_type_name(m.types[list_row].ty)}")
+    source: ir_temp(m, b, list_row)
+    ir_emit(b.f, IROp.Copy, source, window, -1, -1, b.line)
+    ir_list_clone(m, p, b, source, element_row, list_row)
 }
 
 // Moves the variable `name` into a frame cell and rebinds it to the cell's

@@ -1,0 +1,16 @@
+# A lambda that outlives the list a captured window reads holds its own copy
+# of the window's elements, built when the lambda is made and freed with it,
+# so it reads the elements after the list dies on every tier.
+fixture: an_escaping_lambda_owns_the_window_it_captures.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "2000|true|\n100000\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "2000|true|\n100000\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "2000|true|\n100000\n"

@@ -147,9 +147,10 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
     owned := [IRCaptureSlot]{}
     key := "#closure.release<{ir_align8(bytes)}"
     loop capture in captures {
-        if capture.by_ref || !ir_glue_drops(m, capture.row) -> next
-        key = "{key}|{capture.offset}:{ir_row_key(m, capture.row)}"
-        owned.push(capture.copy())
+        dropped: if capture.owned_row >= 0 -> capture.owned_row else -> capture.row
+        if capture.by_ref || !ir_glue_drops(m, dropped) -> next
+        key = "{key}|{capture.offset}:{ir_row_key(m, dropped)}"
+        owned.push(IRCaptureSlot{name: capture.name.copy(), offset: capture.offset, row: dropped, by_ref: false})
     }
     key = "{key}>"
     known: name_rows_value(m.function_rows, key) ?? -1
