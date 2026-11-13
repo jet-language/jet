@@ -35,6 +35,12 @@ own, `web.BadPath` for a library's. The current registered code shapes are `E`
 or `L` followed by four digits, `JT` followed by four digits for
 source-migration reports, and `E-WORD-WORD` with two or more uppercase words. A
 library diagnostic without a `code` constant uses its type path as its code.
+The `L` prefix marks a lint: every new row with `severity: .Lint` takes an `L`
+code, and no new row of any other severity does. A code registered before
+this law keeps its letter even where the two disagree, because codes are never
+renumbered. `W0410` (`jet.RandomCryptoContext`, reserved) is the one code with
+a third letter: a frozen historical exception that no new code follows
+(D-REPORT-SEV1).
 Codes are stable identities: do not reuse or renumber one. Lexer, parser, and
 semantic checks raise the row that owns the violated rule; a library rule
 raises its own type with `reject(Value)` from a marker's `expand` body, which
