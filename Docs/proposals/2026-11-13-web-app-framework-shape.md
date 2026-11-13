@@ -11,14 +11,16 @@ invitation's expiry; each push and mail a job sends has its own key; an
 upload's policy check runs before the body is read and spools only after
 it; the text names which policies join; a replayed edit keeps its version;
 and a failed background run reaches the app's notice list (section 0).
-Revision 4 answered the 28 items of round three.
+Round five found C3 holding and asked for five text fixes, which this text
+makes (0.1). Revision 4 answered the 28 items of round three.
 
 - Card: #6792. The proposal answers criteria c1 and c2, c6 (native and web
   needs), c7 (styling) and c8 (Crewboard as a probe, with a comparison
   matrix). c3 is the adversarial review. Round one failed C3, C5 and C6;
   round two failed C3 and c8 and found c7 partly met; round three failed C3
-  and found c8 partly met; round four failed C3 narrowly, on eight gaps.
-  Section 0 answers each round-four gap, then each earlier item.
+  and found c8 partly met; round four failed C3 narrowly, on eight gaps;
+  round five passed, with five text fixes. Section 0 answers round five's
+  fixes, then each round-four gap, then each earlier item.
 - Base: dev `2fcd2d5247`.
 - Builds on these ratified decisions: D-ONEAPP-MODEL1, D-ONEAPP-RENDER1,
   D-ONEAPP-WEBOUT1, D-VIEW-SET1, D-PORTABLE-WEB1, D-ROUTE-ONE1,
@@ -38,7 +40,7 @@ Revision 4 answered the 28 items of round three.
 ## Contents
 
 - [How to read the code](#how-to-read-the-code)
-- [0. What changed after the round-four review](#0-what-changed-after-the-round-four-review)
+- [0. What changed after the reviews](#0-what-changed-after-the-reviews)
 - [1. The shape in one page](#1-the-shape-in-one-page)
 - [2. Today's code versus the shape](#2-todays-code-versus-the-shape)
 - [3. Crewboard: the business app, used as a probe](#3-crewboard-the-business-app-used-as-a-probe)
@@ -73,14 +75,28 @@ There are two kinds of code block.
 Every name the proposal adds is listed in section 10. Each one is
 owner-gated, and the ballot approves them together with the shape.
 
-## 0. What changed after the round-four review
+## 0. What changed after the reviews
 
-### 0.1 Round four
+### 0.1 Round five
+
+Round five (`Docs/audits/2026-11-13-web-app-framework-shape-review.md`,
+R5-4) found C3 holding and listed five gaps, each a text fix. This text
+makes each one.
+
+| # | Gap | Now | Where |
+|---|---|---|---|
+| 1 | FCM keeps at most four collapse keys per device, and a browser push had no key | FCM pushes go as non-collapsible messages, which FCM keeps up to 100 of per device, with the key in `android.notification.tag` [FCM-ANDROID], so a shown push with the same tag is replaced and none is dropped. A browser push carries the key as the Web Push `Topic` header [RFC8030] and as the notification's `tag` [MDN-NOTIF-TAG]. The key goes out as a fixed-length hash of the run's key, the recipient and the target, which fits APNs's 64 bytes and Topic's 32 characters. Main has edited #6825 c1 to match. | 3.2, 4.14, 10 (`app.notify`) |
+| 2 | Mail does not drop a repeat | 3.2 now says what 4.14 says: a receiver that drops a repeated Message-ID shows the mail once. 4.14 names the cost: after a crash a run can mail twice, and most mail clients show both copies. | 3.2, 4.14 |
+| 3 | A memo that outlives a write | A memoized policy result is dropped when the transaction writes a table the policy read, so a later write in the same transaction is never judged on a stale answer. | 3.2, 4.2, 9, 10 (`db.Table.guard`) |
+| 4 | The upload test proved less than its name | It is renamed "may_attach refuses an outsider": it shows the check refuses an outsider. That the framework runs the check before it reads the body is #6813 c3's own proof. A body sent without `Content-Length` cannot be refused before it is read, so the spool counts bytes and stops at `max_upload` with 413. | 3.2, 5.2.3 |
+| 5 | No test for a lapsed invitation | "a lapsed invitation adds no member" stores an invitation that lapsed yesterday; `accept_invite` answers `NotFound` and a direct `members.add` answers `Denied`. | 3.2 |
+
+### 0.2 Round four
 
 Round four (`Docs/audits/2026-11-13-web-app-framework-shape-review.md`,
 R4-5) found 23 of the 28 round-three items closed and listed eight gaps.
 This revision closes each one in the files and the text. Each criterion it
-needs is in 0.2.
+needs is in 0.3.
 
 | # | Gap | Revision 5 | Where |
 |---|---|---|---|
@@ -93,7 +109,7 @@ needs is in 0.2.
 | 7 | A replayed rebased edit (item 15) | It keeps the row version it was made with, so after Ben's change it gets `Conflict` and its own notice. | 3.7 |
 | 8 | The batch path (item 9), nested calls, the background run (R4-3), A.3 | Decoding a list runs each element's `validate` and names the element (`tasks[3].title`); `import_tasks` gives `check_assignee`'s refusal the same path through `in_row` (test: "an import names the refused row"). A method called from another method, an endpoint included, joins its transaction. A failed `native.background` run joins the app's notice list as well as the log, so CL7 stands as written. A.3 and 3.8 count every file as written, from a fresh run; A.3 says why the checked `model.jet` is 16 lines shorter (TR4 drops its marker lines), which is the 224 against 240 that round four found. | 3.2, 4.2, 4.3, 4.10, 8.3, A.3 |
 
-### 0.2 Criteria revision 5 asks for
+### 0.3 Criteria revision 5 asks for
 
 Main has filed the first two. The rest are edits this revision asks Main to
 make; each row gives the text.
@@ -108,13 +124,13 @@ make; each row gives the text.
 | #6826 c5 (edit) | Add: the members policy refuses a member insert from a lapsed invitation. |
 | #6445 c7 (edit) | `native.background`'s failed run joins the app's notice list, kept until dismissed, as well as the log (was "native.background logs it"). |
 
-### 0.3 Round three
+### 0.4 Round three
 
 Round three (`Docs/audits/2026-11-13-web-app-framework-shape-review.md`,
 R3-6) listed 28 items. Revision 4 answered each one in the files and the
 text; none is left as a promise. Each "(card)" item is a criterion that Main
-files or edits (0.4); the row names it. Round four found items 4, 11, 12, 13
-and 15 partly closed; 0.1 finishes them.
+files or edits (0.5); the row names it. Round four found items 4, 11, 12, 13
+and 15 partly closed; 0.2 finishes them.
 
 | # | Item | Revision 4 | Where |
 |---|---|---|---|
@@ -147,9 +163,9 @@ and 15 partly closed; 0.1 finishes them.
 The claims that failed their own next tests are retested in 8.3: CL2 by
 item 8, CL4 by item 16 and CL7 by item 14.
 
-### 0.4 Criteria revision 4 asked for
+### 0.5 Criteria revision 4 asked for
 
-Main has filed these on Tower; each row names the criterion. 0.2 edits
+Main has filed these on Tower; each row names the criterion. 0.3 edits
 #3709 c22, #6813 c5, #6825 c1, #6826 c5 and #6445 c7 again.
 
 | Card | New or changed criterion |
@@ -168,7 +184,7 @@ Main has filed these on Tower; each row names the criterion. 0.2 edits
 | #6445 c7 (edit) | Add the destinations of the tray and menu bar builders, `native.background`'s `run`, `native.lifecycle`'s `on_resume` and `native.drop_files`'s `on_drop`. |
 | #6445 c8 | `app.live`'s closure must be one call of an `app.Remote` endpoint with codable arguments, so the subscription is keyed by method and arguments. |
 
-### 0.5 Round two
+### 0.6 Round two
 
 Round one found 32 gaps. Round two found 25 of them closed and 7 partly
 closed, and folded every residual into its own list of 28 items, which
@@ -886,9 +902,10 @@ use {
 // member_policy's read look up the caller's member row by key, so the
 // database joins them into the query. invite_policy (it asks
 // auth.verified_email) and member_policy's insert (first_owner counts the
-// members, invited reads the invitation) run per row, memoized per key.
-// `jet inspect choices` lists each policy, how it runs, and each place that
-// runs as System.
+// members, invited reads the invitation) run per row, memoized per key; a
+// memoized result is dropped when the transaction writes a table the policy
+// read. `jet inspect choices` lists each policy, how it runs, and each place
+// that runs as System.
 
 // Members read a project's tasks and files; owners and members write them.
 task_policy: fn(row: Task, op: db.Op, who: db.Who, store: db.Store) -[DB.Read]> Bool db.DBError! {
@@ -1052,8 +1069,9 @@ Each table names its key type: `db.Table<TaskID, Task>` (#6822).
   member row by key, so the database joins them into the query and the
   count stays two; `limit(50)` counts only rows the policy passed. The
   invites policy and the members policy's insert are not key lookups; they
-  run per row, memoized, on the few rows an invitation or a join touches
-  (4.2).
+  run per row, memoized, on the few rows an invitation or a join touches.
+  A memoized result is dropped when the transaction writes a table the
+  policy read, so a later write is never judged on a stale answer (4.2).
 - **Validation.** Each endpoint takes its form's type: `create_project`
   takes a `ProjectDraft`, `invite` an `InviteDraft`, `import_tasks` a
   `TaskBatch`, all in `model.jet`. The decoder runs each type's `validate`
@@ -1066,10 +1084,12 @@ Each table names its key type: `db.Table<TaskID, Task>` (#6822).
   same refusal names its row, `tasks[3].assignee` (`in_row`).
 - **Files.** `attach` names its check, `#App.UploadCheck(method:
   "may_attach")`. The task ID travels in the URL, so after the session
-  check and the size cap (413) the framework runs `may_attach` as the
-  caller, under the row policies, before it reads the body: a caller who
-  cannot edit the task gets 403 and the body is never read (#6813 c3). Only
-  then does the framework spool the body to a staging file, before
+  check and the size cap (413 when `Content-Length` is over `max_upload`)
+  the framework runs `may_attach` as the caller, under the row policies,
+  before it reads the body: a caller who cannot edit the task gets 403 and
+  the body is never read (#6813 c3). Only then does the framework spool the
+  body to a staging file, counting its bytes, so a body sent without
+  `Content-Length` stops at `max_upload` with 413. It spools before
   `attach`'s transaction starts, so the transaction never waits on the
   network and a retry reads the same bytes (#6813 c5). In the transaction
   `attach` checks the role again, since it may have changed meanwhile. Then
@@ -1109,10 +1129,11 @@ Each table names its key type: `db.Table<TaskID, Task>` (#6822).
   row holds the job's name and bytes, not a closure. A job runs at least
   once: a run that crashes after its push but before it is recorded runs
   again. Each push and mail a run sends has its own key, made from the
-  run's key, the recipient and the `open:` or `link:` value; the push and
-  mail transports drop a repeat by it, and two different pushes never share
-  one. `tell_assignee` pushes to a new assignee and
-  `send_invite` mails the invitation. `#App.Every(cron:)` runs
+  run's key, the recipient and the `open:` or `link:` value. A repeated
+  push replaces the earlier one with the same key; a repeated mail shows
+  once only at a receiver that drops a repeated Message-ID (4.14). Two
+  different sends never share a key. `tell_assignee` pushes to a new
+  assignee and `send_invite` mails the invitation. `#App.Every(cron:)` runs
   `remind_due_today` each morning and `drop_expired_invites` each night
   (#6825 c1, c5).
 - **The webhook.** `on_issue_event` is reachable only by GitHub. The
@@ -1612,8 +1633,8 @@ in_row: fn(error: TaskError, index: Int) -> TaskError Never! {
 
 The tests run the rules on plain values and the service on an in-memory
 database. They check a stale edit, the assignee rule, that an outsider sees
-nothing through `search` or `my_projects`, and that the server-only methods
-are not endpoints.
+nothing through `search` or `my_projects`, that a lapsed invitation adds no
+member, and that the server-only methods are not endpoints.
 
 `crewboard/Logic/logic_test.jet`
 
@@ -1623,6 +1644,7 @@ are not endpoints.
 use {
     app
     auth
+    time: core.time
 }
 
 // A fixed UUIDv7, as every ID is (model.jet).
@@ -1827,8 +1849,9 @@ join: fn(crew: Crew, owner: auth.AccountID, member: auth.AccountID) Never! {
     })
 }
 
-// An upload's check runs before the body is read: an outsider is refused.
-#Test("an outsider's upload is refused before it is read") {
+// The upload check refuses an outsider. That the framework runs it before
+// it reads the body is #6813 c3's proof, on the server.
+#Test("may_attach refuses an outsider") {
     crew: open_crew(":memory:") ?? panic("open")
     owner: app.test_account("ada@example.com")
     outsider: app.test_account("eve@example.com")
@@ -1838,6 +1861,28 @@ join: fn(crew: Crew, owner: auth.AccountID, member: auth.AccountID) Never! {
     app.as_caller(outsider, fn() {
         refused: if crew.may_attach(id) == {
             .Err(.NotFound) | .Err(.NotAllowed) -> true
+            .Err(_) | .Ok(_) -> false
+        }
+        assert(refused)
+    })
+}
+
+// The members policy checks an invitation's date, so a lapsed invitation
+// adds no member, through accept_invite or a direct insert.
+#Test("a lapsed invitation adds no member") {
+    crew: open_crew(":memory:") ?? panic("open")
+    owner: app.test_account("ada@example.com")
+    member: app.test_account("bob@example.com")
+    seed(crew, owner)
+    crew.invites.put(Invite{project: launch(), project_name: "Launch", email: "bob@example.com", role: Role.Member, expires: time.today().add_days(-1)}) ?? panic("invite")
+    app.as_caller(member, fn() {
+        lapsed: if crew.accept_invite(launch()) == {
+            .Err(.NotFound) -> true
+            .Err(_) | .Ok(_) -> false
+        }
+        assert(lapsed)
+        refused: if crew.members.add(Member{project: launch(), account: app.caller(), name: "Bob", role: Role.Member}) == {
+            .Err(.Denied) -> true
             .Err(_) | .Ok(_) -> false
         }
         assert(refused)
@@ -2702,13 +2747,13 @@ included.
 
 | Package | Used by | Holds | Code lines | Test lines |
 |---|---|---|---|---|
-| Logic | every target | the types, the rules and the `Crew` service | 886 | 217 |
+| Logic | every target | the types, the rules and the `Crew` service | 887 | 240 |
 | Screens | every target | the graph, the screens and the theme | 469 | 49 |
 | Web | the web server | opens the database and the account store, mounts the service, sets mail | 24 | 0 |
 | Desktop | desktop | menus, a window per task, the CSV export, the offline queue | 78 | 0 |
 | Phone | phones | tabs, app links, push, the offline queue | 25 | 0 |
 | Manifests | — | the root and five package manifests | 86 | — |
-| Total | | | 1568 | 266 |
+| Total | | | 1569 | 289 |
 
 The logic and the screens are shared by every target. What is left in each
 entry is platform work: mounting the service, accounts, mail, menus, tabs,
@@ -2905,8 +2950,11 @@ names the key function (#6822). On top of that:
   within the transaction, and `jet inspect choices` names it with its cost.
   In Crewboard those are `invite_policy`, which asks `auth.verified_email`,
   and `member_policy` for an insert, which counts the project's members and
-  reads its invitation; both judge a handful of rows per call. #6827 c2 and
-  c3 count the policies' statements too.
+  reads its invitation; both judge a handful of rows per call. A memoized
+  result is dropped when the transaction writes a table the policy read, so
+  a later write in the same transaction is never judged on a stale answer.
+  Each policy reads one or two tables, so in the common case nothing is
+  dropped. #6827 c2 and c3 count the policies' statements too.
 - **Transactions.** Each method that writes is one serializable transaction,
   retried when it loses a race (#6445 c5). A version check and the write
   after it cannot be split by another writer. A method called from another
@@ -3496,16 +3544,28 @@ the server (#6825).
   Queue. Each queued call has a key, and so does each scheduled run (the
   job's name and the time it was due). Each push and each mail a run sends
   has its own key, made from the run's key, the recipient and the `open:` or
-  `link:` value (#6825 c1). `app.notify` passes it to APNs as
-  `apns-collapse-id` [APNS-REQ] and to FCM as the collapse key
-  [FCM-COLLAPSE], and `app.mail` uses it as the Message-ID. So a repeated
-  run replaces each push it sent before, and a receiver that drops a
-  repeated Message-ID shows the mail once. `remind_due_today`'s pushes about
-  three tasks due today have three keys and stay three pushes. A key made
-  from the send's position in the run would not do: a re-run whose query
-  returns another set of tasks would give a push the key of a different
-  one. A job that writes rows is a transaction like any method, so a repeat
-  finds its own result (`unassign` finds no task left to clear).
+  `link:` value (#6825 c1). The key goes out as a fixed-length hash of
+  those three, since APNs allows at most 64 bytes [APNS-REQ] and a Web Push
+  topic at most 32 characters [RFC8030]. `app.notify` passes it to APNs as
+  `apns-collapse-id`. FCM keeps at most four collapse keys per device
+  [FCM-COLLAPSE], so a push to Android goes as a non-collapsible message
+  with the key in `android.notification.tag` [FCM-ANDROID], which replaces
+  a shown notification with the same tag. A browser push carries the key as
+  the `Topic` header, which replaces a push still waiting at the push
+  service, and as the notification's `tag` [MDN-NOTIF-TAG]. So a repeated
+  run replaces each push it sent before, and no push is dropped.
+  `remind_due_today`'s pushes about three tasks due today have three keys
+  and stay three pushes. A key made from the send's position in the run
+  would not do: a re-run whose query returns another set of tasks would give
+  a push the key of a different one. A job that writes rows is a
+  transaction like any method, so a repeat finds its own result (`unassign`
+  finds no task left to clear).
+- **The cost for mail.** `app.mail` uses the key as the Message-ID, and
+  mail transports do not drop a repeat by it: only a receiver that drops a
+  repeated Message-ID shows a re-run's mail once. After a crash between the
+  send and the record, a run can mail twice, and most mail clients show
+  both copies. Recording each mail key in the outbox before the send would
+  narrow the repeat to a crash between the send and that record.
 - **Retries.** `#App.Job(retries: 5)` retries a failed run with backoff. A run
   that fails five times stays in the job table with its error.
 - **Schedules.** `#App.Every(cron: "0 8 * * *")` runs `remind_due_today` each
@@ -4105,7 +4165,10 @@ the attach button and the download list in `Screens/task.jet` (3.3). Round
 
 The framework now closes each one, in this order (#6813 c1–c4):
 
-1. **Size.** A body over the api's `max_upload` gets 413 before it is read.
+1. **Size.** A body whose `Content-Length` is over the api's `max_upload`
+   gets 413 before it is read. A body sent without `Content-Length` cannot
+   be refused before it is read, so the spool (step 3) counts its bytes and
+   stops at `max_upload` with 413.
 2. **Policy, before the body.** `attach` is marked
    `#App.UploadCheck(method: "may_attach")`. The task ID travels in the URL,
    so after the session check the framework runs `may_attach(task)` as the
@@ -5505,7 +5568,7 @@ CL5 waits on #6557.
 | Live queries | one subscription per screen; a result is shared only by callers it does not depend on, so Crewboard's policy-guarded queries run once per subscriber per write that meets them (4.9, #3709 c24); at most 50 ms between a commit and the push, with changes inside that window coalesced; a cap on live queries per session; a Postgres LISTEN/NOTIFY broker across server processes; table-level invalidation as the fallback when a footprint is too wide | #3709 |
 | Prediction | the client carries the code of every eligible method; a method that is not eligible costs nothing | #3709 |
 | Typed tables | a new Core surface, and the codec derive for ID types | #6822, #6819 |
-| Row policies | a policy is asked on every read and write of its table. A policy whose reads are key lookups joins into the query, so a list read stays one statement; any other policy runs once per row, memoized per key in the transaction, and `jet inspect choices` shows which. An update pays two checks, on the stored row and the new one | #3709 c21, c22, #6827 |
+| Row policies | a policy is asked on every read and write of its table. A policy whose reads are key lookups joins into the query, so a list read stays one statement; any other policy runs once per row, memoized per key in the transaction until the transaction writes a table the policy read, and `jet inspect choices` shows which. An update pays two checks, on the stored row and the new one | #3709 c21, c22, #6827 |
 | Transactions | every write method is a serializable transaction; a lost race retries the whole method | #6445 c5 |
 | Jobs and mail | an outbox table written in each queuing transaction, a runner on each server, and one scheduler lease for `#App.Every` | #6825, #6826 |
 | Accounts | confirmation, reset, passkeys, two-factor codes, a sign-in rate limit, invitations that lapse, and member removal, to build and keep secure | #6826 |
@@ -5861,10 +5924,12 @@ enqueue: fn<E>(job: fn() E!) Never! { panic("stub") }
 // Server-only: sends a push notification to every device the account
 // registered. `open` is the screen state a tap opens; it is a route of the
 // one route table, so every target has it. Inside a job or a scheduled run,
-// each push has its own key, made from the run's key, `to` and `open`. It
-// goes to APNs as `apns-collapse-id` and to FCM as the collapse key, so a
-// repeated run replaces each push it sent before, and two different pushes
-// from one run never replace each other.
+// each push has its own key, made from the run's key, `to` and `open`, and
+// sent as a fixed-length hash. It goes to APNs as `apns-collapse-id`, to FCM
+// as `android.notification.tag` on a non-collapsible message, and to Web
+// Push as the `Topic` header and the notification's `tag`, so a repeated run
+// replaces each push it sent before, and two different pushes from one run
+// never replace each other.
 notify: fn<V>(to: auth.AccountID, title: String, body: String, open: V) -[Net]> Never! { panic("stub") }
 
 // Server-only: sends a mail through the transport the server entry names.
@@ -6485,7 +6550,8 @@ Table: struct<K, T> {
     // Crewboard's is, compiles into the query as a join, so a list read is
     // one statement and `limit` counts only the rows the policy passes.
     // Any other policy runs once per row, memoized per key within the
-    // transaction, and `jet inspect choices` names it.
+    // transaction; a memoized result is dropped when the transaction writes
+    // a table the policy read. `jet inspect choices` names it.
     guard: fn(self, policy: fn(T, Op, Who, Store) -> Bool DBError!) -> Table<K, T> Never! { Table<K, T>{name: self.name} }
 }
 
@@ -6563,6 +6629,7 @@ written.
 | EXPO-ROUTER | [Expo Router: introduction](https://docs.expo.dev/router/introduction/) |
 | EXPO-UPD | [EAS Update](https://docs.expo.dev/eas-update/introduction/) |
 | FASTAPI-BODY | [FastAPI: request body](https://fastapi.tiangolo.com/tutorial/body/) |
+| FCM-ANDROID | [Firebase Cloud Messaging: AndroidNotification](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages#androidnotification) |
 | FCM-COLLAPSE | [Firebase Cloud Messaging: collapsible messages](https://firebase.google.com/docs/cloud-messaging/concept-options#collapsible_and_non-collapsible_messages) |
 | FLUTTER | [Flutter architectural overview](https://docs.flutter.dev/resources/architectural-overview) |
 | FLUTTER-A11Y | [Flutter: accessibility](https://docs.flutter.dev/ui/accessibility) |
@@ -6597,6 +6664,7 @@ written.
 | MDN-FILE | [MDN: file input](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/file) |
 | MDN-FORCED | [MDN: forced-colors](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/forced-colors) |
 | MDN-FSA | [MDN: File System API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API) |
+| MDN-NOTIF-TAG | [MDN: Notification.tag](https://developer.mozilla.org/en-US/docs/Web/API/Notification/tag) |
 | MDN-PUSH | [MDN: Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API) |
 | MDN-PWA | [MDN: making PWAs installable](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable) |
 | MDN-RM | [MDN: prefers-reduced-motion](https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion) |
@@ -6641,6 +6709,7 @@ written.
 | REACT-STREAM | [React: renderToPipeableStream](https://react.dev/reference/react-dom/server/renderToPipeableStream) |
 | REACT-TAINT | [React: taintUniqueValue](https://react.dev/reference/react/experimental_taintUniqueValue) |
 | REP | [Replicache: how it works](https://doc.replicache.dev/concepts/how-it-works) |
+| RFC8030 | [RFC 8030: Generic Event Delivery Using HTTP Push, section 5.4, replacing push messages](https://www.rfc-editor.org/rfc/rfc8030#section-5.4) |
 | RN | [React Native: core and native components](https://reactnative.dev/docs/intro-react-native-components) |
 | RN-A11Y | [React Native: accessibility](https://reactnative.dev/docs/accessibility) |
 | RR-ACT | [React Router: actions](https://reactrouter.com/start/framework/actions) |
@@ -6753,10 +6822,10 @@ and 38 in `Screens`; `Desktop` and the examples have none.
 | `style_bugs/b8_contrast.jet` | 10 | clean |
 | `crewboard/Desktop/desktop.jet` | 78 | clean |
 | `crewboard/Logic/crew.jet` | 431 | clean |
-| `crewboard/Logic/logic_test.jet` | 217 | clean |
+| `crewboard/Logic/logic_test.jet` | 240 | clean |
 | `crewboard/Logic/model.jet` | 244 | clean |
 | `crewboard/Logic/notices.jet` | 23 | clean |
-| `crewboard/Logic/policy.jet` | 116 | clean |
+| `crewboard/Logic/policy.jet` | 117 | clean |
 | `crewboard/Logic/remote_gen.jet` | 27 | clean |
 | `crewboard/Logic/routes.jet` | 30 | clean |
 | `crewboard/Logic/rules.jet` | 42 | clean |
@@ -6840,12 +6909,12 @@ Found while checking these files. Each is filed under #6819.
 ### A.7 Running it again
 
 The kit holds the files above, the stubs, the probes and the scripts. It is
-kept at `$JET_SCRATCH_ROOT/lanes/G12Docs/webshape-r5-kit/`. The kit is a
+kept at `$JET_SCRATCH_ROOT/lanes/G12Docs/webshape-r6-kit/`. The kit is a
 working copy and may be cleaned away; every file it checks is embedded in
 this document verbatim, so the files can be rebuilt from the text.
 
 ```sh
-cd "$JET_SCRATCH_ROOT/lanes/G12Docs/webshape-r5-kit"
+cd "$JET_SCRATCH_ROOT/lanes/G12Docs/webshape-r6-kit"
 node build.mjs                       # writes chk/ and chk/files.txt
 JET_WORKTREE=<dev checkout> JET_SEED=<seed-b15 jet> \
   bash check.sh chk/files.txt run    # one file at a time, 8 GiB cap
