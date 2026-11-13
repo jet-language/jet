@@ -1,21 +1,22 @@
 // Smart Context — `#Context(field: value) { … }`.
-// Expert tier: swaps an ambient field for a block's lexical+dynamic extent, then
-// restores it on exit (return, break, ?, panic). Q2 = CÎ²: restore is per-block.
-// Q1 = A2: an explicit allocator arg at a call site beats the ambient context.
+// Expert tier: `#Context(allocator: a)` takes a `core.mem` allocator for the
+// block. An Arena, `context.scratch` (the task's scratch arena) or a value
+// whose type implements `mem.Allocator` serves the values the block's code
+// makes (Examples/Memory/Allocation/ContextAllocator.jet); an Arena block's
+// end rewinds it. A Bump, Pool or Fixed isn't used by allocation: allocate
+// from it directly by calling it. `arena.alloc(v)` allocates from `arena`
+// in any block.
 use core.mem
 
 run: fn() {
     // Arena declared before the block; it outlives the context scope.
     arena: mem.Arena.new()
-    // Swap the ambient allocator to `arena` for this block only.
     #Context(allocator: arena) {
-        // Inside the block the ambient allocator is `arena`.
-        // Explicit `arena.alloc(v)` still uses `arena` directly (Q1 = A2).
+        // An explicit `arena.alloc(v)` allocates from `arena`.
         x: arena.alloc(10)
         print(x)
     }
-    // Block exit restores the outer ambient (RAII guard dropped).
-    // A pre-block allocation is unaffected.
+    // The arena stays usable after the block.
     y: arena.alloc(20)
     print(y)
     close(arena)

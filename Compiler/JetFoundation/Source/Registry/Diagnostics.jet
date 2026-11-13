@@ -499,6 +499,21 @@ diagnostic_registry_with_source_derived_suggestion: fn(diagnostic: &&Diagnostic,
     updated
 }
 
+// A language change's registered rewrite of source an earlier release
+// accepted. The change defines the new text, so `jet fix` applies it as a
+// behavior-preserving edit, whatever the row grades the diagnostic's own
+// fixes; the row's no-fix reason covers only the other sources of the error.
+diagnostic_registry_with_migration_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+    updated := diagnostic
+    if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
+    if diagnostic_registry_row(updated.code) == None -> panic("updated `{updated.code}` has no generated Source registry row")
+    updated.no_fix_reason = None
+    updated.applicability = Val(DiagnosticFixApplicability.Safe)
+    updated.safety = Val(DiagnosticFixSafety.BehaviorPreserving)
+    updated.edit = Val(edit)
+    updated
+}
+
 diagnostic_registry_with_alternative_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")

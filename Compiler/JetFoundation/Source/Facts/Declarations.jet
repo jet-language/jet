@@ -10,6 +10,15 @@ TEffectSpan: struct {
     held: Bool{false}
 }
 
+// A `#ContextKey` value a `#Memo` function can read (`context.get(key)`):
+// the key constant (its declaration key), the value's type, and whether
+// that type has equality, which keying the memo store on the value needs.
+TEffectContextKey: struct {
+    key: String
+    ty: Type
+    equatable: Bool
+}
+
 TEffectFacts: struct {
     direct: [String]
     solved: [String]
@@ -29,6 +38,13 @@ TEffectFacts: struct {
     // parameter or local (`held`). It is no effect, but a pure function may
     // not reach one.
     module_writes: [TEffectSpan]{[TEffectSpan]{}}
+    // For a `#Memo` function, the task context fields it can read
+    // (`context.<field>`) and the context keys (`context.get(key)`),
+    // JetSema sema_effect_context_reach, in key order: its memo key holds
+    // each one beside the arguments (JetIR BuildMemo.jet). Reading the
+    // context is no effect, so `solved` never shows it.
+    context: [String]{[String]{}}
+    context_keys: [TEffectContextKey]{[TEffectContextKey]{}}
 }
 
 TVisibility: enum {

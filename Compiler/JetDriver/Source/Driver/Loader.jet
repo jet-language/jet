@@ -66,6 +66,10 @@ use {
         name_intern,
         name_table,
         ImportedItem,
+        TextEdit,
+        diagnostic_with_migration_edit,
+        effect_list_entry_removal,
+        effect_root_removed,
     ]
     jet_lexer.[
         STRING_PART_INTERPOLATION,
@@ -108,6 +112,7 @@ use {
         parser_line_starts,
     ]
     jet_sema.[
+        SEMA_CONTEXT_CORE_FIELDS,
         SemaRegistrationImportEdge,
         SemaRegistrationModule,
         SemaSourceOrigin,
@@ -130,6 +135,7 @@ use {
         sema_module_meta_value_reads,
         sema_module_meta_carries,
         sema_module_meta_field_lines,
+        sema_context_field_module,
         sema_unknown_module_alias,
     ]
     jet_pkg_model.[
@@ -366,12 +372,9 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
         return JetDriverParsedAuthorityList{values: None, next_index: list_open_index + 1}
     }
     names := [String]{}
-    item_index := list_open_index + 1
-    loop item_index < list_close {
-        if tokens[item_index].kind == TOKEN_COMMA || tokens[item_index].kind == TOKEN_SEMI || tokens[item_index].kind == TOKEN_LINE_COMMENT || tokens[item_index].kind == TOKEN_BLOCK_COMMENT {
-            item_index += 1
-            next
-        }
+    items: jet_driver_manifest_list_items(source, tokens, list_open_index + 1, list_close)
+    loop position in 0..<items.len() {
+        item_index: items[position]
         item: jet_driver_manifest_field_value(source, tokens, item_index)
         // Layout whitespace goes; a scope argument (`FS.Read("my data/")`) keeps its text.
         written: effect_scope_split(item.text)
@@ -381,7 +384,7 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
         // A positive `Panic` entry is one E0751 at that entry and grants nothing.
         if {
             name.len() == 0 -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
-            sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
+            sema_effect_parse_name(sema_effect_root(name)) == None -> diagnostics.push(jet_driver_authority_unknown_effect(name, span, (loop entry in items -> jet_driver_manifest_item_span(tokens, entry, jet_driver_manifest_field_value(source, tokens, entry).next_index)), position))
             sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
             jet_driver_authority_ffi_library(name) == .Val(ffi_library) -> diagnostics.push(jet_driver_authority_diagnostic(span, ffi_library))
@@ -391,17 +394,39 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
             name.contains("(") && sema_effect_parse_name(name) == None -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
             else -> names.push(name)
         }
-        item_index = item.next_index
-        if {
-            item_index < list_close && (tokens[item_index].kind == TOKEN_COMMA || tokens[item_index].kind == TOKEN_SEMI) -> item_index += 1
-            item_index < list_close -> {
-                diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a comma-separated effect list"))
-                item_index += 1
-            }
-            else -> {}
-        }
+        after: item.next_index
+        if after < list_close && tokens[after].kind != TOKEN_COMMA && tokens[after].kind != TOKEN_SEMI -> diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a comma-separated effect list"))
     }
     JetDriverParsedAuthorityList{values: Val(names), next_index: list_close + 1}
+}
+
+// The first token of each entry of the list whose entries run from
+// `first_index` to `close_index`: a comma or semicolon ends an entry, and a
+// token that follows an entry without one starts no entry.
+jet_driver_manifest_list_items: fn(source: String, tokens: [Token], first_index: Int, close_index: Int) -> [Int] Never! {
+    items := [Int]{}
+    index := first_index
+    loop index < close_index {
+        kind: tokens[index].kind
+        if kind == TOKEN_COMMA || kind == TOKEN_SEMI || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT {
+            index += 1
+            next
+        }
+        items.push(index)
+        index = jet_driver_manifest_field_value(source, tokens, index).next_index
+        if index < close_index -> index += 1
+    }
+    items
+}
+
+// E1221 for an authority list entry that names no effect, the entry at
+// `position` of a list whose entries were written at `sources`. An entry
+// naming a root a language change removed carries the edit that drops it
+// from the list, which `jet fix` applies.
+jet_driver_authority_unknown_effect: fn(name: String, span: Span, sources: [Span], position: Int) -> Diagnostic {
+    diagnostic: jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)")
+    if !effect_root_removed(name) -> return diagnostic
+    diagnostic_with_migration_edit(diagnostic, TextEdit{span: effect_list_entry_removal(sources, position), new_text: ""})
 }
 
 // `allow:`, `deny:` and `grants:` sit directly in the `authority:` record.
@@ -3577,6 +3602,13 @@ JetDriverCoreDemandNames: struct {
     core_segments: [Int]
     // Per BOUNDARY_TYPED_HEADS row, the id of its name.
     typed_heads: [Int]
+    // `context`, the `Context` of `#Context(…)`, and per
+    // SEMA_CONTEXT_CORE_FIELDS row the id of the field's name: `context.logger`
+    // and a `#Context(logger: …)` label read and set core.log's `logger` key,
+    // so that module loads (jet_driver_context_field_spelled).
+    context_name: Int
+    context_marker_name: Int
+    context_fields: [Int]
 }
 
 jet_driver_core_demand_name: fn(tables: TokenTables, text: String) -> Int Never! {
@@ -3618,7 +3650,9 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     }
     typed_heads := [Int]{}
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads}
+    context_fields := [Int]{}
+    loop field in SEMA_CONTEXT_CORE_FIELDS -> context_fields.push(jet_driver_core_demand_name(tables, field))
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
 }
 
 // The words besides its name that demand a bare Core type's module: `url`
@@ -3643,6 +3677,27 @@ jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
     rows[id] = if rows[id] == -1 -> at else -> -2
 }
 
+// Whether the identifier at `index` spells a context field: a read
+// `context.<field>`, or a `<field>:` label of a `#Context(…)` marker
+// (`#Context(deadline: d, logger: h)`).
+jet_driver_context_field_spelled: fn(tokens: [Token], names: JetDriverCoreDemandNames, from: Int, to: Int, index: Int) -> Bool Never! {
+    if index >= from + 2 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.context_name -> return true
+    if index + 1 >= to || tokens[index + 1].kind != TOKEN_COLON -> return false
+    depth := 0
+    at := index - 1
+    loop at >= from {
+        kind: tokens[at].kind
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE {
+            depth += 1
+        } else if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE {
+            if depth == 0 -> return kind == TOKEN_LPAREN && at >= from + 2 && tokens[at - 1].kind == TOKEN_IDENT && name_index(tokens[at - 1].decoded) == names.context_marker_name && tokens[at - 2].kind == TOKEN_HASH
+            depth -= 1
+        }
+        at -= 1
+    }
+    false
+}
+
 // Interpolation tokens share the enclosing lexed source's spelling/literal table.
 jet_driver_collect_core_identifier_demand: fn(tokens: [Token], tables: TokenTables, demand: &JetDriverCoreIdentifierDemand, collect_bare: Bool) Never! {
     names: jet_driver_core_demand_names(tables)
@@ -3657,6 +3712,11 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
         if tokens[index].kind == TOKEN_IDENT {
             name: name_index(tokens[index].decoded)
             if name == names.or_err_name -> demand.option_or_err = true
+            loop (at, field) in names.context_fields {
+                if field != name || !jet_driver_context_field_spelled(tokens, names, from, to, index) -> next
+                module_name: sema_context_field_module(SEMA_CONTEXT_CORE_FIELDS[at]) ?? next
+                if !demand.source_modules.contains(module_name) -> demand.source_modules.push(module_name)
+            }
             if name == names.field_error_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && name_index(tokens[index + 2].decoded) == names.field_error_under_name -> demand.codec_decode = true
             if name == names.decode_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LT -> demand.codec_decode = true
             if name == names.migration_name && index + 2 < to && tokens[index + 1].kind == TOKEN_IDENT && tokens[index + 2].kind == TOKEN_LBRACE -> demand.codec_decode = true

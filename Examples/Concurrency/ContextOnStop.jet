@@ -1,0 +1,70 @@
+package: {
+    name: "context_on_stop"
+    authority: { allow: [IO] }
+}
+
+use dbg: core.debug
+
+// `context.on_stop` is the task's stop handler, a `fn(dbg.Stop)` the
+// runtime calls once at the start of every stop, before it reports and
+// unwinds. Unset it does nothing; `#Context(on_stop: f)` sets it for a
+// region and the tasks spawned there, and nested blocks shadow and restore
+// it. While a handler runs, the enclosing one is current, so a stop inside a
+// handler reaches that one.
+
+kind_name: fn(kind: dbg.StopKind) -> String {
+    if kind == {
+        .Panic -> "panic"
+        .Assert -> "assert"
+        .Contract -> "contract"
+        .Bounds -> "bounds"
+        .Shift -> "shift"
+        .Todo -> "todo"
+    }
+}
+
+show_stop: fn(stop: dbg.Stop) {
+    print("on_stop: {kind_name(stop.kind)}: {stop.message}")
+}
+
+outer_stop: fn(stop: dbg.Stop) {
+    print("outer on_stop: {kind_name(stop.kind)}: {stop.message}")
+}
+
+failing_assert: fn() -> Int {
+    assert(false, "expected condition")
+    1
+}
+
+out_of_bounds: fn(at: Int) -> Int {
+    items: [Int]{1, 2, 3}
+    items[at]
+}
+
+report: fn(&&handle: Task<Int>) {
+    if handle.join() == {
+        .Ok(value) -> { print("task: {value}") }
+        .Err(_) -> { print("task: stopped") }
+    }
+}
+
+run: fn() {
+    quiet: task failing_assert()
+    report(quiet)
+    #Context(on_stop: show_stop) {
+        handler: context.on_stop
+        handler(dbg.Stop{message: "called directly", kind: .Panic})
+        asserting: task failing_assert()
+        report(asserting)
+        indexing: task out_of_bounds(5)
+        report(indexing)
+    }
+    #Context(on_stop: outer_stop) {
+        #Context(on_stop: show_stop) {
+            inner: task failing_assert()
+            report(inner)
+        }
+        outer: task failing_assert()
+        report(outer)
+    }
+}

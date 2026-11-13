@@ -47,8 +47,8 @@ sema_casing_check: fn(name: String, span: Span, category: String, case: SemaName
     }
     fixed: sema_casing_canonical(name, case)
     // The respelling can equal the name (`type_`, `_0`): never suggest
-    // identical text, and name the rule the written name breaks.
-    fix: if sema_casing_underscore_digit(name) -> "rename it to a word: a leading underscore followed by a digit is not a valid binding name" else -> if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
+    // identical text, and name the rule the name breaks.
+    fix: if fixed == name -> "rename it: {sema_casing_unfixable_rule(name)}, so pick another word" else -> "rename it to `{fixed}`"
     diagnostics.push(sema_error(
         "E0357",
         span,
@@ -58,12 +58,16 @@ sema_casing_check: fn(name: String, span: Span, category: String, case: SemaName
     ))
 }
 
-// `_0`, `_12`: a leading underscore followed by a digit.
-sema_casing_underscore_digit: fn(name: String) -> Bool Never! {
-    bytes: name.bytes()
-    bytes.len() >= 2 && bytes[0] == 95 && bytes[1] >= 48 && bytes[1] <= 57
+// The rule a name breaks when no respelling of its case fixes it.
+sema_casing_unfixable_rule: fn(name: String) -> String Never! {
+    body: if name.starts_with("_") -> name.slice(1, name.len()) else -> name
+    if body.len() > 0 && "0123456789".contains(body.slice(0, 1)) {
+        return if name.starts_with("_") -> "a leading `_` followed by a digit isn't a valid name" else -> "a name can't start with a digit"
+    }
+    if name.ends_with("_") -> return "a name can't end with `_`"
+    if name.contains("__") -> return "a name can't hold `__`"
+    "a name needs a letter after its leading `_`"
 }
-
 // E0358: a type-like declaration keeps every lexicon acronym
 // in caps. The edit replaces the whole written name when the span covers it.
 sema_casing_acronyms: fn(name: String, span: Span, diagnostics: &[Diagnostic]) {
@@ -236,10 +240,13 @@ sema_casing_item: fn(item: Item, diagnostics: &[Diagnostic]) {
             // lowercase name has no casing to check.
             output_defaults: definition.ty == (Val(Type.Named{name: "__OutputDefaults"}))
             // Owner ruling (2026-09-30): an immutable module binding is
-            // ALL_CAPS; a mutable one is never ALL_CAPS.
+            // ALL_CAPS; a mutable one is never ALL_CAPS. A `#ContextKey` is
+            // read as `context.get(name)` beside `context.deadline`, so it is
+            // snake_case like a field (ContextKeys.jet).
             if {
                 output_defaults -> {}
                 definition.mutable -> sema_casing_snake(definition.name, definition.name_span, "module variable", diagnostics)
+                sema_context_key_declared(definition) -> sema_casing_snake(definition.name, definition.name_span, "context key", diagnostics)
                 else -> sema_casing_screaming(definition.name, definition.name_span, "constant", diagnostics)
             }
             sema_casing_expr(definition.value, diagnostics)

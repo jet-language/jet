@@ -2158,17 +2158,6 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         parser_sync_stmt(state)
         return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
     }
-    if word == "Context" {
-        loop label in labels {
-            if label == .Val(field) {
-                if field.name != "allocator" && field.name != "logger" && field.name != "deadline" {
-                    parser_add_error_code(state, "E0761", field.span, "`{field.name}` isn't a context field", "the context bundle holds `allocator`, `logger`, and `deadline`", "write `#Context(allocator: …)`, `#Context(logger: …)`, or `#Context(deadline: …)`")
-                    parser_sync_stmt(state)
-                    return Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
-                }
-            }
-        }
-    }
     // A switch-off attribute (`#Off` or `#Off(.Release)`) governs a block or
     // the one statement after it; two on one statement is E0344.
     if word == MARKER_OFF {

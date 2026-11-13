@@ -1,0 +1,8 @@
+Error [jet.UseWhileWriteActive]: `arena` can't be reset here — the `#Context(allocator: arena)` block is still allocating from it
+  --> tests/ui/context_allocator_reset_inside.jet:8:15
+    |
+  8 |         arena.reset()
+    |               ^^^^^
+ Why: The values this block allocated live in `arena` until they leave the block; changing or moving it before the block ends would leave them pointing into gone memory
+ Fix: Change `arena` after the block ends
+More: jet-lang.dev/e/E0204

@@ -14,8 +14,9 @@
 // `irreversible: fn(self) -> Bool` says which effects a `#Transact` rollback
 // can't take back; a family is irreversible when any of its cases is.
 // `Panic`, `Mem`, `Time.Wait` and `Unsafe` are deny-only: a policy may refuse
-// them but never has to grant them. `Context` is never granted either (every
-// program holds it), but a function's row still names it.
+// them but never has to grant them. Reading the task context
+// (`context.deadline`) is no effect: it is an implicit input of every
+// function, as its arguments are.
 
 Net: struct {
     impl Effect {
@@ -118,15 +119,6 @@ Mem: enum {
     Stack
     Gc
 
-    impl Effect {}
-}
-
-// Reading the implicit task context (`context.deadline`, `context.thread`).
-// A read adds it to the function's effect row, so a pure function or a row
-// that leaves it out cannot read the context; every program holds it, so no
-// policy grants it and a policy may deny it (Policy/Authority.jet
-// authority_needs_no_grant).
-Context: struct {
     impl Effect {}
 }
 

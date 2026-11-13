@@ -39,17 +39,6 @@ authority_is_deny_only: fn(right: String) -> Bool Never! {
     root == AUTHORITY_PANIC_ROOT || root == "Mem" || root == AUTHORITY_UNSAFE_ROOT || right == AUTHORITY_TIME_WAIT_LEAF
 }
 
-// Reading the task context (`context.deadline`, `context.get(key)`): a
-// function names it in its row like any effect, and every program holds it,
-// so no application grants it and a policy may still deny it.
-AUTHORITY_CONTEXT_ROOT: "Context"
-
-// Whether no application policy has to grant `right`: a deny-only right or
-// the task context every program holds.
-authority_needs_no_grant: fn(right: String) -> Bool Never! {
-    authority_is_deny_only(right) || authority_root(right) == AUTHORITY_CONTEXT_ROOT
-}
-
 // The roots an application may grant: every root Prelude/Effects.jet declares
 // but the deny-only ones, in vocabulary order.
 authority_grantable_roots: fn() -> [String] Never! {
@@ -267,7 +256,6 @@ authority_effect_action: fn(right: String) -> String Never! {
         "Browser" -> "uses browser APIs"
         "Secret" -> "reads secrets"
         "Mem" -> "allocates memory"
-        "Context" -> "reads the task context"
         "Panic" -> "can stop with a panic"
         "Unsafe" -> "reaches `#Unsafe` code"
         else -> "uses an undeclared authority"

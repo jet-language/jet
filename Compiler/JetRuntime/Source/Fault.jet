@@ -144,3 +144,247 @@ fault_raise: fn(signal: I64) {
     }
     trap_defect_exit(wrapping(I64{128} + signal))
 }
+
+// ---------------------------------------------------------------------------
+// `context.trace` (JetIR BuildTransact.jet ir_context_read): the calling
+// task's Jet frames, innermost first. They come from the same frame-pointer
+// chain and location table (.debug_jetline) that the fault report reads
+// (report.S `walk`, `find` and `line`), in a read-only mapping of this
+// executable's ELF file: the loader's under `jet run` (HOST_AT_IMAGE),
+// else /proc/self/exe. A release image keeps the table when its program
+// reads the trace (JetBackend Image/StaticLink.jet link_trace_lines).
+// The result is text, one `function\tfile\tline\n` line per frame, which
+// core.debug's `__trace_records` turns into SourceLocation records. A frame
+// the table doesn't hold adds no line: the runtime's own, or every frame of
+// an image without a table. A function the table holds with no row for the
+// address gets line 0. As in the report's walk, it stops after 4096 frames
+// or at a link that doesn't ascend by less than 16 MiB.
+#Export(c) jet_rt_context_trace: fn() -> I64 {
+    text: rt_text_builder_with_capacity(I64{0})
+    if (text == I64{0}) -> return I64{0}
+    // The frame walk needs rbp, which no admitted asm leaf reads. As
+    // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
+    // ret`. os_call_address_i64 is an inline leaf, so the stub returns this
+    // function's frame pointer, and that frame's return address is in the
+    // reading function.
+    stub: alloc_map_try(I64{4096})
+    if (stub == I64{0}) -> return text
+    frame := I64{0}
+    #Unsafe("stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call") {
+        os_store_i64(stub, I64{3286796616})
+        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
+    }
+    trace_unmap(stub, I64{4096})
+    if (frame == I64{0}) -> return text
+    loaded: host_getauxval(HOST_AT_IMAGE)
+    image := loaded
+    length := I64{0}
+    if (image == I64{0}) {
+        path: alloc_map_try(I64{4096})
+        if (path == I64{0}) -> return text
+        #Unsafe("path is a fresh private page; the executable is mapped read-only and only read") {
+            // "/proc/self/exe\0", little-endian.
+            os_store_i64(path, I64{7310238724270485551})
+            os_store_i64(wrapping(path + I64{8}), I64{111567768086124})
+            fd: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
+            if (fd >= I64{0}) {
+                size: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
+                if (size > I64{64}) {
+                    mapped: os_syscall_i64(I64{9}, I64{0}, size, I64{1}, I64{2}, fd, I64{0})
+                    if (mapped > I64{0}) {
+                        image = mapped
+                        length = size
+                    }
+                }
+                _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            }
+        }
+        trace_unmap(path, I64{4096})
+    }
+    if (image == I64{0}) -> return text
+    trace_frames(text, image, alloc_check_bias(image), frame)
+    if (length > I64{0}) -> trace_unmap(image, length)
+    text
+}
+
+// Unmap a mapping the trace made: its stub page, its path page or its view
+// of the executable.
+trace_unmap: fn(address: I64, bytes: I64) {
+    #Unsafe("the trace made this mapping and holds no pointer into it past this call") {
+        _ := os_syscall_i64(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// One line per Jet frame of the chain from `start` onto `text`, read from
+// the .debug_jetline section of `image` (its load bias `bias`).
+trace_frames: fn(text: I64, image: I64, bias: I64, start: I64) {
+    table := I64{0}
+    table_end := I64{0}
+    #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
+        offset: os_load_i64(wrapping(image + I64{40}))
+        entry: trace_u16(wrapping(image + I64{58}))
+        count: trace_u16(wrapping(image + I64{60}))
+        names_index: trace_u16(wrapping(image + I64{62}))
+        if (offset > I64{0} && names_index < count) {
+            sections: wrapping(image + offset)
+            names: wrapping(image + os_load_i64(wrapping(wrapping(sections + wrapping(names_index * entry)) + I64{24})))
+            index := I64{0}
+            loop index < count {
+                section: wrapping(sections + wrapping(index * entry))
+                name: wrapping(names + trace_u32(section))
+                // ".debug_jetline\0", little-endian.
+                if (os_load_i64(name) == I64{7664958844667520046} && os_load_i64(wrapping(name + I64{8})).bit_and(I64{72057594037927935}) == I64{111524889523301}) {
+                    table = wrapping(image + os_load_i64(wrapping(section + I64{24})))
+                    table_end = wrapping(table + os_load_i64(wrapping(section + I64{32})))
+                    break
+                }
+                index = wrapping(index + I64{1})
+            }
+        }
+    }
+    if (table == I64{0}) -> return
+    frame := start
+    steps := I64{0}
+    loop frame != (I64{0}) && frame.bit_and(I64{7}) == (I64{0}) && steps < (I64{4096}) {
+        address := I64{0}
+        above := I64{0}
+        #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB") {
+            address = os_load_i64(wrapping(frame + I64{8}))
+            above = os_load_i64(frame)
+        }
+        // The call's own address, at link time.
+        if (address != I64{0}) -> trace_frame(text, table, table_end, wrapping(wrapping(address - I64{1}) - bias))
+        frame = if (above > frame && wrapping(above - frame) < I64{16777216}) -> above else -> I64{0}
+        steps = wrapping(steps + I64{1})
+    }
+}
+
+// The line of the Jet function whose code holds link-time address `pc`,
+// from the table [table, table_end). Its layout is DebugPrune.jet's, and
+// its lookup is report.S `find`. Nothing when no function holds pc.
+trace_frame: fn(text: I64, table: I64, table_end: I64, pc: I64) {
+    block := table
+    loop wrapping(block + I64{20}) <= table_end {
+        end: wrapping(wrapping(block + I64{4}) + trace_u32(block))
+        if (end < wrapping(block + I64{20}) || end > table_end) -> return
+        count: trace_u32(wrapping(block + I64{4}))
+        strings: wrapping(block + trace_u32(wrapping(block + I64{8})))
+        low := I64{0}
+        #Unsafe("block + 12 is inside this block, which lies in the read-only table") {
+            low = os_load_i64(wrapping(block + I64{12}))
+        }
+        cursor := wrapping(block + I64{20})
+        left := count
+        loop left > (I64{0}) && cursor < end {
+            low = wrapping(low + trace_sleb(cursor))
+            cursor = trace_leb_end(cursor)
+            high: wrapping(low + trace_uleb(cursor))
+            cursor = trace_leb_end(cursor)
+            name: trace_uleb(cursor)
+            cursor = trace_leb_end(cursor)
+            file: trace_uleb(cursor)
+            cursor = trace_leb_end(trace_leb_end(cursor))
+            rows_length: trace_uleb(cursor)
+            cursor = trace_leb_end(cursor)
+            rows_end: wrapping(cursor + rows_length)
+            if (rows_end > end) -> return
+            if (pc >= low && pc < high) {
+                trace_text_cstr(text, wrapping(strings + name), end)
+                rt_text_push_scalar(text, I64{9})
+                trace_text_cstr(text, wrapping(strings + file), end)
+                rt_text_push_scalar(text, I64{9})
+                rt_text_push_number(text, trace_line(cursor, rows_end, low, high, pc))
+                rt_text_push_scalar(text, I64{10})
+                return
+            }
+            cursor = rows_end
+            low = high
+            left = wrapping(left - I64{1})
+        }
+        block = end
+    }
+}
+
+// The line of `pc` in the function [low, high) whose rows are [rows,
+// rows_end): the row before the first row past it, or the last row's line
+// through the function's end. 0 when no row holds it (report.S `line`).
+trace_line: fn(rows: I64, rows_end: I64, low: I64, high: I64, pc: I64) -> I64 {
+    at := rows
+    address := low
+    line := I64{1}
+    previous := I64{-1}
+    previous_line := I64{0}
+    loop at < rows_end {
+        address = wrapping(address + trace_uleb(at))
+        at = trace_leb_end(at)
+        line = wrapping(line + trace_sleb(at))
+        at = trace_leb_end(at)
+        if (previous >= I64{0} && pc >= previous && pc < address) -> return previous_line
+        previous = address
+        previous_line = line
+    }
+    if (previous >= I64{0} && pc >= previous && pc < high) -> return previous_line
+    I64{0}
+}
+
+// The NUL-terminated string at `at` appended to `text`; it ends at `end`
+// at the latest.
+trace_text_cstr: fn(text: I64, at: I64, end: I64) {
+    length := I64{0}
+    loop wrapping(at + length) < end && trace_u8(wrapping(at + length)) != (I64{0}) {
+        length = wrapping(length + I64{1})
+    }
+    rt_text_append(text, at, length)
+}
+
+trace_u8: fn(at: I64) -> I64 {
+    byte := I64{0}
+    #Unsafe("at lies in the executable's read-only mapping: its ELF header, section table or location table") {
+        byte = os_load_u8(at)
+    }
+    byte
+}
+
+trace_u16: fn(at: I64) -> I64 { trace_u8(at).bit_or(trace_u8(wrapping(at + I64{1})) << I64{8}) }
+
+trace_u32: fn(at: I64) -> I64 { trace_u16(at).bit_or(trace_u16(wrapping(at + I64{2})) << I64{16}) }
+
+// The unsigned LEB128 at `at`.
+trace_uleb: fn(at: I64) -> I64 {
+    value := I64{0}
+    shift := I64{0}
+    cursor := at
+    loop shift < (I64{70}) {
+        byte: trace_u8(cursor)
+        if (shift < I64{63}) -> value = value.bit_or(byte.bit_and(I64{127}) << shift)
+        shift = wrapping(shift + I64{7})
+        cursor = wrapping(cursor + I64{1})
+        if (byte < I64{128}) -> return value
+    }
+    value
+}
+
+// The signed LEB128 at `at`.
+trace_sleb: fn(at: I64) -> I64 {
+    value := I64{0}
+    shift := I64{0}
+    cursor := at
+    loop shift < (I64{70}) {
+        byte: trace_u8(cursor)
+        if (shift < I64{63}) -> value = value.bit_or(byte.bit_and(I64{127}) << shift)
+        shift = wrapping(shift + I64{7})
+        cursor = wrapping(cursor + I64{1})
+        if (byte < I64{128}) {
+            if (byte.bit_and(I64{64}) != I64{0} && shift < I64{63}) -> value = wrapping(value - (I64{1} << shift))
+            return value
+        }
+    }
+    value
+}
+
+// The address past the LEB128 at `at`.
+trace_leb_end: fn(at: I64) -> I64 {
+    cursor := at
+    loop trace_u8(cursor) >= (I64{128}) -> cursor = wrapping(cursor + I64{1})
+    wrapping(cursor + I64{1})
+}

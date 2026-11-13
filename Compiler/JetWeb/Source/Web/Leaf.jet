@@ -160,7 +160,9 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
         "os_fiber_switch_i64" | "os_gs_base_write_i64" -> web_op(e, 0x00)
         // The web host delivers no signal to a handler, so no restorer runs.
         "os_signal_return" -> web_op(e, 0x00)
-        "os_stack_address_i64" -> web_global_get(e, WEB_GLOBAL_SP)
+        // The stack pointer; the stack mark's (JetIR Build.jet
+        // ir_stack_mark) is its caller's, with no leaf frame between them.
+        "os_stack_address_i64" | "jet_ir_stack_mark" -> web_global_get(e, WEB_GLOBAL_SP)
         "os_copy_ascending_i64" -> {
             web_at(e, args[0])
             web_at(e, args[1])

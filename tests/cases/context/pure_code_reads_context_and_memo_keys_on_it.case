@@ -1,0 +1,27 @@
+# Reading the task context is an implicit input, not an effect: a `-[]>`
+# function reads it, and a `#Memo` function keys its results on the context
+# fields it can reach, so a call under another deadline is a miss.
+fixture: pure_code_reads_context_and_memo_keys_on_it.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check pure.jet
+exit: 0
+step: jet run --optimize=none pure.jet
+exit: 0
+stdout: ~ "pure 95 thread 0" # the block's deadline, read by pure code
+step: jet run --optimize=basic pure.jet
+exit: 0
+stdout: ~ "pure 95 thread 0" # the block's deadline, read by pure code
+step: jet run --optimize=full pure.jet
+exit: 0
+stdout: ~ "pure 95 thread 0" # the block's deadline, read by pure code
+step: jet run --optimize=none memo.jet
+exit: 0
+stdout: ~ "memo 0 95 0 hits=1 misses=2" # the deadline is part of the key
+step: jet run --optimize=basic memo.jet
+exit: 0
+stdout: ~ "memo 0 95 0 hits=1 misses=2" # the deadline is part of the key
+step: jet run --optimize=full memo.jet
+exit: 0
+stdout: ~ "memo 0 95 0 hits=1 misses=2" # the deadline is part of the key

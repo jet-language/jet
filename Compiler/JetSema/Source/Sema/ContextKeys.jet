@@ -1,0 +1,221 @@
+// `#ContextKey` (#5025 c3): a package's own context value. A key is a
+// module constant carrying the ContextKey marker (`#ContextKey frame_index:
+// 0`); its value is the default `context.get(frame_index)` answers
+// where no `#Context` block sets it, and its identity is the constant's
+// SymbolID key text, so an imported key is the same key. `#Context(
+// frame_index: 3)` sets it for a block (Statements.jet
+// sema_stmt_check_context_block), and a task spawned inside sees what its
+// parent set (Runtime Context.jet). IR BuildTransact.jet lowers both.
+use jet_foundation.[
+    CONTEXT_ON_STOP_KEY,
+    CallArg,
+    CallLabel,
+    ConstDef,
+    DeclID,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    MARKER_CONTEXT_KEY,
+    Marker,
+    MarkerCallArg,
+    NodeKind,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    Type,
+    expr_span,
+]
+
+// The fields `#Context` sets itself; any other label names a key.
+SEMA_CONTEXT_SET_FIELDS: comptime { [String]{"allocator", "deadline"} }
+
+// The names of the context's own fields and of `context.get`, which a key
+// may not take: `context.<name>` already means them. A Core module declares
+// the key behind a field it owns (sema_context_field_module).
+SEMA_CONTEXT_RESERVED_NAMES: comptime { [String]{"allocator", "logger", "deadline", "scratch", "on_stop", "print", "thread", "trace", "get"} }
+
+// A resolved key: its SymbolID key text and its value type.
+SemaContextKey: struct {
+    key: String
+    ty: Type
+}
+
+// Whether `#Context` sets the field `name` itself.
+sema_context_field_settable: fn(name: String) -> Bool Never! { SEMA_CONTEXT_SET_FIELDS.contains(name) }
+
+// The context fields a Core module carries (sema_context_field_module). The
+// loader loads that module wherever the field is spelled (Loader.jet
+// jet_driver_context_field_spelled).
+SEMA_CONTEXT_CORE_FIELDS: comptime { [String]{"logger", "on_stop", "trace"} }
+
+// The Core module that carries the context field `name`: `logger` is
+// core.log's `logger` key, a `log.Handler`; `on_stop` is a
+// `fn(debug.Stop)`, whose default is core.debug's `__stop_ignore`; `trace`
+// is read through core.debug's `__trace_records` (Places.jet
+// sema_expression_context_trace) and has no key, so no block sets it.
+sema_context_field_module: fn(name: String) -> String? Never! {
+    if name == {
+        "logger" -> Val("core.log")
+        "on_stop" | "trace" -> Val("core.debug")
+        else -> None
+    }
+}
+
+// The value a Core-carried context field has where no `#Context` block set
+// it: a `#ContextKey` constant, or a function of the module read as a value.
+SemaContextDefault: enum {
+    Constant(symbol: SymbolID)
+    Function(function: DeclID)
+}
+
+// A context field a Core module carries: the key, and the field's value
+// where no `#Context` block set it.
+SemaContextFieldKey: struct {
+    key: SemaContextKey
+    default: SemaContextDefault
+}
+
+// The key behind the context field `name`, when the program loaded its Core
+// module: `logger` is the `#ContextKey` constant of that name, and
+// `on_stop` is CONTEXT_ON_STOP_KEY, typed as core.debug's `__stop_ignore`
+// and defaulting to it.
+sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
+    module_name: sema_context_field_module(name) ?? return None
+    graph: program.registration_graph ?? return None
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].module_name != module_name -> next
+        if name == "on_stop" {
+            loop function in graph.modules[module_index].functions {
+                if function.symbol.name != "__stop_ignore" -> next
+                id: sema_registration_callable_id(graph, function.symbol.id.key) ?? return None
+                ty: sema_type_resolve_declared(graph, function.signature, function.symbol.module_name)
+                return Val(SemaContextFieldKey{key: SemaContextKey{key: CONTEXT_ON_STOP_KEY, ty: ty}, default: SemaContextDefault.Function{function: id}})
+            }
+            return None
+        }
+        loop constant in graph.modules[module_index].constants {
+            if constant.symbol.name != name || !sema_context_key_declared(constant.declaration) -> next
+            declared: constant.symbol.ty ?? constant.ty ?? return None
+            ty: sema_type_resolve_declared(graph, declared, constant.symbol.module_name)
+            return Val(SemaContextFieldKey{key: SemaContextKey{key: constant.symbol.id.key, ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
+        }
+    }
+    None
+}
+
+// The field's value where no `#Context` block set it, typed `ty`.
+sema_context_field_default: fn(field: SemaContextFieldKey, ty: Type, span: Span, context: &SemaCheckContext) -> TExpr Never! {
+    if field.default == {
+        .Constant(symbol) -> sema_node(context, ty, NodeKind.ConstRef{symbol: symbol}, span)
+        .Function(function) -> sema_tree_node(ty, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
+    }
+}
+
+// The key a `#Context` label names: a field a Core key carries, else a
+// `#ContextKey` constant in scope.
+sema_context_label_key: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaContextKey? {
+    if sema_context_field_module(name) != None {
+        field: sema_context_field_key(name, program) ?? return None
+        return Val(field.key)
+    }
+    sema_context_key_resolve(name, environment, program, scopes)
+}
+
+// Whether `declaration` is a `#ContextKey`.
+sema_context_key_declared: fn(declaration: ConstDef) -> Bool Never! {
+    loop marker in declaration.markers {
+        if marker.name == MARKER_CONTEXT_KEY && !marker.negated -> return true
+    }
+    false
+}
+
+// A key's own law, at its constant site (MarkerRules.jet
+// sema_marker_rules_check_static_item): it takes no reserved context name,
+// except the field's own key in the Core module that owns the field
+// (sema_context_field_module), and holds one fixed default, so it is
+// neither mutable nor `#Persist` (E0761).
+sema_context_key_check_declaration: fn(declaration: ConstDef, module_name: String, diagnostics: &[Diagnostic]) Never! {
+    if !sema_context_key_declared(declaration) -> return
+    name: declaration.name
+    if SEMA_CONTEXT_RESERVED_NAMES.contains(name) && sema_context_field_module(name) != (Val(module_name)) {
+        diagnostics.push(sema_error("E0761", declaration.name_span, "`{name}` is a context field, so it can't be a context key", "`context.{name}` already names the context's own field", "rename the key, e.g. `#ContextKey my_{name}: …`"))
+    }
+    if declaration.mutable || declaration.is_persist {
+        diagnostics.push(sema_error("E0761", declaration.name_span, "context key `{name}` can't be mutable", "a key's value is its fixed default; a `#Context` block sets it for its body", "declare it with `:` and set it with `#Context({name}: …)`"))
+    }
+}
+
+// The `#ContextKey` constant `name` names in `scopes`, if it is one.
+sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaContextKey? {
+    index: sema_scope_resolve_index(scopes, name) ?? return None
+    symbol: sema_scope_binding_symbol(environment, scopes, index)
+    if symbol.kind != SymbolKind.Constant || !sema_context_key_symbol(program, symbol) -> return None
+    ty: sema_scope_binding_type(environment, scopes, index) ?? return None
+    Val(SemaContextKey{key: symbol.id.key, ty: ty})
+}
+
+// Whether the constant `symbol` is declared with `#ContextKey`, read from
+// its declaring module's row.
+sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_registration_module_index(graph, symbol.module_name) ?? return false
+        loop constant in graph.modules[module_index].constants {
+            if constant.symbol.id.key == symbol.id.key -> return sema_context_key_declared(constant.declaration)
+        }
+    }
+    false
+}
+
+// The `#Context` marker `marker` with only its field arguments: the labels
+// naming keys are checked by sema_stmt_check_context_block, not bound
+// against `Context(allocator:, logger:, deadline:)`.
+sema_context_marker_fields: fn(marker: Marker) -> Marker Never! {
+    // copy: `marker` is the module's rule fact; the bound marker owns its parts.
+    kept := marker.copy()
+    kept.args = [MarkerCallArg]{}
+    kept.arg_labels = [CallLabel?]{}
+    loop index in 0..<marker.args.len() {
+        label: if index < marker.arg_labels.len() -> marker.arg_labels[index].copy() else -> CallLabel?{None}
+        if label == .Val(written) && !sema_context_field_settable(written.name) -> next
+        kept.args.push(marker.args[index].copy())
+        kept.arg_labels.push(label)
+    }
+    kept
+}
+
+// `context.get(key)`: the value the innermost `#Context` block of this
+// task, or of the task it was spawned from, set for the `#ContextKey`
+// constant `key`, else the constant itself. Like a `context.<field>` read
+// it is an implicit input, not an effect: its site records an empty row,
+// and a `#Memo` key holds the value (Effects/Checks.jet
+// sema_effect_context_reach), compared by the type's equality.
+// Unhandled unless the receiver is the bare, unbound `context`.
+sema_context_get: fn(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled: SemaDirectSpecialCheck{handled: false, value: None}
+    root := ""
+    if receiver == .Ident(name, _, _) -> root = name
+    if root != "context" || sema_scope_resolve_index(scopes, root) != None || sema_expression_type_symbol(scopes, environment, program, root) != None -> return unhandled
+    failed: SemaDirectSpecialCheck{handled: true, value: None}
+    span: Span{start: expr_span(receiver).start, end: method_span.end}
+    if method != "get" {
+        diagnostics.push(sema_error("E0302", method_span, "`context` has no method `{method}`", "the task context reads its fields as `context.<field>` and a package's keys as `context.get(key)`", "write `context.get(key)` for a `#ContextKey` constant"))
+        return failed
+    }
+    if args.len() != 1 || args[0].label != None {
+        diagnostics.push(sema_error("E0761", method_span, "`context.get` takes one context key", "`context.get(key)` reads the value a `#Context` block set for a `#ContextKey` constant", "write `context.get(frame_index)` for `#ContextKey frame_index: …`"))
+        return failed
+    }
+    name := ""
+    if args[0].expr == .Ident(written, _, _) -> name = written
+    resolved: if name == "" -> SemaContextKey?{None} else -> sema_context_key_resolve(name, environment, program, scopes)
+    found: resolved ?? {
+        diagnostics.push(sema_error("E0761", expr_span(args[0].expr), "`context.get` needs a context key", "only a constant declared with `#ContextKey` names a context value", "declare a snake_case key such as `#ContextKey frame_index: 0` and pass its name"))
+        return failed
+    }
+    default: sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.get", span, [EffectRowEntry]{}, diagnostics) -> return failed
+    equatable: sema_type_equatable(environment, program, found.ty)
+    read: sema_tree_node(found.ty, TExprKind.HostCall{call: THostCall.ContextGet{key: found.key, default: default, equatable: equatable}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(read, expected, environment, program, diagnostics)}
+}

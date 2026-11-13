@@ -2810,12 +2810,49 @@ link_build_id_note: fn(out: &[U8]) Never! {
 }
 
 // A split image's section headers, appended to it: the build-id note's
-// alone (and the name table's), where debuggers read the id that finds the
-// side debug file.
-link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int) Never! {
-    note: LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}
-    shoff: link_write_section_headers(image, 0, [LinkSectionHeader]{note})
-    link_elf_sections(image, shoff, 3)
+// (and the name table's), where debuggers read the id that finds the side
+// debug file, and the linked `.debug_jetline` in `lines` when it is not
+// empty (link_trace_lines), unloaded, before the headers.
+link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8]) Never! {
+    headers := [LinkSectionHeader]{LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}}
+    if lines.len() > 0 {
+        at: image.len()
+        size: lines.len()
+        image.extend(lines.move())
+        headers.push(LinkSectionHeader{name: ".debug_jetline", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: at, size: size, link: 0, info: 0, align: 1, entry_size: 0})
+    }
+    shoff: link_write_section_headers(image, 0, headers)
+    link_elf_sections(image, shoff, headers.len() + 2)
+}
+
+// The linked `.debug_jetline` a split image keeps: its program reads
+// `context.trace`, whose runtime walk (JetRuntime Fault.jet
+// jet_rt_context_trace) names each frame from the image's own table, so a
+// release trace has the same text as a dev one. Empty when the link holds
+// no live jet_rt_context_trace or no table. The side debug file gets its
+// own copy: the rows' bytes are copied, not taken.
+link_trace_lines: fn(c: &LinkContext, debug: LinkDebug, pieces: LinkPieces, l: LinkLayout) -> [U8] Never! {
+    global: c.g_index.get("jet_rt_context_trace") ?? return [U8]{}
+    final: link_final(c, global)
+    if c.g_kind[final] != LINK_G_FILE || c.g_section[final] < 0 || link_live_row(c, c.g_section[final]) < 0 -> return [U8]{}
+    loop (group, name) in debug.names {
+        if name != ".debug_jetline" -> next
+        bytes := [U8]{}
+        loop row in debug.rows[group] {
+            link_pad_to(bytes, c.live_addr[row], 0)
+            if pieces.bytes.len() == 0 {
+                errors := [String]{}
+                link_emit_section(c, errors, bytes, row)
+                c.errors.extend(errors)
+            } else {
+                bytes.extend(pieces.bytes[row].copy())
+            }
+        }
+        link_pad_to(bytes, debug.sizes[group], 0)
+        if !link_jetline_link(bytes, l.text_start, l.text_end) -> return [U8]{}
+        return bytes
+    }
+    [U8]{}
 }
 
 // The side debug file of the image `image`, laid out as `l` (whose build-id
@@ -3156,8 +3193,9 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     debug_file := [U8]{}
     build_id := [U8]{}
     if split {
+        lines := link_trace_lines(c, debug, emitted.pieces, layout)
         debug_file = link_debug_file(c, image, layout, debug, emitted.pieces)
-        link_image_note_section(image, layout, c.base)
+        link_image_note_section(image, layout, c.base, lines.move())
         link_write_code(c, image, layout, emitted.pieces)
         build_id = link_build_id(image, debug_file, layout.note_at - c.base)
     } else {

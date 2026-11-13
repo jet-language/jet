@@ -475,6 +475,7 @@ body_flat_context_guard: fn(value: TContextGuard, flat: &BodyFlat) -> BodyContex
     BodyContextGuard{
         field: value.field,
         value: body_flat_expr(value.value, flat),
+        key: value.key,
     }
 }
 
@@ -617,6 +618,7 @@ body_flat_host_call: fn(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never
         .ComptimeInput(f_builtin, f_path, f_pin) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_flat_expr(f_path, flat), pin: f_pin}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
         .ContextRead(f_field) -> BodyHostCall.ContextRead{field: f_field}
+        .ContextGet(f_key, f_default, f_equatable) -> BodyHostCall.ContextGet{key: f_key, default: body_flat_expr(f_default, flat), equatable: f_equatable}
     }
 }
 
@@ -1330,6 +1332,7 @@ body_copy_context_guard: fn(value: BodyContextGuard, flat: &BodyFlat) -> BodyCon
     BodyContextGuard{
         field: value.field,
         value: body_copy_expr(value.value, flat),
+        key: value.key,
     }
 }
 
@@ -1493,6 +1496,7 @@ body_copy_host_call: fn(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Ne
         .ComptimeInput(f_builtin, f_path, f_pin) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: body_copy_expr(f_path, flat), pin: f_pin}
         .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
         .ContextRead(f_field) -> BodyHostCall.ContextRead{field: f_field}
+        .ContextGet(f_key, f_default, f_equatable) -> BodyHostCall.ContextGet{key: f_key, default: body_copy_expr(f_default, flat), equatable: f_equatable}
     }
 }
 

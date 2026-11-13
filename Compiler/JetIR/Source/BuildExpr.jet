@@ -494,19 +494,21 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // variable that still owns it, or a write parameter's place)
             // appends in place: jet_rt_string_append consumes the old value,
             // so building a text by repeated `+=` is linear, not a copy per
-            // step.
+            // step. A fresh text it makes is the program's own (ir_append).
             if op == .Val(binary) {
                 if binary == .Add && ir_kind_of(m, b, current) == .String && ir_ty(p, b, value) == Type.String && (binding.indirect >= 0 || (!binding.write && ir_owned_binding(b, binding.slot) && ir_live_flag(b, binding.slot) < 0)) {
                     row: b.f.slot_type[current]
-                    appended: ir_runtime(m, b, "jet_rt_string_append", [Int]{current, right}, row)
+                    appended: ir_append(m, b, current, right, row)
                     ir_release(m, b, right)
                     if ir_failed(b) -> return
                     if binding.indirect >= 0 {
                         ir_emit(b.f, IROp.Store, -1, binding.slot, 0, appended, b.line)
                         b.fresh[appended] = false
+                        ir_move_stored(m, p, b, row, binding.slot, 0)
                         return
                     }
                     ir_store(m, p, b, binding.slot, appended)
+                    ir_move_binding(m, p, b, binding.slot)
                     if binding.owned -> ir_reown(b, binding)
                     return
                 }
@@ -534,6 +536,8 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
                 size: m.types[b.f.slot_type[binding.slot]].size
                 ir_emit(b.f, IROp.CopyBytes, -1, binding.slot, owned, size, b.line)
                 b.fresh[owned] = false
+                // The caller's storage holds its values in its own allocator.
+                ir_move_stored(m, p, b, b.f.slot_type[binding.slot], binding.slot, 0)
                 return
             }
             // A variable that closes its value closes the old one first,
@@ -557,6 +561,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             if binding.indirect >= 0 {
                 ir_emit(b.f, IROp.Store, -1, binding.slot, 0, owned, b.line)
                 b.fresh[owned] = false
+                ir_move_stored(m, p, b, b.f.slot_type[owned], binding.slot, 0)
                 return
             }
             if ir_kind_of(m, b, binding.slot) == .Aggregate {
@@ -564,6 +569,9 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             } else {
                 ir_store(m, p, b, binding.slot, owned)
             }
+            // A variable bound before an open `#Context(allocator: a)` block
+            // holds its values where it was bound (BuildMove.jet).
+            ir_move_binding(m, p, b, binding.slot)
             // The variable owns its new value again, also when an earlier
             // statement moved its old one out (`moved := f(x); x = moved.move()`)
             // or it held none yet (`x := T{ uninit }`): its scope end drops it.
@@ -716,7 +724,16 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             target_row: b.f.slot_type[frame.value]
             slot: ir_value_as(m, p, b, value, target_row, span)
             if ir_failed(b) -> return
-            if slot >= 0 -> ir_store(m, p, b, frame.value, slot)
+            if slot >= 0 {
+                ir_store(m, p, b, frame.value, slot)
+                // It leaves the `#Context(allocator: a)` blocks opened
+                // inside the loop (BuildMove.jet).
+                depth := 0
+                loop (index, open) in b.loops {
+                    if open.exit == frame.exit -> depth = index + 1
+                }
+                ir_move_leaving(m, p, b, frame.value, depth)
+            }
             ir_loop_jump(m, p, b, label, true, span)
             b.line = site
         }
@@ -1436,7 +1453,8 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
             }
             else -> {}
         }
-        ir_member_write(m, p, b, base, member, result)
+        ir_member_write(m, p, b, base, member, result, base)
+        ir_move_member_stored(m, p, b, base, member)
         return
     }
     if ir_body_node(p, b, place).kind == .Index(base, index, kind, _, _, _) {
@@ -1495,6 +1513,9 @@ ir_storage_assign: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, op
         if ir_failed(b) -> return
     }
     owned: ir_own(m, p, b, result)
+    // Module storage outlives every `#Context(allocator:)` block: its value
+    // moves to the heap (BuildMove.jet).
+    ir_move_heap(m, p, b, owned)
     if ir_has_drop(m, b, owned) {
         row: ir_value_type(m, p, definition.ty) ?? return ir_fail(b, span, "storage: module {definition.name} of {ir_type_name(definition.ty)}")
         old: ir_load_at(m, b, address, 0, row)
@@ -1973,7 +1994,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
                 value: if widened -> ir_widen_union(m, p, b, field.value, member_ty, span) else -> ir_value_as(m, p, b, field.value, member.ty, span)
                 if ir_failed(b) -> return -1
                 if value < 0 -> return ir_fail_slot(b, span, "Unit struct field")
-                ir_member_write(m, p, b, storage, member, value)
+                ir_member_write(m, p, b, storage, member, value, -1)
             }
             return storage
         }
@@ -2025,6 +2046,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             }
             if call == .MemoStats(function, bound) -> return ir_memo_stats(m, p, b, expression_ty, function, bound, span)
             if call == .ContextRead(field) -> return ir_context_read(m, p, b, expression_ty, field, span)
+            if call == .ContextGet(key, default, _) -> return ir_context_get(m, p, b, expression_ty, key, default, span)
             if call == .ComptimeInput(builtin, path, pin) {
                 // Sema refuses every input a runtime entry can reach (E0956),
                 // so the running program's copy never gets here.
@@ -3268,9 +3290,7 @@ ir_string: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], s
         ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, literal), -1, -1, b.line)
         return slot
     }
-    pointer_row: ir_pointer_row(m)
-    builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
-    b.fresh[builder] = false
+    builder: ir_text_builder(m, b)
     loop (index, part) in parts {
         if part == {
             .Literal(text) -> {
@@ -3390,10 +3410,11 @@ ir_self_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding
     if ir_failed(b) || text < 0 -> return true
     current: ir_read_binding(m, b, binding)
     row: b.f.slot_type[binding.slot]
-    appended: ir_runtime(m, b, "jet_rt_string_append", [Int]{current, text}, row)
+    appended: ir_append(m, b, current, text, row)
     ir_release(m, b, text)
     if ir_failed(b) -> return true
     ir_store(m, p, b, binding.slot, appended)
+    ir_move_binding(m, p, b, binding.slot)
     if binding.owned -> ir_reown(b, binding)
     true
 }
@@ -6543,6 +6564,7 @@ ir_assign_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: I
         ir_emit(b.f, IROp.Drop, -1, old, -1, -1, b.line)
     }
     ir_store_at(m, p, b, address, 0, slot)
+    ir_move_stored(m, p, b, row, address, 0)
 }
 
 // `loop x in xs` / `loop (i, x) in xs` over a List: an index walk. With a
@@ -7285,7 +7307,8 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
             // its elements, read through the window's header. A value a
             // task body takes (`task &&name`) moves into the box instead:
             // the variable stops owning and closing it, so the body alone
-            // ends it.
+            // ends it. An escaping closure's box is the heap's and outlives
+            // the block, so the copy moves there (BuildMove.jet).
             captured: ir_read_binding(m, b, binding)
             taken: slot.body_owned && ir_owned_binding(b, captured) && (lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name))
             kept := if {
@@ -7302,6 +7325,7 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
             }
             if ir_failed(b) -> return -1
             ir_store_at(m, p, b, boxed, slot.offset, kept)
+            if lambda.capture_facts.escapes -> ir_move_stored(m, p, b, slot.row, boxed, slot.offset)
         }
     }
     id: m.functions.len()
@@ -7807,7 +7831,7 @@ ir_comptime_struct: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row:
         if value < 0 && answered {
             value = ir_word_const(m, b, 0)
         }
-        if value >= 0 -> ir_member_write(m, p, b, storage, member, value)
+        if value >= 0 -> ir_member_write(m, p, b, storage, member, value, -1)
     }
     storage
 }

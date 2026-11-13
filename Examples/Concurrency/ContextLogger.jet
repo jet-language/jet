@@ -1,0 +1,43 @@
+package: {
+    name: "context_logger"
+    authority: { allow: [IO] }
+}
+
+use log: core.log
+
+// `context.logger` is the task's `log.Handler`: core.log's `logger` context
+// key. Unset, it is `log.handler(.Info)`; `#Context(logger: h)` sets it for
+// a region, nested blocks shadow and restore it, and a task spawned inside
+// the region keeps it.
+
+describe: fn() -> String {
+    handler: context.logger
+    level: if handler.minimum == {
+        .Debug -> "debug"
+        .Info -> "info"
+        .Warn -> "warn"
+        else -> "error or above"
+    }
+    "logger {level}, {handler.mode}"
+}
+
+report: fn(&&handle: Task<String>) {
+    if handle.join() == {
+        .Ok(text) -> { print("task: {text}") }
+        .Err(_) -> { print("task: failed") }
+    }
+}
+
+run: fn() {
+    print(describe())
+    #Context(logger: log.handler(.Warn)) {
+        print(describe())
+        #Context(logger: log.handler_format(log.handler(.Debug), "text")) {
+            print(describe())
+        }
+        print(describe())
+        inside: task describe()
+        report(inside)
+    }
+    print(describe())
+}

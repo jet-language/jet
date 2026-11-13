@@ -1,0 +1,12 @@
+deadline_left: fn(now: Int) -[Context]> Int { (context.deadline ?? now) - now }
+
+stamp: fn(now: Int) -[Context, IO]> Int {
+    print("stamp")
+    deadline_left(now)
+}
+
+quiet: fn(now: Int) -[IO, !Context]> Int { stamp(now) }
+
+run: fn() {
+    print("left {quiet(5)}")
+}

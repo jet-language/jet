@@ -1177,8 +1177,10 @@ sema_marker_rules_block_form_is_bare: fn(registry: SemaScopeMembersMarkerRegistr
 }
 
 // Rust `Stmt::ContextBlock`: the block's `#Context` application binds against
-// `Context(allocator:, logger:, deadline:)`. False when it does not bind; the
-// field checks then stay quiet.
+// `Context(allocator:, logger:, deadline:)`, its labels naming
+// `#ContextKey` constants left out (ContextKeys.jet
+// sema_context_marker_fields). False when it does not bind; the field
+// checks then stay quiet.
 sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == None -> return true
@@ -1186,7 +1188,7 @@ sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvir
         if row < 0 -> return true
         loop index in 0..<graph.modules[row].program.rule_facts.len() {
             if !sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
-            return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, state, tail_store, context, diagnostics)
+            return sema_marker_rules_check_rule_signature(sema_context_marker_fields(graph.modules[row].program.rule_facts[index].marker), environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     true
@@ -1234,6 +1236,7 @@ sema_marker_rules_check_static_item: fn(item: Item, environment: SemaScopeEnviro
         }
         .Const(definition) -> {
             _ := sema_marker_rules_check_rule_signatures(definition.markers, environment, program, scopes, state, tail_store, context, diagnostics)
+            sema_context_key_check_declaration(definition, environment.module_name, diagnostics)
         }
         .Test(test) -> {
             args := [MarkerCallArg]{}

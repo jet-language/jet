@@ -1,0 +1,110 @@
+use core.mem
+
+// An allocator that hands released blocks out again, so a text left
+// pointing into a block it served would read another value's bytes.
+Reuser: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+    given: Int
+}
+
+impl Reuser.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        self.taken += 1
+        loop i in 0..<self.kept.len() {
+            if self.kept[i].size() >= size && self.kept[i].address().bit_and(align - 1) == 0 {
+                return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
+            }
+        }
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Reuser"})
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+Holder: struct {
+    name: String
+}
+
+#Persist module_kept := ""
+
+word: fn(n: Int) -> String {
+    "item-{n}"
+}
+
+counted: fn(n: Int) -> String {
+    out := ""
+    loop i in 0..<n -> out += "{i},"
+    out
+}
+
+returned: fn(reuser: &Reuser) -> String {
+    #Context(allocator: reuser) {
+        text: counted(4) + "end"
+        if text.len() > 0 -> return text
+    }
+    ""
+}
+
+// Fills the blocks the earlier blocks released with other text.
+scribble: fn(reuser: &Reuser) -> Int {
+    filled := 0
+    #Context(allocator: reuser) {
+        loop round in 0..<40 {
+            junk := ""
+            loop i in 0..<16 -> junk += "#{round}{i}#"
+            filled += junk.len()
+        }
+    }
+    filled
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 22) ?? panic("reserve")
+    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    local := ""
+    grown := "start"
+    holder := Holder{name: ""}
+    names := [String]{}
+    table := [String:Int]{}
+    count: 5
+    #Context(allocator: reuser) {
+        local = "made {word(1)} here"
+        grown += " then {word(2)}"
+        holder.name = word(3) + "/" + word(4)
+        names.push(count.to_string())
+        names.push([String]{word(6), word(7)}.join("+"))
+        table["key {word(8)}"] = 8
+        module_kept = counted(3)
+    }
+    left: word(10)
+    concat_len := 0
+    before: reuser.taken
+    #Context(allocator: reuser) {
+        both: left + "!"
+        concat_len = both.len()
+    }
+    concat_served: reuser.taken > before
+    from_return: returned(reuser)
+    print("scribbled {scribble(reuser)}")
+    print("outer local: {local}")
+    print("appended: {grown}")
+    print("outer field: {holder.name}")
+    print("pushed: {names[0]} {names[1]}")
+    print("map key: {table["key item-8"] ?? 0}")
+    print("module store: {module_kept}")
+    print("returned: {from_return}")
+    print("concat: {concat_len} served {concat_served}")
+    print("served {reuser.taken > 0}, all released {reuser.taken == reuser.given}")
+}

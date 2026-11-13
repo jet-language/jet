@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1437,
+  "total": 1439,
   "counts": {
     "Compiler": 753,
-    "Core": 170,
+    "Core": 172,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -4495,7 +4495,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Task.jet",
-      "line": 601,
+      "line": 604,
       "column": 9,
       "reason": "written once, zeroed first, under the TLS registry mutex"
     },
@@ -6220,6 +6220,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 44,
       "column": 1,
       "reason": "`pointer` names a live, aligned, writable `T` for the whole access"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 83,
+      "column": 1,
+      "reason": "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 87,
+      "column": 1,
+      "reason": "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again"
     },
     {
       "package": "Core",
@@ -10290,13 +10304,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 753 |
-| Core | 170 |
+| Core | 172 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 450 |
-| **total** | **1437** |
+| **total** | **1439** |
 
 ### Regions
 
@@ -10912,7 +10926,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 277:5 | "sync_sole_inflight is this sole thread's own count until sync_sole is cleared; sync_sole_end reads it only after a membarrier" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 294:5 | "an elided section: only this thread has written the lock word and the count since sync_sole_enter" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 306:5 | "membarrier and sched_yield retain no memory; sync_sole only ever goes from 1 to 0" |
-| Compiler | Compiler/JetRuntime/Source/Task.jet | 601:9 | "written once, zeroed first, under the TLS registry mutex" |
+| Compiler | Compiler/JetRuntime/Source/Task.jet | 604:9 | "written once, zeroed first, under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 22:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalProcessRoutes.jet | 58:9 | "TIOCSWINSZ borrows one initialized stack winsize word; the Child104 lock prevents close/recycling until ioctl returns" |
@@ -11159,6 +11173,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 36:1 | "`addr` is the address of a live, aligned `T` that stays valid for every use of the returned pointer" |
 | Core | Core/Mem/Mem.jet | 40:1 | "`pointer` names a live, aligned, readable `T` for the whole access" |
 | Core | Core/Mem/Mem.jet | 44:1 | "`pointer` names a live, aligned, writable `T` for the whole access" |
+| Core | Core/Mem/Mem.jet | 83:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
+| Core | Core/Mem/Mem.jet | 87:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
 | Core | Core/Net/Net.jet | 141:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 147:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
 | Core | Core/Net/Net.jet | 153:5 | "read the native IP address discriminant" |

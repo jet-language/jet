@@ -12,15 +12,36 @@
 // ir_context_read) call jet_ctx_deadline_present and jet_ctx_deadline_ms
 // (Deadline.jet) and jet_ctx_thread (Thread.jet): the thread index is the
 // running thread's, kept in its TCB at THREAD_TCB_INDEX, not in the record.
-// Record, append-only (allocator, logger and scratch take the next words):
+// Record, append-only (`logger` is core.log's key on the value chain):
 // deadline present@0, deadline ms@8 (Deadline.jet), effect scope@16 (the
-// innermost effect-scope frame node, 0 for none: Authority.jet).
+// innermost effect-scope frame node, 0 for none: Authority.jet),
+// allocator@24 (the carrier of the innermost `#Context(allocator:)` block,
+// 0 for the program heap: Alloc.jet's user allocators), values@32,
+// scratch@40 (the record of the arena reservation behind
+// `context.scratch`, 0 until its first block: Alloc.jet's arena blocks).
+// The allocator slot owns one reference to its carrier, and a TCB's cache
+// rows are blocked while its record names one (Alloc.jet alloc_cache_sync).
+//
+// values@32 is the head of the `#ContextKey` value chain, innermost first.
+// A node is the counted box IR BuildTransact.jet ir_context_push_value
+// builds: owners@0, release helper@16 (drops the value, frees the node),
+// key word@24, next@32, value@40. The head slot owns one reference to its
+// node and each node one to its next, so a spawned task's record shares its
+// parent's chain by one retain (context_inherit) and a parent's pop never
+// frees a node a task still sees. `context.get` (ir_context_get) copies the
+// value of the first node with its key (jet_ctx_value_find).
 CONTEXT_TCB_SLOT: I64{48}
 CONTEXT_TCB_ROOT: I64{456}
-CONTEXT_RECORD_BYTES: I64{24}
+CONTEXT_RECORD_BYTES: I64{48}
 CONTEXT_DEADLINE_PRESENT: I64{0}
 CONTEXT_DEADLINE_MS: I64{8}
 CONTEXT_EFFECT_SCOPE: I64{16}
+CONTEXT_ALLOCATOR: I64{24}
+CONTEXT_VALUES: I64{32}
+CONTEXT_SCRATCH: I64{40}
+CONTEXT_NODE_RELEASE: I64{16}
+CONTEXT_NODE_KEY: I64{24}
+CONTEXT_NODE_NEXT: I64{32}
 
 context_current: fn() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SLOT)) }
 
@@ -30,6 +51,14 @@ context_tcb_bytes: fn() -> I64 { CONTEXT_TCB_ROOT + CONTEXT_RECORD_BYTES }
 // A zeroed root record is the empty root context.
 context_tcb_install_root: fn(tcb: I64) { sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT) }
 
+// Ends the scratch reservation of a TCB's root record: a thread's detach
+// and a fiber's teardown (Thread.jet, Fiber.jet).
+context_tcb_release: fn(tcb: I64) { alloc_arena_release(wrapping(tcb + wrapping(CONTEXT_TCB_ROOT + CONTEXT_SCRATCH))) }
+
+// Copies the current record into `record`, which then shares its value
+// chain (one more owner of the head node). A task starts on the program
+// heap: a `#Context(allocator:)` carrier serves only the block's own thread
+// of control, and its `context.scratch` is its own.
 context_inherit: fn(record: I64) {
     current: context_current()
     at := I64{0}
@@ -37,14 +66,215 @@ context_inherit: fn(record: I64) {
         sync_store(wrapping(record + at), sync_load(wrapping(current + at)))
         at += I64{8}
     }
+    sync_store(wrapping(record + CONTEXT_ALLOCATOR), I64{0})
+    sync_store(wrapping(record + CONTEXT_SCRATCH), I64{0})
+    head: sync_load(wrapping(record + CONTEXT_VALUES))
+    if head != (I64{0}) -> jet_rt_native_closure_retain(head)
 }
 
-// Points TCB@48 at record and returns the pointer it replaced.
+// Ends a task's record (Task.jet task_drop): its reference to its chain and
+// its scratch reservation.
+context_release: fn(record: I64) {
+    context_values_release(sync_load(wrapping(record + CONTEXT_VALUES)))
+    alloc_arena_release(wrapping(record + CONTEXT_SCRATCH))
+}
+
+// Drops one reference to `node` (0: none); a last owner's release helper
+// drops its value and frees it, and its reference to the next node goes
+// the same way.
+context_values_release: fn(node: I64) {
+    at := node
+    loop at != (I64{0}) {
+        if !jet_rt_native_closure_unref(at) -> return
+        next: sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+        coll_call1_unit(sync_load(wrapping(at + CONTEXT_NODE_RELEASE)), at)
+        at = next
+    }
+}
+
+// `#Context(key: value)` entry: `node`, a new node with one owner, goes in
+// front of the current record's chain, taking over the head's reference.
+#Export(c) jet_ctx_value_push: fn(node: I64) {
+    head: wrapping(context_current() + CONTEXT_VALUES)
+    sync_store(wrapping(node + CONTEXT_NODE_NEXT), sync_load(head))
+    sync_store(head, node)
+}
+
+// `#Context(key: value)` exit: the `count` innermost nodes leave the
+// current record's chain, which keeps the next one.
+#Export(c) jet_ctx_value_pop: fn(count: I64) {
+    head: wrapping(context_current() + CONTEXT_VALUES)
+    left := count
+    loop left > (I64{0}) {
+        node: sync_load(head)
+        if node == (I64{0}) -> return
+        next: sync_load(wrapping(node + CONTEXT_NODE_NEXT))
+        if next != (I64{0}) -> jet_rt_native_closure_retain(next)
+        sync_store(head, next)
+        context_values_release(node)
+        left -= I64{1}
+    }
+}
+
+// The innermost node of the current record's chain holding key word `key`,
+// else 0.
+#Export(c) jet_ctx_value_find: fn(key: I64) -> I64 {
+    at := sync_load(wrapping(context_current() + CONTEXT_VALUES))
+    loop at != (I64{0}) {
+        if sync_load(wrapping(at + CONTEXT_NODE_KEY)) == key -> return at
+        at = sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+    }
+    I64{0}
+}
+
+// `#Context(allocator: a)` entry: `handler`, the block's allocator call (a
+// function value whose owner moves here; Alloc.jet ALLOC_USER_TAKE), becomes
+// the current record's allocator in a new carrier for the block whose code
+// runs below the stack address `mark` (JetIR Build.jet ir_stack_mark). The
+// enclosing carrier (0: the program heap) goes to word 0 of `save`, two
+// stack words of the block's frame, and the new one to word 8; the new
+// carrier holds one more reference to the enclosing one as its outer: the
+// allocator its handler's own allocations use, and the one a value leaving
+// the block moves to. The thread's cache rows are blocked from here
+// (alloc_cache_sync).
+#Export(c) jet_ctx_push_allocator: fn(handler: I64, save: I64, mark: I64) {
+    slot: wrapping(context_current() + CONTEXT_ALLOCATOR)
+    outer: sync_load(slot)
+    carrier: alloc_user_carrier_new(handler, outer, mark)
+    sync_store(save, outer)
+    sync_store(wrapping(save + I64{8}), carrier)
+    sync_store(slot, carrier)
+    alloc_cache_sync(thread_base())
+}
+
+// `#Context(allocator: a)` exit: the enclosing carrier saved at entry comes
+// back, an arena block's arena goes back to its entry mark (Alloc.jet
+// alloc_arena_rewind), and the block's carrier loses the record's
+// reference, whatever a move a stop interrupted left in the record
+// (Alloc.jet jet_rt_move_enter). The regions it served from still name it
+// (Alloc.jet's page map), so it ends once the last of them is released or
+// serves another carrier.
+#Export(c) jet_ctx_pop_allocator: fn(save: I64) {
+    slot: wrapping(context_current() + CONTEXT_ALLOCATOR)
+    sync_store(slot, sync_load(save))
+    alloc_cache_sync(thread_base())
+    carrier: sync_load(wrapping(save + I64{8}))
+    alloc_arena_rewind(carrier)
+    alloc_user_drop(carrier)
+}
+
+// `#Context(allocator: a)` entry over a `mem.Arena` handle `arena`, or
+// over `context.scratch` when `arena` is 0, as jet_ctx_push_allocator's:
+// the new carrier is an arena block's (Alloc.jet alloc_arena_carrier_new)
+// over the arena's reservation, at the handle's word ARENA_BLOCKS or the
+// record's scratch word, mapped at its first block. `held` 1 hands the
+// block the arena, a value it made itself, to drop at its end.
+#Export(c) jet_ctx_push_arena: fn(arena: I64, held: I64, save: I64, mark: I64) {
+    current: context_current()
+    reservation: if (arena == I64{0}) -> wrapping(current + CONTEXT_SCRATCH) else -> wrapping(arena + ARENA_BLOCKS)
+    slot: wrapping(current + CONTEXT_ALLOCATOR)
+    outer: sync_load(slot)
+    handle: if (held != I64{0}) -> arena else -> I64{0}
+    carrier: alloc_arena_carrier_new(alloc_arena_record(reservation), handle, outer, mark)
+    sync_store(save, outer)
+    sync_store(wrapping(save + I64{8}), carrier)
+    sync_store(slot, carrier)
+    alloc_cache_sync(thread_base())
+}
+
+// The stop handler's key word (IR BuildTransact.jet ir_context_key_word of
+// CONTEXT_ON_STOP_KEY): `#Context(on_stop: f)` pushes `f`, a function value,
+// under it.
+CONTEXT_ON_STOP_KEY: I64{1}
+
+// The stop door's call of the context's stop handler (Trap.jet trap_stop,
+// for every stop outside served comptime code): when a `#Context(on_stop:)`
+// block of this task, or of a task it was spawned from, set one, it runs
+// once with a fresh core.debug `Stop` it borrows, laid out as message@0 and
+// kind@8, the StopKind's declaration index (Panic 0, Assert 1, Contract 2,
+// Bounds 3, Shift 4, Todo 5). While it runs the chain's head is the node
+// after its own, so it is not the current handler and a stop inside it
+// reaches the enclosing one, never itself; the head comes back when it
+// returns. A thread without a TCB or a record runs none.
+context_on_stop_run: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) -> return
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) -> return
+    node: jet_ctx_value_find(CONTEXT_ON_STOP_KEY)
+    if (node == I64{0}) -> return
+    head: wrapping(record + CONTEXT_VALUES)
+    saved: sync_load(head)
+    sync_store(head, sync_load(wrapping(node + CONTEXT_NODE_NEXT)))
+    handler: sync_load(wrapping(node + I64{40}))
+    stop: jet_rt_alloc(I64{16}, I64{8})
+    message: context_on_stop_message(kind, a, b, c, d)
+    sync_store(stop, message)
+    sync_store(wrapping(stop + I64{8}), context_on_stop_kind(kind, a))
+    coll_call2_unit(sync_load(wrapping(handler + I64{8})), handler, stop)
+    sync_store(head, saved)
+    jet_rt_string_drop(message)
+    jet_rt_free(stop, I64{16}, I64{8})
+}
+
+// The StopKind index of trap_stop kind `kind`; a require stop's (4) own kind
+// `a` is 0 assert, 1 assert_eq, 2 panic or 3 a contract clause.
+context_on_stop_kind: fn(kind: I64, a: I64) -> I64 {
+    if (kind == I64{2}) -> return I64{4}
+    if (kind == I64{3}) -> return I64{3}
+    if (kind == I64{5}) -> return I64{5}
+    if (kind != I64{4} || a == I64{2}) -> return I64{0}
+    if (a == I64{3}) -> return I64{2}
+    I64{1}
+}
+
+// The message the stop reports, as an owned String built from trap_stop's
+// words (Trap.jet): 1 a message's bytes and length; 2 a shift's count, count
+// signedness, width and direction; 3 a list's length and the index; 4 a
+// require stop's kind, message and an assert_eq's two sides; 5 a `#Todo`'s
+// file, line and expected type.
+context_on_stop_message: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    if (kind == I64{2}) -> return trap_shift_reason(d, a, b, c)
+    if (kind == I64{3}) -> return trap_list_bounds_reason(a, b)
+    if (kind == I64{4}) {
+        if (a != I64{1}) {
+            if (b == I64{0}) -> return rt_text_copy(I64{0}, I64{0})
+            return jet_rt_string_clone(b)
+        }
+        message: jet_rt_string_builder_new()
+        trap_build_msg_expected(message)
+        jet_rt_string_builder_push(message, d)
+        trap_build_msg_got(message)
+        jet_rt_string_builder_push(message, c)
+        return message
+    }
+    if (kind == I64{5}) {
+        message: jet_rt_string_builder_new()
+        trap_build_msg_todo(message)
+        jet_rt_string_builder_push(message, a)
+        rt_text_push_word(message, I64{58}, I64{1})
+        rt_text_push_number(message, trap_line(b))
+        trap_build_msg_todo_expected(message)
+        jet_rt_string_builder_push(message, c)
+        return message
+    }
+    rt_text_copy(a, b)
+}
+
+// Points TCB@48 at record and returns the pointer it replaced. The cache
+// rows follow the record's allocator (Alloc.jet alloc_cache_sync): a task
+// run inline inside a `#Context(allocator:)` block takes the heap.
 context_enter: fn(record: I64) -> I64 {
-    slot: wrapping(thread_base() + CONTEXT_TCB_SLOT)
+    base: thread_base()
+    slot: wrapping(base + CONTEXT_TCB_SLOT)
     previous: sync_load(slot)
     sync_store(slot, record)
+    alloc_cache_sync(base)
     previous
 }
 
-context_leave: fn(previous: I64) { sync_store(wrapping(thread_base() + CONTEXT_TCB_SLOT), previous) }
+context_leave: fn(previous: I64) {
+    base: thread_base()
+    sync_store(wrapping(base + CONTEXT_TCB_SLOT), previous)
+    alloc_cache_sync(base)
+}

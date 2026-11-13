@@ -109,9 +109,7 @@ ir_unit_text: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int)
     label: ir_unit_label(p, ty) ?? return -1
     string_row: ir_string_row(m)
     magnitude: ir_runtime(m, b, "jet_fmt_quantity", [Int]{slot}, string_row)
-    pointer: ir_pointer_row(m)
-    builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer)
-    b.fresh[builder] = false
+    builder: ir_text_builder(m, b)
     _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, magnitude}, -1)
     ir_release(m, b, magnitude)
     ir_push_static(m, b, builder, " {label}")

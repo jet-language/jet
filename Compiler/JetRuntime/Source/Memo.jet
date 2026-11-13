@@ -53,7 +53,9 @@ memo_put: fn(address: I64, value: I64) {
 
 // Files `entry` first. Returns the entry the bound evicts (the least recently
 // used, or `entry` itself under a bound of 0) for the caller to drop, else 0.
-// `bound` < 0 is unbounded.
+// `bound` < 0 is unbounded. The entry's copies are the heap's: a value from
+// a `#Context(allocator:)` block moved there first (JetIR BuildMemo.jet
+// ir_memo_file).
 #Export(c) jet_rt_memo_file: fn(cell: I64, entry: I64, bound: I64) -> I64 {
     if (bound == I64{0}) -> return entry
     count: memo_word(wrapping(cell + I64{8}))

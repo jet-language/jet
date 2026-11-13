@@ -121,7 +121,7 @@ ir_wrapper_unique: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, memb
     ir_open_if(b.f, sole, b.line)
     ir_else(b.f, b.line)
     width: ir_align8(m.types[member.ty].size)
-    replica: ir_box_alloc(m, b, width, pointer_row)
+    replica: ir_box_replica(m, b, width, holder, pointer_row)
     ir_emit(b.f, IROp.CopyBytes, -1, replica, holder, width, b.line)
     ir_emit(b.f, IROp.Store, -1, base, member.offset, replica, b.line)
     ir_copy_fixup_at(m, p, b, member.ty, replica, 0)
@@ -447,7 +447,7 @@ ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
     ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
     ir_end(a.f, a.line)
     size: ir_box_bytes(m, p, row)
-    replica: ir_box_alloc(m, a, size, row)
+    replica: ir_box_replica(m, a, size, boxed, row)
     a.fresh[replica] = false
     ir_emit(a.f, IROp.CopyBytes, -1, replica, boxed, size, a.line)
     loop shape in shapes {
@@ -464,7 +464,7 @@ ir_box_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) ->
                 old: ir_temp(m, a, pointer_row)
                 ir_emit(a.f, IROp.Load, old, replica, member.offset, -1, a.line)
                 width: ir_align8(m.types[member.ty].size)
-                wrapper: ir_box_alloc(m, a, width, pointer_row)
+                wrapper: ir_box_replica(m, a, width, old, pointer_row)
                 ir_emit(a.f, IROp.CopyBytes, -1, wrapper, old, width, a.line)
                 ir_emit(a.f, IROp.Store, -1, replica, member.offset, wrapper, a.line)
                 ir_copy_fixup_at(m, p, a, member.ty, wrapper, 0)
@@ -820,8 +820,14 @@ ir_unique_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int
         ir_end(a.f, a.line)
         width: ir_word_const(m, a, stride)
         bytes: ir_word_op(m, a, IROp.Mul, fresh_capacity, width)
-        align: ir_word_const(m, a, 8)
-        replica = ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+        // A List's copy comes from where its buffer or storage is served
+        // (BuildMove.jet); any other's from the heap.
+        if m.user_values && ir_move_list(m, row) {
+            replica = ir_runtime(m, a, "jet_rt_alloc_value_grow", [Int]{bytes, data, header}, word_row)
+        } else {
+            align: ir_word_const(m, a, 8)
+            replica = ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+        }
         moved: ir_word_op(m, a, IROp.Mul, length, width)
         _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{replica, data, moved}, -1)
         ir_emit(a.f, IROp.Store, -1, header, 16, replica, a.line)

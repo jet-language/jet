@@ -1,0 +1,16 @@
+# Compile-time code reads the build's root context: a `#run` at file scope or
+# in a block sees thread 0 and no deadline, while the task that runs the
+# function reads its own thread and the deadline it was spawned under.
+fixture: compile_time_code_reads_the_build_root_context.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none prepared.jet
+exit: 0
+stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline 100" # the build root, then the running task
+step: jet run --optimize=basic prepared.jet
+exit: 0
+stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline 100" # the build root, then the running task
+step: jet run --optimize=full prepared.jet
+exit: 0
+stdout: ~ "prepared thread 0 0 deadline None; running thread 1 deadline 100" # the build root, then the running task

@@ -1480,14 +1480,15 @@ ir_x64_block_retain: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     ir_x64_overflow_trap(e, overflow)
 }
 
-// The runtime's align-8 entry (JetRuntime Alloc.jet jet_rt_alloc_8 and
-// jet_rt_free_8) for call `at` of jet_rt_alloc(size, align) or
+// The runtime's align-8 entry (JetRuntime Alloc.jet jet_rt_alloc_8,
+// jet_rt_alloc_value_8 and jet_rt_free_8) for call `at` of
+// jet_rt_alloc(size, align), jet_rt_alloc_value(size, align) or
 // jet_rt_free(pointer, size, align) whose align is the constant 8: it takes
 // the call's arguments but the align. "" for any other call.
 ir_x64_alloc_entry: fn(f: IRFunction, al: IRX64Allocation, at: Int, symbol: String) -> String Never! {
-    if symbol == "jet_rt_alloc" && f.c[at] == 2 {
+    if (symbol == "jet_rt_alloc" || symbol == "jet_rt_alloc_value") && f.c[at] == 2 {
         align: f.args[f.b[at] + 1]
-        if al.consts[align] && al.values[align] == 8 -> return "jet_rt_alloc_8"
+        if al.consts[align] && al.values[align] == 8 -> return "{symbol}_8"
     } else if symbol == "jet_rt_free" && f.c[at] == 3 {
         align: f.args[f.b[at] + 2]
         if al.consts[align] && al.values[align] == 8 -> return "jet_rt_free_8"
@@ -3228,7 +3229,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
         .Sqrt -> ir_x64_sqrt(e, m, f, al, at)
         .IntBig -> ir_x64_int_big(e, m, f, al, at)
         .Convert -> ir_x64_convert(e, m, f, al, at)
-        .Concat -> ir_x64_helper(e, m, f, al, "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
+        .Concat -> ir_x64_helper(e, m, f, al, if f.c[at] == 1 -> "jet_rt_string_concat_value" else -> "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
         .Call -> {
             if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return ir_x64_fail(e, f, at, "function {f.a[at]} is not in the module")
             if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return ir_x64_tail_jump(e, m, f, al, at)

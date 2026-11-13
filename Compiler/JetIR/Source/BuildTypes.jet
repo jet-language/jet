@@ -1251,9 +1251,8 @@ ir_record_out_records: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, 
 // wrapper box first.
 ir_record_load_member: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, getter: String, base: Int, member: IRMember, span: Span) Never! {
     if !member.boxed -> return ir_record_load_value(m, p, a, handle, getter, member.ty, base, member.offset, span)
-    pointer_row: ir_pointer_row(m)
     size: m.types[member.ty].size
-    wrapper: ir_box_alloc(m, a, if size < 8 -> 8 else -> size, pointer_row)
+    wrapper: ir_wrapper_alloc(m, a, if size < 8 -> 8 else -> size, -1)
     ir_record_load_value(m, p, a, handle, getter, member.ty, wrapper, 0, span)
     ir_emit(a.f, IROp.Store, -1, base, member.offset, wrapper, a.line)
 }
@@ -1346,8 +1345,7 @@ ir_record_load_records: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: In
     ir_open_if(a.f, present, a.line)
     width: ir_word_const(m, a, stride)
     bytes: ir_word_op(m, a, IROp.Mul, length, width)
-    align: ir_word_const(m, a, 8)
-    data: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    data: ir_list_buffer_sized(m, a, bytes)
     ir_emit(a.f, IROp.Store, -1, list, 16, data, a.line)
     ir_emit(a.f, IROp.Store, -1, list, 8, length, a.line)
     ir_emit(a.f, IROp.Store, -1, list, 0, length, a.line)
@@ -1562,9 +1560,7 @@ IRRender: enum { Display Show Debug }
 ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
     string_row: ir_string_row(m)
     if ir_unit_type(ty) {
-        pointer: ir_pointer_row(m)
-        builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer)
-        b.fresh[builder] = false
+        builder: ir_text_builder(m, b)
         ir_push_static(m, b, builder, "()")
         return ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
@@ -1606,9 +1602,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         return ir_runtime(m, b, "jet_rt_require_debug_string", [Int]{slot}, string_row)
     }
     if kind == .Aggregate || ir_carrier_type(ty) || ir_enum_def(m, p, b.f.slot_type[slot]) != None {
-        pointer: ir_pointer_row(m)
-        builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer)
-        b.fresh[builder] = false
+        builder: ir_text_builder(m, b)
         ir_render_push(m, p, b, builder, slot, mode, false, span)
         return ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
     }
@@ -1643,6 +1637,38 @@ ir_push_static: fn(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Neve
     args := [Int]{builder}
     loop arg in ir_static_text(m, b, text) -> args.push(arg)
     _: ir_runtime(m, b, "jet_rt_string_builder_push_static", args, -1)
+}
+
+// A fresh text builder: a program's (IRModule.user_values) and the buffer it
+// grows into come from the allocator a `#Context(allocator: a)` block
+// serves values from (JetRuntime Text.jet jet_rt_string_builder_value), any
+// other from the heap.
+ir_text_builder: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
+    symbol: if m.user_values -> "jet_rt_string_builder_value" else -> "jet_rt_string_builder_new"
+    pointer_row: ir_pointer_row(m)
+    builder: ir_runtime(m, b, symbol, [Int]{}, pointer_row)
+    b.fresh[builder] = false
+    builder
+}
+
+// `current + text` into `current`, an owned String it consumes (JetRuntime
+// Text.jet jet_rt_string_append): a fresh text it makes for a program
+// (IRModule.user_values) comes from the allocator a `#Context(allocator: a)`
+// block serves values from.
+ir_append: fn(m: &IRModule, b: &IRBuilder, current: Int, text: Int, row: Int) -> Int Never! {
+    symbol: if m.user_values -> "jet_rt_string_append_value" else -> "jet_rt_string_append"
+    ir_runtime(m, b, symbol, [Int]{current, text}, row)
+}
+
+// ir_render for a text that becomes a program's value (`to_string()`): a
+// fresh one a runtime formatter made on the heap moves into the allocator a
+// `#Context(allocator: a)` block serves values from (JetRuntime Text.jet
+// jet_rt_string_serve).
+ir_render_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    text: ir_render(m, p, b, ty, slot, mode, span)
+    if text < 0 || ir_failed(b) || !m.user_values || !b.fresh[text] -> return text
+    b.fresh[text] = false
+    ir_runtime(m, b, "jet_rt_string_serve", [Int]{text}, b.f.slot_type[text])
 }
 
 // The owned String a selected Display (`display`) or Printable (`show`)
@@ -2179,7 +2205,9 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
     if kind == .String {
         if op != .Add || right_ty != Type.String -> return ir_fail_slot(b, span, "String operator {op}")
         dst: ir_fresh_like(m, b, left)
-        ir_emit(b.f, IROp.Concat, dst, left, right, -1, site)
+        // A program's own text comes from the allocator a
+        // `#Context(allocator: a)` block serves values from (IR.jet Concat).
+        ir_emit(b.f, IROp.Concat, dst, left, right, if m.user_values -> 1 else -> -1, site)
         return dst
     }
     if kind == .Int {
@@ -4005,7 +4033,7 @@ ir_numeric_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             ir_release(m, b, value)
             return result
         }
-        .ToShow -> return ir_render(m, p, b, receiver_ty, value, IRRender.Display, span)
+        .ToShow -> return ir_render_value(m, p, b, receiver_ty, value, IRRender.Display, span)
         .InlineRange(lo, hi, checked) -> {
             // A runtime value is Ok in lo..hi, else Err (the route
             // jet_inline_range_from_int, as a ranged distinct's conversion).

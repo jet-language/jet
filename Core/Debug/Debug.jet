@@ -1,0 +1,67 @@
+package: {
+    name: "core.debug"
+    version: "0.0.1"
+    edition: "2026"
+    description: "What a stop tells the task context's stop handler, and the records context.trace reads."
+    license: "MIT"
+    outputs: {
+        debug: .Library{ entry: debug }
+    }
+}
+use {
+    core: core
+}
+
+// core.debug — what a stop tells the task context's stop handler, and the
+// records `context.trace` reads.
+//
+// `context.on_stop` is a `fn(debug.Stop)` the runtime calls once at the start
+// of every stop (a panic, a failed `assert` or `assert_eq`, a contract
+// clause, a list index out of bounds, a shift past the width, a `todo()`),
+// before the stop reports and unwinds. `#Context(on_stop: f) { .. }` sets it
+// for a block and the tasks spawned there; outside any such block it is
+// `__stop_ignore` below, which does nothing. The handler gets a `Stop` of its
+// own; the stop goes on when it returns. While it runs it is not the current
+// handler, so a stop inside it reaches the enclosing one.
+//
+// `debug` is also the prelude's `debug(value)`, so a program that calls both
+// imports this module under another name (`use dbg: core.debug`).
+
+// Which stop the runtime is taking.
+StopKind: enum {
+    Panic
+    Assert
+    Contract
+    Bounds
+    Shift
+    Todo
+}
+
+// One stop as the handler sees it: the message it reports and its kind.
+// The runtime writes this record itself (JetRuntime Context.jet
+// context_on_stop_run): `message` at 0, then `kind` as its declaration
+// index at 8, which is the struct layout's order.
+Stop: struct {
+    message: String
+    kind: StopKind
+}
+
+// The stop handler where no `#Context(on_stop:)` block set one: the stop
+// goes on unchanged. The compiler reads it as `context.on_stop`'s default
+// (Sema ContextKeys.jet sema_context_field_key).
+__stop_ignore: fn(stop: Stop) {}
+
+// `context.trace`'s records (Sema Places.jet sema_expression_context_trace).
+// `frames` is the runtime's frame walk (JetRuntime Fault.jet
+// jet_rt_context_trace): one `function\tfile\tline` line per Jet frame,
+// innermost first. The location table it reads names no column and no
+// module, so `column` is 0 and `module` is "".
+__trace_records: fn(frames: String) -> [SourceLocation] Never! {
+    records := [SourceLocation]{}
+    loop line in frames.lines() {
+        parts: line.split("\t").to_list()
+        if parts.len() != 3 -> next
+        records.push(SourceLocation{file: parts[1].copy(), line: Int.parse(parts[2]) ?? 0, column: 0, function: parts[0].copy(), module: ""})
+    }
+    records
+}

@@ -1,0 +1,64 @@
+use core.mem
+
+// An allocator that hands released blocks out again, so an entry left
+// pointing into a block it served would read another value's bytes.
+Reuser: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+}
+
+impl Reuser.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        self.taken += 1
+        loop i in 0..<self.kept.len() {
+            if self.kept[i].size() >= size && self.kept[i].address().bit_and(align - 1) == 0 {
+                return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
+            }
+        }
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Reuser"})
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+#Memo
+squares: fn(n: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<n -> out.push(i * i)
+    out
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 22) ?? panic("reserve")
+    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0}
+    first := 0
+    second := 0
+    #Context(allocator: reuser) {
+        first = squares(40)[39]
+        second = squares(40)[39]
+    }
+    inside: squares.cache()
+    print("inside the block: {first} {second}, hits={inside.hits} misses={inside.misses} size={inside.size}")
+    // Hand the released blocks to other values before the entry is read.
+    filled := 0
+    #Context(allocator: reuser) {
+        loop round in 0..<40 {
+            junk := [Int]{}
+            loop i in 0..<64 -> junk.push(-1 - round - i)
+            filled += junk.len()
+        }
+    }
+    after: squares(40)[39]
+    again: squares(40)[39]
+    stats: squares.cache()
+    print("after the block: {after} {again}, hits={stats.hits} misses={stats.misses} size={stats.size}")
+    print("served {reuser.taken > 0}, scribbled {filled}")
+}

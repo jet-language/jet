@@ -1,0 +1,20 @@
+# A `#Memo` function called inside a `#Context(allocator:)` block over a
+# `mem.Allocator` value files its entry on the heap: the result moves out of
+# the block's allocator into the memo store. The second call inside the block
+# hits, and the entry still reads right after the allocator hands the blocks
+# it released to other values.
+fixture: context_allocator_memo_entry_moves_to_the_heap.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check memo.jet
+exit: 0
+step: jet run --optimize=none memo.jet
+exit: 0
+stdout: = "inside the block: 1521 1521, hits=1 misses=1 size=1\nafter the block: 1521 1521, hits=3 misses=1 size=1\nserved true, scribbled 2560\n"
+step: jet run --optimize=basic memo.jet
+exit: 0
+stdout: = "inside the block: 1521 1521, hits=1 misses=1 size=1\nafter the block: 1521 1521, hits=3 misses=1 size=1\nserved true, scribbled 2560\n"
+step: jet run --optimize=full memo.jet
+exit: 0
+stdout: = "inside the block: 1521 1521, hits=1 misses=1 size=1\nafter the block: 1521 1521, hits=3 misses=1 size=1\nserved true, scribbled 2560\n"

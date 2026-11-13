@@ -242,6 +242,11 @@ diagnostic_with_source_derived_suggestion: fn(diagnostic: Diagnostic, span: Span
     diagnostic_registry_with_source_derived_suggestion(diagnostic.copy(), span, new_text)
 }
 
+diagnostic_with_migration_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+    // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
+    diagnostic_registry_with_migration_edit(diagnostic.copy(), edit)
+}
+
 diagnostic_with_alternative_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     // copy: `diagnostic` is a read parameter; the registry builder owns the value it edits.
     diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)

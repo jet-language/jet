@@ -4446,6 +4446,19 @@ is `2.67`: the stored binary value is just below 2.675); non-finite values print
 `Float` text. `duration` does not emit unbounded trailing zero units.
 The library-call boundary is deliberate: ordinary human formatting remains explicit (`D-HUMANFMT1`), and `pretty` follows the expanded deterministic Debug shape (`D-FMT-PRETTY1`).
 
+### `core.debug` — the context's stop handler and trace
+
+`core.debug` declares what a stop tells the task context's stop handler,
+`context.on_stop` (spec.md, Deadlines and teaching diagnostics). `Stop` holds
+the `message` the stop reports and its `kind`, a `StopKind`: `Panic`,
+`Assert`, `Contract`, `Bounds`, `Shift` or `Todo`; any other runtime stop is
+`Panic`. A handler is a `fn(debug.Stop)` set with `#Context(on_stop: f)`.
+It also makes the `SourceLocation` records of `context.trace` from the
+runtime's frame walk, with `column` 0 and `module` `""`.
+The module is named `debug`, as is the prelude's `debug(value)`, so a program
+that calls both imports it under another name (`use dbg: core.debug`). Its
+package source is [`Core/Debug/Debug.jet`](../../../Core/Debug/Debug.jet).
+
 ### `core.log` — structured logging
 
 `core.log` writes structured records through a configured sink. The levels are
@@ -5428,6 +5441,49 @@ callees and other threads see them in program order. Pad hot fields to the
 cache line with `#Layout(c, align(#build.cpu.cache_line))`; the fact is 64 on
 every target until Jet selects CPUs (D-CACHE-CONTROL1).
 
+**Regions, blocks and the allocator trait (D-ALLOC-TRAIT1).** A user-written
+allocator implements `mem.Allocator` over memory from a `mem.Region`, with no
+`#Unsafe`. A region is a span of address space: `Region.reserve(bytes)` maps
+fresh private pages, which the system commits on first touch, and `close`
+unmaps them. `claim` hands blocks out in address order and never reuses them;
+reuse is the allocator's job. A `mem.Block` is `#SingleUse`: it cannot be
+copied, and code outside `core.mem` cannot build one or change its fields, so
+a block is always memory that a region handed out. It ends by going back to an
+allocator's `release`. `split` and `join` change a block in place; `join` takes
+the neighbor that starts where the block ends.
+
+| Signature | Result | Description |
+|---|---|---|
+| `Region.reserve(bytes: Int) -> Region AllocError!` | region | Map `bytes` of fresh pages. A size of zero or less, or a system refusal, is an `AllocError` naming `Region`. |
+| `Region.adopt(address: Int, bytes: Int) -> Region` | region | `#Unsafe` function: a region over memory the caller owns. It is never unmapped. |
+| `region.claim(size: Int, align: Int) -> Block?` | block | The next `size` bytes at a multiple of `align` (a power of two), or `None` when the arguments are invalid or the region is full. |
+| `region.address()`, `region.size()`, `region.remaining()` | integer | The first address, the size, and the bytes not yet claimed. |
+| `close(region)` | — | Unmap a reserved region. |
+| `block.address()`, `block.size()` | integer | The first address and the size in bytes. |
+| `block.split(at: Int) -> Block` | block | Keep the first `at` bytes and return the rest. `at` outside the block panics. |
+| `block.join(next: &&Block)` | — | Grow over `next`, which must start where the block ends, else it panics. |
+| `Allocator: trait { allocate: fn(&self, size: Int, align: Int) -> Block AllocError!; release: fn(&self, block: &&Block) Never!; resize: fn(&self, block: &Block, new_size: Int) -> Bool Never! }` | trait | The allocator trait. `resize` changes a block in place and answers whether it could; on `false` the block is unchanged. `release` and `resize` cannot fail. |
+
+Inside a `#Context(allocator: a)` block over an `Arena`, `context.scratch`
+(the task's scratch arena) or a `mem.Allocator` value, the list buffers,
+boxes, recursive links and text (interpolation, `+`, `+=`, `to_string`,
+`join`) the block's code makes take their memory from `a`
+([`Examples/Memory/Allocation/ContextAllocator.jet`](../../../Examples/Memory/Allocation/ContextAllocator.jet)).
+An `Arena` and `context.scratch` serve a block from one contiguous
+reservation whose pages the system commits on first touch: dropping a value
+frees nothing, and the block's end rewinds the reservation to where it
+stood when the block began, so nested blocks are nested marks.
+A value that leaves
+the block, by a store into older data, a `return` or `break`, a send, a
+task's or escaping closure's capture, a module store or a `#Memo` entry,
+first moves into the allocator that holds its destination, so the block's
+memory can be released or rewound once the block ends. Resetting the
+block's allocator inside the block is E0204. Closures, maps and the other
+containers take the program heap. The built-in allocators do not implement
+the trait, and a block's bytes have no checked `[U8]` view.
+[`Examples/Memory/Allocation/UserAllocator.jet`](../../../Examples/Memory/Allocation/UserAllocator.jet)
+is a free-list allocator over a region.
+
 ### `core.text.parse` — text parsing and scanning
 
 `core.text.parse` contains destination-independent string operations and
@@ -6304,6 +6360,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `app`
 - `core`
 - `core.devtools`
+- `core.debug`
 - `core.archive`
 - `core.archive.gzip`
 - `core.archive.zstd`

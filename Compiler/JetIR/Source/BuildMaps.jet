@@ -765,9 +765,12 @@ ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapS
 
 // Moves the key and value in: an existing key keeps its entry key (the
 // incoming one is dropped) and its value is replaced, dropped by map.set and
-// returned in an Option box by map.insert (null when the key was new).
+// returned in an Option box by map.insert (null when the key was new). A
+// Map's entries are the heap's, so what they hold moves there first
+// (BuildMove.jet).
 ir_map_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, map_row: Int, map: Int, key: Int, value: Int, option_row: Int) Never! {
     a.f.result = option_row
+    ir_move_heap(m, p, a, value)
     word_row: ir_word_row(m)
     index: ir_map_call(m, p, a, map_row, "map.find", [Int]{map, key}, word_row)
     none: ir_word_const(m, a, 0)
@@ -795,6 +798,7 @@ ir_map_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
     if m.types[shape.key.ty].drop != "" -> ir_emit(a.f, IROp.Drop, -1, key, -1, -1, a.line)
     ir_emit(a.f, IROp.Return, -1, old, -1, -1, a.line)
     ir_end(a.f, a.line)
+    ir_move_heap(m, p, a, key)
     if ir_map_hashed(shape) {
         // A new key goes after the last entry, out of order until a
         // rebuild merges it in.

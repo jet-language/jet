@@ -3,11 +3,48 @@
 
 use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, name_rows_set, name_rows_value]
 
+// A buffer of `bytes` bytes (a slot) to replace the one of the List at
+// `list`, null when `try` and refused. In a program's module it comes from
+// the allocator that served the old buffer, else from the one owning the
+// List's storage (BuildMove.jet), the current one for storage this body
+// reserved inside its innermost open `#Context(allocator: a)` block (which
+// its address test cannot tell from the frame's older storage); the heap
+// anywhere else.
+ir_list_grow_buffer: fn(m: &IRModule, b: &IRBuilder, list: Int, bytes: Int, try: Bool) -> Int Never! {
+    word_row: ir_word_row(m)
+    if !m.user_values {
+        align: ir_word_const(m, b, 8)
+        return ir_runtime(m, b, if try -> "jet_rt_alloc_try" else -> "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    }
+    old: ir_load_word(m, b, list, 16)
+    place: if ir_young_storage(b, list) -> ir_word_const(m, b, 0) else -> list
+    ir_runtime(m, b, if try -> "jet_rt_alloc_value_grow_try" else -> "jet_rt_alloc_value_grow", [Int]{bytes, old, place}, word_row)
+}
+
+// Whether `slot` addresses storage of this body's frame reserved inside its
+// innermost open `#Context(allocator: a)` block: every write of it there is
+// a StackAddress, or an Offset into such storage.
+ir_young_storage: fn(b: IRBuilder, slot: Int) -> Bool Never! {
+    if b.young_slots < 0 || slot < b.young_slots -> return false
+    made := false
+    loop at in b.young_ops..<b.f.op.len() {
+        if b.f.dst[at] != slot -> next
+        if b.f.op[at] == .StackAddress || (b.f.op[at] == .Offset && ir_young_storage(b, b.f.a[at])) {
+            made = true
+        } else {
+            return false
+        }
+    }
+    made
+}
+
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
-// when full, then stores the element at `len`.
+// when full, then stores the element at `len`, which moves into the
+// allocator owning the buffer (BuildMove.jet).
 ir_list_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, value: Int) Never! {
     slot: ir_list_slot(m, b, list, row)
     ir_store_at(m, p, b, slot.address, 0, value)
+    ir_move_stored(m, p, b, row, slot.address, 0)
     ir_list_counted(m, b, list, slot.length)
 }
 
@@ -28,10 +65,8 @@ ir_list_slot: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> (address: 
     ir_open_if(b.f, small, b.line)
     ir_emit(b.f, IROp.Copy, grown, four, -1, -1, b.line)
     ir_end(b.f, b.line)
-    align: ir_word_const(m, b, 8)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    word_row: ir_word_row(m)
-    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{grown_bytes, align}, word_row)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, false)
     old_data: ir_load_word(m, b, list, 16)
     old_bytes: ir_word_op(m, b, IROp.Mul, length, width)
     _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, old_bytes}, -1)
@@ -267,6 +302,17 @@ ir_list_fill_span: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row:
     ir_emit(b.f, IROp.Copy, next, zero, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_count_close(m, b, index)
+    // The filled elements move into the allocator owning the buffer
+    // (BuildMove.jet).
+    if m.user_values && ir_move_needs(m, p, row) {
+        saved: ir_move_open(m, b, IR_MOVE_ENTER_AT, data)
+        moved: ir_count_open(m, b, count)
+        position: ir_word_op(m, b, IROp.Add, first, moved)
+        element: ir_element_address(m, b, data, position, stride)
+        ir_move_at(m, p, b, row, element, 0)
+        ir_count_close(m, b, moved)
+        ir_move_close(m, b, saved)
+    }
 }
 
 // The write view of `length` elements of the buffer `data` from `first`
@@ -515,10 +561,8 @@ ir_list_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: In
     ir_open_if(b.f, below, b.line)
     ir_emit(b.f, IROp.Copy, grown, total, -1, -1, b.line)
     ir_end(b.f, b.line)
-    align: ir_word_const(m, b, 8)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    word_row: ir_word_row(m)
-    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{grown_bytes, align}, word_row)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, false)
     old_data: ir_load_word(m, b, list, 16)
     _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, kept}, -1)
     // The source may window the old buffer: it is copied before that goes.
@@ -605,8 +649,7 @@ ir_list_try_reserve: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     ir_emit(b.f, IROp.Copy, grown, required, -1, -1, b.line)
     ir_end(b.f, b.line)
     grown_bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    align: ir_word_const(m, b, 8)
-    data: ir_runtime(m, b, "jet_rt_alloc_try", [Int]{grown_bytes, align}, word_row)
+    data: ir_list_grow_buffer(m, b, list, grown_bytes, true)
     nil: ir_word_const(m, b, 0)
     no_memory: ir_bool_op(m, b, IROp.Eq, data, nil)
     ir_open_if(b.f, no_memory, b.line)
@@ -691,10 +734,12 @@ ir_string_try_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     ir_emit(b.f, IROp.Copy, result, failed, -1, -1, b.line)
     b.fresh[failed] = false
     ir_else(b.f, b.line)
-    // The place's owner is consumed and the joined text stored back.
+    // The place's owner is consumed and the joined text stored back, in the
+    // allocator owning the place (BuildMove.jet).
     current: ir_load_at(m, b, address, 0, string_row)
-    appended: ir_runtime(m, b, "jet_rt_string_append", [Int]{current, text}, string_row)
+    appended: ir_append(m, b, current, text, string_row)
     ir_emit(b.f, IROp.Store, -1, address, 0, appended, b.line)
+    ir_move_stored(m, p, b, string_row, address, 0)
     pushed: ir_result_box(m, p, b, ty, true, -1)
     ir_emit(b.f, IROp.Copy, result, pushed, -1, -1, b.line)
     b.fresh[pushed] = false
@@ -937,7 +982,7 @@ ir_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: In
     if operation == .ToString {
         value: ir_expr(m, p, b, receiver)
         if ir_failed(b) || value < 0 -> return -1
-        return ir_render(m, p, b, receiver_ty, value, IRRender.Display, span)
+        return ir_render_value(m, p, b, receiver_ty, value, IRRender.Display, span)
     }
     if operation == .TryStringPush -> return ir_string_try_push(m, p, b, ty, receiver, args, span)
     if ir_lazy_fused(m, p, b, ty, receiver, operation, args, span) == .Val(fused) -> return fused
@@ -1131,9 +1176,7 @@ ir_builtin_on: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_
             .JoinSep | .DequeJoin -> {
                 if operands.len() != 2 -> return ir_fail_slot(b, span, "join without a separator")
                 separator: operands[1]
-                pointer_row: ir_pointer_row(m)
-                builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
-                b.fresh[builder] = false
+                builder: ir_text_builder(m, b)
                 walk: ir_walk_open(m, b, subject, element)
                 zero: ir_word_const(m, b, 0)
                 later: ir_bool_op(m, b, IROp.Ne, walk.index, zero)
@@ -1597,6 +1640,9 @@ ir_cache_add: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRCacheShape,
     point: ir_list_reserve(m, b, entries, shape.entry)
     room: ir_load_word(m, b, entries, 16)
     target: ir_element_address(m, b, room, point, shape.stride)
+    // A Cache's entries are the heap's (BuildMove.jet).
+    ir_move_heap(m, p, b, key)
+    ir_move_heap(m, p, b, value)
     if key >= 0 -> b.fresh[key] = true
     ir_store_at(m, p, b, target, shape.key.offset, key)
     if value >= 0 -> b.fresh[value] = true
@@ -4468,6 +4514,7 @@ ir_list_replace: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: I
     }
     b.fresh[owned] = true
     ir_store_at(m, p, b, address, 0, owned)
+    ir_move_stored(m, p, b, row, address, 0)
     if drops {
         ir_else(b.f, b.line)
         ir_emit(b.f, IROp.Drop, -1, owned, -1, -1, b.line)
@@ -5006,7 +5053,7 @@ ir_record_list_from_runtime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item:
     ir_open_if(b.f, filled, b.line)
     width: ir_word_const(m, b, stride)
     bytes: ir_word_op(m, b, IROp.Mul, length, width)
-    storage: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    storage: ir_list_buffer_sized(m, b, bytes)
     ir_emit(b.f, IROp.Copy, data, storage, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_route_list_header(m, b, base, offset, data, length)
@@ -5971,6 +6018,34 @@ ir_core_list_leaf: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRu
     loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     ir_release(m, b, list)
     reserved
+}
+
+// A region's pages (Core/Mem/Mem.jet): `__region_reserve(bytes)` maps fresh
+// private pages and answers their address, or 0
+// (jet_rt_mem_region_reserve); `__region_release(address, bytes)` unmaps
+// them at the length reserved (jet_rt_mem_region_release). Each Int crosses
+// as a native word.
+ir_core_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRuntimeIntrinsic, args: [Int], span: Span) -> Int Never! {
+    reserves: operation == IRRuntimeIntrinsic.RegionReserve
+    if args.len() != (if reserves -> 1 else -> 2) -> return ir_fail_slot(b, span, "region operation has invalid checked arity")
+    words := [Int]{}
+    loop arg in args {
+        value: ir_expr(m, p, b, arg)
+        if ir_failed(b) || value < 0 -> return -1
+        native: ir_native_index(m, b, value, span)
+        if ir_failed(b) -> return -1
+        ir_release(m, b, value)
+        words.push(native)
+    }
+    if !reserves {
+        _: ir_runtime(m, b, "jet_rt_mem_region_release", words, -1)
+        return -1
+    }
+    int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
+    word_row: ir_word_row(m)
+    address: ir_runtime(m, b, "jet_rt_mem_region_reserve", words, word_row)
+    if m.types[int_row].kind == .Int -> return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{address}, int_row)
+    address
 }
 
 // `crypto.wipe(bytes)`: the runtime wipes the written List header's buffer

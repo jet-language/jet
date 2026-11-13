@@ -1,0 +1,21 @@
+ROOT_THREAD: #run context.thread
+
+report: fn() -> String {
+    thread: #run context.thread
+    deadline: #run context.deadline
+    shown: if deadline == {
+        .Val(ms) -> "{ms}"
+        .None -> "None"
+    }
+    "prepared thread {ROOT_THREAD} {thread} deadline {shown}; running thread {context.thread} deadline {context.deadline ?? -1}"
+}
+
+run: fn() {
+    #Context(deadline: 100) {
+        worker: task report()
+        if worker.join() == {
+            .Ok(line) -> { print(line) }
+            .Err(_) -> { print("failed") }
+        }
+    }
+}

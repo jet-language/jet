@@ -1,13 +1,22 @@
 // `#Memo` result caching (A memoized function keeps its results in a
 // store of entries, most recently used first, at most its bound
 // (FnBody.memo_bound; memo_unbounded: none). An entry is a heap block holding
-// copies of the arguments (receiver first), then a copy of the result. On entry
-// the arguments are compared with each entry's under the store's lock: a hit
-// moves the entry first and returns a copy of its result without running the
-// body; a miss opens an entry with copies of the arguments, and each return of
-// the body files a copy of its result there (ir_memo_file), dropping the entry
-// the bound evicts. The runtime (JetRuntime Memo.jet) only orders and counts
-// the entry pointers; the layout, comparison, copies and drops are built here.
+// copies of the arguments (receiver first), of the task context fields the
+// body can read (TEffectFacts.context, read on entry; `trace` as the text of
+// the frames, which names everything the records hold) and of the context
+// key values it can read (TEffectFacts.context_keys, each an Option that is
+// None where no `#Context` block set the key), then a copy of the result.
+// On entry the key values are compared with each entry's under the store's
+// lock: a hit moves the entry first and returns a copy of its result
+// without running the body; a miss opens an entry with copies of the key
+// values, and each return of the body files a copy of its result there
+// (ir_memo_file), dropping the entry the bound evicts. The entry is the
+// heap's, and a copy a `#Context(allocator:)` block's allocator served moves
+// there before it is filed (BuildMove.jet). A function that can
+// read a context key whose type has no equality keeps no store: its body
+// runs on every call. The runtime (JetRuntime Memo.jet) only orders and
+// counts the entry pointers; the layout, comparison, copies and drops are
+// built here.
 // The store is the function's zeroed static cell. No stop check runs while the
 // lock is held: a stop the comparison publishes is taken at the next check
 // after unlock.
@@ -26,6 +35,9 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
     } else if !function.memo_unbounded {
         return
     }
+    loop read in function.effects.context_keys {
+        if !read.equatable -> return
+    }
     span: function.source_span
     result_row: b.f.result
     rows := [Int]{}
@@ -39,6 +51,37 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
         offsets.push(size)
         keys.push(binding.slot)
         size += ir_align8(m.types[row].size)
+    }
+    loop field in function.effects.context {
+        ty: if field == {
+            "deadline" -> Type.Option{inner: Type.Int}
+            "trace" -> Type.String
+            else -> Type.Int
+        }
+        read: ir_context_read(m, p, b, ty, field, span)
+        if ir_failed(b) -> return
+        b.fresh[read] = ir_has_drop(m, b, read)
+        row: b.f.slot_type[read]
+        rows.push(row)
+        offsets.push(size)
+        keys.push(read)
+        size += ir_align8(m.types[row].size)
+    }
+    loop read in function.effects.context_keys {
+        if ir_unit_type(read.ty) -> next
+        value: ir_context_lookup(m, p, b, read.ty, read.key, span)
+        if ir_failed(b) -> return
+        row: b.f.slot_type[value]
+        rows.push(row)
+        offsets.push(size)
+        keys.push(value)
+        size += ir_align8(m.types[row].size)
+    }
+    // The context reads are fresh values of this entry: a hit drops them and
+    // a miss moves them into its entry.
+    owned := [Int]{}
+    loop slot in keys {
+        if b.fresh[slot] && ir_has_drop(m, b, slot) -> owned.push(slot)
     }
     value_offset: size
     if result_row >= 0 -> size += ir_align8(m.types[result_row].size)
@@ -71,6 +114,7 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
     }
     _: ir_runtime(m, b, "jet_rt_memo_unlock", [Int]{cell}, -1)
     b.stopping = stopping
+    loop slot in owned -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     ir_emit_return(m, b, result)
     ir_end(b.f, b.line)
     ir_emit(b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
@@ -83,12 +127,14 @@ ir_memo_enter: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) N
     _: ir_runtime(m, b, "jet_rt_memo_unlock", [Int]{cell}, -1)
     b.stopping = stopping
     bytes: ir_word_const(m, b, size)
-    align: ir_word_const(m, b, 8)
-    opened: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    // The store outlives any `#Context(allocator:)` block: its entry is the
+    // heap's (jet_rt_alloc_8), and what it holds moves there (BuildMove.jet).
+    opened: ir_runtime(m, b, "jet_rt_alloc_8", [Int]{bytes}, word_row)
     loop at in 0..<keys.len() {
         if m.types[rows[at]].kind == .Unit -> next
-        duplicate: ir_copy_value(m, p, b, keys[at], span)
+        duplicate: if owned.contains(keys[at]) -> keys[at] else -> ir_copy_value(m, p, b, keys[at], span)
         ir_store_at(m, p, b, opened, offsets[at], duplicate)
+        ir_move_stored(m, p, b, rows[at], opened, offsets[at])
     }
     b.memo = Val(IRMemo{cell: cell, entry: opened, rows: rows, offsets: offsets, value_offset: value_offset, size: size, bound: bound})
 }
@@ -139,6 +185,7 @@ ir_memo_file: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Spa
     if slot >= 0 && m.types[result_row].kind != .Unit {
         duplicate: ir_copy_value(m, p, b, slot, span)
         ir_store_at(m, p, b, memo.entry, memo.value_offset, duplicate)
+        ir_move_stored(m, p, b, result_row, memo.entry, memo.value_offset)
     }
     word_row: ir_word_row(m)
     stopping: b.stopping

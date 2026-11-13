@@ -56,7 +56,8 @@ IRRuntimeIntrinsic: enum {
     // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
     // an exact List reserve, a volatile load or store, a streaming store,
     // a raw pointer's step by elements or by bytes, a raw block copy or fill;
-    // and, with no type argument, a raw heap allocation and its release.
+    // and, with no type argument, a raw heap allocation and its release, and
+    // a region's reserve and release of fresh pages.
     TypeSize
     ListCapacity
     ListReserveExact
@@ -69,6 +70,8 @@ IRRuntimeIntrinsic: enum {
     MemFill
     AllocRaw
     FreeRaw
+    RegionReserve
+    RegionRelease
 }
 
 IRIntrinsicShape: enum {
@@ -688,8 +691,8 @@ ir_address_target_signature: fn(function: FnBody, arity: Int) -> Bool Never! {
 // intrinsic is the FunctionAddress of its export; rt_fault_print is a call of
 // the fault report the linker writes; a core.mem operation is its inline
 // lowering (BuildRoutes.jet ir_core_list_leaf, ir_core_stream_store,
-// BuildSentry.jet ir_core_volatile, ir_core_mem_block, ir_core_alloc_raw and
-// ir_core_free_raw, BuildExpr.jet ir_core_ptr_step).
+// ir_core_region, BuildSentry.jet ir_core_volatile, ir_core_mem_block,
+// ir_core_alloc_raw and ir_core_free_raw, BuildExpr.jet ir_core_ptr_step).
 ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRuntimeIntrinsic, type_args: [Type], args: [BodyCallArg], span: Span) -> Int Never! {
     word_row: ir_word_row(m)
     float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, "type Float")
@@ -709,6 +712,7 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .MemFill -> ir_core_mem_block(m, p, b, "fill", ir_intrinsic_nodes(args), type_args, span)
         .AllocRaw -> ir_core_alloc_raw(m, p, b, ir_intrinsic_nodes(args), span)
         .FreeRaw -> ir_core_free_raw(m, p, b, ir_intrinsic_nodes(args), span)
+        .RegionReserve | .RegionRelease -> ir_core_region(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
     }
 }
 

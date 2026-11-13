@@ -10,7 +10,8 @@
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
 // the large-block cache owns lock 216, cached bytes 224 and 59 class heads
 // from 256; the slab regions own lock 736, cursor 744, end 752, the
-// free-slab stack 760 and the next region size 768 (alloc_slab_map).
+// free-slab stack 760 and the next region size 768 (alloc_slab_map); words
+// 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
@@ -192,6 +193,135 @@ alloc_unmap: fn(address: I64, bytes: I64) {
     }
 }
 
+// The page map: every region core.mem.Region.reserve maps
+// is registered by address, so growth and drop find the allocator that
+// served a block from the block's address alone, with no header word; a miss
+// is the program heap. A region is mapped at 64 KiB alignment in whole
+// 64 KiB units (ALLOC_PAGE_UNIT), so no heap mapping shares a unit with it.
+// State word 232 (ALLOC_PAGE_MAP) names the root table, 0 until the first
+// region: one word per 4 GiB span of the 47-bit user address space, each 0
+// or a span table of one word per unit, 0 or the region's record [base 0]
+// [mapped bytes 8][carrier 16]. The tables are fresh mappings the kernel
+// commits on first touch and live as long as the process; lock 240
+// (ALLOC_PAGE_LOCK) serializes their writes, and a lookup reads their
+// aligned words without it. Word 232 shares the cache line of the tracked
+// count 200 that every free already reads. The record's carrier is the
+// `#Context(allocator:)` carrier that last served a block from the region
+// (alloc_user_take), 0 before any did.
+ALLOC_PAGE_MAP: I64{232}
+ALLOC_PAGE_LOCK: I64{240}
+ALLOC_PAGE_UNIT: I64{65536}
+ALLOC_PAGE_ROOT_BYTES: I64{262144}
+ALLOC_PAGE_SPAN_BYTES: I64{524288}
+ALLOC_PAGE_LIMIT: I64{140737488355328}
+
+// `bytes` rounded up to whole page-map units.
+alloc_page_bytes: fn(bytes: I64) -> I64 Never! {
+    wrapping(bytes + wrapping(ALLOC_PAGE_UNIT - I64{1})).bit_and(wrapping(ALLOC_PAGE_UNIT - I64{1}).bit_not())
+}
+
+// The record of the registered region holding `address`, or 0: the heap.
+alloc_page_region: fn(address: I64) -> I64 {
+    if (address <= I64{0} || address >= ALLOC_PAGE_LIMIT) -> return I64{0}
+    #Unsafe("the root and span tables are process-lifetime mappings, zero where nothing is registered, whose aligned words are read atomically on x86") {
+        root: os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
+        if (root == I64{0}) -> return I64{0}
+        span: os_load_i64(wrapping(root + wrapping((address >> I64{32}) * I64{8})))
+        if (span == I64{0}) -> return I64{0}
+        return os_load_i64(wrapping(span + wrapping((address >> I64{16}).bit_and(I64{65535}) * I64{8})))
+    }
+}
+
+// Points every unit of [base, base + bytes) at `record` (0 clears them)
+// under the page lock. False, with no unit written, when a table cannot be
+// mapped.
+alloc_page_set: fn(base: I64, bytes: I64, record: I64) -> Bool {
+    lock: wrapping(alloc_root + ALLOC_PAGE_LOCK)
+    alloc_lock(lock)
+    ok := true
+    #Unsafe("the held page lock serializes every table write; a fresh table is zero-filled before the aligned store that publishes it, and the units written lie in spans mapped first") {
+        root := os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP))
+        if (root == I64{0}) {
+            root = alloc_map_try(ALLOC_PAGE_ROOT_BYTES)
+            if (root != I64{0}) { os_store_i64(wrapping(alloc_root + ALLOC_PAGE_MAP), root) }
+        }
+        if (root == I64{0}) { ok = false }
+        end: wrapping(base + bytes)
+        at := base
+        loop ok && at < end {
+            cell: wrapping(root + wrapping((at >> I64{32}) * I64{8}))
+            if (os_load_i64(cell) == I64{0}) {
+                span: alloc_map_try(ALLOC_PAGE_SPAN_BYTES)
+                if (span == I64{0}) { ok = false } else { os_store_i64(cell, span) }
+            }
+            at = wrapping((at >> I64{32}) + I64{1}) << I64{32}
+        }
+        at = base
+        loop ok && at < end {
+            span: os_load_i64(wrapping(root + wrapping((at >> I64{32}) * I64{8})))
+            os_store_i64(wrapping(span + wrapping((at >> I64{16}).bit_and(I64{65535}) * I64{8})), record)
+            at = wrapping(at + ALLOC_PAGE_UNIT)
+        }
+    }
+    alloc_unlock(lock)
+    ok
+}
+
+// The `core.mem.__region_reserve` route behind core.mem.Region.reserve:
+// `bytes` of fresh private pages, which the kernel commits on first touch,
+// registered in the page map, or 0 when the size is not positive or the
+// system refuses. The heap never sees these pages.
+#Export(c) jet_rt_mem_region_reserve: fn(bytes: I64) -> I64 {
+    record: alloc_reservation_map(bytes, I64{24})
+    if (record == I64{0}) -> I64{0} else -> sync_load(record)
+}
+
+// Maps `bytes` of fresh private pages at a page-map unit and registers them
+// under a new record of `record_bytes` ([base 0][units 8], then zero
+// words: a region record's carrier at 16, an arena record's words); answers
+// the record, or 0 when the size is not positive or the system refuses.
+alloc_reservation_map: fn(bytes: I64, record_bytes: I64) -> I64 {
+    if (bytes <= I64{0} || bytes > wrapping(ALLOC_PAGE_LIMIT - ALLOC_PAGE_UNIT)) { return I64{0} }
+    units: alloc_page_bytes(bytes)
+    mapping: alloc_map_try(wrapping(units + ALLOC_PAGE_UNIT))
+    if (mapping == I64{0}) { return I64{0} }
+    base: alloc_align(mapping, ALLOC_PAGE_UNIT)
+    // The unit of slack mapped for the alignment goes back: `head` bytes
+    // before `base`, the rest after its units.
+    head: wrapping(base - mapping)
+    if (head != I64{0}) { alloc_unmap(mapping, head) }
+    alloc_unmap(wrapping(base + units), wrapping(ALLOC_PAGE_UNIT - head))
+    record: alloc_try_validated(record_bytes, I64{8})
+    if (record != I64{0}) {
+        sync_store(record, base)
+        sync_store(wrapping(record + I64{8}), units)
+        at := I64{16}
+        loop at < record_bytes {
+            sync_store(wrapping(record + at), I64{0})
+            at += I64{8}
+        }
+        if alloc_page_set(base, units, record) -> return record
+        alloc_free_validated(record, record_bytes, I64{8})
+    }
+    alloc_unmap(base, units)
+    I64{0}
+}
+
+// The `core.mem.__region_release` route behind Region's close: removes the
+// region from the page map, drops its record's carrier and unmaps the pages
+// that jet_rt_mem_region_reserve returned.
+#Export(c) jet_rt_mem_region_release: fn(address: I64, bytes: I64) {
+    if (address == I64{0} || bytes <= I64{0}) { return }
+    record: alloc_page_region(address)
+    units: if (record != I64{0}) -> sync_load(wrapping(record + I64{8})) else -> alloc_page_bytes(bytes)
+    if (record != I64{0}) {
+        _ := alloc_page_set(address, units, I64{0})
+        alloc_user_drop(sync_load(wrapping(record + I64{16})))
+        alloc_free_validated(record, I64{24}, I64{8})
+    }
+    alloc_unmap(address, units)
+}
+
 // runtime-init: 0
 #Export(c) jet_rt_alloc_init: fn() {
     if (alloc_root != I64{0}) {
@@ -292,7 +422,9 @@ alloc_live_blocks: fn(width: I64) -> I64 {
     data: sync_load(wrapping(live + I64{16}))
     at := I64{0}
     loop at < count {
-        total = wrapping(total - sync_load(wrapping(sync_load(wrapping(data + (at + I64{1}) * I64{8})) + count_offset)))
+        // A blocked TCB (alloc_cache_sync) caches nothing.
+        cached: sync_load(wrapping(sync_load(wrapping(data + (at + I64{1}) * I64{8})) + count_offset))
+        if (cached != ALLOC_CACHE_BLOCKED) { total = wrapping(total - cached) }
         at += I64{2}
     }
     sync_mutex_unlock(thread_tls_registry)
@@ -604,10 +736,16 @@ alloc_small: fn(root: I64, size: I64, align: I64, slot: I64) -> I64 {
 }
 
 // The calling thread's cache row [head][count] for a class, or zero when the
-// thread has no TCB (TCB @320 + 16 per class, Thread.jet).
+// thread has no TCB (TCB @320 + 16 per class, Thread.jet) or its rows are
+// blocked (alloc_cache_sync).
 alloc_cache_row: fn(slot: I64) -> I64 {
     base: thread_base()
-    if (base == I64{0}) -> I64{0} else -> wrapping(base + wrapping(I64{304} + wrapping(alloc_head(I64{0}, slot) * I64{2})))
+    if (base == I64{0}) -> return I64{0}
+    row: wrapping(base + wrapping(I64{304} + wrapping(alloc_head(I64{0}, slot) * I64{2})))
+    #Unsafe("row is this thread's private cache row") {
+        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) -> return I64{0}
+    }
+    row
 }
 
 // 1 once a thread refilled its cache. Its storage is a guard of the thread
@@ -619,9 +757,11 @@ alloc_cache_row: fn(slot: I64) -> I64 {
 alloc_cache_linked := I64{0}
 
 // Refill this thread's cache row with up to 32 blocks of one slab of the
-// stack band's arena. False only when no slab can be mapped.
+// stack band's arena. False when no slab can be mapped or the row is blocked
+// (alloc_cache_sync).
 alloc_cache_refill: fn(row: I64, slot: I64) -> Bool {
-    #Unsafe("an idempotent flag: every writer stores the same 1") {
+    #Unsafe("row is this thread's private cache row; the flag is idempotent: every writer stores the same 1") {
+        if (os_load_i64(wrapping(row + I64{8})) == ALLOC_CACHE_BLOCKED) -> return false
         alloc_cache_linked = I64{1}
     }
     root: alloc_arena()
@@ -686,6 +826,96 @@ alloc_cache_flush: fn() {
         }
         row = wrapping(row + I64{16})
         index = wrapping(index + I64{1})
+    }
+}
+
+// A blocked row's count: its head is 0, so the fast allocation finds no
+// block, and the count is past 64, so the fast free finds it full.
+ALLOC_CACHE_BLOCKED: I64{4611686018427387904}
+
+// Whether the TCB `tcb`'s rows are blocked (its first row stands for all).
+alloc_cache_blocked: fn(tcb: I64) -> Bool {
+    #Unsafe("tcb is a live TCB whose eight cache rows start at @320") {
+        return os_load_i64(wrapping(tcb + I64{328})) == ALLOC_CACHE_BLOCKED
+    }
+}
+
+// Sets every cache row of `tcb` to `head` and `count`.
+alloc_cache_set: fn(tcb: I64, head: I64, count: I64) {
+    row := wrapping(tcb + I64{320})
+    loop row < wrapping(tcb + I64{448}) {
+        #Unsafe("row is one of the TCB's eight cache rows, which only the thread running on it touches") {
+            os_store_i64(row, head)
+            os_store_i64(wrapping(row + I64{8}), count)
+        }
+        row = wrapping(row + I64{16})
+    }
+}
+
+// Keeps the rows of `tcb`, the running thread's or fiber's, blocked exactly
+// while its context record names a `#Context(allocator:)` carrier (the user
+// allocators below): blocking returns every cached block to its slab first,
+// and unblocking leaves the rows empty. Called where the record or its
+// allocator changes (Context.jet) and where a fiber switches in.
+alloc_cache_sync: fn(tcb: I64) {
+    if (tcb == I64{0} || tcb == thread_detached_base()) -> return
+    record: sync_load(wrapping(tcb + CONTEXT_TCB_SLOT))
+    wanted: record != I64{0} && sync_load(wrapping(record + CONTEXT_ALLOCATOR)) != I64{0}
+    if (wanted == alloc_cache_blocked(tcb)) -> return
+    if wanted {
+        row := wrapping(tcb + I64{320})
+        loop row < wrapping(tcb + I64{448}) {
+            #Unsafe("row is one of the running TCB's eight private cache rows") {
+                alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
+            }
+            row = wrapping(row + I64{16})
+        }
+        alloc_cache_set(tcb, I64{0}, ALLOC_CACHE_BLOCKED)
+        return
+    }
+    alloc_cache_set(tcb, I64{0}, I64{0})
+}
+
+// A fiber switching in on the thread whose TCB is `tcb` (Fiber.jet
+// fiber_run) takes the thread's cached blocks, as only the running TCB
+// touches them, unless the thread's rows are blocked: those stay, and the
+// fiber starts empty. Then the fiber's rows follow its own record.
+alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
+    if alloc_cache_blocked(tcb) {
+        alloc_cache_set(fiber_tcb, I64{0}, I64{0})
+    } else {
+        alloc_cache_move(tcb, fiber_tcb)
+    }
+    alloc_cache_sync(fiber_tcb)
+}
+
+// The fiber on `fiber_tcb` switched out to the thread on `tcb`: its cached
+// blocks go back to the thread, or to their slabs when the thread's rows
+// are blocked. A blocked fiber holds none, and the thread's rows are then as
+// alloc_cache_lend left them.
+alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
+    if alloc_cache_blocked(fiber_tcb) -> return
+    if !alloc_cache_blocked(tcb) {
+        alloc_cache_move(fiber_tcb, tcb)
+        return
+    }
+    row := wrapping(fiber_tcb + I64{320})
+    loop row < wrapping(fiber_tcb + I64{448}) {
+        #Unsafe("row is one of the switched-out fiber's eight cache rows, which no thread runs on now") {
+            alloc_cache_drain(row, os_load_i64(wrapping(row + I64{8})))
+        }
+        row = wrapping(row + I64{16})
+    }
+}
+
+// Moves the cache rows from one TCB to another, emptying the source: a
+// cached block is reachable from exactly one TCB.
+alloc_cache_move: fn(from: I64, to: I64) {
+    at := I64{320}
+    loop at < (I64{448}) {
+        sync_store(wrapping(to + at), sync_load(wrapping(from + at)))
+        sync_store(wrapping(from + at), I64{0})
+        at += I64{8}
     }
 }
 
@@ -790,6 +1020,8 @@ alloc_large: fn(size: I64, align: I64) -> I64 {
 // syscall.
 alloc_grow_large: fn(pointer: I64, size: I64, grown: I64) -> I64 {
     if (alloc_class_limit == I64{0} || grown <= size || alloc_class(size, I64{1}, alloc_class_limit) != I64{0}) -> return I64{0}
+    // A served block (the page map) grows from its allocator, never by mremap.
+    if (alloc_page_region(pointer) != I64{0}) -> return I64{0}
     #Unsafe("pointer is a live direct allocation of exactly `size` bytes at align 1 whose two header words name its mapping and the mapping's bytes; the mode and tracked-count words are aligned words read atomically on x86, as alloc_reserve and alloc_untrack read them; a refused mremap leaves the mapping as it was") {
         if (os_load_i64(wrapping(alloc_root + I64{144})) != I64{0} || os_load_i64(wrapping(alloc_root + I64{200})) != I64{0}) { return I64{0} }
         mapping: os_load_i64(wrapping(pointer - I64{16}))
@@ -1014,6 +1246,442 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
 
 #Export(c) jet_rt_alloc_try: fn(size: I64, align: I64) -> I64 { alloc_try(size, align) }
 
+// User allocators: a `#Context(allocator: a)` block (Context.jet
+// jet_ctx_push_allocator) serves the values of align <= 8 its code makes,
+// in the functions it calls, from `a` until the block ends, outside checked
+// mode; a task it spawns starts on the program heap (context_inherit). Only
+// the value entries divert: the ones a code generator calls for a program's
+// own boxes and list buffers (jet_rt_alloc_value, jet_rt_alloc_value_8,
+// jet_rt_alloc_value_try, jet_rt_alloc_value_grow and
+// jet_rt_alloc_value_grow_try: JetIR names them), a list's growth
+// (alloc_grow_try), and the text a program builds (Text.jet
+// jet_rt_string_builder_value, jet_rt_string_concat_value,
+// jet_rt_string_append_value and jet_rt_string_serve) and its growth
+// (alloc_grow_bytes). The runtime's own allocations always come from the
+// heap. The record's allocator slot names a carrier, a runtime block [refs
+// 0][handler 8][outer 16][mark 24][arena 32][entry 40][held 48]: refs
+// counts the records naming it, the region records naming it (the page map
+// above) and the carriers whose outer it is; handler is a function value
+// fn(op: Int, x: Int, y: Int) -> Int that calls `a` (op ALLOC_USER_TAKE:
+// allocate x bytes at align y, the address or 0; op ALLOC_USER_GIVE:
+// release the x bytes at address y), 0 for an arena block (below); outer
+// is the carrier that was current when the block began (0: the program
+// heap), whose allocator the handler's own allocations use; mark is the
+// stack pointer of the block's code (JetIR Build.jet ir_stack_mark): the
+// frames of the functions it calls lie below it, its own frame and the
+// older ones above. arena, entry and held are an arena block's.
+//
+// A served block is [count 0][0 at 8][block at 16] then the payload at
+// block + 24, as an align-8 heap block lays out its count word and
+// block-start, and lies in one registered region, whose record then names
+// the carrier; a block outside every region goes back and counts as a
+// refusal. Nothing in it tells it from a heap block: drop (jet_rt_free and
+// the entries that fall back to it) and growth (alloc_grow_try,
+// alloc_grow_large) look its address up in the page map, a miss being the
+// heap, and pushes, reads and walks do not change.
+//
+// A value that leaves the block moves first: a store into older data, a
+// return or break out of the block, a send, a task hand-off, a closure's
+// capture, a module store and a memo entry put each part a younger carrier
+// served into the destination's own allocator (jet_rt_move_enter; JetIR
+// BuildMove.jet), and an older container grows from its owner's allocator
+// (alloc_grow_carrier). So no data ever holds a part of a block that ends
+// before it, and a block's end leaves no reference into its allocator.
+//
+// The allocation fast paths take no extra load: while the running record
+// names a carrier, the TCB's cache rows are blocked (alloc_cache_sync), so
+// the fast allocation finds no block and the fast free a full row, and both
+// take the full path, where a value entry asks the record. Runtime metadata
+// (carriers, region records, tracker nodes) always comes from the heap.
+//
+// Arena blocks: a block over a `mem.Arena`, or over `context.scratch`, the
+// task's own arena (Context.jet jet_ctx_push_arena), serves the same values
+// from the arena's block reservation: ALLOC_ARENA_BYTES of fresh pages in
+// one run, which the system commits on first touch, registered in the page
+// map under an arena record [base 0][units 8][ALLOC_ARENA_OWNER at 16]
+// [cursor 24][top 32]. Its carrier has handler 0, the record at arena, the
+// cursor at the block's start at entry and, for an arena the block made
+// itself, that arena's handle at held, dropped with the carrier. A value
+// is taken at the cursor (alloc_arena_take), and the block's end puts the
+// cursor back at entry (alloc_arena_rewind), so nested blocks are nested
+// marks and a drop gives nothing back (alloc_user_give). top is the
+// innermost open block over the arena; the block owning an address in the
+// reservation is the innermost open one whose entry lies at or below it
+// (alloc_user_owner). Only the top block takes at the cursor: a value
+// moving into an enclosing block while an inner one is open, a container
+// of it growing then, and a value made once the reservation is full come
+// from the program heap, which outlives them all.
+ALLOC_USER_TAKE: I64{0}
+ALLOC_USER_GIVE: I64{1}
+ALLOC_USER_HEADER: I64{24}
+ALLOC_USER_CARRIER_BYTES: I64{56}
+ALLOC_ARENA_BYTES: I64{268435456}
+ALLOC_ARENA_RECORD_BYTES: I64{40}
+ALLOC_ARENA_OWNER: I64{-1}
+
+// A new carrier for `handler` (whose owner moves in) over `outer`, which it
+// holds one reference to, for the block whose code runs below the stack
+// address `mark`, named by one record: the caller's.
+alloc_user_carrier_new: fn(handler: I64, outer: I64, mark: I64) -> I64 {
+    carrier: alloc_try_validated(ALLOC_USER_CARRIER_BYTES, I64{8})
+    if (carrier == I64{0}) { alloc_out_of_memory(ALLOC_USER_CARRIER_BYTES) }
+    sync_store(carrier, I64{1})
+    sync_store(wrapping(carrier + I64{8}), handler)
+    sync_store(wrapping(carrier + I64{16}), outer)
+    sync_store(wrapping(carrier + I64{24}), mark)
+    sync_store(wrapping(carrier + I64{32}), I64{0})
+    sync_store(wrapping(carrier + I64{40}), I64{0})
+    sync_store(wrapping(carrier + I64{48}), I64{0})
+    if (outer != I64{0}) -> jet_rt_native_closure_retain(outer)
+    carrier
+}
+
+// A record or a region record no longer names `carrier` (0: none). The
+// last reference drops its handler or held arena, frees it and drops its
+// reference to its outer the same way.
+alloc_user_drop: fn(carrier: I64) {
+    at := carrier
+    loop at != (I64{0}) {
+        if !jet_rt_native_closure_unref(at) -> return
+        handler: sync_load(wrapping(at + I64{8}))
+        outer: sync_load(wrapping(at + I64{16}))
+        held: sync_load(wrapping(at + I64{48}))
+        if (handler != I64{0} && jet_rt_native_closure_unref(handler)) {
+            helper: sync_load(wrapping(handler + I64{16}))
+            if (helper != I64{0}) -> coll_call1_unit(helper, handler)
+        }
+        if (held != I64{0}) -> jet_rt_handle_drop_jet_arena(held)
+        alloc_free_validated(at, ALLOC_USER_CARRIER_BYTES, I64{8})
+        at = outer
+    }
+}
+
+// The record of the arena reservation kept at `slot` (a `mem.Arena`'s or a
+// task context's word, 0 until its first block), mapped on first use; 0
+// when the system refuses, and the blocks then take the program heap.
+alloc_arena_record: fn(slot: I64) -> I64 {
+    kept: sync_load(slot)
+    if (kept != I64{0}) -> return kept
+    record: alloc_reservation_map(ALLOC_ARENA_BYTES, ALLOC_ARENA_RECORD_BYTES)
+    if (record == I64{0}) -> return I64{0}
+    sync_store(wrapping(record + I64{16}), ALLOC_ARENA_OWNER)
+    sync_store(wrapping(record + I64{24}), sync_load(record))
+    sync_store(slot, record)
+    record
+}
+
+// Ends the arena reservation kept at `slot` (0: none): an arena's drop, a
+// task's end and a thread's detach. No block over it is open.
+alloc_arena_release: fn(slot: I64) {
+    record: sync_load(slot)
+    if (record == I64{0}) -> return
+    sync_store(slot, I64{0})
+    base: sync_load(record)
+    units: sync_load(wrapping(record + I64{8}))
+    _ := alloc_page_set(base, units, I64{0})
+    alloc_free_validated(record, ALLOC_ARENA_RECORD_BYTES, I64{8})
+    alloc_unmap(base, units)
+}
+
+// A new arena block's carrier over `outer` for the reservation of `record`
+// (0: refused), dropping the arena handle `held` (0: none) at its end. It
+// becomes the record's top, entered at the record's cursor.
+alloc_arena_carrier_new: fn(record: I64, held: I64, outer: I64, mark: I64) -> I64 {
+    carrier: alloc_user_carrier_new(I64{0}, outer, mark)
+    sync_store(wrapping(carrier + I64{32}), record)
+    sync_store(wrapping(carrier + I64{48}), held)
+    if (record != I64{0}) {
+        sync_store(wrapping(carrier + I64{40}), sync_load(wrapping(record + I64{24})))
+        sync_store(wrapping(record + I64{32}), carrier)
+    }
+    carrier
+}
+
+// The arena block of `carrier` ends (a user block's carrier names no
+// arena): its record's cursor goes back to the block's entry, and its top
+// to the enclosing open block over the same arena (0: none).
+alloc_arena_rewind: fn(carrier: I64) {
+    record: sync_load(wrapping(carrier + I64{32}))
+    if (record == I64{0}) -> return
+    sync_store(wrapping(record + I64{24}), sync_load(wrapping(carrier + I64{40})))
+    at := sync_load(wrapping(carrier + I64{16}))
+    loop at != (I64{0}) {
+        if (sync_load(wrapping(at + I64{32})) == record) -> break
+        at = sync_load(wrapping(at + I64{16}))
+    }
+    sync_store(wrapping(record + I64{32}), at)
+}
+
+// A served block of `size` payload bytes from the arena block of `carrier`,
+// laid out as alloc_user_take's: at the record's cursor while the block is
+// its arena's top and the reservation has room, else from the program heap
+// at `align`.
+alloc_arena_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
+    record: sync_load(wrapping(carrier + I64{32}))
+    requested: if (size == I64{0}) -> I64{1} else -> size
+    if (record == I64{0} || sync_load(wrapping(record + I64{32})) != carrier || requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER - I64{7})) -> return alloc_try_reserved(size, align)
+    cursor: sync_load(wrapping(record + I64{24}))
+    bytes: wrapping(requested + ALLOC_USER_HEADER + I64{7}).bit_and(I64{-8})
+    if (bytes > wrapping(wrapping(sync_load(record) + sync_load(wrapping(record + I64{8}))) - cursor)) -> return alloc_try_reserved(size, align)
+    sync_store(wrapping(record + I64{24}), wrapping(cursor + bytes))
+    sync_store(cursor, I64{1})
+    sync_store(wrapping(cursor + I64{8}), I64{0})
+    sync_store(wrapping(cursor + I64{16}), cursor)
+    wrapping(cursor + ALLOC_USER_HEADER)
+}
+
+// The running record's allocator slot, else 0: the thread has no TCB or
+// record.
+alloc_user_slot: fn() -> I64 {
+    base: thread_base()
+    if (base == I64{0} || base == thread_detached_base()) -> return I64{0}
+    record: sync_load(wrapping(base + CONTEXT_TCB_SLOT))
+    if (record == I64{0}) -> I64{0} else -> wrapping(record + CONTEXT_ALLOCATOR)
+}
+
+// The current record's carrier when it serves a request of `align`, else 0:
+// the align is above 8, checked mode is on, or the thread has no TCB or
+// record. Only the full allocation paths ask.
+alloc_user_current: fn(align: I64) -> I64 {
+    if (align > I64{8} || alloc_class_limit == I64{0}) -> return I64{0}
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> I64{0} else -> sync_load(slot)
+}
+
+// The carrier that served the block holding `address`, else 0: the page
+// map has no region there (the heap), or no carrier served from it. In an
+// arena's reservation it is the innermost open block over that arena whose
+// entry lies at or below `address`.
+alloc_user_owner: fn(address: I64) -> I64 {
+    record: alloc_page_region(address)
+    if (record == I64{0}) -> return I64{0}
+    owner: sync_load(wrapping(record + I64{16}))
+    if (owner != ALLOC_ARENA_OWNER) -> return owner
+    at := sync_load(wrapping(record + I64{32}))
+    loop at != (I64{0}) {
+        if (sync_load(wrapping(at + I64{32})) == record && address >= sync_load(wrapping(at + I64{40}))) -> return at
+        at = sync_load(wrapping(at + I64{16}))
+    }
+    I64{0}
+}
+
+// The carrier owning the data at `address`, whose allocator a value stored
+// there comes from: a served block's carrier (the page map); for an address
+// on this thread's stack, the innermost carrier whose mark lies above it,
+// whose block's code called the frame holding it; else 0, the program heap,
+// which an older frame's data lives as long as.
+alloc_owner: fn(address: I64) -> I64 {
+    served: alloc_user_owner(address)
+    if (served != I64{0}) -> return served
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> return I64{0}
+    at := sync_load(slot)
+    if (at == I64{0}) -> return I64{0}
+    top := I64{0}
+    #Unsafe("reads the stack pointer register only; nothing is dereferenced") {
+        top = os_stack_address_i64()
+    }
+    if (address < top) -> return I64{0}
+    loop at != (I64{0}) {
+        if (address < sync_load(wrapping(at + I64{24}))) -> return at
+        at = sync_load(wrapping(at + I64{16}))
+    }
+    I64{0}
+}
+
+// Whether a part `owner` served (0: the heap) moves to live in `target`'s
+// allocator (0: the heap): its block ends before target's, being one opened
+// inside it. The heap outlives every block.
+alloc_younger: fn(owner: I64, target: I64) -> Bool {
+    if (owner == I64{0} || owner == target) -> return false
+    if (target == I64{0}) -> return true
+    at := sync_load(wrapping(owner + I64{16}))
+    loop at != (I64{0}) {
+        if (at == target) -> return true
+        at = sync_load(wrapping(at + I64{16}))
+    }
+    false
+}
+
+// A move into `target`'s allocator (0: the heap; JetIR BuildMove.jet): while
+// it runs the record names `target`, so the copies it makes come from
+// there. Answers the carrier it replaced, for jet_rt_move_leave, or -1 when
+// no carrier serves this thread or `target` is the current one, so no part
+// is younger than the destination and nothing moves. A stop between them
+// leaves the record on `target` until the block's jet_ctx_pop_allocator
+// restores the enclosing carrier; the one replaced keeps the record's
+// reference, so the blocks it served still go back to it.
+#Export(c) jet_rt_move_enter: fn(target: I64) -> I64 {
+    if (alloc_class_limit == I64{0}) -> return I64{-1}
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> return I64{-1}
+    current: sync_load(slot)
+    if (current == I64{0} || current == target) -> return I64{-1}
+    sync_store(slot, target)
+    alloc_cache_sync(thread_base())
+    current
+}
+
+// jet_rt_move_enter into the allocator owning the destination `address`
+// (alloc_owner).
+#Export(c) jet_rt_move_enter_at: fn(address: I64) -> I64 {
+    if (alloc_class_limit == I64{0}) -> return I64{-1}
+    slot: alloc_user_slot()
+    if (slot == I64{0} || sync_load(slot) == I64{0}) -> return I64{-1}
+    jet_rt_move_enter(alloc_owner(address))
+}
+
+// Ends the move jet_rt_move_enter answered `saved` for (-1: none began).
+#Export(c) jet_rt_move_leave: fn(saved: I64) {
+    if (saved < I64{0}) -> return
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> return
+    sync_store(slot, saved)
+    alloc_cache_sync(thread_base())
+}
+
+// Whether the part at `address` (a box or buffer) moves in the running
+// move: a carrier younger than its target, the record's carrier now,
+// served it.
+#Export(c) jet_rt_move_needed: fn(address: I64) -> Bool {
+    slot: alloc_user_slot()
+    if (slot == I64{0}) -> return false
+    alloc_younger(alloc_user_owner(address), sync_load(slot))
+}
+
+// Calls `carrier`'s handler with (op, x, y) and answers its word, or 0 when
+// a stop is pending after it: the stop leaves the handler early, so its word
+// is no answer. While it runs, the current record's allocator is the
+// carrier's outer, so the handler's own allocations never come back to it.
+alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
+    slot: alloc_user_slot()
+    saved: if (slot == I64{0}) -> I64{0} else -> sync_load(slot)
+    if (slot != I64{0}) -> sync_store(slot, sync_load(wrapping(carrier + I64{16})))
+    handler: sync_load(wrapping(carrier + I64{8}))
+    first: jet_int_owned_from_i64(op)
+    second: jet_int_owned_from_i64(x)
+    third: jet_int_owned_from_i64(y)
+    answer: coll_call4(sync_load(wrapping(handler + I64{8})), handler, first, second, third)
+    jet_rt_int_drop(first)
+    jet_rt_int_drop(second)
+    jet_rt_int_drop(third)
+    if (slot != I64{0}) -> sync_store(slot, saved)
+    if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
+    word: jet_int_owned_to_i64(answer)
+    jet_rt_int_drop(answer)
+    word
+}
+
+// A served block of `size` payload bytes from `carrier`, or 0 when its
+// allocator refuses. A block that is not 8-aligned or not inside one
+// registered region goes back to it and counts as a refusal. The region's
+// record then names `carrier`. An arena block's carrier takes from its
+// arena (alloc_arena_take).
+//
+// A stop in the allocator's own code (a panic in `allocate`) leaves the
+// handler early with no block: the stop stays pending, the task takes it at
+// its next stop check, and the value comes from the program heap at `align`,
+// as the free that finds no region there expects. So does every value made
+// while a stop is already pending, when the handler would not run whole.
+alloc_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
+    if (sync_load(wrapping(carrier + I64{8})) == I64{0}) -> return alloc_arena_take(carrier, size, align)
+    requested: if (size == I64{0}) -> I64{1} else -> size
+    if (requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER)) -> return I64{0}
+    if (jet_rt_session_propagate() != I64{0}) -> return alloc_try_reserved(size, align)
+    bytes: wrapping(requested + ALLOC_USER_HEADER)
+    block: alloc_user_call(carrier, ALLOC_USER_TAKE, bytes, I64{8})
+    if (jet_rt_session_propagate() != I64{0}) -> return alloc_try_reserved(size, align)
+    if (block == I64{0}) -> return I64{0}
+    record: if (block.bit_and(I64{7}) != I64{0}) -> I64{0} else -> alloc_page_region(block)
+    if (record == I64{0} || alloc_page_region(wrapping(block + wrapping(bytes - I64{1}))) != record) {
+        _: alloc_user_call(carrier, ALLOC_USER_GIVE, bytes, block)
+        return I64{0}
+    }
+    bound: sync_load(wrapping(record + I64{16}))
+    if (bound != carrier) {
+        jet_rt_native_closure_retain(carrier)
+        sync_store(wrapping(record + I64{16}), carrier)
+        alloc_user_drop(bound)
+    }
+    sync_store(block, I64{1})
+    sync_store(wrapping(block + I64{8}), I64{0})
+    sync_store(wrapping(block + I64{16}), block)
+    wrapping(block + ALLOC_USER_HEADER)
+}
+
+// alloc_user_take for an allocation that cannot fail: a refusal is out of
+// memory.
+alloc_user_need: fn(carrier: I64, size: I64, align: I64) -> I64 {
+    pointer: alloc_user_take(carrier, size, align)
+    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
+    pointer
+}
+
+// Returns the served block at `pointer` of `size` payload bytes, in the
+// region of `record`, to the allocator whose carrier the record names. A
+// region no carrier served from holds no payload to give back, and an
+// arena's takes its blocks back only as its blocks end.
+alloc_user_give: fn(pointer: I64, size: I64, record: I64) {
+    carrier: sync_load(wrapping(record + I64{16}))
+    if (carrier == I64{0} || carrier == ALLOC_ARENA_OWNER) -> return
+    block: sync_load(wrapping(pointer - I64{8}))
+    requested: if (size == I64{0}) -> I64{1} else -> size
+    _: alloc_user_call(carrier, ALLOC_USER_GIVE, wrapping(requested + ALLOC_USER_HEADER), block)
+}
+
+// The buffer replacing the one at `old` (0: none yet) of the container
+// whose header is at `place`, of `size` bytes at `align`, or 0 when
+// refused: a growth (alloc_grow_carrier names its allocator).
+alloc_grow_try: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
+    carrier: alloc_grow_carrier(old, place, align)
+    if (carrier == I64{0}) -> return alloc_try(size, align)
+    if !alloc_layout_valid(size, align) -> return I64{0}
+    if jet_fault_should_fail_allocation() -> return I64{0}
+    alloc_user_take(carrier, size, align)
+}
+
+// The carrier serving the buffer that replaces `old` (0: none yet) of the
+// container whose header is at `place`, else 0: the heap. An older
+// container grows from its owner's allocator: a buffer a carrier served
+// grows from that carrier's; a first buffer, or one replacing a heap
+// buffer, comes from the header's owner (alloc_owner). Place 0 names a
+// header the growing code's own block made (JetIR BuildRoutes.jet
+// ir_list_grow_place), which the current carrier serves.
+alloc_grow_carrier: fn(old: I64, place: I64, align: I64) -> I64 {
+    if (align > I64{8} || alloc_class_limit == I64{0}) -> return I64{0}
+    served: if (old == I64{0}) -> I64{0} else -> alloc_user_owner(old)
+    if (served != I64{0}) -> return served
+    if (place == I64{0}) -> alloc_user_current(align) else -> alloc_owner(place)
+}
+
+// jet_rt_alloc for the buffer replacing the one at `old` of the container
+// at `place` (alloc_grow_try).
+alloc_grow: fn(old: I64, place: I64, size: I64, align: I64) -> I64 {
+    carrier: alloc_grow_carrier(old, place, align)
+    if (carrier == I64{0}) -> jet_rt_alloc(size, align) else -> alloc_user_need(carrier, size, align)
+}
+
+// alloc_bytes for the text buffer replacing the one at `old`: one a carrier
+// served grows from that carrier's allocator; text is otherwise the
+// heap's.
+alloc_grow_bytes: fn(old: I64, size: I64) -> I64 {
+    carrier: if (old == I64{0} || alloc_class_limit == I64{0}) -> I64{0} else -> alloc_user_owner(old)
+    if (carrier == I64{0}) -> alloc_bytes(size) else -> alloc_user_need(carrier, size, I64{1})
+}
+
+// A program list's growth (JetIR BuildRoutes.jet): the buffer of `size`
+// bytes replacing `old` (0: none) of the header at `place` (0: one the
+// growing code's own block made), from the allocator alloc_grow_carrier
+// names; a refusal is out of memory.
+#Export(c) jet_rt_alloc_value_grow: fn(size: I64, old: I64, place: I64) -> I64 {
+    alloc_grow(old, place, size, I64{8})
+}
+
+// jet_rt_alloc_value_grow answering 0 for a refusal.
+#Export(c) jet_rt_alloc_value_grow_try: fn(size: I64, old: I64, place: I64) -> I64 {
+    alloc_grow_try(old, place, size, I64{8})
+}
+
 // The allocation fast path (#5476): jet_rt_alloc and jet_rt_free serve a
 // small request of a plainly valid layout (size below alloc_class_limit,
 // align 1, 2, 4 or 8) on the calling thread's cache row, calling nothing
@@ -1030,6 +1698,13 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
 // - the counting policy: the mode word is 0 on allocation, and no counted
 //   payload is tracked on free (so alloc_untrack has nothing to find), so
 //   the ProgramAllocator facts stay exact;
+// - user allocators: a TCB whose record names a `#Context(allocator:)`
+//   carrier has its rows blocked (alloc_cache_sync), so its allocations and
+//   frees take the full path, where only the value entries
+//   (jet_rt_alloc_value) ask the record; a free first looks its address up
+//   in the page map (alloc_page_region: one load of a word on the tracked
+//   count's line while no region exists), and a block a region holds takes
+//   the full path;
 // - an ending process frees nothing (#5478, Main.jet).
 // Anything else (a direct mapping, over-alignment, an empty row whose refill
 // finds no slab, a row holding 64 blocks) takes the full path, unchanged.
@@ -1086,9 +1761,9 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
             if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
         } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
         if (index >= I64{0}) {
-            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
                 base: os_tls_base_i64()
-                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {
                     row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
                     count: os_load_i64(wrapping(row + I64{8}))
                     if (count < I64{64}) {
@@ -1110,6 +1785,11 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
     }
     // An ending process leaves its heap to the kernel (#5478, Main.jet).
     if (main_process_ending != I64{0}) -> return
+    region: alloc_page_region(pointer)
+    if (region != I64{0}) {
+        alloc_user_give(pointer, size, region)
+        return
+    }
     alloc_release(alloc_untrack(pointer))
     alloc_free_validated(pointer, size, align)
 }
@@ -1165,10 +1845,10 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
                     if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
                 } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
                 if (offset != I64{0}) {
-                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word") {
+                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word") {
                         base: os_tls_base_i64()
                         if (base != I64{0}) {
-                            if (os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                            if (os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {
                                 row: wrapping(base + offset)
                                 count: os_load_i64(wrapping(row + I64{8}))
                                 if (count < I64{64}) {
@@ -1187,6 +1867,92 @@ alloc_try: fn(size: I64, align: I64) -> I64 {
         }
     }
     jet_rt_free(pointer, size, I64{8})
+}
+
+// The value entries: jet_rt_alloc_value, jet_rt_alloc_value_8 and
+// jet_rt_alloc_value_try are jet_rt_alloc, jet_rt_alloc_8 and
+// jet_rt_alloc_try for a program's own values (JetIR BuildMove.jet names
+// the kinds), which a `#Context(allocator:)` block's carrier serves
+// (the user allocators above). Their fast paths are jet_rt_alloc's and
+// jet_rt_alloc_8's, spelled out again so the program's allocations call
+// nothing more: a current carrier blocks the rows, so only the full path
+// asks the record for it.
+#Export(c) jet_rt_alloc_value: fn(size: I64, align: I64) -> I64 {
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        header: if (align == I64{8}) -> I64{24} else -> I64{16}
+        needed: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
+        index := I64{-1}
+        if (needed <= I64{256}) {
+            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
+        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
+        if (index >= I64{0}) {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
+                base: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                    row: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    block := os_load_i64(row)
+                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    if (block != I64{0}) {
+                        pointer: wrapping(block + header)
+                        os_store_i64(row, os_load_i64(block))
+                        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
+                        os_store_i64(wrapping(pointer - I64{8}), block)
+                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
+                        return pointer
+                    }
+                }
+            }
+        }
+    }
+    if !alloc_layout_valid(size, align) {
+        rt_trap_invalid_box_layout()
+        return I64{0}
+    }
+    carrier: alloc_user_current(align)
+    if (carrier != I64{0}) -> return alloc_user_need(carrier, size, align)
+    // Allocation failure is terminal SIGABRT.
+    pointer: alloc_try_reserved(size, align)
+    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
+    pointer
+}
+
+#Export(c) jet_rt_alloc_value_8: fn(size: I64) -> I64 {
+    if (size >= I64{0}) {
+        if (size < alloc_class_limit) {
+            offset := I64{0}
+            if (size <= I64{232}) {
+                if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
+            } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
+            if (offset != I64{0}) {
+                #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned") {
+                    base: os_tls_base_i64()
+                    if (base != I64{0}) {
+                        if (os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                            row: wrapping(base + offset)
+                            block: os_load_i64(row)
+                            if (block != I64{0}) {
+                                os_store_i64(row, os_load_i64(block))
+                                os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                                os_store_i64(wrapping(block + I64{16}), block)
+                                os_store_i64(block, I64{1})
+                                return wrapping(block + I64{24})
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    jet_rt_alloc_value(size, I64{8})
+}
+
+#Export(c) jet_rt_alloc_value_try: fn(size: I64, align: I64) -> I64 {
+    carrier: alloc_user_current(align)
+    if (carrier == I64{0}) -> return alloc_try(size, align)
+    if !alloc_layout_valid(size, align) -> return I64{0}
+    if jet_fault_should_fail_allocation() -> return I64{0}
+    alloc_user_take(carrier, size, align)
 }
 
 // The align-1 entries for text and byte buffers: alloc_bytes(size) is
@@ -1234,9 +2000,9 @@ free_bytes: fn(pointer: I64, size: I64) {
             if (size <= I64{48}) { offset = if (size <= I64{16}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{112}) -> I64{352} else -> I64{368} }
         } else if (size <= I64{1008}) { offset = if (size <= I64{496}) -> I64{384} else -> I64{400} } else if (size <= I64{2032}) { offset = I64{416} } else if (size <= I64{4080}) { offset = I64{432} }
         if (offset != I64{0}) {
-            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count and the page-map root are aligned words read atomically, as alloc_untrack and alloc_page_region read them; row is this thread's private cache row of the size's class; the caller frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
                 base: os_tls_base_i64()
-                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0} && (os_load_i64(wrapping(alloc_root + ALLOC_PAGE_MAP)) == I64{0} || alloc_page_region(pointer) == I64{0})) {
                     row: wrapping(base + offset)
                     count: os_load_i64(wrapping(row + I64{8}))
                     if (count < I64{64}) {

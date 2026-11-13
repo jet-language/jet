@@ -1,0 +1,26 @@
+# A local whose initializer reaches a task context read is computed at run
+# time, as one that reads `#phase` is: a value computed while building would
+# read the build's root context instead of the running task's. A `#run` value
+# still reads the build root, so `prepared` is 0.
+fixture: local_values_reaching_a_context_read_stay_run_time_code.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none fold.jet
+exit: 0
+stdout: ~ "local 95 prepared 0" # the block's deadline, not the build root's
+step: jet run --optimize=basic fold.jet
+exit: 0
+stdout: ~ "local 95 prepared 0" # the block's deadline, not the build root's
+step: jet run --optimize=full fold.jet
+exit: 0
+stdout: ~ "local 95 prepared 0" # the block's deadline, not the build root's
+step: jet run --optimize=none thread2.jet
+exit: 0
+stdout: ~ "task local 1" # the task's thread, not the build root's
+step: jet run --optimize=basic thread2.jet
+exit: 0
+stdout: ~ "task local 1" # the task's thread, not the build root's
+step: jet run --optimize=full thread2.jet
+exit: 0
+stdout: ~ "task local 1" # the task's thread, not the build root's

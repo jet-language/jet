@@ -29,9 +29,11 @@ host_u8_put: fn(data: I64, index: I64, byte: I64) {
     required: length + additional
     if (required <= capacity) -> return true
     if (required > I64{9223372036854775807} /% stride) -> return false
-    next: jet_rt_alloc_try(required * stride, I64{8})
-    if (next == I64{0}) -> return false
     data: trap_word(wrapping(header + I64{16}))
+    // An older list grows from its owner's allocator (Alloc.jet
+    // alloc_grow_carrier).
+    next: alloc_grow_try(if (capacity != I64{0}) -> data else -> I64{0}, header, required * stride, I64{8})
+    if (next == I64{0}) -> return false
     if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * stride)
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
     trap_store(wrapping(header + I64{8}), required)
@@ -49,8 +51,8 @@ rt_host_u8_list_room: fn(header: I64, room: I64) {
     if (capacity - length >= room) -> return
     grown := capacity * I64{2}
     if (grown < length + room) -> grown = length + room
-    next: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
     data: trap_word(wrapping(header + I64{16}))
+    next: alloc_grow(if (capacity != I64{0}) -> data else -> I64{0}, header, grown * RT_HOST_U8_STRIDE, I64{8})
     if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * RT_HOST_U8_STRIDE)
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * RT_HOST_U8_STRIDE, I64{8})
     trap_store(wrapping(header + I64{8}), grown)

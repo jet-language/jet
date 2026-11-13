@@ -2007,6 +2007,8 @@ ir_shared_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], shar
     owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
     if ir_failed(b) -> return -1
     b.fresh[owned] = false
+    // The cell is the heap's: the value moves there (BuildMove.jet).
+    ir_move_heap(m, p, b, owned)
     slot: ir_lazy_value_slot(m, b, owned)
     meta: ir_lazy_meta(m, p, b, inner, span)
     if meta < 0 -> return -1

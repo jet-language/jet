@@ -1,0 +1,23 @@
+# A `#Context(allocator: context.scratch)` block, or one over a `mem.Arena`,
+# serves the values its code makes, in the functions it calls too, from one
+# reservation in address order: a dropped value's bytes are not taken
+# again, a nested block takes after its enclosing one, and a block's end
+# rewinds to its entry mark. A value that leaves the block (a write to an
+# outer local, a push, a map entry, text, a `return`, a write to an
+# enclosing block's local from a nested one) moves out first and keeps its
+# value after later blocks fill the same bytes; a task has its own scratch.
+fixture: context_scratch_block_rewinds_and_moves_what_leaves.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check scratch.jet
+exit: 0
+step: jet run --optimize=none scratch.jet
+exit: 0
+stdout: = "a drop frees nothing: true\ninner after outer: true\nrewound to the inner block's mark: true\nsibling blocks start at one mark: true\nscribbled 2560\nnested move: 8555\nouter local: 8555\npushed: 8555\nmap entry: 8555\nouter text: total 8555\nreturned: 8555\ntask: 8555\narena blocks start at one mark: true\nfresh arena: 8555\n"
+step: jet run --optimize=basic scratch.jet
+exit: 0
+stdout: = "a drop frees nothing: true\ninner after outer: true\nrewound to the inner block's mark: true\nsibling blocks start at one mark: true\nscribbled 2560\nnested move: 8555\nouter local: 8555\npushed: 8555\nmap entry: 8555\nouter text: total 8555\nreturned: 8555\ntask: 8555\narena blocks start at one mark: true\nfresh arena: 8555\n"
+step: jet run --optimize=full scratch.jet
+exit: 0
+stdout: = "a drop frees nothing: true\ninner after outer: true\nrewound to the inner block's mark: true\nsibling blocks start at one mark: true\nscribbled 2560\nnested move: 8555\nouter local: 8555\npushed: 8555\nmap entry: 8555\nouter text: total 8555\nreturned: 8555\ntask: 8555\narena blocks start at one mark: true\nfresh arena: 8555\n"

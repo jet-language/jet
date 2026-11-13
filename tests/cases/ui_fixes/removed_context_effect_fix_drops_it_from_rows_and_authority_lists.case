@@ -1,0 +1,31 @@
+# `Context` is no longer an effect: reading `context` is an implicit input.
+# Source that named it in an effect row or an authority list is an unknown
+# effect, and `jet fix` deletes the entry with its comma; a row left with no
+# entry stays the empty row `-[]>`. The fixed files check and run.
+fixture: removed_context_effect_fix_drops_it_from_rows_and_authority_lists.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check rows.jet
+exit: nonzero
+stderr: ~ "`Context` isn't a known effect" # E0119 on each row entry
+step: jet fix rows.jet
+exit: 0
+file: rows.jet ~ "deadline_left: fn(now: Int) -[]> Int {" # a lone entry leaves the empty row
+file: rows.jet ~ "stamp: fn(now: Int) -[IO]> Int {" # the first entry goes with the comma after it
+file: rows.jet ~ "quiet: fn(now: Int) -[IO]> Int {" # a last prohibition goes with the comma before it
+file: rows.jet !~ "Context" # every entry is gone
+step: jet check rows.jet
+exit: 0
+step: jet run rows.jet
+exit: 0
+stdout: ~ "left 0" # the fixed program runs
+step: jet check denied.jet
+exit: nonzero
+stderr: ~ "`Context` isn't a known effect" # E1221 on each authority entry
+step: jet fix denied.jet
+exit: 0
+file: denied.jet ~ "authority: { allow: [IO], deny: [Net] }" # both lists drop the entry
+step: jet run denied.jet
+exit: 0
+stdout: ~ "deadline 0" # the fixed program runs

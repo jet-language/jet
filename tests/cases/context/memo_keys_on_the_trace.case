@@ -1,0 +1,18 @@
+# `context.trace` is a context field like any other: a `#Memo` function that
+# can read it keys its results on the frames, so a second call from the same
+# frames hits and a call from another line misses.
+fixture: memo_keys_on_the_trace.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check traced.jet
+exit: 0
+step: jet run --optimize=none traced.jet
+exit: 0
+stdout: ~ "traced same=true differ=true hits=1 misses=2" # the frames are part of the memo key
+step: jet run --optimize=basic traced.jet
+exit: 0
+stdout: ~ "traced same=true differ=true hits=1 misses=2" # the frames are part of the memo key
+step: jet run --optimize=full traced.jet
+exit: 0
+stdout: ~ "traced same=true differ=true hits=1 misses=2" # the frames are part of the memo key

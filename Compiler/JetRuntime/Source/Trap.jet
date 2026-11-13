@@ -139,13 +139,18 @@ trap_defect_exit: fn(status: I64) {
 // tests/guards/runtime_stop_door.jet holds every JetRuntime routine to it.
 // Served comptime code (ComptimeServe.jet) reports the stop to the compiler
 // here as `kind` and its words (JetBackend Image/ComptimeWire.jet: 1 a
-// message's bytes and length, 2 shift, 3 list bounds, 4 require, 5 todo) and
-// never comes back, so no served stop is published to the serve entry's
-// root and answered as the call's value. Any other program returns at once
-// to the caller's runtime path.
+// message's bytes and length, 2 shift (count, count unsigned, bits, and in
+// `d` the direction, 0 left), 3 list bounds, 4 require, 5 todo) and never
+// comes back, so no served stop is published to the serve entry's root and
+// answered as the call's value. Any other program runs the context's stop
+// handler (Context.jet context_on_stop_run) and returns to the caller's
+// runtime path.
 trap_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     code: comptime_serve_stop_code
-    if (code == I64{0}) -> return
+    if (code == I64{0}) {
+        context_on_stop_run(kind, a, b, c, d)
+        return
+    }
     #Unsafe("the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words") {
         _ := os_call5_i64(code, kind, a, b, c, d)
     }
@@ -291,9 +296,16 @@ trap_root_panic_report: fn(message: I64) -> I64 {
 }
 
 trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
+    trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_simple_report(code, file, file_len, line, message, message_len)
+}
+
+// trap_simple after its routine already passed the stop door with its own
+// kind (jet_rt_fixed_shift_stop, jet_rt_list_bounds_stop, Scheduler.jet
+// scheduler_fatal), so the stop handler runs once per stop.
+trap_simple_report: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // jet_runtime_stop_unwind carries the raw message into the task runner, not
     // this process report (jet_scheduler_panic_message).
-    trap_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
     production_receipt_write(code, file, file_len, trap_line(line), I64{0}, I64{0})
     trap_header(code)
@@ -365,7 +377,15 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
 // type is {bits} bits wide)". The count prints in the shifted type's signedness
 // (1 = unsigned), as the seed's i128 operand does.
 #Export(c) jet_rt_fixed_shift_stop: fn(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
-    trap_stop(I64{2}, count, count_unsigned, bits, I64{0})
+    trap_stop(I64{2}, count, count_unsigned, bits, direction)
+    message: trap_shift_reason(direction, count, count_unsigned, bits)
+    trap_simple_report(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+}
+
+// jet_rt_fixed_shift_stop's message, an owned String (the stop handler's
+// too, Context.jet context_on_stop_message).
+trap_shift_reason: fn(direction: I64, count: I64, count_unsigned: I64, bits: I64) -> I64 {
     message: jet_rt_string_builder_new()
     jet_rt_string_builder_push(message, rt_static_text("Shifting "))
     jet_rt_string_builder_push(message, if (direction == I64{0}) -> rt_static_text("left") else -> rt_static_text("right"))
@@ -378,8 +398,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     jet_rt_string_builder_push(message, width)
     jet_rt_string_drop(width)
     jet_rt_string_builder_push(message, rt_static_text(" bits wide)"))
-    trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
-    jet_rt_string_drop(message)
+    message
 }
 
 // Publish the seed's raw native-Int range reason. Root rendering stays separate
@@ -484,7 +503,7 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 #Export(c) jet_rt_list_bounds_stop: fn(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
     trap_stop(I64{3}, len, index, I64{0}, I64{0})
     message: trap_list_bounds_reason(len, index)
-    trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    trap_simple_report(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
 }
 

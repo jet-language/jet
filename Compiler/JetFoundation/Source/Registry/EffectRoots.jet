@@ -7,7 +7,7 @@
 // naming each missing and extra root.
 EFFECT_ROOT_COUNT: #run effect_root_count(embed_file("EffectRoots.jet"), EFFECT_VOCABULARY_MACHINE_ROOTS)
 
-Effect: enum { Net FS IO Time Rand Env Exec GPU FFI Browser Panic Mem Context Unsafe }
+Effect: enum { Net FS IO Time Rand Env Exec GPU FFI Browser Panic Mem Unsafe }
 
 // The number of roots, once Effect's cases (in `text`, this file) are
 // `roots` in their order; else the build stops naming the difference.
@@ -25,6 +25,35 @@ effect_roots_problem: fn(text: String, roots: [String]) -> String {
     "EffectRoots.jet: the cases of Effect differ from the machine roots of {EFFECT_VOCABULARY_MACHINE_PATH}: missing [{effect_vocabulary_strays(roots, cases).join(", ")}], extra [{effect_vocabulary_strays(cases, roots).join(", ")}] (the order must match too)"
 }
 
+// The roots a language change took out of the vocabulary. Source an earlier
+// release accepted may still name one in an effect row or an authority list;
+// it stays an unknown effect (E0119, E1221), and `jet fix` deletes the entry.
+EFFECT_ROOTS_REMOVED: [String]{"Context"}
+
+// Whether `name`, an effect row or authority list entry with any `!`
+// prohibition taken off, is a root a language change removed.
+effect_root_removed: fn(name: String) -> Bool Never! {
+    EFFECT_ROOTS_REMOVED.contains(name)
+}
+
+// The source an effect row entry was written as: its name and the `!` or
+// `..` before it, which the row parser leaves out of the entry's span.
+effect_row_entry_source: fn(entry: EffectRowEntry) -> Span Never! {
+    if entry.name.starts_with("..") -> return Span{start: entry.span.start - 2, end: entry.span.end}
+    if entry.name.starts_with("!") -> return Span{start: entry.span.start - 1, end: entry.span.end}
+    entry.span
+}
+
+// The source that drops the entry at `index` from a comma-separated list
+// whose entries were written at `spans`: the entry and the comma after it, or
+// for the last entry the comma before it. A lone entry leaves the empty list
+// as written (`-[]>`, `deny: []`).
+effect_list_entry_removal: fn(spans: [Span], index: Int) -> Span Never! {
+    if index + 1 < spans.len() -> return Span{start: spans[index].start, end: spans[index + 1].start}
+    if index > 0 -> return Span{start: spans[index - 1].end, end: spans[index].end}
+    spans[index]
+}
+
 #Test("the authored Effect enum is checked against the machine roots, naming each difference") {
     roots: [String]{"Net", "FS", "Mem"}
     assert_eq(effect_roots_problem("x: 1\nEffect: enum {{ Net FS Mem }}\n", roots), "")
@@ -32,4 +61,16 @@ effect_roots_problem: fn(text: String, roots: [String]) -> String {
     assert(effect_roots_problem("Effect: enum {{ FS Net Mem }}\n", roots).contains("missing [], extra []"))
     assert(effect_roots_problem("Kind: enum {{ Net }}\n", roots).contains("declares no"))
     assert_eq(EFFECT_ROOT_COUNT, EFFECT_VOCABULARY_MACHINE_ROOTS.len())
+}
+
+#Test("dropping a list entry takes its comma, and a lone entry leaves the empty list") {
+    // -[Context, IO]>   -[IO, !Context]>   -[!Context]>
+    first: [Span]{effect_row_entry_source(EffectRowEntry{name: "Context", span: Span{start: 2, end: 9}}), effect_row_entry_source(EffectRowEntry{name: "IO", span: Span{start: 11, end: 13}})}
+    assert_eq(effect_list_entry_removal(first, 0), Span{start: 2, end: 11})
+    last: [Span]{effect_row_entry_source(EffectRowEntry{name: "IO", span: Span{start: 2, end: 4}}), effect_row_entry_source(EffectRowEntry{name: "!Context", span: Span{start: 7, end: 14}})}
+    assert_eq(effect_list_entry_removal(last, 1), Span{start: 4, end: 14})
+    lone: [Span]{effect_row_entry_source(EffectRowEntry{name: "!Context", span: Span{start: 3, end: 10}})}
+    assert_eq(effect_list_entry_removal(lone, 0), Span{start: 2, end: 10})
+    assert(effect_root_removed("Context"))
+    assert(!effect_root_removed("Net"))
 }

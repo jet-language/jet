@@ -1,0 +1,52 @@
+package: {
+    name: "context_keys"
+    authority: { allow: [IO] }
+}
+
+// A package declares its own context values with `#ContextKey`. The
+// constant is the default; `#Context(key: value)` sets the key for a
+// region, nested blocks shadow and restore it, and a task spawned inside
+// the region keeps the value its parent set after the region ends.
+
+#ContextKey request_id: 0
+#ContextKey user_name: "anonymous"
+#ContextKey trace_tag: String?{None}
+
+describe: fn() -> String {
+    tag: context.get(trace_tag) ?? "untagged"
+    id: context.get(request_id)
+    name: context.get(user_name)
+    "request {id} for {name} ({tag})"
+}
+
+spawn_tagged: fn() -> Task<String> {
+    #Context(request_id: 9, trace_tag: "spawned") {
+        return task describe()
+    }
+    task describe()
+}
+
+report: fn(label: String, &&handle: Task<String>) {
+    if handle.join() == {
+        .Ok(text) -> { print("{label}: {text}") }
+        .Err(_) -> { print("{label}: failed") }
+    }
+}
+
+run: fn() {
+    print(describe())
+    #Context(request_id: 7, user_name: "ada") {
+        print(describe())
+        #Context(request_id: 8, trace_tag: "inner") {
+            print(describe())
+        }
+        print(describe())
+        inside: task describe()
+        report("task inside", inside)
+    }
+    print(describe())
+    tagged: spawn_tagged()
+    plain: task describe()
+    report("task tagged", tagged)
+    report("task plain", plain)
+}

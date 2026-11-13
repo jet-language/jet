@@ -312,13 +312,15 @@ ir_opt_dead_end: fn(f: IRFunction, at: Int) -> Int Never! {
 
 // Whether the header Store at `at` of the header word `word` bytes in
 // keeps its buffer the header's own: a length or capacity, or a buffer
-// fresh from jet_rt_alloc (a growth).
+// fresh from jet_rt_alloc or a program list's jet_rt_alloc_value or
+// jet_rt_alloc_value_grow (a growth).
 ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: Int, word: Int) -> Bool Never! {
     if word == 0 || word == 8 -> return true
     if word != 16 -> return false
     value: f.c[at]
     if value < f.param_count || facts.defs[value] != 1 -> return false
-    ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
+    def: facts.def_at[value]
+    ir_opt_calls_route(m, f, def, "jet_rt_alloc") || ir_opt_calls_route(m, f, def, "jet_rt_alloc_value") || ir_opt_calls_route(m, f, def, "jet_rt_alloc_value_grow")
 }
 
 // Uniqueness at the caller (O1, O2, before the call graph is built). A

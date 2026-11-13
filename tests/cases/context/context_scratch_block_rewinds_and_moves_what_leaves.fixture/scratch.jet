@@ -1,0 +1,142 @@
+use core.mem
+
+squares: fn(n: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<n -> out.push(i * i)
+    out
+}
+
+total: fn(values: [Int]) -> Int {
+    sum := 0
+    loop value in values -> sum += value
+    sum
+}
+
+// The address of the first item of `values`, in the list's buffer.
+item_address: fn(values: [Int]) -> Int {
+    cell: values[0]
+    address := 0
+    #Unsafe("only reads the address of an item the caller keeps alive") {
+        address = mem.address_of(cell)
+    }
+    address
+}
+
+returned: fn() -> [Int] {
+    #Context(allocator: context.scratch) {
+        built: squares(30)
+        if built.len() > 0 -> return built
+    }
+    [Int]{}
+}
+
+scratch_total: fn() -> Int {
+    result := 0
+    #Context(allocator: context.scratch) {
+        result = total(squares(30))
+    }
+    result
+}
+
+// Fills the scratch arena from its start with other values.
+scribble: fn() -> Int {
+    filled := 0
+    #Context(allocator: context.scratch) {
+        loop round in 0..<40 {
+            junk := [Int]{}
+            loop i in 0..<64 -> junk.push(-1 - round - i)
+            filled += junk.len()
+        }
+    }
+    filled
+}
+
+run: fn() {
+    dropped := 0
+    later := 0
+    #Context(allocator: context.scratch) {
+        x := squares(8)
+        dropped = item_address(x)
+        x = [Int]{}
+        y: squares(8)
+        later = item_address(y)
+    }
+    print("a drop frees nothing: {later > dropped}")
+
+    outer := 0
+    inner := 0
+    after := 0
+    #Context(allocator: context.scratch) {
+        made: squares(8)
+        outer = item_address(made)
+        #Context(allocator: context.scratch) {
+            nested: squares(8)
+            inner = item_address(nested)
+        }
+        again: squares(8)
+        after = item_address(again)
+    }
+    print("inner after outer: {inner > outer}")
+    print("rewound to the inner block's mark: {after == inner}")
+
+    sibling := 0
+    #Context(allocator: context.scratch) {
+        made: squares(8)
+        sibling = item_address(made)
+    }
+    print("sibling blocks start at one mark: {sibling == dropped}")
+
+    local := [Int]{}
+    lists := [[Int]]{}
+    table := [String:[Int]]{}
+    line := ""
+    nested_total := 0
+    #Context(allocator: context.scratch) {
+        local = squares(30)
+        lists.push(squares(30))
+        table["squares"] = squares(30)
+        line = "total {total(squares(30))}"
+        holder := [Int]{}
+        #Context(allocator: context.scratch) {
+            holder = squares(30)
+        }
+        #Context(allocator: context.scratch) {
+            junk := [Int]{}
+            loop i in 0..<256 -> junk.push(-1 - i)
+        }
+        nested_total = total(holder)
+    }
+    from_return: returned()
+    task_sum := 0
+    task.group workers {
+        worker: task { scratch_total() }
+        task_sum = worker.join() ?? panic("worker failed")
+    }
+    print("scribbled {scribble()}")
+    print("nested move: {nested_total}")
+    print("outer local: {total(local)}")
+    print("pushed: {total(lists[0])}")
+    print("map entry: {total(table["squares"] ?? [Int]{})}")
+    print("outer text: {line}")
+    print("returned: {total(from_return)}")
+    print("task: {task_sum}")
+
+    arena: mem.Arena.new()
+    first_mark := 0
+    second_mark := 0
+    #Context(allocator: arena) {
+        made: squares(8)
+        first_mark = item_address(made)
+    }
+    #Context(allocator: arena) {
+        made: squares(8)
+        second_mark = item_address(made)
+    }
+    print("arena blocks start at one mark: {first_mark == second_mark && first_mark != dropped}")
+
+    fresh := 0
+    #Context(allocator: mem.Arena.new()) {
+        fresh = total(squares(30))
+    }
+    print("fresh arena: {fresh}")
+}

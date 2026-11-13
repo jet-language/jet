@@ -365,7 +365,7 @@ web_select: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables
         .Concat -> {
             web_load(e, f.a[at])
             web_load(e, f.b[at])
-            web_runtime(e, st, f, at, "jet_rt_string_concat", "ll", "l")
+            web_runtime(e, st, f, at, if f.c[at] == 1 -> "jet_rt_string_concat_value" else -> "jet_rt_string_concat", "ll", "l")
             web_store(e, dst)
         }
         .Call -> web_direct_call(e, st, m, f, at)

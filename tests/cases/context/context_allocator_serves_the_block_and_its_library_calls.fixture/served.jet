@@ -1,0 +1,59 @@
+use core.mem
+use core.collections
+
+Counter: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+    given: Int
+}
+
+impl Counter.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Counter"})
+        self.taken += 1
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 20) ?? panic("reserve")
+    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    evens := [Int]{}
+    loop i in 0..<50 -> evens.push(i * 2)
+    odds := [Int]{}
+    loop i in 0..<50 -> odds.push(i * 2 + 1)
+    print("before the block: {counter.taken}")
+
+    last := 0
+    #Context(allocator: counter) {
+        squares := [Int]{}
+        loop i in 0..<100 -> squares.push(i * i)
+        last = squares[99]
+    }
+    inside: counter.taken
+    print("inside the block: {last}, served {inside > 0}")
+
+    outside := [Int]{}
+    loop i in 0..<100 -> outside.push(i)
+    print("outside the block: {outside.len()}, served {counter.taken > inside}")
+
+    merged_last := 0
+    #Context(allocator: counter) {
+        merged: collections.merge_sorted(evens, odds)
+        merged_last = merged[merged.len() - 1]
+    }
+    print("through core.collections: {merged_last}, served {counter.taken > inside}")
+    print("all released: {counter.taken == counter.given}")
+}

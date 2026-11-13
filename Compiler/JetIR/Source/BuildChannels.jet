@@ -145,6 +145,9 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             owned: if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
             if ir_failed(b) -> return Val(-1)
             b.fresh[owned] = false
+            // The channel's buffer is the heap's: the value moves there
+            // (BuildMove.jet).
+            ir_move_heap(m, p, b, owned)
             slot: ir_lazy_value_slot(m, b, owned)
             meta: ir_lazy_meta(m, p, b, element, span)
             if meta < 0 -> return Val(-1)

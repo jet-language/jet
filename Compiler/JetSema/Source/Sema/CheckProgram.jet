@@ -7936,7 +7936,10 @@ sema_comptime_callable_memoized: fn(graph: SemaRegistrationGraph, row: SemaRegis
 // building, or None. A body that takes a raw address or makes a pointer from
 // one names storage only the running program has: a computed value would bake
 // an address that points at nothing (an expired sentry frame reads as no
-// allocation at all). With `unsafe_runs` (a local value, which the running
+// allocation at all). A body that reads the task context (`context.<field>`)
+// is refused too: reading it is no effect, but its value is the running
+// task's, and a value computed while building would read the build's root
+// context instead. With `unsafe_runs` (a local value, which the running
 // program computes otherwise), an `#Unsafe` function or block is also
 // refused: its effect row is a claim the compiler can't check, so the call
 // runs in the program whatever the row says (#6758: host reads and unchecked
@@ -7951,6 +7954,7 @@ sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String
         if node.kind == .RawOf(_) || node.kind == .RawAddressOf(_) -> return Val("it calls {name}, which takes a raw address only the running program has")
         if node.kind == .PtrFromAddr(_, _) -> return Val("it calls {name}, which makes a pointer only the running program can follow")
     }
+    if sema_comptime_tree_reads_context(function.tree) -> return Val("it calls {name}, which reads `context`, the task context of the code that runs it")
     if !unsafe_runs -> return None
     if function.is_unsafe || function.unsafe_gate != None -> return Val("it calls {name}, which is `#Unsafe` code")
     if function.memo_bound != None || function.memo_unbounded -> return Val("it calls {name}, whose `#Memo` result store the program reads")
@@ -7959,6 +7963,17 @@ sema_comptime_body_unfoldable: fn(function: FnBody, unsafe_runs: Bool) -> String
     }
     if sema_comptime_tree_reads_phase(function.tree) -> return Val("it calls {name}, which reads `#phase`, the phase of the copy that runs it")
     None
+}
+
+// Whether checked tree `tree` reads the task context (a ContextRead or
+// ContextGet host call).
+sema_comptime_tree_reads_context: fn(tree: BodyTree) -> Bool Never! {
+    loop node in tree.nodes {
+        if node.kind == .HostCall(call) {
+            if call == .ContextRead(_) || call == .ContextGet(_, _, _) -> return true
+        }
+    }
+    false
 }
 
 // Whether checked tree `tree` reads `#phase` (a CopyPhase node).

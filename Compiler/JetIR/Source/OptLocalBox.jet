@@ -1,6 +1,7 @@
 // Local boxes (O1, O2, pass "localbox", after Simplify, which runs again
 // when a box moved, and before scalar replacement): a small fresh box
-// (`jet_rt_alloc(size, 8)`, size at most 64) that never leaves its function
+// (`jet_rt_alloc(size, 8)` or a program value's `jet_rt_alloc_value(size,
+// 8)`, size at most 64) that never leaves its function
 // becomes frame storage (StackAddress), such as the Result box an inlined
 // `route() ?? return` builds around each call of a runtime route. The box
 // never leaves when its slot is written only by the allocation and every
@@ -38,7 +39,9 @@ use jet_foundation.[Type, compiler_threads_single, name_rows_set, name_rows_valu
 
 // Turns each local box of `f` into frame storage; returns how many.
 ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
-    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? return 0
+    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? -2
+    value: name_rows_value(m.name_rows, "jet_rt_alloc_value") ?? -2
+    if alloc == -2 && value == -2 -> return 0
     unique: name_rows_value(m.name_rows, "jet_rt_block_unique") ?? -2
     release: name_rows_value(m.name_rows, "jet_rt_block_release") ?? -2
     free: name_rows_value(m.name_rows, "jet_rt_free") ?? -2
@@ -49,7 +52,7 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     size := [Int]{}
     loop _ in 0..<count -> size.push(-1)
     loop at in 0..<f.op.len() {
-        if f.op[at] != .CallRuntime || f.a[at] != alloc || f.c[at] != 2 || f.dst[at] < f.param_count -> next
+        if f.op[at] != .CallRuntime || (f.a[at] != alloc && f.a[at] != value) || f.c[at] != 2 || f.dst[at] < f.param_count -> next
         boxed: f.dst[at]
         if facts.defs[boxed] != 1 -> next
         bytes: ir_opt_const_at(f, facts, f.args[f.b[at]], at) ?? -1
@@ -126,7 +129,7 @@ ir_opt_local_boxes: fn(m: IRModule, f: &IRFunction) -> Int Never! {
     if made == 0 -> return 0
     loop at in 0..<f.op.len() {
         op: f.op[at]
-        if op == .CallRuntime && f.a[at] == alloc && f.dst[at] >= 0 && size[f.dst[at]] >= 0 {
+        if op == .CallRuntime && (f.a[at] == alloc || f.a[at] == value) && f.dst[at] >= 0 && size[f.dst[at]] >= 0 {
             f.op[at] = .StackAddress
             f.a[at] = size[f.dst[at]]
             f.b[at] = 8

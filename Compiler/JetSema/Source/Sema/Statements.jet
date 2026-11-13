@@ -6731,7 +6731,7 @@ sema_stmt_tree_expr_touches_shared: fn(value: TExpr, arena: BodyTree) -> Bool Ne
                     // A capture inside a transaction snapshots through the STM.
                     if method == "capture" && receiver.ty == .Shared(_) -> return true
                 }
-                .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
+                .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) | .ContextGet(_, _, _) -> {}
             }
         }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) -> {}
@@ -6920,7 +6920,7 @@ sema_stmt_row_touches_shared: fn(tree: BodyTree, index: Int) -> Bool Never! {
                     // A capture inside a transaction snapshots through the STM.
                     if method == "capture" && tree.types.types[tree.expr_types[receiver - tree.node_base].ty] == .Shared(_) -> return true
                 }
-                .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
+                .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) | .ContextRead(_) | .ContextGet(_, _, _) -> {}
             }
         }
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
@@ -9630,9 +9630,18 @@ sema_stmt_is_paren_if: fn(expr: Expr) -> Bool Never! {
     }
 }
 
-// The parser already rejected unknown fields, E0761), then the body is an
-// ordinary nested block. Lowering installs the guards around the body
-// (jet_codegen_lower_context_block).
+// Each `#Context` field value is checked once in the enclosing scope
+// (`deadline` is an Int
+// epoch-millis instant, `allocator` an `Arena`, `Bump`, `Pool` or `Fixed`
+// handle, `context.scratch`, the task's own arena (sema_stmt_context_scratch),
+// or a value whose type implements `mem.Allocator`, whose guard is
+// its handler, sema_stmt_context_allocator_handler); `logger` is core.log's
+// `logger` key and `on_stop` the stop
+// handler, a `fn(debug.Stop)` (ContextKeys.jet sema_context_field_key), and
+// any other label names a `#ContextKey` constant, whose value takes the
+// key's type; a label naming neither is E0761. Then the body is an ordinary
+// nested block. Lowering installs the guards around the body (IR
+// BuildTransact.jet ir_context_block).
 sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // Rust binds the block's `#Context` application first; fields that do
     // not bind (E0930) get no E0762 of their own.
@@ -9640,6 +9649,31 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
     complete := signature_valid
     guards := [TContextGuard]{}
     loop field in fields {
+        if !sema_context_field_settable(field.name) {
+            name_span: Span{start: field.span.start, end: field.span.start + field.name.len()}
+            found: sema_context_label_key(field.name, environment, program, scopes) ?? {
+                _ := sema_check_expression(field.value, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                diagnostics.push(sema_error("E0761", name_span, "`{field.name}` isn't a context field or key", "`#Context` sets `allocator`, `logger`, `deadline` and `on_stop`, and the constants a package declares with `#ContextKey`", "declare `#ContextKey {field.name}: …` or write `#Context(allocator: …)`, `#Context(logger: …)`, `#Context(deadline: …)` or `#Context(on_stop: …)`"))
+                complete = false
+                next
+            }
+            checked_key: sema_check_expression(field.value, Val(found.ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+                complete = false
+                next
+            }
+            // A value of another type is the ordinary mismatch; an optional
+            // key takes a present value as `T?`.
+            value: sema_expr_expected_owned(checked_key, Val(found.ty), environment, program, diagnostics) ?? {
+                complete = false
+                next
+            }
+            guards.push(TContextGuard{field: field.name, value: value, key: found.key})
+            next
+        }
+        if field.name == "allocator" && sema_stmt_context_scratch(field.value, environment, program, scopes) {
+            guards.push(TContextGuard{field: field.name, value: sema_tree_node(Type.Named{name: "Arena"}, TExprKind.HostCall{call: THostCall.ContextRead{field: "scratch"}}, field.span)})
+            next
+        }
         checked: sema_check_expression(field.value, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             complete = false
             next
@@ -9649,23 +9683,53 @@ sema_stmt_check_context_block: fn(fields: [ContextField], body: [Stmt], span: Sp
             complete = false
         }
         if signature_valid && field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
-            diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`"))
-            complete = false
+            if !sema_stmt_context_user_allocator(checked.ty, environment, program) {
+                diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value, or a value whose type implements `mem.Allocator`", "pass an allocator, e.g. `mem.Arena.new()`"))
+                complete = false
+            } else {
+                handler: sema_stmt_context_allocator_handler(field, checked.ty, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+                    complete = false
+                    next
+                }
+                guards.push(TContextGuard{field: field.name, value: handler})
+                next
+            }
         }
         guards.push(TContextGuard{field: field.name, value: checked})
     }
     previous_allocation: scopes.context_allocation
+    // Each open block's allocator stays in place while the block runs
+    // (Ownership/Checks.jet SemaOwnershipBlockAllocator).
+    open_allocators: state.block_allocators.len()
     names_allocator := false
     loop field in fields {
-        if field.name == "allocator" -> names_allocator = true
+        if field.name != "allocator" -> next
+        names_allocator = true
+        places: sema_ownership_places_from_expr_in_state(field.value, scopes, state)
+        if places.len() > 0 && places[0].root_key != "" {
+            state.block_allocators.push(SemaOwnershipBlockAllocator{name: sema_ownership_place_name(places[0]), key: places[0].root_key.copy()})
+        }
     }
     scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else -> 1
     nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "context@{span.start}", loop_depth)
+    loop state.block_allocators.len() > open_allocators {
+        _ := state.block_allocators.pop()
+    }
     scopes.context_allocation = previous_allocation
     if !nested.complete -> return false
     if !complete -> return false
     output.push(TStmt.ContextBlock{guards: guards, body: nested.value, span: span})
     true
+}
+
+// Whether the allocator guard `value` is `context.scratch`, the task's own
+// arena. Its guard is a context read of type `Arena` that lowering never
+// evaluates.
+sema_stmt_context_scratch: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool Never! {
+    if value == .Field(base, member, _, _) && member == "scratch" && base == .Ident(root, _, _) && root == "context" {
+        return sema_scope_resolve_index(scopes, root) == None && sema_expression_type_symbol(scopes, environment, program, root) == None
+    }
+    false
 }
 
 sema_stmt_context_deadline_type: fn(ty: Type) -> Bool Never! {
@@ -9682,14 +9746,46 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Its condition is compile-time code, like `name: #run value`
-// (sema_stmt_check_prepared_binding): a value already known here selects at
-// once; any other value is staged through the body comptime evaluator, and the
-// branch is selected when the owner body is checked again. The selected arm is
-// an ordinary nested block emitted inline; the dropped arm is checked for name
-// resolution only (its other reports and everything it did to the scope, the
-// context and the ownership state are rolled back). False while the arm is
-// unselected or incomplete.
+// Whether `ty` names a type that implements core.mem's `Allocator`, as the
+// user writes it (a type parameter is not one).
+sema_stmt_context_user_allocator: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        identity: sema_call_core_module_identity(environment, program, "core.mem") ?? return false
+        caller: sema_scope_caller_row(environment, graph)
+        actual: sema_type_resolve_declared_recursive(graph, ty, caller, environment.generic_params)
+        nominal_row: sema_type_resolve_nominal_row_at(graph, actual, caller) ?? return false
+        trait_symbol: sema_type_graph_trait_symbol_at(graph, sema_type_module_row(graph, identity), "Allocator") ?? return false
+        return sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, "Allocator", actual, environment.generic_params) == Val(true)
+    }
+    false
+}
+
+// A `#Context(allocator: a)` block over a user allocator: the guard's value
+// is core.mem's `__allocator_handler(a)`, the function the runtime calls for
+// each allocation and release inside the block (JetRuntime Alloc.jet
+// alloc_user_call). It lends `a` as `&`, and the block keeps `a` in place
+// until it ends (E0204, Ownership/Checks.jet SemaOwnershipBlockAllocator).
+sema_stmt_context_allocator_handler: fn(field: ContextField, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? return None
+    target: sema_call_core_source_target(environment, program, identity, "__allocator_handler", [Type]{ty}, field.span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0003", field.span, "core.mem's allocator handler is missing", "a `#Context(allocator:)` block over a user allocator calls core.mem's `__allocator_handler`", "load the registered Core source module"))
+        return None
+    }
+    args := [CallArg]{CallArg{convention: AccessConvention.Write, expr: field.value, span: field.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, "#Context(allocator:)", [Type]{ty}, args, field.span, None, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.ownership_call_depth -= 1
+    value
+}
+
+// `#if` selects a branch while building. Its condition is compile-time
+// code, like `name: #run value` (sema_stmt_check_prepared_binding): a
+// value already known here selects at once; any other value is staged through
+// the body comptime evaluator, and the branch is selected when the owner body
+// is checked again. The selected arm is an ordinary nested block emitted
+// inline; the dropped arm is checked for name resolution only (its other
+// reports and everything it did to the scope, the context and the ownership
+// state are rolled back). False while the arm is unselected or incomplete.
 sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // `#if T == Int { … }` is the one-arm type test,
     // which already keeps its arm only in the `Int` instance.

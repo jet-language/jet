@@ -9,7 +9,10 @@
 // quiescent world reset. A Thread or Attempt site holds its TLS key
 // (jet_rt_tls_shared_key; scope 0 retires at thread exit, scope 1 at the
 // attempt reset as well), and the owner lives in this thread's slot of that
-// key, whose destructor releases it. Every read returns an owning clone.
+// key, whose destructor releases it. Every read returns an owning clone. A
+// site's owner outlives any `#Context(allocator:)` block, so its candidate is
+// built in the program heap, its destination's allocator (jet_rt_move_enter
+// of 0 and jet_rt_move_leave).
 
 use jet_foundation.[DeclID, SharedLifetime, Span, TConstantDef, Type, name_rows_set, name_rows_value]
 
@@ -26,8 +29,10 @@ ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initiali
         current: ir_load_at(m, b, site, 0, word_row)
         empty: ir_bool_op(m, b, IROp.Eq, current, zero)
         ir_open_if(b.f, empty, b.line)
+        held: ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
         candidate: ir_call_row_values(m, p, b, row, [Int]{}, span)
         if ir_failed(b) -> return -1
+        _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
         world: ir_word_const(m, b, if lifetime == .World -> 1 else -> 0)
         _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, world}, word_row)
         b.fresh[candidate] = false
@@ -40,8 +45,10 @@ ir_shared_site: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, initiali
     current: ir_runtime(m, b, "jet_rt_tls_get", [Int]{key}, word_row)
     empty: ir_bool_op(m, b, IROp.Eq, current, zero)
     ir_open_if(b.f, empty, b.line)
+    held: ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
     candidate: ir_call_row_values(m, p, b, row, [Int]{}, span)
     if ir_failed(b) -> return -1
+    _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
     _: ir_runtime(m, b, "jet_rt_tls_set", [Int]{key, candidate}, -1)
     b.fresh[candidate] = false
     ir_end(b.f, b.line)
@@ -64,11 +71,13 @@ ir_shared_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition:
     current: ir_load_at(m, b, site, 0, word_row)
     empty: ir_bool_op(m, b, IROp.Eq, current, zero)
     ir_open_if(b.f, empty, b.line)
+    held: ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
     static_payload: ir_static_read(m, p, b, inner, "{definition.key}#payload", definition.value)
     payload: if static_payload >= 0 -> static_payload else -> ir_comptime(m, p, b, inner, definition.value, span)
     if ir_failed(b) -> return -1
     candidate: ir_shared_new(m, p, b, [Int]{payload}, definition.ty, span)
     if ir_failed(b) -> return -1
+    _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
     process: ir_word_const(m, b, 0)
     _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, process}, word_row)
     b.fresh[candidate] = false

@@ -98,6 +98,7 @@ fiber_teardown: fn(fiber: I64) {
     tcb: sync_load(wrapping(fiber + I64{24}))
     scheduler_thread_detach()
     thread_tls_teardown(tcb)
+    context_tcb_release(tcb)
     sentry_thread_detach()
     if (thread_tls_registry != I64{0}) -> thread_unregister_tcb(tcb)
 }
@@ -197,17 +198,6 @@ fiber_ready_pop: fn(root: I64) -> I64 {
     fiber
 }
 
-// Moves the alloc thread cache rows from one TCB to another, emptying the
-// source: a cached block is reachable from exactly one TCB.
-fiber_cache_move: fn(from: I64, to: I64) {
-    at := I64{320}
-    loop at < (I64{448}) {
-        sync_store(wrapping(to + at), sync_load(wrapping(from + at)))
-        sync_store(wrapping(from + at), I64{0})
-        at += I64{8}
-    }
-}
-
 // GS write: wrgsbase when the kernel enabled FSGSBASE (AT_HWCAP2 bit 1),
 // else ARCH_SET_GS. The mode is settled before the first fiber exists.
 fiber_gs_write: fn(root: I64, base: I64) {
@@ -236,7 +226,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         sync_store(fiber, FIBER_RUNNING)
         sync_store(wrapping(fiber + I64{16}), record)
         if (fiber_clock_on != I64{0}) -> sync_store(wrapping(fiber + I64{192}), sync_thread_cpu_ns())
-        fiber_cache_move(tcb, fiber_tcb)
+        alloc_cache_lend(tcb, fiber_tcb)
         // The fiber runs on this carrier: `context.thread` reads its index.
         sync_store(wrapping(fiber_tcb + THREAD_TCB_INDEX), sync_load(wrapping(tcb + THREAD_TCB_INDEX)))
         sync_store(wrapping(record + I64{64}), fiber)
@@ -246,7 +236,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         }
         sync_store(wrapping(record + I64{64}), I64{0})
         fiber_gs_write(root, tcb)
-        fiber_cache_move(fiber_tcb, tcb)
+        alloc_cache_reclaim(fiber_tcb, tcb)
         if (fiber_clock_on != I64{0}) -> fiber_clock_settle(fiber)
         action: sync_load(wrapping(fiber + I64{64}))
         if (action == FIBER_PARK) {

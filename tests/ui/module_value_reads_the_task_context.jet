@@ -1,0 +1,10 @@
+left: fn(now: Int) -> Int { (context.deadline ?? now) - now }
+
+// `left` reads the task context; a value computed while building would read the build's root context, so a module value that calls it is a build error (E0643).
+EARLY: left(5)
+
+run: fn() {
+    #Context(deadline: 100) {
+        print("module value {EARLY}")
+    }
+}

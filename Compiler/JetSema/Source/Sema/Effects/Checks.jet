@@ -86,6 +86,11 @@ use jet_foundation.[
     sema_effect_covers,
     symbol_id,
     type_name,
+    TextEdit,
+    diagnostic_with_migration_edit,
+    effect_list_entry_removal,
+    effect_root_removed,
+    effect_row_entry_source,
 ]
 
 SemaEffectFunctionSource: struct {
@@ -347,6 +352,13 @@ SemaEffectNode: struct {
     // `find`, `net.fetch`), by name and call span: the compiler answers them
     // while compiling only (sema_effect_runtime_input_paths).
     comptime_inputs: [TEffectSpan]{[TEffectSpan]{}}
+    // The task context fields this body reads (`context.<field>`), the
+    // context keys it reads (`context.get(key)`), and whether it calls
+    // through a function value, whose reads no edge shows
+    // (sema_effect_context_reach).
+    context_reads: [String]{[String]{}}
+    context_keys: [TEffectContextKey]{[TEffectContextKey]{}}
+    context_open: Bool{false}
     // The memory operations this body performs directly
     // and the `-[!Mem.*]>` denials its signature declares (E0921).
     memory_events: [SemaMemoryEvent]{[SemaMemoryEvent]{}}
@@ -948,6 +960,20 @@ sema_effect_unknown: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0119", span, "`{name}` isn't a known effect", "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`", "use one of the known effect names, or remove it from the list")
 }
 
+// E0119 at `span` for the entry at `index` of a written effect list whose
+// entries were written at `sources`. An entry naming a root a language change
+// removed carries the edit that drops it from the list, which `jet fix` applies.
+sema_effect_unknown_entry: fn(name: String, span: Span, sources: [Span], index: Int) -> Diagnostic {
+    diagnostic: sema_effect_unknown(name, span)
+    if !effect_root_removed(name) -> return diagnostic
+    diagnostic_with_migration_edit(diagnostic, TextEdit{span: effect_list_entry_removal(sources, index), new_text: ""})
+}
+
+// Where each entry of a written effect row was written (effect_row_entry_source).
+sema_effect_row_sources: fn(entries: [EffectRowEntry]) -> [Span] Never! {
+    loop entry in entries -> effect_row_entry_source(entry)
+}
+
 sema_effect_positive_panic: fn(span: Span) -> Diagnostic {
     sema_error("E0751", span, "`Panic` can't be granted, only denied", "`Panic` is a deny-only effect row; no positive effect bound or authority can grant it", "drop `Panic` from the list, or write `-[!Panic]>`")
 }
@@ -1005,7 +1031,8 @@ sema_effect_apply_via: fn(nodes: &[SemaEffectNode], node_index: Int, function: F
     }
     if callback_type == {
         .Fn(_, _, effect_bound, _, _, _) -> if effect_bound == {
-            .Val(effect_row) -> loop entry in effect_row {
+            .Val(effect_row) -> loop index in 0..<effect_row.len() {
+                entry: effect_row[index]
                 if entry.name.starts_with("..") -> next
                 raw := entry.name
                 if raw.starts_with("!") {
@@ -1013,7 +1040,7 @@ sema_effect_apply_via: fn(nodes: &[SemaEffectNode], node_index: Int, function: F
                     if pieces.len() > 1 -> raw = pieces[1]
                 }
                 effect_name: sema_effect_parse_name(raw) ?? {
-                    diagnostics.push(sema_effect_unknown(raw, entry.span))
+                    diagnostics.push(sema_effect_unknown_entry(raw, entry.span, sema_effect_row_sources(effect_row), index))
                     next
                 }
                 if sema_effect_root(effect_name) == "Panic" {
@@ -1171,6 +1198,88 @@ sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int,
             nodes[node_index].comptime_inputs.push(TEffectSpan{name: name, span: node.span})
         }
     }
+}
+
+// A task context read at `node`, charged to `node_index` once per field
+// (`context.<field>`) or key (`context.get(key)`), or a call through a
+// function value that is not a lambda this body writes
+// (sema_effect_local_lambda_call), whose callee's reads the graph can't
+// follow. `context.scratch` is no read: as an allocator guard it names
+// where values are made, not what they are.
+sema_effect_record_context: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode) Never! {
+    if node.kind == .HostCall(call) {
+        if call == {
+            .ContextRead(field) -> {
+                if field != "scratch" && !nodes[node_index].context_reads.contains(field) -> nodes[node_index].context_reads.push(field.copy())
+            }
+            .ContextGet(key, default, equatable) -> sema_effect_add_context_key(nodes[node_index].context_keys, TEffectContextKey{key: key.copy(), ty: body_type(tree, default), equatable: equatable})
+            .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) -> {}
+        }
+        return
+    }
+    if node.kind == .IndirectCall(_, _, _, _) && !sema_effect_local_lambda_call(tree, node.kind) -> nodes[node_index].context_open = true
+}
+
+sema_effect_add_context_key: fn(keys: &[TEffectContextKey], read: TEffectContextKey) Never! {
+    loop known in keys {
+        if known.key == read.key -> return
+    }
+    keys.push(read.copy())
+}
+
+// The task context the function at `root` can read: each field
+// (`context.<field>`, in the order of sema_context_read_fields, then
+// `trace`) and each key (`context.get(key)`, in first-read order) a body it
+// reaches reads, following its calls and the functions it takes as values.
+// When a reached body calls code the graph can't follow (an unknown callee
+// (maximal), an unbounded trait or type-parameter dispatch, or a function
+// value), it is the whole context: every field, `trace` when any body of
+// the program reads it, and every key any body of the program reads. A
+// `#Memo` function's key holds each one beside its arguments (IR
+// BuildMemo.jet).
+sema_effect_context_reach: fn(nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, facts: &TEffectFacts) Never! {
+    every: sema_context_read_fields()
+    read := [String]{}
+    keys := [TEffectContextKey]{}
+    seen := (loop _ in nodes -> false)
+    seen[root] = true
+    pending := [Int]{root}
+    cursor := 0
+    loop cursor < pending.len() {
+        index: pending[cursor]
+        cursor += 1
+        if nodes[index].context_open || nodes[index].maximal || nodes[index].dispatches.len() > 0 || nodes[index].param_dispatches.len() > 0 {
+            facts.context = every
+            all_keys := [TEffectContextKey]{}
+            traced := false
+            loop node in nodes {
+                loop key in node.context_keys -> sema_effect_add_context_key(all_keys, key.copy())
+                if node.context_reads.contains("trace") -> traced = true
+            }
+            if traced -> facts.context.push("trace")
+            facts.context_keys = all_keys
+            return
+        }
+        loop field in nodes[index].context_reads {
+            if !read.contains(field) -> read.push(field.copy())
+        }
+        loop key in nodes[index].context_keys -> sema_effect_add_context_key(keys, key.copy())
+        calls: nodes[index].call_edges.len()
+        loop position in 0..<(calls + nodes[index].value_edges.len()) {
+            edge: if position < calls -> nodes[index].call_edges[position] else -> nodes[index].value_edges[position - calls]
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if seen[target] -> next
+            seen[target] = true
+            pending.push(target)
+        }
+    }
+    fields := [String]{}
+    loop field in every {
+        if read.contains(field) -> fields.push(field.copy())
+    }
+    if read.contains("trace") -> fields.push("trace")
+    facts.context = fields
+    facts.context_keys = keys
 }
 
 // The compiler answers a comptime input while it compiles, so the running
@@ -1586,10 +1695,11 @@ sema_effect_module_cap_names: fn(items: [Item], diagnostics: &[Diagnostic]) {
 }
 
 sema_effect_cap_entry_names: fn(cap: ModuleCap, diagnostics: &[Diagnostic]) {
-    loop entry in cap.entries {
+    loop index in 0..<cap.entries.len() {
+        entry: cap.entries[index]
         raw: if entry.name.starts_with("!") -> entry.name.slice(1, entry.name.len()) else -> entry.name
         effect_name: sema_effect_parse_name(raw) ?? {
-            diagnostics.push(sema_effect_unknown(raw, entry.span))
+            diagnostics.push(sema_effect_unknown_entry(raw, entry.span, (loop written in cap.entries -> written.span), index))
             next
         }
         if !entry.name.starts_with("!") && sema_effect_root(effect_name) == "Panic" -> diagnostics.push(sema_effect_positive_panic(entry.span))
@@ -2058,7 +2168,8 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
     }
     if actual.declared_effects == .Val(effect_row) {
         if effect_row.len() > 0 -> node.row_span = Val(effect_row[0].span)
-        loop entry in effect_row {
+        loop index in 0..<effect_row.len() {
+            entry: effect_row[index]
             // An open row (`-[..E]>`, `-[IO, ..E]>`) has no closed ceiling:
             // its named effects are a floor, so no bound is checked.
             if entry.name.starts_with("..") {
@@ -2076,7 +2187,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
                 // A library effect admits the kernel effects it lists; a
                 // denial of it is checked over the library effects reached.
                 library_name: sema_library_effect_find(library, raw) ?? {
-                    diagnostics.push(sema_effect_unknown(raw, entry.span))
+                    diagnostics.push(sema_effect_unknown_entry(raw, entry.span, sema_effect_row_sources(effect_row), index))
                     next
                 }
                 if prohibited {
@@ -3149,6 +3260,7 @@ sema_effect_walk_expr: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyT
 // false when its children aren't walked.
 sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
     sema_effect_record_comptime_input(nodes, node_index, node)
+    sema_effect_record_context(nodes, node_index, tree, node)
     if {
         // The suspended determinism checks record nothing for the call.
         sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
@@ -5260,6 +5372,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         loop function_index in 0..<modules[target].functions.len() {
             node_index: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
             effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
+            memoized: modules[target].functions[function_index].memo_bound != None || modules[target].functions[function_index].memo_unbounded
+            if memoized -> sema_effect_context_reach(nodes, calls.node_by_key, node_index, effects)
             capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
             frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
             if target < taken {
@@ -5744,6 +5858,7 @@ sema_effect_walk_enter: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
             sema_effect_record_value_reads(nodes, facts, node_index, tree, expression, node)
             sema_effect_record_stop(nodes, node_index, node)
             sema_effect_record_comptime_input(nodes, node_index, node)
+            sema_effect_record_context(nodes, node_index, tree, node)
             if node.kind == {
                 .ConstRef(symbol) -> sema_effect_record_callback_bound(nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
                 .Lambda(value) -> sema_effect_record_lambda_bound(nodes, node_index, facts, caller, tree, value, body_type(tree, expression), node.span)
@@ -6242,6 +6357,7 @@ sema_effect_walk_host_call_children: fn(walk: SemaEffectWalk, nodes: &[SemaEffec
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, value)
         .ComptimeInput(_, path, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, path)
+        .ContextGet(_, default, _) -> sema_effect_walk_visit(walk, nodes, facts, diagnostics, caller, tree, default)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }

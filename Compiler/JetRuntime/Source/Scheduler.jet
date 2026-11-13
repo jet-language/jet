@@ -1877,7 +1877,7 @@ scheduler_fatal: fn(message: I64) {
     bytes: sync_load(message)
     length: sync_load(wrapping(message + I64{8}))
     trap_stop(I64{1}, bytes, length, I64{0}, I64{0})
-    if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
+    if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple_report(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
 }
 

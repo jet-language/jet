@@ -257,6 +257,9 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
     if slot >= 0 {
         owned: ir_own(m, p, b, slot)
         ir_store_at(m, p, b, boxed, 8, owned)
+        // The trait box is the heap's: its payload moves there
+        // (BuildMove.jet).
+        ir_move_stored(m, p, b, payload_row, boxed, 8)
     }
     b.fresh[boxed] = true
     boxed

@@ -580,6 +580,17 @@ Context: struct {
     }
 }
 
+// A package's own context value: `#ContextKey frame_index: 0` declares
+// a snake_case key whose value is the default. `#Context(frame_index: 3)`
+// sets it for a region, `context.get(frame_index)` reads it, and a spawned
+// task inherits the value its parent set. A key may not reuse a `context`
+// field name (E0761).
+ContextKey: struct {
+    impl Marker {
+        sites: [.Constant]
+    }
+}
+
 Reactive: struct {
     impl Marker {
         sites: [.Function, .Method, .Block]

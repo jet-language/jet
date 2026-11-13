@@ -12,13 +12,17 @@ storage_arena_close: fn() { jet_rt_mem_arena_close() }
 storage_arena_retain: fn(bytes: I64) { jet_rt_mem_arena_retain(bytes) }
 storage_arena_release: fn(bytes: I64) { jet_rt_mem_arena_release(bytes) }
 
-// Arena80: blocks List32@0, current@24, drops List24@32, bytes@56,
-// highwater@64, next-block-size@72. Bump72 embeds its RawBlock32@0;
+// Arena88: blocks List32@0, current@24, drops List24@32, bytes@56,
+// highwater@64, next-block-size@72, block reservation@80 (ARENA_BLOCKS: the
+// record of the reservation its `#Context(allocator:)` blocks take from, 0
+// until the first; Alloc.jet's arena blocks). Bump72 embeds its RawBlock32@0;
 // Pool72 uses a fixed List40@0 and generation@24, then the same drops/facts.
 // RawBlock32=[data,capacity,alignment,used]; PoolSlot40 appends occupied.
 // DropEntry24=[pointer,drop-thunk,actual-size], including trivial and ZST values.
 // Fixed64=[backing,capacity,used,metadata-start,last-header,count,bytes,highwater].
 // FixedHeader32 lives INSIDE the backing=[previous,value-offset,drop-thunk,size].
+ARENA_BLOCKS: I64{80}
+ARENA_BYTES: I64{88}
 storage_word: fn(address: I64) -> I64 {
     #Unsafe("address borrows an initialized word in a native allocator header, descriptor, drop record, or Fixed metadata span") { return os_load_i64(address) }
 }
@@ -168,8 +172,8 @@ storage_block_reserve: fn(block: I64, offset: I64, bytes: I64) -> I64 {
     capacity: storage_capacity(capacity_word)
     first: if (capacity == I64{0}) -> I64{1} else -> capacity
     storage_arena_open()
-    handle: jet_rt_alloc(I64{80}, I64{8})
-    storage_zero(wrapping(handle + I64{24}), I64{48})
+    handle: jet_rt_alloc(ARENA_BYTES, I64{8})
+    storage_zero(wrapping(handle + I64{24}), wrapping(ARENA_BYTES - I64{24}))
     data: jet_rt_alloc(I64{32}, I64{8})
     _ := storage_block_init(data, first, I64{4096}, false)
     storage_put(handle, I64{1})
@@ -242,7 +246,8 @@ storage_arena_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     }
     storage_list_free(handle, I64{32})
     storage_list_free(wrapping(handle + I64{32}), I64{24})
-    jet_rt_free(handle, I64{80}, I64{8})
+    alloc_arena_release(wrapping(handle + ARENA_BLOCKS))
+    jet_rt_free(handle, ARENA_BYTES, I64{8})
 }
 
 #Export(c) jet_bump_new: fn() -> I64 { jet_bump_with_capacity(I64{65536}) }

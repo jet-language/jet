@@ -31,8 +31,14 @@ use jet_foundation.[name_rows_value]
 // probe, then the failed entry's exit), the backtrace mode, the sentry's
 // release switch (Sentry.jet: a word of the sentry root runtime init
 // allocates) and the cleanup
-// scopes (with no root no stop is ever pending). jet_rt_process_entry_return
-// only marks the end of a rooted process, so an owned main drops its calls.
+// scopes (with no root no stop is ever pending). The program's value
+// allocations and moves (Alloc.jet jet_rt_alloc_value, jet_rt_move_enter;
+// Text.jet jet_rt_string_builder_value, jet_rt_string_append_value,
+// jet_rt_string_serve, jet_rt_string_move) are memory too: a program with a
+// `#Context(allocator:)` block has a root (jet_ctx_push_allocator and
+// jet_ctx_push_arena are not here), so with none no carrier serves or
+// moves. jet_rt_process_entry_return only marks the end of a rooted
+// process, so an owned main drops its calls.
 // Int shifts are not here: jet_int_shl/shr read the scheduler on every call.
 //
 // The generated CLI parser's routes (#6328 S2) are root-free too: the
@@ -74,6 +80,8 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_journey_reset",
     "jet_rt_alloc",
     "jet_rt_alloc_8",
+    "jet_rt_alloc_value",
+    "jet_rt_alloc_value_grow",
     "jet_rt_block_inherit_zero",
     "jet_rt_block_release",
     "jet_rt_block_retain",
@@ -96,6 +104,10 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_list_bounds_stop",
     "jet_rt_mem_fill",
     "jet_rt_mem_move",
+    "jet_rt_move_enter",
+    "jet_rt_move_enter_at",
+    "jet_rt_move_leave",
+    "jet_rt_move_needed",
     "jet_rt_numeric_stop",
     "jet_rt_panic_message",
     "jet_rt_panic_overflow",
@@ -105,15 +117,19 @@ IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_rt_sentry_set_release",
     "jet_rt_session_propagate",
     "jet_rt_string_append",
+    "jet_rt_string_append_value",
     "jet_rt_string_builder_finish",
     "jet_rt_string_builder_new",
     "jet_rt_string_builder_push",
     "jet_rt_string_builder_push_static",
+    "jet_rt_string_builder_value",
     "jet_rt_string_clear",
     "jet_rt_string_clone",
     "jet_rt_string_drop",
     "jet_rt_string_eq",
     "jet_rt_string_from_static",
+    "jet_rt_string_move",
+    "jet_rt_string_serve",
     "jet_rt_timing_admit",
     "jet_rt_u64_to_string",
     "jet_rt_unreachable",

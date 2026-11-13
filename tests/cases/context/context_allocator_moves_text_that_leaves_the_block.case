@@ -1,0 +1,21 @@
+# Text a `#Context(allocator:)` block's code builds (interpolation, `+`,
+# `+=`, `to_string`, `join`) comes from the block's allocator, and text that
+# leaves the block moves into its destination's allocator first: a write to
+# an outer local or field, an append to an outer local, a push, a map key, a
+# module store and a `return` each keep their text after the block's
+# allocator hands the blocks it released to other text.
+fixture: context_allocator_moves_text_that_leaves_the_block.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check text.jet
+exit: 0
+step: jet run --optimize=none text.jet
+exit: 0
+stdout: = "scribbled 3280\nouter local: made item-1 here\nappended: start then item-2\nouter field: item-3/item-4\npushed: 5 item-6+item-7\nmap key: 8\nmodule store: 0,1,2,\nreturned: 0,1,2,3,end\nconcat: 8 served true\nserved true, all released true\n"
+step: jet run --optimize=basic text.jet
+exit: 0
+stdout: = "scribbled 3280\nouter local: made item-1 here\nappended: start then item-2\nouter field: item-3/item-4\npushed: 5 item-6+item-7\nmap key: 8\nmodule store: 0,1,2,\nreturned: 0,1,2,3,end\nconcat: 8 served true\nserved true, all released true\n"
+step: jet run --optimize=full text.jet
+exit: 0
+stdout: = "scribbled 3280\nouter local: made item-1 here\nappended: start then item-2\nouter field: item-3/item-4\npushed: 5 item-6+item-7\nmap key: 8\nmodule store: 0,1,2,\nreturned: 0,1,2,3,end\nconcat: 8 served true\nserved true, all released true\n"

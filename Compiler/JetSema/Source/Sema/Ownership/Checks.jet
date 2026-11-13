@@ -352,6 +352,30 @@ SemaOwnershipState: struct {
     // The places the active task groups lend to running children, as the
     // parent sees them; empty while a child's own body is checked.
     group_loans: [SemaOwnershipGroupLoan]{[SemaOwnershipGroupLoan]{}}
+    // The allocators of the open `#Context(allocator: a)` blocks being
+    // checked, outermost first (Statements.jet sema_stmt_check_context_block).
+    block_allocators: [SemaOwnershipBlockAllocator]{[SemaOwnershipBlockAllocator]{}}
+}
+
+// The allocator a `#Context(allocator: a)` block allocates from: `name` as
+// the block names it, `key` its place's root binding. The block's values
+// live in `a` until they leave the block, so `a` may not reset, change or
+// move while the block runs.
+SemaOwnershipBlockAllocator: struct {
+    name: String
+    key: String
+}
+
+// E0204 when a write or move reaches an open block's allocator.
+sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [SemaOwnershipPlace], action: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    loop open in state.block_allocators {
+        loop place in places {
+            if place.root_key != open.key -> next
+            diagnostics.push(sema_error("E0204", span, "`{open.name}` can't {action} here — the `#Context(allocator: {open.name})` block is still allocating from it", "the values this block allocated live in `{open.name}` until they leave the block; changing or moving it before the block ends would leave them pointing into gone memory", "change `{open.name}` after the block ends"))
+            return true
+        }
+    }
+    false
 }
 
 // A written `name := value` (or `{a, b} := value`): the names it declares,
@@ -596,6 +620,7 @@ sema_ownership_state_snapshot: fn(source: SemaOwnershipState) -> SemaOwnershipSt
     snapshot.mutable_sigils = source.mutable_sigils
     snapshot.mutated_starts = source.mutated_starts
     loop loan in source.group_loans -> snapshot.group_loans.push(SemaOwnershipGroupLoan{name: loan.name, group: loan.group, place: sema_ownership_place_snapshot(loan.place), access: loan.access})
+    loop open in source.block_allocators -> snapshot.block_allocators.push(SemaOwnershipBlockAllocator{name: open.name.copy(), key: open.key.copy()})
     snapshot
 }
 
@@ -2972,6 +2997,8 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
             return false
         }
     }
+    // A `&` argument toward a parameter that does not edit changes nothing.
+    if (capability || action != "be passed with write access") && sema_ownership_block_allocator_refuses(state, places, if action == "" -> "be edited" else -> action, expr_span(expr), diagnostics) -> return false
     if !capability -> return true
     has_view: sema_ownership_view_exists_for_expr(state, expr, scopes)
     if has_view && sema_ownership_view_has_access(state, expr, scopes, AccessConvention.Read) {
@@ -3175,6 +3202,7 @@ sema_ownership_mark_move_as: fn(state: &SemaOwnershipState, expr: Expr, scopes: 
     if sema_ownership_report_invalidated_view(state, expr, scopes, expr_span(expr), diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if places.len() == 0 -> return true
+    if sema_ownership_block_allocator_refuses(state, places, "be moved", expr_span(expr), diagnostics) -> return false
     binding: sema_ownership_binding_for_expr(state, expr, scopes)
     // An ExpiringSecret loan is lent for the callback only: an exact move of
     // it is refused and nothing moves (an unmarked read keeps lending it);

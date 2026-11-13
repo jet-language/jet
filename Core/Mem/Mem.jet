@@ -2,7 +2,7 @@ package: {
     name: "core.mem"
     version: "0.0.1"
     edition: "2026"
-    description: "Arenas, pins, atomics, and volatile access."
+    description: "Regions, blocks, the allocator trait, arenas, pins, atomics, and volatile access."
     license: "MIT"
     outputs: {
         mem: .Library{ entry: mem }
@@ -152,4 +152,153 @@ __ptr_offset: fn<T>(pointer: *T, count: Int) -> *T Never! {
 
 __ptr_byte_offset: fn<T>(pointer: *T, bytes: Int) -> *T Never! {
     __ptr_byte_offset<T>(pointer, bytes)
+}
+
+// A region's fresh pages: `__region_reserve` maps `bytes` of private pages,
+// which the system commits on first touch, and answers their address, or 0
+// when the size is not positive or the system refuses; `__region_release`
+// unmaps them at the length reserved. Compiler intrinsics as the List layout
+// operations above are. Reserved `__` names, never public.
+#Unsafe("the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved") __region_reserve: fn(bytes: Int) -> Int Never! {
+    __region_reserve(bytes)
+}
+
+#Unsafe("`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again") __region_release: fn(address: Int, bytes: Int) Never! {
+    __region_release(address, bytes)
+}
+
+/// A span of address space that allocators take their blocks from.
+/// `reserve` maps fresh pages, which the system commits on first touch, and
+/// `close` unmaps them. `adopt` wraps memory the caller already owns and never
+/// unmaps it. `claim` hands blocks out in address order and never reuses
+/// them; reuse is the allocator's job.
+Region: struct {
+    priv base: Int
+    priv size: Int
+    priv cursor: Int
+    priv mapped: Bool
+
+    /// A region of `bytes` of fresh private memory. A size of zero or less,
+    /// or a system refusal, is an AllocError.
+    reserve: fn(bytes: Int) -> Region AllocError! {
+        if bytes <= 0 -> return Err(AllocError{requested_bytes: bytes, allocator: "Region"})
+        address := 0
+        #Unsafe("the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close") {
+            address = __region_reserve(bytes)
+        }
+        if address == 0 -> return Err(AllocError{requested_bytes: bytes, allocator: "Region"})
+        Ok(Region{base: address, size: bytes, cursor: 0, mapped: true})
+    }
+
+    /// A region over `bytes` of memory at `address` that the caller owns.
+    #Unsafe("`address` names `bytes` of live, writable memory that nothing else reads or writes while the region and its blocks live") adopt: fn(address: Int, bytes: Int) -> Region Never! {
+        Region{base: address, size: if bytes < 0 -> 0 else -> bytes, cursor: 0, mapped: false}
+    }
+
+    /// The first address of the region.
+    address: fn(self) -> Int Never! { self.base }
+
+    /// The size of the region in bytes.
+    size: fn(self) -> Int Never! { self.size }
+
+    /// The bytes that `claim` has not handed out yet.
+    remaining: fn(self) -> Int Never! { self.size - self.cursor }
+
+    /// The next `size` bytes at a multiple of `align`, which must be a power
+    /// of two. None when the size or alignment is invalid, or the region has
+    /// no room left.
+    claim: fn(&self, size: Int, align: Int) -> Block? Never! {
+        if size <= 0 || align <= 0 || align.bit_and(align - 1) != 0 -> return None
+        mask: align - 1
+        limit: self.base + self.size
+        next: self.base + self.cursor
+        if mask > limit - next -> return None
+        start: (next + mask).bit_and(mask.bit_not())
+        if size > limit - start -> return None
+        self.cursor = start + size - self.base
+        Val(Block{address: start, size: size})
+    }
+
+    impl Close {
+        close: fn(&&self) {
+            if !self.mapped -> return
+            #Unsafe("the region mapped these pages at reserve, and no block of it is used after close") {
+                __region_release(self.base, self.size)
+            }
+        }
+    }
+}
+
+/// A span of bytes that a region or an allocator handed out. A block is
+/// single use: it ends by going back to an allocator's `release`, and it
+/// cannot be copied or forged. `split` and `join` change it in place.
+#SingleUse Block: struct {
+    priv address: Int
+    priv size: Int
+
+    /// The first address of the block.
+    address: fn(self) -> Int Never! { self.address }
+
+    /// The size of the block in bytes.
+    size: fn(self) -> Int Never! { self.size }
+
+    /// Keeps the first `at` bytes and returns the rest as a new block.
+    /// `at` must lie strictly inside the block.
+    split: fn(&self, at: Int) -> Block Never! {
+        if at <= 0 || at >= self.size -> panic("mem.Block.split: the split point {at} is outside a block of {self.size} bytes")
+        tail: Block{address: self.address + at, size: self.size - at}
+        self.size = at
+        tail
+    }
+
+    /// Grows the block over `next`, which must start where this block ends.
+    join: fn(&self, next: &&Block) Never! {
+        if self.address + self.size != next.address -> panic("mem.Block.join: the blocks at {self.address} and {next.address} are not neighbors")
+        self.size += next.size
+        #Unsafe("`next`'s bytes now belong to this block, so its release duty is this block's") {
+            consume(next)
+        }
+    }
+}
+
+/// The allocator trait. `allocate` answers a block of at least `size` bytes
+/// at a multiple of `align`, or an AllocError. `release` takes a block back.
+/// `resize` changes a block's size in place and answers whether it could;
+/// on false the block is unchanged. Neither fails: the runtime calls
+/// `release` for a `#Context(allocator:)` block inside a drop.
+Allocator: trait {
+    allocate: fn(&self, size: Int, align: Int) -> Block AllocError!
+    release: fn(&self, block: &&Block) Never!
+    resize: fn(&self, block: &Block, new_size: Int) -> Bool Never!
+}
+
+// The runtime's call into `allocator` for a `#Context(allocator:)` block
+// (JetRuntime Alloc.jet alloc_user_call): op 0 allocates x bytes at align y
+// and answers the address, 0 when refused; op 1 releases the x bytes at
+// address y, a block op 0 answered. The block borrows the allocator, so the
+// call holds its address, not a copy: the block's checks keep the allocator
+// in place and unchanged until the block ends, and the runtime calls this
+// only inside it. The sentry witness is off for that read because the
+// address was taken in this function's frame, which has returned by then.
+__allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int Never! {
+    address := 0
+    #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
+        address = mem.address_of(allocator)
+    }
+    (op: Int, x: Int, y: Int) -> {
+        answer := 0
+        #Unsafe("the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else") {
+            #Policy(sentries: .Off) {
+                held := mem.Ptr<A>.from_addr(address)
+                if op == 0 {
+                    block: held.*.allocate(x, y) ?? return 0
+                    answer = block.address()
+                    consume(block)
+                } else {
+                    held.*.release(Block{address: y, size: x})
+                }
+            }
+        }
+        answer
+    }
 }

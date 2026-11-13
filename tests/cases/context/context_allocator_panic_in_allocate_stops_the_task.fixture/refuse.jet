@@ -1,0 +1,38 @@
+use core.mem
+
+// An allocator that panics on its third allocation.
+Picky: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+}
+
+impl Picky.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        if self.taken == 2 -> panic("the allocator is out of patience")
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Picky"})
+        self.taken += 1
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! { self.kept.push(block) }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 20) ?? panic("reserve")
+    picky := Picky{region: region, kept: [mem.Block]{}, taken: 0}
+    print("before the block")
+    total := 0
+    #Context(allocator: picky) {
+        words := [String]{}
+        loop i in 0..<1000 -> words.push("word {i}")
+        total = words.len()
+    }
+    print("after the block: {total}")
+}

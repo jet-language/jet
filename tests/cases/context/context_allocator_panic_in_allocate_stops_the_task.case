@@ -1,0 +1,22 @@
+# A panic inside a `#Context(allocator:)` block's `allocate` stops the task:
+# the list growth it interrupted takes its buffer from the program heap, the
+# stop is taken at the loop's next stop check, and the task reports the
+# panic and never reaches the code after the block.
+fixture: context_allocator_panic_in_allocate_stops_the_task.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check refuse.jet
+exit: 0
+step: jet run --optimize=none refuse.jet
+exit: 70
+stdout: = "before the block\n"
+stderr: ~ "panic: the allocator is out of patience"
+step: jet run --optimize=basic refuse.jet
+exit: 70
+stdout: = "before the block\n"
+stderr: ~ "panic: the allocator is out of patience"
+step: jet run --optimize=full refuse.jet
+exit: 70
+stdout: = "before the block\n"
+stderr: ~ "panic: the allocator is out of patience"

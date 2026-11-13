@@ -1,0 +1,12 @@
+#ContextKey scale: 2
+
+scaled: fn(n: Int) -> Int { n * context.get(scale) }
+
+// `scaled` reads a context key; a value computed while building would read the build's root context, so a module value that calls it is a build error (E0643).
+EARLY: scaled(5)
+
+run: fn() {
+    #Context(scale: 3) {
+        print("module value {EARLY}")
+    }
+}

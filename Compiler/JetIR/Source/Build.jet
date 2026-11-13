@@ -171,6 +171,12 @@ IRBuilder: struct {
     // A `#Memo` function's result store: each return files its result
     // (ir_memo_file).
     memo: IRMemo?{None}
+    // The slot and instruction counts where the innermost open
+    // `#Context(allocator: a)` block of this body began (-1: none open):
+    // storage it reserved after them is younger than the block
+    // (BuildRoutes.jet ir_list_grow_buffer).
+    young_slots: Int{-1}
+    young_ops: Int{-1}
     // Building the program entry itself (IRProgram.entry, not a lambda or a
     // generic instance in it): its end and each return first report the
     // entry returning (ir_entry_ending), so its drops can leave the heap to
@@ -796,7 +802,8 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout,
 // volatile and streaming access, the raw pointer steps, and the raw block
 // copy and fill at the call's one type argument, and the raw heap
-// allocation and release, which take none.
+// allocation and release and a region's reserve and release of fresh pages,
+// which take none.
 IRCoreIntrinsicRow: struct { module_name: String, name: String, intrinsic: IRRuntimeIntrinsic }
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
@@ -814,6 +821,8 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "fill", intrinsic: IRRuntimeIntrinsic.MemFill},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "alloc_raw", intrinsic: IRRuntimeIntrinsic.AllocRaw},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "free_raw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_reserve", intrinsic: IRRuntimeIntrinsic.RegionReserve},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_release", intrinsic: IRRuntimeIntrinsic.RegionRelease},
 }
 
 // The checked functions IR_CORE_INTRINSICS names, by function key, each of
@@ -829,14 +838,18 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never
     intrinsics
 }
 
-// A bitcast reads its one scalar; a core.mem operation is generic over the
-// one type its call instantiates, but for the raw heap pair, which is not.
+// A bitcast reads its one scalar; a core.mem layout, access, pointer or
+// block operation is generic over the one type its call instantiates, the
+// raw heap pair is not, and a region's reserve reads its size and its
+// release the address and size.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
         .TypeSize | .ListCapacity | .ListReserveExact | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
+        .RegionReserve -> ir_intrinsic_signature(function, 1)
+        .RegionRelease -> ir_intrinsic_signature(function, 2)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }
@@ -1000,6 +1013,9 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     m := ir_module_new()
     loop _ in 0..<p.functions.len() -> m.ids.push(-1)
     m.stop_points = p.stop_points
+    // The images whose `#Unsafe` scopes enter the sentry are the program's
+    // and test images, whose allocations are the program's own values.
+    m.user_values = p.sentries
     m
 }
 
@@ -2531,13 +2547,18 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
     if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") -> return false
     if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") -> return false
     if symbol == {
-        "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
+        "jet_rt_alloc" | "jet_rt_alloc_8" | "jet_rt_alloc_value" | "jet_rt_alloc_value_grow" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
+        "jet_rt_mem_region_reserve" | "jet_rt_mem_region_release" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_rt_string_clear" | "jet_journey_reset" -> false
         // A failure's Err value and its journey hops (ir_journey_origin, ir_journey_hop)
         // only allocate and copy texts (Err.jet, JourneyTLS.jet).
         "jet_rt_record_new_jet_err" | "jet_err_from_message" | "jet_err_with_context_frame" | "jet_journey_origin" | "jet_journey_frame_text" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
-        "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" | "jet_ctx_deadline_present" | "jet_ctx_deadline_ms" | "jet_ctx_thread" -> false
+        "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" | "jet_ctx_deadline_present" | "jet_ctx_deadline_ms" | "jet_ctx_thread" | "jet_rt_context_trace" -> false
+        "jet_ctx_push_allocator" | "jet_ctx_push_arena" | "jet_ctx_pop_allocator" -> false
+        "jet_rt_move_enter" | "jet_rt_move_enter_at" | "jet_rt_move_leave" | "jet_rt_move_needed" | "jet_rt_string_move" | "jet_rt_string_serve" -> false
+        // A pop may run the last owner's drop of the value (Runtime Context.jet), which can stop.
+        "jet_ctx_value_push" | "jet_ctx_value_find" -> false
         "jet_term_mode_enter" | "jet_term_mode_leave" -> false
         "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
         "jet_rt_effect_scope_enter" | "jet_rt_effect_scope_leave" -> false
@@ -2727,6 +2748,25 @@ ir_stop_poll: fn(m: &IRModule, key: String) -> Int Never! {
     id
 }
 
+// The stack mark of a `#Context(allocator: a)` block (BuildTransact.jet
+// ir_context_block): its caller's stack pointer, `lea rax, [rbp + 16]` in
+// the leaf's own frame. The frames of the functions the block's code calls
+// lie below it; the caller's frame and the older ones above. Its result
+// register is the template's own, so it is never inlined, and it is built
+// once per module.
+ir_stack_mark: fn(m: &IRModule) -> Int Never! {
+    found: name_rows_value(m.function_rows, IR_STACK_MARK_KEY) ?? -1
+    if found >= 0 -> return found
+    name: "jet_ir_stack_mark"
+    f := ir_function_new(name, IR_STACK_MARK_KEY, name, "", 0)
+    f.result = ir_word_row(m)
+    f.asm = Val(IRAsmLeaf{code: [U8]{U8{72}, U8{141}, U8{69}, U8{16}}, regs: [Int]{}, result: -1})
+    id: m.functions.len()
+    m.functions.push(f)
+    name_rows_set(m.function_rows, IR_STACK_MARK_KEY, id)
+    id
+}
+
 // The stop edge: the cleanup of a return from here (each open
 // transaction's snapshots restored, latest first, then its Stm and handle
 // dropped, whose rollback hooks run, as ir_tx_unwind does; then every owned
@@ -2845,16 +2885,17 @@ ir_member_read: fn(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember) -> 
 }
 
 // Writes `value` into the member of the aggregate at `base`; a recursive
-// edge gets a wrapper box of its own. A variable's value moved in here is
-// no longer closed by its scope: the aggregate closes it.
-ir_member_write: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
+// edge gets a wrapper box of its own (ir_wrapper_alloc: `place` -1 for an
+// aggregate being built, else the address of the storage holding it). A
+// variable's value moved in here is no longer closed by its scope: the
+// aggregate closes it.
+ir_member_write: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int, place: Int) Never! {
     ir_close_disarm(b, value)
     holder := base
     offset := member.offset
     if member.boxed {
-        pointer_row: ir_pointer_row(m)
         size: m.types[member.ty].size
-        holder = ir_box_alloc(m, b, if size < 8 -> 8 else -> size, pointer_row)
+        holder = ir_wrapper_alloc(m, b, if size < 8 -> 8 else -> size, place)
         ir_emit(b.f, IROp.Store, -1, base, member.offset, holder, b.line)
         offset = 0
     }
@@ -2923,8 +2964,7 @@ ir_enum_tag_of: fn(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
 ir_member_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, value: Int) Never! {
     if !member.boxed -> return ir_store_at(m, p, b, base, member.offset, value)
     size: m.types[member.ty].size
-    pointer_row: ir_pointer_row(m)
-    wrapper: ir_box_alloc(m, b, size, pointer_row)
+    wrapper: ir_wrapper_alloc(m, b, size, -1)
     ir_store_at(m, p, b, wrapper, 0, value)
     ir_emit(b.f, IROp.Store, -1, base, member.offset, wrapper, b.line)
 }
@@ -2968,24 +3008,61 @@ ir_load_word: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int) -> Int Nev
     slot
 }
 
-// Heap storage of `size` bytes (jet_rt_alloc(bytes, 8)).
+// Storage of `size` bytes for a value of row `row`: a box of a box row in a
+// program's module (IRModule.user_values) comes from the allocator a
+// `#Context(allocator: a)` block serves values from (jet_rt_alloc_value,
+// BuildMove.jet), any other from the heap (jet_rt_alloc(bytes, 8)).
 ir_box_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, row: Int) -> Int Never! {
     bytes: ir_word_const(m, b, ir_align8(size))
     align: ir_word_const(m, b, 8)
-    boxed: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, align}, row)
+    symbol: if m.user_values && ir_box_row(m, row) -> "jet_rt_alloc_value" else -> "jet_rt_alloc"
+    boxed: ir_runtime(m, b, symbol, [Int]{bytes, align}, row)
     b.fresh[boxed] = m.types[row].drop != ""
     boxed
 }
 
-// A List buffer of exactly `bytes` bytes (jet_rt_alloc(bytes, 8)). Unlike a
-// box it is not rounded up: every List buffer is released as capacity *
-// stride (the List drop, ir_release_moved_buffer), and a free must name the
-// allocation's own size.
+// A recursive edge's wrapper box of `size` bytes: in a program's module from
+// the allocator of the holder whose storage `place` addresses
+// (jet_rt_alloc_value_grow; -1: a holder being built, whose allocator is
+// the current one), else the heap.
+ir_wrapper_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, place: Int) -> Int Never! {
+    pointer_row: ir_pointer_row(m)
+    if !m.user_values -> return ir_box_alloc(m, b, size, pointer_row)
+    bytes: ir_word_const(m, b, ir_align8(size))
+    if place < 0 {
+        align: ir_word_const(m, b, 8)
+        return ir_runtime(m, b, "jet_rt_alloc_value", [Int]{bytes, align}, pointer_row)
+    }
+    none: ir_word_const(m, b, 0)
+    ir_runtime(m, b, "jet_rt_alloc_value_grow", [Int]{bytes, none, place}, pointer_row)
+}
+
+// The copy of the box of box row `row`, or the wrapper (the pointer row),
+// `old` of `size` bytes its holder makes its own: in a program's module from
+// the allocator that served `old` (jet_rt_alloc_value_grow), the holder's or
+// an older one, else the heap.
+ir_box_replica: fn(m: &IRModule, b: &IRBuilder, size: Int, old: Int, row: Int) -> Int Never! {
+    if !m.user_values || (row != ir_pointer_row(m) && !ir_box_row(m, row)) -> return ir_box_alloc(m, b, size, row)
+    bytes: ir_word_const(m, b, ir_align8(size))
+    replica: ir_runtime(m, b, "jet_rt_alloc_value_grow", [Int]{bytes, old, old}, row)
+    b.fresh[replica] = m.types[row].drop != ""
+    replica
+}
+
+// A List buffer of exactly `bytes` bytes, from where ir_box_alloc takes a
+// box's in a program's module. Unlike a box it is not rounded up: every
+// List buffer is released as capacity * stride (the List drop,
+// ir_release_moved_buffer), and a free must name the allocation's own size.
 ir_list_buffer_alloc: fn(m: &IRModule, b: &IRBuilder, bytes: Int) -> Int Never! {
-    word_row: ir_word_row(m)
     size: ir_word_const(m, b, bytes)
+    ir_list_buffer_sized(m, b, size)
+}
+
+// ir_list_buffer_alloc of the byte count in slot `size`.
+ir_list_buffer_sized: fn(m: &IRModule, b: &IRBuilder, size: Int) -> Int Never! {
+    word_row: ir_word_row(m)
     align: ir_word_const(m, b, 8)
-    ir_runtime(m, b, "jet_rt_alloc", [Int]{size, align}, word_row)
+    ir_runtime(m, b, if m.user_values -> "jet_rt_alloc_value" else -> "jet_rt_alloc", [Int]{size, align}, word_row)
 }
 
 // Writes `value` at byte `offset` of the storage at `base`: an aggregate's
@@ -3144,7 +3221,7 @@ ir_record_reorder: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, have
         } ?? return ir_fail_slot(b, span, "record member {member.name} of {ir_type_name(m.types[row].ty)}")
         loaded: ir_load_at(m, b, slot, source.offset, source.ty)
         owned: ir_own(m, p, b, loaded)
-        ir_member_write(m, p, b, storage, member, owned)
+        ir_member_write(m, p, b, storage, member, owned, -1)
     }
     ir_release(m, b, slot)
     storage

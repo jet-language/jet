@@ -1,0 +1,18 @@
+# Reading a `#ContextKey` value is an implicit input, not an effect: a `-[]>`
+# function reads it, and a `#Memo` function keys its results on the key
+# values it can reach, so a call under a block that sets the key is a miss.
+fixture: memo_keys_on_the_context_key_values_it_reads.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check keyed.jet
+exit: 0
+step: jet run --optimize=none keyed.jet
+exit: 0
+stdout: ~ "keyed 5 15 15 5 hits=2 misses=2" # the key's value is part of the memo key
+step: jet run --optimize=basic keyed.jet
+exit: 0
+stdout: ~ "keyed 5 15 15 5 hits=2 misses=2" # the key's value is part of the memo key
+step: jet run --optimize=full keyed.jet
+exit: 0
+stdout: ~ "keyed 5 15 15 5 hits=2 misses=2" # the key's value is part of the memo key

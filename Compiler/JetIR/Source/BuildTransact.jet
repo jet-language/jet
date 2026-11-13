@@ -11,22 +11,29 @@
 // process.exit, os.stop: Build.jet ir_stop_return) restore the snapshots,
 // latest first, then drop the Stm and the handle before the exit's own drops.
 
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, name_rows_set, name_rows_value, StmtKind]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_STOP_KEY, NodeKind, BodyLambda, TLocal, TMethodRef, BodyPlace, TTransactionSnapshot, TTryConvert, Type, checked_generated_local, name_rows_set, name_rows_value, stable_id, StmtKind]
 
 // An open transaction: its handle and Stm slots (-1: none), its snapshots
 // and the number of loops open around it. A `#Shield` block is a frame with
 // `shield` set and nothing else: an early exit leaves the session Shield.
-// A `#Context(deadline: …)` block is a frame with only `deadline`, the
-// two-word save area of the deadline it replaced (-1: none): an early exit
-// restores that deadline. A `#Live` block is a frame with only `terminal`:
-// an early exit restores the terminal mode it replaced. An `#Unsafe` scope
-// is a frame with only `sentry`, the save area of the sentry gate it
-// replaced, and a function taking raw addresses one with only
-// `sentry_frame`, its sentry stack frame (BuildSentry.jet). A function with
-// an effect-scope descriptor (FnBody.effect_scope) is a frame with only
-// `effect_scope`, the effect-scope frame its entry replaced, and a
-// `#MaxDepth(n)` function one with only `depth_site`, the site word its
-// count lives under (BuildDepth.jet): an early exit leaves them.
+// A `#Context(deadline: …)` block is a frame with `deadline`, the two-word
+// save area of the deadline it replaced (-1: none): an early exit restores
+// that deadline. A `#Context` block setting `#ContextKey` values has
+// `values`, the number of value nodes it pushed: an early exit pops them.
+// A `#Context(allocator: a)` block over a user allocator has `allocator`,
+// its two-word save area ([the carrier it replaced][its own carrier]): an
+// early exit restores that carrier. `bindings` counts the variables bound
+// before the block began: a write into one moves the value into the
+// allocator they hold their values in (BuildMove.jet ir_move_binding).
+// A `#Live` block is a frame with only `terminal`: an early exit restores
+// the terminal mode it replaced. An `#Unsafe` scope is a frame with only
+// `sentry`, the save area of the sentry gate it replaced, and a function
+// taking raw addresses one with only `sentry_frame`, its sentry stack frame
+// (BuildSentry.jet). A function with an effect-scope descriptor
+// (FnBody.effect_scope) is a frame with only `effect_scope`, the
+// effect-scope frame its entry replaced, and a `#MaxDepth(n)` function one
+// with only `depth_site`, the site word its count lives under
+// (BuildDepth.jet): an early exit leaves them.
 IRTxFrame: struct {
     handle: Int
     stm: Int
@@ -42,6 +49,9 @@ IRTxFrame: struct {
     terminal: Bool{false}
     effect_scope: Int{-1}
     depth_site: Int{-1}
+    values: Int{0}
+    allocator: Int{-1}
+    bindings: Int{0}
 }
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
@@ -278,17 +288,58 @@ ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
     _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
 }
 
-// `#Context(field: value, …) { .. }`: the guard values run in order; a
-// `deadline` (absolute wall milliseconds, Deadline.jet) is installed for the
-// body by jet_ctx_push_deadline, which saves the enclosing one in a stack
-// save area, and jet_ctx_pop_deadline restores it after the body's bindings
-// drop or on an early exit (ir_tx_unwind, ir_stop_return). The other guards
-// have no native carrier: their values run and are released.
+// `#Context(field: value, …) { .. }`: the guard values run in order, then
+// take effect for the body. A `deadline` (absolute wall milliseconds,
+// Deadline.jet) is installed by jet_ctx_push_deadline, which saves the
+// enclosing one in a stack save area, and jet_ctx_pop_deadline restores it
+// after the body's bindings drop or on an early exit (ir_tx_unwind,
+// ir_stop_return). A `#ContextKey` value, `logger` included (core.log's
+// key), moves into a node in front of the task's value chain
+// (ir_context_push_value), which jet_ctx_value_pop unlinks the same way.
+// A user allocator's guard value is its handler (Sema Statements.jet
+// sema_stmt_context_allocator_handler), a function value whose owner moves
+// to jet_ctx_push_allocator with the block's stack mark (Build.jet
+// ir_stack_mark), pushed after the value nodes so they come from the heap;
+// jet_ctx_pop_allocator restores the enclosing carrier first when the block
+// ends. A `mem.Arena` value, or `context.scratch` (never evaluated: the
+// runtime finds the task's arena), pushes an arena block the same way
+// (jet_ctx_push_arena), which the pop rewinds; an arena the guard made
+// itself goes to the block, which drops it at its end. Another builtin
+// allocator handle has no carrier: its value runs and is released.
 ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyContextGuard], body: [Int]) Never! {
     save := -1
+    keys := [String]{}
+    values := [Int]{}
+    handler := -1
+    arena := -1
+    arena_owned := false
     loop guard in guards {
+        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_scratch(p, b, guard.value) {
+            arena = ir_word_const(m, b, 0)
+            next
+        }
         value: ir_expr(m, p, b, guard.value)
-        if ir_failed(b) || value < 0 -> return
+        if ir_failed(b) -> return
+        if guard.key != "" {
+            span: ir_body_node(p, b, guard.value).span
+            held: if value < 0 || b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
+            if ir_failed(b) -> return
+            keys.push(guard.key)
+            values.push(held)
+            next
+        }
+        if value < 0 -> return
+        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_ty(p, b, guard.value) == .Fn(_, _, _, _, _, _) {
+            span: ir_body_node(p, b, guard.value).span
+            handler = if b.fresh[value] -> value else -> ir_copy_value(m, p, b, value, span)
+            if ir_failed(b) -> return
+            next
+        }
+        if guard.field == "allocator" && handler < 0 && arena < 0 && ir_context_arena(ir_ty(p, b, guard.value)) {
+            arena = value
+            arena_owned = b.fresh[value]
+            next
+        }
         if guard.field != "deadline" || save >= 0 {
             ir_release(m, b, value)
             next
@@ -301,23 +352,157 @@ ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyCon
         ir_emit(b.f, IROp.StackAddress, save, 16, 8, -1, b.line)
         _: ir_runtime(m, b, "jet_ctx_push_deadline", [Int]{deadline, save}, -1)
     }
-    if save >= 0 -> b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save})
+    loop index in 0..<keys.len() {
+        ir_context_push_value(m, p, b, keys[index], values[index])
+    }
+    carrier := -1
+    young_slots: b.young_slots
+    young_ops: b.young_ops
+    if handler >= 0 || arena >= 0 {
+        pointer_row: ir_pointer_row(m)
+        carrier = ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.StackAddress, carrier, 16, 8, -1, b.line)
+        word_row: ir_word_row(m)
+        mark: ir_temp(m, b, word_row)
+        start: ir_args(b.f, [Int]{})
+        ir_emit(b.f, IROp.Call, mark, ir_stack_mark(m), start, 0, b.line)
+        if handler >= 0 {
+            _: ir_runtime(m, b, "jet_ctx_push_allocator", [Int]{handler, carrier, mark}, -1)
+            b.fresh[handler] = false
+        } else {
+            owned: ir_word_const(m, b, if arena_owned -> 1 else -> 0)
+            _: ir_runtime(m, b, "jet_ctx_push_arena", [Int]{arena, owned, carrier, mark}, -1)
+            b.fresh[arena] = false
+        }
+        b.young_slots = b.f.slot_type.len()
+        b.young_ops = b.f.op.len()
+    }
+    framed: save >= 0 || keys.len() > 0 || carrier >= 0
+    if framed -> b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save, values: keys.len(), allocator: carrier, bindings: b.bindings.len()})
     ir_scope_open(b)
     ir_stmts(m, p, b, body)
+    b.young_slots = young_slots
+    b.young_ops = young_ops
     if ir_failed(b) -> return
     ir_scope_close(m, b)
-    if save < 0 -> return
-    _: b.transactions.pop()
-    _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{save}, -1)
+    if !framed -> return
+    frame: b.transactions.pop() ?? return
+    ir_tx_leave_scopes(m, b, frame)
+}
+
+// Whether a guard value of type `ty` is a `mem.Arena`.
+ir_context_arena: fn(ty: Type) -> Bool Never! {
+    if ty == .Named(name) -> return name == "Arena"
+    false
+}
+
+// Whether the guard value `value` is `context.scratch`, the task's arena.
+ir_context_scratch: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
+    if ir_body_node(p, b, value).kind == .HostCall(call) {
+        if call == .ContextRead(field) -> return field == "scratch"
+    }
+    false
+}
+
+// The runtime word naming the key whose text is `key`: the stop handler's
+// CONTEXT_ON_STOP_KEY is 1, the word the runtime's stop door finds (Runtime
+// Context.jet CONTEXT_ON_STOP_KEY); a `#ContextKey` constant's SymbolID key
+// text is its stable hash kept to 62 bits, so one positive machine word,
+// and never 0 (jet_ctx_value_find's "not set") or 1.
+ir_context_key_word: fn(key: String) -> Int Never! {
+    if key == CONTEXT_ON_STOP_KEY -> return 1
+    word: Int.from_u64(stable_id("context.key", key).bit_and(U64{4611686018427387903}))
+    if word <= 1 -> 2 else -> word
+}
+
+// Installs `value` (-1: a Unit value; else fresh, its ownership moving
+// here) as the `#ContextKey` constant `key`'s value for the enclosing
+// `#Context` block: a counted node laid out like a function value's box
+// (one owner at 0, no code at 8, the release helper at 16 that drops the
+// value and frees the node), the key word at 24, the chain link at 32 and
+// the value at 40. jet_ctx_value_push links it in front of the current
+// task's chain (Runtime Context.jet).
+ir_context_push_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, value: Int) Never! {
+    pointer_row: ir_pointer_row(m)
+    captures := [IRCaptureSlot]{}
+    size := 0
+    if value >= 0 {
+        row: b.f.slot_type[value]
+        size = m.types[row].size
+        captures.push(IRCaptureSlot{name: key, offset: 40, row: row, by_ref: false})
+    }
+    node: ir_closure_box(m, b, pointer_row, 40 + size, captures)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, node, 8, zero, b.line)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    ir_emit(b.f, IROp.Store, -1, node, 24, word, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
+    ir_store_at(m, p, b, node, 40, value)
+    if value >= 0 -> b.fresh[value] = false
+    _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
+}
+
+// `context.get(key)` (BodyHostCall.ContextGet): a copy of the value the
+// innermost `#Context` block of the current task, or of a task it was
+// spawned from, set for the `#ContextKey` constant `key`
+// (jet_ctx_value_find, which cannot stop), else `default`, the constant.
+ir_context_get: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, default: Int, span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if m.types[row].kind == .Unit -> return ir_expr(m, p, b, default)
+    pointer_row: ir_pointer_row(m)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{word}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ne, node, zero)
+    result: ir_temp(m, b, row)
+    ir_open_if(b.f, present, b.line)
+    view: ir_load_at(m, b, node, 40, row)
+    owned: ir_copy_value(m, p, b, view, span)
+    ir_store(m, p, b, result, owned)
+    ir_else(b.f, b.line)
+    ir_branch_value(m, p, b, [Int]{}, default, result)
+    ir_end(b.f, b.line)
+    b.fresh[result] = ir_has_drop(m, b, result)
+    result
+}
+
+// A `#Memo` key value for the `#ContextKey` constant `key` (BuildMemo.jet
+// ir_memo_enter): a fresh Option of the key's type `ty`, holding a copy of
+// the value the innermost `#Context` block of the current task, or of a
+// task it was spawned from, set for it, None when none did, as the
+// constant's own value is the same on every call.
+ir_context_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
+    value_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    option_ty: Type.Option{inner: ty.copy()}
+    row: ir_value_type(m, p, option_ty) ?? return ir_type_fail(b, span, option_ty)
+    pointer_row: ir_pointer_row(m)
+    word: ir_word_const(m, b, ir_context_key_word(key))
+    node: ir_runtime(m, b, "jet_ctx_value_find", [Int]{word}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ne, node, zero)
+    result: ir_fresh_temp(m, b, row)
+    ir_option_none(m, b, result)
+    ir_open_if(b.f, present, b.line)
+    view: ir_load_at(m, b, node, 40, value_row)
+    owned: ir_copy_value(m, p, b, view, span)
+    size: ir_type_size(m, p, ty)
+    made: ir_option_make(m, p, b, row, owned, size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    result
 }
 
 // `context.<field>` (BodyHostCall.ContextRead): a read of the current task
 // context (Runtime Context.jet), whose runtime reads cannot stop.
 // `thread` is the running thread's index (jet_ctx_thread); `deadline` is
 // the installed absolute wall-millisecond deadline, None when no
-// `#Context(deadline:)` or `task.timeout` installed one.
+// `#Context(deadline:)` or `task.timeout` installed one; `trace` is the
+// text of the calling frames (Runtime Fault.jet jet_rt_context_trace),
+// which sema hands to core.debug's `__trace_records`. The call is built in
+// the reading function, so the walk starts at its frame.
 ir_context_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, field: String, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if field == "trace" -> return ir_runtime(m, b, "jet_rt_context_trace", [Int]{}, row)
     int_row: ir_type_row(m, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
     word_row: ir_word_row(m)
     if field == "thread" {
@@ -442,16 +627,24 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
     b.transactions = open
 }
 
-// The runtime scopes an early exit out of `frame` leaves: the session
-// Shield, the replaced deadline, the replaced sentry gate, the sentry
-// stack frame, the replaced terminal mode, the replaced effect scope and a
-// `#MaxDepth(n)` call's count.
+// The runtime scopes an early exit out of `frame` leaves: the replaced
+// allocator carrier (pushed last, so restored first), the session Shield,
+// the replaced deadline, the pushed context values, the replaced sentry
+// gate, the sentry stack frame, the replaced terminal mode, the replaced
+// effect scope and a `#MaxDepth(n)` call's count.
 ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
+    if frame.allocator >= 0 {
+        _: ir_runtime(m, b, "jet_ctx_pop_allocator", [Int]{frame.allocator}, -1)
+    }
     if frame.shield {
         _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
     }
     if frame.deadline >= 0 {
         _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
+    }
+    if frame.values > 0 {
+        count: ir_word_const(m, b, frame.values)
+        _: ir_runtime(m, b, "jet_ctx_value_pop", [Int]{count}, -1)
     }
     if frame.sentry >= 0 {
         _: ir_runtime(m, b, "jet_rt_sentry_scope_leave", [Int]{frame.sentry}, -1)
@@ -514,9 +707,9 @@ ir_effect_scope_enter: fn(m: &IRModule, b: &IRBuilder, descriptor: String, loops
 }
 
 // Whether a frame opened at or above `base` holds state a caught stop
-// cannot leave in place (a handle, an Stm, snapshots or a Shield); deadline,
-// sentry, terminal and effect-scope frames only need leaving
-// (ir_tx_leave_sentries).
+// cannot leave in place (a handle, an Stm, snapshots or a Shield);
+// allocator, deadline, context value, sentry, terminal and effect-scope
+// frames only need leaving (ir_tx_leave_sentries).
 ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     loop index in base..<frames.len() {
         frame: frames[index]
@@ -525,8 +718,9 @@ ir_tx_frames_hold_state: fn(frames: [IRTxFrame], base: Int) -> Bool Never! {
     false
 }
 
-// A caught stop leaving the deadline, sentry, terminal and effect-scope
-// frames opened at or above `base`, innermost first.
+// A caught stop leaving the allocator, deadline, context value, sentry,
+// terminal and effect-scope frames opened at or above `base`, innermost
+// first.
 ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
     frames: b.transactions
     index := frames.len() - 1
@@ -538,7 +732,8 @@ ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
 
 // A return of `slot` (-1: nothing): the open contract scope's `post` clauses
 // check it, a memoized body files it (ir_memo_file), then it leaves the open
-// transactions, taken before their snapshots are restored.
+// transactions, taken before their snapshots are restored, moving out of
+// the open `#Context(allocator: a)` blocks' allocators (BuildMove.jet).
 ir_return_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
     ir_contract_return(m, p, b, slot, span)
     if ir_failed(b) -> return
@@ -555,8 +750,8 @@ ir_return_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: S
             ir_emit(b.f, IROp.Copy, kept, slot, -1, -1, b.line)
         }
     }
+    ir_move_leaving(m, p, b, kept, 0)
     ir_tx_unwind(m, p, b, 0, span)
-    ir_emit_return(m, b, kept)
 }
 
 // A `break`/`next` to the loop whose exit Block is `exit`: the transactions

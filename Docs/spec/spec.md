@@ -363,9 +363,12 @@ global's initializer is a tier-stable scalar literal; any other initializer is
 E0622. An immutable global's initializer is any expression, computed while
 building and stored in the program, and every read is an ordinary copy
 (D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
-initializer that stops, reaches the outside world, or can't run while building
-is a build error (E0643), the same on every tier, and so are initializers that
-read each other in a cycle, one that reads itself included (E0338). A `name: Shared{value}`
+initializer that stops, reaches the outside world, reads the task context
+(`context.<field>`, itself or through any function it calls), or can't run
+while building is a build error (E0643), the same on every tier, and so are
+initializers that read each other in a cycle, one that reads itself included
+(E0338). A context read would see the build's root context, not the reader's,
+so no such value is ever stored. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell. Only an explicit
 `#run { … }` reads build
@@ -669,7 +672,8 @@ computation calls something the runtime answers from the running program
 (a clock, the task, the process, its environment or its live and auth
 stores): a build would bake its own process's answer. Nor do they fold a call
 of a `#Memo` function, whose result store and `name.cache()` counts belong
-to the running program. A folded value is laid
+to the running program, or a value that reads the task context, itself or
+through any function it calls: it reads the running task's context there. A folded value is laid
 out once as read-only data, as a module constant is, rather than built part by
 part at each use. `NAME: #run value` at file
 scope, and `lanes: #run calculate()` in a block, where names stay
@@ -692,7 +696,9 @@ binding (D-VERDICT-1308-1, D-PERSIST1).
 `embed_file("path") -> String` embeds UTF-8 text, `embed_bytes("path") -> [U8]` embeds raw
 bytes, and `find("glob") -> [String]` returns sorted relative paths. `find` accepts the
 std-only glob forms `*`, `**`, `?`, `{a,b}`, and `[a-z]`. They are the sanctioned build-time
-I/O operations inside a compile-time binding; other comptime evaluation is pure.
+I/O operations inside a compile-time binding; other comptime evaluation is pure,
+and like any pure code it may read the task context, which is the build's root
+context there.
 A path or glob is any `String` the comptime code computes: a literal, or a value such
 as a path an earlier `find` returned (D-EMBED-WALK1). It resolves relative to the
 embedding file, never absolute and never escaping the project with `..` (E0957, which
@@ -932,7 +938,17 @@ is not supplied in a `Type{ … }` literal. Arguments to bare `#Memo` are E0382.
 See [`computed_field.jet`](../../Examples/Memory/ComputedField.jet)
 (D-FIELDPOL1, D-FIELDMEMO1).
 
-A pure function marked `#Memo` retains completed results by its argument tuple.
+A pure function marked `#Memo` retains completed results by its argument tuple
+and the task context it can read (each field read as `context.<field>` and
+each key read as `context.get(key)`, itself or through any function it calls),
+each compared by its equality as an argument is. A key holds whether a
+`#Context` block set it and the value set, since the default is the same on
+every call. Where the compiler can't bound that reach (a call through a
+function value, an unbounded trait or type-parameter dispatch, or an unknown
+callee), the key holds every field and every key the program reads; every
+current field (`deadline`, `thread`) has an equality. A function that can read
+a key whose type has no equality keeps no results: its body runs on every
+call.
 Its default bound is 128 entries; `#Memo(bound: none)` makes it unbounded.
 `name.cache()` reads hits, misses, size, and bound from that same result store,
 including before the first call. The shared Prelude owns eviction and counters;
@@ -2471,6 +2487,9 @@ and denial facts; they do not have to be listed in a positive effect ceiling.
 The same exclusion applies to inferred purity: an explicit empty effect row
 `-[]>` admits allocation, heap copies, and panic facts without requesting a
 positive right. Ambient effects such as `IO` still violate that empty ceiling.
+Reading the task context is not an effect: pure code (`-[]>`, a bare `#FX`)
+may read `context.<field>`. Its input is the task's current context record,
+which the code reads where it runs, not a parameter its caller passes.
 Writing module state is not an effect, but a `-[]>` function may not do it,
 itself or through any function it calls (E3401): a module `Shared` holder's
 value, a module `Cell`, and a `#Persist` or `#Unsafe` module `:=` binding all
@@ -2646,8 +2665,8 @@ owns, an unannotated foreign call) lists `FFI`, whose words say the program
 "calls native code, which can do anything". `Exec` reads "starts other
 programs, which this list does not limit". The floor, `IO`, `Mem.Alloc` and
 `Exec.Args`, is never listed, and neither are the deny-only rights (`Panic`,
-`Mem`, `Time.Wait`, `Unsafe`) or `Context`, the task context every program reads
-without a grant. The floor covers output, ordinary allocation and argument
+`Mem`, `Time.Wait`, `Unsafe`). Reading the task context is no effect and
+needs no grant. The floor covers output, ordinary allocation and argument
 reads, and carries no power the shell has not already given the process. It
 never covers the `Exec` root, which also starts processes.
 
@@ -3855,12 +3874,116 @@ Code reads the task context as `context.<field>` (D-CONTEXT1).
 `Int?`, `None` outside every `#Context(deadline:)` block and `task.timeout`;
 a task reads the deadline it was spawned under. `context.thread` is the
 running thread's index as an `Int`: 0 on the main thread, and a fiber reads
-its carrier thread's index. Each read adds the `Context` effect to the
-function's row, so a `-[]>` function or a written row that leaves `Context`
-out cannot read the context. Every program holds `Context`: no policy has to
-grant it, and `authority: { deny: [Context] }` refuses it. Any other field is
-**E0302**. The name `context` reads the
-task context only where nothing in scope is named `context`.
+its carrier thread's index. A read is an implicit input of every function,
+not an effect: it adds nothing to the function's row and needs no grant, so a
+`-[]>` function reads the context too, and no policy denies it. The input is
+the task's current context record. A module value that reads it is E0643, a
+block value that reads it computes at run time, and a `#Memo` key holds each
+field the function can read. Compile-time code is pure in the same sense, so
+a `#run` may read the context too: it reads the build's root context, where
+`context.thread` is 0, `context.deadline` is `None` and every key holds its
+default. A field this section doesn't describe is
+**E0302**. The name `context` reads the task context only where nothing in
+scope is named `context`.
+
+A package declares its own context values with `#ContextKey` on a module
+constant: `#ContextKey request_id: 0`. The key is snake_case, and its value
+is the default. `#Context(request_id: 7) { ... }` sets the key for the
+block, which must be given a value of the key's type. Nested blocks shadow
+the outer value and restore it on exit, including an early exit or a stop.
+`context.get(request_id)` returns a copy of the innermost value set for the
+key in the current task, or the default when no block set it. Like a field
+read, it is an implicit input and adds nothing to the function's row; a module
+value that reads a key is E0643 and a `#Memo` key holds its value. A task
+spawned inside the block keeps the values its parent had set, even after the
+block ends. A key's identity is its constant, so an
+imported key is the same key. A `#Context` label or `context.get` argument
+that names no context field and no key is **E0761**. So is a key named
+`allocator`, `logger`, `deadline`, `scratch`, `on_stop`, `print`, `thread`,
+`trace` or `get`, and so is a mutable or `#Persist` key.
+
+`#Context(allocator: a)` takes a `core.mem` allocator value: an `Arena`,
+`Bump`, `Pool` or `Fixed`, `context.scratch`, or a value whose type
+implements `mem.Allocator` (any other value is **E0762**; a type
+parameter's value is not one). A `Bump`, `Pool` or `Fixed` is only
+evaluated: collections and boxes allocate from the program heap inside the
+block as outside it, and allocating from it means calling it
+(`bump.alloc(v)`). An `Arena`, `context.scratch` or a `mem.Allocator`
+value serves the block: the list buffers, boxes, recursive links and text
+that the block's code makes, in the functions it calls too, come from `a`.
+The text is what interpolation, `+`, `+=`, `to_string` and `join` build. A
+list or text grows from the allocator that holds it. Closures, trait
+objects, maps, sets, caches, `Shared` cells and channels use the program
+heap. A `mem.Allocator` value serves each value through `a.allocate` at
+align 8, and each goes back through `a.release(block)` when dropped.
+
+`context.scratch` is the task's scratch arena. An `Arena` and
+`context.scratch` serve a block from one contiguous reservation of their
+own, whose pages the system commits on first touch: each value is the next
+bytes, dropping one frees nothing, and the block's end rewinds the
+reservation to where it stood when the block began, so nested blocks over
+the same arena are nested marks. While a nested block over the same arena
+is open, a value that moves into or grows in the enclosing one, and every
+value once the reservation is full, comes from the program heap.
+
+A value that leaves
+the block first moves into the allocator of the place it goes to: a write
+into a value made before the block, a push or other store into an older
+container, a `return` or `break` out of the block, a send, a task's or
+escaping closure's capture, a module or `#Persist` store, and a `#Memo`
+entry. That allocator is the one whose blocks hold the destination's
+address; a destination on the program heap, such as a map's entries or the
+memo store, takes the heap. The block lends `a` and keeps it in place until
+it ends: resetting, assigning or moving `a` inside the block is **E0204**. On
+every exit, including an early exit or a stop, the enclosing allocator is
+current again. The blocks `a` answers must lie in a `mem.Region` it reserved;
+one outside every region counts as a refusal, and a refusal is out of memory
+unless the operation reports it (`try_push`). A stop inside `a.allocate` or
+`a.release` stops the task at its next stop check, and the value being made
+comes from the program heap. Values a runtime routine builds whole, such as
+the text a Core routine reads or converts, the allocator's own allocations,
+tasks the block starts and checked mode use the program heap; a task starts
+with a scratch arena of its own.
+Inside a `#Context` block that names no allocator, a growing call (`push`,
+`append`, `insert`, `add` or `add_new`) is lint **L0506**.
+
+`context.logger` is the task's `log.Handler`. It is core.log's own
+`#ContextKey logger`, so `#Context(logger: h)` sets it like any key and
+`context.logger` reads it as `context.get(logger)` does. A program that
+spells either form loads core.log. Unset, it is `log.handler(.Info)`, the
+`info` threshold in the JSON line layout. `log.info` and the other emitters
+do not consult it; `log.handle(context.logger, event)` applies it.
+
+`context.on_stop` is the task's stop handler, a `fn(debug.Stop)` from
+core.debug (imported under another name, such as `use dbg: core.debug`,
+where the prelude's `debug` is also called). The runtime calls it once at
+the start of every stop: a panic, a failed `assert` or `assert_eq`, a
+contract clause, a list index out of bounds, a shift past the width, a
+reached `todo()`, and every other runtime stop. It runs before the stop
+reports and unwinds. The `Stop` it gets holds the reported `message` and a
+`kind` (`StopKind`: `Panic`, `Assert`, `Contract`, `Bounds`, `Shift`,
+`Todo`; other runtime stops are `Panic`). `#Context(on_stop: f)` sets the
+handler for the block and the tasks spawned there, nested blocks shadow it
+and restore it, and `context.on_stop` reads it. Unset, it does nothing.
+While a handler runs, the enclosing block's handler is current, so a stop
+inside a handler reaches that one and never the same handler again. The
+stop goes on when the handler returns. Stops inside served comptime code
+run no handler. A program that spells either form loads core.debug.
+
+`context.trace` is the calling task's Jet frames as a `[SourceLocation]`,
+innermost first: the reading function, then its callers, down to the task's
+or thread's entry. The runtime walks the same frame chain and reads the same
+location table (`.debug_jetline`) as the panic and fault reports, so a record
+names the function, file and line that a report's frame line does. A frame
+the table doesn't hold, such as the runtime's own, has no record. The table
+holds no column or module, so `column` is 0 and `module` is `""`. A release
+image keeps the table when its program reads the trace, so every tier gives
+the same records. The optimizer never inlines a function that reads it, but a
+caller inlined into its own caller has no frame of its own. `#Context` does
+not set it. As with every context field, a `#Memo` function that can read
+`context.trace` keys its results on it: a call from the same frames can hit,
+and a call from other frames misses. A program that spells it loads
+core.debug.
 
 ### Parallel collection adapters
 

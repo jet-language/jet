@@ -1,0 +1,20 @@
+# A value that leaves a `#Context(allocator:)` block moves into its
+# destination's allocator first: a write to an outer local or field, a push,
+# a map entry, a module store, a send, a task hand-off, a `break`, a `return`
+# and a returned closure's capture each keep their value after the block's
+# allocator hands the blocks it released to other values.
+fixture: context_allocator_moves_what_leaves_the_block.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check moves.jet
+exit: 0
+step: jet run --optimize=none moves.jet
+exit: 0
+stdout: = "scribbled 2560\nbreak: 8555\nouter local: 8555\nouter field: 8555\npushed: 8555\nmap entry: 8555\nmodule store: 8555\nsent: 8555\ntask: 8555\nreturned: 8555\nclosure: 8555\nserved true, all released true\n"
+step: jet run --optimize=basic moves.jet
+exit: 0
+stdout: = "scribbled 2560\nbreak: 8555\nouter local: 8555\nouter field: 8555\npushed: 8555\nmap entry: 8555\nmodule store: 8555\nsent: 8555\ntask: 8555\nreturned: 8555\nclosure: 8555\nserved true, all released true\n"
+step: jet run --optimize=full moves.jet
+exit: 0
+stdout: = "scribbled 2560\nbreak: 8555\nouter local: 8555\nouter field: 8555\npushed: 8555\nmap entry: 8555\nmodule store: 8555\nsent: 8555\ntask: 8555\nreturned: 8555\nclosure: 8555\nserved true, all released true\n"

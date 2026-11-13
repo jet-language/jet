@@ -1,0 +1,31 @@
+package: {
+    name: "context_trace"
+    authority: { allow: [IO] }
+}
+
+// `context.trace` is the calling task's Jet frames as `[SourceLocation]`,
+// innermost first: the reading function, then its callers. The runtime
+// walks the same frame chain and reads the same location table as the panic
+// and fault reports, so each record names the function, file and line a
+// report's frame line does, on every tier. The table holds no column or
+// module: `column` is 0 and `module` is "".
+
+show: fn(frames: [SourceLocation]) {
+    loop at in frames {
+        if at.function.ends_with("descend") -> print("{at.function} line {at.line}")
+    }
+    print("column {frames[0].column}, module \"{frames[0].module}\"")
+}
+
+// Recursive, so each level keeps its own frame on every tier.
+descend: fn(depth: Int) -> Int {
+    if depth == 0 {
+        show(context.trace)
+        return 0
+    }
+    1 + descend(depth - 1)
+}
+
+run: fn() {
+    print("depth {descend(2)}")
+}

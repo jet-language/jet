@@ -1,0 +1,18 @@
+// A `#Memo` key holds the context fields the function can read, here
+// `deadline` through `remaining`: the call under the block's deadline runs
+// again, and the last call answers the first one's result.
+remaining: fn(now: Int) -> Int { (context.deadline ?? now) - now }
+
+#Memo
+left: fn(now: Int) -> Int { remaining(now) }
+
+run: fn() {
+    a: left(5)
+    b := 0
+    #Context(deadline: 100) {
+        b = left(5)
+    }
+    c: left(5)
+    stats: left.cache()
+    print("memo {a} {b} {c} hits={stats.hits} misses={stats.misses}")
+}

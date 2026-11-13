@@ -145,6 +145,7 @@ task_drop: fn(child: I64) {
     sync_park_drop(sync_load(wrapping(child + I64{104})))
     jet_rt_string_drop(sync_load(wrapping(child + I64{128})))
     jet_rt_world_drop(sync_load(wrapping(child + I64{192})))
+    context_release(wrapping(child + TASK_CONTEXT))
     jet_rt_free(child, task_state_bytes(), I64{8})
 }
 

@@ -1,0 +1,10 @@
+left: fn(now: Int) -> Int { (context.deadline ?? now) - now }
+
+EARLY: #run left(5)
+
+run: fn() {
+    #Context(deadline: 100) {
+        here: left(5)
+        print("local {here} prepared {EARLY}")
+    }
+}

@@ -4176,6 +4176,8 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         }
         return sema_expr_check_method_call(Expr.Ident{name: owner_name, span: receiver_span, id: AST_NODE_GENERATED}, method, method_span, inferred_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    context_get := sema_context_get(receiver, method, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if context_get.handled -> return context_get.value
     checked_text := sema_expression_checked_text_static_method_call(receiver, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if checked_text.handled -> return checked_text.value
     explicit_unit := sema_expr_try_explicit_unit_method(receiver, method, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)

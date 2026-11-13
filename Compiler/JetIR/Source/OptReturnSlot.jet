@@ -1,6 +1,7 @@
 // Return slots (O1, O2, pass "retslot", first of the passes, programs
 // only): a function whose every value Return gives a fresh box of at most
-// 16 bytes (`jet_rt_alloc(size, 8)`, then only Stores of values without a
+// 16 bytes (`jet_rt_alloc(size, 8)` or a program value's
+// `jet_rt_alloc_value(size, 8)`, then only Stores of values without a
 // Drop at offsets in it, such as a `T E!` Result of a Float, a word, a
 // Bool or an error enum without payload drops; an Option's None is null,
 // no box) writes that box
@@ -38,14 +39,16 @@ IROptSlotPlan: struct {
 
 ir_opt_return_slots: fn(m: &IRModule) -> Int Never! {
     if m.entry < 0 -> return 0
-    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? return 0
+    alloc: name_rows_value(m.name_rows, "jet_rt_alloc") ?? -2
+    value: name_rows_value(m.name_rows, "jet_rt_alloc_value") ?? -2
+    if alloc == -2 && value == -2 -> return 0
     unique: name_rows_value(m.name_rows, "jet_rt_block_unique") ?? -2
     free: name_rows_value(m.name_rows, "jet_rt_free") ?? -2
     count: m.functions.len()
     plan := IROptSlotPlan{size: [Int]{}, allocs: [[Int]]{}}
     loop id in 0..<count {
         allocs := [Int]{}
-        plan.size.push(ir_opt_slot_size(m, m.functions[id], alloc, allocs))
+        plan.size.push(ir_opt_slot_size(m, m.functions[id], alloc, value, allocs))
         plan.allocs.push(allocs)
     }
     // Reached other than by a direct call.
@@ -95,8 +98,9 @@ ir_opt_return_slots: fn(m: &IRModule) -> Int Never! {
 }
 
 // The box size `f` returns in every value Return (-1 when it cannot use a
-// return slot), with the allocations it returns into `allocs`.
-ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, allocs: &[Int]) -> Int Never! {
+// return slot), with the allocations (calls of name rows `alloc` or
+// `value`) it returns into `allocs`.
+ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, value: Int, allocs: &[Int]) -> Int Never! {
     if f.asm != None || f.op.len() == 0 || f.result < 0 || m.types[f.result].kind != .Pointer -> return -1
     facts: ir_opt_facts(f)
     size := -1
@@ -106,7 +110,7 @@ ir_opt_slot_size: fn(m: IRModule, f: IRFunction, alloc: Int, allocs: &[Int]) -> 
         boxed: f.a[at]
         if boxed < f.param_count || facts.defs[boxed] != 1 || f.slot_type[boxed] != f.result -> return -1
         def: facts.def_at[boxed]
-        if def < 0 || f.op[def] != .CallRuntime || f.a[def] != alloc || f.c[def] != 2 -> return -1
+        if def < 0 || f.op[def] != .CallRuntime || (f.a[def] != alloc && f.a[def] != value) || f.c[def] != 2 -> return -1
         bytes: ir_opt_const_at(f, facts, f.args[f.b[def]], def) ?? return -1
         align: ir_opt_const_at(f, facts, f.args[f.b[def] + 1], def) ?? return -1
         if bytes < 8 || bytes > 16 || align != 8 || (size >= 0 && bytes != size) -> return -1

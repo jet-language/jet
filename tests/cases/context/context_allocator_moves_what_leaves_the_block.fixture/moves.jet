@@ -1,0 +1,126 @@
+use core.mem
+
+// An allocator that hands released blocks out again, so a value left
+// pointing into a block it served would read another value's bytes.
+Reuser: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+    given: Int
+}
+
+impl Reuser.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        self.taken += 1
+        loop i in 0..<self.kept.len() {
+            if self.kept[i].size() >= size && self.kept[i].address().bit_and(align - 1) == 0 {
+                return Ok(self.kept.remove(i, .Slot) ?? panic("kept block"))
+            }
+        }
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Reuser"})
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+Holder: struct {
+    items: [Int]
+}
+
+#Persist module_kept := [Int]{}
+
+squares: fn(n: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<n -> out.push(i * i)
+    out
+}
+
+total: fn(values: [Int]) -> Int {
+    sum := 0
+    loop value in values -> sum += value
+    sum
+}
+
+returned: fn(reuser: &Reuser) -> [Int] {
+    #Context(allocator: reuser) {
+        built: squares(30)
+        if built.len() > 0 -> return built
+    }
+    [Int]{}
+}
+
+reader: fn(reuser: &Reuser) -> fn() -> Int {
+    #Context(allocator: reuser) {
+        built: squares(30)
+        if built.len() > 0 -> return () -> total(built)
+    }
+    () -> 0
+}
+
+// Fills the blocks the earlier blocks released with other values.
+scribble: fn(reuser: &Reuser) -> Int {
+    filled := 0
+    #Context(allocator: reuser) {
+        loop round in 0..<40 {
+            junk := [Int]{}
+            loop i in 0..<64 -> junk.push(-1 - round - i)
+            filled += junk.len()
+        }
+    }
+    filled
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 22) ?? panic("reserve")
+    reuser := Reuser{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    { sender, receiver }: channel<[Int]>(capacity: 1)
+    local := [Int]{}
+    holder := Holder{items: [Int]{}}
+    lists := [[Int]]{}
+    table := [String:[Int]]{}
+    task_sum := 0
+    broken: loop round in 0..<3 {
+        #Context(allocator: reuser) {
+            built: squares(30)
+            if round == 1 -> break built
+        }
+    } ?? [Int]{}
+    #Context(allocator: reuser) {
+        local = squares(30)
+        holder.items = squares(30)
+        lists.push(squares(30))
+        table["squares"] = squares(30)
+        module_kept = squares(30)
+        sender.send(squares(30))
+        task.group workers {
+            built := squares(30)
+            worker: task &&built { total(built) }
+            task_sum = worker.join() ?? panic("worker failed")
+        }
+    }
+    from_return: returned(reuser)
+    from_closure: reader(reuser)
+    print("scribbled {scribble(reuser)}")
+    received: receiver.receive() ?? panic("channel closed")
+    print("break: {total(broken)}")
+    print("outer local: {total(local)}")
+    print("outer field: {total(holder.items)}")
+    print("pushed: {total(lists[0])}")
+    print("map entry: {total(table["squares"] ?? [Int]{})}")
+    print("module store: {total(module_kept)}")
+    print("sent: {total(received)}")
+    print("task: {task_sum}")
+    print("returned: {total(from_return)}")
+    print("closure: {from_closure()}")
+    print("served {reuser.taken > 0}, all released {reuser.taken == reuser.given}")
+}

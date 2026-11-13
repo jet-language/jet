@@ -1,0 +1,11 @@
+// E0204: the block is still allocating from `arena`, so `arena` can't be
+// reset inside it.
+use core.mem
+
+run: fn() {
+    arena: mem.Arena.new()
+    #Context(allocator: arena) {
+        arena.reset()
+    }
+    print("done")
+}

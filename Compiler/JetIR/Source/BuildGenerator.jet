@@ -56,13 +56,15 @@ ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBo
     ir_emit(b.f, IROp.Store, -1, env, 0, zero, b.line)
     ir_emit(b.f, IROp.Store, -1, env, 8, zero, b.line)
     // A move parameter moves into the env; any other is copied there, the
-    // caller keeping its own.
+    // caller keeping its own. The env is the heap's and outlives the call,
+    // so what it holds moves there (BuildMove.jet).
     loop (index, capture) in captures {
         slot: b.bindings[index].slot
         owned: b.bindings[index].owned
         if owned -> b.fresh[slot] = true
         ir_store_at(m, p, b, env, capture.offset, slot)
         if owned -> ir_disown(b, slot)
+        ir_move_stored(m, p, b, capture.row, env, capture.offset)
     }
     if ir_failed(b) -> return
     producer: ir_generator_producer(m, p, b, function, captures)
@@ -202,6 +204,12 @@ ir_generator_yield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, sp
     storage: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.StackAddress, storage, size, 8, -1, b.line)
     ir_store_at(m, p, b, storage, 0, slot)
+    // The consumer is another task: the value moves to the heap
+    // (BuildMove.jet).
+    if slot >= 0 {
+        zero: ir_word_const(m, b, 0)
+        ir_move_stored_into(m, p, b, b.f.slot_type[slot], storage, 0, IR_MOVE_ENTER, zero)
+    }
     state: b.generator
     _: ir_runtime(m, b, "jet_rt_native_generator_yield", [Int]{state, storage}, -1)
     return -1

@@ -3,18 +3,30 @@ package: {
     authority: { allow: [IO, Time, Time.Wait] }
 }
 
-// `context.<field>` reads the task context, and each read adds the
-// `Context` effect. `context.deadline` is the installed absolute
-// wall-millisecond deadline (`Int?`), None outside every
-// `#Context(deadline:)` block; a task reads the deadline it was spawned
-// under. `context.thread` is the running thread's index (`Int`), 0 on the
-// main thread.
+// `context.<field>` reads the task context, an implicit input of every
+// function: a read is no effect, so pure (`-[]>`) code reads it too.
+// `context.deadline` is the installed absolute wall-millisecond deadline
+// (`Int?`), None outside every `#Context(deadline:)` block; a task reads the
+// deadline it was spawned under. `context.thread` is the running thread's
+// index (`Int`), 0 on the main thread.
 
 FAR: 4102444800000
 
 deadline_or_none: fn() -> Int { context.deadline ?? -1 }
 
 on_a_thread: fn() -> Bool { context.thread >= 0 }
+
+has_deadline: fn() -[]> Bool {
+    (context.deadline ?? -1) >= 0
+}
+
+// A `#Memo` key holds the context fields the function can read, here
+// `deadline` through deadline_or_none: a call under another deadline runs
+// again rather than answering the result the old deadline gave.
+#Memo
+deadline_plus: fn(offset: Int) -[]> Int {
+    deadline_or_none() + offset
+}
 
 spawn_under: fn(deadline: Int) -> Task<Int> {
     #Context(deadline: deadline) { return task deadline_or_none() }
@@ -49,4 +61,14 @@ run: fn() {
         .Ok(value) -> { print("task thread: {value}") }
         .Err(_) -> { print("task thread: failed") }
     }
+    print("pure outside {has_deadline()}")
+    first: deadline_plus(1)
+    #Context(deadline: FAR) {
+        print("pure inside {has_deadline()}")
+        print("memo inside {deadline_plus(1)}")
+        print("memo again {deadline_plus(1)}")
+    }
+    print("memo outside {first}, {deadline_plus(1)}")
+    stats: deadline_plus.cache()
+    print("memo stats: hits={stats.hits}, misses={stats.misses}")
 }

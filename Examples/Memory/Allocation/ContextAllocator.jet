@@ -1,0 +1,48 @@
+// A user allocator serving a block: inside `#Context(allocator: a)`, the
+// list buffers, boxes and text the code makes come from `a`. This allocator
+// claims its blocks from a `mem.Region`, keeps the ones it gets back, and
+// counts both. Each value made in the block goes back to it when dropped, and a
+// value that leaves the block moves out of `a` first, so every block `a`
+// served is back by the time the block ends.
+// Run with: jet run Examples/Memory/Allocation/ContextAllocator.jet
+use core.mem
+
+Counter: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+    given: Int
+}
+
+impl Counter.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Counter"})
+        self.taken += 1
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 20) ?? panic("reserve")
+    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    count := 0
+    #Context(allocator: counter) {
+        squares := [Int]{}
+        loop i in 0..<100 -> squares.push(i * i)
+        count = squares.len()
+        print("{count} squares, the last {squares[count - 1]}")
+    }
+    print("served by the allocator: {counter.taken > 0}")
+    print("all given back: {counter.taken == counter.given}")
+}

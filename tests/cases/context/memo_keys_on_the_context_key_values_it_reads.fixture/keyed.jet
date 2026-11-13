@@ -1,0 +1,24 @@
+// A `#ContextKey` value is an implicit input, not an effect: the `-[]>`
+// function `scaled` reads one, and the `#Memo` function `total` keys its
+// results on the value it can read through `scaled`. The first call under
+// the block misses and the second hits; after the block the first result
+// answers again.
+#ContextKey scale: 1
+
+scaled: fn(n: Int) -[]> Int { n * context.get(scale) }
+
+#Memo
+total: fn(n: Int) -> Int { scaled(n) }
+
+run: fn() {
+    a: total(5)
+    b := 0
+    c := 0
+    #Context(scale: 3) {
+        b = total(5)
+        c = total(5)
+    }
+    d: total(5)
+    stats: total.cache()
+    print("keyed {a} {b} {c} {d} hits={stats.hits} misses={stats.misses}")
+}

@@ -50,6 +50,7 @@ use {
         check_pure_program_root,
         sema_check_comptime_item,
         sema_comptime_body_unfoldable,
+        sema_comptime_tree_reads_context,
         sema_comptime_tree_reads_phase,
         sema_comptime_call_facts_impurity,
         sema_comptime_codec_methods,
@@ -115,7 +116,6 @@ use {
     ]
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
-        AUTHORITY_CONTEXT_ROOT,
         AUTHORITY_PANIC_ROOT,
         effect_scope_read_paths,
         body_fixed_timing,
@@ -1068,8 +1068,10 @@ jet_driver_comptime_function_closure: fn(
     complete := true
     incomplete := [SemaTotalityRow]{}
     // A local value whose own initializer reads `#phase` stays run-time code,
-    // as one whose closure does (sema_comptime_body_unfoldable).
-    impurity := if local_value && sema_comptime_tree_reads_phase(request.expression.tree) -> Val("it reads `#phase`, the phase of the copy that runs it") else -> String?{None}
+    // as one whose closure does (sema_comptime_body_unfoldable). So does one
+    // that reads the task context, and a module value that reads it is
+    // refused: the build's root context would stand in for the caller's.
+    impurity := if local_value && sema_comptime_tree_reads_phase(request.expression.tree) -> Val("it reads `#phase`, the phase of the copy that runs it") else if module_value && sema_comptime_tree_reads_context(request.expression.tree) -> Val("it reads `context`, the task context of the code that runs it") else -> String?{None}
     // #3708: obligations against unannotated callees settle over the closure.
     failure_closure := SemaComptimeFailureClosure{}
     cursor := 0
@@ -5035,8 +5037,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
 // run never names an effect the row leaves out (spec.md "Application
 // authority"). A `deny` over the root's own code is sema's E0749, checked at
 // every function of the package. The written `allow` row adds to the
-// beginner floor every program holds (spec.md:1764-1769) and to the task
-// context, which no policy has to grant. A row's `FS.Read("<path>")` grant
+// beginner floor every program holds (spec.md:1764-1769). A row's `FS.Read("<path>")` grant
 // holds `FS.Read` itself, as `jet run --allow='FS.Read("<path>")'` does: the
 // run's reads are confined to its paths (jet-cli Authority.jet
 // jet_cli_merged_read_scope). No budget, no diagnostic.
@@ -5047,7 +5048,6 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, rows: JetDri
     if root.authority_allow == .Val(allow) {
         row := [String]{}
         loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> row.push(name)
-        row.push(AUTHORITY_CONTEXT_ROOT)
         loop name in allow -> row.push(name.copy())
         if effect_scope_read_paths(allow).len() > 0 -> row.push("FS.Read")
         manifest.authority.allow = Val(row.move())

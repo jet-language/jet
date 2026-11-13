@@ -33,12 +33,14 @@ Run a lesson from the repository root, for example `jet run Examples/Memory/<Les
 - [Arena](Allocation/Arena.jet) — Explicit arena allocators under `core.mem`.
 - [ArenaRegions](Allocation/ArenaRegions.jet) — Real bump-allocated arenas with scope-bound regions.
 - [CacheLinePadding](Allocation/CacheLinePadding.jet) — `#build.cpu.cache_line` is the cache-line size of the selected CPU in bytes.
+- [ContextAllocator](Allocation/ContextAllocator.jet) — A user allocator serving a block: inside `#Context(allocator: a)`, the values the code makes come from `a`.
 - [FixedBacking](Allocation/FixedBacking.jet) — `mem.Fixed.over(bytes)` allocates typed values inside a caller-owned buffer.
 - [GCCyclic](Allocation/GCCyclic.jet) — Scoped promotion traces nested ownership and cyclic mutations while the source keeps ordinary bare-value syntax.
 - [PoolStaleID](Allocation/PoolStaleID.jet) — Pools: a stale `Id<T>` — its pool slot was removed — panics at runtime, mirroring the array-out-of-bounds panic precedent (jet_index_vec/jet_pool_get): a…
 - [ProgramAllocator](Allocation/ProgramAllocator/) — package.jet wraps the hidden system heap once for the whole hosted program.
 - [TryAllocation](Allocation/TryAllocation.jet) — Fallible allocation is a value.
 - [Uninit](Allocation/Uninit.jet) — `name := Type{ uninit }` opts out of automatic zero-fill for a binding, skipping the default initialisation for raw performance.
+- [UserAllocator](Allocation/UserAllocator.jet) — A user-written allocator: `mem.Allocator` over a `mem.Region`.
 
 ## Shared
 

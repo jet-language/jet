@@ -1,0 +1,18 @@
+# A `mem.Allocator` value in `#Context(allocator:)` serves every allocation
+# the block makes, including inside a core.collections call, and none made
+# outside the block; each block goes back through `release`.
+fixture: context_allocator_serves_the_block_and_its_library_calls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check served.jet
+exit: 0
+step: jet run --optimize=none served.jet
+exit: 0
+stdout: = "before the block: 0\ninside the block: 9801, served true\noutside the block: 100, served false\nthrough core.collections: 99, served true\nall released: true\n"
+step: jet run --optimize=basic served.jet
+exit: 0
+stdout: = "before the block: 0\ninside the block: 9801, served true\noutside the block: 100, served false\nthrough core.collections: 99, served true\nall released: true\n"
+step: jet run --optimize=full served.jet
+exit: 0
+stdout: = "before the block: 0\ninside the block: 9801, served true\noutside the block: 100, served false\nthrough core.collections: 99, served true\nall released: true\n"

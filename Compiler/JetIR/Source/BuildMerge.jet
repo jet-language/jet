@@ -157,7 +157,10 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
     g.use_starts = [[Int]]{}
     g.uses = [[Int]]{}
     out := ir_module_new()
-    if parts.len() > 0 -> out.stop_points = parts[0].stop_points
+    if parts.len() > 0 {
+        out.stop_points = parts[0].stop_points
+        out.user_values = parts[0].user_values
+    }
     ir_merge_take_functions(parts, g, out.functions)
     if entry >= 0 -> out.entry = g.sides[roots[entry].part].function_new[roots[entry].local]
     loop (row, part) in g.type_part {

@@ -749,22 +749,74 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     Val(value)
 }
 
-// `context.<field>`: a read of the current task context, which records the
-// `Context` effect at the read. `deadline` is the installed absolute
+// `context.<field>`: a read of the current task context, an implicit input of
+// every function. Its site records no effect, so the read is known to need
+// none and pure code reads it too; what depends on the read follows it
+// instead: a value computed while building never reads it
+// (CheckProgram.jet sema_comptime_body_unfoldable), and a `#Memo` key holds
+// each field and key the function reaches (Effects/Checks.jet
+// sema_effect_context_reach). `deadline` is the installed absolute
 // wall-millisecond deadline (`Int?`, None outside a `#Context(deadline:)`
-// block or `task.timeout`), and `thread` the running thread's index (`Int`,
-// 0 on the main thread). IR BuildTransact.jet ir_context_read lowers it.
+// block or `task.timeout`), `thread` the running thread's index (`Int`,
+// 0 on the main thread), `logger` core.log's `logger` key (a
+// `log.Handler`), read as `context.get(logger)` is, `on_stop` the stop
+// handler (a `fn(debug.Stop)`, core.debug's `__stop_ignore` where no block
+// set one) (ContextKeys.jet sema_context_field_key), and `trace` the
+// calling frames (sema_expression_context_trace). IR BuildTransact.jet
+// ir_context_read and ir_context_get lower them.
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    ty: if member == {
-        "deadline" -> Type.Option{inner: Type.Int}
-        "thread" -> Type.Int
-        else -> {
-            diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds) and `thread` (`Int`, the running thread's index)", "write `context.deadline` or `context.thread`"))
-            return None
+    if member == "trace" -> return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
+    keyed: if sema_context_field_module(member) != None -> sema_context_field_key(member, program) else -> SemaContextFieldKey?{None}
+    ty: if keyed == {
+        .Val(field) -> field.key.ty.copy()
+        .None -> if member == {
+            "deadline" -> Type.Option{inner: Type.Int}
+            "thread" -> Type.Int
+            else -> {
+                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop` or `context.trace`"))
+                return None
+            }
         }
     }
-    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.{member}", span, [EffectRowEntry]{EffectRowEntry{name: "Context", span: span}}, diagnostics) -> return None
-    read: sema_tree_node(ty, TExprKind.HostCall{call: THostCall.ContextRead{field: member}}, span)
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.{member}", span, [EffectRowEntry]{}, diagnostics) -> return None
+    call: if keyed == {
+        .Val(field) -> THostCall.ContextGet{key: field.key.key, default: sema_context_field_default(field, ty, span, context), equatable: sema_type_equatable(environment, program, ty)}
+        .None -> THostCall.ContextRead{field: member}
+    }
+    read: sema_tree_node(ty, TExprKind.HostCall{call: call}, span)
+    sema_expr_expected_owned(read, expected, environment, program, diagnostics)
+}
+
+// The fields `context.<field>` reads (sema_expression_context_read), in the
+// order a `#Memo` key holds them (Effects/Checks.jet
+// sema_effect_context_reach), which then holds `trace` when it can be read.
+sema_context_read_fields: fn() -> [String] Never! { [String]{"deadline", "thread"} }
+
+// `context.trace`: the calling task's Jet frames, innermost first, as
+// `[SourceLocation]`, read from the frame chain and location table the
+// fault report reads. The runtime's walk (JetRuntime Fault.jet
+// jet_rt_context_trace, the ContextRead "trace") writes them as text, and
+// core.debug's `__trace_records` makes the records: the reading function
+// first, then its callers. The table names no column or module, so
+// `column` is 0 and `module` "". Like every context read it records no
+// effect, and a `#Memo` function that can read it keys its results on the
+// frames (Effects/Checks.jet sema_effect_context_reach).
+sema_expression_context_trace: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.trace", span, [EffectRowEntry]{}, diagnostics) -> return None
+    unavailable: sema_error("E0906", span, "the source `core.debug.__trace_records` declaration for `context.trace` is unavailable", "`context.trace` makes its records through the Core debug source", "restore the `core.debug` source module")
+    identity: sema_call_core_module_identity(environment, program, "core.debug") ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    target: sema_call_core_source_target(environment, program, identity, "__trace_records", [Type]{}, span, true, diagnostics) ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    returned: sema_call_signature_return(target.signature) ?? return None
+    records: if returned == .Result(ok, _) -> ok.copy() else -> returned
+    frames: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ContextRead{field: "trace"}}, span)
+    read: sema_tree_node(records, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(frames)}}, span)
     sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 

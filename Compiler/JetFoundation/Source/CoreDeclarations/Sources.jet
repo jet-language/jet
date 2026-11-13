@@ -103,11 +103,14 @@ core_decl_declares_at: fn(bytes: [U8], at: Int) -> Bool Never! {
 }
 
 // The name of a column-0 declaration (`Name: struct …`, an alias `Name: Type`
-// or `Name<T>: Type<T>`, after an optional `pub`), or "". Any other column-0
-// declaration counts too, which only widens the owned-type existence check.
+// or `Name<T>: Type<T>`, after any `#Attr` attributes and an optional
+// `pub`), or "". Any other column-0 declaration counts too, which only widens
+// the owned-type existence check.
 core_decl_type_name: fn(line: String) -> String Never! {
     bytes: line.bytes()
-    at: if core_decl_word_then_space(line, 0, "pub") -> core_decl_skip_space(bytes, 3) else -> 0
+    start: if bytes.len() > 0 && Int.from_u8(bytes[0]) == 35 -> core_decl_attributes_end(line) else -> 0
+    if start < 0 -> return ""
+    at: if core_decl_word_then_space(line, start, "pub") -> core_decl_skip_space(bytes, start + 3) else -> start
     name_end: core_decl_name_end(bytes, at)
     if name_end == at || !core_decl_declares_at(bytes, core_decl_generics_end(bytes, name_end)) -> return ""
     core_decl_slice(line, at, name_end)

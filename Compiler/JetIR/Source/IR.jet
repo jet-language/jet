@@ -44,7 +44,11 @@
 //                                              and rounds to nearest, Float to
 //                                              Float32 rounds, Float32 to Float
 //                                              is exact
-//   Concat       dst  a=left b=right           String + String (new owned String)
+//   Concat       dst  a=left b=right c=served  String + String (new owned String)
+//                                              c=1 a program's own text, from
+//                                              the allocator a
+//                                              `#Context(allocator:)` block
+//                                              serves values from; -1 the heap
 //   Call         dst? a=function b=args c=count
 //   CallRuntime  dst? a=name (symbol) b=args c=count
 //   CallIndirect dst? a=callee slot b=args c=count
@@ -179,6 +183,8 @@ ir_overflow_wraps: fn(c: Int) -> Bool Never! {
 // operation whose slow path can publish a numeric stop.
 IR_STOP_POLL_KEY: "jet_ir_stop_poll#asm"
 IR_STOP_TRAP_KEY: "jet_ir_stop_trap#asm"
+// The stack mark leaf (Build.jet ir_stack_mark).
+IR_STACK_MARK_KEY: "jet_ir_stack_mark#asm"
 
 // What a slot holds. `Int` is Jet's exact integer (an inline word whose bits
 // 63 and 62 agree, else a big-integer handle); `Word` a fixed-width integer
@@ -419,6 +425,10 @@ IRDataReloc: struct { offset: Int, target: Int, addend: Int, text: Bool }
 // `single_thread`: the program provably never runs a second thread (JetCli
 // Host.jet jet_cli_single_thread), so x86-64 selection updates its RC
 // counts without the lock prefix; false for the runtime library.
+// `user_values`: the module is a program's or test image's, whose boxes,
+// recursive edge wrappers and List buffers come from the runtime's value
+// entries (BuildMove.jet), which a `#Context(allocator:)` block serves;
+// false for the runtime library and compile-time evaluation.
 // `debug_directory`: the compilation directory the image's DWARF records
 // ("": the working directory), which relative source paths (a fault
 // report's) resolve from. `host_literals`: the compile-time literals that are
@@ -470,6 +480,7 @@ IRModule: struct {
     owned_main: Bool{false}
     owned_attach: Bool{false}
     single_thread: Bool{false}
+    user_values: Bool{false}
     debug_directory: String{""}
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
     struct_fields: [String]{[String]{}}

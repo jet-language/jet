@@ -1,0 +1,71 @@
+// A user-written allocator: `mem.Allocator` over a `mem.Region`.
+// The region hands out blocks in address order. This allocator keeps released
+// blocks on a free list and gives the newest one out again when it fits, and
+// `resize` shrinks a block in place by splitting its tail onto the free list.
+// No `#Unsafe` is needed: a `mem.Block` is single use, so a block cannot be
+// copied or forged.
+// Run with: jet run Examples/Memory/Allocation/UserAllocator.jet
+use core.mem
+
+FreeList: struct {
+    region: mem.Region
+    free: [mem.Block]
+}
+
+impl FreeList.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        if self.free.len() > 0 {
+            last: self.free.len() - 1
+            if self.free[last].size() >= size && self.free[last].address().bit_and(align - 1) == 0 {
+                return Ok(self.free.pop() ?? panic("the free list is not empty"))
+            }
+        }
+        Ok(self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "FreeList"}))
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! { self.free.push(block) }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.free.push(block.split(new_size))
+        true
+    }
+}
+
+// Any allocator works here: the function sees only the trait.
+scratch_offset: fn<A: mem.Allocator>(allocator: &A, base: Int) -> Int {
+    block: allocator.allocate(48, 16) ?? panic("allocate")
+    offset: block.address() - base
+    allocator.release(block)
+    offset
+}
+
+run: fn() {
+    region: mem.Region.reserve(4096) ?? panic("reserve")
+    base: region.address()
+    print("region of {region.size()} bytes")
+    pool := FreeList{region: region, free: [mem.Block]{}}
+
+    a: pool.allocate(64, 16) ?? panic("a")
+    b := pool.allocate(64, 64) ?? panic("b")
+    print("a at {a.address() - base}, b at {b.address() - base}")
+
+    pool.release(a)
+    c: pool.allocate(32, 16) ?? panic("c")
+    print("c reuses a: at {c.address() - base}, {c.size()} bytes")
+
+    print("shrink b to 16: {pool.resize(b, 16)}, b is {b.size()} bytes")
+    print("trait call reuses a free block at {scratch_offset(pool, base)}")
+
+    pool.allocate(8192, 16) ? huge -> {
+        print("unexpected block of {huge.size()} bytes")
+        pool.release(huge)
+    }
+    ! error -> {
+        print("refused {error.requested_bytes} bytes from {error.allocator}")
+    }
+
+    pool.release(b)
+    pool.release(c)
+    print("{pool.free.len()} blocks free")
+}

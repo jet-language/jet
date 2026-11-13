@@ -280,9 +280,12 @@ TMixedArm: struct {
     body: [TStmt]
 }
 
+// One `#Context` guard: a context field, or with `key` set the value of the
+// `#ContextKey` constant whose SymbolID key text it is (ContextKeys.jet).
 TContextGuard: struct {
     field: String
     value: TExpr
+    key: String{""}
 }
 
 TUnitRounding: struct { mode: TUnitRoundingMode, digits: TExpr }
@@ -449,6 +452,10 @@ THostCall: enum {
     // A `context.<field>` read of the current task context
     // (Expressions/Places.jet sema_expression_context_read).
     ContextRead(field: String)
+    // `context.get(key)` of the `#ContextKey` constant whose SymbolID key
+    // text is `key`; `default` reads the constant itself, and `equatable`
+    // says the value's type has equality (ContextKeys.jet).
+    ContextGet(key: String, default: TExpr, equatable: Bool)
 }
 
 TCoreClosureKind: enum {
@@ -1132,6 +1139,7 @@ tree_each_host_call_child: fn(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem
         .TupleIndex(base, _) -> visit(base)
         .YieldSend(value) -> visit(value)
         .ComptimeInput(_, path, _) -> visit(path)
+        .ContextGet(_, default, _) -> visit(default)
         .SwitchSubjectValue | .NumericBounds(_, _) | .MemoStats(_, _) | .ContextRead(_) -> {}
     }
 }
