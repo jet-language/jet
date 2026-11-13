@@ -1,730 +1,1074 @@
-// Unified typed dependency graph, event waits, deterministic invalidation and transactional replacement.
+// The typed dependency graph of one entry and the watch session over it. A
+// session polls the directories that hold its watched paths through
+// core.watcher, settles a save before it reports it, then invalidates the
+// reverse closure of what changed. The host serializes source transactions
+// by holding the session behind its `Shared` guard, and the loader's view of
+// the entry's modules comes from the host's `LSPChecker`.
 use {
-    fs: std.fs
-    env: std.env
-    std.collections.[VecDeque]
-    // GATE #4494: channels, mutexes and blocking event waits.
-    std.sync.[mpsc, Mutex, MutexGuard]
-    thread: std.thread
-    std.time.[Duration, Instant, SystemTime]
-    watcher: core.watcher
-    core.watcher.[WatchSet]
-    jet_driver.Diagnostics.[Diagnostic]
-    Loader: jet_driver.Loader
-    jet_driver.Syntax.[PACKAGE_FILE]
-    jet_foundation.JSON.[foundation_json_escape]
-    jet_foundation.Game.[JetGameChangeKind]
-    SHA256: jet_foundation.SHA256
+    watch_crypto: core.crypto
+    watch_files: core.files
+    watch_time: core.time
+    watch_watcher: core.watcher
+    core.files.[LinkPolicy]
+    core.time.[Stopwatch]
+    core.watcher.[WatchHandle]
+    jet_foundation.[foundation_json_quote]
+    jet_lsp.[LSPChecker, LSPOverlay]
+    jetpack_foundation.[PACKAGE_FILE]
 }
 
-RootKind: enum {
-    Import; Asset; HTML; Style; Manifest; Lock; Generated; BuildInput; TargetFact
-    as_str: fn(self) -> String { if self == {
-        .Import -> "import"
-        .Asset -> "asset"
-        .HTML -> "html"
-        .Style -> "style"
-        .Manifest -> "manifest"
-        .Lock -> "lock"
-        .Generated -> "generated"
-        .BuildInput -> "build_input"
-        .TargetFact -> "target_fact"
-    } }
+WATCH_POLL_INTERVAL_MS: Int{5}
+WATCH_COALESCE_MS: Int{4}
+WATCH_SETTLE_MAX_MS: Int{250}
+EDIT_TO_VISIBLE_BUDGET_MS: Int{2000}
+
+impl RootKind {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .Import -> "import"
+            .Asset -> "asset"
+            .HTML -> "html"
+            .Style -> "style"
+            .Manifest -> "manifest"
+            .Lock -> "lock"
+            .Generated -> "generated"
+            .BuildInput -> "build_input"
+            .TargetFact -> "target_fact"
+        }
+    }
 }
+
+impl ChangeKind {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .Created -> "created"
+            .Modified -> "modified"
+            .Deleted -> "deleted"
+            .Renamed -> "renamed"
+            .Stale -> "stale"
+        }
+    }
+}
+
+// What one path looked like at one poll: a file carries the digest of its
+// bytes, so a save that keeps the size and time is still seen.
 PathStamp: struct {
-    exists: Bool; mtime: SystemTime?; len: U64?; digest: String?
-    capture: fn(path: OSPath) -> PathStamp {
-        if fs.metadata(path) == {
-            .Ok(meta) -> {
-                digest: if meta.is_file() -> SHA256.sha256_file_hex(path).ok().map(fn(d) { "sha256-{d}" }) else -> None
-                PathStamp{exists: true, mtime: meta.modified().ok(), len: .Val(meta.len()), digest}
-            }
-            .Err(_) -> PathStamp{exists: false, mtime: None, len: None, digest: None}
-        }
-    }
-    changed_since: fn(self, newer: PathStamp) -> Bool {
+    exists: Bool
+    modified_ns: Int?
+    size: Int?
+    digest: String?
+
+    changed_since: fn(self, newer: PathStamp) -> Bool Never! {
         if self.exists != newer.exists -> return true
-        if (_0: self.digest.as_ref(), _1: newer.digest.as_ref()) == {
-            (.Val(previous), .Val(current)) -> previous != current
-            (_0: .Val(_), _1: None) | (_0: None, _1: .Val(_)) -> true
-            (_0: None, _1: None) -> self.mtime != newer.mtime || self.len != newer.len
+        if self.digest == .Val(previous) {
+            if newer.digest == .Val(current) -> return previous != current
+            return true
         }
+        if newer.digest != None -> return true
+        self.modified_ns != newer.modified_ns || self.size != newer.size
     }
 }
-WatchWake: struct {
-    sender: mpsc.Sender<()>
-    wake: fn(self) -> () { watch_wake_send(self.sender).drop("a gone waiter needs no wake") }
+
+watch_stamp_missing: fn() -> PathStamp Never! {
+    PathStamp{exists: false, modified_ns: None, size: None, digest: None}
 }
-// One wake to the waiter; a refused send means the waiter is gone.
-watch_wake_send: fn(sender: mpsc.Sender<()>) Err! {
-    sender.send(_)
+
+watch_stamp_capture: fn(path: String) -> PathStamp {
+    stat: watch_files.stat(path, links: Val(LinkPolicy.Follow)) ?? return watch_stamp_missing()
+    digest: if stat.is_file -> watch_file_digest(path) else -> None
+    PathStamp{exists: true, modified_ns: Val(stat.modified.to_unix_ns() ?? 0), size: Val(stat.size), digest: digest}
 }
-// Waits for a change under the watched paths or a wake. Every host watches
-// through core.watcher; one poll per WATCH_POLL_INTERVAL_MS reports whether
-// any watched directory changed since the last poll.
-EventWaiter: struct {
-    receiver: mpsc.Receiver<()>; wake: WatchWake; watches: WatchSet
-    new: fn(paths: [OSPath]) -> EventWaiter {
-        (sender, receiver): mpsc.channel()
-        EventWaiter{receiver, wake: WatchWake{sender}, watches: watch_set(paths)}
-    }
-    refresh: fn(self, paths: [OSPath]) -> () { self.watches = watch_set(paths) }
-    wait: fn(self, timeout: Duration?) -> Bool {
-        deadline: timeout.map(fn(limit) { Instant.now() + limit })
-        loop {
-            if self.watches.poll().len() > 0 -> return true
-            interval := Duration.from_millis(WATCH_POLL_INTERVAL_MS)
-            if deadline == .Val(end) {
-                remaining: end.saturating_duration_since(Instant.now())
-                if remaining.is_zero() -> return false
-                interval = interval.min(remaining)
-            }
-            if self.receiver.recv_timeout(interval).is_ok() -> return true
-        }
-    }
-    coalesce: fn(self, timeout: Duration) -> () {
-        thread.sleep(timeout)
-        _: self.watches.poll()
-        loop { if self.receiver.try_recv().is_err() -> break }
-    }
-    wake_handle: fn(self) -> WatchWake { self.wake.clone() }
+
+watch_file_digest: fn(path: String) -> String? {
+    bytes: watch_files.read_bytes(path) ?? return None
+    Val("sha256-{watch_crypto.sha256(bytes).hex()}")
 }
-existing_directory: fn(path: OSPath) -> OSPath? {
-    candidate := if path.is_dir() -> path.to_path_buf() else -> path.parent().unwrap_or(OSPath(".")).to_path_buf()
+
+watch_stamps: fn(paths: [String]) -> [PathStamp] {
+    stamps := [PathStamp]{}
+    loop path in paths -> stamps.push(watch_stamp_capture(path))
+    stamps
+}
+
+// The nearest existing directory that holds `path`.
+watch_existing_directory: fn(path: String) -> String? {
+    candidate := if watch_files.is_dir(path) -> watch_files.normalize(path) else -> watch_files.dirname(path)
     loop {
-        if candidate.is_dir() -> return .Val(candidate)
-        if candidate.parent() == .Val(parent) {
-            if parent == candidate -> return None
-            candidate = parent.to_path_buf()
-        } else { return None }
+        if candidate == "" -> return None
+        if watch_files.is_dir(candidate) -> return Val(candidate)
+        parent: watch_files.dirname(candidate)
+        if parent == candidate -> return None
+        candidate = parent
     }
 }
+
+watch_directories: fn(paths: [String]) -> [String] {
+    seen := [String:Bool]{}
+    loop path in paths {
+        if watch_existing_directory(path) == .Val(directory) -> seen[directory] = true
+    }
+    directories := seen.keys().to_list()
+    directories.sort()
+    directories
+}
+
 // One file watch per existing directory that holds a watched path; a
-// directory that cannot be watched is left out, as a failed watch add was.
-watch_set: fn(paths: [OSPath]) -> WatchSet {
-    directories := paths.iter().filter_map(fn(path) { existing_directory(path) }).collect()
-    directories.sort(); directories.dedup()
-    set: watcher.set()
-    loop directory in directories {
-        if watcher.files(directory.to_string()) == .Ok(handle) -> set.add(handle)
+// directory that cannot be watched is left out.
+WatchEvents: struct {
+    directories: [String]
+    handles: [WatchHandle]
+
+    open: fn(paths: [String]) -> WatchEvents {
+        events := WatchEvents{directories: [String]{}, handles: [WatchHandle]{}}
+        events.refresh(paths)
+        events
     }
-    set
-}
-ChangeKind: enum { Created; Modified; Deleted; Renamed; Stale }
-InvalidationReceipt: struct {
-    generation: U64; changed: [OSPath]; closure: [OSPath]; kinds: [String]; change_kinds: [String]
-    content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U64?
-    render: fn(self) -> String {
-        elapsed: self.edit_to_visible_ms.map(fn(ms) { "{ms}" }).unwrap_or("null")
-        "{{\"generation\":{self.generation},\"changed\":[{join_paths(self.changed)}],\"closure\":[{join_paths(self.closure)}],\"kinds\":[{join_quoted(self.kinds)}],\"change_kinds\":[{join_quoted(self.change_kinds)}],\"content_digests\":[{join_optional_quoted(self.content_digests)}],\"dev_entries\":[{join_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
-    }
-    game_dev_entries: fn(self) -> [DevWatchEntry] { &self.dev_entries }
-}
-DevWatchEntry: struct {
-    path: OSPath; change_kind: String; game_kind: JetGameChangeKind
-    old_digest: String?; new_digest: String?; old_schema_id: String?; new_schema_id: String?
-}
-WatchNode: struct { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
-join_optional_quoted: fn(items: [String?]) -> String {
-    items.iter().map(fn(item) { item.as_ref().map(fn(value) { "\"{foundation_json_escape(value)}\"" }).unwrap_or("null") }).collect().join(",")
-}
-join_quoted: fn(items: [String]) -> String { items.iter().map(fn(item) { "\"{foundation_json_escape(item)}\"" }).collect().join(",") }
-join_dev_entries: fn(entries: [DevWatchEntry]) -> String {
-    entries.iter().map(fn(entry) {
-        optional: fn(value: String?) { value.map(fn(value) { "\"{foundation_json_escape(value)}\"" }).unwrap_or("null") }
-        "{{\"path\":\"{foundation_json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
-    }).collect().join(",")
-}
-join_paths: fn(paths: [OSPath]) -> String { paths.iter().map(fn(p) { "\"{foundation_json_escape(p.display().to_string())}\"" }).collect().join(",") }
-WatchGraph: struct {
-    nodes: [OSPath:WatchNode]; asset_roots: [OSPath:Bool]; runtime_input_roots: [OSPath:Bool]
-    game_paths: [OSPath:JetGameChangeKind]; game_schema_ids: [OSPath:(String?, String?)]
-    reverse: [OSPath:[OSPath:Bool]]; forward: [OSPath:[OSPath:Bool]]; entry: OSPath?
-    default: fn() -> WatchGraph { WatchGraph{nodes: {}, asset_roots: {}, runtime_input_roots: {}, game_paths: {}, game_schema_ids: {}, reverse: {}, forward: {}, entry: None} }
-    new: fn() -> WatchGraph { WatchGraph.default() }
-    entry: fn(self) -> OSPath? { self.entry.as_ref() }
-    node_count: fn(self) -> USize { self.nodes.len() }
-    nodes: fn(self) -> Iterator<WatchNode> {
-        paths := self.nodes.keys().cloned().collect(); paths.sort()
-        paths.into_iter().map(fn(path) { &self.nodes[path] })
-    }
-    reverse_edges: fn(self) -> [OSPath:[OSPath:Bool]] { &self.reverse }
-    upsert: fn(self: WatchGraph, path: OSPath, kind: RootKind) -> () { self.upsert_with_dir_hint(path, kind, false) }
-    upsert_with_dir_hint: fn(self: WatchGraph, path: OSPath, kind: RootKind, dir_hint: Bool) -> () {
-        is_dir: dir_hint || path.is_dir(); stamp: PathStamp.capture(path)
-        self.nodes.insert(path.clone(), WatchNode{path: path.move(), kind, stamp, is_dir})
-    }
-    link: fn(self: WatchGraph, from: OSPath, to: OSPath) -> () {
-        self.forward.entry(from.clone()).or_default().insert(to.clone(), true)
-        self.reverse.entry(to).or_default().insert(from, true)
-    }
-    set_entry: fn(self: WatchGraph, entry: OSPath) -> () { self.entry = .Val(entry.clone()); self.upsert(entry, .Import) }
-    register_asset_root: fn(self: WatchGraph, path: OSPath) -> () {
-        path: canonicalize_loose(path); self.asset_roots.insert(path.clone(), true)
-        visited := [OSPath:Bool]{}; self.add_asset_tree(path, visited)
-    }
-    asset_roots: fn(self) -> [OSPath:Bool] { &self.asset_roots }
-    register_game_path: fn(self: WatchGraph, path: OSPath, kind: JetGameChangeKind) -> () {
-        path: canonicalize_loose(path); self.game_paths.insert(path.clone(), kind)
-        if !self.nodes.contains_key(path) -> self.upsert(path, .BuildInput)
-    }
-    register_game_path_with_schema_ids: fn(self: WatchGraph, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
-        path: canonicalize_loose(path); self.register_game_path(path.clone(), kind)
-        self.game_schema_ids.insert(path, (_0: old_schema_id, _1: new_schema_id))
-    }
-    game_kind_for: fn(self, path: OSPath) -> JetGameChangeKind? {
-        self.game_paths.get(path).copied().or_else(fn() { self.nodes.get(path).and_then(fn(node) { if node.kind == {
-            .Import -> .Val(.Script)
-            .Asset -> .Val(.Asset)
-            else -> None
-        } }) })
-    }
-    game_schema_ids_for: fn(self, path: OSPath) -> (String?, String?) { self.game_schema_ids.get(path).cloned().unwrap_or((_0: None, _1: None)) }
-    discover_runtime_input_trees: fn(self: WatchGraph) -> () {
-        roots := self.runtime_input_roots.keys().cloned().collect(); roots.sort(); visited := [OSPath:Bool]{}
-        loop root in roots { self.add_new_runtime_tree(root, visited) }
-    }
-    add_new_runtime_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path: canonicalize_loose(path)
-        if visited.contains_key(path) -> return
-        visited.insert(path.clone(), true)
-        exists: fs.metadata(path).is_ok()
-        expected_dir: !exists && self.nodes.get(path).is_some_and(fn(node) { node.is_dir && !node.stamp.exists })
-        is_dir: path.is_dir() || expected_dir
-        if self.nodes.get_mut(path) == .Val(node) {
-            if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset }
-        } else {
-            self.nodes.insert(path.clone(), WatchNode{path: path.clone(), kind: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path),
-                stamp: PathStamp{exists: false, mtime: None, len: None, digest: None}, is_dir})
+
+    refresh: fn(&self, paths: [String]) {
+        directories: watch_directories(paths)
+        if directories == self.directories && self.handles.len() > 0 -> return
+        loop handle in self.handles -> handle.cancel()
+        handles := [WatchHandle]{}
+        loop directory in directories {
+            if watch_watcher.files(directory) == .Ok(handle) -> handles.push(handle)
         }
-        if self.entry == .Val(entry) -> self.link(entry.clone(), path.clone())
-        if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
-        children.sort()
-        loop child in children { self.add_new_runtime_tree(child, visited) }
+        self.handles = handles
+        self.directories = directories
     }
-    discover_asset_tree: fn(self: WatchGraph) -> () {
-        roots := self.asset_roots.keys().cloned().collect(); roots.sort(); visited := [OSPath:Bool]{}
-        loop root in roots { self.add_new_asset_tree(root, visited) }
-    }
-    add_new_asset_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path: canonicalize_loose(path)
-        if visited.contains_key(path) -> return
-        visited.insert(path.clone(), true); is_dir: path.is_dir(); exists: fs.metadata(path).is_ok()
-        if self.nodes.get_mut(path) == .Val(node) { if exists -> node.is_dir = is_dir } else {
-            self.nodes.insert(path.clone(), WatchNode{path: path.clone(), kind: .Asset,
-                stamp: PathStamp{exists: false, mtime: None, len: None, digest: None}, is_dir})
+
+    // Drains every handle, then says whether any reported a change.
+    changed: fn(self) -> Bool {
+        any := false
+        loop handle in self.handles {
+            if handle.poll().len() > 0 -> any = true
         }
-        if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
-        children.sort(); loop child in children { self.add_new_asset_tree(child, visited) }
+        any
     }
-    add_asset_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path: canonicalize_loose(path)
-        if visited.contains_key(path) -> return
-        visited.insert(path.clone(), true); self.upsert(path.clone(), .Asset)
-        if !path.is_dir() -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
-        children.sort(); loop child in children { self.add_asset_tree(child, visited) }
-    }
-    closure_of: fn(self, seeds: [OSPath]) -> [OSPath] {
-        seen := [OSPath:Bool]{}; queue := VecDeque.new()
-        loop seed in seeds {
-            if !seen.contains_key(seed) { seen.insert(seed.clone(), true); queue.push_back(seed.clone()) }
-        }
+
+    wait: fn(self, timeout_ms: Int?) -> Bool {
+        clock: watch_time.start()
         loop {
-            if queue.pop_front() == .Val(path) {
-                if self.reverse.get(path) == .Val(deps) {
-                    loop dep in deps.keys() {
-                        if !seen.contains_key(dep) { seen.insert(dep.clone(), true); queue.push_back(dep.clone()) }
+            if self.changed() -> return true
+            interval := WATCH_POLL_INTERVAL_MS
+            if timeout_ms == .Val(limit) {
+                remaining: limit - clock.elapsed_millis()
+                if remaining <= 0 -> return false
+                if remaining < interval -> interval = remaining
+            }
+            watch_time.sleep(watch_time.duration_ms(interval))
+        }
+    }
+
+    coalesce: fn(self, ms: Int) {
+        watch_time.sleep(watch_time.duration_ms(ms))
+        _: self.changed()
+    }
+}
+
+DevWatchEntry: struct {
+    path: String
+    change_kind: String
+    game_kind: String
+    old_digest: String?
+    new_digest: String?
+}
+
+InvalidationReceipt: struct {
+    generation: Int
+    changed: [String]
+    closure: [String]
+    kinds: [String]
+    change_kinds: [String]
+    content_digests: [String?]
+    dev_entries: [DevWatchEntry]
+    edit_to_visible_ms: Int?
+
+    render: fn(self) -> String Never! {
+        elapsed: if self.edit_to_visible_ms == .Val(ms) -> "{ms}" else -> "null"
+        "{{\"generation\":{self.generation},\"changed\":[{watch_json_strings(self.changed)}],\"closure\":[{watch_json_strings(self.closure)}],\"kinds\":[{watch_json_strings(self.kinds)}],\"change_kinds\":[{watch_json_strings(self.change_kinds)}],\"content_digests\":[{watch_json_optional_strings(self.content_digests)}],\"dev_entries\":[{watch_json_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
+    }
+}
+
+watch_json_optional: fn(value: String?) -> String Never! {
+    if value == .Val(text) -> foundation_json_quote(text) else -> "null"
+}
+
+watch_json_strings: fn(items: [String]) -> String Never! {
+    parts := [String]{}
+    loop item in items -> parts.push(foundation_json_quote(item))
+    parts.join(",")
+}
+
+watch_json_optional_strings: fn(items: [String?]) -> String Never! {
+    parts := [String]{}
+    loop item in items -> parts.push(watch_json_optional(item))
+    parts.join(",")
+}
+
+watch_json_dev_entries: fn(entries: [DevWatchEntry]) -> String Never! {
+    parts := [String]{}
+    loop entry in entries {
+        parts.push("{{\"path\":{foundation_json_quote(entry.path)},\"change_kind\":{foundation_json_quote(entry.change_kind)},\"game_kind\":{foundation_json_quote(entry.game_kind)},\"old_digest\":{watch_json_optional(entry.old_digest)},\"new_digest\":{watch_json_optional(entry.new_digest)}}}")
+    }
+    parts.join(",")
+}
+
+WatchNode: struct {
+    path: String
+    kind: RootKind
+    stamp: PathStamp
+    is_dir: Bool
+}
+
+WatchGraph: struct {
+    nodes: [String:WatchNode]
+    asset_roots: [String:Bool]
+    runtime_input_roots: [String:Bool]
+    reverse: [String:[String:Bool]]
+    forward: [String:[String:Bool]]
+    entry: String?
+
+    new: fn() -> WatchGraph Never! {
+        WatchGraph{
+            nodes: [String:WatchNode]{}, asset_roots: [String:Bool]{}, runtime_input_roots: [String:Bool]{},
+            reverse: [String:[String:Bool]]{}, forward: [String:[String:Bool]]{}, entry: None,
+        }
+    }
+
+    entry_path: fn(self) -> String? Never! { self.entry }
+
+    node_count: fn(self) -> Int Never! { self.nodes.len() }
+
+    // The nodes in path order.
+    node_list: fn(self) -> [WatchNode] {
+        paths := self.nodes.keys().to_list()
+        paths.sort()
+        out := [WatchNode]{}
+        loop path in paths {
+            if self.nodes.get(path) == .Val(node) -> out.push(node)
+        }
+        out
+    }
+
+    watched_paths: fn(self) -> [String] {
+        paths := self.nodes.keys().to_list()
+        paths.sort()
+        paths
+    }
+
+    upsert: fn(&self, path: String, kind: RootKind) { self.upsert_with_dir_hint(path, kind, false) }
+
+    upsert_with_dir_hint: fn(&self, path: String, kind: RootKind, dir_hint: Bool) {
+        is_dir: dir_hint || watch_files.is_dir(path)
+        self.nodes[path] = WatchNode{path: path, kind: kind, stamp: watch_stamp_capture(path), is_dir: is_dir}
+    }
+
+    set_stamp: fn(&self, path: String, stamp: PathStamp) {
+        if self.nodes.get(path) == .Val(node) {
+            updated := node
+            updated.stamp = stamp
+            self.nodes[path] = updated
+        }
+    }
+
+    // A node that exists now takes its current shape; a directory becomes an
+    // asset sentinel.
+    reshape: fn(&self, path: String, is_dir: Bool, as_asset: Bool) {
+        if self.nodes.get(path) == .Val(node) {
+            updated := node
+            updated.is_dir = is_dir
+            if as_asset && is_dir -> updated.kind = RootKind.Asset
+            self.nodes[path] = updated
+        }
+    }
+
+    stamp_size: fn(self, path: String) -> Int {
+        if self.nodes.get(path) == .Val(node) {
+            if node.stamp.size == .Val(size) -> return size
+        }
+        0
+    }
+
+    link: fn(&self, source_path: String, target_path: String) {
+        targets := self.forward.get(source_path) ?? [String:Bool]{}
+        targets[target_path] = true
+        self.forward[source_path] = targets
+        sources := self.reverse.get(target_path) ?? [String:Bool]{}
+        sources[source_path] = true
+        self.reverse[target_path] = sources
+    }
+
+    link_from_entry: fn(&self, path: String) {
+        entry: self.entry_path() ?? return
+        self.link(entry, path)
+    }
+
+    set_entry: fn(&self, entry: String) {
+        self.entry = Val(entry)
+        self.upsert(entry, RootKind.Import)
+    }
+
+    mark_runtime_root: fn(&self, path: String) { self.runtime_input_roots[path] = true }
+
+    register_asset_root: fn(&self, raw_path: String) {
+        root: watch_canonicalize_loose(raw_path)
+        self.asset_roots[root] = true
+        visited := [String:Bool]{}
+        self.add_asset_tree(root, visited)
+    }
+
+    add_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+        path: watch_canonicalize_loose(raw_path)
+        if visited.has_key(path) -> return
+        visited[path] = true
+        self.upsert(path, RootKind.Asset)
+        if !watch_files.is_dir(path) -> return
+        loop child in watch_children(path) -> self.add_asset_tree(child, visited)
+    }
+
+    discover_asset_tree: fn(&self) {
+        roots := self.asset_roots.keys().to_list()
+        roots.sort()
+        visited := [String:Bool]{}
+        loop root in roots -> self.add_new_asset_tree(root, visited)
+    }
+
+    add_new_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+        path: watch_canonicalize_loose(raw_path)
+        if visited.has_key(path) -> return
+        visited[path] = true
+        is_dir: watch_files.is_dir(path)
+        exists: watch_files.exists(path)
+        if self.nodes.has_key(path) {
+            if exists -> self.reshape(path, is_dir, false)
+        } else {
+            self.nodes[path] = WatchNode{path: path, kind: RootKind.Asset, stamp: watch_stamp_missing(), is_dir: is_dir}
+        }
+        if !is_dir -> return
+        loop child in watch_children(path) -> self.add_new_asset_tree(child, visited)
+    }
+
+    discover_runtime_input_trees: fn(&self) {
+        roots := self.runtime_input_roots.keys().to_list()
+        roots.sort()
+        visited := [String:Bool]{}
+        loop root in roots -> self.add_new_runtime_tree(root, visited)
+    }
+
+    add_new_runtime_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+        path: watch_canonicalize_loose(raw_path)
+        if visited.has_key(path) -> return
+        visited[path] = true
+        exists: watch_files.exists(path)
+        expected_dir := false
+        if !exists && self.nodes.get(path) == .Val(node) -> expected_dir = node.is_dir && !node.stamp.exists
+        is_dir: watch_files.is_dir(path) || expected_dir
+        if self.nodes.has_key(path) {
+            if exists -> self.reshape(path, is_dir, true)
+        } else {
+            kind: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
+            self.nodes[path] = WatchNode{path: path, kind: kind, stamp: watch_stamp_missing(), is_dir: is_dir}
+        }
+        self.link_from_entry(path)
+        if !is_dir -> return
+        loop child in watch_children(path) -> self.add_new_runtime_tree(child, visited)
+    }
+
+    // The seeds and every path that reaches one through reverse edges.
+    closure_of: fn(self, seeds: [String]) -> [String] {
+        seen := [String:Bool]{}
+        loop seed in seeds -> seen[seed] = true
+        frontier := seen.keys().to_list()
+        loop frontier.len() > 0 {
+            found := [String:Bool]{}
+            loop path in frontier {
+                if self.reverse.get(path) == .Val(dependents) {
+                    loop dependent in dependents.keys() {
+                        if !seen.has_key(dependent) -> found[dependent] = true
                     }
                 }
-                seen.insert(path, true)
-            } else { break }
-        }
-        result := seen.keys().cloned().collect(); result.sort(); result.move()
-    }
-    watched_paths: fn(self) -> [OSPath] { paths := self.nodes.keys().cloned().collect(); paths.sort(); paths.move() }
-    refresh_stamps: fn(self: WatchGraph) -> () { loop node in self.nodes.values_mut() { node.stamp = PathStamp.capture(node.path) } }
-    classify: fn(path: OSPath) -> RootKind {
-        name: path.file_name().and_then(fn(n) { n.to_str() }).unwrap_or("").to_ascii_lowercase()
-        if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
-        if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return .Lock
-        if path.parent() == .Val(parent) {
-            if parent.components().any(fn(c) { c.as_os_str() == "generated" || c.as_os_str() == ".jet-gen" }) -> return .Generated
-        }
-        extension: path.extension().and_then(fn(e) { e.to_str() }).map(fn(e) { e.to_ascii_lowercase() })
-        if extension == {
-            .Val(lit0) && lit0 == "jet" -> .Import
-            .Val("html") | .Val("htm") -> .HTML
-            .Val(lit0) && lit0 == "css" -> .Style
-            .Val("png") | .Val("jpg") | .Val("jpeg") | .Val("gif") | .Val("svg") | .Val("webp") | .Val("woff") | .Val("woff2") | .Val("ttf") | .Val("otf") -> .Asset
-            .Val("toml") | .Val("json") | .Val("yaml") | .Val("yml") -> .BuildInput
-            else -> if name.starts_with("target.") || name.contains("target_fact") -> .TargetFact else -> .BuildInput
-        }
-    }
-    from_entry: fn(entry: OSPath, deps: [OSPath]) -> WatchGraph Diagnostic! {
-        graph := WatchGraph.new(); entry: canonicalize_loose(entry); graph.set_entry(entry.clone()); html_paths := [OSPath]{}
-        entry_dir: entry.parent().unwrap_or(OSPath("."))
-        project: Loader.find_manifest_root_checked(entry_dir).unwrap_or_else(fn() { entry_dir.to_path_buf() })
-        manifest: Loader.manifest_path_checked(project)
-        stem: entry.file_stem().and_then(fn(s) { s.to_str() }).unwrap_or("app")
-        extras: [(_0: manifest, _1: RootKind.Manifest), (_0: .Val(project.join(".jet/lock")), _1: RootKind.Lock),
-            (_0: .Val(entry_dir.join("{stem}.html")), _1: RootKind.HTML), (_0: .Val(project.join("{stem}.css")), _1: RootKind.Style),
-            (_0: .Val(project.join("target.fact")), _1: RootKind.TargetFact)]
-        loop (path, kind) in extras {
-            if path == .Val(path) {
-                if path.exists() || kind == RootKind.Manifest || kind == RootKind.Lock || kind == RootKind.HTML {
-                    graph.upsert(path.clone(), kind); graph.link(entry.clone(), path.clone())
-                    if kind == RootKind.HTML -> html_paths.push(path)
-                }
             }
+            loop dependent in found.keys() -> seen[dependent] = true
+            frontier = found.keys().to_list()
         }
-        loop dep in deps {
-            path: canonicalize_loose(dep)
+        result := seen.keys().to_list()
+        result.sort()
+        result
+    }
+
+    refresh_stamps: fn(&self) {
+        loop path in self.watched_paths() -> self.set_stamp(path, watch_stamp_capture(path))
+    }
+
+    classify: fn(path: String) -> RootKind Never! {
+        name: watch_ascii_lower(watch_files.basename(path))
+        if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return RootKind.Manifest
+        if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return RootKind.Lock
+        parents: "/{watch_files.dirname(path)}/"
+        if parents.contains("/generated/") || parents.contains("/.jet-gen/") -> return RootKind.Generated
+        if watch_extension(name) == {
+            "jet" -> RootKind.Import
+            "html" | "htm" -> RootKind.HTML
+            "css" -> RootKind.Style
+            "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "woff" | "woff2" | "ttf" | "otf" -> RootKind.Asset
+            "toml" | "json" | "yaml" | "yml" -> RootKind.BuildInput
+            else -> if name.starts_with("target.") || name.contains("target_fact") -> RootKind.TargetFact else -> RootKind.BuildInput
+        }
+    }
+
+    // The graph of the entry and the files it depends on: its manifest, lock,
+    // shell, style and target fact, each dependency, what the HTML shells
+    // reference and the files the sources read at run time.
+    from_entry: fn(entry_path: String, dependencies: [String]) -> WatchGraph {
+        graph := WatchGraph.new()
+        entry: watch_canonicalize_loose(entry_path)
+        graph.set_entry(entry)
+        html_paths := [String]{}
+        entry_dir: watch_files.dirname(entry)
+        project: watch_manifest_root(entry_dir) ?? entry_dir
+        stem: watch_files.stem(entry)
+        graph.add_extra(watch_files.join(project, PACKAGE_FILE), RootKind.Manifest)
+        graph.add_extra(watch_files.join(project, ".jet/lock"), RootKind.Lock)
+        shell: watch_files.join(entry_dir, "{stem}.html")
+        graph.add_extra(shell, RootKind.HTML)
+        html_paths.push(shell)
+        graph.add_extra(watch_files.join(project, "{stem}.css"), RootKind.Style)
+        graph.add_extra(watch_files.join(project, "target.fact"), RootKind.TargetFact)
+        loop dependency in dependencies {
+            path: watch_canonicalize_loose(dependency)
             if path == entry -> next
-            kind: WatchGraph.classify(path); graph.upsert(path.clone(), kind); graph.link(entry.clone(), path.clone())
+            kind: WatchGraph.classify(path)
+            graph.upsert(path, kind)
+            graph.link(entry, path)
             if kind == RootKind.HTML -> html_paths.push(path)
         }
-        graph.scan_html_references(html_paths); graph.scan_runtime_inputs()
-        Ok(graph)
+        graph.scan_html_references(html_paths)
+        graph.scan_runtime_inputs()
+        graph
     }
-    scan_runtime_inputs: fn(self: WatchGraph) -> () {
-        sources: self.nodes().filter(fn(node) { node.kind == RootKind.Import || node.path.extension().and_then(fn(e) { e.to_str() }).is_some_and(fn(e) { e.eq_ignore_ascii_case("jet") }) }).map(fn(node) { node.path.clone() }).collect()
-        base: self.entry.as_ref().and_then(fn(path) { path.parent() }).unwrap_or(OSPath("."))
-        inputs := [OSPath:Bool]{}
+
+    // A manifest, lock or shell is watched before it exists; the rest only
+    // once they do.
+    add_extra: fn(&self, path: String, kind: RootKind) {
+        expected: kind == RootKind.Manifest || kind == RootKind.Lock || kind == RootKind.HTML
+        if !expected && !watch_files.exists(path) -> return
+        self.upsert(path, kind)
+        self.link_from_entry(path)
+    }
+
+    // The graph of `entry` over the modules the checker loaded for it.
+    discover: fn(entry: String, checker: LSPChecker) -> WatchGraph {
+        checked: checker.check(entry, [LSPOverlay]{})
+        seen := [String:Bool]{}
+        loop loaded in checked.modules {
+            if loaded.physical_path != "" {
+                seen[loaded.physical_path] = true
+            } else if loaded.path != "" {
+                seen[loaded.path] = true
+            }
+        }
+        dependencies := seen.keys().to_list()
+        dependencies.sort()
+        WatchGraph.from_entry(entry, dependencies)
+    }
+
+    scan_runtime_inputs: fn(&self) {
+        sources := [String]{}
+        nodes: self.node_list()
+        loop node in nodes.move() {
+            if node.kind == RootKind.Import || watch_extension(watch_ascii_lower(node.path)) == "jet" -> sources.push(node.path)
+        }
+        base: if self.entry == .Val(entry) -> watch_files.dirname(entry) else -> "."
+        inputs := [String:Bool]{}
         loop source in sources {
-            if fs.read_to_string(source).ok() == .Val(text) {
-                loop input in runtime_file_inputs(text) {
-                    path: OSPath(input.path); path: if path.is_absolute() -> canonicalize_loose(path) else -> canonicalize_loose(base.join(path))
-                    inputs.entry(path).and_modify(fn(is_dir) { is_dir |= input.is_dir }).or_insert(input.is_dir)
+            if watch_files.read(source) == .Ok(text) {
+                loop input in watch_runtime_file_inputs(text) {
+                    joined: if watch_files.is_absolute(input.path) -> watch_files.normalize(input.path) else -> watch_files.join(base, input.path)
+                    path: watch_canonicalize_loose(joined)
+                    inputs[path] = (inputs.get(path) ?? false) || input.is_dir
                 }
             }
         }
-        visited := [OSPath:Bool]{}; paths := inputs.keys().cloned().collect(); paths.sort()
-        loop input in paths { self.add_runtime_input_tree(input, visited, inputs[input]) }
+        paths := inputs.keys().to_list()
+        paths.sort()
+        visited := [String:Bool]{}
+        loop path in paths -> self.add_runtime_input_node(path, visited, inputs.get(path) ?? false, true)
     }
-    add_runtime_input_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool) -> () { self.add_runtime_input_node(path, visited, dir_hint, true) }
-    add_runtime_input_node: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool, register_root: Bool) -> () {
-        path: canonicalize_loose(path)
-        if visited.contains_key(path) -> return
-        visited.insert(path.clone(), true); exists: fs.metadata(path).is_ok(); is_dir: path.is_dir() || (dir_hint && !exists)
-        kind: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
-        if self.nodes.get_mut(path) == .Val(node) { if exists { node.is_dir = is_dir; if is_dir -> node.kind = .Asset } } else { self.upsert_with_dir_hint(path.clone(), kind, dir_hint && !exists) }
-        if register_root && dir_hint -> self.runtime_input_roots.insert(path.clone(), true)
-        if self.entry == .Val(entry) -> self.link(entry.clone(), path.clone())
+
+    add_runtime_input_node: fn(&self, raw_path: String, visited: &[String:Bool], dir_hint: Bool, register_root: Bool) {
+        path: watch_canonicalize_loose(raw_path)
+        if visited.has_key(path) -> return
+        visited[path] = true
+        exists: watch_files.exists(path)
+        is_dir: watch_files.is_dir(path) || (dir_hint && !exists)
+        if self.nodes.has_key(path) {
+            if exists -> self.reshape(path, is_dir, true)
+        } else {
+            kind: if is_dir -> RootKind.Asset else -> WatchGraph.classify(path)
+            self.upsert_with_dir_hint(path, kind, dir_hint && !exists)
+        }
+        if register_root && dir_hint -> self.mark_runtime_root(path)
+        self.link_from_entry(path)
         if !is_dir -> return
-        children := fs.read_dir(path).into_iter().flatten().filter_map(fn(item) { item.ok().map(fn(item) { item.path() }) }).collect()
-        children.sort(); loop child in children { self.add_runtime_input_node(child, visited, false, false) }
+        loop child in watch_children(path) -> self.add_runtime_input_node(child, visited, false, false)
     }
-    scan_html_references: fn(self: WatchGraph, roots: [OSPath]) -> () {
-        visited := [OSPath:Bool]{}; loop root in roots { self.add_reference_tree(root, visited) }
+
+    scan_html_references: fn(&self, roots: [String]) {
+        visited := [String:Bool]{}
+        loop root in roots -> self.add_reference_tree(root, visited)
     }
-    add_reference_tree: fn(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
-        path: canonicalize_loose(path)
-        if visited.contains_key(path) -> return
-        visited.insert(path.clone(), true); kind: WatchGraph.classify(path); self.upsert(path.clone(), kind)
-        if self.entry == .Val(entry) -> self.link(entry.clone(), path.clone())
-        if fs.read_to_string(path).ok() == .Val(source) {
-            if path.parent() == .Val(parent) {
-                loop reference in referenced_paths(path, source) {
-                    if local_reference_path(parent, reference) == .Val(child) -> self.add_reference_tree(child, visited)
-                }
-            }
+
+    add_reference_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
+        path: watch_canonicalize_loose(raw_path)
+        if visited.has_key(path) -> return
+        visited[path] = true
+        self.upsert(path, WatchGraph.classify(path))
+        self.link_from_entry(path)
+        source: watch_files.read(path) ?? return
+        parent: watch_files.dirname(path)
+        loop reference in watch_referenced_paths(path, source) {
+            if watch_local_reference_path(parent, reference) == .Val(child) -> self.add_reference_tree(child, visited)
         }
-    }
-    discover: fn(entry: OSPath) -> WatchGraph Diagnostic! {
-        entry_str: entry.to_string_lossy()
-        deps: if Loader.load_entry_with_overlays_and_dependencies(entry_str, [], false) == {
-            (.Ok(bundle), deps) -> {
-                paths := deps.move()
-                loop module_ref in bundle.modules { paths.push(module_ref.path.clone()) }
-                if bundle.modules.get(bundle.entry) == .Val(module_ref) {
-                    if (module_ref.path.parent(), module_ref.html_path.as_ref()) == (.Val(parent), .Val(html)) {
-                        if local_reference_path(parent, html) == .Val(path) -> paths.push(path)
-                    }
-                }
-                loop input in bundle.comptime_inputs { paths.push(bundle.project_root.join(input.path)) }
-                paths.sort(); paths.dedup(); paths.move()
-            }
-            (_0: .Err(_), _1: deps) -> deps
-        }
-        WatchGraph.from_entry(entry, deps)
     }
 }
 
-canonicalize_loose: fn(path: OSPath) -> OSPath {
-    fs.canonicalize(path).unwrap_or_else(fn(_) { if path.is_absolute() -> path.to_path_buf() else -> env.current_dir().unwrap_or(OSPath(".")).join(path) })
+// The children of a directory in path order; an unreadable one has none.
+watch_children: fn(path: String) -> [String] {
+    entries: watch_files.list_dir(path) ?? return [String]{}
+    children := [String]{}
+    loop entry in entries.move() -> children.push(entry.path)
+    children.sort()
+    children
 }
-RuntimeFileInput: struct { path: String; is_dir: Bool }
-RUNTIME_FILE_INPUT_METHODS: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
-    (_0: "read", _1: false), (_0: "read_bytes", _1: false), (_0: "walk", _1: true), (_0: "glob", _1: false), (_0: "stat", _1: false),
-    (_0: "fixture", _1: false), (_0: "golden", _1: false), (_0: "corpus", _1: true), (_0: "corpus_entries", _1: true)]
-runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] {
-    inputs := [String:Bool]{}; bytes: source.as_bytes()
-    loop (method, is_dir) in RUNTIME_FILE_INPUT_METHODS {
-        marker: ".{method}"; offset := USize{0}
-        loop {
-            if source[offset..<source.len()].find(marker) == .Val(relative) {
-                start: offset + relative; cursor := start + marker.len()
-                if bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_alphanumeric() || b == 95 }) { offset = cursor; next }
-                loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
-                if bytes.get(cursor) != .Val(U8{40}) { offset = cursor; next }
-                cursor += 1
-                loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
-                if quoted_literal(source, cursor) == .Val(tuple_9) {
-                    value: tuple_9._0
-                    end: tuple_9._1
-                    if !value.is_empty() && !value.contains('{') && !value.contains('}') && !value.contains("://") {
-                        inputs.entry(value.to_string()).and_modify(fn(seen_dir) { seen_dir |= is_dir }).or_insert(is_dir)
-                    }
-                    offset = end.saturating_add(1)
-                } else { offset = cursor.saturating_add(1) }
-            } else { break }
-        }
-    }
-    paths := inputs.keys().cloned().collect(); paths.sort()
-    paths.into_iter().map(fn(path) {is_dir: inputs[path], path}).collect()
-}
-quoted_literal: fn(source: String, start: USize) -> (String, USize)? {
-    bytes: source.as_bytes()
-    if bytes.get(start) == .Val(quote) {
-        if quote != 39 && quote != 34 -> return None
-        value_start: start + 1; cursor := value_start
-        loop {
-            if cursor >= bytes.len() -> break
-            if bytes[cursor] == 92 { cursor = cursor.saturating_add(2) } else if bytes[cursor] == quote {
-                value := source[value_start..cursor] // #4303
-                return .Val((_0: value, _1: cursor))
-            } else { cursor += 1 }
-        }
-    }
-    None
-}
-local_reference_path: fn(base: OSPath, raw: String) -> OSPath? {
-    raw := raw.trim() // #4303
-    if raw.split(fn(ch) { ch == '?' || ch == '#' }).next() == .Val(first) {
-        reference := first.trim() // #4303
-        if reference.is_empty() || reference.starts_with("//") || reference.starts_with("data:") || reference.starts_with("blob:")
-            || reference.starts_with("http:") || reference.starts_with("https:") || reference.starts_with("mailto:")
-            || reference.starts_with("javascript:") || reference.contains('\\') -> return None
-        reference := reference.trim_start_matches('/') // #4303
-        path: OSPath(reference)
-        if path.is_absolute() -> return None
-        return .Val(canonicalize_loose(base.join(path)))
-    }
-    None
-}
-referenced_paths: fn(path: OSPath, source: String) -> [String] {
-    references := [String]{}; extension: path.extension().and_then(fn(e) { e.to_str() }).map(fn(e) { e.to_ascii_lowercase() })
-    if extension == "html" || extension == "htm" {
-        loop attribute in ["src", "href", "poster", "srcset"] { extract_values_after(source, attribute, .Val(U8{61}), false, attribute == "srcset", references) }
-    }
-    if extension == "html" || extension == "htm" || extension == "css" -> extract_values_after(source, "url", .Val(U8{40}), false, false, references)
-    if extension == "js" || extension == "mjs" {
-        extract_values_after(source, "from", None, false, false, references); extract_values_after(source, "import", None, true, false, references)
-    }
-    references.move()
-}
-is_attribute_name_byte: fn(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == 95 || byte == 45 }
-extract_values_after: fn(source: String, keyword: String, delimiter: U8?, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) -> () {
-    lower: source.to_ascii_lowercase(); bytes: lower.as_bytes(); offset := USize{0}
+
+// The nearest directory at or above `start` that holds a package manifest.
+watch_manifest_root: fn(start: String) -> String? {
+    candidate := watch_files.normalize(start)
     loop {
-        if lower[offset..<lower.len()].find(keyword) == .Val(relative) {
-            start: offset + relative; before: start.checked_sub(1).and_then(fn(i) { bytes.get(i) }); after: bytes.get(start + keyword.len())
-            if before.is_some_and(fn(b) { is_attribute_name_byte(b) }) || after.is_some_and(fn(b) { is_attribute_name_byte(b) }) {
-                offset = start + keyword.len(); next
-            }
-            cursor := start + keyword.len()
-            loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
-            if delimiter == {
-                .Val(U8{61}) | .Val(U8{40}) -> {
-                    if bytes.get(cursor) != delimiter { offset = start + keyword.len(); next }
-                    cursor += 1
-                    loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
-                }
-                .None -> {
-                    if optional_parentheses && bytes.get(cursor) == .Val(U8{40}) {
-                        cursor += 1
-                        loop { if !bytes.get(cursor).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> break; cursor += 1 }
-                    }
-                }
-                else -> { panic("unreachable delimiter") }
-            }
-            quote: bytes.get(cursor).copied().filter(fn(b) { b == 39 || b == 34 })
-            if quote.is_some() -> cursor += 1
-            if quote.is_none() && delimiter.is_none() { offset = start + keyword.len(); next }
-            value_start: cursor
-            value_end: if quote == {
-                .Val(quote) -> source[cursor..<source.len()].find(Char(quote)).map(fn(i) { cursor + i }).unwrap_or(source.len())
-                .None -> source[cursor..<source.len()].find(fn(ch) { ch.is_ascii_whitespace() || ch == '>' || (delimiter == .Val(U8{40}) && ch == ')') }).map(fn(i) { cursor + i }).unwrap_or(source.len())
-            }
-            if value_start < value_end {
-                value := source[value_start..value_end] // #4303
-                if split_srcset {
-                    loop candidate in value.split(',') { if candidate.split_whitespace().next() == .Val(path) -> out.push(path.to_string()) }
-                } else { out.push(value.to_string()) }
-            }
-            offset = value_end.saturating_add(1)
-        } else { break }
+        if watch_files.is_file(watch_files.join(candidate, PACKAGE_FILE)) -> return Val(candidate)
+        parent: watch_files.dirname(candidate)
+        if parent == candidate || parent == "" -> return None
+        candidate = parent
     }
+}
+
+// The canonical path when it exists, else the path made absolute.
+watch_canonicalize_loose: fn(path: String) -> String {
+    if watch_files.canonicalize(path) == .Ok(found) -> return found
+    if watch_files.is_absolute(path) -> return watch_files.normalize(path)
+    watch_files.normalize(watch_files.join(watch_files.cwd() ?? ".", path))
+}
+
+watch_ascii_lower: fn(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if byte >= 65 && byte <= 90 -> out.push(byte + 32) else -> out.push(byte)
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// The text after the last `.` of a file name, or "".
+watch_extension: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    at := bytes.len() - 1
+    loop at >= 0 {
+        if bytes[at] == 47 -> return ""
+        if bytes[at] == 46 -> return String.from_bytes(bytes.slice(at + 1, bytes.len())) ?? ""
+        at -= 1
+    }
+    ""
+}
+
+watch_is_space: fn(byte: U8) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 13 }
+
+watch_is_word: fn(byte: U8) -> Bool Never! {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+watch_is_attribute_name: fn(byte: U8) -> Bool Never! { watch_is_word(byte) || byte == 45 }
+
+watch_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
+    cursor := start
+    loop cursor < bytes.len() && watch_is_space(bytes[cursor]) -> cursor += 1
+    cursor
+}
+
+// The first index at or after `start` where `needle` begins, or -1.
+watch_find: fn(bytes: [U8], needle: [U8], start: Int) -> Int Never! {
+    if needle.len() == 0 -> return -1
+    at := start
+    loop at + needle.len() <= bytes.len() {
+        matched := true
+        loop index in 0..<needle.len() {
+            if bytes[at + index] != needle[index] {
+                matched = false
+                break
+            }
+        }
+        if matched -> return at
+        at += 1
+    }
+    -1
+}
+
+watch_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
+    String.from_bytes(bytes.slice(start, end)) ?? ""
+}
+
+RuntimeFileInput: struct {
+    path: String
+    is_dir: Bool
+}
+
+WatchQuoted: struct {
+    value: String
+    end: Int
+}
+
+// The literal paths a source hands to the file-reading calls, each marked
+// when the call reads a directory.
+watch_runtime_file_inputs: fn(source: String) -> [RuntimeFileInput] Never! {
+    bytes: source.bytes()
+    inputs := [String:Bool]{}
+    watch_scan_method(bytes, "copy", false, inputs)
+    watch_scan_method(bytes, "copy_dir", true, inputs)
+    watch_scan_method(bytes, "exists", false, inputs)
+    watch_scan_method(bytes, "is_dir", true, inputs)
+    watch_scan_method(bytes, "list_dir", true, inputs)
+    watch_scan_method(bytes, "read", false, inputs)
+    watch_scan_method(bytes, "read_bytes", false, inputs)
+    watch_scan_method(bytes, "walk", true, inputs)
+    watch_scan_method(bytes, "glob", false, inputs)
+    watch_scan_method(bytes, "stat", false, inputs)
+    watch_scan_method(bytes, "fixture", false, inputs)
+    watch_scan_method(bytes, "golden", false, inputs)
+    watch_scan_method(bytes, "corpus", true, inputs)
+    watch_scan_method(bytes, "corpus_entries", true, inputs)
+    paths := inputs.keys().to_list()
+    paths.sort()
+    out := [RuntimeFileInput]{}
+    loop path in paths.move() {
+        is_dir: inputs.get(path) ?? false
+        out.push(RuntimeFileInput{path: path, is_dir: is_dir})
+    }
+    out
+}
+
+watch_scan_method: fn(bytes: [U8], method: String, is_dir: Bool, inputs: &[String:Bool]) Never! {
+    marker: ".{method}".bytes()
+    offset := 0
+    loop {
+        start: watch_find(bytes, marker, offset)
+        if start < 0 -> break
+        cursor := start + marker.len()
+        if cursor < bytes.len() && watch_is_word(bytes[cursor]) {
+            offset = cursor
+            next
+        }
+        cursor = watch_skip_space(bytes, cursor)
+        if cursor >= bytes.len() || bytes[cursor] != 40 {
+            offset = cursor
+            next
+        }
+        cursor = watch_skip_space(bytes, cursor + 1)
+        if watch_quoted_literal(bytes, cursor) == .Val(quoted) {
+            value: quoted.value
+            if value != "" && !value.contains("{{") && !value.contains("}}") && !value.contains("://") {
+                inputs[value] = (inputs.get(value) ?? false) || is_dir
+            }
+            offset = quoted.end + 1
+        } else {
+            offset = cursor + 1
+        }
+    }
+}
+
+watch_quoted_literal: fn(bytes: [U8], start: Int) -> WatchQuoted? Never! {
+    if start >= bytes.len() -> return None
+    quote: bytes[start]
+    if quote != 39 && quote != 34 -> return None
+    cursor := start + 1
+    loop cursor < bytes.len() {
+        if bytes[cursor] == 92 {
+            cursor += 2
+        } else if bytes[cursor] == quote {
+            return Val(WatchQuoted{value: watch_text(bytes, start + 1, cursor), end: cursor})
+        } else {
+            cursor += 1
+        }
+    }
+    None
+}
+
+// A reference an HTML or CSS file makes to a local file, resolved against
+// `base`; remote, inline and script URLs are not files.
+watch_local_reference_path: fn(base: String, raw: String) -> String? {
+    bytes: raw.trim().bytes()
+    cut := bytes.len()
+    loop (index, byte) in bytes {
+        if byte == 63 || byte == 35 {
+            cut = index
+            break
+        }
+    }
+    reference: watch_text(bytes, 0, cut).trim()
+    if reference == "" -> return None
+    loop prefix in ["//", "data:", "blob:", "http:", "https:", "mailto:", "javascript:"] {
+        if reference.starts_with(prefix) -> return None
+    }
+    if reference.contains("\\") -> return None
+    relative := reference
+    loop relative.starts_with("/") -> relative = relative.slice(1, relative.len())
+    Val(watch_canonicalize_loose(watch_files.join(base, relative)))
+}
+
+watch_referenced_paths: fn(path: String, source: String) -> [String] Never! {
+    references := [String]{}
+    extension: watch_extension(watch_ascii_lower(watch_files.basename(path)))
+    markup: extension == "html" || extension == "htm"
+    if markup {
+        loop attribute in ["src", "href", "poster", "srcset"] {
+            watch_extract_values(source, attribute, 61, false, attribute == "srcset", references)
+        }
+    }
+    if markup || extension == "css" -> watch_extract_values(source, "url", 40, false, false, references)
+    if extension == "js" || extension == "mjs" {
+        watch_extract_values(source, "from", 0, false, false, references)
+        watch_extract_values(source, "import", 0, true, false, references)
+    }
+    references
+}
+
+// Every value that follows `keyword` (and the `delimiter` byte, when it is
+// not 0), quoted or bare, compared without case.
+watch_extract_values: fn(source: String, keyword: String, delimiter: Int, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) Never! {
+    bytes: source.bytes()
+    lower: watch_ascii_lower(source).bytes()
+    needle: keyword.bytes()
+    offset := 0
+    loop {
+        start: watch_find(lower, needle, offset)
+        if start < 0 -> break
+        after_keyword: start + needle.len()
+        before_word: start > 0 && watch_is_attribute_name(lower[start - 1])
+        after_word: after_keyword < lower.len() && watch_is_attribute_name(lower[after_keyword])
+        if before_word || after_word {
+            offset = after_keyword
+            next
+        }
+        cursor := watch_skip_space(lower, after_keyword)
+        if delimiter != 0 {
+            if cursor >= lower.len() || (Int{lower[cursor]}) != delimiter {
+                offset = after_keyword
+                next
+            }
+            cursor = watch_skip_space(lower, cursor + 1)
+        } else if optional_parentheses && cursor < lower.len() && lower[cursor] == 40 {
+            cursor = watch_skip_space(lower, cursor + 1)
+        }
+        quote := 0
+        if cursor < bytes.len() && (bytes[cursor] == 39 || bytes[cursor] == 34) {
+            quote = Int{bytes[cursor]}
+            cursor += 1
+        }
+        if quote == 0 && delimiter == 0 {
+            offset = after_keyword
+            next
+        }
+        value_end := cursor
+        loop value_end < bytes.len() {
+            byte: bytes[value_end]
+            if quote != 0 {
+                if (Int{byte}) == quote -> break
+            } else if watch_is_space(byte) || byte == 62 || (delimiter == 40 && byte == 41) {
+                break
+            }
+            value_end += 1
+        }
+        if cursor < value_end {
+            value: watch_text(bytes, cursor, value_end)
+            if split_srcset {
+                loop candidate in value.split(",").to_list() {
+                    word: watch_first_word(candidate)
+                    if word != "" -> out.push(word)
+                }
+            } else {
+                out.push(value)
+            }
+        }
+        offset = value_end + 1
+    }
+}
+
+watch_first_word: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    start: watch_skip_space(bytes, 0)
+    end := start
+    loop end < bytes.len() && !watch_is_space(bytes[end]) -> end += 1
+    watch_text(bytes, start, end)
+}
+
+// One path a poll saw change, and how.
+WatchChange: struct {
+    path: String
+    kind: ChangeKind
+}
+
+// One settled change, with what it was and what it is now.
+WatchSettled: struct {
+    path: String
+    change_kind: ChangeKind
+    root_kind: RootKind
+    old_digest: String?
+    new_digest: String?
 }
 
 WatchSession: struct {
-    graph: WatchGraph; generation: U64; applied_generation: U64; coalesce: Duration; edit_started: Instant?; events: EventWaiter
-    open: fn(entry: OSPath) -> WatchSession Diagnostic! {
-        graph: WatchGraph.discover(entry); events: EventWaiter.new(graph.watched_paths())
-        Ok(WatchSession{graph, generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events})
+    graph: WatchGraph
+    generation: Int
+    applied_generation: Int
+    coalesce_ms: Int
+    edit_started: Stopwatch?
+    events: WatchEvents
+
+    open: fn(entry: String, checker: LSPChecker) -> WatchSession {
+        WatchSession.from_graph(WatchGraph.discover(entry, checker))
     }
-    from_graph: fn(graph: WatchGraph) -> WatchSession {
-        events: EventWaiter.new(graph.watched_paths())
-        WatchSession{graph: graph.move(), generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events}
+
+    from_graph: fn(&&graph: WatchGraph) -> WatchSession {
+        events: WatchEvents.open(graph.watched_paths())
+        WatchSession{graph: graph.move(), generation: 0, applied_generation: 0, coalesce_ms: WATCH_COALESCE_MS, edit_started: None, events: events}
     }
-    reopen: fn(self: &WatchSession, entry: OSPath) Diagnostic! {
-        graph: WatchGraph.discover(entry); self.events.refresh(graph.watched_paths())
-        self.graph = graph.move(); self.generation = 0; self.applied_generation = 0; self.edit_started = None
+
+    reopen: fn(&self, entry: String, checker: LSPChecker) {
+        graph: WatchGraph.discover(entry, checker)
+        self.events.refresh(graph.watched_paths())
+        self.graph = graph
+        self.generation = 0
+        self.applied_generation = 0
+        self.edit_started = None
     }
-    register_asset_root: fn(self: WatchSession, path: OSPath) -> () { self.graph.register_asset_root(path); self.events.refresh(self.graph.watched_paths()) }
-    register_game_path: fn(self: WatchSession, path: OSPath, kind: JetGameChangeKind) -> () { self.graph.register_game_path(path, kind); self.events.refresh(self.graph.watched_paths()) }
-    register_game_path_with_schema_ids: fn(self: WatchSession, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
-        self.graph.register_game_path_with_schema_ids(path, kind, old_schema_id, new_schema_id); self.events.refresh(self.graph.watched_paths())
+
+    register_asset_root: fn(&self, path: String) {
+        self.graph.register_asset_root(path)
+        self.events.refresh(self.graph.watched_paths())
     }
-    graph: fn(self) -> WatchGraph { &self.graph }
-    graph_mut: fn(self: WatchSession) -> WatchGraph { &self.graph }
-    generation: fn(self) -> U64 { self.generation }
-    mark_edit_started: fn(self: WatchSession) -> () { self.edit_started = .Val(Instant.now()) }
-    wait_for_change_for: fn(self: WatchSession, timeout: Duration?) -> Bool { self.events.refresh(self.graph.watched_paths()); self.events.wait(timeout) }
-    wake_handle: fn(self) -> WatchWake { self.events.wake_handle() }
-    poll: fn(self: WatchSession) -> InvalidationReceipt? {
-        self.graph.discover_asset_tree(); self.graph.discover_runtime_input_trees(); self.events.refresh(self.graph.watched_paths())
-        changed := [OSPath]{}; change_kinds := [ChangeKind]{}
-        loop node in self.graph.nodes() {
-            now: PathStamp.capture(node.path)
+
+    mark_edit_started: fn(&self) { self.edit_started = Val(watch_time.start()) }
+
+    wait_for_change_for: fn(&self, timeout_ms: Int?) -> Bool {
+        self.events.refresh(self.graph.watched_paths())
+        self.events.wait(timeout_ms)
+    }
+
+    // The receipt of what changed since the last poll, once the saves settle;
+    // None when nothing did. A generation the host already applied comes
+    // back stale, with no closure.
+    poll: fn(&self) -> InvalidationReceipt? {
+        self.graph.discover_asset_tree()
+        self.graph.discover_runtime_input_trees()
+        self.events.refresh(self.graph.watched_paths())
+        changes := [WatchChange]{}
+        nodes: self.graph.node_list()
+        loop node in nodes.move() {
+            now: watch_stamp_capture(node.path)
             if !node.stamp.changed_since(now) -> next
+            if !node.stamp.exists && !now.exists -> next
             kind: if {
-                node.stamp.exists == false && now.exists == true -> ChangeKind.Created
-                node.stamp.exists == true && now.exists == false -> ChangeKind.Deleted
-                node.stamp.exists == true && now.exists == true -> ChangeKind.Modified
-                node.stamp.exists == false && now.exists == false -> next
+                !node.stamp.exists -> ChangeKind.Created
+                !now.exists -> ChangeKind.Deleted
+                else -> ChangeKind.Modified
             }
-            changed.push(node.path.clone()); change_kinds.push(kind)
+            changes.push(WatchChange{path: node.path, kind: kind})
         }
-        detect_renames(changed, change_kinds, self.graph)
-        if changed.is_empty() -> return None
-        if self.edit_started.is_none() -> self.edit_started = .Val(Instant.now())
-        self.events.coalesce(self.coalesce); self.settle(changed)
-        settled := [OSPath]{}; settled_kinds := [ChangeKind]{}; settled_root_kinds := [RootKind]{}
-        settled_old_digests := [String?]{}; settled_digests := [String?]{}
-        loop (path, change_kind) in changed.into_iter().zip(change_kinds.into_iter()) {
-            (root_kind, is_dir): self.graph.nodes.get(path).map(fn(node) { (_0: node.kind, _1: node.is_dir) }).unwrap_or_else(fn() { (_0: WatchGraph.classify(path), _1: path.is_dir()) })
-            now: PathStamp.capture(path)
-            previous: self.graph.nodes.get(path).map(fn(node) { node.stamp.clone() }).unwrap_or(PathStamp{exists: false, mtime: None, len: None, digest: None})
-            if !previous.changed_since(now) && change_kind != ChangeKind.Renamed -> next
+        watch_detect_renames(changes, self.graph)
+        if changes.len() == 0 -> return None
+        if self.edit_started == None -> self.edit_started = Val(watch_time.start())
+        self.events.coalesce(self.coalesce_ms)
+        changed_paths := [String]{}
+        loop change in changes -> changed_paths.push(watch_files.normalize(change.path))
+        self.settle(changed_paths)
+        rows := [WatchSettled]{}
+        loop change in changes.move() {
+            root_kind := WatchGraph.classify(change.path)
+            is_dir := watch_files.is_dir(change.path)
+            previous := watch_stamp_missing()
+            if self.graph.nodes.get(change.path) == .Val(node) {
+                root_kind = node.kind
+                is_dir = node.is_dir
+                previous = node.stamp
+            }
+            now: watch_stamp_capture(change.path)
+            if !previous.changed_since(now) && change.kind != ChangeKind.Renamed -> next
             if root_kind == RootKind.Asset && is_dir {
-                runtime_root: self.graph.runtime_input_roots.contains_key(path)
-                report_transition: runtime_root && (change_kind == ChangeKind.Created || change_kind == ChangeKind.Deleted)
-                if !report_transition {
+                runtime_root: self.graph.runtime_input_roots.has_key(change.path)
+                transition: change.kind == ChangeKind.Created || change.kind == ChangeKind.Deleted
+                if !(runtime_root && transition) {
                     // Directory nodes are discovery sentinels; files carry resource changes.
-                    if self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = now.move()
+                    self.graph.set_stamp(change.path, now)
                     next
                 }
             }
-            settled.push(path); settled_kinds.push(change_kind); settled_root_kinds.push(root_kind)
-            settled_old_digests.push(previous.digest.clone()); settled_digests.push(now.digest.move())
+            rows.push(WatchSettled{path: change.path, change_kind: change.kind, root_kind: root_kind, old_digest: previous.digest, new_digest: now.digest})
         }
-        if settled.is_empty() -> return None
-        self.generation += 1; generation: self.generation
-        if generation <= self.applied_generation {
-            stale_count: settled.len(); stale_digests: [String?].repeat(None, stale_count)
-            dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, stale_digests, stale_digests)
-            return .Val(InvalidationReceipt{generation, changed: settled, closure: [],
-                kinds: settled_root_kinds.iter().map(fn(kind) { kind.as_str() }).collect(), change_kinds: [String].repeat("stale", stale_count),
-                content_digests: stale_digests, dev_entries, edit_to_visible_ms: None})
+        if rows.len() == 0 -> return None
+        self.generation += 1
+        generation: self.generation
+        stale: generation <= self.applied_generation
+        if !stale {
+            loop row in rows {
+                if self.graph.nodes.has_key(row.path) -> self.graph.set_stamp(row.path, watch_stamp_capture(row.path)) else -> self.graph.upsert(row.path, WatchGraph.classify(row.path))
+            }
         }
-        loop path in settled {
-            if self.graph.nodes.get_mut(path) == .Val(node) -> node.stamp = PathStamp.capture(path) else -> self.graph.upsert(path.clone(), WatchGraph.classify(path))
+        dev_entries: watch_dev_entries(rows, stale)
+        changed := [String]{}
+        kinds := [String]{}
+        change_names := [String]{}
+        digests := [String?]{}
+        loop row in rows.move() {
+            kinds.push(row.root_kind.as_str())
+            change_names.push(if stale -> ChangeKind.Stale.as_str() else -> row.change_kind.as_str())
+            digests.push(if stale -> None else -> row.new_digest)
+            changed.push(row.path)
         }
-        closure: self.graph.closure_of(settled); edit_to_visible_ms: self.edit_started.map(fn(started) { started.elapsed().as_millis() })
-        self.edit_started = None
-        dev_entries: make_dev_entries(self.graph, settled, settled_kinds, settled_root_kinds, settled_old_digests, settled_digests)
-        .Val(InvalidationReceipt{generation, changed: settled, closure,
-            kinds: settled_root_kinds.iter().map(fn(kind) { kind.as_str() }).collect(),
-            change_kinds: settled_kinds.iter().map(fn(kind) { change_kind_name(kind) }).collect(),
-            content_digests: settled_digests, dev_entries, edit_to_visible_ms})
-    }
-    settle: fn(self, paths: [OSPath]) -> () {
-        deadline: Instant.now() + Duration.from_millis(WATCH_SETTLE_MAX_MS)
-        previous := paths.iter().map(fn(path) { PathStamp.capture(path) }).collect()
-        loop {
-            if Instant.now() >= deadline -> break
-            truncated: paths.iter().zip(previous).any(fn(pair) {
-                (path, now): pair
-                now.len == 0 && self.graph.nodes.get(path).and_then(fn(node) { node.stamp.len }).is_some_and(fn(len) { len > 0 })
+        if stale {
+            return Val(InvalidationReceipt{
+                generation: generation, changed: changed, closure: [String]{}, kinds: kinds, change_kinds: change_names,
+                content_digests: digests, dev_entries: dev_entries, edit_to_visible_ms: None,
             })
-            self.events.coalesce(self.coalesce)
-            current: paths.iter().map(fn(path) { PathStamp.capture(path) }).collect()
+        }
+        closure: self.graph.closure_of(changed)
+        edit_to_visible_ms := Int?{None}
+        if self.edit_started == .Val(started) -> edit_to_visible_ms = Val(started.elapsed_millis())
+        self.edit_started = None
+        Val(InvalidationReceipt{
+            generation: generation, changed: changed, closure: closure, kinds: kinds, change_kinds: change_names,
+            content_digests: digests, dev_entries: dev_entries, edit_to_visible_ms: edit_to_visible_ms,
+        })
+    }
+
+    // Waits until the changed paths stop changing, past a save that
+    // truncated a file before writing it, for at most WATCH_SETTLE_MAX_MS.
+    settle: fn(self, paths: [String]) {
+        clock: watch_time.start()
+        previous := watch_stamps(paths)
+        loop clock.elapsed_millis() < WATCH_SETTLE_MAX_MS {
+            truncated := false
+            loop (index, path) in paths {
+                if (previous[index].size ?? -1) == 0 && self.graph.stamp_size(path) > 0 -> truncated = true
+            }
+            self.events.coalesce(self.coalesce_ms)
+            current: watch_stamps(paths)
             if current == previous && !truncated -> return
-            previous = current.move()
+            previous = current
         }
     }
-    acknowledge_with_dependencies: fn(self: &WatchSession, receipt: InvalidationReceipt, dependencies: [OSPath]) Diagnostic! {
-        if self.graph.entry().map(fn(path) { path.to_path_buf() }) == .Val(entry) {
-            desired_imports := [OSPath:Bool]{}
-            loop path in [entry.clone()].into_iter().chain(dependencies.iter().map(fn(path) { canonicalize_loose(path) })) {
-                if WatchGraph.classify(path) == RootKind.Import -> desired_imports.insert(path, true)
-            }
-            current_imports: self.graph.nodes().filter(fn(node) { node.kind == RootKind.Import }).map(fn(node) { (_0: node.path.clone(), _1: true) }).collect()
-            topology_changed: desired_imports.keys().any(fn(path) { !current_imports.contains_key(path) })
-                || current_imports.keys().any(fn(path) { !desired_imports.contains_key(path) })
-            if topology_changed -> return self.acknowledge(receipt)
-            if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
-            loop dependency in dependencies {
-                path: canonicalize_loose(dependency)
-                if !self.graph.nodes.contains_key(path) -> self.graph.upsert(path.clone(), WatchGraph.classify(path))
-                self.graph.link(entry.clone(), path)
-            }
-            self.events.refresh(self.graph.watched_paths())
-        } else { self.acknowledge(receipt) }
-    }
-    acknowledge: fn(self: &WatchSession, receipt: InvalidationReceipt) Diagnostic! {
+
+    // Acknowledges `receipt` with the dependencies its rebuild loaded; a
+    // change to the set of imports rediscovers the graph.
+    acknowledge_with_dependencies: fn(&self, receipt: InvalidationReceipt, dependencies: [String], checker: LSPChecker) {
+        entry: self.graph.entry_path() ?? {
+            self.acknowledge(receipt, checker)
+            return
+        }
+        desired := [String:Bool]{}
+        desired[entry] = true
+        loop dependency in dependencies {
+            path: watch_canonicalize_loose(dependency)
+            if WatchGraph.classify(path) == RootKind.Import -> desired[path] = true
+        }
+        current := [String:Bool]{}
+        nodes: self.graph.node_list()
+        loop node in nodes {
+            if node.kind == RootKind.Import -> current[node.path] = true
+        }
+        topology_changed := false
+        loop path in desired.keys() {
+            if !current.has_key(path) -> topology_changed = true
+        }
+        loop path in current.keys() {
+            if !desired.has_key(path) -> topology_changed = true
+        }
+        if topology_changed {
+            self.acknowledge(receipt, checker)
+            return
+        }
         if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
-        if self.graph.entry().map(fn(p) { p.to_path_buf() }) == .Val(entry) {
-            discovered: WatchGraph.discover(entry)
-            loop node in discovered.nodes() {
-                if !self.graph.nodes.contains_key(node.path) -> self.graph.upsert(node.path.clone(), node.kind)
+        loop dependency in dependencies {
+            path: watch_canonicalize_loose(dependency)
+            if !self.graph.nodes.has_key(path) -> self.graph.upsert(path, WatchGraph.classify(path))
+            self.graph.link(entry, path)
+        }
+        self.events.refresh(self.graph.watched_paths())
+    }
+
+    acknowledge: fn(&self, receipt: InvalidationReceipt, checker: LSPChecker) {
+        if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
+        entry: self.graph.entry_path() ?? return
+        discovered: WatchGraph.discover(entry, checker)
+        nodes: discovered.node_list()
+        loop node in nodes {
+            if !self.graph.nodes.has_key(node.path) -> self.graph.upsert(node.path, node.kind)
+        }
+        targets := discovered.reverse.keys().to_list()
+        targets.sort()
+        loop target in targets {
+            if discovered.reverse.get(target) == .Val(sources) {
+                source_paths := sources.keys().to_list()
+                source_paths.sort()
+                loop source_path in source_paths -> self.graph.link(source_path, target)
             }
-            to_paths := discovered.reverse_edges().keys().cloned().collect(); to_paths.sort()
-            loop to in to_paths {
-                from_paths := discovered.reverse_edges()[to].keys().cloned().collect(); from_paths.sort()
-                loop from in from_paths { self.graph.link(from, to.clone()) }
-            }
-            loop path in discovered.runtime_input_roots.keys() { self.graph.runtime_input_roots.insert(path.clone(), true) }
         }
+        loop path in discovered.runtime_input_roots.keys() -> self.graph.mark_runtime_root(path)
+        self.events.refresh(self.graph.watched_paths())
     }
-    recover: fn(self: WatchSession) -> () { self.graph.refresh_stamps(); self.edit_started = None }
-}
-detect_renames: fn(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGraph) -> () {
-    deleted: changed.iter().enumerate().filter(fn(pair) { change_kinds[pair._0] == ChangeKind.Deleted }).map(fn(pair) { (_0: pair._0, _1: pair._1.clone()) }).collect()
-    created: changed.iter().enumerate().filter(fn(pair) { change_kinds[pair._0] == ChangeKind.Created }).map(fn(pair) { (_0: pair._0, _1: pair._1.clone()) }).collect()
-    loop (di, dpath) in deleted {
-        dparent: dpath.parent(); dkind: graph.nodes.get(dpath).map(fn(n) { n.kind })
-        loop (_, cpath) in created {
-            if cpath.parent() == dparent && graph.nodes.get(cpath).map(fn(n) { n.kind }) == dkind && dpath != cpath -> change_kinds[di] = .Renamed
-        }
+
+    recover: fn(&self) {
+        self.graph.refresh_stamps()
+        self.edit_started = None
     }
-}
-make_dev_entries: fn(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
-    paths.iter().enumerate().filter_map(fn(pair) {
-        (index, path): pair
-        game_kind: graph.game_kind_for(path).or_else(fn() { if root_kinds.get(index) == .Val(.Asset) -> .Val(JetGameChangeKind.Asset) else -> None })
-        if game_kind == .Val(game_kind) {
-            (old_schema_id, new_schema_id): graph.game_schema_ids_for(path)
-            .Val(DevWatchEntry{path: path.clone(), change_kind: change_kinds.get(index).copied().map(fn(kind) { change_kind_name(kind) }).unwrap_or("modified"),
-                game_kind, old_digest: old_digests.get(index).cloned().flatten(), new_digest: new_digests.get(index).cloned().flatten(), old_schema_id, new_schema_id})
-        } else { None }
-    }).collect()
-}
-change_kind_name: fn(kind: ChangeKind) -> String { if kind == {
-    .Created -> "created"
-    .Modified -> "modified"
-    .Deleted -> "deleted"
-    .Renamed -> "renamed"
-    .Stale -> "stale"
-} }
-// Persist remains at the shared runtime-heap owner.
-use {
-    jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
-    Persist: jet_foundation.Persist
-    jet_pkg_model.[Manifest]
-    jet_foundation.[Diagnostic, foundation_json_escape]
-    jetpack_foundation.[PACKAGE_FILE]
-    core.files.[OSPath]
-}
-SessionSnapshot: struct {
-    generation: U64; artifact_token: String; source_id: String; build_id: String; revision: String; world_id: String; persist: PersistStore
-    new: fn(generation: U64, artifact_token: String, persist: PersistStore) -> SessionSnapshot {
-        SessionSnapshot{generation, artifact_token: artifact_token, source_id: "", build_id: "", revision: "", world_id: "", persist: persist.move()}
-    }
-    with_lineage: fn(self: SessionSnapshot, source_id: String, build_id: String, revision: String, world_id: String) -> SessionSnapshot {
-        self := self.move(); self.source_id = source_id.move(); self.build_id = build_id.move(); self.revision = revision.move(); self.world_id = world_id.move(); self.move()
-    }
-    with_persist: fn(self: SessionSnapshot, persist: PersistStore) -> SessionSnapshot { self := self.move(); self.persist = persist.move(); self.move() }
-    lineage_valid: fn(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all(fn(value) { !value.is_empty() && !value.chars().any(fn(c) { c.is_control() }) }) }
-}
-HotReplacePolicy: enum { Swap; Restart; Pin
-    default: fn() -> HotReplacePolicy { .Swap }
-}
-HotReplacePhase: enum { Begun; Paused; Preflighted; Staged; Committed; RolledBack }
-HotReplaceTxn: struct {
-    prior: SessionSnapshot; shared_prior: PersistStore; candidate: SessionSnapshot?; decisions: [PersistOutcome]
-    policy: HotReplacePolicy; phase: HotReplacePhase; failure: String?
-    begin: fn(prior: SessionSnapshot) -> HotReplaceTxn { HotReplaceTxn.begin_with_policy(prior, .Swap) }
-    begin_with_policy: fn(prior: SessionSnapshot, policy: HotReplacePolicy) -> HotReplaceTxn {
-        HotReplaceTxn{shared_prior: Persist.shared_clone(), prior: prior, candidate: None, decisions: [], policy, phase: .Begun, failure: None}
-    }
-    policy: fn(self) -> HotReplacePolicy { self.policy }
-    pause: fn(self: &HotReplaceTxn) Err! {
-        if self.phase != HotReplacePhase.Begun -> return Err("hot replacement pause is out of order")
-        self.phase = .Paused
-    }
-    preflight: fn(self: &HotReplaceTxn, candidate: SessionSnapshot) Err! {
-        if self.phase != HotReplacePhase.Paused -> return Err("hot replacement preflight requires a paused world")
-        if self.policy == HotReplacePolicy.Restart -> return self.reject("explicit restart requested; swap was not attempted")
-        if !candidate.lineage_valid() -> return self.reject("candidate lineage is incomplete; live identity is unavailable")
-        if !self.prior.lineage_valid() -> return self.reject("prior lineage is incomplete; live identity is unavailable")
-        if candidate.source_id != self.prior.source_id -> return self.reject("source identity changed; restart required")
-        if candidate.world_id != self.prior.world_id -> return self.reject("world identity changed; restart required")
-        self.decisions.clear(); rejected := String?{None}
-        loop entry in candidate.persist.entries() {
-            outcome: self.prior.persist.plan_migrate(entry.module_ref, entry.name, entry.shape, entry.payload)
-            if outcome == (.Rejected{reason, prior}) -> rejected = .Val("`{prior.key()}`: {reason.message()}")
-            self.decisions.push(outcome)
-        }
-        loop old in self.prior.persist.entries() {
-            if candidate.persist.get(old.module_ref, old.name).is_none() -> self.decisions.push(.Reset{
-                reason: "binding `{old.stable_key()}` disappeared; prior value reset because its name is no longer present", entry: old.clone()})
-        }
-        if rejected == .Val(reason) -> return self.reject("hot replacement preflight rejected: {reason}")
-        self.candidate = .Val(candidate.clone()); self.phase = .Preflighted
-    }
-    stage: fn(self: &HotReplaceTxn) Err! {
-        if self.phase != HotReplacePhase.Preflighted || self.candidate.is_none() -> return Err("hot replacement stage requires successful preflight")
-        self.phase = .Staged
-    }
-    commit: fn(self: HotReplaceTxn) -> Result<SessionSnapshot, (SessionSnapshot, String)> {
-        self := self.move()
-        if self.phase != HotReplacePhase.Staged {
-            reason: self.failure.take().unwrap_or("hot replacement was not staged; prior session kept")
-            Persist.shared_replace(self.shared_prior.move())
-            return .Err((_0: self.prior.move(), _1: reason))
-        }
-        if self.candidate.take() == .Val(candidate) {
-            generation: self.prior.generation + 1
-            next := candidate.move(); next.generation = generation; next.artifact_token = "gen-{generation}"
-            Persist.shared_replace(next.persist.clone()); self.phase = .Committed
-            .Ok(next)
-        } else {
-            Persist.shared_replace(self.shared_prior.move())
-            .Err((_0: self.prior.move(), _1: "hot replacement candidate disappeared"))
-        }
-    }
-    rollback: fn(self: HotReplaceTxn, reason: String) -> SessionSnapshot {
-        self.failure = .Val(reason); Persist.shared_replace(self.shared_prior.clone()); self.phase = .RolledBack; self.prior.clone()
-    }
-    reject: fn(self: &HotReplaceTxn, reason: String) Err! { self.failure = .Val(reason.clone()); Err(reason) }
-    phase: fn(self) -> HotReplacePhase { self.phase }
-    decisions: fn(self) -> [PersistOutcome] { &self.decisions }
-    candidate: fn(self) -> SessionSnapshot? { self.candidate.as_ref() }
-    prior: fn(self) -> SessionSnapshot { &self.prior }
-}
-WATCH_POLL_INTERVAL_MS: U64{5}
-WATCH_COALESCE_MS: U64{4}
-WATCH_SETTLE_MAX_MS: U64{250}
-EDIT_TO_VISIBLE_BUDGET_MS: U64{2000}
-within_budget: fn(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map(fn(ms) { ms <= EDIT_TO_VISIBLE_BUDGET_MS }).unwrap_or(true) }
-SessionBroker: struct {
-    source_transactions: Mutex<()>
-    default: fn() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }
-    lock_source_transaction: fn(self) -> MutexGuard<()> { self.source_transactions.lock().unwrap() }
 }
 
+// A deletion beside a creation of the same kind in the same directory is a
+// rename.
+watch_detect_renames: fn(changes: &[WatchChange], graph: WatchGraph) {
+    loop deleted_index in 0..<changes.len() {
+        if changes[deleted_index].kind != ChangeKind.Deleted -> next
+        deleted_path: changes[deleted_index].path
+        deleted_parent: watch_files.dirname(deleted_path)
+        deleted_node: graph.nodes.get(deleted_path) ?? next
+        renamed := false
+        loop change in changes {
+            if change.kind != ChangeKind.Created || change.path == deleted_path -> next
+            if watch_files.dirname(change.path) != deleted_parent -> next
+            if graph.nodes.get(change.path) == .Val(created_node) {
+                if created_node.kind == deleted_node.kind -> renamed = true
+            }
+        }
+        if renamed -> changes[deleted_index].kind = ChangeKind.Renamed
+    }
+}
+
+// The game-facing rows of a receipt: scripts and assets. A stale receipt
+// carries no digests.
+watch_dev_entries: fn(rows: [WatchSettled], stale: Bool) -> [DevWatchEntry] Never! {
+    entries := [DevWatchEntry]{}
+    loop row in rows {
+        game_kind: if row.root_kind == {
+            .Import -> "script"
+            .Asset -> "asset"
+            .HTML | .Style | .Manifest | .Lock | .Generated | .BuildInput | .TargetFact -> ""
+        }
+        if game_kind == "" -> next
+        entries.push(DevWatchEntry{
+            path: row.path, change_kind: row.change_kind.as_str(), game_kind: game_kind,
+            old_digest: if stale -> None else -> row.old_digest, new_digest: if stale -> None else -> row.new_digest,
+        })
+    }
+    entries
+}
+
+watch_within_budget: fn(receipt: InvalidationReceipt) -> Bool Never! {
+    if receipt.edit_to_visible_ms == .Val(ms) -> return ms <= EDIT_TO_VISIBLE_BUDGET_MS
+    true
+}

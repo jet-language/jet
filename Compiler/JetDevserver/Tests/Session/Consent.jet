@@ -64,13 +64,14 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
         assert(grant.matches(incomplete, scope))
         assert(!grant.matches(identity, scope))
     }
-    invalid: [String]{"\n", "{Char{13}}", "\t", String.from_bytes([U8]{0}) ?? panic("NUL"), String.from_bytes([U8]{127}) ?? panic("DEL"), String.from_bytes([U8]{194, 133}) ?? panic("C1")}
+    invalid: [String]{"\n", "\r", "\t", String.from_bytes([U8]{0}) ?? panic("NUL"), String.from_bytes([U8]{127}) ?? panic("DEL"), String.from_bytes([U8]{194, 133}) ?? panic("C1")}
     loop text in invalid {
         changed := identity.copy()
         changed.revision = "rev{text}"
         assert(!changed.is_exact())
     }
-    unicode: CaptureIdentity.exact("λ", "版本", "native", " session ", "é", "build", "rev{Char{8232}}{Char{8233}}")
+    separators: String.from_bytes([U8]{226, 128, 168, 226, 128, 169}) ?? panic("line and paragraph separators")
+    unicode: CaptureIdentity.exact("λ", "版本", "native", " session ", "é", "build", "rev{separators}")
     assert(unicode.is_exact())
 }
 
@@ -183,7 +184,6 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
         assert_eq(reason.code(), codes[index])
         wanted: "capture: skipped ({texts[index]})"
         assert_eq(skip.status_line(), wanted)
-        // #4444: borrowed enum-payload getter closure is compiler-gated.
         assert(reason.source() == None)
     }
 }
@@ -198,7 +198,6 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert(!safe.is_sensitive())
     assert_eq(safe.kind(), Val(CaptureKind.SafeClock))
     assert_eq(safe.budget(), Val(budget))
-    // #4444: getter assertions are excluded only from the independent proof.
     assert(safe.skip() == None)
     assert(sensitive.is_allowed())
     assert(sensitive.is_sensitive())
@@ -211,29 +210,25 @@ capture_consent_test_scope: fn() -> CaptureConsentScope Never! {
     assert_eq(denied.budget(), None)
 }
 
-// #4446: original receiver-backed scalar View acceptance retained unchanged.
-#Test("capture_consent_accessors_borrow_private_binding_without_mutation") {
+#Test("capture_consent_accessors_read_private_binding_without_mutation") {
     identity: capture_consent_test_identity()
     scope: capture_consent_test_scope()
     grant: SensitiveCaptureConsent.new(identity, scope)
-    id_view: grant.identity()
-    scope_view: grant.scope()
-    assert_eq(id_view[0].revision, "rev")
-    assert_eq(scope_view[0].byte_limit, U64{123})
+    assert_eq(grant.identity().revision, "rev")
+    assert_eq(grant.scope().byte_limit, U64{123})
 }
 
-// #4444: full no-copy enum-payload getter acceptance, not an owned substitute.
-#Test("capture_skip_accessors_borrow_source_and_skip_payload") {
+#Test("capture_skip_accessors_return_source_and_skip_payload") {
     fact: CaptureSourceFact.at(CaptureSource.Randomness, "rand.jet", U32{11})
     reason: CaptureSkipReason.UnsafeSource{source: fact}
     if reason.source() == {
-        .Val(source) -> assert_eq(source[0].reason_text(), "Rand at rand.jet:11")
+        .Val(source) -> assert_eq(source.reason_text(), "Rand at rand.jet:11")
         .None -> { panic("source lost") }
     }
     skip: CaptureSkip{reason, terminal_available: false}
     eligibility: CaptureEligibility.Skipped{skip}
     if eligibility.skip() == {
-        .Val(view) -> assert_eq(view[0].status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
+        .Val(found) -> assert_eq(found.status_line(), "capture: skipped (Rand at rand.jet:11); no terminal to consent")
         .None -> { panic("skip lost") }
     }
 }

@@ -21,7 +21,7 @@ CaptureMode: enum {
         }
     }
 
-    impl Display { display: fn(&&self) -> String { self.as_str() } }
+    impl Display { display: fn(self) -> String { self.as_str() } }
 }
 // Rust CaptureSource: only Clock is safe without sensitive consent.
 CaptureSource: enum {
@@ -45,7 +45,7 @@ CaptureSource: enum {
     requires_sensitive_consent: fn(self) -> Bool Never! { !self.is_safe_clock() }
     as_str: fn(self) -> String Never! { self.reason_code() }
 
-    impl Display { display: fn(&&self) -> String { self.reason_code() } }
+    impl Display { display: fn(self) -> String { self.reason_code() } }
 }
 // Rust CaptureLocation and CaptureSourceFact: source-relative status reasons.
 CaptureLocation: struct {
@@ -67,7 +67,7 @@ CaptureLocation: struct {
         }
     }
 
-    impl Display { display: fn(&&self) -> String { self.render() } }
+    impl Display { display: fn(self) -> String { self.render() } }
 }
 CaptureSourceFact: struct {
     source: CaptureSource
@@ -99,7 +99,7 @@ CaptureKind: enum {
     }
     is_sensitive: fn(self) -> Bool Never! { self == CaptureKind.Sensitive }
 
-    impl Display { display: fn(&&self) -> String { self.as_str() } }
+    impl Display { display: fn(self) -> String { self.as_str() } }
 }
 // Rust PackageCaptureSetting/Policy. Release eligibility belongs to C3.
 PackageCaptureSetting: enum {
@@ -190,7 +190,7 @@ CaptureBudgetError: enum {
         }
     }
 
-    impl Display { display: fn(&&self) -> String { self.as_str() } }
+    impl Display { display: fn(self) -> String { self.as_str() } }
 }
 // Rust RecordIndexRetention. The canonical RecordIndex adapter owns disposable
 // policy; saved rows MUST return false from evictable, even when overriding it.

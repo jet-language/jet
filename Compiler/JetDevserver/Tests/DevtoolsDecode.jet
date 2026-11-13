@@ -1,0 +1,67 @@
+decode_test_events: fn(events: String) -> String {
+    "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"runtime_to_host\",\"events\":[{events}],\"cursor\":2,\"selection\":{{\"panel_id\":\"build\",\"item_key\":null}},\"lifecycle\":\"ready\"}}"
+}
+
+decode_test_event: fn(sequence: Int, kind: String, fields: String) -> String {
+    "{{\"sequence\":{sequence},\"timestamp_ms\":20,\"source\":\"runtime\",\"kind\":\"{kind}\",\"entity\":\"users\",\"fields\":{fields},\"payload\":null}}"
+}
+
+#Test("an event envelope keeps typed bodies and its view metadata") {
+    query: decode_test_event(1, "Query", "{{\"name\":\"users\",\"state\":\"fresh\",\"footprint\":3}}")
+    custom: decode_test_event(2, "Custom", "{{\"z\":1,\"a\":true}}")
+    decoded: decode_devtools_envelope(decode_test_events("{query},{custom}")) ?? panic("event envelope")
+    assert_eq(decoded.session_id(), "s1")
+    envelope: if decoded == {
+        .Events(envelope) -> envelope
+        .Commands(_) -> panic("expected an event envelope")
+    }
+    events: envelope.events()
+    assert_eq(events.len(), 2)
+    assert(events[0].body != None)
+    assert(events[1].body == None)
+    assert_eq(events[1].fields_json(), "{{\"a\":true,\"z\":1}}")
+    assert(envelope.cursor() == Val(2))
+    assert(envelope.selection() != None)
+}
+
+#Test("a mismatched typed body stays untyped or fails as its kind requires") {
+    extra_query: decode_test_event(1, "Query", "{{\"name\":\"users\",\"state\":\"fresh\",\"footprint\":3,\"extra\":1}}")
+    decoded: decode_devtools_envelope(decode_test_events(extra_query)) ?? panic("untyped query")
+    if decoded == {
+        .Events(envelope) -> assert(envelope.events()[0].body == None)
+        .Commands(_) -> panic("expected an event envelope")
+    }
+    extra_mutation: decode_test_event(1, "Mutation", "{{\"name\":\"save\",\"lifecycle\":\"started\",\"rollback\":false,\"extra\":1}}")
+    assert(decode_devtools_envelope(decode_test_events(extra_mutation)) == .Err(_))
+    bad_state: decode_test_event(1, "Query", "{{\"name\":\"users\",\"state\":\"warm\",\"footprint\":3}}")
+    assert(decode_devtools_envelope(decode_test_events(bad_state)) == .Err(_))
+    zero_sequence: decode_test_event(0, "Custom", "{{}}")
+    assert(decode_devtools_envelope(decode_test_events(zero_sequence)) == .Err(_))
+}
+
+#Test("a command envelope decodes host-to-runtime commands only") {
+    explain: "{{\"kind\":\"DatabaseExplain\",\"payload\":{{\"session_id\":\"s1\",\"request_id\":\"d1\",\"statement_identity\":\"users.by_id\",\"timeout_ms\":1000,\"max_rows\":10}}}}"
+    commands: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"host_to_runtime\",\"commands\":[{explain}]}}"
+    decoded: decode_devtools_envelope(commands) ?? panic("command envelope")
+    if decoded == {
+        .Commands(envelope) -> assert_eq(envelope.command_count(), 1)
+        .Events(_) -> panic("expected a command envelope")
+    }
+    mixed: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"host_to_runtime\",\"commands\":[],\"events\":[]}}"
+    assert(decode_devtools_envelope(mixed) == .Err(_))
+    undirected: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"commands\":[]}}"
+    assert(decode_devtools_envelope(undirected) == .Err(_))
+    sideways: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"sideways\",\"events\":[]}}"
+    assert(decode_devtools_envelope(sideways) == .Err(_))
+    foreign_explain: "{{\"kind\":\"DatabaseExplain\",\"payload\":{{\"session_id\":\"s2\",\"request_id\":\"d1\",\"statement_identity\":\"users.by_id\",\"timeout_ms\":1000,\"max_rows\":10}}}}"
+    foreign: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"host_to_runtime\",\"commands\":[{foreign_explain}]}}"
+    assert(decode_devtools_envelope(foreign) == .Err(_))
+}
+
+#Test("the envelope must be bounded jet.devtools.v1 JSON with one event stream") {
+    assert(decode_devtools_envelope("not json") == .Err(_))
+    assert(decode_devtools_envelope("[]") == .Err(_))
+    assert(decode_devtools_envelope("{{\"protocol\":\"jet.devtools.v2\",\"session_id\":\"s1\",\"started_at_ms\":10,\"events\":[]}}") == .Err(_))
+    assert(decode_devtools_envelope("{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"events\":[],\"history\":[]}}") == .Err(_))
+    assert(decode_devtools_envelope("{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"events\":[]}}") == .Ok(_))
+}

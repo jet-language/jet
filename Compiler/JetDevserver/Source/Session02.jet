@@ -1,247 +1,414 @@
+// The session's lifecycle, transaction, debugger and recording edits, its
+// JSON views and the request helpers they share.
 use {
-    std.sync.[Arc, MutexGuard]
-    std.time.[Instant, SystemTime, UNIX_EPOCH]
-    jet_foundation.Dyn.[Dyn]
-    jet_foundation.JSON.[foundation_json_escape, parse_json]
-    jet_foundation.HotSwap.[StateRetentionFact, StateRetentionDecision]
-    jet_foundation.Game.[JetGameChangeFact]
-    jet_devserver.CapturePolicy.[RecordIndexCaptureSink]
-    jet_foundation.[foundation_json_escape]
-    jet_foundation.Devtools.[JetDevtoolsLifecycleState]
-    core.encoding.[Dyn]
+    session_view_time: core.time
+    jet_foundation.[foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json, foundation_parse_protocol_json_with_limit, jettrace_has_control]
 }
 
 impl ResidentDevSession {
-    publish_session_state: fn(self: Self, state_name: String, code: String, diagnostic: String) -> Unit {
-        lifecycle: devtools_session_state(state_name)
-        freshness: if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(unix_time_ms()) else -> JetDevtoolsFreshnessFact.stale(unix_time_ms()) {
-            state: self.devtools_lock()
-            state.envelope.set_lifecycle(lifecycle)
-            state.envelope.set_freshness(freshness)
-        }
-        fields: "{{\"state\":{json_value(state_name)},\"code\":{json_value(code)},\"diagnostic\":{json_value(diagnostic)}}}"
-        if JetDevtoolsEvent.from_parts(unix_time_ms(), "devserver", "state", "session", fields) == .Ok(event) {
-            _: self.publish_devtools_event_typed(event)
+    publish_session_state: fn(&self, state_name: String, code: String, diagnostic: String) {
+        lifecycle: session_lifecycle_state(state_name)
+        now: session_unix_ms()
+        self.devtools.set_lifecycle(lifecycle)
+        self.devtools.set_freshness(if lifecycle == .Ready -> JetDevtoolsFreshnessFact.fresh(now) else -> JetDevtoolsFreshnessFact.stale(now))
+        fields: "{{\"state\":{session_json_value(state_name)},\"code\":{session_json_value(code)},\"diagnostic\":{session_json_value(diagnostic)}}}"
+        if JetDevtoolsEvent.from_parts(now, "devserver", "state", "session", fields) == .Ok(event) {
+            self.push_devtools_event(event.move()).drop("a refused state event leaves the lifecycle fact already set")
         }
     }
-    push_devtools_event: fn(self: Self, event: JetDevtoolsEvent) -> U64 Err! {
-        devtools: self.devtools_lock()
-        sequence: if devtools.envelope.latest_sequence() == {
-            .Val(sequence) -> sequence.checked_add(1) ?? return .Err("devtools event sequence exhausted")
-            .None -> 1
+    // Records `event` under the sequence the envelope assigns next, then
+    // appends it; the live cursor follows the recording's tail.
+    push_devtools_event: fn(&self, &&event: JetDevtoolsEvent) -> Int Err! {
+        sequence: self.devtools.next_sequence
+        if self.recording == .Val(current) {
+            state := current
+            recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source(), event.kind(), event.entity(), event.fields_json(), event.payload_json()) ?? return Err("{err}")
+            _: state.recording.append_event(recorded) ?? return Err("{err}")
+            state.cursor = ReplayCursor{identity: state.recording.identity, generation: state.recording.generation, position: state.recording.events.len(), sequence: state.recording.last_retained_sequence()}
+            state.checkpoints = [String:SessionCheckpoint]{}
+            self.recording = Val(state)
         }
-        recording: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
-        if recording.as_mut() == .Val(state) {
-            recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source().to_string(), event.kind().to_string(),
-                event.entity().to_string(), event.fields_json().to_string(), event.payload_json().map(fn(text) { text.to_string() })).map_err(recording_error)
-            state.recording.append_event(recorded).map_err(recording_error)
-        }
-        assigned: devtools.envelope.push(event)
-        if recording.as_mut() == .Val(state) {
-            cursor := state.recording.replay()
-            loop _ in 0..state.recording.event_count() -> _: cursor.step_forward(state.recording).map_err(recording_error)
-            state.cursor = cursor.move()
-            state.checkpoints.clear()
-        }
-        assigned
+        Ok(self.devtools.push(event.move()))
     }
-    devtools_lock: fn(self: Self) -> MutexGuard<DevtoolsState> {
-        // GATE #4494: poison recovery retains the resident envelope.
-        if self.devtools.lock() == {
-            .Ok(guard) -> guard
-            .Err(poisoned) -> poisoned.into_inner()
-        }
+    mark_last_good: fn(&self, revision: String, program: String) {
+        if revision == "" -> return
+        self.last_good_revision = revision
+        self.last_good_program = program
     }
-    sync_replay_cursor: fn(self: Self, projection: ReplayProjection) -> Unit { self.devtools_lock().envelope.set_cursor(projection.sequence()) }
-    mark_last_good: fn(self: Self, revision: String, program: String) -> Unit {
-        if revision.is_empty() -> return
-        *self.last_good_revision.lock().unwrap() = revision
-        *self.last_good_program.lock().unwrap() = program
+    remember_last_good_view: fn(&self, kind: String, source_id: String, revision: String, payload: String) {
+        if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision == "" || payload == "" || payload.bytes().len() > SESSION_MAX_RETAINED_VIEW_BYTES -> return
+        self.last_good_views[kind] = RetainedView{revision: revision, source_id: source_id, payload: payload}
     }
-    remember_last_good_view: fn(self: Self, kind: String, source_id: String, revision: String, payload: String) -> Unit {
-        if !(kind == "graph" || kind == "debugger" || kind == "runtime") || revision.is_empty() || payload.is_empty() || payload.len() > MAX_RETAINED_VIEW_BYTES -> return
-        self.last_good_views.lock().unwrap().insert(kind, RetainedView { revision, source_id, payload })
+    last_good_view: fn(self, kind: String, source_id: String) -> (revision: String, payload: String)? Never! {
+        view: self.last_good_views.get(kind) ?? return None
+        if view.source_id != source_id -> return None
+        Val((revision: view.revision, payload: view.payload))
     }
-    last_good_view: fn(self: Self, kind: String, source_id: String) -> (String,String)? {
-        views: self.last_good_views.lock().unwrap()
-        view: views.get(kind)
-        if view.source_id != source_id -> return .None
-        .Val((_0: view.revision.copy(), _1: view.payload.copy()))
-    }
-    clear_last_good_view: fn(self: Self, kind: String) -> Unit { self.last_good_views.lock().unwrap().remove(kind) }
-    accept_transaction: fn(self: Self, request: String, revision: String) -> Unit {
-        before: request_string(request, "revision")
-        client: request_string(request, "client_id")
-        kind: request_string(request, "op")
-        self.select_project_source(request_string(request, "source_id"))
+    clear_last_good_view: fn(&self, kind: String) { _: self.last_good_views.remove(kind) }
+    accept_transaction: fn(&self, request: String, revision: String) {
+        kind: session_request_string(request, "op")
+        self.select_project_source(session_request_string(request, "source_id"))
         self.observe_source(revision)
-        if !revision.is_empty() -> *self.accepted_revision.lock().unwrap() = revision
-        self.push_receipt(Receipt { kind: if kind.is_empty() -> "source" else -> kind.move(), status: "accepted", before: before,
-            after: revision, client: client, output: request_string(request, "output"), live: .None })
+        if revision != "" -> self.accepted_revision = revision
+        self.push_receipt(Receipt{kind: if kind == "" -> "source" else -> kind, status: "accepted", before: session_request_string(request, "revision"), after: revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
     }
-    refuse_transaction: fn(self: Self, request: String, current_revision: String) -> Unit {
+    refuse_transaction: fn(&self, request: String, current_revision: String) {
         self.observe_source(current_revision)
-        self.push_receipt(Receipt { kind: request_string(request, "op"), status: "refused", before: request_string(request, "revision"),
-            after: current_revision, client: request_string(request, "client_id"), output: request_string(request, "output"), live: .None })
+        self.push_receipt(Receipt{kind: session_request_string(request, "op"), status: "refused", before: session_request_string(request, "revision"), after: current_revision, client: session_request_string(request, "client_id"), output: session_request_string(request, "output"), live: None})
     }
-    lock_source_transaction: fn(self: Self) -> MutexGuard<Unit> { self.source_transactions.lock_source_transaction() }
-    record_command: fn(self: Self, request: String) -> Unit {
-        action: request_string(request, "action_id")
-        self.select_project_source(request_string(request, "source_id"))
-        if action.contains("test") -> *self.test_state.lock().unwrap() = "requested"
-        self.push_receipt(Receipt { kind: if action.is_empty() -> "command" else -> action.move(), status: "requested", before: "",
-            after: (*self.current_revision.lock().unwrap()).copy(), client: request_string(request, "client_id"),
-            output: (*self.selected_output.lock().unwrap()).copy(), live: .None })
+    record_command: fn(&self, request: String) {
+        action: session_request_string(request, "action_id")
+        self.select_project_source(session_request_string(request, "source_id"))
+        if action.contains("test") -> self.test_state = "requested"
+        self.push_receipt(Receipt{kind: if action == "" -> "command" else -> action, status: "requested", before: "", after: self.current_revision_text, client: session_request_string(request, "client_id"), output: self.selected_output_name, live: None})
     }
-    record_debug: fn(self: Self, request: String) -> Unit {
-        self.select_project_source(request_string(request, "source_id"))
-        debugger: self.debugger.lock().unwrap()
-        if request_bool(request, "stop") || request_string(request, "op") == "disconnect" {
-            *debugger = idle_debugger()
-            drop(debugger)
+    record_debug: fn(&self, request: String) {
+        self.select_project_source(session_request_string(request, "source_id"))
+        if session_request_bool(request, "stop") || session_request_string(request, "op") == "disconnect" {
+            self.debugger = DebuggerSnapshot.idle()
             self.clear_last_good_view("debugger")
             return
         }
-        debugger.state = "active"
-        set_if_present(debugger.session_id, request_string(request, "session_id"))
-        set_if_present(debugger.source_id, request_string(request, "source_id"))
-        set_if_present(debugger.revision, request_string(request, "revision"))
-        set_if_present(debugger.tier, request_string(request, "tier"))
+        self.debugger.state = "active"
+        session_id: session_request_string(request, "session_id")
+        if session_id != "" -> self.debugger.session_id = session_id
+        source_id: session_request_string(request, "source_id")
+        if source_id != "" -> self.debugger.source_id = source_id
+        revision: session_request_string(request, "revision")
+        if revision != "" -> self.debugger.revision = revision
+        tier: session_request_string(request, "tier")
+        if tier != "" -> self.debugger.tier = tier
     }
-    record_debug_response: fn(self: Self, request: String, response: String) -> Unit {
+    record_debug_response: fn(&self, request: String, response: String) {
         self.record_debug(request)
-        if request_bool(request, "stop") -> return
-        snapshot: find_debugger_snapshot(response) ?? return
-        (source_id, debugger_revision): (fn() {
-            debugger: self.debugger.lock().unwrap()
-            state: if snapshot.state == {
-                "running" -> "active"
-                "stopped" -> "idle"
-                state -> state.copy()
-            }
-            *debugger = DebuggerSnapshot { state: state.move(), session_id: snapshot.session_id.move(), source_id: snapshot.source_id.move(),
-                revision: snapshot.revision.move(), tier: snapshot.tier.move() }
-            source_id: if debugger.source_id.is_empty() -> request_string(request, "source_id") else -> debugger.source_id.copy()
-            (_0: source_id, _1: debugger.revision.copy())
-        })()
-        revision: if debugger_revision.is_empty() {
-            requested: request_string(request, "revision")
-            if requested.is_empty() -> (*self.current_revision.lock().unwrap()).copy() else -> requested.move()
-        } else -> debugger_revision.move()
+        if session_request_bool(request, "stop") -> return
+        snapshot: session_find_debugger_snapshot(response) ?? return
+        state: if snapshot.state == {
+            "running" -> "active"
+            "stopped" -> "idle"
+            else -> snapshot.state
+        }
+        self.debugger = DebuggerSnapshot{state: state, session_id: snapshot.session_id, source_id: snapshot.source_id, revision: snapshot.revision, tier: snapshot.tier}
+        source_id: if snapshot.source_id == "" -> session_request_string(request, "source_id") else -> snapshot.source_id
+        revision := snapshot.revision
+        if revision == "" {
+            requested: session_request_string(request, "revision")
+            revision = if requested == "" -> self.current_revision_text else -> requested
+        }
         self.remember_last_good_view("debugger", source_id, revision, response)
     }
-    select_project_source: fn(self: Self, source_id: String) -> Unit {
-        if !source_id.is_empty() -> *self.selected_source_id.lock().unwrap() = source_id
+    select_project_source: fn(&self, source_id: String) {
+        if source_id != "" -> self.selected_source_id = source_id
     }
-    select_project_source_from_payload: fn(self: Self, payload: String) -> Unit {
-        if json_string_any(payload, "source_id") == .Val(source_id) -> self.select_project_source(source_id)
+    select_project_source_from_payload: fn(&self, payload: String) {
+        if session_json_string_any(payload, "source_id") == .Val(source_id) -> self.select_project_source(source_id)
     }
-    select_output: fn(self: Self, request: String) -> Unit {
-        output: request_string(request, "output")
-        target: request_string(request, "target")
-        self.select_output_values(if !output.is_empty() -> .Val(output) else -> .None, if !target.is_empty() -> .Val(target) else -> .None)
+    select_output: fn(&self, request: String) {
+        self.select_output_values(session_optional_fact(session_request_string(request, "output")), session_optional_fact(session_request_string(request, "target")))
     }
-    select_output_values: fn(self: Self, output: String?, target: String?) -> Unit {
-        if output.filter(fn(output) { !output.is_empty() }) == .Val(selected) -> *self.selected_output.lock().unwrap() = selected.copy()
-        if target.filter(fn(target) { !target.is_empty() }) == .Val(selected) -> *self.selected_target.lock().unwrap() = selected.copy()
+    select_output_values: fn(&self, output: String?, target: String?) {
+        if output == .Val(selected) {
+            if selected != "" -> self.selected_output_name = selected
+        }
+        if target == .Val(selected) {
+            if selected != "" -> self.selected_target_name = selected
+        }
     }
-    id: fn(self: Self) -> String { &self.id }
-    selected_target: fn(self: Self) -> String? {
-        target: (*self.selected_target.lock().unwrap()).copy()
-        if !target.is_empty() -> .Val(target) else -> .None
-    }
-    selected_output: fn(self: Self) -> String? {
-        output: (*self.selected_output.lock().unwrap()).copy()
-        if !output.is_empty() -> .Val(output) else -> .None
-    }
-    application_port: fn(self: Self) -> U16 { self.application_port }
-    canvas_port: fn(self: Self) -> U16 { self.canvas_port }
-    application_host: fn(self: Self) -> String { &self.application_host }
-    json: fn(self: Self) -> String {
-        current: (*self.current_revision.lock().unwrap()).copy()
-        accepted: (*self.accepted_revision.lock().unwrap()).copy()
-        last_good: (*self.last_good_revision.lock().unwrap()).copy()
-        program: (*self.last_good_program.lock().unwrap()).copy()
-        state: (*self.state.lock().unwrap()).copy()
-        diagnostic_code: (*self.diagnostic_code.lock().unwrap()).copy()
-        diagnostic: (*self.diagnostic.lock().unwrap()).copy()
-        diagnostic_revision: (*self.diagnostic_revision.lock().unwrap()).copy()
-        selected_source_id: (*self.selected_source_id.lock().unwrap()).copy()
-        output: (*self.selected_output.lock().unwrap()).copy()
-        target: (*self.selected_target.lock().unwrap()).copy()
-        debugger: (*self.debugger.lock().unwrap()).copy()
-        tests: (*self.test_state.lock().unwrap()).copy()
-        views: (*self.last_good_views.lock().unwrap()).copy()
-        live_lineage: (*self.live_lineage.lock().unwrap()).copy()
-        live_values: (*self.live_values.lock().unwrap()).copy()
-        (live_protocol, live_session_id, live_source_id, live_build_id, live_revision, live_world_id): live_lineage.as_ref().map(fn(lineage) {
-            (_0: json_value(lineage.protocol), _1: json_value(lineage.session_id), _2: json_value(lineage.source_id), _3: json_value(lineage.build_id),
-                _4: json_value(lineage.revision), _5: json_value(lineage.world_id))
-        }).unwrap_or((_0: "null", _1: "null", _2: "null", _3: "null", _4: "null", _5: "null"))
-        live_values_json: live_values.iter().map(live_value_fact_json).collect().join(",")
-        now: Instant.now()
-        client_state: self.clients.lock().unwrap()
-        expire_clients(client_state, now)
-        clients: client_state.len()
+    id: fn(self) -> String Never! { self.session_id }
+    selected_target: fn(self) -> String? Never! { session_optional_fact(self.selected_target_name) }
+    selected_output: fn(self) -> String? Never! { session_optional_fact(self.selected_output_name) }
+    application_port: fn(self) -> Int Never! { self.application_port_number }
+    canvas_port: fn(self) -> Int Never! { self.canvas_port_number }
+    application_host: fn(self) -> String Never! { self.application_host_name }
+    json: fn(self) -> String {
+        live_protocol := "null"
+        live_session_id := "null"
+        live_source_id := "null"
+        live_build_id := "null"
+        live_revision := "null"
+        live_world_id := "null"
+        if self.live_lineage == .Val(lineage) {
+            live_protocol = session_json_value(lineage.protocol)
+            live_session_id = session_json_value(lineage.session_id)
+            live_source_id = session_json_value(lineage.source_id)
+            live_build_id = session_json_value(lineage.build_id)
+            live_revision = session_json_value(lineage.revision)
+            live_world_id = session_json_value(lineage.world_id)
+        }
+        live_values := [String]{}
+        loop value in self.live_values -> live_values.push(session_live_value_fact_json(value))
+        now: self.clock.elapsed_millis()
+        clients := 0
+        loop seen in self.clients.values() {
+            if now - seen <= SESSION_CLIENT_TTL_MS -> clients += 1
+        }
         listener_entries := [String]{}
-        if self.canvas_port != 0 {
-            listener_entries.push("\"canvas\":{{\"host\":{json_value(self.canvas_host)},\"port\":{self.canvas_port},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}")
+        if self.canvas_port_number != 0 -> listener_entries.push("\"canvas\":{{\"host\":{session_json_value(self.canvas_host)},\"port\":{self.canvas_port_number},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}")
+        if self.application_port_number != 0 -> listener_entries.push("\"application\":{{\"host\":{session_json_value(self.application_host_name)},\"port\":{self.application_port_number},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}")
+        custom_server_listener: if self.application_port_number != 0 -> "\"application\"" else -> "null"
+        receipts := [String]{}
+        loop receipt in self.receipts {
+            live: if receipt.live == .Val(value) -> session_live_receipt_json(value) else -> "null"
+            receipts.push("{{\"kind\":{session_json_value(receipt.kind)},\"status\":{session_json_value(receipt.status)},\"before\":{session_json_value(receipt.before)},\"after\":{session_json_value(receipt.after)},\"client\":{session_json_value(receipt.client)},\"output\":{session_json_value(receipt.output)},\"live\":{live}}}")
         }
-        if self.application_port != 0 {
-            listener_entries.push("\"application\":{{\"host\":{json_value(self.application_host)},\"port\":{self.application_port},\"transport\":\"application\",\"listener\":\"application\",\"routes\":\"application-owned\",\"shared\":false}}")
+        debugger: self.debugger
+        views: "{{\"graph\":{session_retained_view_json(self.last_good_views.get("graph"))},\"debugger\":{session_retained_view_json(self.last_good_views.get("debugger"))},\"runtime\":{session_retained_view_json(self.last_good_views.get("runtime"))}}}"
+        identity: "\"id\":{session_json_value(self.session_id)},\"protocol\":{live_protocol},\"session_id\":{live_session_id},\"source_id\":{live_source_id},\"build_id\":{live_build_id},\"revision\":{live_revision},\"world_id\":{live_world_id},\"values\":[{live_values.join(",")}],\"entry\":{session_json_value(self.entry)},\"project_context\":{{\"source_id\":{session_json_value(self.selected_source_id)}}}"
+        revisions: "\"source_revision\":{session_json_value(self.current_revision_text)},\"accepted_revision\":{session_json_value(self.accepted_revision)},\"last_good_revision\":{session_json_value(self.last_good_revision)},\"last_good_program\":{session_json_value(self.last_good_program)},\"state\":{session_json_value(self.state)},\"diagnostic_code\":{session_json_value(self.diagnostic_code)},\"diagnostic\":{session_json_value(self.diagnostic)},\"diagnostic_revision\":{session_json_value(self.diagnostic_revision)}"
+        run: "\"last_good_views\":{views},\"clients\":{clients},\"run\":{{\"output\":{session_json_value(self.selected_output_name)},\"target\":{session_json_value(self.selected_target_name)}}},\"debugger\":{{\"state\":{session_json_value(debugger.state)},\"session_id\":{session_json_value(debugger.session_id)},\"source_id\":{session_json_value(debugger.source_id)},\"revision\":{session_json_value(debugger.revision)},\"tier\":{session_json_value(debugger.tier)}}},\"tests\":{{\"state\":{session_json_value(self.test_state)}}}"
+        hosts: "\"history\":{{\"count\":{self.receipts.len()},\"receipts\":[{receipts.join(",")}]}},\"listeners\":{{{listener_entries.join(",")}}},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{custom_server_listener}}}"
+        "{{{identity},{revisions},{run},{hosts}}}"
+    }
+    push_receipt: fn(&self, &&receipt: Receipt) {
+        self.receipts.push(receipt.move())
+        if self.receipts.len() > SESSION_MAX_RECEIPTS -> _: self.receipts.remove(0, .Slot)
+    }
+    // Session teardown: the queued commands, receipts and browser controls go
+    // with the session.
+    clear_commands: fn(&self) {
+        self.commands.clear()
+        self.browser_game_controls = [JetDevtoolsGameControlRequest]{}
+    }
+    scrub: fn(&self, sequence: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.seek(state.recording, sequence) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    scrub_time: fn(&self, timestamp_ms: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.seek_time(state.recording, timestamp_ms) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    // Replay steps forward only; a backward step is refused by the control.
+    step: fn(&self) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        projection: state.cursor.step(state.recording, .Forward) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
+    }
+    // Up to `count` forward steps; the tail stops the walk early.
+    skip: fn(&self, count: Int) -> ReplayProjection Err! {
+        state := self.recording ?? return Err(session_recording_unavailable())
+        loop _ in 0..<count {
+            if state.cursor.step(state.recording, .Forward) == .Err(_) -> break
         }
-        listeners: "{{{listener_entries.join(",")}}}"
-        custom_server_listener: if self.application_port != 0 -> "\"application\"" else -> "null"
-        receipts: self.receipts.lock().unwrap().iter().map(fn(receipt) {
-            live: receipt.live.as_ref().map(live_receipt_json).unwrap_or("null")
-            "{{\"kind\":{json_value(receipt.kind)},\"status\":{json_value(receipt.status)},\"before\":{json_value(receipt.before)},\"after\":{json_value(receipt.after)},\"client\":{json_value(receipt.client)},\"output\":{json_value(receipt.output)},\"live\":{live}}}"
-        }).collect().join(",")
-        "{{\"id\":{json_value(self.id)},\"protocol\":{live_protocol},\"session_id\":{live_session_id},\"source_id\":{live_source_id},\"build_id\":{live_build_id},\"revision\":{live_revision},\"world_id\":{live_world_id},\"values\":[{live_values_json}],\"entry\":{json_value(self.entry)},\"project_context\":{{\"source_id\":{json_value(selected_source_id)}}},\"source_revision\":{json_value(current)},\"accepted_revision\":{json_value(accepted)},\"last_good_revision\":{json_value(last_good)},\"last_good_program\":{json_value(program)},\"state\":{json_value(state)},\"diagnostic_code\":{json_value(diagnostic_code)},\"diagnostic\":{json_value(diagnostic)},\"diagnostic_revision\":{json_value(diagnostic_revision)},\"last_good_views\":{{\"graph\":{retained_view_json(views.get("graph"))},\"debugger\":{retained_view_json(views.get("debugger"))},\"runtime\":{retained_view_json(views.get("runtime"))}}},\"clients\":{clients},\"run\":{{\"output\":{json_value(output)},\"target\":{json_value(target)}}},\"debugger\":{{\"state\":{json_value(debugger.state)},\"session_id\":{json_value(debugger.session_id)},\"source_id\":{json_value(debugger.source_id)},\"revision\":{json_value(debugger.revision)},\"tier\":{json_value(debugger.tier)}}},\"tests\":{{\"state\":{json_value(tests)}}},\"history\":{{\"count\":{self.receipts.lock().unwrap().len()},\"receipts\":[{receipts}]}},\"listeners\":{listeners},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":{custom_server_listener}}}}}"
+        projection: state.recording.projection(state.cursor) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
     }
-    push_receipt: fn(self: Self, receipt: Receipt) -> Unit {
-        receipts: self.receipts.lock().unwrap()
-        receipts.push(receipt)
-        if receipts.len() > MAX_RECEIPTS -> receipts.remove(0)
+    checkpoint: fn(&self, name: String) -> SessionCheckpoint Err! {
+        session_validate_devtools_text(name, "checkpoint name")
+        state := self.recording ?? return Err(session_recording_unavailable())
+        checkpoint: state.recording.checkpoint(state.cursor) ?? return Err("{err}")
+        state.checkpoints[name] = checkpoint
+        saved: state.checkpoints.get(name) ?? return Err("{RecordingError.CheckpointUnavailable}")
+        self.recording = Val(state)
+        Ok(saved)
     }
-    install_devtools_event_sink: fn(self: Arc<Self>) -> JetDevtoolsEventSinkGuard {
-        // GATE #4494: scoped Arc-backed callback registration.
-        sink: Arc<JetDevtoolsEventSink>{self.clone()}
-        jet_foundation.Devtools.jet_devtools_install_event_sink(sink)
+    restore: fn(&self, name: String) -> ReplayProjection Err! {
+        session_validate_devtools_text(name, "checkpoint name")
+        state := self.recording ?? return Err(session_recording_unavailable())
+        checkpoint: state.checkpoints.get(name) ?? return Err("{RecordingError.CheckpointUnavailable}")
+        state.cursor = state.recording.restore_checkpoint(checkpoint) ?? return Err("{err}")
+        projection: state.recording.projection(state.cursor) ?? return Err("{err}")
+        self.recording = Val(state)
+        self.devtools.set_cursor(projection.sequence)
+        Ok(projection)
     }
-    drop: fn(self: Self) -> Unit {
-        jet_foundation.DevtoolsControl.jet_devtools_clear_commands(self.id)
-        _: jet_foundation.Devtools.jet_devtools_clear_game_control_relays()
-    }
-}
-impl ResidentDevSession.JetDevtoolsEventSink {
-    publish: fn(self: Self, event: JetDevtoolsEvent) -> Unit { _: self.publish_devtools_event_typed(event) }
-}
-trim_capture_facts: fn(facts: [CaptureSessionFact]) -> Unit {
-    if facts.len() > MAX_RECEIPTS {
-        drop_count: facts.len() - MAX_RECEIPTS
-        facts.drain(..drop_count)
-    }
-}
-impl ResidentDevSession.RecordIndexCaptureSink {
-    record_capture_start: fn(self: &Self, fact: &CaptureStartFact) Err! { ResidentDevSession.record_capture_start(self, fact) }
-    record_capture_fault: fn(self: &Self, fact: &CaptureFaultFact) Err! { ResidentDevSession.record_capture_fault(self, fact) }
-}
-persist_outcome_fact: fn(outcome: PersistOutcome) -> LiveValueFact {
-    if outcome == {
-        .Kept(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "kept", reason: "" }
-        .Migrated(entry) -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "migrated", reason: "published schema migration applied" }
-        .Reset { reason, entry } -> LiveValueFact { value_id: entry.stable_key(), type_identity: entry.type_identity().to_string(), disposition: "reset", reason: reason.copy() }
-        .Rejected { reason, prior } -> {
-            type_identity: if reason == {
-                .MigrationUnavailable { from, .. } | .ShapeChanged { from, .. } -> from.copy()
-                else -> "unavailable"
+    divergence: fn(self) -> DevtoolsRecordingDivergence Err! {
+        state: self.recording ?? return Err(session_recording_unavailable())
+        identity: state.recording.identity
+        expected_sequence := Int?{None}
+        if state.first_sequence == .Val(first) {
+            if self.devtools.latest_sequence() == .Val(sequence) {
+                if sequence >= first -> expected_sequence = Val(sequence)
             }
-            LiveValueFact { value_id: prior.key(), type_identity: type_identity, disposition: "rejected", reason: reason.message() }
         }
+        actual_sequence: state.recording.last_retained_sequence()
+        same_identity := false
+        if self.devtools.source_identity == .Val(published) -> same_identity = published.source_id == Val(identity.source_id) && published.build_id == Val(identity.build_id)
+        reason := String?{None}
+        if !same_identity -> reason = Val("resident source/build identity differs from recording")
+        else if expected_sequence != actual_sequence -> reason = Val("resident event tail differs from recording")
+        else if state.recording.projection(state.cursor) == .Err(error) -> reason = Val("{error}")
+        truncation: state.recording.truncation()
+        Ok(DevtoolsRecordingDivergence{divergent: reason != None, reason: reason, identity: identity, expected_sequence: expected_sequence, actual_sequence: actual_sequence, retained_events: state.recording.events.len(), dropped_events: truncation.dropped_events, truncation: truncation})
+    }
+    recording_control: fn(&self, payload: String) -> String Err! {
+        root: foundation_parse_protocol_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return Err("recording control must be valid bounded JSON")
+        object: recording_object_fields(root) ?? return Err("recording control must be a JSON object")
+        operation := session_field_text(object, "op")
+        if operation == None -> operation = session_field_text(object, "action")
+        op: operation ?? return Err("recording control must include string op")
+        if op == {
+            "scrub" -> {
+                sequence: session_field_count(object, "sequence") ?? return Err("recording scrub requires non-negative sequence")
+                self.scrub(sequence).drop("a refused scrub leaves the cursor; the recording view reports it")
+            }
+            "scrub_time" -> {
+                timestamp_ms: session_field_count(object, "timestamp_ms") ?? return Err("recording scrub_time requires non-negative timestamp_ms")
+                self.scrub_time(timestamp_ms).drop("a refused scrub leaves the cursor; the recording view reports it")
+            }
+            "step" -> {
+                direction: session_field_text(object, "direction") ?? "forward"
+                if direction == "backward" || direction == "reverse" -> return Err("recording step is forward-only")
+                if direction != "forward" -> return Err("unknown recording step direction `{direction}`")
+                _: self.step()
+            }
+            "skip" -> {
+                count: session_field_count(object, "count") ?? return Err("recording skip requires non-negative count")
+                _: self.skip(count)
+            }
+            "checkpoint" -> {
+                name: session_field_text(object, "name") ?? return Err("recording checkpoint requires string name")
+                _: self.checkpoint(name)
+            }
+            "restore" -> {
+                name: session_field_text(object, "name") ?? return Err("recording restore requires string name")
+                _: self.restore(name)
+            }
+            "divergence" -> { _: self.divergence() }
+            else -> return Err("unknown recording operation `{op}`")
+        }
+        Ok(self.recording_json())
+    }
+    recording_json: fn(self) -> String {
+        divergence := DevtoolsRecordingDivergence?{None}
+        if self.divergence() == .Ok(found) -> divergence = Val(found)
+        state: self.recording ?? return session_recording_unavailable_json(self.session_id, "source/build identity is unavailable")
+        projection: state.recording.projection(state.cursor) ?? return session_recording_unavailable_json(self.session_id, "{err}")
+        session_recording_json_for_state(self.session_id, state, projection, divergence)
+    }
+    set_devtools_source_identity: fn(&self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
+        recording_identity := SessionRecordingIdentity?{None}
+        if source_id == .Val(source) {
+            if build_id == .Val(build) {
+                identity: SessionRecordingIdentity.new(source, build) ?? return Err("{err}")
+                recording_identity = Val(identity)
+            }
+        }
+        self.devtools.set_source_identity(Val(JetDevtoolsSourceIdentityFact{source_id: source_id, build_id: build_id, revision: revision, world_id: world_id}))
+        first_sequence: self.devtools.next_sequence
+        self.set_recording_identity(recording_identity, Val(first_sequence))
+        Ok()
+    }
+    // A new source/build identity starts a new recording; the same identity
+    // keeps the one already running.
+    set_recording_identity: fn(&self, identity: SessionRecordingIdentity?, first_sequence: Int?) Err! {
+        wanted: identity ?? {
+            self.recording = None
+            return Ok()
+        }
+        if self.recording == .Val(state) {
+            if state.recording.identity.matches(wanted) -> return Ok()
+        }
+        recording: SessionRecording.new(wanted) ?? return Err("{err}")
+        self.recording = Val(ResidentRecordingState.new(recording, first_sequence))
+        Ok()
+    }
+    set_devtools_selection: fn(&self, request: String) Err! {
+        root: foundation_parse_protocol_json(request) ?? return Err("devtools selection must be valid JSON")
+        object: recording_object_fields(root) ?? return Err("devtools selection must be an object")
+        nested := [(key: String, value: Dyn)]{}
+        clear := false
+        if recording_lookup(object, "selection") == .Val(selection) {
+            if selection == .Null -> clear = true
+            if recording_object_fields(selection) == .Val(fields) -> nested = fields
+        }
+        if recording_lookup(object, "clear") == .Val(value) {
+            if value == .Bool(flag) {
+                if flag -> clear = true
+            }
+        }
+        panel_id := session_selection_field(object, nested, "panel_id")
+        if panel_id == None -> panel_id = session_selection_field(object, nested, "target")
+        item_key := session_selection_field(object, nested, "item_key")
+        if item_key == None -> item_key = session_selection_field(object, nested, "source_id")
+        if item_key == None -> item_key = session_selection_field(object, nested, "output")
+        origin: session_selection_field(object, nested, "origin") ?? "host"
+        session_validate_devtools_text(origin, "selection origin")
+        if panel_id == .Val(value) -> session_validate_devtools_text(value, "panel_id")
+        if item_key == .Val(value) -> session_validate_devtools_text(value, "item_key")
+        if !clear && panel_id == None && item_key == None -> return Err("devtools selection has no selected value")
+        if clear {
+            self.selected_source_id = ""
+            self.selected_output_name = ""
+            self.selected_target_name = ""
+            self.devtools.set_selection(None)
+        } else {
+            source := session_selection_field(object, nested, "source_id")
+            if source == None -> source = item_key
+            if source == .Val(selected) -> self.select_project_source(selected)
+            run_target := session_selection_field(object, nested, "target")
+            if run_target == None -> run_target = panel_id
+            self.select_output_values(session_selection_field(object, nested, "output"), run_target)
+            selected_panel := panel_id ?? ""
+            selected_item := item_key
+            if self.devtools.selection() == .Val(prior) {
+                if panel_id == None -> selected_panel = prior.panel_id
+                if item_key == None -> selected_item = prior.item_key
+            }
+            self.devtools.set_selection(Val(JetDevtoolsSelection.new(selected_panel, selected_item)))
+        }
+        panel_json: if clear -> "null" else -> session_optional_json(panel_id)
+        item_json: if clear -> "null" else -> session_optional_json(item_key)
+        event: JetDevtoolsEvent.from_parts(session_unix_ms(), origin, "Selection", "session", "{{\"panel_id\":{panel_json},\"item_key\":{item_json},\"cleared\":{clear}}}")
+        _: self.push_devtools_event(event.move())
+        Ok()
+    }
+    set_devtools_cursor: fn(&self, request: String) Err! {
+        root: foundation_parse_protocol_json(request) ?? return Err("devtools cursor must be valid JSON")
+        object: recording_object_fields(root) ?? return Err("devtools cursor must be an object")
+        origin: session_field_text(object, "origin") ?? "host"
+        session_validate_devtools_text(origin, "cursor origin")
+        cursor_value := recording_lookup(object, "cursor")
+        if cursor_value == None -> cursor_value = recording_lookup(object, "sequence")
+        sequence := Int?{None}
+        if cursor_value == .Val(value) {
+            target := value
+            if recording_object_fields(value) == .Val(entries) -> target = recording_lookup(entries, "sequence") ?? return Err("devtools cursor must be a sequence")
+            if !(target == .Null) -> sequence = Val(session_count(target) ?? return Err("devtools cursor must be a sequence"))
+        }
+        self.devtools.set_cursor(sequence)
+        sequence_json: if sequence == .Val(number) -> "{number}" else -> "null"
+        event: JetDevtoolsEvent.from_parts(session_unix_ms(), origin, "Cursor", "session", "{{\"sequence\":{sequence_json}}}")
+        _: self.push_devtools_event(event.move())
+        Ok()
     }
 }
-optional_fact: fn(value: String) -> String? { if !value.is_empty() -> .Val(value) else -> .None }
-devtools_session_state: fn(value: String) -> JetDevtoolsLifecycleState {
+
+impl ResidentDevSession.RecordIndexCaptureSink {
+    Error: CaptureSinkError
+
+    // A skipped capture keeps its skip inside the start fact's eligibility.
+    record_capture_start: fn(&self, &&fact: CaptureStartFact) CaptureSinkError! {
+        self.validate_capture_identity(fact.identity)
+        self.capture_fact_list.push(CaptureSessionFact.Start{fact: fact.move()})
+        self.trim_capture_facts()
+        Ok()
+    }
+    record_capture_fault: fn(&self, &&fact: CaptureFaultFact) CaptureSinkError! {
+        self.validate_capture_identity(fact.identity)
+        self.capture_fact_list.push(CaptureSessionFact.Fault{fact: fact.move()})
+        self.trim_capture_facts()
+        Ok()
+    }
+}
+
+session_unix_ms: fn() -> Int { session_view_time.unix_ns() /% 1000000 }
+
+session_optional_fact: fn(value: String) -> String? Never! {
+    if value == "" -> return None
+    Val(value)
+}
+
+session_lifecycle_state: fn(value: String) -> JetDevtoolsLifecycleState Never! {
     if value == {
         "starting" -> .Starting
         "building" -> .Building
@@ -251,143 +418,165 @@ devtools_session_state: fn(value: String) -> JetDevtoolsLifecycleState {
         else -> .Unavailable
     }
 }
-live_value_fact_json: fn(value: LiveValueFact) -> String {
-    "{{\"value_id\":{json_value(value.value_id)},\"type_identity\":{json_value(value.type_identity)},\"disposition\":{json_value(value.disposition)},\"reason\":{json_value(value.reason)}}}"
+
+session_client_id_is_valid: fn(client: String) -> Bool Never! {
+    client != "" && client.bytes().len() <= SESSION_MAX_CLIENT_ID && !jettrace_has_control(client)
 }
-live_receipt_json: fn(receipt: LiveReceipt) -> String {
-    values: receipt.values.iter().map(live_value_fact_json).collect().join(",")
-    "{{\"protocol\":{json_value(receipt.lineage.protocol)},\"session_id\":{json_value(receipt.lineage.session_id)},\"source_id\":{json_value(receipt.lineage.source_id)},\"build_id\":{json_value(receipt.lineage.build_id)},\"revision\":{json_value(receipt.lineage.revision)},\"world_id\":{json_value(receipt.lineage.world_id)},\"values\":[{values}]}}"
+
+session_lineage_part: fn(value: String) -> Bool Never! { value != "" && !jettrace_has_control(value) }
+
+// Empty text is absent: it renders as JSON null.
+session_json_value: fn(value: String) -> String Never! {
+    if value == "" -> return "null"
+    foundation_json_quote(value)
 }
-expire_clients: fn(clients: [String:Instant], now: Instant) -> Unit { clients.retain(fn(_, seen) { now.saturating_duration_since(*seen) <= CLIENT_TTL }) }
-client_id_is_valid: fn(client: String) -> Bool { !client.is_empty() && client.len() <= MAX_CLIENT_ID && !client.chars().any(fn(ch) { ch.is_control() }) }
-retained_view_json: fn(view: RetainedView?) -> String {
-    retained: view.cloned().unwrap_or(RetainedView { revision: "", source_id: "", payload: "" })
-    "{{\"revision\":{json_value(retained.revision)},\"source_id\":{json_value(retained.source_id)},\"payload\":{json_value(retained.payload)}}}"
+
+session_optional_json: fn(value: String?) -> String Never! {
+    if value == .Val(text) -> return session_json_value(text)
+    "null"
 }
-recording_error: fn(error: RecordingError) -> String { error.to_string() }
-recording_unavailable: fn() -> String { "devtools recording is unavailable because source/build identity is not installed" }
-recording_unavailable_json: fn(session_id: String, reason: String) -> String {
-    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":false,\"reason\":{json_value(reason)},\"events\":[],\"cursor\":null,\"divergence\":null}}"
+
+session_optional_int_json: fn(value: Int?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
 }
-recording_json_for_state: fn(session_id: String, state: &ResidentRecordingState, projection: &ReplayProjection, divergence: &DevtoolsRecordingDivergence?) -> String {
-    identity: state.recording.identity()
-    events: state.recording.events().map(recording_event_json).collect().join(",")
-    names := state.checkpoints.keys().cloned().collect()
+
+session_live_value_fact_json: fn(value: LiveValueFact) -> String Never! {
+    "{{\"value_id\":{session_json_value(value.value_id)},\"type_identity\":{session_json_value(value.type_identity)},\"disposition\":{session_json_value(value.disposition)},\"reason\":{session_json_value(value.reason)}}}"
+}
+
+session_live_receipt_json: fn(receipt: LiveReceipt) -> String Never! {
+    values := [String]{}
+    loop value in receipt.values -> values.push(session_live_value_fact_json(value))
+    lineage: receipt.lineage
+    "{{\"protocol\":{session_json_value(lineage.protocol)},\"session_id\":{session_json_value(lineage.session_id)},\"source_id\":{session_json_value(lineage.source_id)},\"build_id\":{session_json_value(lineage.build_id)},\"revision\":{session_json_value(lineage.revision)},\"world_id\":{session_json_value(lineage.world_id)},\"values\":[{values.join(",")}]}}"
+}
+
+session_retained_view_json: fn(view: RetainedView?) -> String Never! {
+    retained: view ?? RetainedView{revision: "", source_id: "", payload: ""}
+    "{{\"revision\":{session_json_value(retained.revision)},\"source_id\":{session_json_value(retained.source_id)},\"payload\":{session_json_value(retained.payload)}}}"
+}
+
+session_recording_unavailable: fn() -> String Never! { "devtools recording is unavailable because source/build identity is not installed" }
+
+session_recording_unavailable_json: fn(session_id: String, reason: String) -> String Never! {
+    "{{\"protocol\":{session_json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{session_json_value(session_id)},\"kind\":\"session.recording\",\"available\":false,\"reason\":{session_json_value(reason)},\"events\":[],\"cursor\":null,\"divergence\":null}}"
+}
+
+session_recording_json_for_state: fn(session_id: String, state: ResidentRecordingState, projection: ReplayProjection, divergence: DevtoolsRecordingDivergence?) -> String Never! {
+    identity: state.recording.identity
+    events := [String]{}
+    loop event in state.recording.events -> events.push(session_recording_event_json(event))
+    names := state.checkpoints.keys().to_list()
     names.sort()
-    checkpoints: names.into_iter().map(fn(name) { recording_checkpoint_json(name, state.checkpoints.get(name).unwrap()) }).collect().join(",")
-    current_event: projection.event().map(recording_event_json).unwrap_or("null")
+    checkpoints := [String]{}
+    loop name in names -> checkpoints.push(session_recording_checkpoint_json(name, state.checkpoints[name]))
+    current_event: if projection.event == .Val(event) -> session_recording_event_json(event) else -> "null"
     truncation: state.recording.truncation()
-    divergence_json: divergence.map(recording_divergence_json).unwrap_or("null")
-    "{{\"protocol\":{json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{json_value(session_id)},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{json_value(identity.source_id)},\"build_id\":{json_value(identity.build_id)}}},\"events\":[{events}],\"truncation\":{{\"event_limit\":{truncation.event_limit},\"byte_limit\":{truncation.byte_limit},\"retained_events\":{truncation.retained_events},\"retained_bytes\":{truncation.retained_bytes},\"dropped_events\":{truncation.dropped_events},\"dropped_bytes\":{truncation.dropped_bytes},\"event_limit_reached\":{truncation.event_limit_reached},\"byte_limit_reached\":{truncation.byte_limit_reached},\"first_dropped_sequence\":{optional_u64_json(truncation.first_dropped_sequence)},\"last_dropped_sequence\":{optional_u64_json(truncation.last_dropped_sequence)},\"first_retained_sequence\":{optional_u64_json(truncation.first_retained_sequence)},\"last_retained_sequence\":{optional_u64_json(truncation.last_retained_sequence)}}},\"cursor\":{{\"identity\":{{\"source_id\":{json_value(projection.identity().source_id)},\"build_id\":{json_value(projection.identity().build_id)}}},\"generation\":{state.cursor.generation()},\"position\":{projection.position()},\"sequence\":{optional_u64_json(projection.sequence())},\"timestamp_ms\":{optional_u64_json(projection.timestamp_ms())},\"previous_sequence\":{optional_u64_json(projection.previous_sequence())},\"next_sequence\":{optional_u64_json(projection.next_sequence())},\"event\":{current_event}}},\"checkpoints\":[{checkpoints}],\"divergence\":{divergence_json}}}"
+    divergence_json: if divergence == .Val(found) -> session_recording_divergence_json(found) else -> "null"
+    head: "\"protocol\":{session_json_value(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{session_json_value(session_id)},\"kind\":\"session.recording\",\"available\":true,\"identity\":{{\"source_id\":{session_json_value(identity.source_id)},\"build_id\":{session_json_value(identity.build_id)}}},\"events\":[{events.join(",")}]"
+    limits: "\"truncation\":{{\"event_limit\":{truncation.event_limit},\"byte_limit\":{truncation.byte_limit},\"retained_events\":{truncation.retained_events},\"retained_bytes\":{truncation.retained_bytes},\"dropped_events\":{truncation.dropped_events},\"dropped_bytes\":{truncation.dropped_bytes},\"event_limit_reached\":{truncation.event_limit_reached},\"byte_limit_reached\":{truncation.byte_limit_reached},\"first_dropped_sequence\":{session_optional_int_json(truncation.first_dropped_sequence)},\"last_dropped_sequence\":{session_optional_int_json(truncation.last_dropped_sequence)},\"first_retained_sequence\":{session_optional_int_json(truncation.first_retained_sequence)},\"last_retained_sequence\":{session_optional_int_json(truncation.last_retained_sequence)}}}"
+    cursor: "\"cursor\":{{\"identity\":{{\"source_id\":{session_json_value(projection.identity.source_id)},\"build_id\":{session_json_value(projection.identity.build_id)}}},\"generation\":{state.cursor.generation},\"position\":{projection.position},\"sequence\":{session_optional_int_json(projection.sequence)},\"timestamp_ms\":{session_optional_int_json(projection.timestamp_ms)},\"previous_sequence\":{session_optional_int_json(projection.previous_sequence)},\"next_sequence\":{session_optional_int_json(projection.next_sequence)},\"event\":{current_event}}}"
+    "{{{head},{limits},{cursor},\"checkpoints\":[{checkpoints.join(",")}],\"divergence\":{divergence_json}}}"
 }
-recording_event_json: fn(event: SessionEvent) -> String {
-    "{{\"sequence\":{event.sequence()},\"timestamp_ms\":{event.timestamp_ms()},\"source\":{json_value(event.source())},\"kind\":{json_value(event.kind())},\"entity\":{json_value(event.entity())},\"fields\":{event.fields_json()},\"payload\":{event.payload_json().unwrap_or("null")}}}"
+
+session_recording_event_json: fn(event: SessionEvent) -> String Never! {
+    "{{\"sequence\":{event.sequence},\"timestamp_ms\":{event.timestamp_ms},\"source\":{session_json_value(event.source)},\"kind\":{session_json_value(event.kind)},\"entity\":{session_json_value(event.entity)},\"fields\":{event.fields_json},\"payload\":{event.payload_json ?? "null"}}}"
 }
-recording_checkpoint_json: fn(name: String, checkpoint: &SessionCheckpoint) -> String {
-    "{{\"name\":{json_value(name)},\"identity\":{{\"source_id\":{json_value(checkpoint.identity().source_id)},\"build_id\":{json_value(checkpoint.identity().build_id)}}},\"generation\":{checkpoint.generation()},\"position\":{checkpoint.position()},\"sequence\":{optional_u64_json(checkpoint.sequence())},\"timestamp_ms\":{optional_u64_json(checkpoint.timestamp_ms())}}}"
+
+session_recording_checkpoint_json: fn(name: String, checkpoint: SessionCheckpoint) -> String Never! {
+    "{{\"name\":{session_json_value(name)},\"identity\":{{\"source_id\":{session_json_value(checkpoint.identity.source_id)},\"build_id\":{session_json_value(checkpoint.identity.build_id)}}},\"generation\":{checkpoint.generation},\"position\":{checkpoint.position},\"sequence\":{session_optional_int_json(checkpoint.sequence)},\"timestamp_ms\":{session_optional_int_json(checkpoint.timestamp_ms)}}}"
 }
-recording_divergence_json: fn(divergence: DevtoolsRecordingDivergence) -> String {
-    reason: divergence.reason.as_ref().map(json_value).unwrap_or("null")
-    "{{\"divergent\":{divergence.divergent},\"reason\":{reason},\"expected_sequence\":{optional_u64_json(divergence.expected_sequence)},\"actual_sequence\":{optional_u64_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
+
+session_recording_divergence_json: fn(divergence: DevtoolsRecordingDivergence) -> String Never! {
+    "{{\"divergent\":{divergence.divergent},\"reason\":{session_optional_json(divergence.reason)},\"expected_sequence\":{session_optional_int_json(divergence.expected_sequence)},\"actual_sequence\":{session_optional_int_json(divergence.actual_sequence)},\"retained_events\":{divergence.retained_events},\"dropped_events\":{divergence.dropped_events}}}"
 }
-optional_u64_json: fn(value: U64?) -> String { value.map(fn(value) { value.to_string() }).unwrap_or("null") }
-json_value: fn(value: String) -> String { if value.is_empty() -> "null" else -> "\"{foundation_json_escape(value)}\"" }
-unix_time_ms: fn() -> U64 {
-    // GATE #4494: wall clock uses epoch duration with original failure/overflow behavior.
-    SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().try_into().unwrap_or(U64.MAX)
+
+session_validate_devtools_text: fn(value: String, label: String) Err! {
+    if value == "" || value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES || jettrace_has_control(value) -> return Err("devtools {label} is empty, too long, or contains control text")
+    Ok()
 }
-json_string: fn(value: Dyn) -> String? { if value == {
-    .Text(value) | .TypedText(value) -> .Val(value)
-    else -> .None
-} }
-json_u64: fn(value: Dyn) -> U64? {
-    if value == {
-        .Int(value) && *value >= 0 -> U64.try_from(*value).ok()
-        .Float(value) && value.fract() == 0.0 && *value >= 0.0 && *value <= F64{U64.MAX} -> .Val(U64{*value})
-        else -> .None
+
+// A non-negative exact JSON integer.
+session_count: fn(value: Dyn) -> Int? Never! {
+    number: foundation_json_integer(value) ?? return None
+    if number < 0 -> return None
+    Val(number)
+}
+
+session_field_text: fn(fields: [(key: String, value: Dyn)], key: String) -> String? Never! {
+    value: recording_lookup(fields, key) ?? return None
+    recording_text(value)
+}
+
+session_field_count: fn(fields: [(key: String, value: Dyn)], key: String) -> Int? Never! {
+    value: recording_lookup(fields, key) ?? return None
+    session_count(value)
+}
+
+// A selection field at the top level, else inside `selection`.
+session_selection_field: fn(fields: [(key: String, value: Dyn)], nested: [(key: String, value: Dyn)], key: String) -> String? Never! {
+    if session_field_text(fields, key) == .Val(text) -> return Val(text)
+    session_field_text(nested, key)
+}
+
+session_request_string: fn(text: String, key: String) -> String Never! {
+    root: foundation_parse_protocol_json(text) ?? return ""
+    fields: recording_object_fields(root) ?? return ""
+    session_field_text(fields, key) ?? ""
+}
+
+session_request_bool: fn(text: String, key: String) -> Bool Never! {
+    root: foundation_parse_protocol_json(text) ?? return false
+    fields: recording_object_fields(root) ?? return false
+    value: recording_lookup(fields, key) ?? return false
+    value == .Bool(true)
+}
+
+// The first string `key` anywhere in the JSON tree, depth first.
+session_json_string_any: fn(text: String, key: String) -> String? Never! {
+    root: foundation_parse_protocol_json(text) ?? return None
+    session_find_string(root, key)
+}
+
+session_find_string: fn(value: Dyn, key: String) -> String? Never! {
+    if recording_object_fields(value) == .Val(fields) {
+        if session_field_text(fields, key) == .Val(found) -> return Val(found)
+        loop field in fields {
+            if session_find_string(field.value, key) == .Val(found) -> return Val(found)
+        }
+        return None
     }
-}
-validate_devtools_text: fn(value: String, label: String) Err! {
-    if value.is_empty() || value.len() > DEVTOOLS_TEXT_LIMIT || value.chars().any(fn(ch) { ch.is_control() }) -> return .Err("devtools {label} is empty, too long, or contains control text")
-}
-string_array_json: fn(values: [String]) -> String { "[{values.iter().map(fn(value) { json_value(value) }).collect().join(",")}]" }
-retention_fact_json: fn(fact: StateRetentionFact) -> String {
-    (decision, reason): if fact.decision == {
-        .Preserve -> (_0: "preserve", _1: "")
-        .Fresh { reason } -> (_0: "fresh", _1: reason)
-    }
-    "{{\"key\":{json_value(fact.key)},\"decision\":{json_value(decision)},\"reason\":{json_value(reason)}}}"
-}
-game_change_fact_json: fn(fact: JetGameChangeFact) -> String {
-    old_schema: fact.old_schema_id.as_ref().map(json_value).unwrap_or("null")
-    new_schema: fact.new_schema_id.as_ref().map(json_value).unwrap_or("null")
-    "{{\"path\":{json_value(fact.path)},\"kind\":{json_value(fact.kind.as_str())},\"old_schema_id\":{old_schema},\"new_schema_id\":{new_schema},\"migration\":{json_value(fact.migration.as_str())},\"reason\":{json_value(fact.reason)}}}"
-}
-render_json: fn(value: Dyn) -> String {
-    if value == {
-        .Null -> "null"
-        .Bool(value) -> value.to_string()
-        .Int(value) -> value.to_string()
-        .Float(value) -> value.to_string()
-        .Number(value) -> value.copy()
-        .TypedText(value) | .Text(value) -> json_value(value)
-        .Bytes(values) -> "[{values.iter().map(fn(value) { value.to_string() }).collect().join(",")}]"
-        .Array(values) -> "[{values.iter().map(render_json).collect().join(",")}]"
-        .Object(values) -> "{{{values.iter().map(fn((key, value)) { "{json_value(key)}:{render_json(value)}" }).collect().join(",")}}}"
-    }
-}
-object_map: fn(value: Dyn) -> [String:Dyn]? {
-    if value == {
-        .Object(values) -> .Val(values.iter().cloned().collect())
-        else -> .None
-    }
-}
-request_string: fn(text: String, key: String) -> String {
-    value: parse_json(text) ?? return ""
-    object_map(value).and_then(fn(object) { object.get(key).and_then(json_string).map(fn(text) { text.to_string() }) }).unwrap_or_default()
-}
-request_bool: fn(text: String, key: String) -> Bool {
-    value: parse_json(text) ?? return false
-    object_map(value).and_then(fn(object) { object.get(key).cloned() }).is_some_and(fn(value) { if value == {
-        .Bool(lit0) && lit0 == true -> true
-        else -> false
-    } })
-}
-set_if_present: fn(target: String, value: String) -> Unit { if !value.is_empty() -> *target = value }
-idle_debugger: fn() -> DebuggerSnapshot { DebuggerSnapshot { state: "idle", session_id: "", source_id: "", revision: "", tier: "" } }
-json_string_any: fn(text: String, key: String) -> String? {
-    value: parse_json(text).ok()
-    fn find(value: Dyn, key: String) -> String? {
-        if value == {
-            .Object(object) -> {
-                if object.iter().find_map(fn((name, value)) { if name == key -> .Val(value) else -> .None }) == .Val(found) {
-                    if json_string(found) == .Val(found_text) -> return .Val(found_text.copy())
-                }
-                object.iter().find_map(fn((_, value)) { find(value, key) })
-            }
-            .Array(values) -> values.iter().find_map(fn(value) { find(value, key) })
-            else -> .None
+    if value == .Array(items) {
+        loop item in items {
+            if session_find_string(item, key) == .Val(found) -> return Val(found)
         }
     }
-    find(value, key)
+    None
 }
-find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? {
-    value: parse_json(text).ok()
-    fn find(value: Dyn) -> DebuggerSnapshot? {
-        if value == {
-            .Object(object) -> {
-                if object.iter().find_map(fn((name, value)) { if name == "id" -> .Val(value) else -> .None }).and_then(json_string) == .Val(session_id) {
-                    if session_id.starts_with("canvas-debug-") {
-                        field: fn(key: String) { object.iter().find_map(fn((name, value)) { if name == key -> .Val(value) else -> .None })
-                            .and_then(json_string).map(fn(text) { text.to_string() }).unwrap_or_default() }
-                        return .Val(DebuggerSnapshot { state: field("state"), session_id: session_id.copy(), source_id: field("source_id"), revision: field("revision"), tier: field("tier") })
-                    }
-                }
-                object.iter().find_map(fn((_, value)) { find(value) })
+
+// The first object whose `id` names a Canvas debug session.
+session_find_debugger_snapshot: fn(text: String) -> DebuggerSnapshot? Never! {
+    root: foundation_parse_protocol_json(text) ?? return None
+    session_find_debugger(root)
+}
+
+session_find_debugger: fn(value: Dyn) -> DebuggerSnapshot? Never! {
+    if recording_object_fields(value) == .Val(fields) {
+        if session_field_text(fields, "id") == .Val(session_id) {
+            if session_id.starts_with("canvas-debug-") {
+                return Val(DebuggerSnapshot{state: session_field_text(fields, "state") ?? "", session_id: session_id, source_id: session_field_text(fields, "source_id") ?? "", revision: session_field_text(fields, "revision") ?? "", tier: session_field_text(fields, "tier") ?? ""})
             }
-            .Array(values) -> values.iter().find_map(find)
-            else -> .None
+        }
+        loop field in fields {
+            if session_find_debugger(field.value) == .Val(found) -> return Val(found)
+        }
+        return None
+    }
+    if value == .Array(items) {
+        loop item in items {
+            if session_find_debugger(item) == .Val(found) -> return Val(found)
         }
     }
-    find(value)
+    None
 }

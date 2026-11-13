@@ -1,0 +1,481 @@
+// The host decoder for jet.devtools.v1 transports. One payload decodes to one
+// direction: an event envelope (runtime to host) or a command envelope (host
+// to runtime). A mixed or unknown shape is rejected before a session sees it.
+// An event whose fields match a first-party body keeps that typed body; any
+// other event stays a flat kind/entity/fields record.
+use jet_foundation.[foundation_json_integer, foundation_json_parse, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsMutationLifecycle, JetDevtoolsQueryState, JetDevtoolsTraceKind, jet_devtools_function_identity_new, jet_devtools_source_span_new]
+
+decode_devtools_envelope: fn(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
+    if payload.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("devtools envelope is not valid bounded JSON")
+    root: foundation_json_parse(payload) ?? return Err("devtools envelope is not valid bounded JSON")
+    object: recording_object_fields(root) ?? return Err("devtools envelope must be an object")
+    protocol: devtools_decode_string(object, "protocol")
+    if protocol != JET_DEVTOOLS_PROTOCOL -> return Err("devtools envelope protocol does not match jet.devtools.v1")
+    if devtools_decode_has(object, "history") -> return Err("devtools envelope must use the single `events` stream")
+    session_id: devtools_decode_string(object, "session_id")
+    started_at_ms: devtools_decode_int(object, "started_at_ms")
+    if recording_lookup(object, "direction") == .Val(value) {
+        direction: devtools_decode_value_string(value, "direction")
+        if direction == "host_to_runtime" {
+            if devtools_decode_has(object, "events") -> return Err("devtools command envelope cannot contain an events stream")
+            commands: devtools_decode_commands(object, session_id, started_at_ms)
+            return Ok(JetDevtoolsDecodedEnvelope.Commands{envelope: commands})
+        }
+        if direction == "runtime_to_host" {
+            if devtools_decode_has(object, "commands") -> return Err("devtools event envelope cannot contain a commands stream")
+            events: devtools_decode_events(object, session_id, started_at_ms)
+            return Ok(JetDevtoolsDecodedEnvelope.Events{envelope: events})
+        }
+        return Err("devtools envelope direction is not recognized")
+    }
+    if devtools_decode_has(object, "commands") -> return Err("devtools command envelope requires direction")
+    events: devtools_decode_events(object, session_id, started_at_ms)
+    Ok(JetDevtoolsDecodedEnvelope.Events{envelope: events})
+}
+
+devtools_decode_events: fn(object: [(key: String, value: Dyn)], &&session_id: String, started_at_ms: Int) -> JetDevtoolsEnvelope Err! {
+    items: devtools_decode_array(object, "events")
+    if items.len() > JET_DEVTOOLS_MAX_EVENTS -> return Err("devtools envelope exceeds the retained event limit")
+    envelope := JetDevtoolsEnvelope.new(session_id, started_at_ms)
+    loop item in items {
+        event: devtools_decode_event(item)
+        _: envelope.push(event)
+    }
+    if recording_lookup(object, "selection") == .Val(value) {
+        if value == .Null {
+            envelope.set_selection(None)
+        } else if value == .Object(fields) {
+            panel_id: devtools_decode_string(fields, "panel_id")
+            item_key: devtools_decode_optional_string(fields, "item_key")
+            envelope.set_selection(Val(JetDevtoolsSelection.new(panel_id, item_key)))
+        } else {
+            return Err("devtools envelope selection must be an object or null")
+        }
+    }
+    if recording_lookup(object, "cursor") == .Val(value) {
+        if value == .Null {
+            envelope.set_cursor(None)
+        } else {
+            cursor: foundation_json_integer(value) ?? return Err("devtools envelope cursor must be a sequence")
+            if cursor < 0 -> return Err("devtools envelope cursor must be a sequence")
+            envelope.set_cursor(Val(cursor))
+        }
+    }
+    if recording_lookup(object, "lifecycle") == .Val(value) {
+        lifecycle: devtools_decode_value_string(value, "lifecycle")
+        envelope.set_lifecycle(devtools_decode_lifecycle(lifecycle))
+    }
+    if recording_lookup(object, "freshness") == .Val(value) {
+        freshness: recording_object_fields(value) ?? return Err("devtools envelope freshness must be an object")
+        state: devtools_decode_freshness_state(devtools_decode_string(freshness, "state"))
+        envelope.set_freshness(JetDevtoolsFreshnessFact{state: state, observed_at_ms: devtools_decode_int(freshness, "observed_at_ms")})
+    }
+    if recording_lookup(object, "privacy") == .Val(value) {
+        privacy: recording_object_fields(value) ?? return Err("devtools envelope privacy must be an object")
+        envelope.privacy = JetDevtoolsPrivacy{
+            loopback_only: devtools_decode_bool(privacy, "loopback_only"),
+            payload_free_by_default: devtools_decode_bool(privacy, "payload_free_by_default"),
+            published_payloads: devtools_decode_bool(privacy, "published_payloads"),
+        }
+    }
+    if recording_lookup(object, "source_identity") == .Val(value) {
+        if value == {
+            .Null -> envelope.source_identity = None
+            .Object(fields) -> {
+                identity: JetDevtoolsSourceIdentityFact.new(devtools_decode_optional_string(fields, "source_id"), devtools_decode_optional_string(fields, "build_id"), devtools_decode_optional_string(fields, "revision"), devtools_decode_optional_string(fields, "world_id"))
+                envelope.source_identity = Val(identity)
+            }
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err("devtools envelope source_identity must be an object or null")
+        }
+    }
+    if devtools_decode_has(object, "reset") -> envelope.reset = devtools_decode_bool(object, "reset")
+    if devtools_decode_has(object, "truncated") -> envelope.truncated = devtools_decode_bool(object, "truncated")
+    Ok(envelope)
+}
+
+devtools_decode_event: fn(value: Dyn) -> JetDevtoolsEvent Err! {
+    event: recording_object_fields(value) ?? return Err("devtools envelope event must be an object")
+    sequence: devtools_decode_int(event, "sequence")
+    if sequence == 0 -> return Err("devtools envelope event sequence must be positive")
+    timestamp_ms: devtools_decode_int(event, "timestamp_ms")
+    source: devtools_decode_string(event, "source")
+    kind: devtools_decode_string(event, "kind")
+    entity: devtools_decode_string(event, "entity")
+    fields_value: recording_lookup(event, "fields") ?? return Err("devtools envelope missing `fields`")
+    field_list: recording_object_fields(fields_value) ?? return Err("devtools envelope `fields` must be an object")
+    fields: recording_canonical_json(fields_value)
+    payload := String?{None}
+    if recording_lookup(event, "payload") == .Val(published) {
+        if published == .Object(_) {
+            payload = Val(recording_canonical_json(published))
+        } else if !(published == .Null) {
+            return Err("devtools event payload must be an object or null")
+        }
+    }
+    if devtools_decode_body(kind, field_list) == .Val(body) {
+        typed: JetDevtoolsEvent.from_wire(sequence, timestamp_ms, source, body, fields, payload)
+        if typed.kind() != kind || typed.entity() != entity -> return Err("devtools event identity does not match its typed body")
+        return Ok(typed)
+    }
+    JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, source, kind, entity, fields, payload)
+}
+
+// The typed first-party body of an event, or None when `kind` has none or its
+// fields are not exactly that body's (the event then stays untyped).
+devtools_decode_body: fn(kind: String, object: [(key: String, value: Dyn)]) -> JetDevtoolsEventBody? Err! {
+    if devtools_decode_expected_fields(kind) == .Val(expected) {
+        if !devtools_decode_exact(object, expected) -> return Ok(None)
+    }
+    if kind == "Build" {
+        return Ok(Val(JetDevtoolsEventBody.Build{status: devtools_decode_string(object, "status"), tier: devtools_decode_string(object, "tier"), diagnostics: devtools_decode_string_array(object, "diagnostics"), kept: devtools_decode_u64(object, "kept"), reset: devtools_decode_u64(object, "reset")}))
+    }
+    if kind == "Route" {
+        return Ok(Val(JetDevtoolsEventBody.Route{path: devtools_decode_string(object, "path"), matched: devtools_decode_bool(object, "matched"), render_mode: devtools_decode_string(object, "render_mode"), reason: devtools_decode_string(object, "reason")}))
+    }
+    if kind == "Query" {
+        state: devtools_decode_query_state(devtools_decode_string(object, "state"))
+        return Ok(Val(JetDevtoolsEventBody.Query{name: devtools_decode_string(object, "name"), state: state, footprint: devtools_decode_u64(object, "footprint")}))
+    }
+    if kind == "Mutation" {
+        devtools_decode_require_exact(object, [String]{"name", "lifecycle", "rollback"})
+        lifecycle: devtools_decode_mutation_lifecycle(devtools_decode_string(object, "lifecycle"))
+        return Ok(Val(JetDevtoolsEventBody.Mutation{name: devtools_decode_string(object, "name"), lifecycle: lifecycle, rollback: devtools_decode_bool(object, "rollback")}))
+    }
+    if kind == "Form" {
+        devtools_decode_require_exact(object, [String]{"name", "field", "state", "validation"})
+        state: devtools_decode_form_state(devtools_decode_string(object, "state"))
+        return Ok(Val(JetDevtoolsEventBody.Form{name: devtools_decode_string(object, "name"), field: devtools_decode_string(object, "field"), state: state, validation: devtools_decode_string(object, "validation")}))
+    }
+    if kind == "Table" {
+        devtools_decode_require_exact(object, [String]{"name", "viewport", "sort", "filter"})
+        return Ok(Val(JetDevtoolsEventBody.Table{name: devtools_decode_string(object, "name"), viewport: devtools_decode_u64(object, "viewport"), sort: devtools_decode_string(object, "sort"), filter: devtools_decode_string(object, "filter")}))
+    }
+    if kind == "Store" {
+        return Ok(Val(JetDevtoolsEventBody.Store{name: devtools_decode_string(object, "name"), transaction: devtools_decode_string(object, "transaction"), diff: devtools_decode_string(object, "diff"), cursor: devtools_decode_u64(object, "cursor")}))
+    }
+    if kind == "Trace" {
+        trace_kind: devtools_decode_trace_kind(devtools_decode_string(object, "kind"))
+        return Ok(Val(JetDevtoolsEventBody.Trace{name: devtools_decode_string(object, "name"), kind: trace_kind, request: devtools_decode_string(object, "request"), duration_ms: devtools_decode_u64(object, "duration_ms"), status: devtools_decode_string(object, "status")}))
+    }
+    if kind == "Cost" {
+        return Ok(Val(JetDevtoolsEventBody.Cost{name: devtools_decode_string(object, "name"), rule: devtools_decode_string(object, "rule"), bytes: devtools_decode_u64(object, "bytes"), allocations: devtools_decode_u64(object, "allocations")}))
+    }
+    if kind == "Gate" {
+        return Ok(Val(JetDevtoolsEventBody.Gate{name: devtools_decode_string(object, "name"), status: devtools_decode_string(object, "status"), detail: devtools_decode_string(object, "detail")}))
+    }
+    if kind == "Structure" {
+        return Ok(Val(JetDevtoolsEventBody.Structure{name: devtools_decode_string(object, "name"), kind: devtools_decode_string(object, "kind"), status: devtools_decode_string(object, "status")}))
+    }
+    if kind == "Test" {
+        return Ok(Val(JetDevtoolsEventBody.Test{name: devtools_decode_string(object, "name"), status: devtools_decode_string(object, "status"), duration_ms: devtools_decode_u64(object, "duration_ms"), diagnostics: devtools_decode_string(object, "diagnostics")}))
+    }
+    if kind == "Job" {
+        return Ok(Val(JetDevtoolsEventBody.Job{name: devtools_decode_string(object, "name"), status: devtools_decode_string(object, "status"), duration_ms: devtools_decode_u64(object, "duration_ms"), diagnostics: devtools_decode_string(object, "diagnostics")}))
+    }
+    if kind == "Frame" {
+        return Ok(Val(JetDevtoolsEventBody.Frame{name: devtools_decode_string(object, "name"), status: devtools_decode_string(object, "status"), duration_ms: devtools_decode_u64(object, "duration_ms")}))
+    }
+    if kind == "GameFrameSample" {
+        return Ok(Val(JetDevtoolsEventBody.GameFrameSample{
+            sequence: devtools_decode_u64(object, "sequence"), frame_id: devtools_decode_u64(object, "frame_id"), scene: devtools_decode_string(object, "scene"),
+            frame_index: devtools_decode_u64(object, "frame_index"), build: devtools_decode_string(object, "build"), revision: devtools_decode_string(object, "revision"),
+            trace_id: devtools_decode_string(object, "trace_id"), start_ns: devtools_decode_u64(object, "start_ns"), cpu_ns: devtools_decode_u64(object, "cpu_ns"),
+            gpu_ns: devtools_decode_optional_u64(object, "gpu_ns"), responsible_function: devtools_decode_optional_function(object, "responsible_function"),
+        }))
+    }
+    if kind == "GameDrawEvent" {
+        return Ok(Val(JetDevtoolsEventBody.GameDrawEvent{
+            sequence: devtools_decode_u64(object, "sequence"), frame_id: devtools_decode_u64(object, "frame_id"), scene: devtools_decode_string(object, "scene"),
+            frame_index: devtools_decode_u64(object, "frame_index"), build: devtools_decode_string(object, "build"), revision: devtools_decode_string(object, "revision"),
+            trace_id: devtools_decode_string(object, "trace_id"), event_index: devtools_decode_u64(object, "event_index"), event_id: devtools_decode_u64(object, "event_id"),
+            function: devtools_decode_function(object, "function"), phase: devtools_decode_string(object, "phase"), domain: devtools_decode_string(object, "domain"),
+            start_ns: devtools_decode_u64(object, "start_ns"), duration_ns: devtools_decode_u64(object, "duration_ns"),
+            object_id: devtools_decode_optional_string(object, "object_id"), resource_id: devtools_decode_optional_string(object, "resource_id"),
+        }))
+    }
+    if kind == "GameLaunchProfile" {
+        return Ok(Val(JetDevtoolsEventBody.GameLaunchProfile{target: devtools_decode_string(object, "target"), run_mode: devtools_decode_string(object, "run_mode"), headless_compatible: devtools_decode_bool(object, "headless_compatible"), phases: devtools_decode_launch_phases(object, "phases")}))
+    }
+    if kind == "GameSwap" {
+        swap_kind: devtools_decode_string(object, "kind")
+        if swap_kind != "asset" && swap_kind != "script" && swap_kind != "world" -> return Err("devtools GameSwap kind is not recognized")
+        status: devtools_decode_string(object, "status")
+        if status != "applied" && status != "rejected" -> return Err("devtools GameSwap status is not recognized")
+        migration: devtools_decode_string(object, "migration")
+        if migration != "preserve" && migration != "migrate" && migration != "reset" && migration != "reject" -> return Err("devtools GameSwap migration is not recognized")
+        return Ok(Val(JetDevtoolsEventBody.GameSwap{
+            sequence: devtools_decode_u64(object, "sequence"), path: devtools_decode_string(object, "path"), kind: swap_kind, status: status,
+            old_schema_id: devtools_decode_optional_string(object, "old_schema_id"), new_schema_id: devtools_decode_optional_string(object, "new_schema_id"),
+            migration: migration, reason: devtools_decode_string(object, "reason"),
+        }))
+    }
+    if kind == "Request" {
+        return Ok(Val(JetDevtoolsEventBody.Request{id: devtools_decode_string(object, "id"), method: devtools_decode_string(object, "method"), path: devtools_decode_string(object, "path"), status: devtools_decode_u16(object, "status")}))
+    }
+    if kind == "Response" {
+        return Ok(Val(JetDevtoolsEventBody.Response{id: devtools_decode_string(object, "id"), status: devtools_decode_u16(object, "status"), bytes: devtools_decode_u64(object, "bytes")}))
+    }
+    Ok(None)
+}
+
+// The exact field names of a typed body whose mismatch leaves the event
+// untyped. Mutation, Form and Table are absent: their mismatch is an error.
+devtools_decode_expected_fields: fn(kind: String) -> [String]? Never! {
+    if kind == {
+        "Build" -> Val([String]{"status", "tier", "diagnostics", "kept", "reset"})
+        "Route" -> Val([String]{"path", "matched", "render_mode", "reason"})
+        "Query" -> Val([String]{"name", "state", "footprint"})
+        "GameSwap" -> Val([String]{"sequence", "path", "kind", "status", "old_schema_id", "new_schema_id", "migration", "reason"})
+        "Request" -> Val([String]{"id", "method", "path", "status"})
+        "Store" -> Val([String]{"name", "transaction", "diff", "cursor"})
+        "Trace" -> Val([String]{"name", "kind", "request", "duration_ms", "status"})
+        "Cost" -> Val([String]{"name", "rule", "bytes", "allocations"})
+        "Gate" -> Val([String]{"name", "status", "detail"})
+        "Structure" -> Val([String]{"name", "kind", "status"})
+        "Test" -> Val([String]{"name", "status", "duration_ms", "diagnostics"})
+        "Job" -> Val([String]{"name", "status", "duration_ms", "diagnostics"})
+        "Frame" -> Val([String]{"name", "status", "duration_ms"})
+        "GameFrameSample" -> Val([String]{"sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "start_ns", "cpu_ns", "gpu_ns", "responsible_function"})
+        "GameDrawEvent" -> Val([String]{"sequence", "frame_id", "scene", "frame_index", "build", "revision", "trace_id", "event_index", "event_id", "function", "phase", "domain", "start_ns", "duration_ns", "object_id", "resource_id"})
+        "GameLaunchProfile" -> Val([String]{"target", "run_mode", "headless_compatible", "phases"})
+        "Response" -> Val([String]{"id", "status", "bytes"})
+        else -> None
+    }
+}
+
+devtools_decode_commands: fn(object: [(key: String, value: Dyn)], &&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Err! {
+    if !devtools_decode_exact(object, [String]{"protocol", "session_id", "started_at_ms", "direction", "commands"}) -> return Err("devtools command envelope has unexpected top-level fields")
+    items: devtools_decode_array(object, "commands")
+    if items.len() > JET_DEVTOOLS_MAX_COMMANDS -> return Err("devtools envelope exceeds the retained command limit")
+    envelope := JetDevtoolsCommandEnvelope.new(session_id, started_at_ms)
+    loop item in items {
+        command: devtools_decode_command(item)
+        envelope.enqueue_command(command)
+    }
+    envelope.validate()
+    Ok(envelope)
+}
+
+devtools_decode_command: fn(value: Dyn) -> JetDevtoolsCommand Err! {
+    command: recording_object_fields(value) ?? return Err("devtools envelope command must be an object")
+    if !devtools_decode_exact(command, [String]{"kind", "payload"}) -> return Err("devtools envelope command must contain only kind and payload")
+    kind: devtools_decode_string(command, "kind")
+    payload_value: recording_lookup(command, "payload") ?? return Err("devtools envelope command payload must be an object")
+    payload: recording_object_fields(payload_value) ?? return Err("devtools envelope command payload must be an object")
+    if kind == "DatabaseExplain" {
+        if !devtools_decode_exact(payload, [String]{"session_id", "request_id", "statement_identity", "timeout_ms", "max_rows"}) -> return Err("devtools envelope database command payload has unexpected fields")
+        request: JetDevtoolsDatabaseExplainRequest.new(devtools_decode_string(payload, "session_id"), devtools_decode_string(payload, "request_id"), devtools_decode_string(payload, "statement_identity"), devtools_decode_int(payload, "timeout_ms"), devtools_decode_int(payload, "max_rows"))
+        return Ok(JetDevtoolsCommand.DatabaseExplain{request: request})
+    }
+    if kind == "GameControl" {
+        if !devtools_decode_exact(payload, [String]{"session_id", "request_id", "kind", "source_id", "revision", "world_id", "actor_id", "component_id", "authored_instance_id", "source_span_start", "source_span_end", "field", "value", "category", "expression", "required_authority", "frame_id", "budget"}) -> return Err("devtools envelope game control payload has unexpected fields")
+        request: JetDevtoolsGameControlRequest{
+            session_id: devtools_decode_string(payload, "session_id"), request_id: devtools_decode_string(payload, "request_id"),
+            kind: JetDevtoolsGameControlKind.parse(devtools_decode_string(payload, "kind")),
+            source_id: devtools_decode_optional_string(payload, "source_id"), revision: devtools_decode_optional_string(payload, "revision"),
+            world_id: devtools_decode_optional_string(payload, "world_id"), actor_id: devtools_decode_optional_string(payload, "actor_id"),
+            component_id: devtools_decode_optional_string(payload, "component_id"), authored_instance_id: devtools_decode_optional_string(payload, "authored_instance_id"),
+            source_span_start: devtools_decode_optional_int(payload, "source_span_start"), source_span_end: devtools_decode_optional_int(payload, "source_span_end"),
+            field: devtools_decode_optional_string(payload, "field"), value: devtools_decode_optional_string(payload, "value"),
+            category: devtools_decode_optional_string(payload, "category"), expression: devtools_decode_optional_string(payload, "expression"),
+            required_authority: devtools_decode_optional_string(payload, "required_authority"), frame_id: devtools_decode_optional_int(payload, "frame_id"),
+            budget: devtools_decode_optional_int(payload, "budget"),
+        }
+        request.validate()
+        return Ok(JetDevtoolsCommand.GameControl{request: request})
+    }
+    if kind == "ProjectRebuild" {
+        if !devtools_decode_exact(payload, [String]{"session_id", "request_id", "expected_revision"}) -> return Err("devtools envelope project rebuild payload has unexpected fields")
+        request: JetDevtoolsProjectRebuildRequest.new(devtools_decode_string(payload, "session_id"), devtools_decode_string(payload, "request_id"), devtools_decode_string(payload, "expected_revision"))
+        return Ok(JetDevtoolsCommand.ProjectRebuild{request: request})
+    }
+    Err("devtools envelope contains an unsupported command kind")
+}
+
+devtools_decode_lifecycle: fn(value: String) -> JetDevtoolsLifecycleState Err! {
+    if value == {
+        "starting" -> Ok(.Starting)
+        "building" -> Ok(.Building)
+        "ready" -> Ok(.Ready)
+        "error" -> Ok(.Error)
+        "unavailable" -> Ok(.Unavailable)
+        "stopped" -> Ok(.Stopped)
+        else -> Err("devtools envelope lifecycle is not recognized")
+    }
+}
+
+devtools_decode_freshness_state: fn(value: String) -> JetDevtoolsFreshnessState Err! {
+    if value == {
+        "fresh" -> Ok(.Fresh)
+        "stale" -> Ok(.Stale)
+        "unknown" -> Ok(.Unknown)
+        else -> Err("devtools envelope freshness state is not recognized")
+    }
+}
+
+devtools_decode_query_state: fn(value: String) -> JetDevtoolsQueryState Err! {
+    if value == {
+        "fetching" -> Ok(.Fetching)
+        "fresh" -> Ok(.Fresh)
+        "stale" -> Ok(.Stale)
+        "invalidated" -> Ok(.Invalidated)
+        else -> Err("devtools Query state is not recognized")
+    }
+}
+
+devtools_decode_mutation_lifecycle: fn(value: String) -> JetDevtoolsMutationLifecycle Err! {
+    if value == {
+        "started" -> Ok(.Started)
+        "committed" -> Ok(.Committed)
+        "failed" -> Ok(.Failed)
+        "rolled_back" -> Ok(.RolledBack)
+        else -> Err("devtools Mutation lifecycle is not recognized")
+    }
+}
+
+devtools_decode_form_state: fn(value: String) -> JetDevtoolsFormState Err! {
+    if value == {
+        "pristine" -> Ok(.Pristine)
+        "dirty" -> Ok(.Dirty)
+        "valid" -> Ok(.Valid)
+        "invalid" -> Ok(.Invalid)
+        else -> Err("devtools Form state is not recognized")
+    }
+}
+
+devtools_decode_trace_kind: fn(value: String) -> JetDevtoolsTraceKind Err! {
+    if value == {
+        "request" -> Ok(.Request)
+        "render" -> Ok(.Render)
+        "job" -> Ok(.Job)
+        "reload" -> Ok(.Reload)
+        "frame" -> Ok(.Frame)
+        else -> Err("devtools Trace kind is not recognized")
+    }
+}
+
+devtools_decode_has: fn(object: [(key: String, value: Dyn)], key: String) -> Bool Never! {
+    recording_lookup(object, key) != None
+}
+
+// The object's distinct keys are exactly `expected`.
+devtools_decode_exact: fn(object: [(key: String, value: Dyn)], expected: [String]) -> Bool Never! {
+    loop field in object {
+        if !expected.contains(field.key) -> return false
+    }
+    loop name in expected {
+        if !devtools_decode_has(object, name) -> return false
+    }
+    true
+}
+
+devtools_decode_require_exact: fn(object: [(key: String, value: Dyn)], expected: [String]) Err! {
+    if !devtools_decode_exact(object, expected) -> return Err("devtools event fields do not match the typed body")
+    Ok()
+}
+
+devtools_decode_array: fn(object: [(key: String, value: Dyn)], key: String) -> [Dyn] Err! {
+    value: recording_lookup(object, key) ?? return Err("devtools envelope `{key}` must be an array")
+    if value == .Array(items) -> return Ok(items)
+    Err("devtools envelope `{key}` must be an array")
+}
+
+devtools_decode_string: fn(object: [(key: String, value: Dyn)], key: String) -> String Err! {
+    value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
+    devtools_decode_value_string(value, key)
+}
+
+devtools_decode_value_string: fn(value: Dyn, key: String) -> String Err! {
+    text: recording_text(value) ?? return Err("devtools envelope `{key}` must be a string")
+    if text == "" -> return Err("devtools envelope `{key}` must not be empty")
+    Ok(text)
+}
+
+devtools_decode_optional_string: fn(object: [(key: String, value: Dyn)], key: String) -> String? Err! {
+    value: recording_lookup(object, key) ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    Ok(Val(devtools_decode_value_string(value, key)))
+}
+
+devtools_decode_string_array: fn(object: [(key: String, value: Dyn)], key: String) -> [String] Err! {
+    items: devtools_decode_array(object, key)
+    strings := [String]{}
+    loop item in items {
+        text: recording_text(item) ?? return Err("devtools event `{key}` must contain strings")
+        if text == "" -> return Err("devtools event `{key}` has an empty string")
+        strings.push(text)
+    }
+    Ok(strings)
+}
+
+devtools_decode_int: fn(object: [(key: String, value: Dyn)], key: String) -> Int Err! {
+    value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
+    number: foundation_json_integer(value) ?? return Err("devtools envelope `{key}` must be an integer")
+    if number < 0 -> return Err("devtools envelope `{key}` must be non-negative")
+    Ok(number)
+}
+
+devtools_decode_optional_int: fn(object: [(key: String, value: Dyn)], key: String) -> Int? Err! {
+    value: recording_lookup(object, key) ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    number: foundation_json_integer(value) ?? return Err("devtools event `{key}` must be an integer or null")
+    if number < 0 -> return Err("devtools event `{key}` must be non-negative")
+    Ok(Val(number))
+}
+
+devtools_decode_u64: fn(object: [(key: String, value: Dyn)], key: String) -> U64 Err! {
+    number: devtools_decode_int(object, key)
+    checked(U64{number}) ?? return Err("devtools envelope `{key}` must be non-negative")
+}
+
+devtools_decode_optional_u64: fn(object: [(key: String, value: Dyn)], key: String) -> U64? Err! {
+    number: devtools_decode_optional_int(object, key) ?? return Ok(None)
+    unsigned: checked(U64{number}) ?? return Err("devtools event `{key}` must be non-negative")
+    Ok(Val(unsigned))
+}
+
+devtools_decode_u32: fn(object: [(key: String, value: Dyn)], key: String) -> U32 Err! {
+    number: devtools_decode_int(object, key)
+    if number > 4294967295 -> return Err("devtools event `{key}` is outside the u32 range")
+    checked(U32{number}) ?? return Err("devtools event `{key}` is outside the u32 range")
+}
+
+devtools_decode_u16: fn(object: [(key: String, value: Dyn)], key: String) -> U16 Err! {
+    number: devtools_decode_int(object, key)
+    if number > 65535 -> return Err("devtools event `{key}` is outside the u16 range")
+    checked(U16{number}) ?? return Err("devtools event `{key}` is outside the u16 range")
+}
+
+devtools_decode_bool: fn(object: [(key: String, value: Dyn)], key: String) -> Bool Err! {
+    value: recording_lookup(object, key) ?? return Err("devtools envelope missing `{key}`")
+    if value == .Bool(flag) -> return Ok(flag)
+    Err("devtools envelope `{key}` must be a boolean")
+}
+
+devtools_decode_function: fn(object: [(key: String, value: Dyn)], key: String) -> JetDevtoolsFunctionIdentity Err! {
+    value: recording_lookup(object, key) ?? return Err("devtools event `{key}` must be an object")
+    function: recording_object_fields(value) ?? return Err("devtools event `{key}` must be an object")
+    source_value: recording_lookup(function, "source") ?? return Err("devtools event `{key}.source` must be an object")
+    source: recording_object_fields(source_value) ?? return Err("devtools event `{key}.source` must be an object")
+    span: jet_devtools_source_span_new(devtools_decode_string(source, "source_id"), devtools_decode_string(source, "file"), devtools_decode_u32(source, "start_line"), devtools_decode_u32(source, "start_column"), devtools_decode_u32(source, "end_line"), devtools_decode_u32(source, "end_column"))
+    Ok(jet_devtools_function_identity_new(devtools_decode_string(function, "function_id"), devtools_decode_string(function, "name"), span))
+}
+
+devtools_decode_optional_function: fn(object: [(key: String, value: Dyn)], key: String) -> JetDevtoolsFunctionIdentity? Err! {
+    value: recording_lookup(object, key) ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    if value == .Object(_) -> return Ok(Val(devtools_decode_function(object, key)))
+    Err("devtools event `{key}` must be an object or null")
+}
+
+devtools_decode_launch_phases: fn(object: [(key: String, value: Dyn)], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
+    items: devtools_decode_array(object, key)
+    if items.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES -> return Err("devtools event `{key}` exceeds {JET_DEVTOOLS_MAX_LAUNCH_PHASES} entries")
+    phases := [JetDevtoolsGameLaunchPhase]{}
+    loop item in items {
+        phase: recording_object_fields(item) ?? return Err("devtools event `{key}` must contain objects")
+        devtools_decode_require_exact(phase, [String]{"phase", "status", "detail"})
+        phases.push(JetDevtoolsGameLaunchPhase{phase: devtools_decode_string(phase, "phase"), status: devtools_decode_string(phase, "status"), detail: devtools_decode_string(phase, "detail")})
+    }
+    Ok(phases)
+}

@@ -467,7 +467,7 @@ EditorHostTransport: struct {
     }
     replace_devtools_json: fn(&self, payload: String) EditorHostError! {
         // Sole wire decoder belongs to WebHost/Foundation, not this transport.
-        decoded: decode_devtools_envelope(payload) ?? return Err(EditorHostError.InvalidEnvelope(err))
+        decoded: decode_devtools_envelope(payload) ?? return Err(EditorHostError.InvalidEnvelope("{err}"))
         if decoded == {
             .Commands(_) -> { return Err(EditorHostError.InvalidEnvelope("editor host accepts runtime event envelopes, not command envelopes")) }
             .Events(envelope) -> {
