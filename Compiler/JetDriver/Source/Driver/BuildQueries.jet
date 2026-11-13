@@ -16,7 +16,17 @@ use {
 // Rust Driver::compiler_nodes_for_bundle_with_outputs. These are static
 // identities, not BuildNodeRecords: no duration or why-ran observation exists
 // until an actual build action runs. Core owns the sole hash byte recipe.
+// The check nodes (jet_driver_build_check_nodes), then the outputs' compile
+// and link nodes (jet_driver_build_output_nodes).
 jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, checked: SemaGraphResult, effect_identity: ModuleID) -> [BuildGraphNode]? Never! {
+    checks: jet_driver_build_check_nodes(request, load, checked, effect_identity) ?? return None
+    Val(jet_driver_build_output_nodes(request, checks))
+}
+
+// One `check` node per checked module of the bundle outside Core: its
+// source's bytes, or a generated module's with the authority and consent it
+// was generated under; sorted by subject.
+jet_driver_build_check_nodes: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, checked: SemaGraphResult, effect_identity: ModuleID) -> [BuildGraphNode]? Never! {
     if !checked.complete -> return None
     root: jet_driver_entry_root_path(request.authorized_sources)
     if root == "" -> return None
@@ -66,6 +76,14 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
         checks.push(build_session_compiler_node("check", subject, unit_inputs))
     }
     checks.sort_by(fn(left: BuildGraphNode, right: BuildGraphNode) { (left.subject <=> right.subject).then(left.key <=> right.key) })
+    Val(checks.move())
+}
+
+// `checks` followed by a compile and a link node for each of the request's
+// build outputs (the entry file's stem when it names none), each compile
+// node over every check node.
+jet_driver_build_output_nodes: fn(request: JetDriverCompileRequest, owned_checks: &&[BuildGraphNode]) -> [BuildGraphNode] Never! {
+    checks := owned_checks.move()
     outputs := [String]{}
     loop name in request.build_output_names -> build_session_append_unique(outputs, name)
     if outputs.len() == 0 {
@@ -98,7 +116,7 @@ jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetD
     // Rust's enum order is Check, Compile, Link (not string key order).
     loop node in compiles -> checks.push(node)
     loop node in links -> checks.push(node)
-    Val(checks.move())
+    checks.move()
 }
 
 jet_driver_build_selected_output_names: fn(plan: BuildSessionPlan) -> [String] Never! {
@@ -195,9 +213,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // The plan reads the entry package's modules (its `build: fn`) and
     // manifest facts, so Core loads as the program reaches it, with no name
     // ledger (jet_driver_source_query loads every Core declaration for one).
-    // The plan's four parts are spans of the request's trace: the load, the
+    // The plan's parts are spans of the request's trace: the load, the
     // staged compile of `build: fn`, its native run, and the final checked
-    // compile (`build.plan.load`, `.stage`, `.run`, `.check`).
+    // compile when it runs (`build.plan.load`, `.stage`, `.run`, `.check`).
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.load")
     sources: jet_driver_source_query_loaded(jet_driver_load(request), request)
     jet_driver_trace_step_end(request.trace_sink, "build.plan.load", sources.modules.len())
@@ -256,16 +274,19 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // with the generated modules reports what generation left unresolved. A
     // build that fails internally is an internal compiler error either way:
     // the staged reports name what it would have generated, not why it failed.
+    // The staging check also takes the bundle's check nodes: a build that
+    // generates nothing checks the same sources finally (see below).
     jet_driver_trace_step_begin(request.trace_sink, "build.plan.stage")
-    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, None)
+    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, true, None)
     errors := [Diagnostic]{}
     staged_failed: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
     if staged_failed {
         errors = selection.compile.diagnostics.move()
-        selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, Val(JetDriverKeepGoing{skip: [String]{}}))
+        selection = jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, false, Val(JetDriverKeepGoing{skip: [String]{}}))
     }
     jet_driver_trace_step_end(request.trace_sink, "build.plan.stage", if staged_failed -> 2 else -> 1)
     compiled := selection.compile.move()
+    staged_checks: jet_driver_build_check_rows(compiled.build_nodes.move())
     // The build's own reports (jet_driver_build_query_stopped).
     ran := [Diagnostic]{}
     if staged_failed {
@@ -342,8 +363,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // The build ran: the final checked compile below replaces the staged reports.
     if staged_failed -> errors = [Diagnostic]{}
     loop error in ran -> errors.push(error)
-    // The final ordinary checked bundle, not the staging build callable,
-    // owns all source/generated identities, even when no output was generated.
+    // The checked bundle owns all source/generated identities: the final
+    // ordinary one when the build generated modules or joined target sources,
+    // else the staging check's, which checked the same sources.
     original_generated_count: request.generated_modules.len()
     selected_outputs: request.build_output_names.len() == 0
     if selected_outputs -> request.build_output_names = jet_driver_build_selected_output_names(plan)
@@ -362,6 +384,16 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     }
     loop target in targets.libraries {
         if target.sources.contains(entry) { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
+    }
+    // A build that generated no module and joins no target's sources to the
+    // entry's bundle leaves the final check the sources the staging check
+    // checked: its check nodes stand, only the outputs' compile and link
+    // nodes are new (jet_driver_build_output_nodes), and its reports are the
+    // staging check's, which `errors` holds.
+    if !staged_failed && generated.len() == 0 && request.target_sources.len() == 0 && staged_checks.move() == .Val(checks) {
+        staged_nodes: jet_driver_build_output_nodes(request, checks.move())
+        if selected_outputs -> request.build_output_names = [String]{}
+        return jet_driver_build_query_planned(request, plan, generated, staged_nodes, errors, compiled.authority_policy.move(), tidy)
     }
     // As above: the plan reads the user modules' diagnostics and build nodes
     // alone, so Core bodies are checked on demand.
@@ -388,11 +420,27 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     }
     // The nodes move out of the checked result: a `:` read of the field would copy them at `nodes.move()`.
     nodes: checked.build_nodes.move() ?? return jet_driver_build_query_empty(request, errors, false, Val("completed build query lost its compiler node identities"))
+    jet_driver_build_query_planned(request, plan, generated, nodes, errors, compiled.authority_policy.move(), tidy)
+}
+
+// The completed build query: `plan` with `nodes` installed, and its graph.
+jet_driver_build_query_planned: fn(request: &&JetDriverCompileRequest, plan: &&BuildSessionPlan, generated: &&[JetDriverGeneratedModule], nodes: &&[BuildGraphNode], diagnostics: &&[Diagnostic], authority_policy: &&JetDriverAuthorityPolicy?, tidy: &&[Diagnostic]) -> JetDriverBuildQueryResponse Never! {
     // copy: the plan installs its own node list, and `nodes` moves into the response's `nodes`
     // below. These are two independent owners of the same node identities.
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph: build_plan_graph(plan)
-    return JetDriverBuildQueryResponse{request: request.move(), query: JetDriverBuildQueryResult{plan: Val(plan.move()), graph: Val(graph), generated: generated.move(), nodes: nodes.move(), diagnostics: errors.move(), complete: true, internal_problem: None, authority_policy: compiled.authority_policy.move(), tidy: tidy.move()}}
+    JetDriverBuildQueryResponse{request: request.move(), query: JetDriverBuildQueryResult{plan: Val(plan.move()), graph: Val(graph), generated: generated.move(), nodes: nodes.move(), diagnostics: diagnostics.move(), complete: true, internal_problem: None, authority_policy: authority_policy.move(), tidy: tidy.move()}}
+}
+
+// The check nodes of a compile's build nodes (jet_driver_build_compiler_nodes),
+// when it took them.
+jet_driver_build_check_rows: fn(owned: &&[BuildGraphNode]?) -> [BuildGraphNode]? Never! {
+    nodes: owned.move() ?? return None
+    checks := [BuildGraphNode]{}
+    loop node in nodes {
+        if node.kind == "check" -> checks.push(node)
+    }
+    Val(checks.move())
 }
 // The findings `meta.report` raised, each reported at its call in its
 // file: an `.Error` finding joins `errors`, a `.Tidy` one `tidy`, and a

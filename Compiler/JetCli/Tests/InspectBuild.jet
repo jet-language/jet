@@ -264,7 +264,16 @@ inspect_build_runtime_dir: fn() -> String {
     planned_query := planned_response.query.move()
     inspect_build_require(planned_request.authorized_sources.entry_path == "/inspect-build/main.jet" && planned_request.selected_entry == None && planned_request.mode == JetDriverCompileMode.Doc && !planned_request.capture_build_program && !planned_request.capture_build_nodes, "build staging restores entry and selection before returning the invocation")
     inspect_build_require(planned_request.generated_modules.len() == 0 && planned_request.build_output_names.len() == 0, "final checked bundle leaves no temporary generated sources or output overrides in the request")
-    inspect_build_require(planned_query.complete && planned_query.generated.len() == 0 && planned_query.nodes.len() == 3, "zero-generated plan still checks the final ordinary bundle")
+    inspect_build_require(planned_query.complete && planned_query.generated.len() == 0 && planned_query.nodes.len() == 3, "zero-generated plan keeps the staging check's nodes")
+    // A build that generates nothing keeps the staging check's nodes; they
+    // are the ones the final ordinary checked bundle would name.
+    final_check := inspect_build_request()
+    final_check.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{}}\nrun: fn() {{}}"
+    final_check.capture_build_nodes = true
+    final_check.doc_core_on_demand = true
+    final_result: jet_driver_compile(final_check)
+    final_nodes: final_result.build_nodes ?? panic("the final ordinary bundle lost its nodes")
+    inspect_build_require(final_nodes == planned_query.nodes, "the staging check's nodes are the final ordinary bundle's")
     planned_graph: planned_query.graph ?? panic("checked plan lost graph")
     planned_plan: planned_query.plan ?? panic("checked plan lost plan")
     inspect_build_require(planned_graph.nodes == planned_query.nodes && build_plan_graph(planned_plan).nodes == planned_query.nodes, "same finished Core plan owns the compiler nodes")

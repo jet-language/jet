@@ -93,7 +93,7 @@ jet_driver_query_dev_config: fn(owned_request: &&JetDriverCompileRequest) -> Jet
         }
     }
     path: selected ?? return JetDriverDevQueryResult{config: jet_driver_dev_config_stock(), diagnostics: sources.diagnostics.move(), complete: true, internal_problem: None}
-    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.move()), Val("dev"), true, None)
+    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, Val(path.move()), Val("dev"), true, false, None)
     compiled := selection.compile.move()
     if !compiled.complete || compiled.internal_problem != None -> return jet_driver_dev_query_failed(compiled.diagnostics.move(), compiled.internal_problem.move())
     inputs: selection.inputs.move() ?? return jet_driver_dev_query_failed(compiled.diagnostics.move(), Val("checked dev invocation lost its checked functions"))

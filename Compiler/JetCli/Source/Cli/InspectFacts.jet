@@ -418,7 +418,7 @@ jet_cli_facts_run_answer: fn(path: String, kind: String) -> JetCLIFactsOutcome N
 // invocation and evaluator.
 jet_cli_facts_invoke: fn(program: String, args: [TComptimeValue], core_sources: [JetDriverCoreSource], base: String) -> JetCLIFactsOutcome {
     request := jet_cli_driver_request(jet_cli_facts_snapshot(program, base), core_sources, None, JetDriverCompileMode.RootRun)
-    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, None, Val(JET_CLI_FACTS_ENTRY), false, None)
+    selection := jet_driver_lowering_inputs_selection(request, JetDriverCompileMode.RootRun, None, Val(JET_CLI_FACTS_ENTRY), false, false, None)
     compiled := selection.compile.move()
     if compiled.internal_problem == .Val(problem) -> return JetCLIFactsOutcome.Failed{reason: problem.copy()}
     loop diagnostic in compiled.diagnostics {

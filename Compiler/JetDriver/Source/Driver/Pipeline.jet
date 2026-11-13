@@ -3727,9 +3727,10 @@ jet_driver_lowering_inputs: fn(request: JetDriverCompileRequest, keep_going: Jet
 
 // jet_driver_lowering_inputs of `request` with entry file `entry_path`,
 // selected function `selected_entry` and `mode`, the build ProgramInfo
-// captured when `capture_build_program`, failures kept going past as
-// `keep_going` asks; the request is restored after.
-jet_driver_lowering_inputs_selection: fn(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: &&String?, selected_entry: &&String?, capture_build_program: Bool, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
+// captured when `capture_build_program` and the bundle's build nodes when
+// `capture_build_nodes`, failures kept going past as `keep_going` asks; the
+// request is restored after.
+jet_driver_lowering_inputs_selection: fn(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: &&String?, selected_entry: &&String?, capture_build_program: Bool, capture_build_nodes: Bool, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
     if entry_path.move() == .Val(path) {
         // copy: `saved` keeps the request's original entry path to restore it; the field is
@@ -3745,7 +3746,7 @@ jet_driver_lowering_inputs_selection: fn(request: &JetDriverCompileRequest, mode
     }
     request.mode = mode
     request.capture_build_program = capture_build_program
-    request.capture_build_nodes = false
+    request.capture_build_nodes = capture_build_nodes
     result := jet_driver_lowering_inputs(request, keep_going)
     jet_driver_compile_selection_restore(request, saved)
     result

@@ -27,7 +27,7 @@ use {
     lifecycle: "{root}/lifecycle.list"
     cli_files.write(lifecycle, "") ?? panic("write the lifecycle list: {err}")
     prefix: "{root}/unit"
-    built: jet_cli_runtime_library(jet_cli_lowering_inputs(request, None), prefix, Val(lifecycle), threads)
+    built: jet_cli_runtime_library(jet_cli_lowering_inputs(request, None), prefix, Val(lifecycle), threads, None)
     if built.internal_problem == .Val(problem) -> panic("the library feed refused: {problem}")
     if !built.complete -> panic("the library feed failed: {built.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })} {cli_files.read("{prefix}.issues") ?? ""}")
     assert_eq(cli_files.read("{prefix}.exports") ?? panic("read the export list: {err}"), "run")
