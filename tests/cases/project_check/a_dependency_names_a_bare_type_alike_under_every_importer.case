@@ -1,0 +1,16 @@
+# A dependency names a bare type it never imports by the one type of that
+# name its own package reaches, so it checks the same under every importer as
+# on its own: an importer's own `Span` does not take the dependency's `Span`.
+fixture: a_dependency_names_a_bare_type_alike_under_every_importer.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check .
+cwd: {work}/mid
+exit: 0
+stdout+stderr: !~ "Error" # the dependency checks clean on its own
+step: jet check .
+cwd: {work}/app
+exit: 0
+stdout+stderr: !~ "E0119" # the dependency's bare `Span` still names reach_base's
+stdout+stderr: !~ "E0626" # so the dependency does not fail under this importer
+stdout+stderr: !~ "Error" # and the importer checks clean

@@ -867,6 +867,12 @@ SemaRegistrationGraph: struct {
     // graph construction on: every nominal row pushed later (compiler
     // builtins, user templates, minted failure unions) is indexed as it lands.
     nominal_symbol_rows: [U32:SemaRegistrationRowRef]
+    // Source package identity -> its slot in `package_reach`: per module row,
+    // whether the package's own modules reach it through their imports
+    // (sema_registration_index_package_reach). Empty until every import is
+    // bound.
+    package_reach_slots: [String:Int]{[String:Int]{}}
+    package_reach: [[Bool]]{[[Bool]]{}}
     // Compiler-owned nominal name (`Err`, `Ordering`, `RemoveBy`) -> its row.
     compiler_builtin_rows: [String:SemaRegistrationRowRef]{[String:SemaRegistrationRowRef]{}}
     // Resolved trait symbol id -> the impl rows implementing it, in
@@ -1551,6 +1557,65 @@ sema_registration_index_nominal_names: fn(graph: &SemaRegistrationGraph, module_
 sema_registration_nominal_rows_named: fn(graph: SemaRegistrationGraph, name: String) -> [SemaRegistrationRowRef] {
     slot: graph.nominal_row_slots.get(name) ?? return [SemaRegistrationRowRef]{}
     graph.nominal_row_buckets[slot]
+}
+
+// Whether the package of module row `from` reaches module row `to` through
+// its imports (SemaRegistrationGraph.package_reach). A Core module, a row
+// the graph grew after the reach was cut, and a graph cut without it reach
+// nothing.
+sema_registration_reaches: fn(graph: SemaRegistrationGraph, from: Int, to: Int) -> Bool Never! {
+    if from < 0 || from >= graph.modules.len() || to < 0 -> return false
+    slot: graph.package_reach_slots.get(graph.modules[from].package_identity) ?? return false
+    to < graph.package_reach[slot].len() && graph.package_reach[slot][to]
+}
+
+// Each source package's reach (SemaRegistrationGraph.package_reach), once
+// every import is bound. A package reaches its own modules; an import of
+// another source package's module reaches that whole package, whose files
+// see each other's names; an import of a Core module reaches that module
+// and what it imports.
+sema_registration_index_package_reach: fn(graph: &SemaRegistrationGraph) Never! {
+    slots := [String:Int]{}
+    members := [[Int]]{}
+    loop row in 0..<graph.modules.len() {
+        if module_is_core(graph.modules[row].module_identity) -> next
+        if slots.get(graph.modules[row].package_identity) == .Val(slot) {
+            members[slot].push(row)
+            next
+        }
+        slots[graph.modules[row].package_identity] = members.len()
+        members.push([Int]{row})
+    }
+    reach := [[Bool]]{}
+    loop slot in 0..<members.len() {
+        seen := (loop _ in 0..<graph.modules.len() -> false)
+        pending := [Int]{}
+        loop member in members[slot] {
+            seen[member] = true
+            pending.push(member)
+        }
+        loop pending.len() > 0 {
+            from: pending.pop() ?? break
+            loop import in graph.modules[from].imports {
+                if !module_is_core(import.target_module_identity) {
+                    target_slot: slots.get(import.target_package_identity) ?? next
+                    loop member in members[target_slot] {
+                        if seen[member] -> next
+                        seen[member] = true
+                        pending.push(member)
+                    }
+                    next
+                }
+                target: sema_registration_module_index(graph, import.target_module_identity) ?? next
+                if seen[target] -> next
+                seen[target] = true
+                pending.push(target)
+            }
+        }
+        reach.push(seen.move())
+    }
+    graph.package_reach_slots = slots.move()
+    graph.package_reach = reach.move()
 }
 
 // The impl rows registered under target type name `name`, in module/row order.
@@ -5069,6 +5134,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         sema_inline_modules_check_imports(graph, module_index)
         module_index += 1
     }
+    sema_registration_index_package_reach(graph)
     sema_comptime_use_check(graph)
     sema_registration_canonicalize_qualified_types(graph)
     module_index = 0

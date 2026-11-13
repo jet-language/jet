@@ -1361,7 +1361,10 @@ sema_type_graph_bare_rename: fn(graph: SemaRegistrationGraph, declared: String, 
 
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither
 // declares nor imports names the one type declaration of that name, among the
-// loaded modules, that the caller can see. Two owners leave it unresolved. A
+// loaded modules, that the caller can see. Two owners leave it unresolved,
+// unless exactly one of them is in a module the caller's package reaches
+// through its imports (sema_registration_reaches): a package then names the
+// same type under every importer as when it is checked on its own. A
 // built-in typed head names its Core carrier record (`URL` in `core.net.url`,
 // `HTML` in `core.text.html`, …; boundary_head_carrier_module) when that
 // module is loaded, and no other owner; a parameterless Core alias outside the
@@ -1384,8 +1387,32 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
         return None
     }
     if caller_index < 0 -> return None
-    caller: graph.modules[caller_index]
-    caller_is_core: module_is_core(caller.module_identity)
+    scan := sema_type_graph_scan_type_owners(graph, caller_index, name, rows, SemaOwnerCount.Every)
+    if scan.ambiguous -> scan = sema_type_graph_scan_type_owners(graph, caller_index, name, rows, SemaOwnerCount.Reached)
+    if scan.ambiguous -> return None
+    chosen: scan.found ?? return None
+    owner_row: graph.modules[chosen.module_index]
+    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: chosen.module_index, row: chosen.row}, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: owner_row.nominals[chosen.row].symbol.visibility, nominal_row: Val(chosen)})
+}
+
+// The one owner of a bare type name among its nominal rows, or that two
+// modules own one.
+SemaTypeOwnerScan: struct {
+    found: SemaRegistrationRowRef?
+    ambiguous: Bool
+}
+
+// Which owners a bare type name's scan counts: every one the caller can see,
+// or only those in modules the caller's package reaches
+// (sema_registration_reaches).
+SemaOwnerCount: enum {
+    Every
+    Reached
+}
+
+// sema_type_graph_unique_type_owner's scan of `rows`, counting `count`'s owners.
+sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index: Int, name: String, rows: [SemaRegistrationRowRef], count: SemaOwnerCount) -> SemaTypeOwnerScan {
+    caller_is_core: module_is_core(graph.modules[caller_index].module_identity)
     found := SemaRegistrationRowRef?{None}
     loop row in rows {
         owner := row
@@ -1422,15 +1449,14 @@ sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index
             // A Core root trait (`__DecodeSource`, the source a generated decode reads) is
             // seen bare wherever Core is loaded, as a Core root value type is.
             && (nominal.kind != SemaRegistrationNominalKind.Trait || (module_is_core(owner_row.module_identity) && !core_root_type(name))) -> next
-        if !sema_registration_visible(nominal.symbol.visibility, caller.module_identity, caller.package_identity, owner_row.module_identity, owner_row.package_identity) -> next
+        if !sema_registration_visible(nominal.symbol.visibility, graph.modules[caller_index].module_identity, graph.modules[caller_index].package_identity, owner_row.module_identity, owner_row.package_identity) -> next
+        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller_index, owner.module_index) -> next
         if found == .Val(previous) {
-            if previous.module_index != owner.module_index -> return None
+            if previous.module_index != owner.module_index -> return SemaTypeOwnerScan{found: None, ambiguous: true}
         }
         found = Val(owner)
     }
-    chosen: found ?? return None
-    owner_row: graph.modules[chosen.module_index]
-    Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: chosen.module_index, row: chosen.row}, source_module_identity: owner_row.module_identity, target_module_identity: owner_row.module_identity, visibility: owner_row.nominals[chosen.row].symbol.visibility, nominal_row: Val(chosen)})
+    SemaTypeOwnerScan{found: found, ambiguous: false}
 }
 
 // Rust `split_type_name`'s leaf: after the last `::`, else after the last `.`.
@@ -1469,23 +1495,33 @@ sema_type_lookup_nominal_row: fn(graph: SemaRegistrationGraph, resolved: SemaReg
         return sema_type_graph_resolved_nominal_row(graph, found)
     }
     if caller >= 0 && module_is_core(graph.modules[caller].module_identity) -> return None
-    sema_type_unscoped_nominal_row(graph, name)
+    sema_type_unscoped_nominal_row(graph, name, caller)
 }
 
 // A value's type can reach a module that never names it: a call into a dependency
 // package returns one of its types (`span: parser_cover(..)` gives a `Span` that
 // jet_parser never imports). With no binding of the name in the caller's scope, the type
-// is the one source nominal of that name in the graph; several make it unknown.
-sema_type_unscoped_nominal_row: fn(graph: SemaRegistrationGraph, name: String) -> SemaRegistrationRowRef? {
+// is the one source nominal of that name in the graph, or, when several share it, the
+// one in a module the caller's package reaches; otherwise it is unknown.
+sema_type_unscoped_nominal_row: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> SemaRegistrationRowRef? {
+    scan := sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Every)
+    if scan.ambiguous -> scan = sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Reached)
+    if scan.ambiguous -> return None
+    scan.found
+}
+
+// sema_type_unscoped_nominal_row's scan, counting `count`'s rows.
+sema_type_scan_unscoped_rows: fn(graph: SemaRegistrationGraph, name: String, caller: Int, count: SemaOwnerCount) -> SemaTypeOwnerScan {
     found := SemaRegistrationRowRef?{None}
     loop row in sema_registration_nominal_rows_named(graph, name) {
         if module_is_core(graph.modules[row.module_index].module_identity) -> next
+        if count == SemaOwnerCount.Reached && !sema_registration_reaches(graph, caller, row.module_index) -> next
         if found == .Val(previous) {
-            if previous.module_index != row.module_index || previous.row != row.row -> return None
+            if previous.module_index != row.module_index || previous.row != row.row -> return SemaTypeOwnerScan{found: None, ambiguous: true}
         }
         found = Val(row)
     }
-    found
+    SemaTypeOwnerScan{found: found, ambiguous: false}
 }
 
 // The ledger alone is not declaration authority: require the registered row.
