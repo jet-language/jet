@@ -114,9 +114,17 @@ object. A URL's user and password never appear in that list.
 <!-- BEGIN GENERATED ENVIRONMENT VARIABLES: Maintainer (Tools/agent/EnvironmentRows.jet; edit Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet) -->
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
+| `JETPACK_CHECK_MEM` | a size such as `6G` | The memory cap of the `jet check` stage of the Jetpack bootstrap proof (`Jetpack/Bootstrap/Check.jet`). Unset, `6G`. |
+| `JETPACK_CHECK_SECS` | seconds | The wall-clock limit of the bootstrap proof's `jet check` stage. Unset, 1200. |
+| `JETPACK_CHECK_SLOTS` | count | How many bootstrap proofs type-check at once on the machine; the rest wait for a slot. Unset, 2. |
+| `JETPACK_EACH_PARALLEL` | count | How many areas `Jetpack/Bootstrap/Check.jet --each` proves at once. Unset, 4. |
+| `JETPACK_HOSTED_MEM` | a size such as `20G` | The memory cap of the `jet build` stage of `Jetpack/Bootstrap/Check.jet --hosted`. Unset, `20G`. |
+| `JETPACK_HOSTED_SECS` | seconds | The wall-clock limit of the `--hosted` `jet build` stage. Unset, 5400. |
+| `JETPACK_MIN_FREE_MB` | megabytes | The available memory a capped bootstrap proof stage waits for; after 10 minutes below it the proof exits 75. Unset, 16000. |
 | `JETPACK_SEAL_CENSUS` | any value | Counts how often each path is sealed and reports the census. |
 | `JETPACK_TIMING` | any value | Reports the time each phase of composing an environment took. |
 | `JETPACK_VERIFY_TRACE` | any value | Prints to stderr why each cache entry failed verification. |
+| `JETPACK_WORKER` | plain name | The writer whose scratch directory a Jetpack bootstrap assembly or proof uses, `$JET_STATE_ROOT/jetpack-bootstrap/<worker>-<tag>`, so concurrent writers keep apart. Unset, `lead`. |
 | `JET_BASE_ROOT` | path | Checkout tool root (`Tools/agent/roots.sh`): the published compilers. Unset, `$JET_SCRATCH_ROOT/discovery/base`. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_CHECK_MEM` | a size such as `20G`, `512M` or `4096K`, or `off` | The address-space cap of each compiler check `Tools/agent/LaneCheck.jet` runs; `off` runs it uncapped. Unset, `20G`. |
@@ -178,7 +186,7 @@ the text before it.
 | Variable | Read by | Purpose |
 | --- | --- | --- |
 | `JETPACK_AUTO_CLEAN_ALWAYS` | `Jetpack/Store/Source/Lifecycle/GarbageCollection.jet` | Test hook: the Hangar's automatic clean runs every time, instead of at most once a day. |
-| `JETPACK_BOOTSTRAP_*` | `Compiler/test.jet` | The scratch directory, source root and engine areas the Jetpack bootstrap suite hands `Jetpack/Bootstrap/Assemble.jet`. |
+| `JETPACK_BOOTSTRAP_*` | `Compiler/test.jet` | What the Jetpack bootstrap suite and `Jetpack/Bootstrap/Check.jet` hand `Jetpack/Bootstrap/Assemble.jet`: `SOURCE_ROOT` the tree to assemble, `SCRATCH` the scratch directory, `AREAS` the areas to assemble, `OWN_AREA` the area being proved, `TEST_AREAS` the test sections whose claims run, and `DEPS_FROM_HEAD=1` to read the dependencies as HEAD has them. |
 | `JETPACK_ENV` | `Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet` | Marks a shell that `jet env` activated. |
 | `JETPACK_ENV_DIR` | `Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet` | The `env.jet` directory `jet env hook` last activated, empty for none; a change from it loads or unloads. |
 | `JETPACK_ENV_HASH` | `Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet` | The identity of the environment `jet env hook` activated. |

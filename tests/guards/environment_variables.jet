@@ -12,9 +12,6 @@ use environment_files: core.files
 // name, never as text, outside ENVIRONMENT_SPELLED.
 ENVIRONMENT_REGISTRY: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
 ENVIRONMENT_ROOTS: [String]{"Compiler", "Jetpack", "Tools/agent/RuntimeGenerators.jet"}
-// The scanned roots' directories not yet scanned: the Jetpack bootstrap scripts,
-// whose variables get their rows with the checkout tools' own.
-ENVIRONMENT_UNSCANNED: [String]{"Jetpack/Bootstrap"}
 
 // The literals in the scanned code that name no environment variable.
 ENVIRONMENT_NOT_VARIABLES: [(prefix: String, why: String)]{
@@ -39,6 +36,8 @@ ENVIRONMENT_SPELLED: [(path: String, why: String)]{
     (path: "Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet", why: "the ratified syntax registry's own spellings"),
     (path: "Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet", why: "the ratified syntax registry's own spellings"),
     (path: "Compiler/JetFoundation/Data/Syntax/Predicates.jet", why: "the ratified syntax registry's own spellings"),
+    (path: "Jetpack/Bootstrap/Assemble.jet", why: "a script that imports no package"),
+    (path: "Jetpack/Bootstrap/Check.jet", why: "a script that imports no package"),
     (path: "Jetpack/Foundation/Source/SyntaxRegistry.jet", why: "the Jetpack unit's generated copy of the ratified syntax registry"),
     (path: "Jetpack/TrustRoot/Source/CacheReceipts.jet", why: "TrustRoot depends on no package"),
     (path: "Jetpack/PackageModel/Source/Foreign/WorkerSupervisor.jet", why: "the worker supervisor's C source"),
@@ -97,7 +96,6 @@ environment_scan: fn(path: String, out: &[String]) {
     if environment_files.is_dir(path) {
         loop child in (environment_files.list_dir(path) ?? panic("list {path}: {err}")) {
             if child.name.starts_with(".") || child.name == "Tests" -> next
-            if ENVIRONMENT_UNSCANNED.contains(environment_files.join(path, child.name)) -> next
             environment_scan(environment_files.join(path, child.name), out)
         }
         return
