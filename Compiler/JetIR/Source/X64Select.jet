@@ -3675,14 +3675,23 @@ ir_x64_pad_local: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, slot: In
 
 // Whether edge `other` may run the tail of edge `pad` from `from`. A tail
 // that ends in a Return may always: nothing is read after it. One that
-// branches into the body runs on there for `other` too, so it must keep
-// every value the body holds over `other`: no temp of the tail may hold the
-// register or the frame home of such a value (temps whose ranges lie apart
-// share homes, X64Alloc), and no such value may be in an xmm register or
-// be a routed one (a call in the tail keeps only the values live over
-// `pad`).
+// branches into the body runs on there for `other` too, to the construct
+// both leave to (their keys name it), so it must keep every value the body
+// may read from there on: one whose range reaches that construct's End
+// (a value read past the End, or at a Loop's head, which grows over the
+// whole Loop). No temp of the tail may hold the register or the frame home
+// of such a value (temps whose ranges lie apart share homes, X64Alloc),
+// and no such value may be a routed one. Around its calls the tail stores
+// and reloads the xmm and routed values whose ranges hold them
+// (ir_x64_keep_xmms, ir_x64_keep_routed), so such a value may sit in an xmm
+// register only when its range holds the whole tail, which keeps it at
+// every call too, and no other value the tail keeps may share its register
+// or its home with one the body reads on.
 ir_x64_share_safe: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, other: IRX64Pad) -> Bool Never! {
-    if f.op[pad.end - 1] == .Return -> return true
+    last: pad.end - 1
+    if f.op[last] == .Return -> return true
+    target: pad.open[pad.open.len() - f.a[last]]
+    resume: if f.op[target] == .If -> f.c[target] else -> f.a[target]
     taken := [Int]{}
     homes := [Int]{}
     reads := [Int]{}
@@ -3696,9 +3705,23 @@ ir_x64_share_safe: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: I
             if al.homes[slot] != 0 -> homes.push(al.homes[slot])
         }
     }
+    kept := [Int]{}
+    loop slot in al.xmm_slots {
+        if al.starts[slot] < pad.end && al.ends[slot] >= from -> kept.push(slot)
+    }
+    loop slot in al.routed {
+        if al.starts[slot] < pad.end && al.ends[slot] >= from -> kept.push(slot)
+    }
     loop slot in 0..<al.starts.len() {
-        if al.starts[slot] > other.end || al.ends[slot] < other.at || ir_x64_pad_local(f, al, other, slot) -> next
-        if al.xmms[slot] >= 0 || al.routed.contains(slot) -> return false
+        if al.ends[slot] < resume || al.starts[slot] > other.end || al.ends[slot] < other.at || ir_x64_pad_local(f, al, other, slot) -> next
+        if al.routed.contains(slot) -> return false
+        if al.xmms[slot] >= 0 && (al.starts[slot] >= from || al.ends[slot] < pad.end) -> return false
+        loop held in kept {
+            if held == slot -> next
+            if al.xmms[slot] >= 0 && al.xmms[held] == al.xmms[slot] -> return false
+            if al.regs[slot] >= 0 && al.routed.contains(held) && al.regs[held] == al.regs[slot] -> return false
+            if al.homes[slot] != 0 && al.homes[held] == al.homes[slot] -> return false
+        }
         if al.regs[slot] >= 0 {
             loop reg in taken {
                 if reg == al.regs[slot] -> return false
@@ -5332,4 +5355,67 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     named: ir_x64_tables(fixed)
     assert(named.texts.get(IR_X64_DIVIDED_BY_ZERO) != None && named.texts.get(ir_x64_overflow_message("div")) != None)
     assert(named.texts.get(ir_x64_overflow_message("add")) == None)
+}
+
+// Two stop edges, each `jet_rt_cleanup_enter`, its leave and a branch out
+// of the Block they sit in, around x = p * p and a total, both read past
+// the Block more often than the edges' calls cost: they keep xmm registers
+// over both edges, and the first edge's tail stores and reloads them around
+// its calls, so the second edge may run it. With y = x + x written between
+// the edges (also in an xmm register), that tail leaves y unkept around its
+// calls: the second edge may run it when y is read only inside the Block,
+// which neither edge returns to, and may not when y is read past the Block
+// (the first edge's way there leaves y unset; only ranges matter here).
+#Test("A stop edge runs another's tail only when that tail keeps the values read after it") {
+    loop shape in 0..<3 {
+        m := ir_module_new()
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        word: ir_word_row(m)
+        enter: ir_intern_name(m, "jet_rt_cleanup_enter")
+        leave: ir_intern_name(m, "jet_rt_cleanup_leave")
+        f := ir_function_new("f", "test:share.jet::f", "", "share.jet", 2)
+        p: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+        c: ir_slot(f, flag, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
+        f.result = float
+        x: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        y: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        total: ir_slot(f, float, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+        _ := ir_emit(f, IROp.Mul, x, p, p, -1, 2)
+        _ := ir_emit(f, IROp.Add, total, x, x, -1, 2)
+        block: ir_open(f, IROp.Block, 3)
+        pads := [IRX64Pad]{}
+        loop edge in 0..<2 {
+            if edge == 1 && shape > 0 -> _ := ir_emit(f, IROp.Add, y, x, x, -1, 3)
+            at: ir_open_if(f, c, 4)
+            token: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+            none: ir_args(f, [Int]{})
+            _ := ir_emit(f, IROp.CallRuntime, token, enter, none, 0, 4)
+            held: ir_args(f, [Int]{token})
+            _ := ir_emit(f, IROp.CallRuntime, -1, leave, held, 1, 4)
+            _ := ir_emit(f, IROp.Br, -1, 1, -1, -1, 4)
+            ir_end(f, 4)
+            pads.push(IRX64Pad{at: at, end: f.op.len() - 1, site: -1, open: [Int]{block}, heads: [Int]{}})
+        }
+        if shape == 1 {
+            loop _ in 0..<4 -> _ := ir_emit(f, IROp.Add, total, total, y, -1, 5)
+        }
+        ir_end(f, 5)
+        if shape == 2 {
+            loop _ in 0..<4 -> _ := ir_emit(f, IROp.Add, total, total, y, -1, 5)
+        }
+        loop _ in 0..<5 {
+            more: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+            _ := ir_emit(f, IROp.Add, more, x, x, -1, 6)
+            _ := ir_emit(f, IROp.Add, total, total, more, -1, 6)
+        }
+        _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 6)
+        al: ir_x64_allocate(m, f)
+        assert(al.xmms[x] >= 0)
+        assert(al.xmms[total] >= 0)
+        if shape > 0 -> assert(al.xmms[y] >= 0)
+        first: pads[0]
+        second: pads[1]
+        assert(ir_x64_share_safe(f, al, first, first.at + 1, second) == (shape < 2))
+    }
 }
