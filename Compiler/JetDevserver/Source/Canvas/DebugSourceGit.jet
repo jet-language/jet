@@ -5,7 +5,7 @@ use {
     canvas_files: core.files
     canvas_process: core.process
     canvas_sys: core.sys
-    jet_debug.[DebugSnapshot, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
+    jet_debug.[DebugSnapshot, NATIVE_DEBUG_BREAKPOINT_HIT, NATIVE_DEBUG_LOCALS_LABEL, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
     jet_foundation.[Diagnostic, Span, diagnostic_render, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex_bytes]
 }
 
@@ -614,7 +614,7 @@ active_line_from_transcript: fn(transcript: String) -> Int? Never! {
     index = lines.len()
     loop index > 0 {
         index -= 1
-        hit: lines[index].split_once("breakpoint hit") ?? next
+        hit: lines[index].split_once(NATIVE_DEBUG_BREAKPOINT_HIT) ?? next
         place: hit.after.split_once("  in ") ?? next
         location: place.before.trim().cut_last(":") ?? next
         number: Int.parse(location.after) ?? next
@@ -800,8 +800,8 @@ locals_json: fn(transcript: String) -> DebugJSONList Never! {
     index := lines.len()
     loop index > 0 {
         index -= 1
-        if !lines[index].starts_with("locals:") -> next
-        listed: lines[index].split_once("locals:") ?? next
+        if !lines[index].starts_with(NATIVE_DEBUG_LOCALS_LABEL) -> next
+        listed: lines[index].split_once(NATIVE_DEBUG_LOCALS_LABEL) ?? next
         return parse_assignments(listed.after.trim())
     }
     DebugJSONList{json: "", truncated: false}

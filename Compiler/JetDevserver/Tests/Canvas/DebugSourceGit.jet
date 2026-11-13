@@ -12,10 +12,10 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
 }
 
 #Test("running_state_ignores_spoofed_completion_output") {
-    src: "run: fn() {{\n    print(\"program finished\")\n}}\n"
+    src: "run: fn() {{\n    print(\"Program finished\")\n}}\n"
     active: debug_span_json(line_span(src, 2))
     graph: "[{{\"node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\",\"source_span\":{active}}},{{\"wire_id\":\"fn:main.jet.run@3-6:wire:1\",\"source_span\":{active}}}]"
-    transcript: "breakpoint hit  main.jet:2  in main()\n   2 |     print(\"program finished\")        <- here\nprogram finished\n"
+    transcript: "Breakpoint hit  main.jet:2  in main()\n   2 |     print(\"Program finished\")        <- here\nProgram finished\n"
     out: debug_ok(test_debug_request(src, graph, transcript, None, .Running, [String]{}))
     assert(out.contains("\"state\":\"running\""), out)
     assert(out.contains("\"debug_overlay\":\"running\""), out)
@@ -31,7 +31,7 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
     active: debug_span_json(line_span(src, 3))
     graph: "[{{\"node_id\":\"node:print\",\"source_span\":{active}}},{{\"wire_id\":\"wire:input\",\"source_span\":{active}}},{{\"wire_id\":\"wire:output\",\"source_span\":{active}}}]"
     snapshot: DebugSnapshot{function: "run", line: 3, locals: [ValueSnapshot{name: "total", type_name: "Int", value: "1"}], call_stack: [FrameSnapshot{function: "run", line: 3}]}
-    out: debug_ok(test_debug_request(src, graph, "program finished\n", Val(snapshot), .Running, ["total"]))
+    out: debug_ok(test_debug_request(src, graph, "Program finished\n", Val(snapshot), .Running, ["total"]))
     fields: ["\"runtime_state\":\"live\"", "\"active_line\":3", "\"type\":\"Int\"", "\"value\":\"1\"", "\"name\":\"total\"", "run()", "\"wire_path\":[\"wire:input\",\"wire:output\"]"]
     loop field in fields -> assert(out.contains(field), "runtime snapshot missing {field}: {out}")
 }
@@ -39,7 +39,7 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
 #Test("overlay_marks_bounded_debug_values") {
     src: "run: fn() {{\n    print(\"ok\")\n}}\n"
     huge: "x".repeat(MAX_DEBUG_VALUE_BYTES + 128)
-    out: debug_ok(test_debug_request(src, "{{}}", "locals: value = {huge}\nvalue = {huge}", None, .Finished, ["value"]))
+    out: debug_ok(test_debug_request(src, "{{}}", "Locals: value = {huge}\nvalue = {huge}", None, .Finished, ["value"]))
     assert(out.contains("\"locals_truncated\":true"), out)
     assert(out.contains("\"watches_truncated\":true"), out)
     assert(out.len() < 20 * 1024, "debug overlay escaped its bound: {out.len()}")

@@ -8810,6 +8810,14 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-11-13 — the `jet debug` prompt is `(Jet)`** *(card #6734; owner ruling
+2026-11-09)*: every readout a user sees starts with a capital, so the
+D-DBG2/3 console prompt `(jet)` becomes `(Jet)` (registry row `DBG_PROMPT`),
+and its readouts read `Locals:`, `Breakpoint hit`, `Breakpoint set`,
+`Program finished` and `<Unavailable>`. The verbs keep their spelling. Older
+entries keep the spelling of their day. Example:
+`tests/cases/debug/loop_next_edges_are_line_mapped.case`.
+
 **2026-11-11 — D-LAMBDA-SHAPE1=C and D-LAMBDA-STORED1=A** *(card #6251;
 decision card c0rqt0kq, ratified 2026-11-01)*: a lambda is a function
 binding's value without its name, and like every function value it starts

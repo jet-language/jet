@@ -9,10 +9,10 @@ env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: loop_next_edges_are_line_mapped.stdin
 exit: 0
-stdout: ~ "breakpoint hit  prog.jet:7  in run()\n7 |         hits += i        <- here" # the body breakpoint stops on its Jet line
-stdout: ~ "(jet) n\n4 |         if i == 1 {        <- here" # `n` crosses the loop edge onto the next iteration's first line
-stdout: ~ "(jet) p i\ni = 1\n(jet) n\n5 |             next        <- here" # the loop variable advanced; n steps onto the next line
-stdout: ~ "(jet) n\n4 |         if i == 1 {        <- here\nlocals:  hits = 0   i = 2" # the next edge goes straight to the following iteration
-stdout: ~ "(jet) p i\ni = 2\n(jet) c\nbreakpoint hit  prog.jet:7" # skipping the body on i == 1 never stopped on line 7
-stdout: ~ "2,3,0\nprogram finished\n" # the program's own result, then the end of the session
+stdout: ~ "Breakpoint hit  prog.jet:7  in run()\n7 |         hits += i        <- here" # the body breakpoint stops on its Jet line
+stdout: ~ "(Jet) n\n4 |         if i == 1 {        <- here" # `n` crosses the loop edge onto the next iteration's first line
+stdout: ~ "(Jet) p i\ni = 1\n(Jet) n\n5 |             next        <- here" # the loop variable advanced; n steps onto the next line
+stdout: ~ "(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 0   i = 2" # the next edge goes straight to the following iteration
+stdout: ~ "(Jet) p i\ni = 2\n(Jet) c\nBreakpoint hit  prog.jet:7" # skipping the body on i == 1 never stopped on line 7
+stdout: ~ "2,3,0\nProgram finished\n" # the program's own result, then the end of the session
 stdout: !~ ".rs:" # no generated Rust anywhere

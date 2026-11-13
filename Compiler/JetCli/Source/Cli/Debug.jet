@@ -1,5 +1,5 @@
 // `jet debug <file.jet>`: the program's native O0 image, built by this `jet`,
-// run under LLDB behind the `(jet)` console of Compiler/JetDebug Native.jet.
+// run under LLDB behind the `(Jet)` console of Compiler/JetDebug Native.jet.
 // It stops at the start of `run`, then reads one command a line; the end of
 // stdin runs the program to its end, and `quit` ends it early (E2204). With
 // no LLDB the session stops with E2203 before it builds anything.
@@ -8,7 +8,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     cli_term: core.term
-    jet_debug.[NativeDebugError, NativeDebugStep, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
+    jet_debug.[NATIVE_DEBUG_PROMPT, NativeDebugError, NativeDebugStep, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[diagnostic_registry_row]
 }
@@ -64,7 +64,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
     stop := first.stop
     input := cli_term.stdin()
     loop stop.kind == NativeStopKind.Paused {
-        jet_cli_debug_write("(jet) ")
+        jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
         // The end of stdin runs the program to its end.
         command := "continue"
         if input.read_line() == {

@@ -54,7 +54,7 @@ NativeFrame: struct {
 }
 
 // One local of the selected frame, in Jet terms. A value the image's debug
-// information cannot show is `<unavailable>`.
+// information cannot show is NATIVE_DEBUG_UNAVAILABLE.
 NativeLocal: struct {
     name: String
     type_name: String
@@ -274,9 +274,9 @@ NativeSession: struct {
                     }
                 }
                 text = if {
-                    at < 1 -> "break needs a line number of {file}, as `break 12`\n"
-                    placed < 0 -> "no code on {file}:{at}\n"
-                    else -> "breakpoint set  {file}:{at}\n"
+                    at < 1 -> "Break needs a line number of {file}, as `break 12`\n"
+                    placed < 0 -> "No code on {file}:{at}\n"
+                    else -> "Breakpoint set  {file}:{at}\n"
                 }
             }
             "locals" -> {
@@ -293,7 +293,7 @@ NativeSession: struct {
             }
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
-            else -> text = "unknown command `{word}`; {NATIVE_DEBUG_HELP}\n"
+            else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n"
         }
         Ok(NativeDebugStep{text: text, stop: stop})
     }
@@ -325,11 +325,11 @@ NativeSession: struct {
     report: fn(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
         text := self.take_output()
         if stop.kind == {
-            .Exited -> text = "{text}{if stop.code == 0 -> "program finished" else -> "program finished with exit status {stop.code}"}\n"
-            .Signaled -> text = "{text}program stopped by {stop.reason}\n"
+            .Exited -> text = "{text}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
+            .Signaled -> text = "{text}Program stopped by {stop.reason}\n"
             .Paused -> {
                 frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
-                if stop.reason.starts_with("breakpoint") -> text = "{text}breakpoint hit  {frame.file}:{frame.line}  in {frame.function}()\n"
+                if stop.reason.starts_with("breakpoint") -> text = "{text}{NATIVE_DEBUG_BREAKPOINT_HIT}  {frame.file}:{frame.line}  in {frame.function}()\n"
                 source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
                 locals: self.locals() ?? return Err(err)
                 text = "{text}{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n"
@@ -367,11 +367,25 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
     native_files.join(out_dir, native_files.basename(entry).before(".jet"))
 }
 
-// The `(jet)` console over a session: `jet debug` and the Canvas native tier
+// The `(Jet)` console over a session: `jet debug` and the Canvas native tier
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
-// runtime) are never shown.
-NATIVE_DEBUG_HELP: "commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+// runtime) are never shown. Each readout starts with a capital.
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+
+// The console's prompt.
+NATIVE_DEBUG_PROMPT: "(Jet) "
+
+// The label of the line that lists the frame's locals; the Canvas native tier
+// reads the locals back from it.
+NATIVE_DEBUG_LOCALS_LABEL: "Locals:"
+
+// The start of the line a breakpoint stop prints; the Canvas native tier reads
+// the stop's line back from it.
+NATIVE_DEBUG_BREAKPOINT_HIT: "Breakpoint hit"
+
+// The value shown for a local the image's debug information cannot show.
+NATIVE_DEBUG_UNAVAILABLE: "<Unavailable>"
 
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
@@ -392,18 +406,18 @@ native_debug_jet_frame: fn(frame: NativeFrame) -> Bool Never! {
     frame.file.ends_with(".jet") && frame.line > 0
 }
 
-// `locals:` and the frame's locals by name.
+// NATIVE_DEBUG_LOCALS_LABEL and the frame's locals by name.
 native_debug_locals_line: fn(locals: [NativeLocal]) -> String Never! {
-    if locals.len() == 0 -> return "locals:  (none)"
+    if locals.len() == 0 -> return "{NATIVE_DEBUG_LOCALS_LABEL}  (none)"
     sorted := locals.copy()
     sorted.sort_by(fn(left: NativeLocal, right: NativeLocal) { left.name <=> right.name })
     shown := [String]{}
     loop local in sorted -> shown.push("{local.name} = {local.value}")
-    "locals:  {shown.join("   ")}"
+    "{NATIVE_DEBUG_LOCALS_LABEL}  {shown.join("   ")}"
 }
 
 native_debug_print: fn(locals: [NativeLocal], name: String) -> String Never! {
-    if name == "" -> return "print needs a local's name, as `print total`"
+    if name == "" -> return "Print needs a local's name, as `print total`"
     loop local in locals {
         if local.name == name -> return "{local.name} = {local.value}"
     }
@@ -539,13 +553,13 @@ native_debug_jet_type: fn(native_type: String) -> String Never! {
 // A value LLDB printed, kept only when it is a whole literal of its Jet type.
 native_debug_jet_value: fn(type_name: String, raw: String) -> String Never! {
     if type_name == "Int" {
-        _: Int.parse(raw) ?? return "<unavailable>"
+        _: Int.parse(raw) ?? return NATIVE_DEBUG_UNAVAILABLE
         return raw.copy()
     }
     if type_name == "Bool" && (raw == "true" || raw == "false") -> return raw.copy()
     if type_name == "Float" {
-        _: Float.parse(raw) ?? return "<unavailable>"
+        _: Float.parse(raw) ?? return NATIVE_DEBUG_UNAVAILABLE
         return raw.copy()
     }
-    "<unavailable>"
+    NATIVE_DEBUG_UNAVAILABLE
 }

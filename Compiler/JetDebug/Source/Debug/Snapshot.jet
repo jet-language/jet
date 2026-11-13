@@ -226,7 +226,7 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
 
 // Rust render_snapshot_locals: stable name-ordered `name = value` dump.
 debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
-    if values.len() == 0 -> return "locals:  (none)"
+    if values.len() == 0 -> return "{NATIVE_DEBUG_LOCALS_LABEL}  (none)"
     order := [Int]{}
     loop index in 0..<values.len() -> order.push(index)
     // Rust's stable sort_by on name: equal names keep their published order.
@@ -236,13 +236,13 @@ debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
     parts := [String]{}
     loop index in order -> parts.push("{values[index].name} = {values[index].value}")
     body: parts.join("   ")
-    "locals:  {body}"
+    "{NATIVE_DEBUG_LOCALS_LABEL}  {body}"
 }
 
 // Rust debug_value: typed safe projection of one published local value.
 debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
     raw := value.value.trim()
-    if raw == "<optimized out>" || raw == "<unavailable>" {
+    if raw == "<optimized out>" || raw == NATIVE_DEBUG_UNAVAILABLE {
         return Err(debug_evaluation_error("local `{value.name}` has no readable value at this stop"))
     }
     type_name := value.type_name.trim()
