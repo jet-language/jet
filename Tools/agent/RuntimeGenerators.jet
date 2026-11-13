@@ -6,6 +6,8 @@
 //        jet Tools/agent/RuntimeGenerators.jet fault-report [--check]
 //   (default)        rewrite every stale output
 //   --check          write nothing; report every stale output
+//   Both also fail on a bare exit status 70 or 101 in an exit position
+//   outside the exit-code table's generated copies (exit_guard).
 //   --defects-only   regenerate only the private trap defect rows, refusing
 //                    when the frozen ordinary trap projection differs
 //   lifecycle        print the lifecycle.list of a library object built from
@@ -134,6 +136,12 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
         }
         .Err(error) -> problems.push(error.message)
     }
+    if read_exit_codes() == {
+        .Ok(generated) -> {
+            loop file in generated -> outputs.push(file)
+        }
+        .Err(error) -> problems.push(error.message)
+    }
     loop output in outputs {
         current: output_current(output.path, output.text) ?? return Err(err)
         if current -> next
@@ -142,6 +150,12 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
         } else {
             write_output(output.path, output.text) ?? return Err(err)
         }
+    }
+    if exit_guard() == {
+        .Ok(found) -> {
+            loop problem in found -> problems.push(problem)
+        }
+        .Err(error) -> problems.push(error.message)
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     if check -> return Ok("runtime generated tables are current")
@@ -1718,6 +1732,24 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
             }
             if depth > 0 -> return Err(generator_fail("unclosed runtime source comment"))
             blank_range(source, code, begin, at)
+        } else if byte == 96 {
+            // A run of N backticks opens raw text; the next run of exactly N
+            // closes it.
+            begin: at
+            loop at < length && Int.from_u8(source[at]) == 96 -> at += 1
+            opening: at - begin
+            closed := false
+            loop at < length && !closed {
+                if Int.from_u8(source[at]) != 96 {
+                    at += 1
+                } else {
+                    run: at
+                    loop at < length && Int.from_u8(source[at]) == 96 -> at += 1
+                    closed = at - run == opening
+                }
+            }
+            if !closed -> return Err(generator_fail("unclosed runtime source raw literal"))
+            blank_range(source, code, begin, at)
         } else if byte == 34 || byte == 39 {
             triple: byte == 34 && code_at(source, at + 1) == 34 && code_at(source, at + 2) == 34
             delimiter_len: if triple -> 3 else -> 1
@@ -2889,16 +2921,16 @@ render_dyn_kind_runtime: fn(rows: [DynKind]) -> String GeneratorError! {
     Ok(lines.join("\n"))
 }
 
-// `text` (the file at `path`) with its one generated dyn_kind region, the
-// DYN_KIND_BEGIN line through the DYN_KIND_END line, replaced by `region`.
-splice_dyn_kind: fn(path: String, text: String, region: String) -> String GeneratorError! {
-    begin: text.find("{DYN_KIND_BEGIN}\n")
-    if begin < 0 -> return Err(generator_fail("{path} has no generated dyn_kind region"))
+// `text` (the file at `path`) with its one generated `name` region, the
+// `begin_line` line through the `end_line` line, replaced by `region`.
+splice_region: fn(path: String, text: String, begin_line: String, end_line: String, name: String, region: String) -> String GeneratorError! {
+    begin: text.find("{begin_line}\n")
+    if begin < 0 -> return Err(generator_fail("{path} has no generated {name} region"))
     rest: byte_tail(text, begin)
-    end: rest.find("{DYN_KIND_END}\n")
-    if end < 0 -> return Err(generator_fail("{path}: the generated dyn_kind region is not closed"))
-    after: byte_tail(rest, end + byte_len(DYN_KIND_END) + 1)
-    if after.find("{DYN_KIND_BEGIN}\n") >= 0 -> return Err(generator_fail("{path} has more than one generated dyn_kind region"))
+    end: rest.find("{end_line}\n")
+    if end < 0 -> return Err(generator_fail("{path}: the generated {name} region is not closed"))
+    after: byte_tail(rest, end + byte_len(end_line) + 1)
+    if after.find("{begin_line}\n") >= 0 -> return Err(generator_fail("{path} has more than one generated {name} region"))
     Ok("{byte_slice(text, 0, begin)}{region}\n{after}")
 }
 
@@ -2907,7 +2939,7 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
     rows: dyn_kind_rows(source) ?? return Err(err)
     runtime: files.read(DYN_KIND_RUNTIME_PATH) ?? return Err(generator_fail("cannot read {DYN_KIND_RUNTIME_PATH}: {err}"))
     runtime_region: render_dyn_kind_runtime(rows) ?? return Err(err)
-    runtime_text: splice_dyn_kind(DYN_KIND_RUNTIME_PATH, runtime, runtime_region) ?? return Err(err)
+    runtime_text: splice_region(DYN_KIND_RUNTIME_PATH, runtime, DYN_KIND_BEGIN, DYN_KIND_END, "dyn_kind", runtime_region) ?? return Err(err)
     Ok([GeneratedFile]{GeneratedFile{path: DYN_KIND_RUNTIME_PATH, text: runtime_text}})
 }
 
@@ -2920,8 +2952,8 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
     runtime: render_dyn_kind_runtime(rows) ?? panic("rows did not render: {err.message}")
     assert(runtime.contains("    if kind == DYN_BYTE_LIST -> return rt_static_text(\"Bytes\")\n    rt_static_text(\"an object\")\n}}\n{DYN_KIND_END}"))
     host: "a\n{DYN_KIND_BEGIN}\nstale\n{DYN_KIND_END}\nb\n"
-    assert_eq(splice_dyn_kind("h", host, "R") ?? "", "a\nR\nb\n")
-    if splice_dyn_kind("h", "{host}{host}", "R") == {
+    assert_eq(splice_region("h", host, DYN_KIND_BEGIN, DYN_KIND_END, "dyn_kind", "R") ?? "", "a\nR\nb\n")
+    if splice_region("h", "{host}{host}", DYN_KIND_BEGIN, DYN_KIND_END, "dyn_kind", "R") == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert_eq(error.message, "h has more than one generated dyn_kind region")
     }
@@ -3062,4 +3094,234 @@ render_fault_reports: fn() -[Exec, FS]> String GeneratorError! {
         .Ok(_) -> assert(false)
         .Err(error) -> assert_eq(error.message, "r.S: the assembler wrote no ELF64 object")
     }
+}
+
+// The process exit codes. Their one home is Jetpack's exit-code table. The
+// runtime and the test kit, which import no package, each get a generated
+// copy, and Core's process module, which cannot import Jetpack, a generated
+// region. A bare 70 or 101 in an exit position anywhere else is a copy.
+
+EXIT_CODES_SOURCE_PATH: "Jetpack/Foundation/Source/ExitCodes.jet"
+EXIT_CODES_RUNTIME_PATH: "Compiler/JetRuntime/Source/ExitCodes.jet"
+EXIT_CODES_KIT_PATH: "Compiler/JetTestKit/Source/ExitCodes.jet"
+EXIT_CODES_CORE_PATH: "Core/Process/Process.jet"
+EXIT_CODES_BEGIN: "// Generated by Tools/agent/RuntimeGenerators.jet from Jetpack/Foundation/Source/ExitCodes.jet; do not edit."
+EXIT_CODES_END: "// End of the generated exit codes."
+// The trees whose sources the exit-position guard reads, and the directories
+// it skips: tests may spell the statuses they expect. Compiler/JetDevserver
+// is no package that compiles yet, so its sources aren't Jet the scan reads.
+EXIT_GUARD_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
+EXIT_GUARD_SKIPPED: [String]{"Tests", "tests", "Fixtures", "fixtures"}
+EXIT_GUARD_UNBUILT: [String]{"Compiler/JetDevserver"}
+// The statuses only a named constant may spell in an exit position.
+EXIT_GUARDED: [String]{"70", "101"}
+
+ExitCode: struct {
+    name: String
+    value: String
+    doc: [String]
+}
+
+// The `EXIT_NAME: N` rows of the exit-code table, each with the comment
+// lines directly above it.
+exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
+    rows := [ExitCode]{}
+    doc := [String]{}
+    loop line in source.split("\n") {
+        if line.starts_with("// ") {
+            doc.push(byte_tail(line, 3))
+            next
+        }
+        if line.trim() == "" {
+            doc = [String]{}
+            next
+        }
+        colon: line.find(": ")
+        name: if colon > 0 -> byte_slice(line, 0, colon) else -> ""
+        value: if colon > 0 -> byte_tail(line, colon + 2) else -> ""
+        if !name.starts_with("EXIT_") || leading_name(name) != name || value == "" || !value.bytes().all(byte -> is_digit_byte(Int.from_u8(byte))) -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH}: unsupported line `{line}`"))
+        rows.push(ExitCode{name: name, value: value, doc: doc.copy()})
+        doc = [String]{}
+    }
+    if rows.len() == 0 -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH} has no exit codes"))
+    Ok(rows)
+}
+
+// The rows as constants named `prefix` and the row's name, each a runtime
+// word when `word`, between the generated region's two lines.
+render_exit_codes: fn(rows: [ExitCode], prefix: String, word: Bool) -> String Never! {
+    lines := [String]{EXIT_CODES_BEGIN}
+    loop row in rows {
+        loop line in row.doc -> lines.push("// {line}")
+        value: if word -> "I64{{{row.value}}}" else -> row.value.copy()
+        lines.push("{prefix}{row.name}: {value}")
+    }
+    lines.push(EXIT_CODES_END)
+    lines.join("\n")
+}
+
+// The runtime's copy as runtime words, the test kit's as KIT_ constants, and
+// Core's as `__` constants, internal to Core, in its generated region.
+read_exit_codes: fn() -[FS]> [GeneratedFile] GeneratorError! {
+    source: files.read(EXIT_CODES_SOURCE_PATH) ?? return Err(generator_fail("cannot read {EXIT_CODES_SOURCE_PATH}: {err}"))
+    rows: exit_code_rows(source) ?? return Err(err)
+    core: files.read(EXIT_CODES_CORE_PATH) ?? return Err(generator_fail("cannot read {EXIT_CODES_CORE_PATH}: {err}"))
+    core_text: splice_region(EXIT_CODES_CORE_PATH, core, EXIT_CODES_BEGIN, EXIT_CODES_END, "exit-code", render_exit_codes(rows, "__", false)) ?? return Err(err)
+    Ok([GeneratedFile]{
+        GeneratedFile{path: EXIT_CODES_RUNTIME_PATH, text: "{render_exit_codes(rows, "", true)}\n"},
+        GeneratedFile{path: EXIT_CODES_KIT_PATH, text: "{render_exit_codes(rows, "KIT_", false)}\n"},
+        GeneratedFile{path: EXIT_CODES_CORE_PATH, text: core_text},
+    })
+}
+
+// Whether `text` names an exit; with `code`, an exit code too.
+names_exit: fn(text: String, code: Bool) -> Bool Never! {
+    lower: text.lower()
+    lower.contains("exit") || (code && lower.contains("code"))
+}
+
+// The offset of the innermost `(` still open at the end of `text`, or -1.
+open_paren: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    depth := 0
+    at := bytes.len()
+    loop at > 0 {
+        at -= 1
+        byte: Int.from_u8(bytes[at])
+        if byte == 41 {
+            depth += 1
+        } else if byte == 40 {
+            if depth == 0 -> return at
+            depth -= 1
+        }
+    }
+    0 - 1
+}
+
+// The text after the last `(`, `,`, `{`, `&&` or `||` of `text`: the left
+// operand of a comparison that ends it.
+left_operand: fn(text: String) -> String Never! {
+    bytes: text.bytes()
+    at := bytes.len()
+    loop at > 0 {
+        byte: Int.from_u8(bytes[at - 1])
+        if byte == 40 || byte == 44 || byte == 123 -> return byte_tail(text, at)
+        if at >= 2 && (byte == 38 || byte == 124) && Int.from_u8(bytes[at - 2]) == byte -> return byte_tail(text, at)
+        at -= 1
+    }
+    text.copy()
+}
+
+// The name a line binds when it ends with `name:` or `name :=`, else "".
+bound_name: fn(head: String) -> String Never! {
+    name: if {
+        head.ends_with(":=") -> byte_slice(head, 0, byte_len(head) - 2).trim()
+        head.ends_with(":") -> byte_slice(head, 0, byte_len(head) - 1).trim()
+        else -> ""
+    }
+    if leading_name(name) == name -> name else -> ""
+}
+
+// Whether the guarded status at bytes `start..<end` of `line` fills an exit
+// position: an argument of a call whose callee names an exit or a code, or
+// whose earlier argument names an exit; the right side of a comparison whose
+// left side names an exit or is a `.code` field; or the whole value of a
+// binding whose name names an exit or a code. A bare `code` compared to a
+// number is left alone: errno tables and byte classes spell it so.
+exit_position: fn(line: String, start: Int, end: Int) -> Bool Never! {
+    before: byte_slice(line, 0, start)
+    head: before.trim()
+    if head.ends_with("==") || head.ends_with("!=") {
+        left: left_operand(byte_slice(head, 0, byte_len(head) - 2)).trim()
+        if names_exit(left, false) || left.ends_with(".code") -> return true
+    }
+    if byte_tail(line, end).trim() == "" && names_exit(bound_name(head), true) -> return true
+    open: open_paren(before)
+    if open < 0 -> return false
+    bytes: before.bytes()
+    callee := open
+    loop callee > 0 && (is_name_byte(Int.from_u8(bytes[callee - 1])) || Int.from_u8(bytes[callee - 1]) == 46) -> callee -= 1
+    if callee == open -> return false
+    names_exit(byte_slice(before, callee, open), true) || names_exit(byte_tail(before, open + 1), false)
+}
+
+// `path:line: ...` for each guarded status in an exit position of `source`,
+// outside comments, literal text and generated exit-code regions.
+exit_literal_problems: fn(path: String, source: String) -> [String] GeneratorError! {
+    code: code_only(source) ?? return Err(generator_fail("{path}: {err.message}"))
+    originals: source.split("\n").to_list()
+    problems := [String]{}
+    generated := false
+    loop (index, line) in code.split("\n").to_list() {
+        original: if index < originals.len() -> originals[index] else -> ""
+        if original == EXIT_CODES_BEGIN -> generated = true
+        if original == EXIT_CODES_END -> generated = false
+        if generated -> next
+        bytes: line.bytes()
+        at := 0
+        loop at < bytes.len() {
+            if !is_digit_byte(Int.from_u8(bytes[at])) || (at > 0 && (is_name_byte(Int.from_u8(bytes[at - 1])) || Int.from_u8(bytes[at - 1]) == 46)) {
+                at += 1
+                next
+            }
+            end := at
+            loop end < bytes.len() && is_digit_byte(Int.from_u8(bytes[end])) -> end += 1
+            number: byte_slice(line, at, end)
+            following: code_at(bytes, end)
+            if EXIT_GUARDED.contains(number) && following != 46 && !is_name_byte(following) {
+                wrapped: at >= 4 && byte_slice(line, at - 4, at) == "I64{{" && following == 125
+                start: if wrapped -> at - 4 else -> at
+                stop: if wrapped -> end + 1 else -> end
+                if exit_position(line, start, stop) -> problems.push("{path}:{index + 1}: a bare {number} fills an exit position; name it with the constant generated from {EXIT_CODES_SOURCE_PATH}")
+            }
+            at = end
+        }
+    }
+    Ok(problems)
+}
+
+exit_guard_files: fn(directory: String, found: &[String]) GeneratorError! -[FS]> {
+    entries: files.list_dir(directory) ?? return Err(generator_fail("cannot list {directory}: {err}"))
+    loop entry in entries {
+        path: "{directory}/{entry.name}"
+        if entry.is_dir {
+            if !EXIT_GUARD_SKIPPED.contains(entry.name) && !EXIT_GUARD_UNBUILT.contains(path) && !entry.name.starts_with(".") && !entry.name.ends_with(".fixture") -> exit_guard_files(path, found) ?? return Err(err)
+        } else if entry.name.ends_with(".jet") && path != EXIT_CODES_SOURCE_PATH {
+            found.push(path)
+        }
+    }
+    Ok()
+}
+
+// Every bare 70 or 101 in an exit position of the guarded trees.
+exit_guard: fn() -[FS]> [String] GeneratorError! {
+    paths := [String]{}
+    loop root in EXIT_GUARD_ROOTS -> exit_guard_files(root, paths) ?? return Err(err)
+    problems := [String]{}
+    loop path in paths {
+        source: files.read(path) ?? return Err(generator_fail("cannot read {path}: {err}"))
+        loop problem in exit_literal_problems(path, source) ?? return Err(err) -> problems.push(problem)
+    }
+    Ok(problems)
+}
+
+#Test("the exit codes are the table's rows, as runtime words, kit constants and a Core region") {
+    rows: exit_code_rows("// Header.\n\n// Fine.\nEXIT_OK: 0\n// A stop.\nEXIT_RUNTIME_PANIC: 70\n") ?? panic("rows did not parse: {err.message}")
+    assert_eq(rows.len(), 2)
+    assert_eq(render_exit_codes(rows, "KIT_", false), "{EXIT_CODES_BEGIN}\n// Fine.\nKIT_EXIT_OK: 0\n// A stop.\nKIT_EXIT_RUNTIME_PANIC: 70\n{EXIT_CODES_END}")
+    assert(render_exit_codes(rows, "", true).contains("\nEXIT_RUNTIME_PANIC: I64{{70}}\n"))
+    if exit_code_rows("EXIT_ICE: 1o1\n") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "{EXIT_CODES_SOURCE_PATH}: unsupported line `EXIT_ICE: 1o1`")
+    }
+}
+
+#Test("a bare 70 or 101 in an exit position is a copy; bytes, errnos, HTTP statuses and named codes are not") {
+    copies: "a: fn() {{\n    trap_exit(I64{{70}})\n    if run.code == 101 -> x()\n    rt.exit(if code == 101 -> 1 else -> code)\n    sync_store(exit_code_out, I64{{70}})\n    code := I64{{70}}\n}}\nJET_CLI_EXIT_ICE: 101\n"
+    found: exit_literal_problems("p", copies) ?? panic(err.message)
+    assert_eq(found.len(), 6)
+    assert(found[0].starts_with("p:2: a bare 70 fills an exit position"))
+    assert(found[5].starts_with("p:8: a bare 101 fills an exit position"))
+    fine: "a: fn() {{\n    rt_text_push_word(target, I64{{101}}, I64{{1}})\n    if (rt_text_byte(base) == I64{{70}}) -> x()\n    scheduler_text_new(I64{{70}})\n    trap_exit(EXIT_RUNTIME_PANIC)\n    // exit 101\n    say(\"exit 70\")\n    say(``exit(101) ` and exit(70)``)\n    trap_exit(I64{{1701}})\n    (code == I64{{101}}) -> rt_static_text(\"NetworkUnreachable\")\n    out.push(if code == 69 -> U8{{101}} else -> byte)\n    hex: (code >= 65 && code <= 70) || (code >= 97 && code <= 102)\n    if reply.status == 101 -> x()\n}}\n{EXIT_CODES_BEGIN}\nEXIT_ICE: 101\n{EXIT_CODES_END}\n"
+    assert_eq(exit_literal_problems("p", fine) ?? panic(err.message), [String]{})
 }

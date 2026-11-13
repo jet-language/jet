@@ -158,7 +158,7 @@ trap_gs_failure: fn() {
     jet_rt_stdout_flush()
     trap_defect_unreachable_head()
     trap_defect_newline()
-    loop { trap_defect_exit(I64{101}) }
+    loop { trap_defect_exit(EXIT_ICE) }
 }
 // A stop under the process root begins the root's captured report. Any other
 // stop while jet_rt_main runs its entry is a process stop too (spec.md,
@@ -174,7 +174,7 @@ trap_root_prepare: fn() {
         return
     }
     claim: main_process_stop_code
-    if (claim != I64{0} && main_root_control != I64{0}) -> _ := coll_call1(claim, I64{70})
+    if (claim != I64{0} && main_root_control != I64{0}) -> _ := coll_call1(claim, EXIT_RUNTIME_PANIC)
 }
 
 // Keep both the value and divisor non-positive: neither I64.MIN's negation
@@ -266,7 +266,7 @@ trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_le
 
 trap_footer: fn(code: I64) {
     trap_footer_bytes(code)
-    trap_exit(I64{70})
+    trap_exit(EXIT_RUNTIME_PANIC)
 }
 trap_footer_bytes: fn(code: I64) {
     // Exact active registry rows; backticks protect the raw message from the
@@ -314,7 +314,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     trap_msg_message_end()
     trap_context(I64{0}, I64{0}, trap_line(I64{0}), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer_bytes(code)
-    trap_defect_exit(I64{70})
+    trap_defect_exit(EXIT_RUNTIME_PANIC)
 }
 
 #Export(c) jet_rt_numeric_stop: fn(file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
@@ -349,7 +349,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
         trap_write(code_data, code_length)
         trap_msg_inactive_row_tail()
         trap_msg_newline()
-        trap_exit(I64{101})
+        trap_exit(EXIT_ICE)
         return
     }
     trap_msg_coded_head()
@@ -358,7 +358,7 @@ trap_process_stop: fn(code: I64, message: I64, message_len: I64) {
     trap_write(data, length)
     trap_msg_newline()
     trap_coded_footer(word)
-    trap_exit(I64{70})
+    trap_exit(EXIT_RUNTIME_PANIC)
 }
 
 // ShiftOutOfRange: "Shifting {left|right} by {count} bits is out of range (this
@@ -517,7 +517,7 @@ trap_host_fault: fn(message: I64, length: I64) {
     jet_rt_stdout_flush()
     trap_write(message, length)
     trap_msg_newline()
-    trap_defect_exit(I64{101})
+    trap_defect_exit(EXIT_ICE)
 }
 
 // IR Never is not a program-side stop. The Rust host's thread/source/backtrace
@@ -529,7 +529,7 @@ trap_host_fault: fn(message: I64, length: I64) {
     trap_msg_unreachable()
     trap_write(reason, length)
     trap_msg_newline()
-    trap_defect_exit(I64{101})
+    trap_defect_exit(EXIT_ICE)
 }
 
 // Vec::with_capacity(capacity as usize) and growth overflow are foreign
@@ -541,7 +541,7 @@ rt_seq_capacity_overflow_stop: fn() {
     jet_rt_stdout_flush()
     trap_write_static(reason)
     trap_msg_newline()
-    trap_defect_exit(I64{101})
+    trap_defect_exit(EXIT_ICE)
 }
 
 // These CAbi getters index Vec[index as usize]. Their bounds panic is a
@@ -587,7 +587,7 @@ rt_seq_index_oob_stop: fn(length: I64, index: I64) {
         alloc_write_word(I64{48} + last, I64{1})
     }
     alloc_write_word(I64{10}, I64{1})
-    trap_defect_exit(I64{101})
+    trap_defect_exit(EXIT_ICE)
 }
 
 #Export(c) jet_panic: fn(file: I64, line: I64, message: I64) {
@@ -726,7 +726,7 @@ trap_contract_stop: fn(descriptor: I64, message: I64, locals: I64) {
     trap_footer_e3005_head()
     trap_write_handle(message)
     trap_footer_e3005_tail()
-    trap_exit(I64{70})
+    trap_exit(EXIT_RUNTIME_PANIC)
 }
 
 trap_range_end: fn(start: I64, end: I64, exclusive: U8, len: I64) -> I64 Never! {

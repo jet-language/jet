@@ -3,6 +3,7 @@
 // argv without the program name and exits with the returned status.
 use {
     jet_foundation.[BUILD_REUSE_SAVED_WORK, JET_BUILD_DEFAULT_PROFILE]
+    jetpack_foundation.[EXIT_ICE]
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
@@ -182,7 +183,7 @@ use {
 }
 
 // `ICE`: Jet's own defect.
-JET_CLI_EXIT_ICE: 101
+JET_CLI_EXIT_ICE: EXIT_ICE
 
 // Rust host `render_internal_fault`.
 jet_cli_ice: fn(what: String) -> JetDriverVerbOutput Never! {
@@ -1750,7 +1751,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
     jet_cli_write_output(output)
     if output.exit_code == JET_CLI_EXIT_ICE {
         #Unsafe("I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit") {
-            cli_process.exit_unmapped(101)
+            cli_process.exit_unmapped(JET_CLI_EXIT_ICE)
         }
     }
     cli_process.exit(output.exit_code)

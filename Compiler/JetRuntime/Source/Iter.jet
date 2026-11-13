@@ -288,7 +288,7 @@ iter_pull_kernel: fn(node: I64, output: I64) -> Bool {
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})
     trap_defect_prepare()
     trap_msg_unreachable()
-    trap_defect_exit(I64{101})
+    trap_defect_exit(EXIT_ICE)
     return false
 }
 
@@ -1358,7 +1358,7 @@ iter_zip_stop: fn(context: I64) {
     source: trap_word(wrapping(context + I64{32}))
     trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_word(wrapping(context + I64{16})).bit_and(I64{4294967295}), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_word(wrapping(context + I64{40})).bit_and(I64{4294967295}), trap_word(wrapping(context + I64{48})).bit_and(I64{4294967295}))
     trap_footer_e0128()
-    trap_exit(I64{70})
+    trap_exit(EXIT_RUNTIME_PANIC)
 }
 
 // Only sources whose Rust size_hint bounds agree supply a progress total.

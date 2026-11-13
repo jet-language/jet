@@ -3,25 +3,28 @@
 // (`report_problems_with_summary`, `emit_check_outcome`, `run_explain`), so
 // both front doors print one meaning (I9). Writing the bytes and exiting stay
 // with the host that owns the process.
-use jet_foundation.[
-    Diagnostic,
-    DiagnosticOrigin,
-    SourceFile,
-    Span,
-    TextEdit,
-    DIAGNOSTIC_ERROR,
-    DIAGNOSTIC_LINT,
-    diagnostic_explanation,
-    diagnostic_explanation_render,
-    diagnostic_from_registry,
-    diagnostic_render_all,
-    diagnostic_theme_dim,
-    sha256_hex,
-]
+use {
+    jet_foundation.[
+        Diagnostic,
+        DiagnosticOrigin,
+        SourceFile,
+        Span,
+        TextEdit,
+        DIAGNOSTIC_ERROR,
+        DIAGNOSTIC_LINT,
+        diagnostic_explanation,
+        diagnostic_explanation_render,
+        diagnostic_from_registry,
+        diagnostic_render_all,
+        diagnostic_theme_dim,
+        sha256_hex,
+    ]
+    jetpack_foundation.[EXIT_OK, EXIT_USAGE, EXIT_USER_ERROR]
+}
 
-JET_DRIVER_EXIT_OK: 0
-JET_DRIVER_EXIT_USER_ERROR: 1
-JET_DRIVER_EXIT_USAGE: 2
+JET_DRIVER_EXIT_OK: EXIT_OK
+JET_DRIVER_EXIT_USER_ERROR: EXIT_USER_ERROR
+JET_DRIVER_EXIT_USAGE: EXIT_USAGE
 
 // A failed verb's typed reports, kept beside the text its stderr renders, so
 // a `--json` run answers with them in the `jet.status/v1` envelope instead.

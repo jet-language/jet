@@ -79,14 +79,14 @@ kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
 // diagnostic report is a front-end rejection, exit 1 whether a build or the
 // direct tier's `jet run` printed it.
 kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
-    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(70)
+    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(KIT_EXIT_RUNTIME_PANIC)
     if report.starts_with("Error [jet.") -> return Val(1)
     if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
         loop raw in report.split("\n") {
             line: raw.trim().copy()
-            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "70" -> return None
+            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "{KIT_EXIT_RUNTIME_PANIC}" -> return None
         }
-        return Val(70)
+        return Val(KIT_EXIT_RUNTIME_PANIC)
     }
     if report == "" -> return if expected.ends_with("tests/run/CoreIO/LogFatal") -> Val(1) else -> None
     exit_one: ["Examples/ErrorsAndEffects/Errors/PropagationJourney", "Examples/ErrorsAndEffects/Errors/ErrorContext", "Examples/ErrorsAndEffects/Errors/DefaultErrorConversion", "Examples/ErrorsAndEffects/Errors/DefaultErrEdge", "Examples/ErrorsAndEffects/Errors/FatalExit", "Examples/Data/DecodeErrorExit", "Examples/Crypto/CryptoErrorRun", "tests/run/FailureFoundation/PropagationJourneyDirect", "tests/run/FailureFoundation/PropagationJourneyOneHop", "tests/run/FailureFoundation/PropagationJourneyCore", "tests/run/FailureFoundation/PropagationJourneyDecode", "tests/run/FailureFoundation/OrErrJourney"]

@@ -288,7 +288,7 @@ scheduler_panic_publish_record: fn(record: I64) -> Bool {
             sync_store(wrapping(record + I64{40}), rendered)
             sync_store(wrapping(record + I64{48}), I64{1})
         }
-        if !scheduler_root_code_known(control) -> scheduler_root_set_code(control, I64{70})
+        if !scheduler_root_code_known(control) -> scheduler_root_set_code(control, EXIT_RUNTIME_PANIC)
     }
     scheduler_native_publish(record)
 }
@@ -324,7 +324,7 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     if (record == I64{0}) -> return I64{0}
     kind: sync_load(record)
     if (kind == I64{1} || kind < I64{1} || kind > I64{5}) -> jet_rt_unreachable(I64{0}, I64{0})
-    code := I64{70}
+    code := EXIT_RUNTIME_PANIC
     if {
         (kind == I64{3} || kind == I64{4}) -> {
             status: if (kind == I64{3}) -> I64{2} else -> I64{3}
@@ -1784,7 +1784,7 @@ scheduler_first_worker_refused: fn(errno: I64) {
     trap_write_static(rt_static_text(", process limit RLIMIT_NPROC "))
     scheduler_limit_write(thread_rlimit_soft(I64{6}))
     trap_write_static(rt_static_text("\n"))
-    trap_defect_exit(I64{70})
+    trap_defect_exit(EXIT_RUNTIME_PANIC)
 }
 
 // A soft rlimit as scheduler_first_worker_refused names it.

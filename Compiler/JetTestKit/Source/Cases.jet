@@ -133,7 +133,8 @@ kit_cases_known_verdict: fn(outcome: KitOutcome, annotation: String) -> KitOutco
 // error.
 kit_cases_owned_failure: fn(verdict: KitVerdict) -> Bool {
     if verdict.status == "FAIL" || verdict.status == "UNSUPPORTED" -> return true
-    verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal") || verdict.detail.contains("without reading it"))
+    ice: kit_exec_ice_detail()
+    verdict.status == "ERROR" && (verdict.detail.contains(ice) || verdict.detail.contains("child terminated by signal") || verdict.detail.contains("without reading it"))
 }
 
 // A seam refusal a ledger row owns: its reason starts `REFUSED: <seam> ` with

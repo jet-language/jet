@@ -1046,7 +1046,7 @@ kit_steps_failure: fn(step: KitStep, result: KitRun) -> KitVerdict? {
     if step.limit_resident > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: resident={step.limit_resident}KiB"))
     isolated: kit_no_nix_failure(step, result)
     if isolated != None -> return isolated
-    if result.code == 101 && (Int.parse(step.exit) ?? -1) == 101 && result.error == "" && !result.timed_out && result.signal == None -> return None
+    if result.code == KIT_EXIT_ICE && (Int.parse(step.exit) ?? -1) == KIT_EXIT_ICE && result.error == "" && !result.timed_out && result.signal == None -> return None
     kit_exec_process_failure(result)
 }
 

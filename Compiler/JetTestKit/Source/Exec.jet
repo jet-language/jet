@@ -637,9 +637,12 @@ kit_exec_process_failure: fn(run: KitRun) -> KitVerdict? {
     if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
     if run.limit_hit == "memory" -> return Val(kit_expect_verdict("ERROR", "memory limit hit"))
     if run.signal != None -> return Val(kit_expect_verdict("ERROR", "child terminated by signal"))
-    if run.code == 101 -> return Val(kit_expect_verdict("ERROR", "internal compiler error (exit 101)"))
+    if run.code == KIT_EXIT_ICE -> return Val(kit_expect_verdict("ERROR", kit_exec_ice_detail()))
     None
 }
+
+// An ERROR verdict's detail for a child that ended with the ICE status.
+kit_exec_ice_detail: fn() -> String { "internal compiler error (exit {KIT_EXIT_ICE})" }
 
 kit_exec_write: fn(path: String, contents: String) {
     files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
