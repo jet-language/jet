@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101737,
+    "rev": 101743,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40862,12 +40862,12 @@
         },
         {
           "n": 22,
-          "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(db.Op, db.Who, db.Store) -> Bool), applied to every read and write for live queries, endpoints, jobs and webhooks. A read is judged on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the store before the write. A row the caller may not read is never returned. A Member's update of its own member row to Owner is refused, create_project makes the caller its owner, and an outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
+          "text": "Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(db.Op, db.Who, db.Store) -> Bool), applied to every read and write for live queries, endpoints, jobs and webhooks. A read is judged on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the transaction's earlier writes but not the write being judged. A row the caller may not read is never returned. A Member's update of its own member row to Owner is refused. The creator rule admits an Owner member insert only for a project whose row names the caller as created_by and has no members, so create_project makes the caller its owner and nothing else can. An outsider's search and my_projects return nothing. Proof: `jet test Compiler --profile cases --filter db/row_policy_judges_each_operation`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:30.527Z"
+          "at": "2026-11-13T18:43:02.366Z"
         },
         {
           "n": 23,
@@ -40928,7 +40928,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T18:26:02.694Z",
+      "updated": "2026-11-13T18:43:02.366Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -78803,12 +78803,12 @@
         },
         {
           "n": 7,
-          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files's on_drop has type fn() app.Notice!: its error type must convert to app.Notice. The frame shows the notice at the handler's destination (beside the control, a disabled menu item, the resumed window, or the drop target), announces it, and rolls back a refused predicted write; native.background logs it. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
+          "text": "A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files's on_drop has type fn() app.Notice!: its error type must convert to app.Notice. The frame shows the notice at the handler's destination (beside the control, a disabled menu item, the resumed window, or the drop target), announces it, and rolls back a refused predicted write. A failed native.background run joins the app's notice list, kept until dismissed, and is logged. Proof: `jet test Compiler --profile cases --filter web_app/handler_error_becomes_a_notice_by_the_control`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:42.307Z"
+          "at": "2026-11-13T18:43:09.146Z"
         },
         {
           "n": 8,
@@ -78828,7 +78828,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:10:58.248Z",
-      "updated": "2026-11-13T18:17:43.299Z",
+      "updated": "2026-11-13T18:43:09.146Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -96931,12 +96931,12 @@
         },
         {
           "n": 3,
-          "text": "attach applies the project's row policy (D-DBPOLICY1, #3709) before it reads the body, so a signed-in caller who is not a member gets 403. Proof: `jet test Compiler --profile cases --filter web_app/upload_by_a_non_member_is_403_before_it_is_read`.",
+          "text": "Before it reads the body, attach runs the method that #App.UploadCheck(method:) names, as the caller and after the session check; that method applies the project's row policy (D-DBPOLICY1, #3709), so a signed-in caller who is not a member gets 403 and the body is never read. Proof: `jet test Compiler --profile cases --filter web_app/upload_by_a_non_member_is_403_before_it_is_read`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T16:43:52.455Z"
+          "at": "2026-11-13T18:43:04.971Z"
         },
         {
           "n": 4,
@@ -96949,12 +96949,12 @@
         },
         {
           "n": 5,
-          "text": "An upload is spooled before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. Proof: `jet test Compiler --profile cases --filter web_app/upload_spools_before_the_transaction_and_rolls_back`.",
+          "text": "An upload is spooled after its check passes and before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. A staged file lives no longer than its request, and one left by a crash is deleted when the server next starts. Proof: `jet test Compiler --profile cases --filter web_app/upload_spools_before_the_transaction_and_rolls_back`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:39.440Z"
+          "at": "2026-11-13T18:43:06.369Z"
         }
       ],
       "refs": [],
@@ -96965,7 +96965,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-13T18:17:39.440Z",
+      "updated": "2026-11-13T18:43:06.369Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -97582,12 +97582,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the queued call key and that send position in the job, and app.notify and app.mail pass it to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID). A retried run repeats each key, so the transport collapses repeats, and two different pushes from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the run's key, the recipient and the send's open: or link: value, and app.notify and app.mail pass it to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID). A retried run repeats each key even when its query returns rows in another order, so the transport collapses repeats, and two different sends from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:26:01.723Z"
+          "at": "2026-11-13T18:43:03.606Z"
         },
         {
           "n": 2,
@@ -97634,7 +97634,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-13T18:26:01.723Z",
+      "updated": "2026-11-13T18:43:03.606Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -97695,12 +97695,12 @@
         },
         {
           "n": 5,
-          "text": "Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; auth.verified_email returns the lowercased address. set_role, remove_member and leave keep at least one owner (LastOwner); a removed member's open live queries re-run and are refused; jobs that push check membership first. Proof: `jet test Compiler --profile cases --filter web_app/membership_lifecycle_keeps_an_owner_and_refuses_the_removed`.",
+          "text": "Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; the members policy refuses a member insert from a lapsed invitation; auth.verified_email returns the lowercased address. set_role, remove_member and leave keep at least one owner (LastOwner); a removed member's open live queries re-run and are refused; jobs that push check membership first. Proof: `jet test Compiler --profile cases --filter web_app/membership_lifecycle_keeps_an_owner_and_refuses_the_removed`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:38.500Z"
+          "at": "2026-11-13T18:43:07.776Z"
         }
       ],
       "refs": [],
@@ -97711,7 +97711,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:12.993Z",
-      "updated": "2026-11-13T18:17:38.500Z",
+      "updated": "2026-11-13T18:43:07.776Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -204066,6 +204066,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:43:09.146Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0y7zq8s",
+      "note": "#7: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: A handler of kit.button, icon_button, swipe_action, file_button, native.item, ui.drop_zone, the tray and menu bar builders, native.background's run, native.lifecycle's on_resume and native.drop_files'"
+    },
+    {
+      "at": "2026-11-13T18:43:07.776Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0b5xq4b",
+      "note": "#5: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: Invitations and membership: accepting an invitation deletes it; an invitation lapses after its expiry and a nightly job deletes it; auth.verified_email returns the lowercased address. set_role, remove"
+    },
+    {
+      "at": "2026-11-13T18:43:06.369Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pg5tj9",
+      "note": "#5: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: An upload is spooled before the transaction starts; a retried transaction reads the staged body; a blob kept in a transaction that rolls back is deleted. Proof: `jet test Compiler --profile cases --fi"
+    },
+    {
+      "at": "2026-11-13T18:43:04.971Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0pg5tj9",
+      "note": "#3: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: attach applies the project's row policy (D-DBPOLICY1, #3709) before it reads the body, so a signed-in caller who is not a member gets 403. Proof: `jet test Compiler --profile cases --filter web_app/up"
+    },
+    {
+      "at": "2026-11-13T18:43:03.606Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#1: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried w"
+    },
+    {
+      "at": "2026-11-13T18:43:02.366Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#22: #6792 r5 (G12Docs-webshape-r5, closing round-4 gaps); was: Typed row policies (D-DBPOLICY1, c10) as Table.guard(fn(db.Op, db.Who, db.Store) -> Bool), applied to every read and write for live queries, endpoints, jobs and webhooks. A read is judged on the store"
+    },
     {
       "at": "2026-11-13T18:26:03.697Z",
       "by": "Main",
