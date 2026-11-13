@@ -1,0 +1,96 @@
+// Rebasing Core record rows into a graph (CoreRecordRebase.jet): a record
+// body's DeclIDs map to the graph's declaration rows, adding only the rows a
+// body names, and record module indexes map to graph module indexes.
+use {
+    jet_driver.[jet_driver_core_record_rebase_decl, jet_driver_core_record_rebase_module, jet_driver_core_record_rebase_new, jet_driver_core_record_rebase_tree]
+    jet_foundation.[BodyCallArg, BodyFnValueKind, BodyHostCall, BodyNode, BodyTree, DeclTable, NodeKind, SharedLifetime, Span, StmtKind, SymbolKind, TExprType, Type, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index]
+}
+
+// The graph row of the DeclID node `index` of `tree` names, or -1.
+rebase_test_decl: fn(tree: BodyTree, index: Int) -> Int Never! {
+    kind: tree.nodes[index].kind
+    if kind == .Call(callee, _, _) -> return decl_id_index(callee)
+    if kind == .GlobalShared(initializer, _) -> return decl_id_index(initializer)
+    if kind == .FnValue(value) {
+        if value == .NamedFn(function, _) {
+            named: function ?? return -1
+            return decl_id_index(named)
+        }
+    }
+    if kind == .HostCall(call) {
+        if call == .MemoStats(function, _) -> return decl_id_index(function)
+    }
+    -1
+}
+
+rebase_test_row: fn(table: DeclTable, key: String) -> Int Never! {
+    found: decl_table_find(table, key) ?? return -1
+    decl_id_index(found)
+}
+
+#Test("A rebase maps a record body's DeclIDs to the graph's rows and adds only the rows it names") {
+    record := DeclTable{}
+    seed: decl_table_add_row(record, "constant:core.a::seed", SymbolKind.Constant)
+    f: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
+    g: decl_table_add_row(record, "function:core.a::g", SymbolKind.Function)
+    f_again: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
+    _: decl_table_add_row(record, "function:core.a::unused", SymbolKind.Function)
+    decl_table_index(record)
+    graph := DeclTable{}
+    _: decl_table_add_row(graph, "function:main::run", SymbolKind.Function)
+    _: decl_table_add_row(graph, "function:core.a::f", SymbolKind.Function)
+    decl_table_index(graph)
+    span: Span{start: 0, end: 1}
+    tree := BodyTree{nodes: [BodyNode]{
+        BodyNode{id: 0, kind: NodeKind.Call{callee: g, type_args: [Type]{}, args: [BodyCallArg]{}}, span: span},
+        BodyNode{id: 1, kind: NodeKind.GlobalShared{initializer: seed, lifetime: SharedLifetime.Process}, span: span},
+        BodyNode{id: 2, kind: NodeKind.FnValue{kind: BodyFnValueKind.NamedFn{function: Val(f), lambda: None}}, span: span},
+        BodyNode{id: 3, kind: NodeKind.HostCall{call: BodyHostCall.MemoStats{function: f_again, bound: "8"}}, span: span},
+        BodyNode{id: 4, kind: NodeKind.Call{callee: g, type_args: [Type]{}, args: [BodyCallArg]{}}, span: span},
+        BodyNode{id: 5, kind: NodeKind.FnValue{kind: BodyFnValueKind.NamedFn{function: None, lambda: None}}, span: span},
+    }, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
+    rebase := jet_driver_core_record_rebase_new([Int]{}, record)
+    rebased: jet_driver_core_record_rebase_tree(rebase, graph, tree) ?? -1
+    assert_eq(rebased, 5)
+    decl_table_index(graph)
+    // f keeps the graph's row; g and seed are added in the order the body
+    // names them; the redeclared f maps as f; unused never joins.
+    assert_eq(graph.rows.len(), 4)
+    assert_eq(rebase_test_decl(tree, 0), 2)
+    assert_eq(rebase_test_decl(tree, 1), 3)
+    assert_eq(rebase_test_decl(tree, 2), 1)
+    assert_eq(rebase_test_decl(tree, 3), 1)
+    assert_eq(rebase_test_decl(tree, 4), 2)
+    assert_eq(rebase_test_decl(tree, 5), -1)
+    assert_eq(rebase_test_row(graph, "function:core.a::g"), 2)
+    assert_eq(rebase_test_row(graph, "constant:core.a::seed"), 3)
+    assert_eq(rebase_test_row(graph, "function:core.a::unused"), -1)
+    // A second rebase of the same record row gives the same graph row.
+    again: jet_driver_core_record_rebase_decl(rebase, graph, g) ?? seed
+    assert_eq(decl_id_index(again), 2)
+    assert_eq(graph.rows.len(), 4)
+}
+
+#Test("A rebase refuses a declaration row the record doesn't have") {
+    record := DeclTable{}
+    only: decl_table_add_row(record, "function:core.a::f", SymbolKind.Function)
+    decl_table_index(record)
+    graph := DeclTable{}
+    _: decl_table_add_row(graph, "function:main::run", SymbolKind.Function)
+    _: decl_table_add_row(graph, "function:main::a", SymbolKind.Function)
+    far: decl_table_add_row(graph, "function:main::b", SymbolKind.Function)
+    decl_table_index(graph)
+    rebase := jet_driver_core_record_rebase_new([Int]{}, record)
+    mapped: jet_driver_core_record_rebase_decl(rebase, graph, far) ?? only
+    assert_eq(decl_id_index(mapped), 0)
+    assert_eq(graph.rows.len(), 3)
+}
+
+#Test("A rebase maps record module indexes and refuses a module the graph hasn't taken") {
+    modules: [Int]{4, -1, 2}
+    assert_eq(jet_driver_core_record_rebase_module(modules, 0) ?? -9, 4)
+    assert_eq(jet_driver_core_record_rebase_module(modules, 2) ?? -9, 2)
+    assert_eq(jet_driver_core_record_rebase_module(modules, 1) ?? -9, -9)
+    assert_eq(jet_driver_core_record_rebase_module(modules, 3) ?? -9, -9)
+    assert_eq(jet_driver_core_record_rebase_module(modules, -1) ?? -9, -9)
+}

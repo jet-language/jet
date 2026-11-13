@@ -20,6 +20,9 @@
 //     tree with every edit applied)
 //   7 declaration rows: the check's declaration table, one row per DeclID
 //     in row order, so a body's DeclID names the row it was checked against
+// A row names another module by its module key position (section 2), not by
+// the check's graph index; a graph that takes a row rebases both its module
+// indexes and its DeclIDs (CoreRecordRebase.jet).
 use {
     core_record_cbor: core.encoding.cbor
     jet_foundation.[DeclRow, DeclTable, FnBody, RecordField, RecordReader, RecordSection, RecordValue, decl_table_add_row, decl_table_index, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_str, record_value_field]
@@ -83,27 +86,36 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         module_order.push(order)
     }
     module_order.sort()
-    module_keys := [RecordValue]{}
-    module_rows := [RecordValue]{}
-    loop order in module_order {
-        row := inputs.modules[module_at[order]].copy()
-        row.functions = [FnBody]{}
-        bytes: core_record_cbor.to_bytes_canonical(row) ?? return Err("Core module `{row.module_name}` has no record encoding: {err}")
-        module_keys.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "name", value: RecordValue.Str{value: row.module_name.copy()}}, RecordField{name: "identity", value: RecordValue.Str{value: row.module_identity.copy()}}}})
-        module_rows.push(RecordValue.Bytes{value: bytes})
-    }
+    // The check's graph names modules by its own module index; the record
+    // names them by module key position, so each row's indexes are rebased
+    // to it (CoreRecordRebase.jet) before it is encoded.
+    record_at := [String:Int]{}
+    loop (position, order) in module_order -> record_at[inputs.modules[module_at[order]].module_identity.copy()] = position
     registration_at := [String:Int]{}
+    graph_modules := [Int]{}
     loop (index, registration) in inputs.registration_modules {
+        graph_modules.push(record_at.get(registration.module_identity) ?? -1)
         if registration.module_identity == inputs.entry_module_identity -> next
         if registration_at.get(registration.module_identity) != None -> return Err("Core module `{registration.module_name}` ({registration.module_identity}) is registered twice")
         registration_at[registration.module_identity.copy()] = index
     }
     if registration_at.len() != module_order.len() -> return Err("the Core check registered {registration_at.len()} modules but checked {module_order.len()}")
+    module_keys := [RecordValue]{}
+    module_rows := [RecordValue]{}
+    loop order in module_order {
+        row := inputs.modules[module_at[order]].copy()
+        row.functions = [FnBody]{}
+        _: jet_driver_core_record_rebase_imports(row.imports, graph_modules)
+        bytes: core_record_cbor.to_bytes_canonical(row) ?? return Err("Core module `{row.module_name}` has no record encoding: {err}")
+        module_keys.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "name", value: RecordValue.Str{value: row.module_name.copy()}}, RecordField{name: "identity", value: RecordValue.Str{value: row.module_identity.copy()}}}})
+        module_rows.push(RecordValue.Bytes{value: bytes})
+    }
     registration_rows := [RecordValue]{}
     loop order in module_order {
         identity: inputs.modules[module_at[order]].module_identity
         index: registration_at.get(identity) ?? return Err("Core module {identity} is checked but has no registration module")
-        registration: inputs.registration_modules[index]
+        registration := inputs.registration_modules[index].copy()
+        _: jet_driver_core_record_rebase_registration(registration, graph_modules) ?? return Err(err)
         bytes: core_record_cbor.to_bytes_canonical(registration) ?? return Err("Core module `{registration.module_name}` has no registration record encoding: {err}")
         registration_rows.push(RecordValue.Bytes{value: bytes})
     }

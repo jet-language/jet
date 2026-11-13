@@ -1,0 +1,144 @@
+// Rebasing the rows of the precompiled Core record (CoreRecord.jet) into the
+// graph that seeds them. A registration or module row names other modules by
+// module index, and a checked body names declarations by DeclID. In the
+// record both are the record's own: a module index is a module key's
+// position (section 2), and a DeclID is a row of the record's declaration
+// table (section 7). A graph that takes a record module gives it a graph
+// module index, and each declaration a taken body names a row of the graph's
+// table. A rebase maps both. Declaration rows map as bodies meet them, so
+// only the rows a taken body names join the graph's table.
+//
+// The record writer runs the same module map the other way: the Core check's
+// graph indexes become module key positions before a row is encoded.
+use {
+    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclTable, NodeKind, decl_id_index, decl_table_add_row, decl_table_find]
+    jet_sema.[SemaRegistrationImport, SemaRegistrationModule]
+}
+
+// One record's map into one graph.
+JetDriverCoreRecordRebase: struct {
+    // Module index `i` of a record row maps to `modules[i]`; -1 marks a
+    // module the graph hasn't taken.
+    modules: [Int]
+    // The record's declaration table, keyed (jet_driver_core_record_decls).
+    record_decls: DeclTable
+    // Record declaration row `i` maps to `decls[i]` once a body named it.
+    decls: [DeclID?]
+}
+
+// A rebase that maps record module `i` to `modules[i]` and no declaration
+// row yet.
+jet_driver_core_record_rebase_new: fn(modules: [Int], record_decls: DeclTable) -> JetDriverCoreRecordRebase Never! {
+    decls := [DeclID?]{}
+    loop _ in 0..<record_decls.rows.len() -> decls.push(None)
+    JetDriverCoreRecordRebase{modules: modules, record_decls: record_decls, decls: decls}
+}
+
+// Module index `index` under the map `modules`. A row that names a module
+// the map leaves out (-1) or doesn't hold can't be rebased.
+jet_driver_core_record_rebase_module: fn(modules: [Int], index: Int) -> Int Err! {
+    if index < 0 || index >= modules.len() -> return Err("a Core row names module {index}, but the record has {modules.len()} modules")
+    mapped: modules[index]
+    if mapped < 0 -> return Err("a Core row names module {index}, which this graph hasn't taken")
+    Ok(mapped)
+}
+
+// Rebases the module indexes of `imports` under `modules`. A binding's
+// target may be a module the map leaves out: it reads as not loaded (None),
+// as registration leaves a namespace binding to a module it didn't load.
+// Returns how many indexes it rebased.
+jet_driver_core_record_rebase_imports: fn(imports: &[SemaRegistrationImport], modules: [Int]) -> Int Never! {
+    rebased := 0
+    loop import_index in 0..<imports.len() {
+        loop binding_index in 0..<imports[import_index].bindings.len() {
+            target: imports[import_index].bindings[binding_index].target_module_index ?? next
+            mapped: if target >= 0 && target < modules.len() && modules[target] >= 0 -> Val(modules[target]) else -> None
+            imports[import_index].bindings[binding_index].target_module_index = mapped
+            rebased += 1
+        }
+    }
+    rebased
+}
+
+// Rebases the module indexes of the registration module `module_row` under
+// `modules`: its import bindings' targets and its namespace bindings. A
+// namespace binding names a sibling declaration, so its module must be
+// taken. Returns how many indexes it rebased.
+jet_driver_core_record_rebase_registration: fn(module_row: &SemaRegistrationModule, modules: [Int]) -> Int Err! {
+    rebased := jet_driver_core_record_rebase_imports(module_row.imports, modules)
+    loop index in 0..<module_row.namespace_bindings.len() {
+        owner: module_row.namespace_bindings[index].module_index
+        mapped: jet_driver_core_record_rebase_module(modules, owner) ?? return Err("Core module `{module_row.module_name}`: {err}")
+        module_row.namespace_bindings[index].module_index = mapped
+        rebased += 1
+    }
+    Ok(rebased)
+}
+
+// The graph DeclID of the record's declaration `id`. A key the graph's
+// `table` holds keeps its row; any other key gets a new row, which the
+// caller's `decl_table_index` keys. A later record row of a key (a
+// redeclaration, kept but never found) maps as the key's first row does.
+jet_driver_core_record_rebase_decl: fn(rebase: &JetDriverCoreRecordRebase, table: &DeclTable, id: DeclID) -> DeclID Err! {
+    row: decl_id_index(id)
+    if row < 0 || row >= rebase.decls.len() -> return Err("a Core body names declaration row {row}, but the record has {rebase.decls.len()} rows")
+    if rebase.decls[row] == .Val(done) -> return Ok(done)
+    key: rebase.record_decls.rows.key[row]
+    first: decl_table_find(rebase.record_decls, key) ?? return Err("the Core record's declaration `{key}` isn't keyed")
+    if decl_id_index(first) != row {
+        shared: jet_driver_core_record_rebase_decl(rebase, table, first) ?? return Err(err)
+        rebase.decls[row] = Val(shared)
+        return Ok(shared)
+    }
+    mapped: decl_table_find(table, key) ?? decl_table_add_row(table, key, rebase.record_decls.rows.kind[row])
+    rebase.decls[row] = Val(mapped)
+    Ok(mapped)
+}
+
+// Rebases every DeclID of the checked tree `tree` (a body's, or a
+// standalone expression's) into the graph's `table`: direct calls, shared
+// globals' initializers, named function values, policy wrappers and memo
+// statistics. A lambda's nodes are rows of the same tree. Returns how many
+// DeclIDs it rebased.
+jet_driver_core_record_rebase_tree: fn(rebase: &JetDriverCoreRecordRebase, table: &DeclTable, tree: &BodyTree) -> Int Err! {
+    rebased := 0
+    loop index in 0..<tree.nodes.len() {
+        kind: tree.nodes[index].kind
+        if kind == .Call(callee, type_args, args) {
+            mapped: jet_driver_core_record_rebase_decl(rebase, table, callee) ?? return Err(err)
+            tree.nodes[index].kind = NodeKind.Call{callee: mapped, type_args: type_args, args: args}
+            rebased += 1
+            next
+        }
+        if kind == .GlobalShared(initializer, lifetime) {
+            mapped: jet_driver_core_record_rebase_decl(rebase, table, initializer) ?? return Err(err)
+            tree.nodes[index].kind = NodeKind.GlobalShared{initializer: mapped, lifetime: lifetime}
+            rebased += 1
+            next
+        }
+        if kind == .FnValue(value) {
+            if value == .NamedFn(function, lambda) {
+                named: function ?? next
+                mapped: jet_driver_core_record_rebase_decl(rebase, table, named) ?? return Err(err)
+                tree.nodes[index].kind = NodeKind.FnValue{kind: BodyFnValueKind.NamedFn{function: Val(mapped), lambda: lambda}}
+                rebased += 1
+                next
+            }
+            if value == .Policy(fn_type, policy_args, policy_conventions, wrapper, captures, callee) {
+                wrapped: wrapper ?? next
+                mapped: jet_driver_core_record_rebase_decl(rebase, table, wrapped) ?? return Err(err)
+                tree.nodes[index].kind = NodeKind.FnValue{kind: BodyFnValueKind.Policy{fn_type: fn_type, policy_args: policy_args, policy_conventions: policy_conventions, wrapper: Val(mapped), captures: captures, callee: callee}}
+                rebased += 1
+            }
+            next
+        }
+        if kind == .HostCall(call) {
+            if call == .MemoStats(function, bound) {
+                mapped: jet_driver_core_record_rebase_decl(rebase, table, function) ?? return Err(err)
+                tree.nodes[index].kind = NodeKind.HostCall{call: BodyHostCall.MemoStats{function: mapped, bound: bound}}
+                rebased += 1
+            }
+        }
+    }
+    Ok(rebased)
+}
