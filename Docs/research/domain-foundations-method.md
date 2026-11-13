@@ -12,9 +12,7 @@ The executable evaluation corpus is separately maintained under:
 
 `tools/agent-eval/domain-foundations/`
 
-The historical ballot source is kept with that corpus at:
-
-`tools/agent-eval/domain-foundations/slate/ballots.mjs`
+The historical ballot source, `Tools/agent-eval/domain-foundations/slate/ballots.mjs`, left the tree in November 2026 because nothing ran it. Recover it with `git show ab2d2ab82b:Tools/agent-eval/domain-foundations/slate/ballots.mjs`.
 
 The ballot module is source history and is not probe evidence. It must not be imported as a docs-time tool or treated as a runtime result.
 
@@ -225,7 +223,7 @@ Every row points to its complete report and machine-readable payload in the pres
 
 ## Campaign decisions and proof ownership
 
-The historical ballot source remains executable only as source history at `tools/agent-eval/domain-foundations/slate/ballots.mjs`. Its 11 ballots are `D-FOUND-REALTIME1`, `D-FOUND-HANDLE1`, `D-FOUND-SANDBOX1`, `D-FOUND-LIFECYCLE1`, `D-FOUND-OPMIX1`, `D-FOUND-LITERAL1`, `D-FOUND-VIEW1`, `D-FOUND-RECEIPT1`, `D-FOUND-PLATFORM1`, `D-FOUND-BOARD1`, and `D-FOUND-COREAPI1`; their campaign cards are `#2784`–`#2794`. The campaign also recorded defect cards `#2762`–`#2783`, battery cards `#2795`–`#2801` and `#2815`, example cards `#2802`–`#2814`, and core-API cards `#2847`–`#2857`. The campaign wave card was `#2761`.
+The historical ballot source (see above) is source history only. Its 11 ballots are `D-FOUND-REALTIME1`, `D-FOUND-HANDLE1`, `D-FOUND-SANDBOX1`, `D-FOUND-LIFECYCLE1`, `D-FOUND-OPMIX1`, `D-FOUND-LITERAL1`, `D-FOUND-VIEW1`, `D-FOUND-RECEIPT1`, `D-FOUND-PLATFORM1`, `D-FOUND-BOARD1`, and `D-FOUND-COREAPI1`; their campaign cards are `#2784`–`#2794`. The campaign also recorded defect cards `#2762`–`#2783`, battery cards `#2795`–`#2801` and `#2815`, example cards `#2802`–`#2814`, and core-API cards `#2847`–`#2857`. The campaign wave card was `#2761`.
 
 The master report and the gap payloads remain the evidence for card ownership. In particular:
 
