@@ -56,8 +56,9 @@ IRRuntimeIntrinsic: enum {
     // (Build.jet IR_CORE_INTRINSICS): the List stride, a List's capacity,
     // an exact List reserve, a volatile load or store, a streaming store,
     // a raw pointer's step by elements or by bytes, a raw block copy or fill;
-    // and, with no type argument, a raw heap allocation and its release, and
-    // a region's reserve and release of fresh pages.
+    // and, with no type argument, a raw heap allocation and its release, a
+    // region's reserve and release of fresh pages, and `context.allocator`'s
+    // take, give and room of a block.
     TypeSize
     ListCapacity
     ListReserveExact
@@ -72,6 +73,9 @@ IRRuntimeIntrinsic: enum {
     FreeRaw
     RegionReserve
     RegionRelease
+    ContextTake
+    ContextGive
+    ContextRoom
 }
 
 IRIntrinsicShape: enum {
@@ -713,6 +717,7 @@ ir_intrinsic_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, intrinsic: IRRu
         .AllocRaw -> ir_core_alloc_raw(m, p, b, ir_intrinsic_nodes(args), span)
         .FreeRaw -> ir_core_free_raw(m, p, b, ir_intrinsic_nodes(args), span)
         .RegionReserve | .RegionRelease -> ir_core_region(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
+        .ContextTake | .ContextGive | .ContextRoom -> ir_core_context_block(m, p, b, intrinsic, ir_intrinsic_nodes(args), span)
     }
 }
 

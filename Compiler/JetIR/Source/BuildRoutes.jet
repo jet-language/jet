@@ -6082,24 +6082,61 @@ ir_core_list_leaf: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRu
 ir_core_region: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRuntimeIntrinsic, args: [Int], span: Span) -> Int Never! {
     reserves: operation == IRRuntimeIntrinsic.RegionReserve
     if args.len() != (if reserves -> 1 else -> 2) -> return ir_fail_slot(b, span, "region operation has invalid checked arity")
-    words := [Int]{}
-    loop arg in args {
-        value: ir_expr(m, p, b, arg)
-        if ir_failed(b) || value < 0 -> return -1
-        native: ir_native_index(m, b, value, span)
-        if ir_failed(b) -> return -1
-        ir_release(m, b, value)
-        words.push(native)
-    }
+    words: ir_core_native_words(m, p, b, args, span)
+    if ir_failed(b) -> return -1
     if !reserves {
         _: ir_runtime(m, b, "jet_rt_mem_region_release", words, -1)
         return -1
     }
-    int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
     word_row: ir_word_row(m)
     address: ir_runtime(m, b, "jet_rt_mem_region_reserve", words, word_row)
-    if m.types[int_row].kind == .Int -> return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{address}, int_row)
-    address
+    ir_core_word_int(m, p, b, address, span)
+}
+
+// `context.allocator`'s blocks (Core/Mem/Mem.jet `__ContextAllocator`):
+// `__context_take(size, align)` answers the address of a block the current
+// allocator serves, or 0 (JetRuntime Context.jet jet_ctx_allocator_take);
+// `__context_give(address)` hands one back (jet_ctx_allocator_give) and
+// `__context_room(address)` answers the bytes it can grow to
+// (jet_ctx_allocator_room). Each Int crosses as a native word.
+ir_core_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRuntimeIntrinsic, args: [Int], span: Span) -> Int Never! {
+    takes: operation == IRRuntimeIntrinsic.ContextTake
+    if args.len() != (if takes -> 2 else -> 1) -> return ir_fail_slot(b, span, "context block operation has invalid checked arity")
+    words: ir_core_native_words(m, p, b, args, span)
+    if ir_failed(b) -> return -1
+    if operation == IRRuntimeIntrinsic.ContextGive {
+        _: ir_runtime(m, b, "jet_ctx_allocator_give", words, -1)
+        return -1
+    }
+    symbol: if takes -> "jet_ctx_allocator_take" else -> "jet_ctx_allocator_room"
+    word_row: ir_word_row(m)
+    word: ir_runtime(m, b, symbol, words, word_row)
+    ir_core_word_int(m, p, b, word, span)
+}
+
+// Each of `args`, an Int, as a native word.
+ir_core_native_words: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> [Int] Never! {
+    words := [Int]{}
+    loop arg in args {
+        value: ir_expr(m, p, b, arg)
+        if ir_failed(b) -> return words
+        if value < 0 {
+            _: ir_fail_slot(b, span, "a core.mem word operation has an argument with no value")
+            return words
+        }
+        native: ir_native_index(m, b, value, span)
+        if ir_failed(b) -> return words
+        ir_release(m, b, value)
+        words.push(native)
+    }
+    words
+}
+
+// Native word `word` as an Int.
+ir_core_word_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, span: Span) -> Int Never! {
+    int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
+    if m.types[int_row].kind == .Int -> return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{word}, int_row)
+    word
 }
 
 // `crypto.wipe(bytes)`: the runtime wipes the written List header's buffer

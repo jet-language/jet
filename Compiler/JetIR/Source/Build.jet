@@ -802,8 +802,8 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // runs. The core.mem rows (Core/Mem/Mem.jet) are the raw List layout,
 // volatile and streaming access, the raw pointer steps, and the raw block
 // copy and fill at the call's one type argument, and the raw heap
-// allocation and release and a region's reserve and release of fresh pages,
-// which take none.
+// allocation and release, a region's reserve and release of fresh pages,
+// and `context.allocator`'s take, give and room of a block, which take none.
 IRCoreIntrinsicRow: struct { module_name: String, name: String, intrinsic: IRRuntimeIntrinsic }
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
@@ -823,6 +823,9 @@ IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.mem", name: "free_raw", intrinsic: IRRuntimeIntrinsic.FreeRaw},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_reserve", intrinsic: IRRuntimeIntrinsic.RegionReserve},
     IRCoreIntrinsicRow{module_name: "core.mem", name: "__region_release", intrinsic: IRRuntimeIntrinsic.RegionRelease},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_take", intrinsic: IRRuntimeIntrinsic.ContextTake},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_give", intrinsic: IRRuntimeIntrinsic.ContextGive},
+    IRCoreIntrinsicRow{module_name: "core.mem", name: "__context_room", intrinsic: IRRuntimeIntrinsic.ContextRoom},
 }
 
 // The checked functions IR_CORE_INTRINSICS names, by function key, each of
@@ -840,16 +843,17 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never
 
 // A bitcast reads its one scalar; a core.mem layout, access, pointer or
 // block operation is generic over the one type its call instantiates, the
-// raw heap pair is not, and a region's reserve reads its size and its
-// release the address and size.
+// raw heap pair is not, a region's reserve reads its size and its release
+// the address and size, and a context block's take reads its size and
+// align, its give and room the address.
 ir_core_intrinsic_shaped: fn(function: FnBody, intrinsic: IRRuntimeIntrinsic) -> Bool Never! {
     if intrinsic == {
         .FloatBits -> ir_bitcast_signature(function, true)
         .FloatFromBits -> ir_bitcast_signature(function, false)
         .TypeSize | .ListCapacity | .ListReserveExact | .VolatileRead | .VolatileWrite | .StreamStore | .PtrOffset | .PtrByteOffset | .MemCopy | .MemFill -> function.generic_params.len() == 1
         .AllocRaw | .FreeRaw -> function.generic_params.len() == 0
-        .RegionReserve -> ir_intrinsic_signature(function, 1)
-        .RegionRelease -> ir_intrinsic_signature(function, 2)
+        .RegionReserve | .ContextGive | .ContextRoom -> ir_intrinsic_signature(function, 1)
+        .RegionRelease | .ContextTake -> ir_intrinsic_signature(function, 2)
         .FunctionAddress(_) | .StaticText | .FaultReport -> false
     }
 }
@@ -2555,7 +2559,7 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
         "jet_rt_record_new_jet_err" | "jet_err_from_message" | "jet_err_with_context_frame" | "jet_journey_origin" | "jet_journey_frame_text" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" | "jet_ctx_deadline_present" | "jet_ctx_deadline_ms" | "jet_ctx_thread" | "jet_rt_context_trace" -> false
-        "jet_ctx_push_allocator" | "jet_ctx_push_arena" | "jet_ctx_pop_allocator" | "jet_ctx_scratch" -> false
+        "jet_ctx_push_allocator" | "jet_ctx_push_arena" | "jet_ctx_pop_allocator" | "jet_ctx_scratch" | "jet_ctx_allocator_take" | "jet_ctx_allocator_give" | "jet_ctx_allocator_room" -> false
         "jet_rt_move_enter" | "jet_rt_move_enter_at" | "jet_rt_move_leave" | "jet_rt_move_needed" | "jet_rt_string_move" | "jet_rt_string_serve" -> false
         // A pop may run the last owner's drop of the value (Runtime Context.jet), which can stop.
         "jet_ctx_value_push" | "jet_ctx_value_find" -> false

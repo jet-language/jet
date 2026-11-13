@@ -1,0 +1,58 @@
+// `context.allocator` is the current allocator as a `mem.Allocator` value.
+// Reading it is an implicit input, not an effect, so a pure (`-[]>`)
+// function reads it too. The value holds no state: each call on it goes to
+// the allocator current where the call runs, the program heap outside every
+// `#Context(allocator:)` block and the block's allocator inside one. Here
+// that is `Counter`, which claims its blocks from a `mem.Region` and counts
+// what it serves and gets back.
+// Run with: jet run Examples/Memory/Allocation/ContextAllocatorRead.jet
+use core.mem
+
+Counter: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    taken: Int
+    given: Int
+}
+
+impl Counter.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Counter"})
+        self.taken += 1
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+current: fn() -[]> mem.Allocator { context.allocator }
+
+// Takes a block of `size` bytes at a multiple of 16 from the current
+// allocator, and gives it back.
+take_and_give: fn(size: Int) -> Bool {
+    allocator := current()
+    block: allocator.allocate(size, 16) ?? return false
+    fits: block.address().bit_and(15) == 0 && block.size() == size
+    allocator.release(block)
+    fits
+}
+
+run: fn() {
+    print("from the heap: {take_and_give(64)}")
+    region: mem.Region.reserve(1 << 20) ?? panic("reserve")
+    counter := Counter{region: region, kept: [mem.Block]{}, taken: 0, given: 0}
+    #Context(allocator: counter) {
+        print("from the counter: {take_and_give(64)}")
+    }
+    print("served by the counter: {counter.taken > 0}")
+    print("all given back: {counter.taken == counter.given}")
+}

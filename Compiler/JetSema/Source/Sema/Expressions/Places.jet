@@ -765,7 +765,8 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // set one), `print` core.term's print style (a `term.PrintStyle`, its
 // defaults where no block set one) (ContextKeys.jet sema_context_field_key),
 // `scratch` the task's scratch arena and `trace` the calling frames
-// (sema_expression_context_trace). The task owns its scratch arena, so a
+// (sema_expression_context_trace), and `allocator` the current allocator
+// (sema_expression_context_allocator). The task owns its scratch arena, so a
 // read of it is a borrow, as a read of a field of a value the reader
 // doesn't own is: an allocator view of the `mem.Arena` (the view
 // `arena.alloc(v)` answers), which owns nothing and may not leave the
@@ -773,6 +774,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // BuildTransact.jet ir_context_read and ir_context_get lower them.
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if member == "trace" -> return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
+    if member == "allocator" -> return sema_expression_context_allocator(span, expected, environment, program, scopes, context, diagnostics)
     keyed: if sema_context_field_module(member) != None -> sema_context_field_key(member, program) else -> SemaContextFieldKey?{None}
     ty: if keyed == {
         .Val(field) -> field.key.ty.copy()
@@ -781,7 +783,7 @@ sema_expression_context_read: fn(member: String, member_span: Span, span: Span, 
             "thread" -> Type.Int
             "scratch" -> Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: Type.Named{name: "Arena"}}
             else -> {
-                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`), `print` (a `term.PrintStyle`), `scratch` (the task's `mem.Arena`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop`, `context.print`, `context.scratch` or `context.trace`"))
+                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `allocator` (a `mem.Allocator`), `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`), `print` (a `term.PrintStyle`), `scratch` (the task's `mem.Arena`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.allocator`, `context.deadline`, `context.thread`, `context.logger`, `context.on_stop`, `context.print`, `context.scratch` or `context.trace`"))
                 return None
             }
         }
@@ -826,6 +828,29 @@ sema_expression_context_trace: fn(span: Span, expected: Type?, environment: Sema
     records: if returned == .Result(ok, _) -> ok.copy() else -> returned
     frames: sema_tree_node(Type.String, TExprKind.HostCall{call: THostCall.ContextRead{field: "trace"}}, span)
     read: sema_tree_node(records, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(frames)}}, span)
+    sema_expr_expected_owned(read, expected, environment, program, diagnostics)
+}
+
+// `context.allocator`: the current allocator, as a `mem.Allocator` value,
+// core.mem's `__context_allocator()`. Its allocator, `__ContextAllocator`,
+// holds no state: each of its calls goes to whichever allocator is current
+// then, the innermost `#Context(allocator:)` block's, else the program
+// heap, so the value is the same one wherever it is read, passed or kept.
+// Like every context read it records no effect.
+sema_expression_context_allocator: fn(span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "context.allocator", span, [EffectRowEntry]{}, diagnostics) -> return None
+    unavailable: sema_error("E0906", span, "the source `core.mem.__context_allocator` declaration for `context.allocator` is unavailable", "`context.allocator` is read through the Core mem source", "restore the `core.mem` source module")
+    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    target: sema_call_core_source_target(environment, program, identity, "__context_allocator", [Type]{}, span, true, diagnostics) ?? {
+        diagnostics.push(unavailable)
+        return None
+    }
+    callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
+    returned: sema_call_signature_return(target.signature) ?? return None
+    read: sema_tree_node(returned, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{}}, span)
     sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 

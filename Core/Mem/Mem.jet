@@ -302,3 +302,54 @@ __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int
         answer
     }
 }
+
+// The blocks of `context.allocator`: `__context_take` answers the address
+// of `size` bytes at a multiple of `align` that the current allocator
+// serves, or 0 when it refuses; `__context_give` hands such a block back to
+// the allocator that served it; `__context_room` answers the bytes from the
+// address to the end of what was served, the most the block can grow to.
+// Compiler intrinsics as the region operations above are.
+__context_take: fn(size: Int, align: Int) -> Int Never! {
+    __context_take(size, align)
+}
+
+__context_give: fn(address: Int) Never! {
+    __context_give(address)
+}
+
+__context_room: fn(address: Int) -> Int Never! {
+    __context_room(address)
+}
+
+// The allocator behind `context.allocator`. It holds no state: each call
+// goes to whichever allocator is current then, the innermost
+// `#Context(allocator:)` block's, else the program heap.
+__ContextAllocator: struct {}
+
+impl __ContextAllocator.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> Block AllocError! {
+        if size <= 0 -> return Err(AllocError{requested_bytes: size, allocator: "context"})
+        address: __context_take(size, align)
+        if address == 0 -> return Err(AllocError{requested_bytes: size, allocator: "context"})
+        Ok(Block{address: address, size: size})
+    }
+
+    release: fn(&self, block: &&Block) Never! {
+        __context_give(block.address)
+        #Unsafe("the block's bytes went back to the allocator that served them") {
+            consume(block)
+        }
+    }
+
+    resize: fn(&self, block: &Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size > __context_room(block.address) -> return false
+        block.size = new_size
+        true
+    }
+}
+
+// `context.allocator`'s value (JetSema Places.jet
+// sema_expression_context_allocator).
+__context_allocator: fn() -> Allocator Never! {
+    __ContextAllocator{}
+}

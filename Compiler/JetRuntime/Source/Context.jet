@@ -88,6 +88,44 @@ context_scratch_drop: fn(record: I64) {
     wrapping(current + CONTEXT_SCRATCH)
 }
 
+// The blocks of `context.allocator`, core.mem's allocator that is always
+// the current one (Core/Mem/Mem.jet `__ContextAllocator`, whose calls JetIR
+// BuildRoutes.jet ir_core_context_block builds): jet_ctx_allocator_take
+// answers the address of `size` bytes at a multiple of `align`, a power of
+// two, or 0 when the current allocator refuses or the request is invalid.
+// The current allocator serves one value of align 8 (jet_rt_alloc_value_try:
+// the innermost `#Context(allocator:)` block's, else the program heap),
+// with room to round the address up to `align` and two header words below
+// it: the value's size at address - 16 and its address at address - 8.
+// jet_ctx_allocator_give hands that value back to the allocator that served
+// it (jet_rt_free finds it), and jet_ctx_allocator_room answers the bytes
+// from the address to the value's end, the most a block there can grow to.
+CONTEXT_BLOCK_HEADER: I64{16}
+
+#Export(c) jet_ctx_allocator_take: fn(size: I64, align: I64) -> I64 {
+    if (size < I64{0} || align <= I64{0} || align.bit_and(wrapping(align - I64{1})) != I64{0}) -> return I64{0}
+    alignment: if (align < I64{8}) -> I64{8} else -> align
+    slack: wrapping(CONTEXT_BLOCK_HEADER + wrapping(alignment - I64{8}))
+    if (size > wrapping(I64{9223372036854775807} - slack)) -> return I64{0}
+    total: wrapping(size + slack)
+    value: jet_rt_alloc_value_try(total, I64{8})
+    if (value == I64{0}) -> return I64{0}
+    address: wrapping(wrapping(value + CONTEXT_BLOCK_HEADER) + wrapping(alignment - I64{1})).bit_and(wrapping(I64{0} - alignment))
+    sync_store(wrapping(address - I64{16}), total)
+    sync_store(wrapping(address - I64{8}), value)
+    address
+}
+
+#Export(c) jet_ctx_allocator_give: fn(address: I64) {
+    if (address == I64{0}) -> return
+    jet_rt_free(sync_load(wrapping(address - I64{8})), sync_load(wrapping(address - I64{16})), I64{8})
+}
+
+#Export(c) jet_ctx_allocator_room: fn(address: I64) -> I64 {
+    if (address == I64{0}) -> return I64{0}
+    wrapping(wrapping(sync_load(wrapping(address - I64{8})) + sync_load(wrapping(address - I64{16}))) - address)
+}
+
 // Copies the current record into `record`, which then shares its value
 // chain (one more owner of the head node). A task starts on the program
 // heap: a `#Context(allocator:)` carrier serves only the block's own thread
@@ -169,12 +207,19 @@ context_values_release: fn(node: I64) {
 // carrier holds one more reference to the enclosing one as its outer: the
 // allocator its handler's own allocations use, and the one a value leaving
 // the block moves to. The thread's cache rows are blocked from here
-// (alloc_cache_sync).
+// (alloc_cache_sync). Handler 0 keeps the current allocator: the block over
+// a `mem.Allocator` value that is `context.allocator` itself, or a builtin
+// allocator with no carrier (JetIR BuildTransact.jet ir_context_block), and
+// word 8 is then 0.
 #Export(c) jet_ctx_push_allocator: fn(handler: I64, save: I64, mark: I64) {
     slot: wrapping(context_current() + CONTEXT_ALLOCATOR)
     outer: sync_load(slot)
-    carrier: alloc_user_carrier_new(handler, outer, mark)
     sync_store(save, outer)
+    if (handler == I64{0}) {
+        sync_store(wrapping(save + I64{8}), I64{0})
+        return
+    }
+    carrier: alloc_user_carrier_new(handler, outer, mark)
     sync_store(wrapping(save + I64{8}), carrier)
     sync_store(slot, carrier)
     alloc_cache_sync(thread_base())
@@ -186,12 +231,14 @@ context_values_release: fn(node: I64) {
 // reference, whatever a move a stop interrupted left in the record
 // (Alloc.jet jet_rt_move_enter). The regions it served from still name it
 // (Alloc.jet's page map), so it ends once the last of them is released or
-// serves another carrier.
+// serves another carrier. A block that kept the current allocator has no
+// carrier.
 #Export(c) jet_ctx_pop_allocator: fn(save: I64) {
     slot: wrapping(context_current() + CONTEXT_ALLOCATOR)
     sync_store(slot, sync_load(save))
     alloc_cache_sync(thread_base())
     carrier: sync_load(wrapping(save + I64{8}))
+    if (carrier == I64{0}) -> return
     alloc_arena_rewind(carrier)
     alloc_user_drop(carrier)
 }

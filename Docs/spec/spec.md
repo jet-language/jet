@@ -3922,6 +3922,14 @@ objects, maps, sets, caches, `Shared` cells and channels use the program
 heap. A `mem.Allocator` value serves each value through `a.allocate` at
 align 8, and each goes back through `a.release(block)` when dropped.
 
+`context.allocator` is the current allocator as a `mem.Allocator` value. It
+holds no state: each `allocate`, `release` and `resize` call goes to the
+allocator current where the call runs, the innermost `#Context(allocator:)`
+block's, else the program heap, so the value is the same wherever it is
+read, passed or kept. A block's allocator is a value of a type that
+implements `mem.Allocator`, so `#Context(allocator: context.allocator)`, a
+`mem.Allocator` value, is **E0762**.
+
 `context.scratch` is the task's scratch arena. An `Arena` and
 `context.scratch` serve a block from one contiguous reservation of their
 own, whose pages the system commits on first touch: each value is the next

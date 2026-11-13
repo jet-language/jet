@@ -1,0 +1,54 @@
+use core.mem
+
+// A user allocator that notes the one request size the program asks for by
+// hand, so its own `allocate` and `release` are seen to run.
+Counter: struct {
+    region: mem.Region
+    kept: [mem.Block]
+    asked: Int
+    returned: Int
+    taken: Int
+    given: Int
+}
+
+impl Counter.mem.Allocator {
+    allocate: fn(&self, size: Int, align: Int) -> mem.Block mem.AllocError! {
+        block: self.region.claim(size, align) ?? return Err(mem.AllocError{requested_bytes: size, allocator: "Counter"})
+        if size == 777 -> self.asked += 1
+        self.taken += 1
+        Ok(block)
+    }
+
+    release: fn(&self, block: &&mem.Block) Never! {
+        if block.size() == 777 -> self.returned += 1
+        self.given += 1
+        self.kept.push(block)
+    }
+
+    resize: fn(&self, block: &mem.Block, new_size: Int) -> Bool Never! {
+        if new_size <= 0 || new_size >= block.size() -> return false
+        self.kept.push(block.split(new_size))
+        true
+    }
+}
+
+current: fn() -[]> mem.Allocator { context.allocator }
+
+take_and_give: fn(size: Int) -> Bool {
+    allocator := current()
+    block: allocator.allocate(size, 16) ?? return false
+    fits: block.address().bit_and(15) == 0 && block.size() == size
+    allocator.release(block)
+    fits
+}
+
+run: fn() {
+    region: mem.Region.reserve(1 << 20) ?? panic("reserve")
+    counter := Counter{region: region, kept: [mem.Block]{}, asked: 0, returned: 0, taken: 0, given: 0}
+    print("from the heap: {take_and_give(777)}")
+    #Context(allocator: counter) {
+        print("from the counter: {take_and_give(777)}")
+    }
+    print("asked the counter: {counter.asked}, given back to it: {counter.returned}")
+    print("all given back: {counter.taken == counter.given}")
+}

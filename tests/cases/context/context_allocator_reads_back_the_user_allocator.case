@@ -1,0 +1,20 @@
+# `#Context(allocator: counter)` takes a user type that implements
+# `mem.Allocator`, and inside the block `context.allocator` reads back a
+# `mem.Allocator` value whose `allocate` and `release` run the user's
+# implementation: the one 777-byte request reaches `Counter` inside the block
+# and not outside it, on every tier.
+fixture: context_allocator_reads_back_the_user_allocator.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "from the heap: true\nfrom the counter: true\nasked the counter: 1, given back to it: 1\nall given back: true\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "from the heap: true\nfrom the counter: true\nasked the counter: 1, given back to it: 1\nall given back: true\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "from the heap: true\nfrom the counter: true\nasked the counter: 1, given back to it: 1\nall given back: true\n"

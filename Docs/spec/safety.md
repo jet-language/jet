@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1466,
+  "total": 1467,
   "counts": {
     "Compiler": 770,
-    "Core": 178,
+    "Core": 179,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -6398,6 +6398,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 260,
+      "column": 9,
+      "reason": "the block's bytes went back to the allocator that served them"
+    },
+    {
+      "package": "Core",
       "file": "Core/Net/Net.jet",
       "line": 141,
       "column": 5,
@@ -10493,13 +10500,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 770 |
-| Core | 178 |
+| Core | 179 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 454 |
-| **total** | **1466** |
+| **total** | **1467** |
 
 ### Regions
 
@@ -11387,6 +11394,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 179:9 | "`next`'s bytes now belong to this block, so its release duty is this block's" |
 | Core | Core/Mem/Mem.jet | 206:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
 | Core | Core/Mem/Mem.jet | 211:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
+| Core | Core/Mem/Mem.jet | 260:9 | "the block's bytes went back to the allocator that served them" |
 | Core | Core/Net/Net.jet | 141:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
 | Core | Core/Net/Net.jet | 147:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
 | Core | Core/Net/Net.jet | 153:5 | "read the native IP address discriminant" |
@@ -12105,7 +12113,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Mem/Mem.jet", "function": "reserve", "proof": "A size of zero or less is an AllocError before the gate (Mem.jet:105). __region_reserve maps `bytes` of fresh private pages that no other owner can see, and a refusal answers 0, which is an AllocError too, so a Region never holds address 0. The Region alone keeps the address and length, with `mapped` set, and `close` unmaps them once at that length. A Block holds an address and a size, not a borrow: reading or writing its bytes takes an #Unsafe pointer whose caller vouches for the region."},
   {"file": "Core/Mem/Mem.jet", "function": "close", "proof": "Unmaps only a region that `reserve` mapped (`mapped` is false for `adopt`), at the address and length reserve recorded. `close` takes the Region (`&&self`), so the pages are unmapped once and no later call names them. A Block left over holds an address and a size, not a borrow; its bytes are reachable only through an #Unsafe pointer whose caller vouches that the region is still open."},
   {"file": "Core/Mem/Mem.jet", "function": "join", "proof": "The gate only consumes `next`, a #SingleUse Block, after the neighbor check (Mem.jet:177) has stopped with a panic unless `next` starts where this block ends. This block's size then grows over exactly `next`'s bytes, so those bytes keep one owner and one release. No memory is read or written."},
-  {"file": "Core/Mem/Mem.jet", "function": "__allocator_handler", "proof": "A reserved `__` name: only the compiler's lowering of a `#Context(allocator: a)` block calls it, never user code. It takes the address of `allocator`, a place that block borrows for its whole extent. The closure follows that address only when the runtime calls it inside the block (JetRuntime Alloc.jet alloc_user_call), while the borrow keeps the allocator live, in place and borrowed by nothing else. Op 1 rebuilds exactly the Block that op 0 answered, at its address and size."}
+  {"file": "Core/Mem/Mem.jet", "function": "__allocator_handler", "proof": "A reserved `__` name: only the compiler's lowering of a `#Context(allocator: a)` block calls it, never user code. It takes the address of `allocator`, a place that block borrows for its whole extent. The closure follows that address only when the runtime calls it inside the block (JetRuntime Alloc.jet alloc_user_call), while the borrow keeps the allocator live, in place and borrowed by nothing else. Op 1 rebuilds exactly the Block that op 0 answered, at its address and size."},
+  {"file": "Core/Mem/Mem.jet", "function": "release", "proof": "The method of __ContextAllocator, the stateless allocator behind `context.allocator`. `block` moves in (`&&Block`), and __context_give hands its address back to the allocator that served it. The gate then only consumes that #SingleUse Block, so the bytes are released once and no copy of the block lives on. No memory is read or written."}
 ]
 ```
 <!-- unsafe-abstractions:end -->

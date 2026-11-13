@@ -47,16 +47,19 @@ sema_context_field_settable: fn(name: String) -> Bool Never! { SEMA_CONTEXT_SET_
 // The context fields a Core module carries (sema_context_field_module). The
 // loader loads that module wherever the field is spelled (Loader.jet
 // jet_driver_context_field_spelled).
-SEMA_CONTEXT_CORE_FIELDS: [String]{"logger", "on_stop", "print", "trace"}
+SEMA_CONTEXT_CORE_FIELDS: [String]{"allocator", "logger", "on_stop", "print", "trace"}
 
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
 // `fn(debug.Stop)`, whose default is core.debug's `__stop_ignore`; `print`
 // is a `term.PrintStyle`, whose default is core.term's `__print_style`;
 // `trace` is read through core.debug's `__trace_records` (Places.jet
-// sema_expression_context_trace) and has no key, so no block sets it.
+// sema_expression_context_trace) and has no key, so no block sets it;
+// `allocator` is read through core.mem's `__context_allocator` (Places.jet
+// sema_expression_context_allocator) and set by the block itself.
 sema_context_field_module: fn(name: String) -> String? Never! {
     if name == {
+        "allocator" -> Val("core.mem")
         "logger" -> Val("core.log")
         "on_stop" | "trace" -> Val("core.debug")
         "print" -> Val("core.term")
