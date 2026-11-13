@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6792,
-    "rev": 101496,
+    "rev": 101497,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58249,6 +58249,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Correction to the previous log, per the owner's clarification (2026-11-13). The order covers compile-speed work only; the general landing loop is unchanged.\nA compile-speed improvement (c1land, dec1, the c22/c23 steps and the layers work) lands once its correctness proof is green, keeping its win. Its owner then fixes any regression it causes, as a follow-up. Speed work is thrown away only when it is incompatible (correctness red) or its regression is shown to be unfixable.\nApplied now: c1land-r3 (the comptime win) lands on green correctness in g11-core-c, and G11Speed-c1land-fin1 fixes the finalize regression it causes."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Owner order, 2026-11-13: \"land wins wherever we can\", and fix regressions after.\nLanding rules, applied by Lander5 from now on:\n- Every fold member whose own proof lines are green lands singly, at once. A red member holds only itself and the members stacked on it.\n- A SUB with a green correctness proof and a measured win lands even if another line regresses. The regression becomes a carded top-priority follow-up for the owner.\n- A SUB that only regresses still goes back.\nFinalize regression root (G11Speed-5): a refused comptime landing builds and evaluates the comptime child, then the body pass builds it again (RunColdContext: sema.local_values_refused=148). The fix is G11Speed-c1land-fin1: the refused run is handed to the body pass, cheap refusal predicates run first, and refusals are counted by reason. Target: RunColdContext and the JetSema check no worse than dev, and jetc-trace keeps its -18%."
         },
         {
@@ -58501,7 +58506,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T13:40:53.211Z",
+      "updated": "2026-11-13T13:44:59.343Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -200771,6 +200776,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T13:44:59.343Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T13:40:53.211Z",
       "by": "Main",
