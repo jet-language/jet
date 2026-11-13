@@ -1,5 +1,5 @@
 #!/usr/bin/env jet
-// The counted language surface (D-SURFACE-BUDGET1=A). Each kind's active count
+// The counted language surface. Each kind's active count
 // is derived from its canonical rows, never pinned by hand:
 //   keywords       the active rows of the lexer keyword table
 //                  (Compiler/JetLexer/Data/Lexer/Keywords.jet; retired rows
@@ -12,13 +12,12 @@
 //                  (Compiler/JetFoundation/Source/Registry/CLICommands.jet)
 // Tools/agent/surface_budget.tsv holds each kind's ceiling as append-only
 // rows `kind<TAB>ceiling<TAB>why`; a kind's last row is its ceiling. Only an
-// owner decision raises a ceiling: a kind's first row and every row above the
-// one before it name a decision of the ratified index in
-// Docs/spec/syntax-decisions.md (generated from Tower). Retirement lowers a
-// count, and the ceiling follows it down: a lower row says what was retired.
-// Every count must equal its ceiling, so a new keyword, form, marker, fact or
-// command fails until a ratified decision raises the ceiling, and a
-// retirement fails until the ceiling is lowered to match.
+// owner decision raises a ceiling, and the row that raises it says in words
+// what the owner allowed; the decision itself stays on Tower, so a row names
+// no decision ID. Retirement lowers a count, and the ceiling follows it down:
+// a lower row says what was retired. Every count must equal its ceiling, so a
+// new keyword, form, marker, fact or command fails until a row raises the
+// ceiling, and a retirement fails until the ceiling is lowered to match.
 // Public Core functions (top-level, non-`priv` functions under Core, by
 // directory) are reported and compared, and never gated.
 // Usage: jet Tools/agent/SurfaceBudget.jet [--check | --report | --ballot <before-root>]
@@ -36,9 +35,6 @@ use {
 }
 
 LEDGER: "Tools/agent/surface_budget.tsv"
-DECISIONS: "Docs/spec/syntax-decisions.md"
-INDEX_BEGIN: "<!-- BEGIN GENERATED RATIFIED INDEX -->"
-INDEX_END: "<!-- END GENERATED RATIFIED INDEX -->"
 CORE_ROOT: "Core"
 CORE_SKIP: [String]{".jet", ".git", "target", "Tests", "Fixtures", "fixtures"}
 USAGE: "usage: jet Tools/agent/SurfaceBudget.jet [--check | --report | --ballot <before-root>]"
@@ -150,20 +146,27 @@ surface_counts: fn(root: String) -[FS]> [Int] SurfaceBudgetError! {
     Ok(counts)
 }
 
-// The decision IDs of the ratified index in the spec text `text`.
-ratified_decisions: fn(text: String) -> [String] Never! {
-    ids := [String]{}
-    inside := false
-    loop line in text.lines() {
-        if line == INDEX_BEGIN -> inside = true
-        if line == INDEX_END -> return ids
-        if !inside || !line.starts_with("| `") -> next
-        cells: line.split("|").to_list()
-        if cells.len() < 3 -> next
-        id: cells[1].trim().removeprefix("`").removesuffix("`")
-        if id != "Decision" && cells[2].trim() != "" -> ids.push(id)
+// Whether `text` names a decision ID as Tower spells one: `D-` at the start
+// of a word, then capitals, digits and dashes ending in a digit (`D-ABC1`).
+names_decision: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    loop at in 0..<bytes.len() {
+        if bytes[at] != 68 || at + 2 >= bytes.len() || bytes[at + 1] != 45 -> next
+        if at > 0 && word_byte(bytes[at - 1]) -> next
+        last := 0
+        loop index in at + 2..<bytes.len() {
+            n: bytes[index]
+            if !((n >= 65 && n <= 90) || (n >= 48 && n <= 57) || n == 45) -> break
+            last = n
+        }
+        if last >= 48 && last <= 57 -> return true
     }
-    ids
+    false
+}
+
+// Whether the byte `n` is an ASCII letter, digit or `_`.
+word_byte: fn(n: U8) -> Bool Never! {
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95
 }
 
 // One ceiling row of the ledger.
@@ -197,14 +200,15 @@ ceiling_rows: fn(text: String, problems: &[String]) -> [CeilingRow] Never! {
 }
 
 // The problems of the ledger `ledger` against the counts `counts` (in
-// SURFACE_KINDS order) and the ratified decisions `ratified`; none when every
-// count equals its kind's ceiling and every row is lawful.
-budget_problems: fn(counts: [Int], ledger: String, ratified: [String]) -> [String] Never! {
+// SURFACE_KINDS order); none when every count equals its kind's ceiling and
+// every row is lawful.
+budget_problems: fn(counts: [Int], ledger: String) -> [String] Never! {
     problems := [String]{}
     rows: ceiling_rows(ledger, problems)
     names: loop kind in SURFACE_KINDS -> kind_name(kind)
     loop row in rows {
         if !names.contains(row.kind) -> problems.push("{LEDGER}:{row.line}: `{row.kind}` is no counted kind ({names.join(", ")})")
+        if names_decision(row.why) -> problems.push("{LEDGER}:{row.line}: the why `{row.why}` names a decision ID; say in words what the owner allowed or what was retired, and keep the ID on Tower")
     }
     loop (index, kind) in SURFACE_KINDS {
         name: kind_name(kind)
@@ -213,18 +217,17 @@ budget_problems: fn(counts: [Int], ledger: String, ratified: [String]) -> [Strin
             if row.kind != name -> next
             // A kind's first row raises its ceiling from nothing.
             previous: ceiling ?? -1
-            raised: row.ceiling > previous
             if row.ceiling == previous -> problems.push("{LEDGER}:{row.line}: {name} repeats its ceiling {previous}")
-            if raised && !ratified.contains(row.why) -> problems.push("{LEDGER}:{row.line}: raising the {name} ceiling to {row.ceiling} needs an owner decision, and `{row.why}` is no decision of the ratified index in {DECISIONS}")
+            if row.ceiling > previous && row.why == "" -> problems.push("{LEDGER}:{row.line}: raising the {name} ceiling to {row.ceiling} must say what the owner allowed")
             if row.ceiling < previous && row.why == "" -> problems.push("{LEDGER}:{row.line}: lowering the {name} ceiling to {row.ceiling} must say what was retired")
             ceiling = Val(row.ceiling)
         }
         count: counts[index]
         limit: ceiling ?? {
-            problems.push("{name}: {LEDGER} has no ceiling row; its first row names the decision that set it")
+            problems.push("{name}: {LEDGER} has no ceiling row; its first row says what the owner allowed")
             next
         }
-        if count > limit -> problems.push("{name}: {count} counted in {kind_source(kind)}, over the ceiling {limit}: a new one needs an owner decision; once it is ratified, append `{name}<TAB>{count}<TAB><decision>` to {LEDGER}")
+        if count > limit -> problems.push("{name}: {count} counted in {kind_source(kind)}, over the ceiling {limit}: a new one needs an owner decision; once it is ratified, append `{name}<TAB>{count}<TAB><what the owner allowed>` to {LEDGER}")
         if count < limit -> problems.push("{name}: {count} counted in {kind_source(kind)}, under the ceiling {limit}: a retirement lowers the ceiling; append `{name}<TAB>{count}<TAB><what was retired>` to {LEDGER}")
     }
     problems
@@ -338,7 +341,7 @@ surface_budget_main: fn(args: [String]) -[FS]> String SurfaceBudgetError! {
     counts: surface_counts("") ?? return Err(err)
     ledger: read_text(LEDGER) ?? return Err(err)
     if args.len() == 0 || (mode == "--check" && args.len() == 1) {
-        problems: budget_problems(counts, ledger, ratified_decisions(read_text(DECISIONS) ?? return Err(err)))
+        problems: budget_problems(counts, ledger)
         if problems.len() > 0 -> return Err(budget_fail("{problems.len()} problem(s):\n{problems.join("\n")}"))
         return Ok("surface budget: every count equals its ceiling")
     }
@@ -353,10 +356,10 @@ surface_budget_main: fn(args: [String]) -[FS]> String SurfaceBudgetError! {
 
 run: fn() { print(surface_budget_main(process.args()) ?? process.fail(1, err.message)) }
 
-// The ledger a fixture checks: every kind at the given ceiling, set by D-A.
+// The ledger a fixture checks: every kind at the given ceiling.
 fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     out := "# kind\tceiling\twhy\n"
-    loop (index, kind) in SURFACE_KINDS -> out = "{out}{kind_name(kind)}\t{ceilings[index]}\tD-A\n"
+    loop (index, kind) in SURFACE_KINDS -> out = "{out}{kind_name(kind)}\t{ceilings[index]}\tthe surface when the budget began\n"
     out
 }
 
@@ -375,50 +378,53 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     assert_eq(count_kind(.Command, commands), 2)
 }
 
-#Test("the ratified index names the decisions that may raise a ceiling") {
-    spec: "| `D-OUTSIDE1` | A | `c1` |\n{INDEX_BEGIN}\n\n| Decision | Outcome | Card |\n| --- | --- | --- |\n| `D-SURFACE-BUDGET1` | A | `c0bs5inj` |\n| `D-OTHER1` | B | `c2` |\n{INDEX_END}\n"
-    assert_eq(ratified_decisions(spec), [String]{"D-SURFACE-BUDGET1", "D-OTHER1"})
+#Test("a why that names a decision ID is a problem; words are not") {
+    assert(names_decision("D-NEW-MARKER1"))
+    assert(names_decision("ratified as D-ABC1=A"))
+    assert(names_decision("(D-X2)"))
+    assert(!names_decision("`#Deadline(limit)`, the one way to bound waiting"))
+    assert(!names_decision("D-day"))
+    assert(!names_decision("AD-HOC1"))
+    assert(!names_decision("D-"))
 }
 
-#Test("a count at its ceiling passes, and an unauthorized +1 fails until a ratified decision raises it") {
-    ratified: [String]{"D-A", "D-NEW-MARKER1"}
+#Test("a count at its ceiling passes, and an unauthorized +1 fails until a row raises it") {
     ledger: fixture_ledger([Int]{25, 74, 77, 52, 50})
-    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, ledger, ratified), [String]{})
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, ledger), [String]{})
     // One more marker with no raise fails, naming the kind and what to do.
-    over: budget_problems([Int]{25, 74, 78, 52, 50}, ledger, ratified)
+    over: budget_problems([Int]{25, 74, 78, 52, 50}, ledger)
     assert_eq(over.len(), 1)
     assert(over[0].starts_with("markers: 78 counted in Compiler/Prelude/Markers.jet, over the ceiling 77: a new one needs an owner decision"))
-    // A raise that names no ratified decision fails too.
-    unratified: budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\tD-WISHFUL1\n", ratified)
-    assert_eq(unratified.len(), 1)
-    assert(unratified[0].contains("raising the markers ceiling to 78 needs an owner decision, and `D-WISHFUL1` is no decision"))
-    // A ratified raise passes.
-    assert_eq(budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\tD-NEW-MARKER1\n", ratified), [String]{})
-    // A first row must name a ratified decision as well.
-    first: budget_problems([Int]{25, 74, 77, 52, 50}, ledger.replace("keywords\t25\tD-A", "keywords\t25\thand count"), ratified)
-    assert_eq(first.len(), 1)
-    assert(first[0].contains("raising the keywords ceiling to 25 needs an owner decision"))
+    // A raise must say what the owner allowed, in words.
+    silent: budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\t\n")
+    assert_eq(silent.len(), 1)
+    assert(silent[0].contains("raising the markers ceiling to 78 must say what the owner allowed"))
+    // A raise that cites a decision ID instead fails: the ID stays on Tower.
+    cited: budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\tD-NEW-MARKER1\n")
+    assert_eq(cited.len(), 1)
+    assert(cited[0].contains("the why `D-NEW-MARKER1` names a decision ID"))
+    // A raise that says what was allowed passes.
+    assert_eq(budget_problems([Int]{25, 74, 78, 52, 50}, "{ledger}markers\t78\t`#Deadline(limit)`, the one way to bound waiting\n"), [String]{})
 }
 
 #Test("a retirement lowers the count, and the ceiling must follow it down with a reason") {
-    ratified: [String]{"D-A"}
     ledger: fixture_ledger([Int]{25, 74, 77, 52, 50})
     // A retired keyword lowers the count; the stale ceiling fails.
-    under: budget_problems([Int]{24, 74, 77, 52, 50}, ledger, ratified)
+    under: budget_problems([Int]{24, 74, 77, 52, 50}, ledger)
     assert_eq(under.len(), 1)
     assert(under[0].starts_with("keywords: 24 counted in Compiler/JetLexer/Data/Lexer/Keywords.jet, under the ceiling 25: a retirement lowers the ceiling"))
-    // A lower row needs no decision, only what was retired.
-    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\n", ratified), [String]{})
-    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\t\n", ratified).len(), 1)
+    // A lower row says what was retired.
+    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\n"), [String]{})
+    assert_eq(budget_problems([Int]{24, 74, 77, 52, 50}, "{ledger}keywords\t24\t\n").len(), 1)
     // Raising back over a lowered ceiling is a raise again.
-    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\nkeywords\t25\tD-UNRATIFIED1\n", ratified).len(), 1)
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, "{ledger}keywords\t24\tretired `module`\nkeywords\t25\t\n").len(), 1)
 }
 
 #Test("a malformed ledger, an unknown kind and a missing ceiling are each named") {
-    problems: budget_problems([Int]{1, 1, 1, 1, 1}, "keywords\t1\tD-A\nkeywords\tone\tD-A\nsigils\t3\tD-A\n", [String]{"D-A"})
+    problems: budget_problems([Int]{1, 1, 1, 1, 1}, "keywords\t1\tstart\nkeywords\tone\tstart\nsigils\t3\tstart\n")
     assert(problems.contains("{LEDGER}:2: the ceiling `one` is not a number"))
     assert(problems.contains("{LEDGER}:3: `sigils` is no counted kind (keywords, lexical-forms, markers, facts, cli-commands)"))
-    assert(problems.contains("markers: {LEDGER} has no ceiling row; its first row names the decision that set it"))
+    assert(problems.contains("markers: {LEDGER} has no ceiling row; its first row says what the owner allowed"))
 }
 
 #Test("public Core functions are reported by module and compared in a ballot, never gated") {
@@ -440,5 +446,5 @@ fixture_ledger: fn(ceilings: [Int]) -> String Never! {
     // An unchanged module is left out of the ballot.
     assert(!ballot.contains("Text:"))
     // Core growth never reaches the budget check: it reads only the counts.
-    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, fixture_ledger([Int]{25, 74, 77, 52, 50}), [String]{"D-A"}), [String]{})
+    assert_eq(budget_problems([Int]{25, 74, 77, 52, 50}, fixture_ledger([Int]{25, 74, 77, 52, 50})), [String]{})
 }
