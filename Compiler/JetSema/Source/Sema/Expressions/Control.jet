@@ -1006,6 +1006,10 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             }
             callee: sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes)
             if sema_failure_callee_is_generator(callee, program) -> return Val(TTryConvert.Never)
+            // A failure that can leave a deep check or `defer` body is
+            // reported there; an unannotated callee's report waits for the
+            // bundle failure solve, which drops it when the callee can't fail.
+            if sema_body_propagates(context, scopes, span, diagnostics) -> return sema_failure_defer_obligation(callee, diagnostics)
             sema_failure_record_edge(callee, context)
             // A call E2702 already reports can only fail: its implicit
             // propagation is not a second error (sema_crypto_misused_call).
@@ -1073,6 +1077,7 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
             return sema_failure_defer_obligation(callee, diagnostics)
         }
         .Option(value) -> {
+            if sema_body_propagates(context, scopes, span, diagnostics) -> return None
             if scopes.failure_carrier == .Val(parent) {
                 if parent == .Optional(target_value) {
                     if type_identity_equal(value, target_value) -> return sema_expression_propagation_taken(context, TTryConvert.NoConversion)
@@ -1184,7 +1189,6 @@ sema_expression_auto_propagate: fn(expr: Expr, value: &&TExpr, expected: Type?, 
     // and conversion reads finish before its owner enters the replacement.
     if !sema_expression_auto_propagates(value.ty, expected, context) -> return Val(value.move())
     span: expr_span(expr)
-    if sema_body_propagates(context, scopes, span, diagnostics) -> return None
     conversion: sema_expression_propagation_conversion(value.ty, Val(expr), sema_failure_method_callee(value, program, context), span, true, environment, program, scopes, context, diagnostics) ?? return None
     payload: sema_expression_carrier_payload(value.ty) ?? return None
     location: sema_expression_panic_location(environment, program, scopes, span)
@@ -1222,7 +1226,6 @@ sema_expression_rejected_call_propagation: fn(result_type: Type, source: Expr?, 
 }
 
 sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_body_propagates(check_context, scopes, span, diagnostics) -> return None
     // Explicit `?` owns its operand's carrier: the call root must not
     // propagate a second time before this check sees it.
     inner: sema_check_expression_carrier(value, None, environment, program, scopes, state, tail_store, check_context, diagnostics) ?? return None
@@ -1233,7 +1236,10 @@ sema_expression_try: fn(value: Expr, span: Span, conversion: TryConvert, context
                 .Never -> true
                 .NoConversion | .DefaultErr | .Typed(_, _, _) | .WidenUnion(_, _) -> false
             }
-            if !unreachable_route -> sema_failure_record_edge(sema_failure_callee_of(Val(value), sema_failure_method_callee(inner, program, check_context), environment, program, scopes), check_context)
+            if !unreachable_route {
+                if sema_body_propagates(check_context, scopes, span, diagnostics) -> return None
+                sema_failure_record_edge(sema_failure_callee_of(Val(value), sema_failure_method_callee(inner, program, check_context), environment, program, scopes), check_context)
+            }
             sema_expression_try_declared_conversion(inner, conversion, span, environment, scopes, check_context, diagnostics) ?? return None
         }
     }
