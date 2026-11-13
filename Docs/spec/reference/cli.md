@@ -1437,6 +1437,10 @@ Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
 also writes the `jet.core/v1` record of that check to the file, reads it back
 and encodes every row again, which must give the bytes it was read from.
+`--embed <image> <out>` writes the executable `image` to `out` with the
+record added as its `jet.core` part; the compiler build runs it with the jet it
+just linked. `--embedded` reads that part from the running jet's mapped
+image, with no file read, and checks it as `--write` does.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.

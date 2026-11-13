@@ -3,9 +3,10 @@
 // declared effect rows. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
 // (CompilerHost.jet, EnvRoutes.jet, HostDescriptors.jet, HostProcess.jet,
-// HostStdio.jet, HostTiming.jet, RouteSys.jet). Each is `priv`: only core.sys,
-// core.data and core.files call them. A tuple result's items cross in the
-// checked tuple's written order, which is the export's slot order. A
+// HostStdio.jet, HostTiming.jet, RouteSys.jet). Each but image_part and
+// image_part_size is `priv`: only core.sys, core.data and core.files call
+// them. A tuple result's items cross in the checked tuple's written order,
+// which is the export's slot order. A
 // POSIX call answers whether the host has it (`available`), the call's
 // result and its errno (0 when it worked). A descriptor or shared-memory
 // `token` is the runtime's token for the object, never its number.
@@ -96,6 +97,14 @@ sys: module {
 
     // The running program's path, None when it can't be read.
     #Import(c) priv executable: fn() -[Env]> String? = "jet_sys_executable_raw"
+
+    // At most `limit` bytes of the part `name` the build added to this
+    // executable, from its byte `offset`, and the part's byte length; None
+    // when it has no such part. The part is mapped with the program, so
+    // neither reads a file. Not `priv`: the CLI's Core record check
+    // (CoreRecordCheck.jet) reads them.
+    #Import(c) image_part: fn(name: String, offset: Int, limit: Int) -[Env]> [U8]? = "jet_sys_image_part_raw"
+    #Import(c) image_part_size: fn(name: String) -[Env]> Int? = "jet_sys_image_part_size_raw"
 
     // The host's f32 SIMD dispatch width, a fact of the CPU the program runs
     // on, read without a system call. It is run-time only

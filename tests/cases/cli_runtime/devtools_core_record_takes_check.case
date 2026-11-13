@@ -1,17 +1,26 @@
 # `jet self devtools core-record` is the compiler build's check of Core and the
-# Prelude alone (JetCli CoreRecordCheck.jet); it runs only as `--check`, or as
-# `--write <file>`, which also writes the record to the file.
+# Prelude alone (JetCli CoreRecordCheck.jet); it runs only as `--check`, as
+# `--write <file>`, which also writes the record to the file, as
+# `--embed <image> <out>`, which adds it to an executable, or as `--embedded`,
+# which reads the record the build added to this jet.
 env: NO_COLOR=1
 step: jet self devtools core-record
 exit: 2
 stdout: = ""
-stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
 step: jet self devtools core-record --check --out
 exit: 2
-stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
 step: jet self devtools core-record --write
 exit: 2
-stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
 step: jet self devtools core-record --write --check
 exit: 2
-stderr: = "usage: jet self devtools core-record --check | --write <file>\n"
+stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
+step: jet self devtools core-record --embed image
+exit: 2
+stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
+step: jet self devtools core-record --embedded
+exit: 0
+stdout: ~ "every row read back and encoded to the same bytes" # the line also carries row counts, a sha256 and the wall time, which change with Core
+stderr: empty
