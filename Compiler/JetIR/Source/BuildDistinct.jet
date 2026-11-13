@@ -10,7 +10,7 @@ use jet_foundation.[Span, TIntegerBounds, TNumericOp, Type]
 ir_distinct_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool, span: Span) -> Int Never! {
     if operation == {
         .CastAs(_) -> {}
-        .Predicate(_) | .BitCount(_, _) | .CheckedIntToFloat(_, _, _) | .CheckedIntToFixed(_, _) | .FixedNarrow(_, _) | .TryFrom(_) | .FloatToInt(_) | .FloatNarrow | .InlineRange(_, _, _) | .ToShow | .EuclideanDiv | .EuclideanRem -> return ir_numeric_method(m, p, b, ty, argument, operation, span)
+        .Predicate(_) | .BitCount(_, _) | .CheckedIntToFloat(_, _, _) | .CheckedIntToFixed(_, _) | .FixedNarrow(_, _) | .TryFrom(_) | .FloatToInt(_) | .FloatExact(_, _) | .FloatNarrow | .InlineRange(_, _, _) | .ToShow | .EuclideanDiv | .EuclideanRem -> return ir_numeric_method(m, p, b, ty, argument, operation, span)
     }
     success := ty.copy()
     if fallible {

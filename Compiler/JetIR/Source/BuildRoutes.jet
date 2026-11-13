@@ -3497,6 +3497,136 @@ ir_float_to_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: T
     found
 }
 
+// `Int{f}`, `U8{f}` and every other integer head's typed literal of a Float
+// or F32 (TNumericOp.FloatExact). A whole, finite value in the destination's
+// range converts exactly; an exact Int destination has the signed 64-bit
+// range, as `Int.from_float` does. Any other value stops at `line` with E3010
+// naming the roundings (Stop), or is None (Absent, whose `ty` is the Option).
+// Saturate truncates toward zero and takes the nearest bound, and NaN is 0.
+// The ordered range tests reject NaN and both infinities.
+ir_float_exact: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, outcome: TNarrowOutcome, line: Int, span: Span) -> Int Never! {
+    unsupported: "integer typed literal of a Float to {ir_type_name(ty)}"
+    absent: outcome == TNarrowOutcome.Absent
+    head := ty
+    if absent {
+        head = if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, unsupported) }
+    }
+    destination: ir_value_type(m, p, head) ?? return ir_type_fail(b, span, head)
+    exact: m.types[destination].kind == .Int
+    if !exact && m.types[destination].kind != .Word -> return ir_fail_slot(b, span, unsupported)
+    signed: exact || m.types[destination].signed
+    bits: if exact -> 64 else -> m.types[destination].bits
+    if bits < 1 || bits > 64 -> return ir_fail_slot(b, span, unsupported)
+    source: m.types[b.f.slot_type[value]].kind
+    if source != .Float && source != .Float32 -> return ir_fail_slot(b, span, unsupported)
+    float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, unsupported)
+    floating := value
+    if source == .Float32 {
+        floating = ir_temp(m, b, float_row)
+        ir_emit(b.f, IROp.Convert, floating, value, -1, -1, b.line)
+    }
+    high_bits: (1023 + bits - (if signed -> 1 else -> 0)) << 52
+    high: ir_int_constant(m, b, float_row, high_bits)
+    low: ir_int_constant(m, b, float_row, if signed -> high_bits.bit_or(-9223372036854775807 - 1) else -> 0)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    fits: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, fits, 0, -1, -1, b.line)
+    above: ir_bool_op(m, b, IROp.Ge, floating, low)
+    ir_open_if(b.f, above, b.line)
+    below: ir_bool_op(m, b, IROp.Lt, floating, high)
+    ir_emit(b.f, IROp.Copy, fits, below, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    word_row: if exact -> ir_word_row(m) else -> destination
+    unsigned_wide: !signed && bits == 64
+    if outcome == TNarrowOutcome.Saturate {
+        lowest: if signed -> 0 - (1 << (bits - 1)) else -> 0
+        highest: if signed -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
+        clamped: ir_temp(m, b, word_row)
+        ir_open_if(b.f, fits, b.line)
+        truncated: ir_float_word(m, b, floating, word_row, unsigned_wide)
+        ir_emit(b.f, IROp.Copy, clamped, truncated, -1, -1, b.line)
+        ir_else(b.f, b.line)
+        nan: ir_bool_op(m, b, IROp.Ne, floating, floating)
+        ir_open_if(b.f, nan, b.line)
+        zero: ir_int_constant(m, b, word_row, 0)
+        ir_emit(b.f, IROp.Copy, clamped, zero, -1, -1, b.line)
+        ir_else(b.f, b.line)
+        under: ir_bool_op(m, b, IROp.Lt, floating, low)
+        ir_open_if(b.f, under, b.line)
+        low_bound: ir_int_constant(m, b, word_row, ir_wide_word(lowest))
+        ir_emit(b.f, IROp.Copy, clamped, low_bound, -1, -1, b.line)
+        ir_else(b.f, b.line)
+        high_bound: ir_int_constant(m, b, word_row, ir_wide_word(highest))
+        ir_emit(b.f, IROp.Copy, clamped, high_bound, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        ir_end(b.f, b.line)
+        if exact -> return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{clamped}, destination)
+        return clamped
+    }
+    whole: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, whole, 0, -1, -1, b.line)
+    ir_open_if(b.f, fits, b.line)
+    integral: ir_float_is_whole(m, b, floating)
+    ir_emit(b.f, IROp.Copy, whole, integral, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    if absent {
+        option_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+        found: ir_fresh_temp(m, b, option_row)
+        ir_option_none(m, b, found)
+        ir_open_if(b.f, whole, b.line)
+        word: ir_float_word(m, b, floating, word_row, unsigned_wide)
+        converted: if exact -> ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{word}, destination) else -> word
+        made: ir_option_make(m, p, b, option_row, converted, m.types[destination].size)
+        ir_option_set(m, b, found, made)
+        ir_end(b.f, b.line)
+        return found
+    }
+    refused: ir_bool_op(m, b, IROp.Not, whole, -1)
+    ir_open_if(b.f, refused, b.line)
+    args := ir_location(m, b, line)
+    loop arg in ir_static_text(m, b, ir_float_exact_stop_text(ir_type_name(head))) -> args.push(arg)
+    _: ir_runtime(m, b, "jet_rt_numeric_stop", args, -1)
+    ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    word: ir_float_word(m, b, floating, word_row, unsigned_wide)
+    if exact -> return ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{word}, destination)
+    word
+}
+
+// The E3010 text an integer typed literal of a Float stops with: it names
+// every rounding that makes the value whole.
+ir_float_exact_stop_text: fn(head: String) -> String Never! {
+    "{head}{{f}} needs a whole, finite Float in range; pick the rounding with math.trunc, math.floor, math.ceil, math.round or math.round_even"
+}
+
+// Whether the finite Float `floating` is a whole number. Every Float of
+// magnitude 2^52 or more is; a smaller one is when its signed 64-bit
+// truncation converts back to itself.
+ir_float_is_whole: fn(m: &IRModule, b: &IRBuilder, floating: Int) -> Int Never! {
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    float_row: b.f.slot_type[floating]
+    whole: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, whole, 1, -1, -1, b.line)
+    limit_bits: (1023 + 52) << 52
+    limit: ir_int_constant(m, b, float_row, limit_bits)
+    negative_limit: ir_int_constant(m, b, float_row, limit_bits.bit_or(-9223372036854775807 - 1))
+    under: ir_bool_op(m, b, IROp.Lt, floating, limit)
+    ir_open_if(b.f, under, b.line)
+    over: ir_bool_op(m, b, IROp.Lt, negative_limit, floating)
+    ir_open_if(b.f, over, b.line)
+    word_row: ir_word_row(m)
+    truncated: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Convert, truncated, floating, -1, -1, b.line)
+    back: ir_temp(m, b, float_row)
+    ir_emit(b.f, IROp.Convert, back, truncated, -1, -1, b.line)
+    same: ir_bool_op(m, b, IROp.Eq, back, floating)
+    ir_emit(b.f, IROp.Copy, whole, same, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    whole
+}
+
 // `F32.from(x)` on a Float (Rust jet_numeric_float_narrow): Ok holds the
 // nearest F32 when `x` is finite and within ±F32 max, else Err holds the
 // text "value doesn't fit in F32". NaN fails both ordered bounds. The

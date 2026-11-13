@@ -1,18 +1,21 @@
 # tests/numeric_widening.rs::typed_literal_float_to_int_is_a_checked_type_error at tests/numeric_widening.rs:29; hand-port
-# A Float typed body never becomes an integer: exactly one error, E0112, whose fix names the explicit conversions.
+# An integer head never rounds a written Float literal: a fraction is exactly
+# one E0112 whose fix names the roundings, and a whole value outside the head
+# is exactly one E1003. A runtime Float body converts exactly or stops
+# (Examples/Math/FloatToInt.jet, FloatToIntStop.jet).
 fixture: typed_literal_float_to_int_is_a_checked_type_error.fixture
 env: NO_COLOR=1
 
 step: jet check int.jet
 exit: 1
-stderr: ~ "Error [jet.ValueTypeMismatch]" # tests/numeric_widening.rs:37 errors[0].code
-stderr: ~ "Use `Int.from_float(value)`" # tests/numeric_widening.rs:38 fix names {head}.from_float(value)
-stderr: ~ "`math.round(value)`" # tests/numeric_widening.rs:39 fix names math.round(value)
-stderr: ~ "1 problem found" # tests/numeric_widening.rs:36 exactly one error
+stderr: ~ "Error [jet.ValueTypeMismatch]: `1.5` isn't a whole number, so `Int` can't hold it exactly"
+stderr: ~ "`Int{math.trunc(value)}`" # the fix names the explicit roundings
+stderr: ~ "`math.round_even`"
+stderr: ~ "1 problem found"
 
 step: jet check i64.jet
 exit: 1
-stderr: ~ "Error [jet.ValueTypeMismatch]" # tests/numeric_widening.rs:37 errors[0].code
-stderr: ~ "Use `I64.from_float(value)`" # tests/numeric_widening.rs:38 fix names {head}.from_float(value)
-stderr: ~ "`math.round(value)`" # tests/numeric_widening.rs:39 fix names math.round(value)
-stderr: ~ "1 problem found" # tests/numeric_widening.rs:36 exactly one error
+stderr: ~ "Error [jet.IntegerOutOfRange]: `"
+stderr: ~ "is outside the range of `I64`"
+stderr: ~ "`saturating(I64{value})`"
+stderr: ~ "1 problem found"

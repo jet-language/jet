@@ -1,0 +1,28 @@
+# math.round has no nearest Int for a NaN, an infinity, or a value outside
+# the signed 64-bit range, so it stops with its panic instead of returning 0
+# or a clamped bound. The report names the Core file and function, not the
+# line, so an edit to Core/Math keeps it. NaN stops the same on O0, O1 and O2.
+fixture: math_round_stops_on_nan_infinity_and_out_of_range.fixture
+env: NO_COLOR=1
+step nan_o0: jet run --optimize=none nan.jet
+exit: 70
+stdout: = math_round_stops_on_nan_infinity_and_out_of_range.out
+stderr: ~ "Stop [E3001]: `panic: math.round needs a finite Float in the signed 64-bit range, but got NaN`"
+stderr: ~ "--> <corelib>/Core/Math/Math.jet:"
+stderr: ~ " in round"
+step nan_o1: jet run --optimize=basic nan.jet
+exit: 70
+stdout: = math_round_stops_on_nan_infinity_and_out_of_range.out
+stderr: ~ "Stop [E3001]: `panic: math.round needs a finite Float in the signed 64-bit range, but got NaN`"
+step nan_o2: jet run --optimize=full nan.jet
+exit: 70
+stdout: = math_round_stops_on_nan_infinity_and_out_of_range.out
+stderr: ~ "Stop [E3001]: `panic: math.round needs a finite Float in the signed 64-bit range, but got NaN`"
+step infinity: jet run infinity.jet
+exit: 70
+stdout: = math_round_stops_on_nan_infinity_and_out_of_range.out
+stderr: ~ "Stop [E3001]: `panic: math.round needs a finite Float in the signed 64-bit range, but got -inf`"
+step range: jet run range.jet
+exit: 70
+stdout: = math_round_stops_on_nan_infinity_and_out_of_range.out
+stderr: ~ "Stop [E3001]: `panic: math.round needs a finite Float in the signed 64-bit range, but got"

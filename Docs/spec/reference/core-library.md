@@ -3085,7 +3085,7 @@ The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 | `math.get_payload(x)` / `math.set_payload(p)` / `math.set_payload_signaling(p)` | `?Float` | Read a NaN's payload as an integral `Float`, or build the positive quiet or signaling NaN with payload `p`; `None` for a value that is not a NaN, or a payload that is negative, fractional, at least 2^51, or (signaling) zero. |
 | `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI: Float{…}`); usable in `#run` contexts. |
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
-| `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
+| `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. A NaN, an infinity, or a value outside the signed 64-bit range stops. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
 | `math.modf(x)` | `(fract: Float, whole: Float)`; `F32` parts for an `F32` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |

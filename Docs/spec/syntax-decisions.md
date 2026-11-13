@@ -1412,10 +1412,18 @@ Literal bodies remain range-checked (`U8{256}` and `I8{-129}` are E1003).
 Machine-float heads contextualize bare or signed decimal literals, not compound
 arithmetic; a Float value passed to `F32{value}` explicitly converts to F32.
 
-A scalar head does not silently narrow a `Float` into `Int`: `Int{decimal}`
-is E0112 when `decimal: Float`. Use `Int.from_float(decimal)` with its ordinary
-failure handling for truncation, or `math.round(decimal)` for nearest-integer
-rounding (ties away from zero).
+A scalar head never rounds a `Float` into an integer. `Int{decimal}` (and
+`I64{decimal}`, `U8{decimal}`, every integer head) converts a whole, finite
+value in the head's range exactly; any other value stops with E3010, naming
+the roundings. `Int` has the signed 64-bit range here. A literal body is
+checked when it is written: `Int{2.5}` is E0112 and `U8{300.0}` is E1003.
+Pick the rounding first: `Int{math.trunc(x)}`, `Int{math.floor(x)}`,
+`Int{math.ceil(x)}`, or `math.round(x)` (ties away from zero, already an
+`Int`). `checked(Int{x})` is `None` where `Int{x}` would stop, and
+`saturating(Int{x})` truncates toward zero, clamps to the head's range and
+maps NaN to 0. `wrapping` is E1005 around a Float body, which has no low bits
+to keep. `math.round` stops on NaN, an infinity, or a value outside the signed
+64-bit range.
 
 **S30 — Enums**:
 

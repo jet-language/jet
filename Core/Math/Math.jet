@@ -14066,15 +14066,15 @@ TAU: Float{6.2831853071795864769}
 INFINITY: Float{1.0} / Float{0.0}
 NAN: Float{0.0} / Float{0.0}
 
+/// The Int nearest `n`, ties away from zero. A NaN, an infinity, or a value
+/// outside the signed 64-bit range has no nearest Int here, so it stops
+/// (`math.round_even` and `Int{…}` give the other roundings).
 round: fn(n: Float) -> Int Never! {
-    if is_nan(n) -> return 0
-    if n >= 9223372036854775808.0 -> return 9223372036854775807
-    if n <= -9223372036854775808.0 -> return -9223372036854775808
     whole := trunc(n)
     fraction: n - whole
     if fraction >= 0.5 -> whole = whole + 1.0
     if fraction <= -0.5 -> whole = whole - 1.0
-    Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
+    Int.from_float(whole) ?? panic("math.round needs a finite Float in the signed 64-bit range, but got {n}")
 }
 to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 // `math.to_bits` on F32: the binary32 bits as an Int in 0..<2^32, and its
@@ -14812,13 +14812,13 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert_eq(radix(0.0), 2)
 }
 
-#Test("math rounding uses ties away from zero and saturating native conversion") {
+#Test("math rounding uses ties away from zero and stays exact at the range ends") {
     assert_eq(round(1.5), 2)
     assert_eq(round(-1.5), -2)
+    assert_eq(round(2.5), 3)
     assert_eq(round(0.49999999999999994), 0)
-    assert_eq(round(NAN), 0)
-    assert_eq(round(INFINITY), 9223372036854775807)
-    assert_eq(round(-INFINITY), -9223372036854775808)
+    assert_eq(round(-9223372036854775808.0), -9223372036854775808)
+    assert_eq(round(9223372036854774784.0), 9223372036854774784)
 }
 
 #Test("math adjacent values and exponent decomposition") {

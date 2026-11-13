@@ -1,0 +1,37 @@
+// An integer head converts a Float exactly: a whole, finite value in the
+// head's range becomes that integer, and any other value stops. The rounding
+// is always written: math.trunc, floor, ceil, round (ties away from zero) or
+// round_even (ties to even). `checked` gives None where the conversion would
+// stop, and `saturating` truncates, clamps and maps NaN to 0.
+use math: core.math
+
+shown_u8: fn(value: U8?) -> String {
+    if value == .Val(number) -> return "{number}"
+    "None"
+}
+
+shown_int: fn(value: Int?) -> String {
+    if value == .Val(number) -> return "{number}"
+    "None"
+}
+
+run: fn() {
+    whole := 2.0
+    print("Int: {Int{whole}}")
+    half: -2.5
+    print("trunc: {Int{math.trunc(half)}}")
+    print("floor: {Int{math.floor(half)}}")
+    print("ceil: {Int{math.ceil(half)}}")
+    print("round: {math.round(half)}")
+    print("round_even: {Int{math.round_even(half)}}")
+    print("I64: {I64{-9007199254740992.0}}")
+    print("U8: {U8{255.0}}")
+    print("I16 from F32: {I16{F32{-300.0}}}")
+    samples: [Float]{2.0, 2.5, -1.0, 300.0, math.NAN, math.INFINITY, -math.INFINITY}
+    loop value in samples {
+        print("{value}: checked U8 {shown_u8(checked(U8{value}))}, saturating U8 {saturating(U8{value})}, saturating I8 {saturating(I8{value})}")
+    }
+    huge: 1.0e300
+    print("saturating Int: {saturating(Int{huge})}")
+    print("checked Int: {shown_int(checked(Int{9.3e18}))}")
+}

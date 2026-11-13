@@ -2207,6 +2207,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             if distinct_literal.handled -> return distinct_literal.value
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
             checked: checked_optional ?? return None
+            if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
+                exact_line: sema_source_line_at(environment.source_segments, expr_span(value)) ?? 0
+                exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
+                return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
+            }
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
             converted := checked
             value_span: expr_span(value)
@@ -2245,6 +2250,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             if distinct_literal.handled -> return distinct_literal.value
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
             checked: checked_optional ?? return None
+            if sema_expression_typed_literal_float_exact_applies(result_head, checked.ty) {
+                exact_line: sema_source_line_at(environment.source_segments, expr_span(value)) ?? 0
+                exact: sema_expression_typed_literal_float_exact(result_head, checked, value, word, exact_line, diagnostics) ?? return None
+                return sema_expr_expected_owned(exact, expected, environment, program, diagnostics)
+            }
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, diagnostics) -> return None
             converted := checked
             value_span: expr_span(value)
@@ -2295,13 +2305,87 @@ sema_expression_typed_literal_text_mismatch: fn(head: Type, value: Expr, diagnos
     }
 }
 
-// This rule scalar heads use parameter acceptance, never a numeric retag.
+// An integer head that isn't `Int` or a fixed width (an inline range) takes
+// no Float body: it uses parameter acceptance, never a numeric retag.
 sema_expression_typed_literal_float_to_integer: fn(head: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (offered == Type.Float || offered == Type.Float32) && sema_expr_is_integer(head) {
-        diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "use `{type_name(head)}.from_float(value)` and handle its failure, or `math.round(value)` to round to the nearest Int"))
+        diagnostics.push(sema_error("E0112", span, "a `{type_name(offered)}` can't be used where a `{type_name(head)}` is expected", "a typed literal accepts its body like a parameter; converting a decimal value to a whole number must be explicit", "convert it to an integer first with `Int{{value}}`, which stops unless the value is whole, or round it with `math.round(value)`"))
         return true
     }
     false
+}
+
+// Whether `head{body}` is the exact conversion of a Float or F32 body to an
+// `Int` or fixed-width head (sema_expression_typed_literal_float_exact).
+sema_expression_typed_literal_float_exact_applies: fn(head: Type, offered: Type) -> Bool Never! {
+    if offered != Type.Float && offered != Type.Float32 -> return false
+    head == Type.Int || head == .IntN(_, _)
+}
+
+// `Int{f}`, `U8{f}` and every fixed-width head over a Float or F32 body: a
+// whole, finite value in the head's range converts exactly, and any other
+// value stops (TNumericOp.FloatExact). Under `checked` it is None instead;
+// under `saturating` it truncates, clamps and maps NaN to 0. `Int` has the
+// signed 64-bit range here. A written literal body is checked now, so
+// `Int{2.5}` is refused before it runs.
+sema_expression_typed_literal_float_exact: fn(head: Type, checked: TExpr, value: Expr, word: String?, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
+    value_span: expr_span(value)
+    shown: type_name(head)
+    if word == .Val(name) {
+        if name == "wrapping" {
+            diagnostics.push(sema_error("E1005", value_span, "`wrapping` has no low bits to keep from a `{type_name(checked.ty)}`", "a Float converts to a whole number exactly; the overflow words that apply to it are `checked` (None when it doesn't convert) and `saturating` (truncate and clamp)", "write `checked({shown}{{value}})` or `saturating({shown}{{value}})`"))
+            return None
+        }
+    }
+    outcome: sema_expr_narrow_outcome(word)
+    if outcome == TNarrowOutcome.Stop {
+        if sema_expression_typed_literal_written_float(value) == .Val(number) {
+            if !sema_expression_typed_literal_float_fits(head, number, value_span, diagnostics) -> return None
+        }
+    }
+    ty: if outcome == TNarrowOutcome.Absent -> Type.Option{inner: head} else -> head
+    Val(TExpr{ty: ty, kind: TExprKind.NumericMethod{receiver: checked, operation: TNumericOp.FloatExact{outcome: outcome, line: line}}, span: value_span})
+}
+
+// A written Float literal under an integer head converts only when it is a
+// whole number the head holds: `Int{2.5}` (E0112) and `U8{300.0}` (E1003)
+// are refused where they are written.
+sema_expression_typed_literal_float_fits: fn(head: Type, number: Float, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    shown: type_name(head)
+    roundings: "round it first, as in `{shown}{{math.trunc(value)}}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`"
+    // Every finite Float of magnitude 2^52 or more is whole; a smaller one
+    // is when its truncation is itself.
+    finite: number - number == 0.0
+    large: number >= 4503599627370496.0 || number <= -4503599627370496.0
+    whole := finite && large
+    if finite && !large {
+        truncated: Int.from_float(number) ?? 0
+        whole = approx(truncated) == number
+    }
+    if !whole {
+        diagnostics.push(sema_error("E0112", span, "`{number}` isn't a whole number, so `{shown}` can't hold it exactly", "an integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you", roundings))
+        return false
+    }
+    bounds: if head == .IntN(signed, bits) -> sema_expr_integer_range(signed, bits) else -> SemaIntegerRange{lo: -9223372036854775808, hi: 9223372036854775807}
+    if number >= approx(bounds.lo) && number < approx(bounds.hi + 1) -> return true
+    diagnostics.push(sema_error("E1003", span, "`{number}` is outside the range of `{shown}`", "`{shown}` holds whole numbers from {bounds.lo} through {bounds.hi}, and an integer typed literal never clamps", "write a value in that range, or use `saturating({shown}{{value}})` to clamp"))
+    false
+}
+
+// The Float a body is written as: a decimal literal, or its negation.
+sema_expression_typed_literal_written_float: fn(value: Expr) -> Float? Never! {
+    if value == {
+        .Float(number, _, _, _, _) -> return Val(number)
+        .Paren(inner, _, _) -> return sema_expression_typed_literal_written_float(inner)
+        .Unary(op, inner, _, _) -> {
+            if op == UnOp.Neg {
+                number: sema_expression_typed_literal_written_float(inner) ?? return None
+                return Val(-number)
+            }
+        }
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
+    }
+    None
 }
 
 // Integer heads own an explicit conversion, including narrowing fixed carriers.

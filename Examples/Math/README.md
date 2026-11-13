@@ -14,6 +14,8 @@ Run a lesson from the repository root, for example `jet run Examples/Math/<Lesso
 - [ExpMinusOne](ExpMinusOne.jet) — 2^x - 1 and 10^x - 1, correctly rounded: the same bits on every tier, and full precision for small x, where exp2(x) - 1 cancels.
 - [F32CorrectlyRounded](F32CorrectlyRounded.jet) — An all-F32 call of a correctly rounded function returns the correctly rounded F32, never the Float result rounded a second time.
 - [FloatExactOps](FloatExactOps.jet) — IEEE 754 exact operations: ties-to-even rounding, rounding into a fixed width, the IEEE remainder, signed-zero min and max, total order and NaN payloads.
+- [FloatToInt](FloatToInt.jet) — An integer head converts a Float exactly: a whole, finite value in the head's range becomes that integer, and any other value stops.
+- [FloatToIntStop](FloatToIntStop.jet) — An integer head stops on a Float that isn't whole; it never rounds.
 - [FloorDiv](FloorDiv.jet) — Floor division: infix `/%` divides and rounds the answer down, and `/%=` divides a mutable binding in place.
 - [Fraction](Fraction.jet)
 - [HalfTurnTrig](HalfTurnTrig.jet) — sin, cos and tan of pi * x, correctly rounded. They give the same bits on every tier, and exact answers stay exact.
