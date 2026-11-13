@@ -124,15 +124,15 @@ Digest512: struct {
 Hasher: struct {
     priv ctx: hashes.HashCtx
 
-    new: fn() -> Hasher Never! { {ctx: hashes.hash_start(.SHA256)} }
+    new: fn() -> Hasher Never! { {ctx: hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)} }
 
-    update: fn(&self, bytes: [U8]) Never! { hashes.hash_update(self.ctx, bytes) }
+    update: fn(&self, bytes: [U8]) Never! { hashes.hash_update_with(hashes.SHA256Hash{}, self.ctx, bytes) }
 
     /// The lowercase hex SHA-256 of everything absorbed so far; the hasher
     /// can keep absorbing afterwards.
     digest: fn(self) -> String Never! {
         done := hashes.hash_clone(self.ctx)
-        hex_encode(hashes.hash_finish(done))
+        hex_encode(hashes.hash_finish_with(hashes.SHA256Hash{}, done))
     }
 }
 
@@ -323,50 +323,50 @@ KeyWrapError: struct {
 /// bytes, so `sha256("hello")` equals `sha256("hello".bytes())`.
 sha256: fn(input: [U8] | String) -> Digest256 Never! {
     if input == {
-        .M__U8_(bytes) -> Digest256{bytes: hashes.hash(.SHA256, bytes)}
-        .String(text) -> Digest256{bytes: hashes.hash(.SHA256, text.bytes())}
+        .M__U8_(bytes) -> Digest256{bytes: hashes.hash_with(hashes.SHA256Hash{}, .SHA256, bytes)}
+        .String(text) -> Digest256{bytes: hashes.hash_with(hashes.SHA256Hash{}, .SHA256, text.bytes())}
     }
 }
 
 /// SHA-224 (FIPS 180-4).
-sha224: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA224, bytes)) }
+sha224: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.SHA256Hash{}, .SHA224, bytes)) }
 
 /// SHA-1 (FIPS 180-4). Prefer SHA-256; this exists for UUID v5 and legacy checks.
-sha1: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA1, bytes)) }
+sha1: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.SHA1Hash{}, .SHA1, bytes)) }
 
 /// SHA-384 (FIPS 180-4).
-sha384: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA384, bytes)) }
+sha384: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.SHA512Hash{}, .SHA384, bytes)) }
 
 /// SHA-512 (FIPS 180-4).
-sha512: fn(bytes: [U8]) -> Digest512 Never! { {bytes: hashes.hash(.SHA512, bytes)} }
+sha512: fn(bytes: [U8]) -> Digest512 Never! { {bytes: hashes.hash_with(hashes.SHA512Hash{}, .SHA512, bytes)} }
 
 /// SHA-3 (FIPS 202).
-sha3_224: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA3x224, bytes)) }
+sha3_224: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.KeccakHash{}, .SHA3x224, bytes)) }
 
-sha3_256: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA3x256, bytes)) }
+sha3_256: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.KeccakHash{}, .SHA3x256, bytes)) }
 
-sha3_384: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA3x384, bytes)) }
+sha3_384: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.KeccakHash{}, .SHA3x384, bytes)) }
 
-sha3_512: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash(.SHA3x512, bytes)) }
+sha3_512: fn(bytes: [U8]) -> String Never! { hex_encode(hashes.hash_with(hashes.KeccakHash{}, .SHA3x512, bytes)) }
 
 /// BLAKE3-256. Tree hasher, 32-byte output.
 blake3: fn(bytes: [U8]) -> Digest256 Never! { {bytes: blake3_raw(bytes)} }
 
 /// HMAC-SHA256 (RFC 2104; test vectors RFC 4231).
-hmac_sha256: fn(key: [U8], data: [U8]) -> [U8] Never! { hashes.hmac(.SHA256, key, data) }
+hmac_sha256: fn(key: [U8], data: [U8]) -> [U8] Never! { hashes.hmac_with(hashes.SHA256Hash{}, .SHA256, key, data) }
 
 /// HKDF-SHA256 (RFC 5869), extract then expand. `len` is 0..=8160. The output
 /// is a `Secret` so callers cannot print it by accident.
 hkdf_sha256: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret CryptoError! {
     if len < 0 || len > 8160 -> return Err(CryptoError.Length)
-    out: hashes.hkdf(.SHA256, salt, ikm, info, len) ?? return Err(CryptoError.Length)
+    out: hashes.hkdf_with(hashes.SHA256Hash{}, .SHA256, salt, ikm, info, len) ?? return Err(CryptoError.Length)
     Ok(Secret{bytes: out})
 }
 
 /// PBKDF2-HMAC-SHA256 (RFC 8018 section 5.2).
 pbkdf2_hmac: fn(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8] CryptoError! {
     if iterations < 1 || key_len < 1 || key_len > 67108864 -> return Err(CryptoError.Length)
-    Ok(hashes.pbkdf2(.SHA256, password, salt, iterations, key_len))
+    Ok(hashes.pbkdf2_with(hashes.SHA256Hash{}, .SHA256, password, salt, iterations, key_len))
 }
 
 // Zeroes the buffer in place. The qualified call is deliberate: inside this
@@ -581,7 +581,7 @@ file_seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) Fi
     if metadata.len < 0 || metadata.len > jetc.MAX_PLAIN -> return Err(.SourceIO)
     stage: jetc_stage(parent)
     jetc_cancel_checkpoint()
-    hash := hashes.hash_start(.SHA256)
+    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
     length := 0
     loop {
         jetc_cancel_checkpoint()
@@ -589,11 +589,11 @@ file_seal: fn(recipients: [X25519PublicKey], source: Path, destination: Path) Fi
         if part.bytes.len() == 0 -> break
         length += part.bytes.len()
         if length > jetc.MAX_PLAIN -> return Err(.SourceIO)
-        hashes.hash_update(hash, part.bytes)
+        hashes.hash_update_with(hashes.SHA256Hash{}, hash, part.bytes)
         jetc_write(stage.file, part.bytes, "seal-stage-write")
     }
     if length != metadata.len -> return Err(.SourceIO)
-    expected: hashes.hash_finish(hash)
+    expected: hashes.hash_finish_with(hashes.SHA256Hash{}, hash)
     jetc_sync(stage.file, "seal-stage-fsync")
     jetc_seek(stage.file, .DestinationIO)
     staged: jetc_digest(stage.file, length, "seal-stage-read")
@@ -661,9 +661,9 @@ __migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destina
     jetc_sync(stage.file, "migrate-stage-fsync")
     metadata: jetc_stat(stage.file, .DestinationIO)
     jetc_seek(stage.file, .DestinationIO)
-    hash := hashes.hash_start(.SHA256)
-    hashes.hash_update(hash, plain.bytes)
-    expected: hashes.hash_finish(hash)
+    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
+    hashes.hash_update_with(hashes.SHA256Hash{}, hash, plain.bytes)
+    expected: hashes.hash_finish_with(hashes.SHA256Hash{}, hash)
     jetc_seal_stage(canonical, parent, stage, plain.bytes.len(), expected, metadata, true)
     Ok(true)
 }
@@ -809,7 +809,7 @@ jetc_sync: fn(file: JetcFd, name: String) FileCryptoError! {
     Ok()
 }
 jetc_digest: fn(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCryptoError! {
-    hash := hashes.hash_start(.SHA256)
+    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
     length := 0
     loop {
         jetc_cancel_checkpoint()
@@ -817,10 +817,10 @@ jetc_digest: fn(file: JetcFd, expected_length: Int, name: String) -> [U8] FileCr
         if part.bytes.len() == 0 -> break
         length += part.bytes.len()
         if length > expected_length || length > jetc.MAX_PLAIN -> return Err(.SourceIO)
-        hashes.hash_update(hash, part.bytes)
+        hashes.hash_update_with(hashes.SHA256Hash{}, hash, part.bytes)
     }
     if length != expected_length -> return Err(.SourceIO)
-    Ok(hashes.hash_finish(hash))
+    Ok(hashes.hash_finish_with(hashes.SHA256Hash{}, hash))
 }
 jetc_revalidate: fn(parent: JetcParent) FileCryptoError! {
     current: if parent.linux -> jetc_walk_directory(parent.path) else -> jetc_fd(core.crypto.__jetc_open_directory(parent.path), .DestinationIO)
@@ -878,16 +878,16 @@ jetc_seal_stage: fn(recipients: [jetc.Recipient], parent: JetcParent, stage: Jet
     jetc_write_span(output.file, writer.prefix, 0, 20, "{operation}-output-write")
     jetc_write_span(output.file, writer.prefix, 20, writer.prefix.len(), "{operation}-output-write")
     jetc_seek(stage.file, .SourceIO)
-    hash := hashes.hash_start(.SHA256)
+    hash := hashes.hash_start_with(hashes.SHA256Hash{}, .SHA256)
     loop !writer.final {
         jetc_cancel_checkpoint()
         count: jetc_min(writer.remaining, jetc.CHUNK)
         plain: jetc_read_exact(stage.file, count, "{operation}-stage-read", .SourceIO)
-        hashes.hash_update(hash, plain.bytes)
+        hashes.hash_update_with(hashes.SHA256Hash{}, hash, plain.bytes)
         if count < jetc.CHUNK {
             trailing: jetc_read(stage.file, 1, "{operation}-stage-read", .SourceIO)
             if trailing.bytes.len() != 0 || !jetc_same_source(metadata, jetc_stat(stage.file, .SourceIO)) -> return Err(.SourceIO)
-            if !constant_time_equal_bytes(hashes.hash_finish(hash), expected) -> return Err(.SourceIO)
+            if !constant_time_equal_bytes(hashes.hash_finish_with(hashes.SHA256Hash{}, hash), expected) -> return Err(.SourceIO)
         }
         record: jetc.seal_chunk(writer, plain.bytes)
         jetc_write_span(output.file, record.framing, 0, 4, "{operation}-output-write")
