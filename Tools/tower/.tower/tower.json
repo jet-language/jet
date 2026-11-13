@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101204,
+    "rev": 101205,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83209,7 +83209,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-13T03:51:29.536Z",
+      "updated": "2026-11-13T03:55:17.242Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -194075,6 +194075,227 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T03:51:29.536Z"
+    },
+    {
+      "id": "D-EXIT-TASKS1",
+      "cardId": "c0q4s6en",
+      "group": "design",
+      "title": "Background tasks still alive when run returns: cancel them with a short grace, keep today's rule, forbid them, or end the process at once",
+      "situation": "A background task is work a program starts with detach() and does not wait for. When run returns, such a task can still be alive. Today a waiting task, such as a ticker that sleeps between ticks, stops the program with error E3013 and exit status 70. A task stuck in a loop that never waits keeps the process alive forever. Past 4,096 tasks, waiting ones are not even cleaned up. This matters for servers, tickers and anyone who wants a clean, prompt exit. You are asked what happens to background tasks when run returns. We recommend cancelling every one, giving them one second to clean up, and then exiting with run's own status.",
+      "gist": "When run returns, what should happen to background tasks: cancel with a grace, today's rule, forbid them, or exit at once?",
+      "lesson": "A background task is work started with detach() that nobody waits for. When the main function run ends, some of that work may still be going. Jet must stop it cleanly, treat it as an error, forbid it, or simply end the process. This vote picks one rule.",
+      "explainer": "Words used here. A task is work that runs alongside the rest of the program. detach() lets a task go on without anyone waiting for it. Cancel asks a task to stop, and a task notices only at its next wait, such as a sleep, a channel read or a network read. Cleanup is the code that runs as a value goes away, such as closing or flushing a file.",
+      "story": "Kai starts a ticker task that wakes every second to refresh a cache, and detaches it. When run finishes, the program prints run returns. Today it then stops with E3013 and exit status 70. Under A the ticker is cancelled at its sleep, cleans up and the program exits 0 at once. Under B Kai must keep the handle, cancel it and join it. Under C, detach() is gone, so he must do the same. Under D the process ends the moment run returns, and the ticker's cleanup never runs.",
+      "inWild": "// Python asyncio: pending tasks are cancelled and unwound when main returns.\nasyncio.create_task(ticker())\nreturn",
+      "detail": "What this ballot decides. What the runtime does with detached tasks that are still alive when run returns.\n\nToday, parked tasks. After run returns, main_exit_cleanup in Compiler/JetRuntime/Source/Main.jet looks for tasks parked on a wait. If it finds any, it reports E3013 (Parked tasks remain at process exit). It cancels the tasks it can reach so they unwind, and the process exits 70. Tasks past the registry cap (OBSERVE_TASK_CAP, 4,096) are neither reported nor unwound. A seed run of the ticker program prints run returns, then E3013 with the ticker blocked on its sleep, and exits 70.\n\nToday, running tasks. If no task is parked, jet_scheduler_drain_after_exit waits until no task is queued or running. A seed run of a program whose detached task runs `loop { n += 1 }` never exits; it was killed after 10 seconds.\n\nCancellation reaches only waits. In spec.md, cancellation is preemptive at wait points: channel send and receive, time.sleep, join, select and I/O. There is no check on loop back-edges. A seed run that cancels and then joins a task looping on `n += 1` also never returns. tasks.yield_now() is a wait point, so a loop that calls it can be cancelled.\n\nThe rest of the spec. A cancelled task unwinds and runs Drop-backed cleanup. #Shield defers cancellation until its block exits. Dropping a handle without joining or detaching is L1101, so every detach is an explicit choice.\n\nWhy it matters for memory. #6567's leak witness counts live allocations at exit. A task that is not unwound keeps its frame and captures, so the witness must either see every task unwound or leave task frames out.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cancel every background task, wait up to one second, then exit",
+          "detail": "When run returns, the runtime cancels every task still alive. A waiting task stops at its wait at once, runs its cleanup, closes its files and frees its memory, with no cap on how many. The exit waits until every cancelled task has unwound, or for one second, whichever comes first. A task still running after that second is in a loop that never waits. It is abandoned, the process exits, and the system takes its memory back. The exit status is run's.",
+          "technical": "Compiler/JetRuntime/Source/Main.jet: after run returns, cancel every live task through the task registry, with no OBSERVE_TASK_CAP limit. Drain until no task is queued, ready or running, or until 1 s of monotonic time has passed, then exit. Retire E3013's exit report: its registry row, explainer page and runtime_e3013 ui snapshot, which becomes a case that exits 0. The leak witness counts after the drain and names each abandoned task instead of counting its frame. spec.md gains the rule.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    ticker: task {\n        loop {\n            tasks.sleep(1000)   // refresh every second\n        }\n    }\n    ticker.detach()\n    print(\"run returns\")\n}\n// prints: run returns\n// The ticker is cancelled at its sleep, unwinds, and the process exits 0 at once.\n// A detached `loop { n += 1 }` instead is abandoned after 1 s."
+        },
+        {
+          "key": "B",
+          "name": "Keep today's rule and close its gap",
+          "detail": "A waiting background task still stops the program with E3013 and exit status 70, after it is cancelled and cleaned up. A task in a loop that never waits still keeps the process alive forever. The 4,096-task cap goes, so every waiting task is reported and cleaned up. A program with a ticker keeps its handle, cancels it and joins it before run returns.",
+          "technical": "Compiler/JetRuntime/Source/Main.jet and Observe.jet: lift OBSERVE_TASK_CAP from the exit report and unwind. No other change; E3013 stays.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    ticker: task {\n        loop {\n            tasks.sleep(1000)   // refresh every second\n        }\n    }\n    print(\"run returns\")\n    ticker.cancel()\n    ticker.join() ?? print(\"ticker stopped\")\n}\n// prints: run returns, ticker stopped; exit 0.\n// With ticker.detach() instead, E3013 stops the program with status 70."
+        },
+        {
+          "key": "C",
+          "name": "No task may outlive run",
+          "detail": "detach() is removed. Every task handle is joined, so every task ends before the function that started it returns. A ticker is kept, cancelled and joined. A server that serves each connection in its own task joins those tasks through a group. A joined task in a loop that never waits still never ends.",
+          "technical": "Remove Task.detach from Core and the sema rule that lets it discharge L1101. Retire the detach forms of E1103 and E1106, and migrate every detach() caller (Core/Http/Server.jet and others) to task groups. spec.md D-DETACH1 is superseded.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    ticker: task {\n        loop {\n            tasks.sleep(1000)   // refresh every second\n        }\n    }\n    print(\"run returns\")\n    ticker.cancel()\n    ticker.join() ?? print(\"ticker stopped\")\n}\n// prints: run returns, ticker stopped; exit 0.\n// ticker.detach() is a compile error."
+        },
+        {
+          "key": "D",
+          "name": "End the process the moment run returns",
+          "detail": "This is the model of Go and of Rust's standard threads. When run returns, the process exits at once with run's status. Background tasks stop where they are, without cancelling and without cleanup, and the system takes their memory back. Nothing can hang the exit, and nothing waits.",
+          "technical": "Compiler/JetRuntime/Source/Main.jet: after run returns and the main task's own cleanup, flush stdout and exit without draining the scheduler. Retire E3013's exit report and the exit unwind. The leak witness leaves every live task's frame and captures out of its count. spec.md gains the rule.",
+          "code": "use tasks: core.tasks\n\nrun: fn() {\n    ticker: task {\n        loop {\n            tasks.sleep(1000)   // refresh every second\n        }\n    }\n    ticker.detach()\n    print(\"run returns\")\n}\n// prints: run returns\n// The process exits 0 at once; the ticker stops mid-sleep and its cleanup never runs."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "When main returns, the process ends; goroutines stop at once and their deferred calls do not run.",
+          "code": "go ticker()\nreturn"
+        },
+        {
+          "lang": "Rust (std threads)",
+          "note": "When main returns, the process exits; spawned threads stop without running their destructors.",
+          "code": "std::thread::spawn(ticker);\n// main returns"
+        },
+        {
+          "lang": "Rust (Tokio)",
+          "note": "Runtime shutdown drops spawned tasks at their await points and runs their destructors; a task that never awaits blocks a blocking shutdown, so shutdown_timeout bounds it.",
+          "code": "runtime.shutdown_timeout(Duration::from_secs(1));"
+        },
+        {
+          "lang": "Python asyncio",
+          "note": "asyncio.run cancels the tasks still pending when main returns and waits for them to unwind.",
+          "code": "asyncio.create_task(ticker())\nreturn"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives every program a clean exit with run's status. Every task that waits, which is almost every background task, cleans up and frees its memory at once. A loop that never waits can delay the exit by at most one second, so nothing hangs. It is Tokio's shutdown_timeout as the default.",
+        "gains": [
+          "A ticker or server task no longer turns a normal exit into status 70.",
+          "Every waiting task's cleanup runs at exit, with no 4,096 cap.",
+          "No exit hangs: a loop that never waits costs at most one second.",
+          "No new syntax; detach() keeps its meaning of not waiting."
+        ],
+        "losses": [
+          {
+            "loss": "Background work still in progress at exit is cut short.",
+            "mitigation": "Join the task when its work must finish, or put that work in #Shield, which finishes before the cancel lands."
+          },
+          {
+            "loss": "A loop that never waits is abandoned after one second without its cleanup.",
+            "mitigation": "Its memory goes back to the system and the leak witness names the task. Calling tasks.yield_now() in the loop makes it cancellable."
+          },
+          {
+            "loss": "E3013 no longer reports a background task stuck on a wait at exit.",
+            "mitigation": "A task whose end matters is joined, and L1101 already forces that choice."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps stopping normal programs with ticker or server tasks with status 70, and a loop that never waits still hangs the exit."
+          },
+          {
+            "key": "C",
+            "reason": "C removes detach(), which servers and tickers use, and a joined loop that never waits still hangs."
+          },
+          {
+            "key": "D",
+            "reason": "D is fastest, but it skips every background task's cleanup, so files go unflushed and connections unclosed, and the leak witness cannot see task memory."
+          }
+        ],
+        "tradeoff": "Up to one second of exit for a loop that never waits, in exchange for cleanup in every task that waits."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The first draft hid that a task looping without a wait never reaches a cancel point, and it omitted the Go and Rust std exit. The revision checks that hang on the seed, adds a 1 s grace to A, and adds D."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When run returns, should background tasks be cancelled with a grace, stop the program, be forbidden, or just die?",
+        "lesson": "A background task is work started with detach() that nobody waits for. When run ends, some may still be going. Today a waiting one stops the program with status 70, and a loop that never waits hangs it. This vote picks the rule.",
+        "trio": {
+          "current": {
+            "note": "Today a sleeping detached ticker stops the program with E3013, status 70.",
+            "code": "ticker: task {\n    loop {\n        tasks.sleep(1000)\n    }\n}\nticker.detach()\nprint(\"run returns\")\n// E3013, exit 70"
+          },
+          "wild": {
+            "lang": "Python asyncio",
+            "note": "Pending tasks are cancelled and unwound when main returns.",
+            "code": "asyncio.create_task(ticker())\nreturn"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cancel, one-second grace",
+            "gist": "Cancel all; wait up to 1 s for cleanup; then exit.",
+            "gains": [
+              "Clean exit with run's status.",
+              "No exit hangs."
+            ],
+            "losses": [
+              "Unfinished background work is cut short."
+            ],
+            "proposed": {
+              "code": "ticker.detach()\nprint(\"run returns\")\n// ticker cancelled, exit 0"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Today's rule, no cap",
+            "gist": "Waiting tasks still stop the program with E3013.",
+            "gains": [
+              "Every waiting task is reported."
+            ],
+            "losses": [
+              "Tickers and servers exit 70.",
+              "A loop that never waits hangs the exit."
+            ],
+            "proposed": {
+              "code": "ticker.cancel()\nticker.join() ?? print(\"ticker stopped\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No detach",
+            "gist": "Every task is joined before its starter returns.",
+            "gains": [
+              "No task outlives run."
+            ],
+            "losses": [
+              "detach() and its callers migrate."
+            ],
+            "proposed": {
+              "code": "ticker.cancel()\nticker.join() ?? print(\"ticker stopped\")\n// detach() is an error"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Exit at once",
+            "gist": "The process ends when run returns; tasks just die.",
+            "gains": [
+              "Fastest exit.",
+              "Nothing can hang it."
+            ],
+            "losses": [
+              "No task cleanup; files go unflushed."
+            ],
+            "proposed": {
+              "code": "ticker.detach()\nprint(\"run returns\")\n// exit 0, no cleanup"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Every waiting task cleans up at once. A loop that never waits costs at most one second, so the exit is clean and never hangs.",
+          "gains": [
+            "No status 70 from tickers.",
+            "No exit hangs."
+          ],
+          "losses": [
+            {
+              "loss": "Unfinished background work is cut short.",
+              "mitigation": "Join it, or wrap it in #Shield so it finishes first."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Normal programs keep exiting 70."
+            },
+            {
+              "key": "C",
+              "reason": "Removes detach(); loops still hang."
+            },
+            {
+              "key": "D",
+              "reason": "Skips all task cleanup."
+            }
+          ],
+          "tradeoff": "At most one second of exit, for cleanup in every waiting task."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T03:55:17.242Z"
     }
   ],
   "questions": [
@@ -197342,6 +197563,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T03:55:17.242Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-EXIT-TASKS1",
+      "note": "Background tasks still alive when run returns: cancel them with a short grace, keep today's rule, forbid them, or end the process at once"
+    },
     {
       "at": "2026-11-13T03:51:29.536Z",
       "by": "Main",
