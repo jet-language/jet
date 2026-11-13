@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101276,
+    "rev": 101279,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52724,11 +52724,11 @@
         {
           "n": 15,
           "text": "(was #5988) (was #4621) Sema accepts collection mutation laundered through a local closure (iterator invalidation, owner read while &-capturing closure live); closures pushing into a captured list ICE in MIR legality",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:45:03.672Z"
+          "evidence": "dev e4c7950dd0 (G10Safe-lambda-method-write, g10-fold2 cmds 61-62, on that fold jet): case closures/a_lambda_whose_only_write_is_a_method_call_keeps_the_write passes on every tier, so a closure pushing into a captured list keeps the write and reaches no MIR ICE. Together with the c17 loan rule landing in g10-fold3, mutation laundered through a local closure is checked.",
+          "at": "2026-11-13T07:10:51.603Z"
         },
         {
           "n": 16,
@@ -52783,7 +52783,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-13T05:55:59.676Z",
+      "updated": "2026-11-13T07:10:51.603Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -65038,20 +65038,20 @@
         {
           "n": 8,
           "text": "Soundness U1 (Prep 2026-11-04, probe $JET_SCRATCH_ROOT/lanes/Main/prep/c3836/s64.jet): an escaping lambda that captures a list window of a local that dies owns a materialized copy, so the probe prints 2000|true| on O0, O1 and O2 instead of reading freed memory. The fix is in IR: ir_lambda honors sema's materialized and cloned captures. Sema keeps accepting the program. A case pins it on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T15:49:25.247Z"
+          "evidence": "dev 7567ee4508 (G10Safe-lambda-owned-window, g10-fold2 cmds 39-44, all rc 0, on that fold jet): ir_lambda honors sema materialized and cloned captures. Case view_copy_semantics/an_escaping_lambda_owns_the_window_it_captures pins the probe on every tier, and the whole view_copy_semantics/, closures/ and core_and_closures/ filters plus CodegenCeiling --check pass.",
+          "at": "2026-11-13T07:10:49.292Z"
         },
         {
           "n": 9,
           "text": "Wrong result L1 (Prep 2026-11-04, probe $JET_SCRATCH_ROOT/lanes/Main/prep/c3836/s36x.jet): writes inside a loop in a non-escaping lambda reach the captured variable, so the probe prints 3|6|3 on O0, O1 and O2 instead of 3|3|0. A case pins it on every tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T15:49:25.979Z"
+          "evidence": "dev c7d8c0291b (G10Safe-lambda-loop-write, g10-fold2 cmds 50-53, on that fold jet): case closures/a_lambda_write_inside_a_loop_or_branch_reaches_the_captured_variable gives PASS 1 (O0, O1 and O2). The whole closures/ filter gives PASS 40, FAIL 0, KNOWN-FAILING 2 (the existing #5454 rows). The ui effects/iterable_loop_charges_its_cursor_effects gives PASS 1, and the Ownership/Checks.jet check is rc 0.",
+          "at": "2026-11-13T07:10:50.483Z"
         },
         {
           "n": 10,
@@ -65128,7 +65128,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-13T06:36:18.212Z",
+      "updated": "2026-11-13T07:10:50.483Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -198343,6 +198343,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T07:10:51.603Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mj3ijb",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-13T07:10:50.483Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0r02x8n",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-13T07:10:49.292Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0r02x8n",
+      "note": "#8"
+    },
     {
       "at": "2026-11-13T07:09:44.859Z",
       "by": "Main",
