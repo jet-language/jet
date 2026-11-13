@@ -68,11 +68,37 @@ component model (`Bytes.jet`, `Component.jet`, `Decode.jet`, `Module.jet`,
 `Opcodes.jet`, `Text.jet`, `Validate.jet`): Jet reads WebAssembly, it does not
 yet write it.
 
-One naming hazard: `core.hardware` already exists as the embedded-board
-capability `Target.Hardware` (`TargetMachine.jet:666`, `:714`), available only
-when the target has register blocks or interrupts (`:827`). D-HOST-CAPS1's
-Core `Hardware` description is a different thing with the same word. The
-implementing card should keep them apart.
+One naming clash, and how this design resolves it. Today the word hardware
+also names the embedded-board profile: the target capability
+`Target.Hardware` (`Compiler/JetFoundation/Source/Target/TargetMachine.jet:700`,
+its fact row `Compiler/Prelude/Facts.jet:377` and
+`Compiler/JetFoundation/Source/Registry/RegistrationFacts.jet:52`), the
+`TargetMachine.hardware` field of register blocks, interrupts and DMA
+channels, which grants that capability (`TargetMachine.jet:870`), and the
+module key `core.hardware` that asks for it (`TargetMachine.jet:749`). No
+`core.hardware` module exists in `Core/`; that key is the only place the name
+appears as a module. D-HOST-CAPS1 is ratified with `Hardware`,
+`Target.hardware` and `$build.hardware` meaning the machine description.
+
+One name gets one meaning: hardware means the D-HOST-CAPS1 machine
+description, everywhere. The embedded profile takes the word its user-facing
+surface already uses, board. Source code reaches registers and DMA channels
+only through `board.<profile>` paths, and Sema accepts only profiles whose
+identity starts with `board.`
+(`Compiler/JetSema/Source/Sema/Calls/Hardware.jet:236-254`, `:385`). So:
+
+| Today | After the rename |
+|---|---|
+| capability `Target.Hardware`, its fact row and registration row | `Target.Board` |
+| `TargetMachine.hardware` (register blocks, interrupts, DMA channels) | `TargetMachine.board` |
+| module key `core.hardware` in `jet_target_capabilities_for_core_usage` | `core.board` |
+| D-HOST-CAPS1 `Hardware`, `Target.hardware`, `$build.hardware` | unchanged |
+
+No source program changes: no example, Core file, UI test or case names
+`Target.Hardware` or `core.hardware`, and `board.<profile>` paths keep their
+spelling. The rename is a cutover inside the compiler and its registry rows,
+with no alias for the old names. It lands before the first `Hardware`
+description type, so the two meanings never exist at the same time.
 
 ## What WebAssembly gives and lacks
 
@@ -256,7 +282,8 @@ with both times reported. This cell proves that a "no" answer costs only speed.
 - #1914 and D-TARGET-ORDER1: every wasm target is E2104 today.
 - #5201: the web back end that the in-page host would reuse.
 - #6205 and #2414: the 29x scalar F32 gap in cell P1.
-- The `core.hardware` naming overlap and the resource-failure bucket above.
+- The rename of the embedded profile to board, above, before the first
+  `Hardware` description type lands; and the resource-failure bucket above.
 - The retired `prep if` spelling in the D-HOST-CAPS1 and D-CPU-DISPATCH1
   examples.
 
