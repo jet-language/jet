@@ -1,0 +1,27 @@
+use plugin: core.plugin
+
+// A call that runs past its 1-second wall-clock budget, with fuel to spare,
+// fails as PluginError.Budget(.Time, fault) naming the export, with the guest
+// frames it stopped in. The host keeps running and the plugin keeps serving
+// calls.
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    slow: plugin.load("slow.wat", policy)
+    if slow.crawl() == {
+        .Ok(value) -> print("crawl returned {value}")
+        .Err(error) -> {
+            if error == {
+                .Budget(limit, fault) -> {
+                    print("time budget: {limit == .Time}, export {fault.export}, frames within 1-32: {fault.frames.len() >= 1 && fault.frames.len() <= 32}")
+                    print(fault.message)
+                }
+                .Guest(fault) -> print("guest failure: {fault.message}")
+                .Denied(fault) -> print("denied: {fault.message}")
+                .Defect(fault) -> print("defect: {fault.message}")
+            }
+        }
+    }
+    print("the host is still running")
+    pong: slow.ping() ?? panic("ping failed after the time budget")
+    print("ping: {pong}")
+}

@@ -6370,6 +6370,10 @@ Every call runs under fixed budgets, and running past one fails as
 
 - `.Fuel`: 10,000,000 units per call, spent at each function entry and loop
   iteration.
+- `.Time`: 1 second of wall-clock time per call, measured from the call's
+  start. The deadline is checked each time the call has spent another 4,096
+  units of fuel, and a call found past it stops there with its guest frames;
+  the host keeps running and the plugin keeps serving calls.
 - `.Memory`: 256 pages of 64 KiB for each linear memory.
 - `.Table`: 10,000 elements for each table.
 - `.Wire`: 1,048,576 bytes for each string argument or result crossing the

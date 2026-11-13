@@ -39,7 +39,6 @@ PLUG_TRAP_MEMORY: 1
 PLUG_TRAP_DIVIDE: 2
 PLUG_TRAP_OVERFLOW: 3
 PLUG_TRAP_STACK: 8
-PLUG_TRAP_FUEL: 9
 
 // Guest calls nest at most this deep (each is a native frame).
 PLUG_DEPTH_LIMIT: 1000
@@ -51,7 +50,7 @@ PLUG_FRAME_BODY: 3
 
 // The runtime helpers the translated code calls.
 PLUG_RUNTIME_NAMES: [
-    "jet_plugin_frame", "jet_plugin_trap", "jet_plugin_memory_grow", "jet_plugin_memory_fill", "jet_plugin_memory_copy",
+    "jet_plugin_frame", "jet_plugin_trap", "jet_plugin_fuel", "jet_plugin_memory_grow", "jet_plugin_memory_fill", "jet_plugin_memory_copy",
     "jet_plugin_memory_init", "jet_plugin_data_drop", "jet_plugin_table_size", "jet_plugin_table_grow",
     "jet_plugin_table_get", "jet_plugin_table_set", "jet_plugin_table_fill", "jet_plugin_table_copy",
     "jet_plugin_table_init", "jet_plugin_elem_drop", "jet_plugin_table_fid", "jet_plugin_clz", "jet_plugin_ctz",
@@ -329,6 +328,8 @@ PlugCx: struct {
         ir_end(self.f, 0)
     }
 
+    // Spends one unit of the fuel slice; a spent slice asks the runtime for
+    // the next one, which traps instead when the call is out of fuel or time.
     fuel: fn(&self) Never! {
         left: self.load(self.rows.word, self.inst, PLUG_INST_FUEL)
         one: self.word(1)
@@ -336,7 +337,12 @@ PlugCx: struct {
         self.store(self.inst, PLUG_INST_FUEL, rest)
         zero: self.word(0)
         spent: self.cmp(IROp.Lt, rest, zero)
-        self.guard(spent, PLUG_TRAP_FUEL)
+        _: ir_open_if(self.f, spent, 0)
+        fid: self.word(self.fid)
+        at: self.word(self.at)
+        _: self.rt("jet_plugin_fuel", [Int]{self.inst, fid, at}, -1)
+        self.check(false)
+        ir_end(self.f, 0)
     }
 
     // An i32 slot's value zero-extended to a word.

@@ -1,0 +1,22 @@
+# Claim: a plugin call that runs past its 1-second wall-clock budget, with
+# fuel to spare, fails as PluginError.Budget(.Time, fault) with fault.export
+# set and 1-32 guest frames, on jet run and jet run --release. The guest's loop
+# fills 64 KiB per iteration, so it spends one unit of fuel per 64 KiB and the
+# deadline comes long before the fuel runs out. The host keeps running, and
+# the plugin serves its next call.
+fixture: plugin_call_fails_past_its_time_budget_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: ~ "time budget: true, export crawl, frames within 1-32: true\n" # default: the call fails as Budget(.Time) naming its export, with 1-32 guest frames
+stdout: ~ "plugin call `crawl`: time budget exhausted" # default: the fault says the time budget ran out
+stdout: ~ "the host is still running\nping: 7\n" # default: the host keeps running and the plugin serves its next call
+stdout: !~ "crawl returned" # default: the call never returned
+step: jet run --release main.jet
+exit: 0
+stdout: ~ "time budget: true, export crawl, frames within 1-32: true\n" # release: the call fails as Budget(.Time) naming its export, with 1-32 guest frames
+stdout: ~ "plugin call `crawl`: time budget exhausted" # release: the fault says the time budget ran out
+stdout: ~ "the host is still running\nping: 7\n" # release: the host keeps running and the plugin serves its next call
+stdout: !~ "crawl returned" # release: the call never returned
