@@ -587,3 +587,459 @@ files.
 30. Measure section 3.8 from the final blocks.
 31. Add the section 4 comparisons with sources.
 32. 4.10's `.Offline` notice must depend on `.offline(.Queue)`.
+
+# Round 2: revision 2 of the proposal
+
+Date: 2026-11-13. Reviewer: Claude Opus, lane G6. The reviewer did not
+write either revision and built no part of the shape.
+
+Subject: revision 2 of `Docs/proposals/2026-11-13-web-app-framework-shape.md`
+as submitted in G12Docs-webshape-r2 (4,215 lines, base dev `93380f43ef`).
+Line numbers in this round refer to that file. This round checks the 32
+round-one gaps and tests criteria c6 (native and web coverage), c7
+(styling) and c8 (Crewboard as a gap-finding probe, the comparison matrix
+and the claims register CL1–CL9).
+
+**Overall verdict for round 2: fails.** Revision 2 is a large step. Every
+Jet block is now a real file. All 41 files reproduce on seed-b14, and the
+native and web coverage asked for by c6 is nearly complete. Twenty-five of
+the 32 round-one gaps are closed, and the other seven are only partly
+closed. It still fails c8 on four counts:
+
+1. None of the nine "goes further" claims holds as stated against the
+   strongest system in its area.
+2. Two claims cite evidence that the seed contradicts: CL1 cites the stub
+   checks, and CL5 cites E0721.
+3. Crewboard works around at least ten framework needs in app code, and
+   names none of them as a gap.
+4. Three new examples carry security bugs.
+
+c7 is partly met. Section R2-6 lists every gap for G12Docs-5 in one pass.
+
+## R2-1. Method
+
+- **Reproduction.** The reviewer copied G12Docs-5's checking kit to the G6
+  scratch and ran `build.mjs`. It then ran
+  `check.sh` with seed-b14 (`jet@a0.0.45#1e8010c1…`), one file at a time
+  under an 8 GiB cap, with the base `93380f43ef` as the toolchain root.
+  All 41 results match Appendix A.3 exactly:
+  - 31 files are clean, the uncaught style bugs b7 and b8 among them;
+  - `new_task.jet`, `task.jet` and `sign_in.jet` each report
+    `jet.UnknownField`;
+  - `screens_test.jet` reports two `jet.ModuleAsValue` and four
+    `jet.UninferableTypeArgument`;
+  - b1–b6 each report their seeded error.
+- **Fidelity.** A script compared every labeled Jet block in the proposal
+  with the kit file of that name:
+  - every labeled Crewboard and example block is byte-identical to its
+    file, and so are the six stub files of section 10;
+  - the eight unlabeled blocks are the section 7 alternatives, marked "not
+    checked".
+- **Probes.** The reviewer added three probe files to the checked copy:
+  - **CL1.** `Screens/zz_probe_cl1.jet` is a screen that calls
+    `crew.webhook_secret(...)` and `crew.on_issue_event(...)`. Neither is
+    an endpoint.
+  - **CL5.** `Logic/zz_probe_cl5.jet` and `Logic/zz_probe_cl5b.jet` move
+    `Project.webhook_secret` (`#Secret String`) into a plain `String`
+    field, an interpolated string, a closure result, an error payload and
+    `print`.
+
+  Results are quoted where used.
+- **Other checks.**
+  - **Cards.** Tower card reads confirm that the criteria revision 2 cites
+    exist on #3709, #6556, #6558, #6818 and #6819–#6823.
+  - **Code.** Code claims were checked with `git show` and `git grep` at
+    `93380f43ef`:
+    - `Host.jet:389–393`;
+    - the E0721, E0737 and E0739 rows;
+    - spec.md:882 ("A derived decoder validates");
+    - the line counts in 3.8.
+- **Sources.** The URLs this round adds come from the reviewer's knowledge
+  and were not fetched in this run. G12Docs-5 must open each before citing
+  it.
+
+## R2-2. The 32 round-one gaps
+
+| # | Verdict | Evidence or residual |
+|---|---|---|
+| 1 | closed | `crewboard()` (854–867) holds no store; only `Web/web.jet` opens one (1225–1233) |
+| 2 | closed | `Crew.mine` (617–621) and `close_from_issue` (685–700) are written |
+| 3 | closed | `app.service` is gone. Residual: `#App.SigningKey` (704) is found by marker, an implicit lookup that `signature: .GitHub` (679) does not name; see R2-6 item 19 |
+| 4 | closed | no effect row names `Context` |
+| 5 | closed | links take state values. Residual: neither the path template ↔ field binding (`:project` to `BoardView.project`) nor a link to a state no graph registers is stated as a compile error, and the stubs cannot show it (`screen: fn<F>`, `go: fn<V>`; 3405, 3437) |
+| 6 | **partly** | 4.1 states pending, cancel, timeout and the UI thread. Missing: where a button handler's error goes. Moves drop it with `_:` (981, 1897, 2131), and 4.1 (1508–1510) routes only form and read errors. 3.7 step 1 ("busy until the call settles") contradicts step 2 (a queued write may settle hours later) |
+| 7 | closed in design | markers, and O2 A. CL1's evidence is wrong (R2-4) |
+| 8 | closed | signature checked before decode. Residual: no replay or redelivery rule; GitHub signs no timestamp (R2-6 item 16) |
+| 9 | **partly** | the codes are right (E0721 is `jet.TaggedValueDenied`; E0737 and E0739 are fixed-timing rules), tags are on types, `#Key` is gone. But the text that a flow of `#Secret` "into a plain value, a response or a log is E0721" (316–318, 1655–1657, table at 186) is false on seed-b14: every probe flow in CL5 checks clean. `#Secret` at dev is the fixed-timing tag; its client-path rule is D-SECRETEDGE1 (#6557, paused) |
+| 10 | closed | no confirm field; `reveal: true` |
+| 11 | closed | #3709 has the request-key, two-edit, two-tab and offline-expiry criteria |
+| 12 | closed | 4.8 (1698–1702) |
+| 13 | closed | `check(...)` only; spec.md:882 confirms D-VALIDATE-DECODE1=B |
+| 14 | closed | conversions exist. Residual: TR2 reads `app.Remote<X>` as `X`, so no checked file exercises `impl app.CallError -> TaskError` or a client call's error path |
+| 15 | closed | #6558 criterion |
+| 16 | closed | #6818 criterion |
+| 17 | closed | #3709 criteria. Residual: 4.9 (1718–1719) says results are shared for "the same caller rights", but the card says "reads no caller-dependent input". Every Crewboard query reads `app.caller()` through `role_in` or `me`, so the probe's own queries never share |
+| 18 | closed | 4.6 |
+| 19 | closed in 4.6 | but CL4 contradicts it (R2-4) |
+| 20 | closed | #6556 criterion |
+| 21 | closed | `.stream(after:)`; #6812 has no criteria yet |
+| 22 | closed, with defects | 5.1; defects in R2-3 |
+| 23 | closed | 5.2 |
+| 24 | **partly** | see R2-5 |
+| 25 | closed | `Host.jet:389–393` verified |
+| 26 | closed | 41 of 41 reproduce, and every block is byte-identical to its file. Limits: TR2, and builder generics the stubs leave unconstrained (`screen<F>`, `theme<T>`, `mount<S>`, `api<S>`), so the graph itself (routes, screen parameters, which service a screen receives) is not type-checked by anything |
+| 27 | closed | the undefined names are gone; the phone manifest lists `native` |
+| 28 | closed | label and ISO date columns. Residual: CSV formula injection (R2-6 item 18) |
+| 29 | closed | two amendments. Amendment 2 (3095–3098) exists only because Jet has no bound method values, and that language gap has no card (R2-6 item 1) |
+| 30 | closed | recounted: Logic 353, Screens 321 + 43, manifests 88 |
+| 31 | closed | URLs not fetched by the reviewer |
+| 32 | **partly** | 4.8 (1693–1696) says the web shows nothing, but the `waiting` comment in `realtime.jet` (1743–1744) says "the web shows it when the service worker holds writes" |
+
+Twenty-five rows are closed (two of them closed in design or text only), and
+seven are partly closed: 6, 9, 24 and 32, plus 5, 22 and 26 because their
+residuals are counted below. Every residual appears once in R2-6.
+
+## R2-3. Card c6: native and web coverage
+
+**Verdict: met, with defects.**
+
+- **Coverage.** Every row the owner listed has a row and a checked example:
+  - native (5.1): windows, menus, tray, menu bar; notifications and push;
+    background work; files and pickers; camera, sensors, location; deep and
+    app links; clipboard, drag and drop, share; permissions; accessibility;
+    localization; dark mode; lifecycle; install, update and signing;
+  - web (5.2): SEO, streaming, assets, uploads, caching and PWA install.
+- **Tables.** The coverage tables map each need to its example and to each
+  target.
+- **Cards.** Every gap names a card. But #6799–#6817 each have zero
+  criteria, so "named with its card" names cards that cannot be proven
+  yet. Main should give each card executable-example criteria from its
+  5.1 or 5.2 example.
+
+**Defects.**
+
+1. **The web form of files cannot work as typed.** `native.open_file`
+   returns `String?` and `drop_files` passes `[String]`, both paths (3849,
+   3851), and `import_from` reads them with `files.read` (2003). A browser
+   gives no paths and has no `core.files`. The claim that "on the web the
+   same call opens the browser's file chooser" (1995–1996) fails. The API
+   needs a file handle type that a browser `File`, a phone content URI and
+   a desktop path all satisfy, as the File System Access API and Tauri's
+   dialog plugin do.
+2. **Push can name a screen the target does not have.** `app.notify(to:
+   who, ..., open: V)` reaches every device the account registered,
+   including Web Push (1916–1921). But the phone graph alone adds
+   `/mine` (1359). A push that opens `MineView{}` lands on a web graph
+   with no such route. This also fails CL3's own round-two test (R2-4).
+3. **The c6 examples are not wired into Crewboard.**
+   - The phone manifest gives reasons for notifications, the camera and
+     location (270–274), but no Crewboard code sends the "assigned to you"
+     push: `tell_assignee` (1919) is never called.
+   - `Task` has no attachment or place field, and no Crewboard screen or
+     method uses `photo_for_task` or `where_done`.
+
+   As standalone snippets they cannot find the gaps that wiring them in
+   would find: send after commit, attachment storage, and upload
+   authorization.
+4. **Server-side scheduled work is missing.** The "due today" reminder
+   runs as device background work, which the proposal calls "a floor, not
+   a promise" (1944–1948). The reliable form is a server job that sends a
+   push. The proposal has no server job, queue or cron surface. The
+   strongest systems:
+   - Oban (https://hexdocs.pm/oban);
+   - Solid Queue and Active Job in Rails;
+   - Laravel queues and its scheduler;
+   - Convex scheduled functions and crons
+     (https://docs.convex.dev/scheduling/scheduled-functions).
+
+   This is a need worked around in app code instead of named.
+5. **Background work on the web.** 5.1 says "no" (1851), but #6801's title
+   promises "the web (background sync)". One of them must change.
+6. **Desktop single instance.** A second launch through
+   `crewboard://tasks/42` (2075) must reach the running app. Electron's
+   `requestSingleInstanceLock` and Tauri's single-instance plugin are the
+   references. The proposal does not state it.
+
+## R2-4. Card c8: the claims register, claim by claim
+
+The proposal may call a claim "goes further" (or "best") only when it
+beats the strongest system in its area. Each verdict below names that
+system.
+
+| ID | Claim | Strongest existing, at its best | Verdict |
+|---|---|---|---|
+| CL1 | No method is reachable from a client unless marked | **Convex internal functions:** `internalQuery`, `internalMutation` and `internalAction` exist only under `internal`, and client hooks accept only public references, so the TypeScript build refuses the call (https://docs.convex.dev/functions/internal-functions). tRPC exposes only router procedures. | **not carried.** At best it matches Convex. The cited evidence is false: the CL1 probe calls the non-endpoints `webhook_secret` and `on_issue_event` from a screen, and seed-b14 checks it clean. Only `priv` methods fail, through ordinary privacy. TR2 removes the boundary the claim is about. The proposal's own O2 table (2871) lists Convex under option A. |
+| CL2 | Every decoder runs the type's `validate` block | **ASP.NET Core `[ApiController]`** runs model validation on every action and answers 400 automatically (https://learn.microsoft.com/aspnet/core/web-api/#automatic-http-400-responses). **FastAPI with Pydantic** validates every request body on decode (https://fastapi.tiangolo.com/tutorial/body/). | **not carried; matches.** The 8.1 validation row names Blazor but omits these two. Rules that need the database (the assignee is a project member, a title is unique) cannot live in a pure `validate` block. Ecto's `unsafe_validate_unique` and constraint-to-error mapping, and Laravel's `exists` and `unique` rules, cover them. `update_task` accepts any `AccountID` as the assignee (643–656). |
+| CL3 | One route identity serves web addresses, deep links and push | **Navigation Compose type-safe routes:** `@Serializable` route classes are the destinations, and `navDeepLink<Route>` maps URLs onto them (https://developer.android.com/guide/navigation/design/type-safety). **Expo Router:** every screen is a URL, deep and universal links land on the same routes, and typed routes are available (https://docs.expo.dev/router/introduction/). | **not carried.** It matches Compose's design, and the proposal's own test breaks it: graphs differ per target (the phone adds `MineView`), so a push that opens `MineView` is reachable by push but not by link on the web. Fixing this needs per-target route checks or one route set for all targets. |
+| CL4 | Prediction runs the server's own method body | **Meteor methods:** the same method body runs as a client stub for latency compensation (https://guide.meteor.com/methods.html). **Zero custom mutators and Replicache mutators:** one shared mutator runs on client and server (https://zero.rocicorp.dev/docs/custom-mutators). | **not carried.** Meteor did this first, and 8.2 itself says "matches" for Meteor (3200). Section 4.6 (1624–1628) says the client cannot run `role_in` or the version check, and `move_task`'s body needs both (660–673). So the prediction is a subset of the body, not the body. Name the subset rule. |
+| CL5 | A secret value cannot reach any client path | SvelteKit refuses to import `$env/static/private` into client code at build time; Next.js `server-only` fails the build on a client import; the Rust `secrecy` crate gives a secret type with no serialization by default. All three work at module or type level, not by value flow. | **not carried today.** If D-SECRETEDGE1 (#6557) is built, it would go further than all three. But seed-b14 accepts every CL5 probe flow, including `print("key {p.webhook_secret}")`. `#Secret` at dev is the fixed-timing tag; nothing yet denies a client path, a reply or a log. Say "proposed in #6557", not "E0721". |
+| CL6 | A webhook cannot be mounted without a signature check | Stripe's SDK `constructEvent` verifies the signature with a timestamp tolerance against replay; Laravel Cashier verifies by middleware by default. | **holds, narrowed.** The true statement is "a method marked `#App.Webhook` cannot skip the check". A third-party POST can still land on an `#App.Public` method with no signature. GitHub deliveries carry no timestamp, so add `X-GitHub-Delivery` de-duplication (https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks). With both, CL6 can stand as "goes further" over frameworks where the check is a recipe. |
+| CL7 | Network failures are typed cases the screen must handle | **Elm** `Http.Error` is a value the update function must match (https://package.elm-lang.org/packages/elm/http/latest/Http#Error). Leptos server functions return `Result<T, ServerFnError>`. | **not carried.** 8.2 (3208) already says "matches on typed errors (CL7)", which contradicts 8.1 (3152). The round-two test finds a failure that is not handled: the move button's `_: crew.move_task(...)` (981) has no stated error destination (gap 6), and no checked file exercises `CallError`, because TR2 erases `Remote`. |
+| CL8 | Removing a wire field follows a compiler-checked policy | **buf breaking** refuses wire-incompatible Protobuf changes (https://buf.build/docs/breaking/). **Apollo GraphOS schema checks** test a change against the operations real clients sent (https://www.apollographql.com/docs/graphos/platform/schema-management/checks). | **not carried; matches.** `min_client` plus an expiry window plus a typed `UpdateRequired` is a sound policy. Apollo's usage-based check knows which clients still read a field, and the proposal's policy does not. |
+| CL9 | Tokens need dark values; icon buttons need labels; images need text alternatives | **Jetpack Compose** `Image` and `Icon` take a required `contentDescription` (null must be written out for decorative images). **vanilla-extract `createThemeContract`** makes a theme that misses a token a type error (https://vanilla-extract.style/documentation/api/create-theme-contract/). | **not carried; matches.** The 8.1 accessibility row (3170) names SwiftUI, React Native and Flutter, and omits Compose, the strongest case. |
+
+**The matrix (8.1, 8.2) has these further defects.**
+
+- 8.2 says Qwik is "behind: Jet hydrates" (3194). That contradicts D-RESUME1 and 4.13 ("Pages resume instead of hydrating").
+- 8.1 has no performance row. 4.13 is "behind", and it belongs in the matrix.
+- These areas have no row at all: authorization policy, server jobs, email, rate limiting and observability. The probe needs each one (R2-6 items 4–10).
+
+**Workarounds in Crewboard that are not named as gaps.** Card c8 says every
+need the framework cannot meet cleanly is a gap with a card, not app code.
+
+1. **Authorization is hand-written in every method.** `role_in` and `can_edit`
+   are repeated in each method (583, 596, 625, 645, 662), and `mine` leaks:
+   it returns every task assigned to the caller, including tasks in
+   projects the caller has left (617–621).
+   - **Strongest:** row-level policies, as in Supabase or Postgres RLS
+     (https://supabase.com/docs/guides/database/postgres/row-level-security),
+     Firestore rules, and Laravel policies.
+   - **Already in the framework:** #3709 has the criterion "row policies
+     are typed, compiled, and enforced on every live query/mutation path"
+     (D-DBPOLICY1). Crewboard does not use it, and the proposal does not
+     mention it.
+2. **The signed-in caller is optional inside `#App.SignedIn`.**
+   `app.caller()` returns `AccountID?` (3429), so every method unwraps it
+   through `me()` (710–712), even though the marker already guarantees a
+   session. tRPC's protected procedures and Phoenix's `on_mount` hand
+   over a non-optional user.
+3. **Concurrency control is hand-written and not atomic.**
+   - `update_task` reads, compares `version`, then writes (643–657). Two
+     concurrent edits can both pass the check, and one is lost.
+   - `move_task` has no version check at all, so a queued move replays
+     over a newer change.
+   - **Strongest:** Rails `lock_version` and EF Core concurrency tokens
+     compare and set in one statement
+     (https://learn.microsoft.com/ef/core/saving/concurrency).
+4. **No transactions.** These writes are not atomic:
+   - `close_from_issue` writes N rows in a loop (687–698);
+   - the CSV import makes one remote call per row (2005–2007), and a
+     failure leaves a partial import.
+
+   At dev, `#Transact` covers `Shared<T>` memory only (spec "Inside
+   `#Transact`"). The proposal has no database transaction, and no batch
+   call across the remote boundary.
+5. **Joins and N+1 queries.** `my_projects` runs one `card()` per membership,
+   and `card()` makes two queries of its own (571–579, 722–726). `search`
+   then repeats `my_projects` inside a loop (606–614). Ecto `preload`,
+   Rails `includes` and Prisma `include` are the references.
+6. **Search is an in-memory scan.** `matching` filters each project's rows in
+   app code (521–537, 609). No predicate-to-SQL rule can compile it, and
+   no full-text index exists. Postgres full-text search and Laravel Scout
+   are the references.
+7. **Offline create needs a server ID.** `new_task` navigates to
+   `TaskView{id: task.id}` after `create_task` (1063–1064), but under
+   `.offline(.Queue)` the ID does not exist until the queue drains. Client-
+   generated IDs, as in Replicache, Zero and Linear, are the references.
+8. **Notifications are not sent after commit.** `tell_assignee` (1919) is
+   not called. Calling it inside a method would send before the commit and
+   could notify about a write that rolls back. Rails `after_commit` and
+   jobs enqueued in the same transaction (Oban, Laravel
+   `afterCommit`) are the references.
+9. **The probe skips the flows that find account gaps.** "Ask an owner to
+   invite you" (893) has no invite method, and there is no project
+   creation, password reset, email verification, rate limit on sign-in,
+   MFA or passkeys. The Rails 8 authentication generator (with
+   `rate_limit`), Laravel Fortify, `phx.gen.auth` and ASP.NET Core Identity
+   ship these. 4.7 claims that sessions match Rails, but the account
+   lifecycle has no row and no card.
+10. **The API is shaped around seed limits, and no card is named.**
+    3.9 (1453–1459) states the rule:
+    - free functions instead of bound methods;
+    - an explicit `ui.style<CrewTheme>(...)`, because a closure's annotated
+      parameter does not drive inference;
+    - handlers typed `fn() E!` instead of `fn() -> R E!`.
+
+    Amendment 2 to D-LIVEQUERY1 (3095–3098) is the same workaround, and so
+    is the three-line closure around every S1 A style (6.1). The seed
+    findings sit under #6819, but #6819's three criteria do not include
+    them. Bound method values, closure-parameter inference, and
+    `UninferableTypeArgument` for an `R` that returns nothing each need a
+    criterion, or a language card and ballot. The public API must not
+    freeze around them.
+
+## R2-5. Card c7: styling
+
+**Verdict: partly met.**
+
+**What is met.**
+
+- Every c7 row has a row in 6.3.
+- S1 A, B and C are each shown, with HTML+CSS, Tailwind, SwiftUI and
+  Flutter beside them.
+- The guarantees in 6.4 are limited honestly, and 6.5 replaces "orders of
+  magnitude" with measures.
+- Six of the eight seeded bugs are caught today, as stated.
+
+**What is not met.**
+
+1. **One card, not "the same Crewboard screens".** Only the board card is
+   styled in every form (6.2). The parts where CSS is strongest are never
+   compared side by side: the board's adaptive layout (three columns or a
+   picker, `ui.by_width`), dark mode as a whole theme, and motion.
+   At least the board screen, with its compact and regular layouts, must
+   appear in each form.
+2. **"No dead rules" is missing.** c7 lists it among the guarantees, and
+   6.4 does not mention it. S1 A can state it: an unused style function or
+   token is a lint. S1 C cannot until #6817 checks class use both ways.
+3. **The owner's floor, "at least as easy as HTML and CSS", is not shown.**
+   The proposal's own count (2663–2678) puts S1 A at 24 + 14 lines for the
+   card, against 15 for HTML and CSS and 7 for Tailwind. Part of the gap is
+   the `ui.style<CrewTheme>(fn(t: CrewTheme) { ui.Style{...} })` wrapper,
+   which exists because of the inference gap in R2-4 workaround 10. Show
+   the form S1 A takes once that gap is closed, and count again.
+4. **CL9's "goes further" for dark values fails against vanilla-extract
+   theme contracts** (R2-4). Revise the verdict at 2686 and 3176 to
+   "matches".
+5. **Theme binding is unchecked.** A style asks for `ui.style<CrewTheme>`,
+   but the graph's `.theme<T>` is unconstrained (stub at 3402). Nothing
+   says what happens when the graph's theme is not `CrewTheme`, or inside
+   `ui.with_theme` with another token type. State that it is a compile
+   error, and how sema knows.
+6. **Missing accessibility rows:** increased contrast and forced colors
+   (CSS `prefers-contrast` and `forced-colors`, SwiftUI
+   `colorSchemeContrast`, Windows high contrast), and a keyboard or
+   single-pointer alternative to dragging (WCAG 2.2 SC 2.5.7, for
+   `drag.jet`).
+7. **Missing layout rows:** overlays (dialogs, popovers, sheets, toasts and
+   their stacking), scroll containers and sticky headers, and view
+   identity. `ui.local` (961) and `kit.list` rows have no stated identity
+   or key, so moving or filtering cards can move local state to the wrong
+   row. SwiftUI's structural identity and Compose's `key` both define
+   this.
+8. **Fairness of the side-by-side.** The SwiftUI version (2600–2625) has
+   hover and a shadow, but leaves out the focus ring that the HTML version
+   and the S1 forms have. Add it, and count again.
+
+## R2-6. Gaps for G12Docs-5, in one pass
+
+Each item must be engineered away in the proposal, or named with its cost,
+mitigation and card. *(card)* means Main files a card or criterion.
+
+**Claims and evidence**
+
+1. Card the language gaps behind the API rule in 3.9 and amendment 2 of
+   D-LIVEQUERY1: bound method values, closure-parameter inference, and the
+   `R`-returns-nothing inference. Do not freeze public API around them.
+   *(card)*
+2. Fix CL1's evidence. Either make the stub prove exposure (a `Remote<S>`
+   type that offers only marked methods), or say the claim is unproven.
+   Change the verdict to "matches Convex".
+3. Rewrite every statement that a `#Secret` flow is E0721 today (186,
+   316–318, 1655–1657) as "proposed in #6557 (D-SECRETEDGE1)". Cite the
+   probe result.
+4. Change CL2, CL3, CL4, CL7, CL8 and CL9 to "matches", naming the system
+   from R2-4 in each case, unless a narrower claim survives. Narrow CL6 to
+   "a method marked as a webhook", and add redelivery de-duplication.
+5. Make CL3 survive its own test. Either check per target that every
+   state a shared screen links to, or a push opens, has a route on every
+   target that can receive it, or give all targets one route set.
+6. Fix 8.2's Qwik row, and the CL7 contradiction between 8.1 and 8.2. Add
+   a performance row to 8.1.
+
+**Crewboard as a probe** (each item is a need the app works around today)
+
+7. Use D-DBPOLICY1 row policies for project membership instead of
+   hand-written `role_in` checks, or name why not. Fix the `mine` leak.
+   *(card if the policy surface is not in #3709)*
+8. Inside `#App.SignedIn`, give the method a non-optional caller.
+9. Make writes atomic and concurrency-checked: a compare-and-set update
+   for `version`, a version on `move_task` (or say the move is last
+   writer wins), a database transaction for `close_from_issue`, and a batch
+   or transaction for the CSV import. *(card)*
+10. Give relation loading and a search index a surface or a card. Rewrite
+    `my_projects` and `search` without N+1 queries. *(card)*
+11. Client-generated IDs for creates under `.offline(.Queue)`, or state
+    that a create waits online. *(criterion on #3709)*
+12. Add after-commit side effects (an outbox) and server jobs, queues and
+    cron. Move the "due today" reminder to a server job that pushes, and
+    send `tell_assignee` after commit from `update_task`. *(card)*
+13. Add the account lifecycle to Crewboard and the matrix: project
+    creation, invitations, email delivery, password reset, verification,
+    a sign-in rate limit, MFA and passkeys. *(card)*
+14. Give button and menu handlers a stated error destination, and stop
+    writing `_:` on calls whose failure the person must see (981, 1897,
+    2131, 2324). Resolve 3.7 steps 1 and 2: what a queued write's button
+    shows.
+15. Wire the c6 examples into Crewboard: an attachment on `Task` through
+    the upload service, and the assignee push. Name what that finds.
+
+**Security bugs in new examples**
+
+16. `on_issue_event`: de-duplicate redeliveries by `X-GitHub-Delivery`. A
+    signature with no timestamp does not stop replay.
+17. `uploads.jet` (2313–2326) has three bugs:
+    - **Path traversal.** It saves to `"{folder}/{task}-{file.name}"`
+      with the client's file name (OWASP path traversal).
+    - **No authorization.** Any signed-in caller can attach to any task.
+    - **Unchecked type.** The type filter `accept:` is client-side only,
+      and `kind` is what the client declares.
+
+    Give the framework a storage surface that names files itself and
+    checks content, as Active Storage does, and show the role check.
+18. CSV export (1301–1311): escape cells that start with `=`, `+`, `-` or
+    `@` in `core.encoding.csv`, or state the rule (OWASP CSV injection).
+19. Presence (1736–1741, stub 3432): who may subscribe to
+    `app.presence(TaskView{id})`? Today anyone who can build the value can
+    see who views a task they cannot read. Require the screen's own access
+    rule. Also name the `#App.SigningKey` lookup explicitly in the
+    webhook marker.
+20. Validate that `assignee` is a member of the project (643–656). This
+    needs a server-side, database-aware validation surface that maps to
+    `FieldError`. *(card)*
+
+**Coverage and styling**
+
+21. Files: give pickers and drops a file handle type that works in a
+    browser, not `String` paths (3849–3851, 2003). *(criterion on #6802)*
+22. Background work on the web: make 5.1 and #6801 agree. Add
+    single-instance handling to desktop links. *(criterion on #6804)*
+23. Fix the `realtime.jet` comment on the web queue (1743–1744).
+24. Reconcile 4.9's sharing rule with #3709's criterion. State that
+    caller-dependent queries such as Crewboard's do not share, and give
+    their cost.
+25. Styling:
+    - style the board screen, with both layouts, in every form;
+    - add the "no dead rules" guarantee;
+    - add the focus ring to the SwiftUI form, and recount;
+    - show S1 A without the inference wrapper;
+    - state that the theme-type check is a compile error;
+    - add rows for contrast and forced colors, the dragging alternative,
+      overlays, scrolling and view identity. *(criteria on #6817)*
+26. Main: give #6799–#6817 executable-example criteria taken from their 5.1
+    and 5.2 examples, so that each named gap can be proven. *(cards)*
+27. Report the seed warning `jet.RedundantFinalReturn` (L0530) on
+    `model.jet:43`. It fires on a `validate {` block that has no `return`,
+    so it is a false positive. Add it to A.6 under #6819.
+28. Follow the ratified syntax, or say why not:
+    - D-BRACE-LAYOUT1=A puts commas between data members, and no struct
+      body in the proposal has them;
+    - D-RECORD-BRACE1=A retires the paren record that keys `members`
+      (568, 735).
+
+    The seed accepts commas between fields today. Name the record key as
+    waiting on #6251 c12.
+
+## R2-7. Verdicts
+
+| Claim or criterion | Round 2 verdict |
+|---|---|
+| C1 logic once | **holds.** The graph is client-safe, and target screens call only shared methods |
+| C2 seamless | **holds within limits.** The route-table binding and per-target routes are not checked (items 5, 14) |
+| C3 safety | **fails.** The `#Secret` client rule is not built and is described as if it were. The uploads and presence examples have authorization bugs, and the webhook has no replay rule (items 3, 16, 17, 19) |
+| C4 performance | **holds within limits.** Nothing is measured. Caller-dependent live queries do not share (item 24) |
+| C5 completeness (c6) | **met, with defects** (R2-3; items 12, 13, 21, 22) |
+| C6 styling (c7) | **partly met** (R2-5; item 25) |
+| c8 probe and matrix | **fails.** No claim in CL1–CL9 carries "goes further" as stated, and ten workarounds are not named as gaps (R2-4) |
+| CL1 | not carried: matches Convex; the evidence is false |
+| CL2 | not carried: matches ASP.NET Core and FastAPI |
+| CL3 | not carried: matches Navigation Compose; fails its own test |
+| CL4 | not carried: matches Meteor and Zero |
+| CL5 | not carried today: not built at dev; goes further only once #6557 is built |
+| CL6 | holds, narrowed to marked webhooks, with replay de-duplication added |
+| CL7 | not carried: matches Elm |
+| CL8 | not carried: matches buf and Apollo checks |
+| CL9 | not carried: matches Compose and vanilla-extract |
+
+Once G12Docs-5 closes items 1–28, a third round needs to check only
+those items, the claim verdicts, and a re-run of the kit.
