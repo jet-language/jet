@@ -508,6 +508,10 @@ SemaComptimeFunctionResult: struct {
     // An inline foreign (`#FFI`) function's checked foreign row: it has no
     // Jet body to check, and a compile-time call of it stops the run.
     foreign: SemaCheckedForeignFunction?{None}
+    // The codecs and derived methods the check demanded (SemaDemandCapture),
+    // which a body pass that takes this result records again.
+    codec_demand: [String]{[String]{}}
+    derive_demand: [String]{[String]{}}
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
@@ -2613,6 +2617,14 @@ sema_comptime_push_obligations: fn(result: SemaComptimeFunctionResult, diagnosti
     }
 }
 
+// Records again what a comptime-checked body demanded of the generated
+// codecs and derived methods, which the body pass that reuses it would have
+// demanded checking it (SemaDemandCapture).
+sema_comptime_replay_demand: fn(result: SemaComptimeFunctionResult, program: SemaProgramTables) {
+    if result.codec_demand.len() == 0 && result.derive_demand.len() == 0 -> return
+    if program.registration_graph == .Val(graph) -> sema_demand_capture_replay(graph, result.codec_demand, result.derive_demand)
+}
+
 // sema_comptime_append_checked_function into one module result in place,
 // carrying the function's exact-int and copy facts as well.
 sema_comptime_append_checked_function_to_module: fn(result: SemaComptimeFunctionResult, module_row: &SemaGraphModuleResult) -> Bool Never! {
@@ -2823,7 +2835,11 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     }
     mark: sema_scope_mark(probe.table)
     probe.table.comptime_execution_depth = 1
+    // The demand this check records rides the result, for a body pass that
+    // takes it to record again (SemaDemandCapture).
+    sema_demand_capture_open(graph)
     checked := sema_function_check(memory_func, sema_program_symbol_key(program, source.symbol.id), function_kind, source.raw_protocol_return, environment, program, probe.table, probe.host_hooks, diagnostics, call_facts, calls, name_references)
+    demand := sema_demand_capture_close(graph)
     sema_scope_rollback(probe.table, mark)
     dependencies := sema_comptime_environment_dependencies(environment, program, name_references, values) ?? return unresolved
     waiting := sema_comptime_waiting_dependencies(available, dependencies)
@@ -2865,6 +2881,8 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         incomplete_reasons: incomplete_reasons,
         failure: checked.failure,
         obligations_pending: settled && !complete && !sema_check_function_failed(diagnostics, 0, true),
+        codec_demand: demand.codecs.move(),
+        derive_demand: demand.derived.move(),
     }
 }
 
@@ -3960,6 +3978,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             // here: its failure row, and the obligations the solve settles.
             if checked_function.failure == .Val(facts) -> result.failure_facts.push(facts)
             sema_comptime_push_obligations(checked_function, result.diagnostics)
+            sema_comptime_replay_demand(checked_function, program)
         }
         .None -> {
             function_call_facts := [SemaCallSiteFact]{}
@@ -4043,6 +4062,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
             // checked here, as a reused top-level body does.
             if checked_function.failure == .Val(facts) -> failure_facts.push(facts)
             sema_comptime_push_obligations(checked_function, diagnostics)
+            sema_comptime_replay_demand(checked_function, program)
             if sema_comptime_append_checked_function(checked_function, functions, call_facts, comptime_requests, name_references) -> return true
             if keep_going {
                 original_kind: sema_check_registered_original_method_kind(job, module_index, environment, program)

@@ -1,0 +1,15 @@
+# Card #6759 c1: a local value whose initializer reaches a generated codec
+# (`show` encodes a Point through json.to_string) leaves that codec's body in
+# the built program. The landing refuses the pass, whose closure names Core
+# bodies that wait for demand, so the full recheck checks the bodies again
+# and takes `show` from the pass's comptime check. That result carries the
+# Encode demand its check recorded (SemaDemandCapture), so the recheck
+# generates Point's encode body, which the built `show` calls. Before, the
+# reused result demanded nothing and IR found Point's encode method
+# unlowered.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
+step: jet run main.jet
+exit: 0
+stdout: ~ '{"x":3,"y":4}' # the value the pass computed with the generated codec

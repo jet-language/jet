@@ -65,6 +65,7 @@ use jet_foundation.[
     ast_comptime_key_to_value,
     ast_empty_call_arg_flags,
     ast_func,
+    compiler_take_rows,
     expr_span,
     owned_trait_codec,
     type_name,
@@ -1539,10 +1540,14 @@ sema_serde_items_result_switch: fn(subject: Expr, ok_binding: String, ok_body: [
 // whose body is generated (sema_codec_fill_demanded).
 
 // Every requirement once in `keys` ("{trait}|{type leaf}"); `order` holds the
-// keys the next codec wave has not taken yet.
+// keys the next codec wave has not taken yet. While `capturing`, `captured`
+// also gets every requirement a check records, met before or not
+// (sema_demand_capture_open).
 SemaCodecDemand: struct {
     keys: [String:Bool]
     order: [String]
+    capturing: Bool{false}
+    captured: [String]{[String]{}}
 }
 
 // The generated codec methods by symbol key, so a checked call and a codec
@@ -1567,7 +1572,7 @@ sema_codec_demand_type: fn(graph: SemaRegistrationGraph, trait_name: String, ty:
     if graph.codec_method_rows.len() == 0 -> return
     names := [String]{}
     sema_codec_type_names(ty, names)
-    if names.len() > 0 -> sema_codec_demand_add(graph.codec_demand, trait_name, names)
+    if names.len() > 0 -> sema_codec_demand_add(graph.codec_demand, sema_codec_demand_keys(trait_name, names))
 }
 
 // The nominal leaf names inside `ty`: the type itself, its type arguments,
@@ -1610,13 +1615,21 @@ sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> [Str
     codecs
 }
 
-sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, trait_name: String, names: [String]) {
+// The requirements that `trait_name` (Encode or Decode) is met at each of
+// `names`, as the demand keys them ("{trait}|{type leaf}").
+sema_codec_demand_keys: fn(trait_name: String, names: [String]) -> [String] Never! {
+    keys := [String]{}
+    loop name in names -> keys.push("{trait_name}|{name}")
+    keys
+}
+
+sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, keys: [String]) {
     permit: demand.guard_edit()
-    loop name in names {
-        key: "{trait_name}|{name}"
+    loop key in keys {
+        if permit.value.capturing -> permit.value.captured.push(key.copy())
         if permit.value.keys.get(key) != None -> next
         permit.value.keys[key] = true
-        permit.value.order.push(key)
+        permit.value.order.push(key.copy())
     }
 }
 
@@ -1640,7 +1653,7 @@ sema_codec_demand_call: fn(program: SemaProgramTables, callee: SymbolID?, value:
         if callee == .Val(id) {
             if graph.codec_method_rows.get(id.id) == .Val(found) {
                 trait_name: graph.modules[found.module_index].impls[found.row].trait_name ?? return
-                sema_codec_demand_add(graph.codec_demand, trait_name, [String]{graph.modules[found.module_index].impls[found.row].target_type_name})
+                sema_codec_demand_add(graph.codec_demand, sema_codec_demand_keys(trait_name, [String]{graph.modules[found.module_index].impls[found.row].target_type_name}))
                 return
             }
         }
@@ -1833,7 +1846,54 @@ sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
 
 sema_derive_demand_add: fn(demand: Shared<SemaDeriveDemand>, keys: [String]) {
     permit: demand.guard_edit()
-    loop key in keys -> permit.value.keys[key] = true
+    loop key in keys {
+        if permit.value.capturing -> permit.value.captured.push(key.copy())
+        permit.value.keys[key] = true
+    }
+}
+
+// The codecs and derived methods one comptime function check demanded
+// (sema_check_comptime_function), each recorded key once or more. A body
+// pass that takes the check's result instead of checking the function as a
+// body records them again (sema_demand_capture_replay), so it demands the
+// generated bodies a check of its own would. Otherwise a pass that reuses
+// the result holds no body for a generated codec or derived method only
+// that function reaches, and a local value splice
+// (LocalSplice.jet) sees its owner checks demand apart.
+SemaDemandCapture: struct {
+    codecs: [String]
+    derived: [String]
+}
+
+// Starts recording what the graph's checks demand; the comptime function
+// checks run one at a time, so captures never nest.
+sema_demand_capture_open: fn(graph: SemaRegistrationGraph) {
+    _: sema_codec_demand_capture_take(graph, true)
+    _: sema_derive_demand_capture_take(graph, true)
+}
+
+// Stops recording and returns what the checks since
+// sema_demand_capture_open demanded.
+sema_demand_capture_close: fn(graph: SemaRegistrationGraph) -> SemaDemandCapture {
+    SemaDemandCapture{codecs: sema_codec_demand_capture_take(graph, false), derived: sema_derive_demand_capture_take(graph, false)}
+}
+
+// Records a reused check's demand (`codecs`, `derived`) again.
+sema_demand_capture_replay: fn(graph: SemaRegistrationGraph, codecs: [String], derived: [String]) {
+    if codecs.len() > 0 -> sema_codec_demand_add(graph.codec_demand, codecs)
+    if derived.len() > 0 -> sema_derive_demand_add(graph.derive_demand, derived)
+}
+
+sema_codec_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [String] {
+    permit := graph.codec_demand.guard_edit()
+    permit.value.capturing = capturing
+    compiler_take_rows<String>(permit.value.captured)
+}
+
+sema_derive_demand_capture_take: fn(graph: SemaRegistrationGraph, capturing: Bool) -> [String] {
+    permit := graph.derive_demand.guard_edit()
+    permit.value.capturing = capturing
+    compiler_take_rows<String>(permit.value.captured)
 }
 
 // A checked call names a demand-checked derived method.

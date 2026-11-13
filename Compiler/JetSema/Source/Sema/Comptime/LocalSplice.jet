@@ -7,9 +7,11 @@
 // bodies (graph.core_wave_rows), once with the values the finalized result
 // was checked against and once with the pass's values, and splices the
 // second check's bodies into the finalized result. A function the pass first
-// checked to run while compiling is an owner too: the body pass takes that
-// result in place of checking it as a body (sema_comptime_find_checked_function),
-// as the full recheck does.
+// checked to run while compiling is an owner too, a generated codec or
+// derived method included: the body pass takes that result in place of
+// checking it as a body (sema_comptime_find_checked_function), and records
+// the demand that check recorded (SemaDemandCapture), as the full recheck
+// does.
 //
 // The first check proves the splice. Its owner bodies, given the stamps the
 // whole-program passes put on a body (sema_local_splice_settle), must equal
@@ -575,23 +577,19 @@ sema_local_splice_owners: fn(
     if found.len() != landed.len() -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     // A function the pass checked to run while compiling is not checked as a
     // body again: the body pass takes the pass's result for it
-    // (sema_comptime_find_checked_function), with its facts and pending
-    // obligations, as the full recheck does. Each such function the earlier
-    // checks took as a body is an owner too, so both checks hold it. A
-    // generated codec or derived method is checked only on the demand a
-    // check reaches, which a reused result makes none of, so the full
-    // recheck may hold no body for it: such a pass finalizes again.
+    // (sema_comptime_find_checked_function), with its facts, pending
+    // obligations and demand (SemaDemandCapture), as the full recheck does.
+    // Each such function the earlier checks took as a body is an owner too,
+    // so both checks hold it, a generated codec or derived method as any
+    // other: the owner checks name it as their wave, and the demand its
+    // result replays is the one its body check records.
     earlier_rows: sema_comptime_checked_function_rows(earlier_functions)
     loop result in comptime_functions {
         if earlier_rows.get("{result.module_identity.id}\n{result.function_key}") != None || owners.get(result.function_key) != None -> next
         loop module_index in 0..<modules.len() {
             if modules[module_index].module_identity != result.module_identity -> next
             if sema_local_splice_slot(modules[module_index].functions, result.function_key) == None -> next
-            generated: if symbol_find(graph.symbols, result.function_key) == .Val(id) -> graph.codec_method_rows.get(id.id) != None || graph.derive_method_rows.get(id.id) != None else -> false
-            if generated {
-                sema_local_splice_refused(trace_sink, "generated", landed.len())
-                return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
-            }
+
             owners[result.function_key] = true
             if !owner_modules.contains(module_index) -> owner_modules.push(module_index)
         }

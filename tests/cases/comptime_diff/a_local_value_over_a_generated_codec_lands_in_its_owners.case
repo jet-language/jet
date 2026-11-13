@@ -1,0 +1,16 @@
+# Card #6759 c1: a local value whose pass checks a generated codec, and the
+# functions that reach it, to run while compiling lands in the bodies that
+# hold it (JetSema Comptime/LocalSplice.jet). The finalization checked `show`
+# and Point's encode method as bodies, so both are owners. The pass's owner
+# check takes their comptime results, which carry the codec demand their
+# checks recorded (SemaDemandCapture), so both owner checks demand the same
+# codecs. Under JET_RECHECK_VERIFY=1 the compile also checks the whole
+# program again and stops on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(show(p.copy()))\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
+step: jet check --trace main.jet
+exit: 0
+stderr: !~ "# sema.local_values_refused" # the owner checks demand the same codecs, so no pass falls back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

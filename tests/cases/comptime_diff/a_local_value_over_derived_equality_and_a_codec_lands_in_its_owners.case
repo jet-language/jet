@@ -1,0 +1,18 @@
+# Card #6759 c1: one local value whose pass reaches two kinds of generated
+# body, Point's derived `==` and its JSON encode method, lands in the
+# bodies that hold it (JetSema Comptime/LocalSplice.jet). The run-time
+# calls make `same`, `show` and both generated methods owners. Their owner
+# checks take the comptime results, which carry the derive and codec
+# demand their checks recorded (SemaDemandCapture), so each owner demands
+# what the finalization's check did. Under JET_RECHECK_VERIFY=1 the compile
+# also checks the whole program again and stops on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nsame: fn(a: Point, b: Point) -> Bool { a == b }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(\"{same(p.copy(), p.copy())} {show(p.copy())}\")\n    text: \"{same(Point{x: 1, y: 2}, Point{x: 1, y: 3})} {show(Point{x: 3, y: 4})}\"\n    print(text)\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
+stderr: ~ "comptime.eval text" # the local value is computed while compiling
+stderr: !~ "# sema.local_values_refused" # the owner checks demand what the finalization's did, so no pass falls back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
