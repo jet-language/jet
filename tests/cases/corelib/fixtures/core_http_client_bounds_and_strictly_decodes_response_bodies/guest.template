@@ -2,8 +2,7 @@
 use client: core.http.client
 
 run: fn() {
-    first: client.get("http://@ADDR@/")
-    if first == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().bytes(8388608) == {
                 .Ok(bytes) -> { print(bytes.len()) }
@@ -12,8 +11,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    second: client.get("http://@ADDR@/")
-    if second == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().text(8388608) == {
                 .Ok(text) -> { print("unexpected utf8 success: {text}") }
@@ -22,8 +20,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    third: client.get("http://@ADDR@/")
-    if third == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().text(8388608) == {
                 .Ok(text) -> { print("{response.status()}:{text}") }
@@ -32,8 +29,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    fourth: client.get("http://@ADDR@/")
-    if fourth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().bytes(8388608) == {
                 .Ok(bytes) -> { print("unexpected oversized success: {bytes.len()}") }
@@ -42,8 +38,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    fifth: client.get("http://@ADDR@/")
-    if fifth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().bytes(8388608) == {
                 .Ok(bytes) -> { print(bytes.len()) }
@@ -52,8 +47,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    sixth: client.get("http://@ADDR@/")
-    if sixth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().bytes(8388608) == {
                 .Ok(bytes) -> { print("unexpected chunked oversized success: {bytes.len()}") }
@@ -62,8 +56,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    seventh: client.get("http://@ADDR@/")
-    if seventh == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().text(8388608) == {
                 .Ok(text) -> { print("unexpected partial content-length success: {text}") }
@@ -72,8 +65,7 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    eighth: client.get("http://@ADDR@/")
-    if eighth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> {
             if response.body().text(8388608) == {
                 .Ok(text) -> { print("unexpected partial chunked success: {response.status()}:{text}") }
@@ -82,13 +74,11 @@ run: fn() {
         }
         .Err(error) -> { print(error) }
     }
-    ninth: client.get("http://@ADDR@/")
-    if ninth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> { print("unexpected malformed status success: {response.status()}") }
         .Err(error) -> { print(error) }
     }
-    tenth: client.get("http://@ADDR@/")
-    if tenth == {
+    if client.get("http://@ADDR@/") == {
         .Ok(response) -> { print("unexpected malformed header success: {response.status()}") }
         .Err(error) -> { print(error) }
     }

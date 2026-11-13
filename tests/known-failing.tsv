@@ -839,7 +839,7 @@ tests/cases/constant_identity/aliased_dotted_module_import_retains_module_preced
 tests/cases/constant_identity/aliased_single_member_import_uses_the_grouped_member_resolution.case	#4723	the aliased single-member import ambiguity is not reported (`jet check` exit 0, expected nonzero)
 tests/cases/constant_identity/checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.case	#4723	`jet check private/main.jet --json` accepts the private constant reach (exit 0, expected 1)
 tests/cases/corelib/core_auth_strict_jwt_and_paseto_hostile_matrix.case	#6448	core.auth JWT/PASETO hostile-matrix output differs from the blessed .out snapshot
-tests/cases/corelib/core_http_client_bounds_and_strictly_decodes_response_bodies.case	#3665	the preserved guest matches `http` results with `.Ok(response)`/`.Err(error)`, but the call returns an `HTTPResponse` (E0305 at guest.jet:7), so the guest never connects and the peer task stays parked (E3013)
+tests/cases/corelib/core_http_client_bounds_and_strictly_decodes_response_bodies.case	#3665	the guest type-checks since it tests each `client.get` call directly; its run against the peer is not yet proven (the sibling binary-body case still stops with E3013 parked tasks)
 tests/cases/corelib/core_http_client_exposes_binary_body_once.case	#3665	`jet test fixture.jet` stops with E3013 "Parked tasks remain at process exit"
 tests/cases/corelib/core_http_client_multipart_boundary_does_not_collide_with_fields.case	#3665	`jet test fixture.jet` E-OperatorTypeMismatch: the fixture joins text with `+`
 tests/cases/corelib/core_http_client_owns_pre_response_errors.case	#3665	`jet test fixture.jet` E0205 at `requests.push(http_read(stream))`: `stream` has read access only
