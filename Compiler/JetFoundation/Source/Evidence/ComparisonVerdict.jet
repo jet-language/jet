@@ -1,14 +1,18 @@
 // Verdict engine (compare_samples_with_discarded, compare_samples,
 // reduce_mismatch) for every consumer, not a CLI comparator.
 
-// Rust `ObservationRelation::compares`: None when the relation declared no
-// checked equality result (TypedEquality and Custom read `declared_equal`).
+// Whether two observations agree under `relation`, or None when the sample
+// declared no checked equality fact. The observed values are equal only by
+// `declared_equal`, which their supplier computes by canonical typed
+// comparison; the raw rendering is a diagnostic, never compared. Ordered
+// effects also need the same effects, cleanup and mutation, and a typed
+// failure the same failure.
 comparison_relation_compares: fn(relation: ObservationRelation, reference: ComparisonObservation, candidate: ComparisonObservation, declared_equal: Bool?) -> Bool? Never! {
+    equal: declared_equal ?? return None
     if relation == {
-        .TypedEquality -> declared_equal
-        .OrderedEffects -> Val(reference.raw == candidate.raw && reference.ordered_effects == candidate.ordered_effects && reference.cleanup == candidate.cleanup && reference.mutation == candidate.mutation)
-        .TypedFailure -> Val(reference.typed_failure == candidate.typed_failure && reference.raw == candidate.raw)
-        .Custom(_) -> declared_equal
+        .TypedEquality | .Custom(_) -> Val(equal)
+        .OrderedEffects -> Val(equal && reference.ordered_effects == candidate.ordered_effects && reference.cleanup == candidate.cleanup && reference.mutation == candidate.mutation)
+        .TypedFailure -> Val(equal && reference.typed_failure == candidate.typed_failure)
     }
 }
 

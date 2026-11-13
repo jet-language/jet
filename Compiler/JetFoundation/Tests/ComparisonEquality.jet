@@ -5,7 +5,7 @@ use {
     json: core.encoding.json
     jet_foundation.[
         ComparisonIdentity, ComparisonObservation, ComparisonSample, ComparisonStatus,
-        ObservationRelation, testing_compare_samples_with_discarded,
+        ObservationRelation, observation_relation_as_str, testing_compare_samples_with_discarded,
     ]
 }
 
@@ -28,22 +28,27 @@ comparison_equality_require: fn(ok: Bool, reason: String) Never! {
     if !ok -> panic("comparison equality: {reason}")
 }
 
-comparison_equality_status: fn(reference: Dyn, candidate: Dyn) -> ComparisonStatus Never! {
+comparison_equality_status: fn(relation: ObservationRelation, reference: Dyn, candidate: Dyn) -> ComparisonStatus Never! {
     sample: comparison_equality_sample(reference, candidate)
-    testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{sample}, 0).status
+    testing_compare_samples_with_discarded(relation, [ComparisonSample]{sample}, 0).status
 }
 
+// Every relation takes the observed values' equality from the checked fact:
+// two NaN observations render the same text and still mismatch, and two
+// signed zeros or reordered objects render differently and still match.
 #Test("comparison_equality") {
-    comparison_equality_require(comparison_equality_status(Dyn.Float(math.NAN), Dyn.Float(math.NAN)) == ComparisonStatus.Mismatch, "NaN never equals NaN")
-    comparison_equality_require(comparison_equality_status(Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal")
+    relations: [ObservationRelation]{ObservationRelation.TypedEquality, ObservationRelation.OrderedEffects, ObservationRelation.TypedFailure, ObservationRelation.Custom{name: "domain"}}
     left: json.parse("{{\"a\":1,\"b\":2}}") ?? panic("left object")
     right: json.parse("{{\"b\":2,\"a\":1}}") ?? panic("right object")
-    comparison_equality_require(comparison_equality_status(left, right) == ComparisonStatus.Matched, "objects ignore insertion order")
-    comparison_equality_require(comparison_equality_status(Dyn.Int(1), Dyn.Float(1.0)) == ComparisonStatus.Mismatch, "numeric variants remain distinct")
-    missing := comparison_equality_sample(Dyn.Int(1), Dyn.Int(1))
-    missing.declared_equal = None
-    missing_record: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{missing}, 0)
-    comparison_equality_require(missing_record.status == ComparisonStatus.InvalidOracle, "missing fact cannot pass")
-    custom_record: testing_compare_samples_with_discarded(ObservationRelation.Custom{name: "domain"}, [ComparisonSample]{missing}, 0)
-    comparison_equality_require(custom_record.status == ComparisonStatus.InvalidOracle, "custom oracle remains explicit")
+    loop relation in relations {
+        name: observation_relation_as_str(relation)
+        comparison_equality_require(comparison_equality_status(relation, Dyn.Float(math.NAN), Dyn.Float(math.NAN)) == ComparisonStatus.Mismatch, "NaN never equals NaN under {name}")
+        comparison_equality_require(comparison_equality_status(relation, Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal under {name}")
+        comparison_equality_require(comparison_equality_status(relation, left, right) == ComparisonStatus.Matched, "objects ignore insertion order under {name}")
+        comparison_equality_require(comparison_equality_status(relation, Dyn.Int(1), Dyn.Float(1.0)) == ComparisonStatus.Mismatch, "numeric variants remain distinct under {name}")
+        missing := comparison_equality_sample(Dyn.Int(1), Dyn.Int(1))
+        missing.declared_equal = None
+        missing_record: testing_compare_samples_with_discarded(relation, [ComparisonSample]{missing}, 0)
+        comparison_equality_require(missing_record.status == ComparisonStatus.InvalidOracle, "a missing fact cannot pass under {name}")
+    }
 }

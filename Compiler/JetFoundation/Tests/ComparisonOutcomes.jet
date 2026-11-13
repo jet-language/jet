@@ -1,7 +1,10 @@
 // A comparison passes only when it matched every observed case: each other
 // outcome fails, a replay that changes is contamination, and reducing a
 // mismatch keeps a case that still mismatches under the record's relation.
+// Each observation is JSON text, and the sample's equality fact is the
+// canonical typed comparison of the parsed values, never the text.
 use {
+    json: core.encoding.json
     jet_foundation.[
         ComparisonIdentity, ComparisonObservation, ComparisonRecord, ComparisonSample, ComparisonStatus,
         ObservationRelation, comparison_assertion_error_text, comparison_observation_failure,
@@ -12,14 +15,19 @@ use {
     ]
 }
 
+outcome_value: fn(observation: ComparisonObservation) -> Dyn Never! {
+    json.parse(observation.raw) ?? panic("comparison outcome observation `{observation.raw}` is not JSON")
+}
+
 outcome_sample: fn(case_id: String, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+    equal: outcome_value(reference).equal_unordered(outcome_value(candidate))
     ComparisonSample{
         identity: ComparisonIdentity{case_id: case_id, input_id: "input-{case_id}", seed: None, source: "fixture", tool: "test", target: "host"},
         reference: reference,
         candidate: candidate,
         reference_replay: None,
         candidate_replay: None,
-        declared_equal: Val(reference.raw == candidate.raw),
+        declared_equal: Val(equal),
     }
 }
 
@@ -137,8 +145,8 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
 }
 
 #Test("comparison outcome: reduction under ordered effects and typed failure compares what each relation declares") {
-    reference: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "write", "close"})
-    swapped: comparison_observation_with_effects(comparison_observation_value("ok"), [String]{"open", "close", "write"})
+    reference: comparison_observation_with_effects(comparison_observation_value("\"ok\""), [String]{"open", "write", "close"})
+    swapped: comparison_observation_with_effects(comparison_observation_value("\"ok\""), [String]{"open", "close", "write"})
     original: testing_compare_samples(ObservationRelation.OrderedEffects, [ComparisonSample]{outcome_sample("long", reference, swapped)})
     assert(original.status == ComparisonStatus.Mismatch, "a reordered effect mismatches under ordered effects")
     // Equal values with equal effects no longer mismatch, so that reduction is refused.
@@ -149,8 +157,8 @@ outcome_case: fn(sample: ComparisonSample?) -> String Never! {
     // Under typed equality the same pair would match: the relation is what decides.
     assert(testing_compare_samples(ObservationRelation.TypedEquality, kept).status == ComparisonStatus.Matched, "typed equality ignores effects")
 
-    refused: comparison_observation_failure("err", "NotFound")
-    denied: comparison_observation_failure("err", "Denied")
+    refused: comparison_observation_failure("\"err\"", "NotFound")
+    denied: comparison_observation_failure("\"err\"", "Denied")
     failing: testing_compare_samples(ObservationRelation.TypedFailure, [ComparisonSample]{outcome_sample("long", refused, denied)})
     assert(failing.status == ComparisonStatus.Mismatch, "a different typed failure mismatches")
     agree: [ComparisonSample]{outcome_sample("agree", refused, refused)}
