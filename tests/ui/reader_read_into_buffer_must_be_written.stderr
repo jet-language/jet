@@ -1,0 +1,8 @@
+Error [jet.TraitMethodMismatch]: `read_into` doesn't match the `Reader` contract
+  --> tests/ui/reader_read_into_buffer_must_be_written.jet:9:9
+    |
+  9 |         read_into: fn(&self, _buffer: [U8], _limit: Int) -> Int IOError! { Ok(0) }
+    |         ^^^^^^^^^
+ Why: A trait implementation must use the trait method's receiver, parameters, return type, and effects
+ Fix: Write `read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!`, matching the `Reader` declaration exactly, including `self`, types, labels, return type, and effects
+More: jet-lang.dev/e/E0907

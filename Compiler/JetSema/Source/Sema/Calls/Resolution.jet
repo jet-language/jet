@@ -5,10 +5,13 @@
 // while cross-module and Core candidates are supplied by Registration.
 use jet_foundation.[
     AccessConvention,
+    CallablePolicy,
+    CallablePolicyChain,
     CallArg,
     Diagnostic,
     EffectRowEntry,
     Expr,
+    FunctionCallMetadata,
     FunctionDefaultRef,
     Span,
     Symbol,
@@ -669,9 +672,11 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
 // A type parameter bounded by a bare-bound compiler-owned trait (OWNED_TRAITS,
 // which no module declares, so it has no registered row) calls the method
 // that trait's row declares, its parameter and return types resolved where the
-// call is. The reference names the trait, so IR dispatches each instance's
-// call to its receiver's implementation (ir_method_key), and the call exposes
-// the declared success value as a registered trait method's does.
+// call is and each parameter taking the access the row gives it (`buffer:
+// &[U8]` is a Write argument). The reference names the trait, so IR
+// dispatches each instance's call to its receiver's implementation
+// (ir_method_key), and the call exposes the declared success value as a
+// registered trait method's does.
 sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: SymbolID, receiver_type: Type, method: String, type_args: [Type], caller_module: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     segments: bound.key.split(":").to_list()
     trait_name: segments[segments.len() - 1]
@@ -697,8 +702,6 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
         diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
         return None
     }
-    params := [Type]{receiver_type.copy()}
-    loop param in found.params -> params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
     declared_return: if found.returns == {
         .Val(returned) -> if returned == {
             .Result(ok, _) -> Val(ok.copy())
@@ -710,9 +713,22 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
         .Val(returned) -> Val(sema_type_resolve_declared_with_generics(graph, returned, caller_module, generic_params))
         .None -> None
     }
+    params := [Type]{receiver_type.copy()}
+    names := [String]{"self"}
+    conventions := [AccessConvention]{convention}
+    // move: `found` is this call's own row; its parameter names become the metadata's.
+    loop param in found.params.move() {
+        params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
+        conventions.push(param.access)
+        names.push(param.name)
+    }
+    count: params.len()
+    defaults: loop _ in 0..<count -> FunctionDefaultRef?{None}
+    variadic: loop _ in 0..<count -> false
+    metadata: FunctionCallMetadata{names: names, defaults: defaults, variadic: variadic, conventions: conventions, policies: CallablePolicyChain{policies: [CallablePolicy]{}}}
     SemaCallMethodCandidate{
         method: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", trait_name, method), name: method, mangled: false, trait_owner: Val(builtin.id.copy()), operator_identity: None},
-        signature: Type.Fn{params: params.move(), ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
+        signature: Type.Fn{params: params.move(), ret: ret, effect_bound: None, param_contract: None, call_metadata: Val(metadata), return_view_provenance: None},
         receiver_type: Val(receiver_type.copy()),
         receiver_convention: convention,
         receiver_offset: 1,

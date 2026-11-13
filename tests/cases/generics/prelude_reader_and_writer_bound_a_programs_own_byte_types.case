@@ -1,0 +1,25 @@
+# #6759 c11: the Prelude Reader and Writer are byte traits a program's own
+# types implement, and bare bounds. `drain` and the generic `Pull` call
+# `read_into` through a `Reader` bound, and the buffer it appends to is the
+# caller's, written in place; `pipe` copies through `Reader` and `Writer`
+# bounds. Each tier prints the same lines. In shadow.jet the program's own
+# struct named `Reader` (as core.term's cursor is) hides neither the bound
+# nor the impl.
+fixture: prelude_reader_and_writer_bound_a_programs_own_byte_types.fixture
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = prelude_reader_and_writer_bound_a_programs_own_byte_types.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = prelude_reader_and_writer_bound_a_programs_own_byte_types.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = prelude_reader_and_writer_bound_a_programs_own_byte_types.out
+step: jet run --optimize=none shadow.jet
+exit: 0
+stdout: = "cursor 3 read 10\n"
+step: jet run --optimize=full shadow.jet
+exit: 0
+stdout: = "cursor 3 read 10\n"

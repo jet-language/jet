@@ -1063,6 +1063,31 @@ runs each of these cases.
 
 <!-- END GENERATED COLLECTION OPERATIONS -->
 
+## Byte streams: `Reader` and `Writer`
+
+`Reader` and `Writer` are Prelude traits for a byte source and a byte sink.
+They are bare bounds, so `fn<R: Reader>` needs no import:
+
+```jet
+Reader: trait {
+    read: fn(&self, limit: Int) -> [U8] IOError!
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
+}
+
+Writer: trait {
+    write: fn(&self, bytes: [U8]) -> Int IOError!
+    write_all: fn(&self, bytes: [U8]) IOError!
+}
+```
+
+`read` returns at most `limit` bytes, and an empty list means the end of the
+input. `read_into` appends at most `limit` bytes to the caller's `buffer` and
+returns how many it added; 0 means the end. A call through a bound passes
+each argument with the access the trait declares, so `source.read_into(out,
+n)` grows the caller's `out` in place. An implementation must declare the
+same access for each parameter that the trait writes (`&`) or moves (`&&`);
+`read_into: fn(&self, buffer: [U8], limit: Int)` is E0907.
+
 ## Pay for what you call
 
 Core module names do not by themselves make a program depend on every helper.

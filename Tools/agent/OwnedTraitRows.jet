@@ -58,6 +58,7 @@ TraitFact: struct {
     value: String
 }
 
+// A parameter as written: `ty` keeps its access sigil (`&[U8]`).
 TraitParam: struct {
     name: String
     ty: String
@@ -268,8 +269,13 @@ render_method: fn(method: TraitMethod, any_receiver: Bool, context: String) -> S
     if any_receiver && method.receiver != "self" -> return Err(rows_fail("{where}: `any_receiver` takes a plain `self`"))
     params := [String]{}
     loop param in method.params {
-        ty: render_type(param.ty, where) ?? return Err(err)
-        params.push("OwnedParam{{name: \"{param.name}\", ty: {ty}}}")
+        access: if {
+            param.ty.starts_with("&&") -> "Move"
+            param.ty.starts_with("&") -> "Write"
+            else -> "Read"
+        }
+        ty: render_type(param.ty.remove_prefix("&").remove_prefix("&"), where) ?? return Err(err)
+        params.push("OwnedParam{{name: \"{param.name}\", access: AccessConvention.{access}, ty: {ty}}}")
     }
     returns: render_returns(method, where) ?? return Err(err)
     Ok("OwnedMethod{{name: \"{method.name}\", receiver: {receiver}, params: [OwnedParam]{{{params.join(", ")}}}, returns: {returns}}}")
@@ -484,7 +490,7 @@ rows_error: fn(source: String) -> String Never! {
     }
 }
 
-MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    operators: String{{\"+\"}}\n    Rhs: type\n    Output: type\n    add: fn(self, rhs: Rhs) -> Output Never!\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}}\n    auto_derive_family: String{{\"Bundle\"}}\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!\n    close: fn(&&self) IOError!\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!\n    }}\n}}\n"
+MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    operators: String{{\"+\"}}\n    Rhs: type\n    Output: type\n    add: fn(self, rhs: Rhs) -> Output Never!\n}}\n\nDriver: trait {{\n    auto_derive: Bool{{true}}\n    auto_derive_family: String{{\"Bundle\"}}\n    query: fn(&self, sql: SQL) -> [[String: DBValue]] DBError!\n    fill: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!\n    close: fn(&&self) IOError!\n}}\n\nLiteral: module {{\n    Int: trait {{\n        from_literal: fn(value: Int) -> Self Never!\n    }}\n}}\n"
 
 #Test("every generated copy matches its Prelude declaration") {
     if owned_trait_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
@@ -493,7 +499,8 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}}\n    ope
 #Test("a declaration renders its contract, types and facts") {
     rendered: render_rows(MINIMAL_TRAITS, true) ?? panic("the minimal traits did not render: {err.message}")
     assert(rendered.contains("OwnedTrait{{name: \"Add\", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Operator{{hook: \"add\", result: None}}, operators: [String]{{\"+\"}}, commutative: false, requires: [String]{{}},"))
-    assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
+    assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", access: AccessConvention.Read, ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
+    assert(rendered.contains("OwnedMethod{{name: \"fill\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"buffer\", access: AccessConvention.Write, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}, OwnedParam{{name: \"limit\", access: AccessConvention.Read, ty: Type.Int}}}}, returns: Val(Type.Result{{ok: Type.Int, err: Type.Named{{name: \"IOError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"close\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Move}}, params: [OwnedParam]{{}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}}"))
     assert(rendered.contains("auto_derive: true, auto_derive_family: Val(\"Bundle\"),"))
     assert(rendered.contains("OwnedTrait{{name: \"Literal.Int\", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{{source: Type.Int}},"))

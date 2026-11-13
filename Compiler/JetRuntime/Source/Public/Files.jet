@@ -248,6 +248,14 @@ files: module {
     // How a mapping keeps its bytes: 1 Clone, 2 Held or 3 Copy.
     #Import(c) priv map_kind: fn(map: MappedFile) -> Int = "jet_std_fs_map_kind"
 
+    // FileReader's Reader and FileWriter's Writer: one read of at most
+    // `limit` bytes, the same read appended to `buffer` (its count, 0 at the
+    // end of the file), and a whole write. Like the handles' other methods
+    // they only wait: the authority is checked where the handle is opened.
+    #Import(c) priv reader_read: fn(reader: &FileReader, limit: Int) -[Time.Wait]> [U8] IOError! = "jet_std_file_reader_read"
+    #Import(c) priv reader_read_into: fn(reader: &FileReader, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! = "jet_std_file_reader_read_into"
+    #Import(c) priv writer_write_all: fn(writer: &FileWriter, bytes: [U8]) -[Time.Wait]> IOError! = "jet_std_file_writer_write_all"
+
     // Whether the process may access `path` in `mode`, and the space row of
     // the filesystem holding `path`.
     #Import(c) priv access_raw: fn(path: String, mode: Int) -[FS.Read]> IOError! = "jet_std_fs_access_raw"

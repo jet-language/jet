@@ -1507,11 +1507,16 @@ sema_type_builtin_trait_symbol: fn(name: String) -> Symbol? {
 }
 
 // A generic bound's trait: the visible declaration of that name, else the
-// builtin trait (Rust `Traits::is_trait_name`).
+// builtin trait (Rust `Traits::is_trait_name`). A visible declaration that is
+// not a trait does not hide a builtin one: core.term's cursor struct is named
+// `Reader`, and `<R: Reader>` there still bounds on the Prelude trait.
 sema_type_graph_bound_symbol: fn(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaRegistrationResolvedSymbol? {
     resolved: sema_type_graph_lookup_symbol(graph, module_identity, name)
-    if resolved != None -> return resolved
-    symbol: sema_type_builtin_trait_symbol(name) ?? return None
+    builtin: sema_type_builtin_trait_symbol(name)
+    if resolved == .Val(found) {
+        if builtin == None || sema_resolved_kind(graph, found) == SymbolKind.Trait -> return Val(found)
+    }
+    symbol: builtin ?? return None
     Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: symbol}, source_module_identity: "", target_module_identity: "", visibility: 2})
 }
 

@@ -222,13 +222,19 @@ Driver: trait {
     begin: fn(self) -> DBTransaction DBError!
 }
 
-// The byte-stream read contract of `core.term`.
+// A byte source: core.files's FileReader, and any type the streaming codecs
+// of core.encoding read from. `read_into` appends at most `limit` bytes to
+// `buffer` and answers how many, 0 at the end of the input.
 Reader: trait {
+    bare_bound: Bool{true}
     read: fn(&self, limit: Int) -> [U8] IOError!
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError!
 }
 
-// The byte-stream write contract of `core.term`.
+// A byte sink: core.files's FileWriter, and any type the streaming codecs
+// of core.encoding write to.
 Writer: trait {
+    bare_bound: Bool{true}
     write: fn(&self, bytes: [U8]) -> Int IOError!
     write_all: fn(&self, bytes: [U8]) IOError!
 }

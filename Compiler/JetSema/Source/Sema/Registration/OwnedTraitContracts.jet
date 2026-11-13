@@ -51,7 +51,7 @@ sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> St
         .Any -> parts.push("self")
         .Fixed(access) -> parts.push("{access_sigil(access)}self")
     }
-    loop param in method.params -> parts.push("{param.name}: {type_name(sema_inference_substitute_type(param.ty, names, types))}")
+    loop param in method.params -> parts.push("{param.name}: {access_sigil(param.access)}{type_name(sema_inference_substitute_type(param.ty, names, types))}")
     rendered: "{method.name}: fn({parts.join(", ")})"
     if method.returns == .Val(returned) -> return "`{rendered} -> {type_name(sema_inference_substitute_type(returned, names, types))}`"
     "`{rendered}`"
@@ -70,7 +70,10 @@ sema_owned_returns_nothing: fn(returned: Type?) -> Bool Never! {
 }
 
 // The receiver, the parameter types and the return type, with `Self` and
-// the associated names resolved on both sides.
+// the associated names resolved on both sides. A parameter the trait takes
+// with Write or Move access (`buffer: &[U8]`) takes the same access in the
+// impl, since a call through a bound passes it that way; a Read one admits
+// any written access.
 sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String], types: [Type]) -> Bool Never! {
     has_self: sema_owned_has_self(actual)
     if wanted.receiver == {
@@ -81,7 +84,9 @@ sema_owned_method_matches: fn(wanted: OwnedMethod, actual: Func, names: [String]
     offset: if has_self -> 1 else -> 0
     if actual.params.len() != wanted.params.len() + offset -> return false
     loop index in 0..<wanted.params.len() {
-        written: sema_inference_substitute_type(actual.params[index + offset].ty, names, types)
+        param: actual.params[index + offset]
+        if wanted.params[index].access != AccessConvention.Read && param.convention != wanted.params[index].access -> return false
+        written: sema_inference_substitute_type(param.ty, names, types)
         if !type_identity_equal(written, sema_inference_substitute_type(wanted.params[index].ty, names, types)) -> return false
     }
     if wanted.returns == .Val(expected) {

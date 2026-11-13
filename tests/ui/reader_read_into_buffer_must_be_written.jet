@@ -1,0 +1,13 @@
+// The Reader contract takes `read_into`'s buffer with Write access (`&[U8]`),
+// since a call through a `Reader` bound passes it that way; an impl that
+// takes the buffer to read is E0907.
+Empty: struct {
+    at: Int
+
+    impl Reader {
+        read: fn(&self, _limit: Int) -> [U8] IOError! { Ok([U8]{}) }
+        read_into: fn(&self, _buffer: [U8], _limit: Int) -> Int IOError! { Ok(0) }
+    }
+}
+
+run: fn() {}
