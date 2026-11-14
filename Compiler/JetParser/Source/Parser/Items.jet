@@ -1532,9 +1532,12 @@ parser_parse_inline_foreign_body: fn(state: &JetParserState, markers: [Marker]) 
     loop applied in markers {
         if parser_marker_is_hook(state, applied, MarkerHook.FFI) -> ffi = applied
     }
+    // `#FFI(language)` binds one argument, written bare or as `language:`;
+    // any other argument is no FFI option, so the marker does not bind.
     lang := ""
     lang_span := ffi.span
-    if parser_marker_first_expr(ffi) == .Val(argument) {
+    bound: parser_marker_bindings(ffi, [String]{"language"}) ?? [Expr?]{}
+    if bound.len() == 1 && bound[0] == .Val(argument) {
         if argument == .Ident(name, span, _) {
             lang = name
             lang_span = span
