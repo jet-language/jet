@@ -1321,8 +1321,8 @@ sema_stmt_check_subject_switch: fn(subject: Expr, arms: [SwitchArm], else_body: 
     // table's `it` instead of reading it.
     it_frame: scopes.current
     bounds: checked_cost_integer_bounds(init)
-    sema_scope_push_binding(scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, key: key.copy(), mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(state, symbol, key, false)
+    sema_scope_push_binding(scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, key: key, mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     // The arms' payload sources are rooted at `it`; the subject it holds
     // decides whether a payload moves out of a named place.
     sema_copy_site_note_subject(state, "it", subject_span, subject)
@@ -8790,13 +8790,13 @@ sema_stmt_mark_discarded_result: fn(program: SemaProgramTables, checked: TExpr, 
     call: discarded.call
     callee: if call.kind == {
         .Call(callee, _, args) -> if sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> sema_symbol_find(program, sema_program_decl_key(program, callee))
-        .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol.copy())
+        .StaticCall(_, _, method, _, args) -> if sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol)
         .MethodCall(receiver, method, _, args) -> {
             written: if receiver.kind == {
                 .Borrow(_, access) -> access != AccessConvention.Read
                 .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> false
             }
-            if written || sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol.copy())
+            if written || sema_stmt_discard_args_effectful(args) -> SymbolID?{None} else -> Val(method.symbol)
         }
         .IntLit(_, _) | .StrLit(_) | .Local(_) | .InlineBlock(_) | .CtLit(_) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardWait(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .DistinctRaw(_) | .Present(_) | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .FnValue(_) | .Flat(_) -> None
     }

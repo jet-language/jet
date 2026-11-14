@@ -591,16 +591,18 @@ sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, p
     window := Expr.Int{value: SEMA_APP_LIMIT_WINDOW_NS, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
     loop (index, argument) in marker.args {
         written: if argument == .Expr(value) -> value.copy() else -> next
-        label := if index == 0 -> "limit" else -> "per"
+        // The first argument is `limit:` and the rest `per:` unless labeled.
+        per := index != 0
         if index < marker.arg_labels.len() {
-            if marker.arg_labels[index] == .Val(named) -> label = named.name.copy()
-        }
-        if label == {
-            "limit" -> calls = written
-            "per" -> {
-                window = Expr.Field{base: written, member: "ns", span: expr_span(written), id: AST_NODE_GENERATED}
+            if marker.arg_labels[index] == .Val(named) {
+                if named.name != "limit" && named.name != "per" -> next
+                per = named.name == "per"
             }
-            else -> {}
+        }
+        if per {
+            window = Expr.Field{base: written, member: "ns", span: expr_span(written), id: AST_NODE_GENERATED}
+        } else {
+            calls = written
         }
     }
     args := [TCallArg]{}

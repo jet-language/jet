@@ -303,8 +303,8 @@ reach_test_sources: fn(dir: String, out: &[String]) {
 reach_test_recorded_strip: fn(recorded: Bool, reached: String) -> JetDriverLoadedModule {
     owner: "use {{\n    table: __core_devtools_table\n}}\n\nplain: fn() -> Int Never! {{ 1 }}\n\nlookup: fn() -> Int Never! {{ table.value() }}\n"
     parsed := jet_driver_parse_one(JetDriverParseJob.Core{text: owner, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
-    found: parsed.words ?? panic("a Core unit has words")
-    words: if recorded -> jet_driver_reach_recorded_words(found, parsed.parsed.program.items) else -> found.copy()
+    found := parsed.words.move() ?? panic("a Core unit has words")
+    words: if recorded -> jet_driver_reach_recorded_words(found, parsed.parsed.program.items) else -> found.move()
     reach := jet_driver_reach(true)
     unit: jet_driver_reach_admit(reach, 0, "core.devtools", words, parsed.parsed.program.imports, false, recorded)
     scoped := [JetDriverScopedImport]{}

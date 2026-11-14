@@ -451,13 +451,13 @@ build_option_flag: fn(name: String) -> String Never! {
 build_option_flag_row: fn(argument: String) -> BuildOptionRow? {
     head: argument.split("=").to_list()[0]
     loop row in JET_BUILD_OPTIONS {
-        if row.kind != BuildOptionKind.Level {
-            if build_option_flag(row.name) == head -> return Val(row.copy())
-            next
+        named := row.kind != BuildOptionKind.Level && build_option_flag(row.name) == head
+        if row.kind == BuildOptionKind.Level {
+            loop value in row.values {
+                if build_option_level_flag(value) == argument -> named = true
+            }
         }
-        loop value in row.values {
-            if build_option_level_flag(value) == argument -> return Val(row.copy())
-        }
+        if named -> return Val(row.copy())
     }
     None
 }

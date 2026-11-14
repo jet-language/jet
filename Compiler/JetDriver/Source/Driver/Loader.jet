@@ -5859,9 +5859,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         unit_words: words ?? jet_driver_unit_no_words()
         // copy: reach admits the same rows from unit_words below.
         if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
-        // The Core record's check keeps each module's reach for the record
-        // (CoreRecord.jet section 16), which leaves its entry's out.
-        if request.every_core_body -> core_reach.push(JetDriverCoreModuleReachRow{module_identity: module_identity, reach: JetDriverCoreModuleReach{demand: demand.copy(), words: jet_driver_reach_recorded_words(unit_words, program.items)}})
         if reach.enabled {
             reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry, recorded)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
@@ -5870,6 +5867,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 _ := jet_driver_follow_core_demands(reach, source_units, queued, pending, generated_records, request.core_sources, entry_module, entry_index ?? 0, bare_modules, diagnostics)
             }
         }
+        // The Core record's check keeps each module's reach for the record
+        // (CoreRecord.jet section 16), which leaves its entry's out. Pushed
+        // after the reach reads `demand`, so the row takes it.
+        if request.every_core_body -> core_reach.push(JetDriverCoreModuleReachRow{module_identity: module_identity, reach: JetDriverCoreModuleReach{demand: demand.move(), words: jet_driver_reach_recorded_words(unit_words, program.items)}})
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
         modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))

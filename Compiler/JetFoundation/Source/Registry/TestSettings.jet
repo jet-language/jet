@@ -145,13 +145,13 @@ test_setting_flag_row: fn(argument: String) -> TestSettingRow? {
     head: argument.split("=").to_list()[0]
     if head == "-u" -> return test_setting_row("update_snapshots")
     loop row in JET_TEST_SETTINGS {
-        if row.kind != TestSettingKind.Levels {
-            if test_setting_flag(row.name) == head -> return Val(row.copy())
-            next
+        named := row.kind != TestSettingKind.Levels && test_setting_flag(row.name) == head
+        if row.kind == TestSettingKind.Levels {
+            loop level in test_setting_levels(row) {
+                if build_option_level_flag(level) == argument -> named = true
+            }
         }
-        loop level in test_setting_levels(row) {
-            if build_option_level_flag(level) == argument -> return Val(row.copy())
-        }
+        if named -> return Val(row.copy())
     }
     None
 }
@@ -173,10 +173,6 @@ test_setting_flag_text: fn(row: TestSettingRow) -> String Never! {
 // The three spellings of a row, as `jet help test` shows them.
 test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
     flag: test_setting_flag(row.name)
-    levels: test_setting_levels(row)
-    // The first and the last level, as a Levels row's spellings show them.
-    low: if levels.len() > 0 -> levels[0].copy() else -> ""
-    high: if levels.len() > 0 -> levels[levels.len() - 1].copy() else -> ""
     if row.kind == {
         .Switch -> "{flag}, `{row.name}: true`, `t.{row.name}()`"
         .Count -> "{flag}=<n>, `{row.name}: 4`, `t.{row.name}(4)`"
@@ -184,10 +180,19 @@ test_setting_spellings: fn(row: TestSettingRow) -> String Never! {
         .Text | .Path -> "{flag}=<text>, `{row.name}: \"x\"`, `t.{row.name}(\"x\")`"
         .Capture -> "{flag}=all, `{row.name}: all`, `t.{row.name}(\"all\")`"
         .Shard -> "{flag}=3/8, `{row.name}: 3/8`, `t.{row.name}(3, 8)`"
-        .Levels -> "{build_option_level_flag(low)} {build_option_level_flag(high)}, `{row.name}: [{low}, {high}]`, `t.{row.name}([\"{low}\", \"{high}\"])`"
+        .Levels -> test_setting_levels_spellings(row.name, test_setting_levels(row))
         .Duration -> "{flag}=60s, `{row.name}: 60s`, `t.{row.name}(\"60s\")`"
         .Size -> "{flag}=16G, `{row.name}: 16gib`, `t.{row.name}(\"16G\")`"
     }
+}
+
+// A Levels row's spellings, from its first and last level: the flags
+// (`-O0 -O2`), then the field and the `t.` call that list both.
+test_setting_levels_spellings: fn(name: String, levels: [String]) -> String Never! {
+    if levels.len() == 0 -> return ""
+    low: levels[0]
+    high: levels[levels.len() - 1]
+    "{build_option_level_flag(low)} {build_option_level_flag(high)}, `{name}: [{low}, {high}]`, `t.{name}([\"{low}\", \"{high}\"])`"
 }
 
 // What a value of the row must look like, for a refusal's "needs …".
