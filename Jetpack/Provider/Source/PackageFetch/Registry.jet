@@ -184,7 +184,8 @@ pkg_fetch_registry_node: fn(verification: &StoreVerification, roots: HangarRoots
     close(snapshot)
     // A hashing failure is a failed content hash; the entry hash is never empty here.
     if (publication_registry_artifact_hash(installed.out) ?? "") != entry.content_hash -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))
-    pkg_source_store_link_into_project(installed.out, files.join(files.join(resolver.root, ".jet/build/deps"), name)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    replaced: pkg_source_store_view_into_project(installed.out, files.join(files.join(resolver.root, ".jet/build/deps"), name)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+    if replaced -> resolver.replaced_views.push(name.copy())
     provenance := pkg_fetch_existing_provenance(resolver, name, entry.version, entry.content_hash) ?? DependencyProvenance.empty()
     if entry.public_key != "" && entry.signature != "" -> provenance.publisher = Val("ed25519:{entry.public_key}")
     Ok(PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Registry{registry: registry.name, reference: "{entry.name}#{entry.version}", output: installed.out, source_hash: entry.content_hash, repository: registry.url, authority: "jet-registry-index", tier: publication_tier_label(entry.tier), gate_status: publication_gate_summary(entry.gate_status)}, fingerprint: fingerprint, content_hash: Val(entry.content_hash), dependencies: dependencies, provenance: if provenance.transparency != None || provenance.publisher != None || provenance.build != None -> Val(provenance) else -> None}, directory: installed.out})

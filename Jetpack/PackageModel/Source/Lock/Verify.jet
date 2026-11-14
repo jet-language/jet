@@ -116,7 +116,7 @@ pkg_lock_same_source_kind: fn(spec: DepSpec, source: LockSource) -> Bool Never! 
 }
 
 // Validate only the lock material the manifest's direct dependencies need.
-// Source identity mismatches are left to `pkg_lock_verify_lock_matches_manifest`,
+// Source-kind mismatches are left to `pkg_lock_verify_lock_matches_manifest`,
 // which reports a stale lock and asks the user to update it.
 pkg_lock_validate_manifest_lock_completeness: fn(manifest: Manifest, lock: LockFile) LockCompletenessError! {
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
@@ -129,26 +129,17 @@ pkg_lock_validate_manifest_lock_completeness: fn(manifest: Manifest, lock: LockF
     }
 }
 
-// Check that the lock still describes each manifest dependency's declared
-// source. Stale-only: missing generated facts are reported by
+// Check that the lock still records each manifest dependency under its
+// declared source kind; a different kind is a stale lock. Within one kind,
+// the exact path, Git URL/selector and revision are the locked source
+// identity, which locked realization verifies and reports as tampered (E1204).
+// Stale-only: missing generated facts are reported by
 // `pkg_lock_verify_all_manifest_deps_locked` as a typed completeness error.
 pkg_lock_verify_lock_matches_manifest: fn(lock: LockFile, manifest: Manifest, lock_path: String) LockError! {
     loop dep_name in pkg_lock_manifest_dependency_names(manifest) {
-        spec: manifest.dependencies[dep_name]
         // The stronger typed verifier owns a missing package record.
         package: lock.find_package(dep_name) ?? next
-        source_matches: if spec == {
-            .Path(path) -> if package.source == {
-                .Path(locked_path) -> path == locked_path
-                .Root | .Git(_, _) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
-            }
-            .Git(url, selector) -> if package.source == {
-                .Git(locked_url, locked_selector) -> url == locked_url && pkg_lock_git_selector_str(selector) == locked_selector
-                .Root | .Path(_) | .Nix(_, _) | .Cran(_, _, _, _, _) | .LuaRocks(_, _, _, _, _) | .Registry(_, _, _, _, _, _, _, _) | .Foreign(_, _, _) -> false
-            }
-            .Registry(_) | .Foreign(_, _) -> pkg_lock_same_source_kind(spec, package.source)
-        }
-        if !source_matches -> return Err(LockError.Reported(pkg_lock_e1202(lock_path)))
+        if !pkg_lock_same_source_kind(manifest.dependencies[dep_name], package.source) -> return Err(LockError.Reported(pkg_lock_e1202(lock_path)))
     }
 }
 

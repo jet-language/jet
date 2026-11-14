@@ -679,12 +679,6 @@ Directory: struct {
     }
 }
 
-// Compiler-private store bridge, not a public filesystem API. The store
-// validates the plain destination name and interprets errno (including EXDEV).
-#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") compiler_link_held: fn(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
-    core.files.jet_files_link_reader_at_raw(source, into.handle, name)
-}
-
 // Compiler-private process bridge. The borrowed Directory stays live through
 // the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
 #Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") compiler_with_process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {

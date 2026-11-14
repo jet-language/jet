@@ -51,7 +51,7 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
     // `existing` carried instead of appending a second copy.
     lock.semantic_text = if semantic.records.len() > 0 || semantic.inputs.len() > 0 || semantic.source_maps.len() > 0 -> trust_write_semantic_lock(semantic) else -> ""
     pkg_lock_write_atomically(root, pkg_lock_write(lock).bytes()) ?? return Err(pkg_fetch_lock_error(err))
-    Ok(PackageFetchResult{lock: lock, directories: directories})
+    Ok(PackageFetchResult{lock: lock, directories: directories, replaced_views: resolver.replaced_views})
 }
 // Each dependency keeps the effect row `previous` recorded for it, by name: a
 // refetch or an update re-resolves its source, and only a build widens the
@@ -131,13 +131,18 @@ pkg_fetch_locked_directories: fn(verification: &StoreVerification, roots: Hangar
         package: lock.find_package(name) ?? return Err(pkg_fetch_locked_error(name, "the lock has no matching source identity"))
         directory: if manifest.dependencies[name] == {
             .Path(path) -> {
-                if package.source != .Path(path) -> return Err(pkg_fetch_locked_error(name, "locked path source disagrees with the manifest"))
+                if package.source != .Path(path) -> return Err(pkg_fetch_locked_error(name, "the locked path source disagrees with the manifest"))
                 tree: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(root, path))
                 pkg_fetch_locked_source(name, package, Val(tree))
             }
             .Git(url, selector) -> {
                 expected_source: LockSource.Git{url: url, selector: pkg_lock_git_selector_str(selector)}
-                if package.source != expected_source || package.locked == None -> return Err(pkg_fetch_locked_error(name, "locked git source disagrees with the manifest or has no pinned revision"))
+                // A manifest `rev` pins the revision itself; the locked revision must be it.
+                pinned_mismatch := false
+                if selector == .Rev(rev) {
+                    if package.locked == .Val(locked) -> pinned_mismatch = locked.rev != rev
+                }
+                if package.source != expected_source || package.locked == None || pinned_mismatch -> return Err(pkg_fetch_locked_error(name, "the locked Git URL or revision disagrees with the manifest"))
                 pkg_fetch_locked_source(name, package, None)
             }
             .Registry(requirement) -> if package.is_registry(BATTERIES_SOURCE_NAME) -> pkg_fetch_locked_battery(root, package, requirement) else -> pkg_fetch_locked_registry(verification, roots, root, manifest, lock, package, requirement)

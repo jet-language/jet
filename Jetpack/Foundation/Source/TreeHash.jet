@@ -484,11 +484,11 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
         Ok(info)
     }
-    rename: fn(self, from: String, to: String, replace: Bool{false}) IOError! -[FS]> {
+    rename: fn(self, from: String, to: String, if_exists: RenameIfExists{.Refuse}) IOError! -[FS]> {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
         self.revalidate()
-        if replace -> self.directories[self.directories.len() - 1].handle.rename(from, to) else -> self.directories[self.directories.len() - 1].handle.rename(from, to, if_exists: .Refuse)
+        self.directories[self.directories.len() - 1].handle.rename(from, to, if_exists: if_exists)
         self.revalidate()
     }
     remove_tree: fn(self, name: String) IOError! -[FS]> {
@@ -508,9 +508,9 @@ FoundationDirectoryAuthority: struct {
         self.revalidate()
     }
     // The process owns a duplicate of this held directory through exec. Git
-    // consumes only the child fd/cwd, never a re-opened authority pathname.
+    // consumes only the child fd/cwd, never a re-opened authority pathname, so
+    // the held descriptor stays the authority even if its path was swapped.
     process_directory: fn(self, spec: ProcessSpec, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
-        self.revalidate()
         #Unsafe("the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler") {
             files.compiler_with_process_directory(spec, self.directories[self.directories.len() - 1].handle, child_fd, as_cwd)
         }
@@ -581,13 +581,6 @@ FoundationDirectoryAuthority: struct {
         source.revalidate()
         self.revalidate()
         foundation_copy_held_tree(source.directories[source.directories.len() - 1].handle, self.directories[self.directories.len() - 1].handle, "", reject_hardlinks)
-        source.revalidate()
-        self.revalidate()
-    }
-    link_tree_from: fn(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
-        source.revalidate()
-        self.revalidate()
-        foundation_link_held_tree(source.directories[source.directories.len() - 1].handle, self.directories[self.directories.len() - 1].handle, "")
         source.revalidate()
         self.revalidate()
     }
@@ -686,55 +679,6 @@ foundation_copy_held_reader: fn(reader: &FileReader, destination: Directory, nam
     Ok(actual)
 }
 
-foundation_link_held_reader: fn(reader: FileReader, destination: Directory, name: String) -[FS, Env]> Bool IOError! {
-    foundation_directory_authority_name(name)
-    #Unsafe("source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here") {
-        facts: files.compiler_link_held(reader, destination, name)
-        if !facts.available {
-            if sys.is_macos() || sys.name() == "ios" -> return Ok(false)
-            return Err(IOError.Other(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("held source linking is unavailable on this platform")}))
-        }
-        if !facts.held -> return Err(IOError.Other(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("dependency destination directory is closed")}))
-        if facts.value == 0 -> return Ok(true)
-        // Store directory_platform::link_file: exactly these Linux/Android
-        // results permit a byte copy. Other errors never select a fallback.
-        if facts.errno == 18 || facts.errno == 1 || facts.errno == 95 -> return Ok(false)
-        context: IOContext{operation: .Write, resource: Val(name), os_code: Val(facts.errno), cause: None}
-        if facts.errno == 2 -> return Err(IOError.NotFound(context))
-        if facts.errno == 13 -> return Err(IOError.PermissionDenied(context))
-        if facts.errno == 17 -> return Err(IOError.AlreadyExists(context))
-        if facts.errno == 22 -> return Err(IOError.InvalidInput(context))
-        return Err(IOError.Other(context))
-    }
-}
-
-foundation_link_held_tree: fn(source: Directory, destination: Directory, relative: String) IOError! -[FS, Env]> {
-    names: foundation_held_tree_names(source)
-    loop name in names {
-        path: if relative == "" -> name else -> files.join(relative, name)
-        info: source.entry_stat(name)
-        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a symlink")}))
-        if info.is_dir {
-            child_source: source.open_directory(name)
-            if foundation_source_tree_ignored(name) -> next
-            destination.create_directory(name, mode: Val(448))
-            destination.fsync()
-            child_destination: destination.open_directory(name)
-            foundation_link_held_tree(child_source, child_destination, path)
-        } else if info.is_file {
-            reader := source.open(name)
-            opened: reader.stat()
-            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a special entry")}))
-            if foundation_source_tree_ignored(name) -> next
-            linked: foundation_link_held_reader(reader, destination, name)
-            if !linked -> foundation_copy_held_reader(reader, destination, name)
-            if !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store source file changed while linking")}))
-        } else {
-            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a special entry")}))
-        }
-    }
-    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("store entry changed while linking directory")}))
-}
 // Host-path semantics for host-configured locations: the OS
 // resolves every ANCESTOR, including symlinked parents and `..` after them
 // (realpath, never lexical flattening). Like Path::parent, trailing separators

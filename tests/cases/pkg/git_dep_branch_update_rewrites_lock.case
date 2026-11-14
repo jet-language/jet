@@ -22,9 +22,10 @@ exit: any # Original setup Command::output().unwrap() asserts spawn only, not Gi
 step: git commit -m init
 cwd: mylib_init
 exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
-step: git clone --bare {work}/mylib_init {work}/mylib.git
+# A local clone hardlinks objects by default; Jet refuses multiply linked files in a local Git source.
+step: git clone --bare --no-hardlinks {work}/mylib_init {work}/mylib.git
 exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
-step: git clone {work}/mylib.git {work}/mylib_clone
+step: git clone --no-hardlinks {work}/mylib.git {work}/mylib_clone
 exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: git config user.email "test@jet.test"
 cwd: mylib_clone
@@ -49,6 +50,7 @@ cwd: mylib_clone
 exit: any # Original setup Command::output().unwrap() asserts spawn only, not Git exit.
 step: jet update
 exit: 0
+stdout: ~ "replaced the stale dependency view `mylib` with a verified copy of its store entry" # the new revision's view swaps in for the old one
 capture: new_rev = text file.after_first("rev = \"").split("\"", 0) .jet/lock
 cap:new_rev: nonempty # original predicate: !is_empty()
 cap:new_rev: != "{cap:initial_rev}" # original assert_ne!(initial_rev, new_rev)

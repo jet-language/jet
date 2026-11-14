@@ -212,11 +212,12 @@ cli_package_dependency_publication_error: fn(path: String, failure: FoundationPu
     }
 }
 
-cli_package_dependency_success: fn(lock: LockFile, options: PackageFetchOptions) -> String Never! {
+cli_package_dependency_success: fn(fetched: PackageFetchResult, options: PackageFetchOptions) -> String Never! {
     output := ""
-    loop package in lock.packages {
+    loop package in fetched.lock.packages {
         if package.source == .Registry(registry, _, _, _, _, _, tier, gate_status) -> output = "{output}resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n"
     }
+    loop name in fetched.replaced_views -> output = "{output}replaced the stale dependency view `{name}` with a verified copy of its store entry\n"
     message: if {
         options.update && options.update_dep == .Val(name) -> "updated `{name}`"
         options.update -> "updated all moving selectors"
@@ -345,7 +346,7 @@ cli_package_dependency: fn(root: String, entry: String, raw: [String], color: Bo
     }
     if command == "vendor" -> return cli_package_dependency_vendor(root, raw, fetched, quiet, color, json)
     if quiet -> return PackageDependencyOutput{}
-    PackageDependencyOutput{stdout: "{prefix}{cli_package_dependency_success(fetched.lock, options)}"}
+    PackageDependencyOutput{stdout: "{prefix}{cli_package_dependency_success(fetched, options)}"}
 }
 
 // `jet registry vendor`: after the fetch, copy every resolved dependency tree

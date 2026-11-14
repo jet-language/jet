@@ -2,7 +2,7 @@
 // edit/publication acceptance. Fetch execution against path, git and locked
 // graphs is proved end to end by the tests/cases/pkg cases.
 
-#Test("package dependency host success lines name every registry tier") {
+#Test("package dependency host success lines name every registry tier and replaced view") {
     lock := LockFile.empty()
     lock.packages = [LockedPackage]{
         {name: "root", version: "1.0.0", source: .Root},
@@ -10,11 +10,14 @@
         {name: "zeta", version: "2.3.4", source: .Registry{registry: "stable", reference: "zeta#2.3.4", output: "out", source_hash: "hash", repository: "repo", authority: "auth", tier: "core", gate_status: "passed"}},
         {name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
     }
+    fetched: PackageFetchResult{lock: lock, directories: [String: String]{}}
     tiers: "resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nresolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
-    assert_eq(cli_package_dependency_success(lock, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")
-    assert_eq(cli_package_dependency_success(lock, PackageFetchOptions{locked: true}), "{tiers}lock verified\n")
-    assert_eq(cli_package_dependency_success(lock, PackageFetchOptions{update: true}), "{tiers}updated all moving selectors\n")
-    assert_eq(cli_package_dependency_success(lock, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}updated `local`\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{locked: true}), "{tiers}lock verified\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true}), "{tiers}updated all moving selectors\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}updated `local`\n")
+    replaced: PackageFetchResult{lock: lock, directories: [String: String]{}, replaced_views: [String]{"local"}}
+    assert_eq(cli_package_dependency_success(replaced, PackageFetchOptions{update: true}), "{tiers}replaced the stale dependency view `local` with a verified copy of its store entry\nupdated all moving selectors\n")
     assert_eq(cli_package_dependency_edit_success("add", "local", "/project/package.jet"), "added `local` to /project/package.jet\n")
     assert_eq(cli_package_dependency_edit_success("remove", "local", "/project/run.jet"), "removed `local` from /project/run.jet\n")
 }

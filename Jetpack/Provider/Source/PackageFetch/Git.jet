@@ -120,7 +120,9 @@ pkg_fetch_git_snapshot: fn(transport: PackageFetchGitTransport, url: String, rev
 }
 pkg_fetch_git_populate: fn(transport: PackageFetchGitTransport, stage: FoundationDirectoryAuthority, revision: String) PackageFetchError! -[FS, Env, Exec, Time.Wait]> {
     clone: stage.process_directory(pkg_fetch_git_command(transport), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git cache authority: {err}"))
-    receipt: clone.args_extend([String]{"clone", "--quiet", "--", transport.remote, "."}).run() ?? return Err(pkg_fetch_git_bad("failed to clone: {err}"))
+    // A local clone would hardlink the source's objects, and Jet refuses a
+    // local Git source whose files are multiply linked.
+    receipt: clone.args_extend([String]{"clone", "--quiet", "--no-hardlinks", "--", transport.remote, "."}).run() ?? return Err(pkg_fetch_git_bad("failed to clone: {err}"))
     if !receipt.success -> return Err(pkg_fetch_git_bad("failed to clone `{transport.remote}`"))
     checkout: stage.process_directory(foundation_hardened_git_command(), 198, true) ?? return Err(pkg_fetch_git_bad("couldn't retain Git checkout authority: {err}"))
     checked: checkout.args_extend([String]{"checkout", "--quiet", revision}).run() ?? return Err(pkg_fetch_git_bad("couldn't check out revision: {err}"))

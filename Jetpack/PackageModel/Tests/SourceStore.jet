@@ -2,8 +2,8 @@
 // parents, so these tests do not alter the user's default source store.
 use {
     jet_pkg_model.[
-        pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_link_into_project,
-        pkg_source_store_path, pkg_source_store_verify,
+        pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_path,
+        pkg_source_store_verify, pkg_source_store_view_into_project,
     ]
     jetpack_foundation.[
         foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
@@ -90,23 +90,37 @@ pkg_source_store_test_root: fn(label: String) -[FS, Env]> String Never! {
     }
 }
 
-#Test("held project dependency links publish verified trees and refuse an existing mismatch") {
-    root: pkg_source_store_test_root("project-link")
+#Test("project dependency views are verified copies that keep a match and replace a stale view") {
+    root: pkg_source_store_test_root("project-view")
     source_path: files.join(root, "source")
-    link_path: files.join(root, "project/deps/pkg")
+    source_file: files.join(source_path, "main.jet")
+    view_path: files.join(root, "project/deps/pkg")
+    view_file: files.join(view_path, "main.jet")
     files.create_dir_all(files.join(source_path, "empty")) ?? panic("source empty directory")
-    files.write(files.join(source_path, "main.jet"), "immutable source") ?? panic("source bytes")
-    pkg_source_store_link_into_project(source_path, link_path) ?? panic("publish project link")
-    assert(files.is_dir(files.join(link_path, "empty")))
-    assert_eq(files.read_bytes(files.join(link_path, "main.jet")) ?? panic("linked bytes"), "immutable source".bytes())
-    pkg_source_store_link_into_project(source_path, link_path) ?? panic("reuse authenticated project link")
-    // Build another existing dependency tree, without editing a potential
-    // hardlink of the original source.
-    mismatch_path: files.join(root, "project/deps/different")
-    files.create_dir_all(mismatch_path) ?? panic("mismatch directory")
-    files.write(files.join(mismatch_path, "main.jet"), "different") ?? panic("mismatch bytes")
-    assert(pkg_source_store_link_into_project(source_path, mismatch_path) == .Err(_))
-    assert_eq(files.read_bytes(files.join(mismatch_path, "main.jet")) ?? panic("mismatch retained"), "different".bytes())
+    files.write(source_file, "immutable source") ?? panic("source bytes")
+    assert(!(pkg_source_store_view_into_project(source_path, view_path) ?? panic("publish project view")))
+    assert(files.is_dir(files.join(view_path, "empty")))
+    assert_eq(files.read_bytes(view_file) ?? panic("view bytes"), "immutable source".bytes())
+    assert_eq((files.stat(source_file) ?? panic("store stat")).links, 1)
+    assert_eq((files.stat(view_file) ?? panic("view stat")).links, 1)
+    // A matching view is kept: the same file, not a rewrite.
+    kept: files.stat(view_file) ?? panic("kept stat")
+    assert(!(pkg_source_store_view_into_project(source_path, view_path) ?? panic("keep matching project view")))
+    assert_eq((files.stat(view_file) ?? panic("kept again")).id, kept.id)
+    // A view with different bytes is replaced by a verified copy.
+    files.write(view_file, "different") ?? panic("stale bytes")
+    assert(pkg_source_store_view_into_project(source_path, view_path) ?? panic("replace stale project view"))
+    assert_eq(files.read_bytes(view_file) ?? panic("replaced bytes"), "immutable source".bytes())
+    // An older linked view shares the store file; replacing it restores the
+    // store file's single link.
+    files.remove(view_file) ?? panic("unlink view file")
+    files.hard_link(source_file, view_file) ?? panic("linked view fixture")
+    assert_eq((files.stat(source_file) ?? panic("linked store stat")).links, 2)
+    assert(pkg_source_store_view_into_project(source_path, view_path) ?? panic("replace linked project view"))
+    assert_eq((files.stat(source_file) ?? panic("restored store stat")).links, 1)
+    assert_eq((files.stat(view_file) ?? panic("copied view stat")).links, 1)
+    // Neither the stage nor the swapped-out view is left beside the view.
+    assert_eq((files.list_dir(files.join(root, "project/deps")) ?? panic("deps list")).len(), 1)
     files.remove_all(root) ?? panic("fixture cleanup")
 }
 

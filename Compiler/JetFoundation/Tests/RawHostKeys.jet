@@ -50,10 +50,6 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
         {name: "errno", ty: Type.Int}
     }}
     raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, "FS", Val("FS.Write"))
-    files: core_module_export("core.files") ?? panic("files exports are registered")
-    assert(files.members.contains("compiler_link_held"))
-    assert(!files.members.contains("__link_held"))
-    assert(core_call("core.files", "compiler_link_held") == None)
     read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__reader_line_bytes"}
     loop member in read_members {
         row: core_call("core.files", member) ?? panic("file read leaf is registered")

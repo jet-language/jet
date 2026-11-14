@@ -159,11 +159,6 @@ Other unlisted CLI sources still fail assembly.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
 through that boundary.
-Held store linking keeps a distinct `compiler_link_held` source bridge: it
-extracts the private held-directory handle inside Core and calls the existing
-`jet_files_link_reader_at_raw` leaf. Compiler callers cannot substitute a path
-or bypass the directory authority, and the bridge does not change link/copy
-fallback policy.
 The held-link leaf carries `FS.Write`, not the broad `FS` root. Raw file
 routes preserve their source wrappers' narrow read or write contract;
 inspection of already-held path, scope, platform, and process-ID facts
@@ -423,11 +418,16 @@ The program identity is the invocation's authorized selected entry, made
 absolute and canonical when possible, then relative to the canonical workspace
 root only at a complete path-component prefix. A selected build function does
 not change this identity; neither a package name nor a filename stem substitutes
-for it. Project dependency trees publish from held source handles, with
-hardlinks where supported; Linux/Android `EXDEV`, `EPERM`, and `EOPNOTSUPP`
-permit a byte copy and Darwin uses byte copies. Other hardlink errors refuse
-publication rather than selecting a pathname-based fallback. Existing or
-concurrently published dependency trees must match the source content hash.
+for it. A project's dependency view (`.jet/build/deps/<name>`) is a byte copy
+of its store entry made from held source handles, never a link, so every
+store file keeps a single link. The copy is staged beside the view and its
+tree hash must equal the store entry's, which fetch verifies against the
+lock's content hash. A view that already hashes as the entry is kept as it
+is. A stale view (different bytes, an invalid tree, or files linked from
+elsewhere) is replaced: the verified stage swaps in for it in one rename, and
+`jet fetch`/`jet update` prints a line naming it ("replaced the stale
+dependency view `<name>` with a verified copy of its store entry").
+A concurrently published view must also match the store entry.
 `jet test-compare <corpus.json>` compares recorded reference and candidate
 observations using the shared finite-sample verdict. It records the canonical
 comparison payload as an immutable receipt section, consumes its protected
