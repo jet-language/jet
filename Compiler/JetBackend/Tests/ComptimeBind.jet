@@ -85,6 +85,7 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
     code: x64_comptime_code(bound.executable, base)
     assert(code.failure == "" && code.segments.len() > 0, "the program part has the batch's segments: {code.failure}")
     part: x64_comptime_symbols(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, "", true)
+    assert(x64_comptime_symbol_address(part, "jet_rt_alloc") == None, "a batch's symbols are its program's only, none of the image's")
     // The whole file the bind stands for: the image, its patches, the
     // program part.
     bound.executable.image = held.move()
@@ -145,7 +146,7 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
     expected: x64_image_segments(file)
     assert(plan.failure == "" && expected.failure == "" && plan.segments.len() == expected.segments.len() && plan.high == expected.high && plan.entry == expected.entry, "the entry program's segments are the whole file's")
     all: x64_comptime_symbols(file, file, 0, "", true)
-    loop name in ([String]{"main", "__jet_bind_main"}) {
+    loop name in ([String]{"main", "__jet_bind_main", "jet_rt_alloc"}) {
         found: x64_comptime_symbol_address(part, name) ?? panic("the entry program's part names no `{name}`")
         assert((x64_comptime_symbol_address(all, name) ?? -1) == found, "`{name}` has the whole file's address")
     }
