@@ -1412,6 +1412,18 @@ sema_expression_lambda_repeated_capture_move: fn(state: &SemaOwnershipState, mov
 sema_expression_lambda_view_diagnostic: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to be captured by a stored lambda", "a view borrows storage owned by the surrounding scope; retaining the lambda could outlive that storage", "copy the view into an owned value before capturing it, or keep the lambda inside the view's scope")
 }
+
+// A body whose check stops keeps its reads of constants that have no staged
+// value yet (sema_expr_check_identifier's "const" references): a comptime
+// function check reads them as its waits
+// (sema_comptime_dependencies_from_references), so a function checked before
+// such a constant lands waits for it rather than staying incomplete with
+// no wait.
+sema_expression_lambda_keep_waits: fn(source: SemaCheckContext, target: &SemaCheckContext, name_start: Int) Never! {
+    loop index in name_start..<source.name_references.len() {
+        if source.name_references[index].kind == "const" -> target.name_references.push(source.name_references[index])
+    }
+}
 sema_expression_lambda_merge_context_facts: fn(source: &SemaCheckContext, target: &SemaCheckContext, call_start: Int, name_start: Int, comptime_start: Int, body_source_start: Int, compute_call_start: Int, autodiff_obligation_start: Int, copy_start: Int) Never! {
     index := call_start
     loop index < source.call_facts.len() {
@@ -2042,6 +2054,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             sema_ownership_keep_share_found(state, lambda_state)
             sema_ownership_keep_mutations(state, lambda_state)
             checked: checked_value ?? {
+                sema_expression_lambda_keep_waits(lambda_context, context, name_reference_start)
                 if !inline_loop && expected_ret == .Val(required) && !sema_expression_lambda_type_is_result(required) -> sema_expression_lambda_return_replace_mismatch(required, value, lambda.span, body_start, environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                 return None
             }
@@ -2075,6 +2088,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             sema_ownership_keep_share_found(state, lambda_state)
             sema_ownership_keep_mutations(state, lambda_state)
             if !checked_block.complete {
+                sema_expression_lambda_keep_waits(lambda_context, context, name_reference_start)
                 loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(context, "closure body: {reason}")
                 return None
             }
@@ -2093,6 +2107,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     // A body that is one value (`fn(x) { x }`) reports its
                     // return mismatch on the lambda, as an expression body does.
                     checked_tail: checked_tail_value ?? {
+                        sema_expression_lambda_keep_waits(lambda_context, context, name_reference_start)
                         if !inline_loop && statements.len() == 1 && expected_ret == .Val(required) && !sema_expression_lambda_type_is_result(required) -> sema_expression_lambda_return_replace_mismatch(required, tail, lambda.span, tail_start, environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                         return None
                     }
