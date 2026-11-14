@@ -15,12 +15,12 @@ file: page.html ~ ".800.jpg 800w\"><source type=\"image/png\" srcset=\"/a/Public
 file: page.html ~ ".800.png 800w, /a/Public/hero." # then its own format, the original last
 file: page.html ~ "<picture><source type=\"image/jpeg\" srcset=\"/a/Public/photo." # the JPEG's own format comes first because the settings list it first
 file: page.html ~ ".800.jpg 800w, /a/Public/photo." # the JPEG original is among the JPEG candidates
-stdout: ~ "hero 320w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 320x213"
-stdout: ~ "hero 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213"
-stdout: ~ "hero 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533"
-stdout: ~ "hero 800w png: 200 | image/png | public, max-age=31536000, immutable | 800x533"
-stdout: ~ "photo 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213"
-stdout: ~ "photo 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533"
+stdout: ~ "hero 320w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 320x213" # the PNG's JPEG variant at the first set width
+stdout: ~ "hero 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213" # its own format at the same width
+stdout: ~ "hero 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533" # the second set width, as JPEG
+stdout: ~ "hero 800w png: 200 | image/png | public, max-age=31536000, immutable | 800x533" # the second set width, as PNG
+stdout: ~ "photo 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213" # the JPEG source gets PNG variants too
+stdout: ~ "photo 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533" # and JPEG ones at the set quality
 stdout: !~ "w gif" # no format the settings left out
 stdout: !~ "640w" # no default width
 signal server: KILL
@@ -33,9 +33,9 @@ env: IMAGE_PAGE_PORT={free-port:off}
 env: IMAGE_PAGE_FILE=off.html
 exit: 0
 file: off.html ~ "<img src=\"/a/Public/hero." # the original alone
-file: off.html ~ "alt=\"hero\" width=\"1500\" height=\"1000\"><img src=\"/a/Public/photo."
+file: off.html ~ "alt=\"hero\" width=\"1500\" height=\"1000\"><img src=\"/a/Public/photo." # each <img> keeps the original's size
 file: off.html !~ "<picture>" # no variants, no <picture>
-stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333"
+stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333" # the original is still served when variants are off
 signal plain: KILL
 wait: plain
 exit: any # the case kills the server; its status is not part of this proof

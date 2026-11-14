@@ -21,15 +21,15 @@ file: page.html ~ "</picture><img src=\"/a/Public/icon." # a source below every 
 file: page.html ~ "alt=\"An icon\" width=\"64\" height=\"64\">" # the small PNG's own size
 file: page.html !~ "data-jet-image" # no placeholder reaches the browser
 stdout: ~ "hero 640w: 200 | image/png | public, max-age=31536000, immutable | 640x427" # a PNG variant at its width, aspect kept
-stdout: ~ "hero 1280w: 200 | image/png | public, max-age=31536000, immutable | 1280x853"
+stdout: ~ "hero 1280w: 200 | image/png | public, max-age=31536000, immutable | 1280x853" # the next default width, aspect kept
 stdout: ~ "hero original: 200 | image/png | public, max-age=31536000, immutable | 1500x1000" # the original's bytes under its digest
-stdout: ~ "icon original: 200 | image/png | public, max-age=31536000, immutable | 64x64"
+stdout: ~ "icon original: 200 | image/png | public, max-age=31536000, immutable | 64x64" # a source below every width serves its original
 stdout: ~ "photo 640w: 200 | image/jpeg | public, max-age=31536000, immutable | 640x427" # JPEG variants decode at their widths
-stdout: ~ "photo 1280w: 200 | image/jpeg | public, max-age=31536000, immutable | 1280x853"
-stdout: ~ "photo 1920w: 200 | image/jpeg | public, max-age=31536000, immutable | 1920x1280"
-stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333"
+stdout: ~ "photo 1280w: 200 | image/jpeg | public, max-age=31536000, immutable | 1280x853" # the JPEG's next default width
+stdout: ~ "photo 1920w: 200 | image/jpeg | public, max-age=31536000, immutable | 1920x1280" # the widest default width under the source
+stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333" # the JPEG original under its digest
 stdout: ~ "unknown key: 404" # a key no source and setting makes is not found
-stdout: ~ "climbing out: 404" # an address that leaves the working directory is not found
+stdout: ~ "climbing out: 400" # the server refuses a `..` path segment before any row, the image row included, sees it
 signal server: KILL
 wait: server
 exit: any # the case kills the server; its status is not part of this proof

@@ -185,6 +185,9 @@ __AppState: struct {
     images: [__ImageNode]
     image_bytes: [String: [U8]]
     image_settings: __ImageSettings
+    // Whether the app is served under `jet dev`, which __app_serve reads once
+    // from the environment, so an image page reads no environment itself.
+    dev: Bool
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -492,6 +495,7 @@ app: fn() -> App Never! {
         images: [__ImageNode]{},
         image_bytes: [String: [U8]]{},
         image_settings: __image_settings(),
+        dev: false,
     }}}
 }
 
@@ -590,6 +594,10 @@ __app_dev: fn() -> Bool Never! {
 // (__app_port) before the ready line.
 __app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
     dev: __app_dev()
+    if dev {
+        guard := app.__state.guard_edit()
+        guard.value.dev = true
+    }
     table: __app_table(app)
     if dev -> __app_dev_reload(table)
     if !__app_has_root_catch_all(table) {
@@ -956,7 +964,7 @@ __app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
 // under `jet dev` it reads the source on every page, so an edited image gets
 // new URLs.
 __app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage Never! {
-    if !__app_dev() {
+    if !__app_served_dev(app) {
         guard: app.__state.guard_read()
         loop node in guard.value.images {
             if node.source == source -> return __ImagePage{body: __image_picture(node, alt), failure: ""}
@@ -973,6 +981,12 @@ __app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage N
     }
     if !known -> guard.value.images.push(node)
     __ImagePage{body: markup, failure: ""}
+}
+
+// Whether __app_serve found the app under `jet dev`.
+__app_served_dev: fn(app: App) -> Bool Never! {
+    guard: app.__state.guard_read()
+    guard.value.dev
 }
 
 // The answer to GET `path` under the image prefix: the original or a
