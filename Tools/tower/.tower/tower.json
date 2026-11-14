@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102327,
+    "rev": 102331,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3709,7 +3709,7 @@
           "at": "2026-09-12T16:54:35.306Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:35.306Z"
     },
     {
@@ -30682,7 +30682,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m27-numeric-cpu-foundations",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P3",
       "plan": "**Goal**\nGive Core one color value with stated spaces, ranges, alpha and rounding, and have tui, game and ui adapt to it instead of each keeping its own color struct.\n\n**Current state**\n- Core/tui/tui.jet:30-35 `TuiColorProfile`, :37-41 `TuiColor` (Ansi16/Ansi256/Rgb(red, green, blue) as Int), :85-88 `color_rgb`.\n- Core/game/raylib.jet:19-22 `RaylibColor{r,g,b,a: Int}`, :34-35 `color()` clamps with `clamp8`.\n- Core/ui/ui.jet:157 `node_color(label, width, height, color: String)` takes an untyped string.\n- No Core color model and no hex/HSL/linear conversion exist.\n- Evidence: Docs/research/mine-for-jet-2026-09-12.md#finding-core-f068.\n\n**Owner question (open; plan written for recommendation A)**\nShould Core define one `core.color.Color` (sRGB8 plus alpha, with linear/HSL/hex conversions) that tui, game and ui adapt to, replacing the per-provider structs? A) one Core Color, providers adapt; B) keep provider structs and add conversions only; C) no change. Recommendation: A (one mechanism).\n\n**Changes** (A)\n1. New Core/color/color.jet (`core.color`): `Color{r, g, b, a: U8}`; `Color.from_hex(String) -> Color ColorError!` (#rgb, #rrggbb, #rrggbbaa); `to_hex()`; `from_hsl`/`to_hsl` (Float degrees/unit ranges); `to_linear`/`from_linear` (IEC 61966-2-1 sRGB transfer, round half to even into U8). Alpha is straight, not premultiplied.\n2. Providers: `TuiColor.Rgb` takes a `Color`, and ANSI downgrade by profile stays in tui. Raylib draw calls take `Color`, and `RaylibColor` is deleted. `ui.node_color` takes `Color`. Migrate every example caller.\n3. Register in crates/jet-codegen/src/Prelude/Core.jet, regenerate with `node Tools/agent/gen-core-tables.mjs`, add a core-library.md section.\n\n**Proof**\n- `jet test Compiler --profile golden ui/color_conversions` -> hex/HSL/linear round trips, clamping and rounding match on every tier.\n- Existing tui/game/ui goldens pass after the migration: `jet test Compiler --profile golden ui`.\n- `node Tools/agent/check-core-surface-ledger.mjs` -> OK.\n\n**Batch**\nbatch-core-ui.\n\n**Dependencies**\nThe owner ballot on the question above. No card blockers.",
       "checkSteps": "1. State conversion spaces/ranges/alpha and rounding.\n2. compare useful asset/UI values.\n3. preserve one color model.\n4. any missing public operation gets a narrow gate.",
@@ -30691,6 +30691,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Closed by Main: the color model golden (c5) and the provider cutover (c6) are on dev."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -30734,11 +30739,11 @@
         {
           "n": 6,
           "text": "D-VERDICT-3288-1=A provider cutover: the terminal, game and interface libraries take core.color.Color and their own color types are removed. TuiColor.Rgb takes a Color and keeps its ANSI downgrade by profile, RaylibColor is deleted, and ui.node_color takes a Color instead of a String. Every caller, example, case and doc moves in one cutover with no alias. Proof: `! git grep -n RaylibColor -- Core Examples tests Docs/spec`, and the tui, game and ui goldens and cases that use color pass on O0/O1/O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T07:54:27.795Z"
+          "evidence": "dev 3c17a45f3b (TUIColor.RGB holds a core.color Color; ANSI downgrade by profile kept), 5345339922 (the ui drawing color replaces RaylibColor), da1102730d (ui.node_color takes a Color; every caller moved, no alias); the raylib module left in 5b32d24a52. `git grep -n RaylibColor origin/dev -- Core Examples tests Docs/spec` prints nothing, exit 1 (Main, 2026-11-14). Rows on the gate-p62 jet (G3Core-2), all passing at O0, O1 and O2: goldens ColorConversions, TUIPolicy, UITypedStyle, UIMotion, DrawShapes, DrawCanvas, DrawImages, DotConstruction, Game/Battery and DrawIndexed; cases alpha_mixes_one_way_on_every_surface_and_tier, ui_values_match_aot_comptime and frames_checksum_the_same_natively_and_on_the_web. The one red, golden Examples/Apps/UI/Surface, fails before any color code runs: its font battery version dependency does not resolve (UseTargetNotFound). That is #6424's new criterion, not a color fault.",
+          "at": "2026-11-14T08:56:33.664Z"
         }
       ],
       "refs": [
@@ -30754,13 +30759,14 @@
       "parentId": "c0tlmh3q",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:20.614Z",
-      "updated": "2026-11-14T00:45:05.621Z",
+      "updated": "2026-11-14T08:56:37.382Z",
       "updatedBy": "Main",
       "workOrder": 328,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T08:56:37.382Z"
     },
     {
       "id": "c0m83e3n",
@@ -78062,6 +78068,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-08T19:53:56.769Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples/Apps/UI/Surface.jet, which names the font battery as a version dependency (`font: \"0.1.0\"`), resolves it and runs. On the gate-p62 jet, golden Examples/Apps/UI/Surface fails at O0, O1 and O2 with UseTargetNotFound: \"version dependency `font` (0.1.0) has no matching first-party battery\" (found by G3Core-2, 2026-11-14, while proving #3288 c6). Proof: `jet test Compiler --profile golden --filter Surface` passes at O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T08:56:30.016Z"
         }
       ],
       "refs": [],
@@ -78072,8 +78087,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T05:09:44.729Z",
-      "updated": "2026-11-09T19:01:15.616Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T08:56:30.016Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c01oyhqk",
@@ -81658,6 +81674,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Level fact (Main, 2026-11-14, from G11Speed-5): `jet build` runs at O2 today. The optimize row's stock_build is \"full\" (JetFoundation/Source/Registry/BuildOptions.jet:48), and \"full\" is level 2 (Host.jet jet_cli_native_level); that agrees with I9. bb770de593's \"default is O1\" no longer holds. So the cold self-compile `jet build JetCli/run.jet` (ir.opt 13.5-15.7 s) is an O2 build, while the 9.62 s best was measured when the default was O1. Every A/B on this card names its level. c6's \"default level\" is O2, and root B is fixed by making each pass cheaper per function, never by dropping passes (the run-time peer floor is a hard gate)."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "Owner of the remaining load-reach work, 2026-11-12 01:3x: G4Ports-1, under #6759 c2. CoreReach.jet (steps 1-3, through 5d60ee4241) is module-granular: on seed-b10, hello plus x.abs() still loads 38 modules in 1043 ms, because Encoding Stream and Cbor reach core.math. The next step makes reach per declaration (lexer item runs as the unit, use targets loaded only when a reached run names the alias, conservative closure over impls and globally registered items, with the core_demand safety net kept), extending CoreReach.jet rather than adding a second mechanism. One SUB meets #6759 c2 and this card's c10."
@@ -81819,7 +81840,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T01:36:04.082Z",
-      "updated": "2026-11-13T01:52:51.119Z",
+      "updated": "2026-11-14T08:52:32.402Z",
       "updatedBy": "Main",
       "criteriaLastN": 12
     },
@@ -205178,6 +205199,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T08:56:37.382Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0k9g7u2",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T08:56:33.664Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0k9g7u2",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-14T08:56:30.016Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tl2yuc",
+      "note": "#3 Examples/Apps/UI/Surface.jet, which names the font battery a"
+    },
+    {
+      "at": "2026-11-14T08:52:32.402Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pjwkhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T08:51:27.113Z",
       "by": "Main",
