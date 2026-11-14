@@ -1511,14 +1511,14 @@ SharedMemory: struct {
     // by a word.
     load: fn(self, offset: Int(0..1073741816)) -[Env]> Int IOError! {
         if !shared_word_valid(self, offset) -> return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
-        core.sys.__shared_load_raw(self.token, wrapping(offset + 0))
+        core.sys.__shared_load_raw(self.token, offset)
     }
 
     // Stores `value` atomically into the word at byte `offset`.
     store: fn(&self, offset: Int(0..1073741816), value: Int) IOError! -[Env]> {
         if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         if !shared_word_fits(value) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
-        core.sys.__shared_store_raw(self.token, wrapping(offset + 0), value)
+        core.sys.__shared_store_raw(self.token, offset, value)
     }
 
     // Atomically replaces the word at byte `offset` with `replacement` if it
@@ -1526,7 +1526,7 @@ SharedMemory: struct {
     compare_exchange: fn(&self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
         if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
         if !shared_word_fits(expected) || !shared_word_fits(replacement) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
-        swapped: core.sys.__shared_compare_exchange_raw(self.token, wrapping(offset + 0), expected, replacement)
+        swapped: core.sys.__shared_compare_exchange_raw(self.token, offset, expected, replacement)
         Ok(swapped == 1)
     }
 
