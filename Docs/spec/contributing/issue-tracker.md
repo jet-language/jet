@@ -28,6 +28,13 @@ dependencies, owner gates, complete cutover, and observable criteria on that
 card. Keep work state in Tower rather than in a second task list or a durable
 status document.
 
+Before adding a card, look for the card that already owns the area. A
+regression, follow-up, or gap found while proving work becomes a criterion on
+the card whose change caused it, or on the card that owns the area; the
+findings of one sweep share one card. Only a new stream of work (a ballot, a
+feature, a goal's plan) earns a new card (AGENTS.md, Owner gates and work
+state).
+
 | Operation | Command |
 |---|---|
 | Create a bug card | `tower card add --title "..." --body "..." --kind bug --add-tag needs-triage --by <agent>` |

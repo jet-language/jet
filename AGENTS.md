@@ -284,6 +284,11 @@ before claiming or briefing more work. A milestone then gets one commit-bound
 composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
+A new card is earned only by a new stream of work: a ballot, a feature, or a
+goal's plan. A regression, follow-up, or gap is a criterion on the card whose
+work caused it or already owns the area, never a card of its own; findings of
+one sweep share one card. This is a standing owner order (2026-11-14).
+
 One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. The repository has at most three branches:
 `master`, `dev`, and one other. Today the one other is `rust`: at the Rust
