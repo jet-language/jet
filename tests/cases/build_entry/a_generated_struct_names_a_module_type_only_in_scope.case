@@ -4,8 +4,10 @@
 # has there: the root's own `Spot` is written `Spot` and runs. The `geo`
 # module's `Point` is in no such scope, so a field whose `TypeId` names
 # `geo.Point`, alone or as `[geo.Point]`, is refused when the build runs
-# (E3502), before any generated module is checked. A hand-written module
-# that imports `geo` names the same type and runs.
+# (E3502), before any generated module is checked. The refusal comes first,
+# beside the staged report it explains (`main.jet` names the `Pin` the
+# build never made). A hand-written module that imports `geo` names the
+# same type and runs.
 fixture: a_generated_struct_names_a_module_type_only_in_scope.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -19,13 +21,15 @@ step: jet build single/main.jet
 exit: 1
 stderr: ~ "`meta.add_struct` was given the type `geo.Point` for the field `at`, which the generated module can't see" # the field's type names a module out of its scope
 stderr: ~ "jet-lang.dev/e/E3502" # the build host's refusal
-stderr: !~ "E0119" # refused before the generated module is checked
+stderr: !~ "There's no type called `geo" # refused before the generated module is checked
+stderr: before "jet-lang.dev/e/E3502" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
 file: single/.jet/build/app absent
 step: jet build list/main.jet
 exit: 1
 stderr: ~ "`meta.add_struct` was given the type `[geo.Point]` for the field `at`, which the generated module can't see" # the list's element type names a module out of its scope
 stderr: ~ "jet-lang.dev/e/E3502" # the build host's refusal
-stderr: !~ "E0119" # refused before the generated module is checked
+stderr: !~ "There's no type called `geo" # refused before the generated module is checked
+stderr: before "jet-lang.dev/e/E3502" "There's no type called `Pin`" # the refusal comes first, then the staged report it explains
 file: list/.jet/build/app absent
 step: jet build imported/main.jet
 exit: 0
