@@ -1,4 +1,4 @@
-// #2815 GUI battery consumer. The model and view are shared by the null and
+// #2815 UI battery consumer. The model and view are shared by the null and
 // TUI paths; host outcomes are never converted into fabricated success.
 // Future state-matrix proof commands:
 //   jet run tests/run/UI/Battery/run.jet
@@ -10,28 +10,28 @@ use {
     text: core.text
     tui: core.tui
     ui: core.ui
-    gui
+    battery: ui
 }
 
 run: fn() {
-    root: ".jet-gui-battery"
-    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup before GUI battery")
-    fs.create_dir_all(root) ?? panic("create GUI battery state directory")
+    root: ".jet-ui-battery"
+    if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup before UI battery")
+    fs.create_dir_all(root) ?? panic("create UI battery state directory")
 
     note_path: "{root}/note.txt"
     session_path: "{root}/session.txt"
     recovery_path: "{root}/recovery.txt"
     seed: "Meeting notes — café\nBring résumé and naïve examples.\nالعربية हिन्दी é 👨‍👩‍👦\n"
 
-    state := gui.new_editor("{seed}", "Meeting")
-    fs.write(note_path, gui.persisted_body(state)) ?? panic("write Unicode note")
-    fs.write(session_path, gui.persisted_session(state)) ?? panic("write session settings")
-    fs.write(recovery_path, gui.persisted_body(state)) ?? panic("write recovery snapshot")
+    state := battery.new_editor("{seed}", "Meeting")
+    fs.write(note_path, battery.persisted_body(state)) ?? panic("write Unicode note")
+    fs.write(session_path, battery.persisted_session(state)) ?? panic("write session settings")
+    fs.write(recovery_path, battery.persisted_body(state)) ?? panic("write recovery snapshot")
 
-    draft := reactive.signal(gui.body_of(state))
+    draft := reactive.signal(battery.body_of(state))
     selected := reactive.signal(0)
-    theme := reactive.signal(gui.theme_of(state))
-    settings_open := reactive.signal(gui.settings_open_of(state))
+    theme := reactive.signal(battery.theme_of(state))
+    settings_open := reactive.signal(battery.settings_open_of(state))
     saved := reactive.signal(false)
     save_requested := reactive.signal(false)
     status: reactive.derived(fn() { if saved.get() -> "saved" else -> "dirty" })
@@ -40,8 +40,8 @@ run: fn() {
     render_backend: tui_backend.copy()
     ui.reactive_render(
     fn() {
-        save_action: ui.node_shortcut(ui.button("Save", fn() { save_requested.set(true) }), gui.save_shortcut())
-        editor: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+        save_action: ui.node_shortcut(ui.button("Save", fn() { save_requested.set(true) }), battery.save_shortcut())
+        editor: battery.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
         tree: ui.box(
         [
             editor,
@@ -52,7 +52,7 @@ run: fn() {
     },
     )
 
-    focus: gui.focus_group()
+    focus: battery.focus_group()
     tui_backend.set_focus_group(focus)
     print("focus: {tui_backend.focused_label()}")
     tab: ui.key_event("Tab")
@@ -67,66 +67,66 @@ run: fn() {
     print("layout panes: {panes.len()}")
 
     null_backend: ui.null_backend()
-    snapshot: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
-    ui.mount(null_backend, ui.box([snapshot, gui.save_button()]), ui.constraint(0.0, 0.0, 80.0, 24.0))
+    snapshot: battery.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+    ui.mount(null_backend, ui.box([snapshot, battery.save_button()]), ui.constraint(0.0, 0.0, 80.0, 24.0))
     print("headless commands: {null_backend.commands().len()}")
 
     // Selection, Unicode scalar offsets, IME composition, drag/drop, and history
     // all update one state model. No backend-specific copy of this logic exists.
-    raw_selection: gui.selection(-3, 999)
-    normalized_selection: gui.normalize_selection(gui.body_of(state), raw_selection)
-    _selected: gui.selected_text(gui.body_of(state), normalized_selection)
-    _edit: gui.replace_selection(gui.body_of(state), normalized_selection, "probe")
-    _cursor: gui.move_cursor(gui.body_of(state), normalized_selection, -2)
-    _title: gui.title_of(state)
-    _composition: gui.composition_of(state)
-    _revision: gui.revision_of(state)
-    _status: gui.status_of(state)
-    _start: gui.selection_start(gui.body_of(state), normalized_selection)
-    _end: gui.selection_end(gui.body_of(state), normalized_selection)
+    raw_selection: battery.selection(-3, 999)
+    normalized_selection: battery.normalize_selection(battery.body_of(state), raw_selection)
+    _selected: battery.selected_text(battery.body_of(state), normalized_selection)
+    _edit: battery.replace_selection(battery.body_of(state), normalized_selection, "probe")
+    _cursor: battery.move_cursor(battery.body_of(state), normalized_selection, -2)
+    _title: battery.title_of(state)
+    _composition: battery.composition_of(state)
+    _revision: battery.revision_of(state)
+    _status: battery.status_of(state)
+    _start: battery.selection_start(battery.body_of(state), normalized_selection)
+    _end: battery.selection_end(battery.body_of(state), normalized_selection)
 
-    composing := gui.start_composition(state)
-    composing = gui.update_composition(composing, "preview")
-    _cancelled_composition: gui.cancel_composition(composing)
+    composing := battery.start_composition(state)
+    composing = battery.update_composition(composing, "preview")
+    _cancelled_composition: battery.cancel_composition(composing)
 
-    state = gui.with_selection(state, gui.selection(0, 7))
-    state = gui.apply_text(state, "Edited — café, résumé, 中文")
-    state = gui.start_composition(state)
-    state = gui.update_composition(state, "かな")
-    state = gui.commit_composition(state, "かな")
-    state = gui.drop_text(state, "\nDropped text — naïve")
-    undo_state: gui.undo(state)
-    state = gui.redo(undo_state)
-    state = gui.set_theme(state, "light")
-    state = gui.set_settings_open(state, true)
+    state = battery.with_selection(state, battery.selection(0, 7))
+    state = battery.apply_text(state, "Edited — café, résumé, 中文")
+    state = battery.start_composition(state)
+    state = battery.update_composition(state, "かな")
+    state = battery.commit_composition(state, "かな")
+    state = battery.drop_text(state, "\nDropped text — naïve")
+    undo_state: battery.undo(state)
+    state = battery.redo(undo_state)
+    state = battery.set_theme(state, "light")
+    state = battery.set_settings_open(state, true)
     edited_state: state
-    draft.set(gui.body_of(edited_state))
+    draft.set(battery.body_of(edited_state))
     selected.set(1)
-    theme.set(gui.theme_of(edited_state))
-    settings_open.set(gui.settings_open_of(edited_state))
+    theme.set(battery.theme_of(edited_state))
+    settings_open.set(battery.settings_open_of(edited_state))
     saved.set(false)
     print("reactive renders after edit: {tui_backend.render_count()}")
-    print("editor status: {gui.status_label(edited_state)} ({status.get()})")
+    print("editor status: {battery.status_label(edited_state)} ({status.get()})")
 
     // Recovery is durable before a host save is confirmed. The committed note
     // remains the original file until the save dialog and scoped write succeed.
-    fs.write(session_path, gui.persisted_session(edited_state)) ?? panic("save session settings")
-    fs.write(recovery_path, gui.persisted_body(edited_state)) ?? panic("save recovery snapshot")
+    fs.write(session_path, battery.persisted_session(edited_state)) ?? panic("save session settings")
+    fs.write(recovery_path, battery.persisted_body(edited_state)) ?? panic("save recovery snapshot")
     reloaded_body: fs.read(recovery_path) ?? panic("reload recovery note")
 
     // Reload the exact Unicode recovery body with independent session policy.
     reloaded_session: fs.read(session_path) ?? panic("reload session settings")
-    reloaded: gui.recover(reloaded_body, reloaded_session, "Meeting")
-    print("reloaded scalars: {text.scalar_count(gui.body_of(reloaded))}")
-    print("reloaded theme: {gui.theme_of(reloaded)} settings: {gui.settings_open_of(reloaded)}")
-    _restored_settings: gui.restore_session(reloaded_session)
+    reloaded: battery.recover(reloaded_body, reloaded_session, "Meeting")
+    print("reloaded scalars: {text.scalar_count(battery.body_of(reloaded))}")
+    print("reloaded theme: {battery.theme_of(reloaded)} settings: {battery.settings_open_of(reloaded)}")
+    _restored_settings: battery.restore_session(reloaded_session)
 
     // Typography receives Arabic, Indic, combining-mark, and emoji-cluster input.
     // `font.shape` is the canonical host shaper; the package never invents a
     // glyph sequence when the host reports an approximate run.
-    face: gui.system_font(.Body)
-    boundary: gui.grapheme_cursor_boundary(gui.body_of(edited_state), 3)
-    shaped: gui.shape_text("العربية हिन्दी é 👨‍👩‍👦", face)
+    face: battery.system_font(.Body)
+    boundary: battery.grapheme_cursor_boundary(battery.body_of(edited_state), 3)
+    shaped: battery.shape_text("العربية हिन्दी é 👨‍👩‍👦", face)
     print("font shaping invoked; grapheme cursor boundary: {boundary}; glyphs: {shaped.glyphs.len()}")
     if shaped.approximate -> print("font shaper reported approximate fallback") else {
         print("font shaper reported host-shaped run")
@@ -134,24 +134,24 @@ run: fn() {
 
     // Real host calls. Result branches below preserve cancellation and failure
     // rather than marking a cancelled service as a completed save.
-    _caps: gui.host_capabilities()
-    _filter: gui.text_filter()
-    _rights: gui.fs_rights()
-    _save_shortcut: gui.save_shortcut()
+    _caps: battery.host_capabilities()
+    _filter: battery.text_filter()
+    _rights: battery.fs_rights()
+    _save_shortcut: battery.save_shortcut()
 
-    if gui.file_filter("Notes", ["jet", "md"], ["text/plain"]) == {
+    if battery.file_filter("Notes", ["jet", "md"], ["text/plain"]) == {
         .Ok(filter) -> { print("file filter ready: {filter.extensions.len()} extensions") }
         .Err(_) -> {
-            error_state: gui.mark_error(edited_state, "file filter cancelled or failed")
-            print("file filter outcome: {gui.status_label(error_state)}")
+            error_state: battery.mark_error(edited_state, "file filter cancelled or failed")
+            print("file filter outcome: {battery.status_label(error_state)}")
         }
     }
-    if gui.request_grant(root) == {
+    if battery.request_grant(root) == {
         .Ok(grant) -> {
             print("filesystem grant: {grant.root}")
-            open_request: gui.open_request(grant.copy())
-            save_request: gui.save_request(grant.copy())
-            if gui.open_file(open_request) == {
+            open_request: battery.open_request(grant.copy())
+            save_request: battery.save_request(grant.copy())
+            if battery.open_file(open_request) == {
                 .Ok(selection) -> {
                     opened_path: selection.files.get(0) ?? panic("open dialog returned no files")
                     opened_body: fs.read(opened_path.path) ?? panic("read selected note")
@@ -159,61 +159,61 @@ run: fn() {
                 }
                 .Err(_) -> print("open dialog outcome: cancelled or failed")
             }
-            if gui.save_file(save_request) == {
+            if battery.save_file(save_request) == {
                 .Ok(selection) -> {
                     selected_path: selection.files.get(0) ?? panic("save dialog returned no files")
-                    fs.write(selected_path.path, gui.persisted_body(edited_state)) ?? panic("save selected note")
-                    saved_state: gui.mark_saved(edited_state)
+                    fs.write(selected_path.path, battery.persisted_body(edited_state)) ?? panic("save selected note")
+                    saved_state: battery.mark_saved(edited_state)
                     saved.set(true)
                     print("save dialog files: {selection.files.len()}")
-                    print("editor status after save: {gui.status_label(saved_state)} ({status.get()})")
+                    print("editor status after save: {battery.status_label(saved_state)} ({status.get()})")
                 }
                 .Err(_) -> {
-                    error_state: gui.mark_error(edited_state, "save dialog cancelled or failed")
-                    print("save dialog outcome: {gui.status_label(error_state)}")
+                    error_state: battery.mark_error(edited_state, "save dialog cancelled or failed")
+                    print("save dialog outcome: {battery.status_label(error_state)}")
                 }
             }
         }
         .Err(_) -> print("filesystem grant outcome: cancelled or failed")
     }
-    if gui.write_clipboard(gui.selected_text(gui.body_of(edited_state), gui.selection_of(edited_state))) == {
+    if battery.write_clipboard(battery.selected_text(battery.body_of(edited_state), battery.selection_of(edited_state))) == {
         .Ok(receipt) -> { print("clipboard write characters: {receipt.characters}") }
         .Err(_) -> print("clipboard write outcome: cancelled or failed")
     }
-    if gui.read_clipboard() == {
+    if battery.read_clipboard() == {
         .Ok(value) -> { print("clipboard read scalars: {text.scalar_count(value.text)}") }
         .Err(_) -> print("clipboard read outcome: cancelled or failed")
     }
-    if gui.poll_ime() == {
+    if battery.poll_ime() == {
         .Ok(_) -> { print("IME poll completed (event may be absent)") }
         .Err(_) -> print("IME poll outcome: cancelled or failed")
     }
-    if gui.poll_drag_drop() == {
+    if battery.poll_drag_drop() == {
         .Ok(_) -> { print("drag/drop poll completed (event may be absent)") }
         .Err(_) -> print("drag/drop poll outcome: cancelled or failed")
     }
-    if gui.host_shortcut() == {
+    if battery.host_shortcut() == {
         .Ok(shortcut) -> {
             print("host shortcut: {shortcut.key}")
-            if gui.bind_shortcut(shortcut.copy(), "save") == {
+            if battery.bind_shortcut(shortcut.copy(), "save") == {
                 .Ok(binding) -> {
-                    if gui.register_shortcut(binding) == {
+                    if battery.register_shortcut(binding) == {
                         .Ok(_) -> { print("shortcut registration completed") }
                         .Err(_) -> print("shortcut registration outcome: cancelled or failed")
                     }
                 }
                 .Err(_) -> print("shortcut binding outcome: cancelled or failed")
             }
-            if gui.dispatch_shortcut(shortcut.copy()) == {
+            if battery.dispatch_shortcut(shortcut.copy()) == {
                 .Ok(_) -> { print("shortcut dispatch completed") }
                 .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
             }
         }
         .Err(_) -> print("host shortcut outcome: cancelled or failed")
     }
-    if gui.accessibility_metadata("Editor", "Multiline note editor") == {
+    if battery.accessibility_metadata("Editor", "Multiline note editor") == {
         .Ok(metadata) -> {
-            a11y_node: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
+            a11y_node: battery.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
             accessible_tree: ui.node_accessibility(a11y_node, metadata.copy())
             if accessible_tree.accessibility == {
                 .Val(_) -> {
@@ -224,7 +224,7 @@ run: fn() {
             accessibility_backend: ui.null_backend()
             ui.mount(accessibility_backend, accessible_tree.copy(), ui.constraint(0.0, 0.0, 80.0, 24.0))
             print("accessibility mount commands: {accessibility_backend.commands().len()}")
-            if gui.attach_accessibility(a11y_node, metadata) == {
+            if battery.attach_accessibility(a11y_node, metadata) == {
                 .Ok(_) -> { print("host accessibility attachment completed") }
                 .Err(_) -> print("accessibility attachment outcome: cancelled or failed")
             }
@@ -234,8 +234,8 @@ run: fn() {
     print("menu: File > Open | Save | Quit; tray fallback is explicit in the shared tree")
     print("mobile gate: Android/iOS adapters, touch, and native IME lifecycle remain core work")
     print("remaining core gates: #2771 reactive ICE compositions; Typography/mobile native cursor adapters")
-    loop command in gui.future_commands() -> print("future proof: {command}")
-    loop gate in gui.open_core_gates() -> print("open gate: {gate}")
+    loop command in battery.future_commands() -> print("future proof: {command}")
+    loop gate in battery.open_core_gates() -> print("open gate: {gate}")
 
-    fs.remove_all(root) ?? panic("cleanup GUI battery state")
+    fs.remove_all(root) ?? panic("cleanup UI battery state")
 }

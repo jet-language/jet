@@ -5,7 +5,7 @@ use {
     ui: core.ui
     core.color.[Color]
     core.term.[Key]
-    games
+    battery: game
 }
 
 Position: struct {
@@ -77,24 +77,24 @@ run: fn() {
     },
     )
 
-    nodes: [games.SceneNode]{
-        {parent: -1, local: games.Transform{x: 100, y: 40}},
-        {parent: 0, local: games.Transform{x: 20, y: 5}},
+    nodes: [battery.SceneNode]{
+        {parent: -1, local: battery.Transform{x: 100, y: 40}},
+        {parent: 0, local: battery.Transform{x: 20, y: 5}},
     }
-    child: games.world_transform(nodes, 1)
+    child: battery.world_transform(nodes, 1)
     print("scene_child_world={child.x},{child.y}")
 
-    player: games.AABB{x: 18, y: 20, w: 8, h: 8}
-    wall: games.AABB{x: 20, y: 20, w: 8, h: 8}
+    player: battery.AABB{x: 18, y: 20, w: 8, h: 8}
+    wall: battery.AABB{x: 20, y: 20, w: 8, h: 8}
     hit_count := 0
-    if games.aabb_overlaps(player, wall) -> hit_count += 1
+    if battery.aabb_overlaps(player, wall) -> hit_count += 1
     print("aabb_hits={hit_count}")
 
-    accumulator := games.accumulator_new(16)
+    accumulator := battery.accumulator_new(16)
     loop frame in 0..<8 {
-        accumulator = games.accumulator_advance(accumulator, 17)
-        alpha: games.accumulator_alpha_thousand(accumulator)
-        render_tick: games.interpolate(accumulator.previous_tick, accumulator.current_tick, alpha)
+        accumulator = battery.accumulator_advance(accumulator, 17)
+        alpha: battery.accumulator_alpha_thousand(accumulator)
+        render_tick: battery.interpolate(accumulator.previous_tick, accumulator.current_tick, alpha)
         print("frame={frame} fixed_tick={accumulator.current_tick} render_tick={render_tick}")
     }
 
@@ -116,14 +116,14 @@ run: fn() {
     shown_root: "{root}/"
     print(transcript.replace(shown_root, ""))
 
-    state: games.SaveState{x: accumulator.current_tick, paused: false}
-    paused_state: games.pause_toggle(state)
-    encoded: games.save_encode(paused_state)
-    save_dir: fs.temp_dir("games-battery-save") ?? panic("save temp dir")
+    state: battery.SaveState{x: accumulator.current_tick, paused: false}
+    paused_state: battery.pause_toggle(state)
+    encoded: battery.save_encode(paused_state)
+    save_dir: fs.temp_dir("game-battery-save") ?? panic("save temp dir")
     save_path: "{save_dir.path}/save.txt"
     fs.write(save_path, encoded) ?? panic("save write")
     restored_raw: fs.read(save_path) ?? panic("save read")
-    restored: games.save_decode(restored_raw)
+    restored: battery.save_decode(restored_raw)
     fs.remove(save_path) ?? panic("save remove")
     print("save_round_trip=x:{restored.x} paused:{restored.paused}")
 
