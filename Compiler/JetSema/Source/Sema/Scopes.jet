@@ -64,6 +64,11 @@ use jet_foundation.[
     Func,
     Namespace,
     NameRows,
+    NameTable,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
     name_rows,
     name_rows_get_text,
     name_rows_set,
@@ -551,8 +556,7 @@ SemaScopeEnvironment: struct {
     source_origin: SemaSourceOrigin
     source_segments: [SemaSourceSegment]
     checked_types: [TTypeDef]{[TTypeDef]{}}
-    checked_type_rows: [String:Int]{[String:Int]{}}
-    checked_type_name_slots: [String:Int]{[String:Int]{}}
+    checked_type_names: NameTable{name_table_sized(2)}
     checked_type_name_rows: [[Int]]{[[Int]]{}}
     boxed_edges: [String:[String]]{[String:[String]]{}}
     copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}}
@@ -1030,11 +1034,10 @@ SemaScopeHardwareFacts: struct {
 SemaProgramTables: struct {
     registration_graph: SemaRegistrationGraph?
     checked_types: [TTypeDef]
-    // Rust `Checker::types` (keyed registry): `checked_types` rows by
-    // "{module_identity}::{name}" (first row), and every row of a bare name
-    // in order (`checked_type_name_slots` -> `checked_type_name_rows`).
-    checked_type_rows: [String:Int]
-    checked_type_name_slots: [String:Int]
+    // Rust `Checker::types` (keyed registry): every `checked_types` row of a
+    // bare name in order, by the name's id in `checked_type_names`. The
+    // first row of a module among them is that module's declaration.
+    checked_type_names: NameTable
     checked_type_name_rows: [[Int]]
     // `sema_checked_program_boxed_edges(registration_graph)`: nominal SymbolId
     // key -> its boxed recursive-layout keys, computed once per tables. Staged
@@ -1119,24 +1122,17 @@ sema_program_tables_init: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
 // The tables over `graph` whose boxed edges and copy facts were already
 // computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
 sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: &&[String:[String]], copy_facts: &&SemaCopyFactsTable) -> SemaProgramTables Never! {
-    rows := [String:Int]{}
-    name_slots := [String:Int]{}
-    name_rows := [[Int]]{}
+    names := name_table_sized(checked_types.len() * 2 + 2)
+    name_rows := [[Int]]{[Int]{}}
     loop (index, definition) in checked_types {
-        key: "{definition.module_identity.id}::{definition.name}"
-        if rows.get(key) == None -> rows[key] = index
-        if name_slots.get(definition.name) == .Val(slot) {
-            name_rows[slot].push(index)
-        } else {
-            name_slots[definition.name] = name_rows.len()
-            name_rows.push([Int]{index})
-        }
+        id: name_index(name_intern(names, definition.name))
+        if id == name_rows.len() -> name_rows.push([Int]{})
+        name_rows[id].push(index)
     }
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
-        checked_type_rows: rows,
-        checked_type_name_slots: name_slots,
+        checked_type_names: names,
         checked_type_name_rows: name_rows,
         boxed_edges: boxed_edges,
         copy_facts: copy_facts,
@@ -1153,8 +1149,7 @@ sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: Str
         source_origin: source_origin,
         source_segments: source_segments,
         checked_types: [TTypeDef]{},
-        checked_type_rows: [String:Int]{},
-        checked_type_name_slots: [String:Int]{},
+        checked_type_names: name_table_sized(2),
         checked_type_name_rows: [[Int]]{},
         boxed_edges: [String:[String]]{},
         declarations: declarations,
@@ -1187,10 +1182,9 @@ sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [String
     [String:[String]]{}
 }
 
-// The first checked declaration of `name` owned by `module_identity`
-// (checked_type_rows keys a row by its module id and name).
+// The first checked declaration of `name` owned by `module_identity`.
 sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String) -> Int? {
-    program.checked_type_rows.get("{module_identity.id}::{name}")
+    sema_scope_checked_type_row_in(program, module_identity, name)
 }
 
 // The checked declaration a qualified `module::Name` spelling names.
@@ -1199,15 +1193,34 @@ sema_scope_checked_type_row_qualified: fn(program: SemaProgramTables, qualified:
     if parts.len() < 2 -> return None
     if program.registration_graph == .Val(graph) {
         owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join("::")) ?? return None
-        return program.checked_type_rows.get("{owner.id}::{parts[parts.len() - 1]}")
+        return sema_scope_checked_type_row_in(program, owner, parts[parts.len() - 1])
     }
     None
 }
 
+// The first row named `name` among `checked_types` that `module_identity` owns.
+sema_scope_checked_type_row_in: fn(program: SemaProgramTables, module_identity: ModuleID, name: String) -> Int? Never! {
+    id: sema_scope_checked_type_name_id(program, name)
+    if id < 0 -> return None
+    loop row in program.checked_type_name_rows[id] {
+        if program.checked_types[row].module_identity.id == module_identity.id -> return Val(row)
+    }
+    None
+}
+
+// The id of `name` in `checked_type_names`, -1 when no checked declaration has it.
+sema_scope_checked_type_name_id: fn(program: SemaProgramTables, name: String) -> Int Never! {
+    found: name_find(program.checked_type_names, name) ?? return -1
+    id: name_index(found)
+    if id >= program.checked_type_name_rows.len() -> return -1
+    id
+}
+
 // Every checked declaration row named `name`, in declaration order.
 sema_scope_checked_type_name_rows: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [Int] {
-    slot: program.checked_type_name_slots.get(name) ?? return [Int]{}
-    program.checked_type_name_rows[slot]
+    id: sema_scope_checked_type_name_id(program, name)
+    if id < 0 -> return [Int]{}
+    program.checked_type_name_rows[id]
 }
 
 // Retarget scope facts while the program tables retain their one graph owner.

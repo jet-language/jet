@@ -2709,8 +2709,7 @@ jet_driver_run_comptime: fn(
     program := SemaProgramTables{
         registration_graph: environment.registration_graph.move(),
         checked_types: environment.checked_types.move(),
-        checked_type_rows: environment.checked_type_rows.move(),
-        checked_type_name_slots: environment.checked_type_name_slots.move(),
+        checked_type_names: environment.checked_type_names.move(),
         checked_type_name_rows: environment.checked_type_name_rows.move(),
         boxed_edges: environment.boxed_edges.move(),
         copy_facts: environment.copy_facts.move(),
@@ -2719,8 +2718,7 @@ jet_driver_run_comptime: fn(
     // empty table fields before retargeting its still-owned module metadata.
     environment.registration_graph = None
     environment.checked_types = [TTypeDef]{}
-    environment.checked_type_rows = [String:Int]{}
-    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_names = name_table_sized(2)
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()

@@ -63,6 +63,7 @@ use jet_foundation.[
     name_rows_get_text,
     name_rows_set,
     name_table,
+    name_table_sized,
     Param,
     Program,
     Span,
@@ -1240,7 +1241,7 @@ sema_incremental_module_input: fn(environment: SemaScopeEnvironment, program: Se
     scopes.lookup_counters = None
     // The module is named by its text: the memo outlives this compile's ids.
     module_text: sema_scope_environment_module_text(environment, program)
-    input := "module={module_text:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};declared={environment.declared_module:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_rows={program.checked_type_rows:Debug};type_slots={program.checked_type_name_slots:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
+    input := "module={module_text:Debug};package={environment.package_identity:Debug};name={environment.module_name:Debug};declared={environment.declared_module:Debug};file={environment.source_file:Debug};origin={environment.source_origin:Debug};segments={environment.source_segments:Debug};types={program.checked_types:Debug};type_names={program.checked_type_name_rows:Debug};boxed={program.boxed_edges:Debug};declarations={declarations:Debug};generics={environment.generic_params:Debug};comptime={comptime_input};else={environment.else_arms:Debug};fixed_writes={environment.fixed_length_write_params:Debug};debug={environment.debug_sites:Debug};scope={scopes:Debug}"
     scopes.location_function = location.move()
     scopes.lookup_counters = counters.move()
     input.move()
@@ -5008,8 +5009,7 @@ sema_check_pass_environment_from: fn(tables: &&SemaProgramTables, fixed_length_w
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.registration_graph = tables.registration_graph.move()
     environment.checked_types = tables.checked_types.move()
-    environment.checked_type_rows = tables.checked_type_rows.move()
-    environment.checked_type_name_slots = tables.checked_type_name_slots.move()
+    environment.checked_type_names = tables.checked_type_names.move()
     environment.checked_type_name_rows = tables.checked_type_name_rows.move()
     environment.boxed_edges = tables.boxed_edges.move()
     environment.copy_facts = tables.copy_facts.move()
@@ -10013,16 +10013,14 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     initial_program := SemaProgramTables{
         registration_graph: initial_environment.registration_graph.move(),
         checked_types: initial_environment.checked_types.move(),
-        checked_type_rows: initial_environment.checked_type_rows.move(),
-        checked_type_name_slots: initial_environment.checked_type_name_slots.move(),
+        checked_type_names: initial_environment.checked_type_names.move(),
         checked_type_name_rows: initial_environment.checked_type_name_rows.move(),
         boxed_edges: initial_environment.boxed_edges.move(),
         copy_facts: initial_environment.copy_facts.move(),
     }
     initial_environment.registration_graph = None
     initial_environment.checked_types = [TTypeDef]{}
-    initial_environment.checked_type_rows = [String:Int]{}
-    initial_environment.checked_type_name_slots = [String:Int]{}
+    initial_environment.checked_type_names = name_table_sized(2)
     initial_environment.checked_type_name_rows = [[Int]]{}
     initial_environment.boxed_edges = [String:[String]]{}
     initial_environment.copy_facts = sema_copy_facts_table_empty()
@@ -10379,8 +10377,7 @@ sema_comptime_environment: fn(graph: &&SemaRegistrationGraph, values: [SemaCompt
     environment := sema_scope_environment_init(module_none(), "", "", "", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
     environment.registration_graph = tables.registration_graph.move()
     environment.checked_types = tables.checked_types.move()
-    environment.checked_type_rows = tables.checked_type_rows.move()
-    environment.checked_type_name_slots = tables.checked_type_name_slots.move()
+    environment.checked_type_names = tables.checked_type_names.move()
     environment.checked_type_name_rows = tables.checked_type_name_rows.move()
     environment.boxed_edges = tables.boxed_edges.move()
     environment.copy_facts = tables.copy_facts.move()
@@ -11268,16 +11265,14 @@ sema_finalize_pass_open: fn(graph: &&SemaRegistrationGraph, values: [SemaComptim
     program := SemaProgramTables{
         registration_graph: environment.registration_graph.move(),
         checked_types: environment.checked_types.move(),
-        checked_type_rows: environment.checked_type_rows.move(),
-        checked_type_name_slots: environment.checked_type_name_slots.move(),
+        checked_type_names: environment.checked_type_names.move(),
         checked_type_name_rows: environment.checked_type_name_rows.move(),
         boxed_edges: environment.boxed_edges.move(),
         copy_facts: environment.copy_facts.move(),
     }
     environment.registration_graph = None
     environment.checked_types = [TTypeDef]{}
-    environment.checked_type_rows = [String:Int]{}
-    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_names = name_table_sized(2)
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()

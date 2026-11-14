@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label, name_table_sized]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -70,16 +70,14 @@ sema_script_probe_open: fn(stage: &&SemaComptimeDeclarationStage) -> SemaScriptP
     program := SemaProgramTables{
         registration_graph: environment.registration_graph.move(),
         checked_types: environment.checked_types.move(),
-        checked_type_rows: environment.checked_type_rows.move(),
-        checked_type_name_slots: environment.checked_type_name_slots.move(),
+        checked_type_names: environment.checked_type_names.move(),
         checked_type_name_rows: environment.checked_type_name_rows.move(),
         boxed_edges: environment.boxed_edges.move(),
         copy_facts: environment.copy_facts.move(),
     }
     environment.registration_graph = None
     environment.checked_types = [TTypeDef]{}
-    environment.checked_type_rows = [String:Int]{}
-    environment.checked_type_name_slots = [String:Int]{}
+    environment.checked_type_names = name_table_sized(2)
     environment.checked_type_name_rows = [[Int]]{}
     environment.boxed_edges = [String:[String]]{}
     environment.copy_facts = sema_copy_facts_table_empty()
