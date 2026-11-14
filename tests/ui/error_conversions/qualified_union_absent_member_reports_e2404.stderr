@@ -4,5 +4,5 @@ Error [jet.ErrorNotPropagatable]: `parse` fails with `ParseErr`, which can't pro
  13 |     value: parse()
     |            ^^^^^
  Why: `parse` is defined at `qualified_union_absent_member_reports_e2404.jet:8:1` with effective failure contract `explicit ParseErr!`; the caller's `explicit (net.NetError | TaskFailure)!` contract has no route from `ParseErr` to `NetError | TaskFailure`
- Fix: Declare the caller with `ParseErr` as its failure domain, or add `impl ParseErr -> NetError | TaskFailure { … }`; otherwise handle `parse` locally with `??`
+ Fix: Declare the caller with `ParseErr` as its failure domain; otherwise handle `parse` locally with `??`
 More: jet-lang.dev/e/E2404
