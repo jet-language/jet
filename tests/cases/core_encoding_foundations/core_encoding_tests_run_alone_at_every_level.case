@@ -1,0 +1,21 @@
+# #6530 c2: Core/Encoding's #Tests run by themselves from the repository root,
+# with no E1355 from the root project's dev imports. O0 runs every #Test in
+# the area. O1 and O2 run the one that checks each Dyn variant has a single
+# decode kind, in Core and in the runtime scalar decodes.
+env: NO_COLOR=1
+step: jet test {root}/Core/Encoding --optimize=none
+timeout: 1800s
+exit: 0
+stdout: ~ " passed, 0 failed" # every Core/Encoding #Test passes at O0
+stderr: !~ "E1355" # the root project's dev imports don't stop a Core #Test
+stderr: !~ "internal compiler error" # the run doesn't crash the compiler
+step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" --optimize=basic
+timeout: 1800s
+exit: 0
+stdout: ~ "1 passed, 0 failed" # O1 keeps one decode kind per Dyn variant
+stderr: !~ "internal compiler error" # O1 doesn't crash the compiler
+step: jet test {root}/Core/Encoding/Encoding.jet --filter "every Dyn variant has one decode kind" --optimize=full
+timeout: 1800s
+exit: 0
+stdout: ~ "1 passed, 0 failed" # O2 keeps one decode kind per Dyn variant
+stderr: !~ "internal compiler error" # O2 doesn't crash the compiler
