@@ -1,0 +1,12 @@
+# Claim (#6819 c6): a struct's `validate {` block has no `return`, so
+# L0530 (jet.RedundantFinalReturn) never reports one at it. The rules the
+# block becomes still answer Ok for a valid value and Err for an invalid one.
+fixture: redundant_final_return_skips_validate_block.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+stderr: !~ "RedundantFinalReturn"
+stderr: !~ "L0530"
+step run: jet run main.jet
+exit: 0
+stdout: = "valid\ninvalid: 1\n"

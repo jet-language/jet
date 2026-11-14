@@ -1,0 +1,26 @@
+// A closure whose last line is a call that returns nothing, passed where the
+// parameter is `fn() -> R E!`, infers R as Unit.
+#Error
+Oops: enum { Bad }
+
+// Runs `work` and says whether it failed.
+attempt: fn<R>(work: fn() -> R Oops!) -> String {
+    if work() == {
+        .Ok(_) -> "done"
+        .Err(_) -> "failed"
+    }
+}
+
+note: fn(text: String) Oops! {
+    print(text)
+}
+
+run: fn() {
+    print(attempt(fn() { note("working") }))
+    print(attempt(fn() { print("printing") }))
+    count := 0
+    print(attempt(fn() {
+        count = count + 1
+        note("counted {count}")
+    }))
+}

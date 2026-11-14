@@ -1,0 +1,23 @@
+// A struct's `validate {` block has no `return` of its own, so L0530 never
+// reports one on it; the synthesized rule body still answers Ok or Err.
+Draft: struct {
+    title: String{""}
+
+    validate {
+        check(title.trim().len() > 0, at: title, "Give the task a title.")
+        check(title.len() <= 20, at: title, "Keep the title short.")
+    }
+}
+
+// Whether `draft` passes its rules, as text.
+verdict: fn(draft: Draft) -> String {
+    if Draft.validate(draft) == {
+        .Ok(_) -> "valid"
+        .Err(errors) -> "invalid: {errors.len()}"
+    }
+}
+
+run: fn() {
+    print(verdict(Draft{title: "Ship it"}))
+    print(verdict(Draft{title: " "}))
+}

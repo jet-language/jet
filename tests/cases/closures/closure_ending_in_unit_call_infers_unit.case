@@ -1,0 +1,9 @@
+# Claim (#6819 c5): a closure passed where the parameter is `fn() -> R E!`
+# infers R as Unit when its last line is a call that returns nothing, whether
+# that call is fallible (`Unit Oops!`) or plain (`print`). The closures run
+# and the fallible ones' Ok arrives.
+fixture: closure_ending_in_unit_call_infers_unit.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = "working\ndone\nprinting\ndone\ncounted 1\ndone\n"
