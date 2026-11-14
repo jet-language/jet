@@ -455,6 +455,19 @@ kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! {
     assert_eq(kit_claim_jobs(0, claim, 64, 4, 8, 0), 1)
 }
 
+#Test("a cgroup cap below the host's room sizes the pool by the cap") {
+    gib: 1073741824
+    // Compiler/test.jet's PACKAGE_MEMORY.
+    claim: 8 * gib
+    host: 100 * gib
+    // A 12 GiB scope with 1 GiB in use holds one package run, not the eight the host's room allows.
+    assert_eq(kit_claim_jobs(kit_exec_room(host, 12 * gib, gib), claim, 64, 4, 8, 100), 1)
+    // A 24 GiB scope holds two.
+    assert_eq(kit_claim_jobs(kit_exec_room(host, 24 * gib, gib), claim, 64, 4, 8, 100), 2)
+    // The cap never widens the pool past the host's room.
+    assert_eq(kit_claim_jobs(kit_exec_room(10 * gib, 24 * gib, gib), claim, 64, 4, 8, 100), 1)
+}
+
 #Test("the pool runs measured entries longest first and weighs each by its last peak") {
     slot: kit_job_memory()
     gib: 1073741824

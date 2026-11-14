@@ -24,10 +24,13 @@ use {
 // The runs a `packages` or `core` run makes at once (package_jobs): a quarter
 // of the CPUs, at least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX, then only as
 // many PACKAGE_MEMORY claims as the corpus pool's memory budget holds, and
-// never more than the runs there are. One package run can hold about 5.5 GiB.
+// never more than the runs there are. A claim is 8 GiB: most package runs'
+// `jet` peaks at 6.5 to 7.7 GiB resident and Compiler/JetCli/Tests at 12.6, so
+// a 24 GiB scope starts two and they fit at their peaks together; a smaller
+// claim starts more runs than the budget holds and the scope is OOM-killed.
 PACKAGE_JOBS: 4
 PACKAGE_JOBS_MAX: 8
-PACKAGE_MEMORY: 5905580032
+PACKAGE_MEMORY: 8589934592
 
 // The trees whose packages a `packages` run tests, from the checkout:
 // tests/guards holds the repository guard packages (the top package,
