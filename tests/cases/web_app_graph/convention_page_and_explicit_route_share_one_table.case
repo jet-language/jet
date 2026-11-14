@@ -1,0 +1,30 @@
+# Convention files and explicit routes feed the App's one route table. A
+# convention page and an explicit route at one address fail `jet check` with
+# E2804, naming the convention file and both registration lines; a program
+# whose two forms answer different addresses lists both rows, each with its
+# own file:line, under `jet explain --routes`, and the web graph explains the
+# same two rows. Each program is its own folder, since the files of one
+# package share their top-level names.
+fixture: convention_page_and_explicit_route_share_one_table.fixture
+env: NO_COLOR=1
+step: jet check app.jet
+cwd: clash
+exit: nonzero
+stderr: ~ "Error [jet.AmbiguousRoute]: Two routes both match `GET /about`; this one comes from `routes/about/page.jet`." # E2804 names the convention file
+stderr: ~ "--> app.jet:3:23" # the `routes(from:)` registration
+stderr: ~ "--> app.jet:3:46" # the explicit `route("/about", ...)` registration
+stderr: ~ "the other registration, by `builder`" # the explicit row is labelled as the other one
+stderr: ~ "More: jet-lang.dev/e/E2804" # the footer links the E2804 page
+step: jet explain --routes app.jet
+cwd: table
+exit: 0
+stdout: ~ "route table — app.jet" # the heading names the entry file
+stdout: ~ "GET  /contact  contact_page  page  app.jet:3\n" # the explicit route's row
+stdout: ~ "GET  /about    page          page  routes/about/page.jet:1\n" # the convention file's row
+
+step: jet explain --web-graph app.jet --json
+cwd: table
+exit: 0
+json: stdout doc $.web_app.routes #= 2
+json: stdout doc $.web_app.routes[?provenance="routes/about/page.jet"] #= 1
+json: stdout doc $.web_app.routes[?handler="contact_page"] #= 1
