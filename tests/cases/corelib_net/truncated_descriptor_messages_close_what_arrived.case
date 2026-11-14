@@ -2,12 +2,12 @@
 # carrying eight arrives truncated; the receive fails with .Protocol and
 # closes the ones that did arrive (none left behind), and the next message
 # on the same stream arrives whole.
-requires: os:linux
+requires: os-name:linux
 requires: tool:python3
 fixture: truncated_descriptor_messages_close_what_arrived.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step run: jet run main.jet
+step run: jet run -A main.jet
 exit: 0
 stdout: = "true\nProtocol: unix receive failed: the message carried more descriptors than fit; every descriptor that arrived was closed\ndescriptors left behind: 0\nnext message [121] with 1 descriptor\n"
 stderr: empty

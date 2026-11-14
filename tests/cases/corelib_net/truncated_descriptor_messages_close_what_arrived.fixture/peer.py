@@ -5,7 +5,10 @@ import socket
 import sys
 
 stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-stream.connect(sys.argv[1])
+# A socket path longer than sockaddr_un holds connects through its
+# directory, as Jet's own unix_connect does.
+os.chdir(os.path.dirname(sys.argv[1]))
+stream.connect(os.path.basename(sys.argv[1]))
 assert stream.recv(1) == b"\x01"
 jet = os.getppid()
 highest = max(int(name) for name in os.listdir(f"/proc/{jet}/fd"))

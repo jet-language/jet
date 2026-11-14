@@ -2,12 +2,12 @@
 # memfd it sent while this process holds it; pread comes up short (0 bytes,
 # size 0) where a mapping would fault, and the memfd is not among this
 # process's mappings.
-requires: os:linux
+requires: os-name:linux
 requires: tool:python3
 fixture: received_descriptors_are_read_never_mapped.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step run: jet run main.jet
+step run: jet run -A main.jet
 exit: 0
 stdout: = "65536\n[120, 120, 120, 120]\n[116]\n0 bytes after the peer truncated it\n0\nmaps read true, peer memfd mapped false\n"
 stderr: empty

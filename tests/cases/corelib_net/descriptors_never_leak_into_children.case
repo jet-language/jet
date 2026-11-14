@@ -2,12 +2,12 @@
 # received descriptor and its duplicate (three memfds) and a listener with
 # both ends of a stream (three sockets), a child it starts inherits none of
 # them.
-requires: os:linux
+requires: os-name:linux
 requires: tool:python3
 fixture: descriptors_never_leak_into_children.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step run: jet run main.jet
+step run: jet run -A main.jet
 exit: 0
 stdout: = "this process: memfds true, sockets true\nchild: inherited memfds and sockets []\n4096\n4096\n"
 stderr: empty

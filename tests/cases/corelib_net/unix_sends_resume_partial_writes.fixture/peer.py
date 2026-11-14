@@ -8,7 +8,10 @@ import time
 size = int(sys.argv[2])
 stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 stream.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
-stream.connect(sys.argv[1])
+# A socket path longer than sockaddr_un holds connects through its
+# directory, as Jet's own unix_connect does.
+os.chdir(os.path.dirname(sys.argv[1]))
+stream.connect(os.path.basename(sys.argv[1]))
 received = bytearray()
 descriptors = []
 carried = []

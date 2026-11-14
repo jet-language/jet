@@ -11,7 +11,10 @@ F_SEAL_SHRINK = 2
 F_SEAL_GROW = 4
 
 stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-stream.connect(sys.argv[1])
+# A socket path longer than sockaddr_un holds connects through its
+# directory, as Jet's own unix_connect does.
+os.chdir(os.path.dirname(sys.argv[1]))
+stream.connect(os.path.basename(sys.argv[1]))
 _, fds, _, _ = socket.recv_fds(stream, 16, 4)
 fd = fds[0]
 
