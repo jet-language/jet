@@ -8416,7 +8416,7 @@ sema_stmt_check_open_callback_return: fn(value: Expr, environment: SemaScopeEnvi
         // A Result row is a propagated call's carrier; a plain row is the
         // value an earlier `return` handed back.
         if row == .Result(success, _) {
-            if !sema_type_assignable(success, checked.ty) -> diagnostics.push(sema_return_value_mismatch(context.function_name, row, checked.ty, expr_span(value)))
+            if !sema_type_assignable(success, checked.ty) -> diagnostics.push(sema_return_value_mismatch(sema_stmt_return_owner(context), row, checked.ty, expr_span(value)))
         } else if !sema_type_assignable(row, checked.ty) {
             diagnostics.push(sema_callback_return_mismatch(row, checked.ty, expr_span(value)))
         }
@@ -8465,7 +8465,14 @@ sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_
     // The value's own type, inferred without the return type as a target.
     probe_diagnostics := [Diagnostic]{}
     offered: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return
-    diagnostics[mismatch_index] = sema_return_value_mismatch(context.function_name, sema_stmt_return_required_type(return_type), offered.ty, value_span)
+    diagnostics[mismatch_index] = sema_return_value_mismatch(sema_stmt_return_owner(context), sema_stmt_return_required_type(return_type), offered.ty, value_span)
+}
+
+// The named function a `return` here leaves, or None inside a lambda's body:
+// that body has its own frame for `return` to leave, a named function's is 0.
+sema_stmt_return_owner: fn(context: SemaCheckContext) -> String? {
+    if context.duty_scope_depth > 0 -> return None
+    Val(context.function_name.copy())
 }
 
 // Rust `check_return_expr` infers the value against the whole return type,

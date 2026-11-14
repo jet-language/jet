@@ -610,16 +610,17 @@ sema_return_value_fix: fn(want: Type, got: Type) -> String Never! {
     hint
 }
 
-// E0113: a value handed back by `function` does not match its written
-// return type `want`.
-sema_return_value_mismatch: fn(function: String, want: Type, got: Type, span: Span) -> Diagnostic {
+// E0113: a value handed back by `function` (None for the lambda a `return`
+// in its body leaves) does not match its return type `want`.
+sema_return_value_mismatch: fn(function: String?, want: Type, got: Type, span: Span) -> Diagnostic {
     // The failure solver wraps even a written infallible result in
     // `T Never!`. That erased error rail is not part of the value contract,
     // and must not hide the concrete conversion/wrapping advice for T.
     required: if want == .Result(success, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> success else -> want
     if sema_nested_fn_failure_mismatch(required, got, span) == .Val(nested_fn) -> return nested_fn
     want_name: type_name(required)
-    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
+    name: function ?? return sema_error("E0113", span, "this value is {sema_type_show(got)}, but this lambda returns {want_name}", "this lambda's result is {want_name}, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
+    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{name}` returns {want_name}", "`{name}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
 }
 
 // The leaf of a canonical Core nominal declared by `module_name`
