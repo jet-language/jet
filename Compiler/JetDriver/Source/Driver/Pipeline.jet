@@ -61,6 +61,7 @@ use {
         sema_comptime_codec_methods,
         sema_comptime_close_methods,
         sema_comptime_render_methods,
+        SemaComptimeRenderMemo,
         SemaCallSiteFact,
         sema_collect_comptime_declarations,
         sema_checked_shape_defaults,
@@ -972,6 +973,9 @@ JetDriverComptimeRunIndex: struct {
     // the closure row it keeps would compute (JetDriverComptimeClosureRow).
     prefetched: [String:SemaComptimeFunctionResult]{[String:SemaComptimeFunctionResult]{}}
     prefetched_refs: [String:[JetDriverComptimeFunctionRef]]{[String:[JetDriverComptimeFunctionRef]]{}}
+    // What the run's body walks have read of each nominal type's render
+    // methods (jet_driver_comptime_owner_refs).
+    render: SemaComptimeRenderMemo{SemaComptimeRenderMemo{}}
 }
 
 // A function whose visit is the same in every later closure of the run,
@@ -1185,13 +1189,13 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // `show` (sema_comptime_render_methods), its own or a nested value's, make
 // its text in an interpolation or a `print`, so a value computed while
 // building renders as it does at run time.
-jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
-    rendered := [String:Bool]{}
+jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
+    rendered := [Int:Bool]{}
     loop type_id in ir_comptime_expression_types(tree, roots, body) {
         loop method in sema_comptime_close_methods(graph, tree.types.types[type_id], module_identity) {
             refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
         }
-        loop method in sema_comptime_render_methods(graph, tree.types.types[type_id], module_identity, rendered) {
+        loop method in sema_comptime_render_methods(graph, index.render, tree.types.types[type_id], module_identity, rendered) {
             refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
         }
     }
@@ -1206,7 +1210,7 @@ jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: &JetDrive
     refs := [JetDriverComptimeFunctionRef]{}
     jet_driver_comptime_precise_refs(graph, index, tree, roots, body, refs)
     jet_driver_comptime_codec_refs(graph, index, module_identity, tree, roots, body, refs)
-    jet_driver_comptime_owner_refs(graph, module_identity, tree, roots, body, refs)
+    jet_driver_comptime_owner_refs(graph, index, module_identity, tree, roots, body, refs)
     loop method in sema_comptime_bound_methods(graph, tree, module_identity) {
         refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
     }
