@@ -48,10 +48,14 @@ Equatable: struct {
                         }
                         return true
                     } else {
-                        #if target.base == "Float" || target.base == "Float32" {
-                            return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
+                        #if target.kind == "key" {
+                            return self.key() == rhs.key()
                         } else {
-                            return self.raw() == rhs.raw()
+                            #if target.base == "Float" || target.base == "Float32" {
+                                return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
+                            } else {
+                                return self.raw() == rhs.raw()
+                            }
                         }
                     }
                 }
@@ -121,12 +125,20 @@ Comparable: struct {
                         }
                         return .Equal
                     } else {
-                        #if target.base == "Float" || target.base == "F32" {
-                            return self.raw().compare(rhs.raw())
-                        } else {
-                            if self.raw() < rhs.raw() -> return .Less
-                            if self.raw() > rhs.raw() -> return .Greater
+                        #if target.kind == "key" {
+                            left: self.key()
+                            right: rhs.key()
+                            if left < right -> return .Less
+                            if left > right -> return .Greater
                             return .Equal
+                        } else {
+                            #if target.base == "Float" || target.base == "F32" {
+                                return self.raw().compare(rhs.raw())
+                            } else {
+                                if self.raw() < rhs.raw() -> return .Less
+                                if self.raw() > rhs.raw() -> return .Greater
+                                return .Equal
+                            }
                         }
                     }
                 }

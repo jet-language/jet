@@ -19,6 +19,7 @@ use jet_foundation.[
     TraitImplBlock,
     IR_RUNTIME_HANDLES,
     ir_runtime_handle_row,
+    owned_trait_implies,
 ]
 
 // One comparability query. A recursive type (`Expr: enum { Neg(inner: Expr) }`)
@@ -103,6 +104,14 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
         if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
             if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) {
                 return true
+            }
+        }
+        // A KeyBy type is equal and ordered by its key.
+        if owned_trait_implies("KeyBy", trait_name) {
+            if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(key_row) {
+                if sema_comparability_nominal_key(graph, graph.modules[key_row.module_index].nominals[key_row.row]) != None {
+                    return true
+                }
             }
         }
         if trait_name != "Equatable" -> return false
@@ -636,6 +645,8 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
 sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, ty: Type, query: &SemaComparabilityQuery) -> Bool Never! {
     if ty == {
         .Int | .Bool | .String | .Char | .IntN(_, _) -> true
+        // A list orders item by item, a shorter prefix first.
+        .List(inner) -> sema_comparability_map_key(environment, program, module_identity, inner, query)
         .Tagged(_, inner) -> sema_comparability_map_key(environment, program, module_identity, inner, query)
         .Tuple(fields) -> {
             loop field in fields {
@@ -655,11 +666,16 @@ sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaP
             query.visited[key] = eligible
             eligible
         }
-        .Float | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
 sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, query: &SemaComparabilityQuery) -> Bool Never! {
+    // A KeyBy type is a key exactly when its key is; a key that reaches its
+    // own type is a cycle and answers false.
+    if sema_comparability_key_type(program, definition) == .Val(key) {
+        return sema_comparability_map_key(environment, program, definition.module_identity, key, query)
+    }
     if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -683,6 +699,47 @@ sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, pro
         .Distinct(base, _) -> sema_comparability_map_key(environment, program, definition.module_identity, base, query)
         .Alias(_) | .UnitFamily(_, _) -> false
     }
+}
+
+// The key type of a KeyBy type (the `Key` its `impl KeyBy` binds), or None
+// when `definition` implements no KeyBy.
+sema_comparability_key_type: fn(program: SemaProgramTables, definition: TTypeDef) -> Type? Never! {
+    if program.registration_graph == .Val(graph) {
+        caller: sema_type_module_row(graph, definition.module_identity)
+        row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
+        return sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row])
+    }
+    None
+}
+
+// The `Key` a KeyBy implementation of `nominal` binds, written as its own
+// `impl` item or as an `impl KeyBy` block in the type's body.
+sema_comparability_nominal_key: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> Type? Never! {
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].declaration.trait_name != (Val("KeyBy")) {
+                next
+            }
+            target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
+            if !target_matches -> next
+            loop associated in graph.modules[module_index].impls[impl_index].declaration.assoc_type_impls {
+                if associated.name == "Key" {
+                    return Val(sema_type_resolve_declared(graph, associated.ty, graph.modules[module_index].impls[impl_index].source_module_identity))
+                }
+            }
+        }
+    }
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != "KeyBy" -> next
+            loop associated in block.assoc_type_impls {
+                if associated.name == "Key" {
+                    return Val(sema_type_resolve_declared(graph, associated.ty, nominal.symbol.module_identity))
+                }
+            }
+        }
+    }
+    None
 }
 
 // Rust `hashable_type_eligible` (E0506): the `Hash + Eq`
@@ -747,6 +804,9 @@ sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: Sema
 
 sema_comparability_definition_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, ty: Type, bindings: [SemaInferenceBinding], query: &SemaComparabilityQuery) -> Bool Never! {
     owner := definition.module_identity
+    if sema_comparability_key_type(program, definition) == .Val(key) {
+        return sema_comparability_hashable(environment, program, owner, key, query)
+    }
     if definition.kind == {
         .Distinct(base, _) -> sema_type_equatable(environment, program, ty) && sema_comparability_hashable(environment, program, owner, sema_inference_substitute_type_bindings(base, bindings), query)
         .Alias(target) -> {

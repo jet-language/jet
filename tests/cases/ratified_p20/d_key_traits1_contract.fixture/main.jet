@@ -1,0 +1,71 @@
+// An address keyed by its lowercase spelling: both spellings are one entry.
+Email: struct {
+    address: String
+
+    impl KeyBy {
+        Key: String
+
+        key: fn(self) -> String { self.address.lower() }
+    }
+}
+
+// A path keyed by its list of components, the way a command line names files.
+OSPath: struct {
+    shown: String
+    parts: [String]
+
+    impl KeyBy {
+        Key: [String]
+
+        key: fn(self) -> [String] { self.parts.copy() }
+    }
+}
+
+// A key that is itself a KeyBy type.
+Account: struct {
+    owner: Email
+    note: String
+
+    impl KeyBy {
+        Key: Email
+
+        key: fn(self) -> Email { self.owner.copy() }
+    }
+}
+
+addresses: fn(values: [Email]) -> String {
+    values.map(value -> "{value.address}").join(" ")
+}
+
+run: fn() {
+    first: Email{address: "Ann@Example.com"}
+    second: Email{address: "ann@example.com"}
+    other: Email{address: "bob@example.com"}
+    print("equal: {first == second} {first != other} {first < other} {other > second}")
+
+    owners := [Email: String]{}
+    owners[first.copy()] = "first"
+    owners[second.copy()] = "second"
+    owners[other.copy()] = "other"
+    print("map: {owners.len()} {owners.get(Email{address: "ANN@EXAMPLE.COM"}) ?? "none"} {owners.has_key(second)}")
+    owners.each((key: Email, value: String) -> print("entry: {key.address} {value}"))
+
+    left: Set.from([first.copy(), other.copy()])
+    right: Set.from([second.copy()])
+    print("set: {left.len()} {left.has(second)} {right.has(first)}")
+    print("union: {addresses(right.union(left).to_list())}")
+    print("intersection: {addresses(right.intersection(left).to_list())}")
+    print("difference: {addresses(left.difference(right).to_list())}")
+
+    sizes := [OSPath: Int]{}
+    sizes[OSPath{shown: "/usr/lib", parts: ["usr", "lib"]}] = 2
+    sizes[OSPath{shown: "/usr", parts: ["usr"]}] = 1
+    sizes[OSPath{shown: "/etc", parts: ["etc"]}] = 3
+    sizes[OSPath{shown: "/usr//lib", parts: ["usr", "lib"]}] = 4
+    sizes.each((path: OSPath, size: Int) -> print("path: {path.shown} {size}"))
+
+    accounts := [Account: Int]{}
+    accounts[Account{owner: first.copy(), note: "a"}] = 1
+    accounts[Account{owner: second.copy(), note: "b"}] = 2
+    print("account: {accounts.len()} {accounts.get(Account{owner: other.copy(), note: "c"}) ?? 0}")
+}

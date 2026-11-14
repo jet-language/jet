@@ -637,11 +637,37 @@ already produce deferred sources (D-CORE-EAGER1=A, D-CORE-EAGER2=A,
 D-LOOPMAP1=B).
 
 Map keys are restricted by E0502 to `Int`, `Bool`, `String`, `Char`, and
-`IntN`, plus tuples whose fields recursively satisfy that rule. Floats, maps,
-functions, shared values, and other unsupported types are not map keys. Set
-elements require `Hash + Eq` (E0506); lists, options, tuples, results, and
-other structural values are eligible when their contents are hashable, while
-maps, floats, shared values, and functions are not.
+`IntN`, plus lists and tuples whose items recursively satisfy that rule. A
+list orders item by item, a shorter prefix first. Floats, maps, functions,
+shared values, and other unsupported types are not map keys. Set elements
+require `Hash + Eq` (E0506); lists, options, tuples, results, and other
+structural values are eligible when their contents are hashable, while maps,
+floats, shared values, and functions are not.
+
+A type that implements `KeyBy` names the one value that decides its `==`,
+ordering, Map lookup and Set membership:
+
+```jet
+Email: struct {
+    address: String
+
+    impl KeyBy {
+        Key: String
+
+        key: fn(self) -> String { self.address.lower() }
+    }
+}
+```
+
+`Key` must itself be a Map key for Map use and hashable for Set use; it may
+be another `KeyBy` type, but a key that reaches its own type is a cycle
+(E0502). `key` is pure and can't fail: an effect row or an error suffix is
+E0502. `KeyBy` derives `Equatable` and `Comparable` from the key, so a
+written `Equatable` or `Comparable`, or a marker for them, on the same type
+is E0908. The type can't hold a Shared, Cell, Atomic, weak or runtime-handle
+value at any depth (E0502), so a stored key never changes. Re-inserting an
+equal key replaces the value and keeps the first stored key, and iteration
+follows key order.
 
 A finite `loop ... -> value` evaluates immediately to a list. An expected type
 does not change collection choice or evaluation time. The naming law in

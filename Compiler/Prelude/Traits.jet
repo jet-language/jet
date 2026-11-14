@@ -107,6 +107,16 @@ Comparable: trait {
     compare: fn(self, rhs: Rhs) -> Ordering Never!
 }
 
+// The one value that decides `==`, ordering, Map lookup and Set membership.
+KeyBy: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    requires: String{"Equatable Comparable"}
+    Key: type
+    key: fn(self) -> Key Never!
+}
+
 // The value as its dynamic encoding tree.
 Encode: trait {
     local: Bool{true}

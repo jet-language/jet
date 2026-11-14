@@ -1,7 +1,6 @@
 // The IR builder: checked functions to IR. A construct the builder does not
 // handle yet fails its function with one message naming the construct; the
 // module build keeps going and reports every failure (collect-all).
-
 use {
     jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, SymbolID, SymbolTable, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, symbol_is_local, symbol_keys_text, symbol_none, symbol_table_key, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
@@ -41,12 +40,26 @@ IRBuildKept: struct {
 // whether it still holds its value (-1: it does wherever it owns it).
 // `cleanup`: an entry that names no variable but a `defer` body, its row in
 // IRBuilder.defers, which runs where the entry would drop (-1: none).
-IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: SymbolID{symbol_none()}, write: Bool{false}, carrier: Int{-1}, live: Int{-1}, cleanup: Int{-1} }
+IRBinding: struct {
+    name: String
+    slot: Int
+    indirect: Int{-1}
+    owned: Bool{false}
+    symbol: SymbolID{symbol_none()}
+    write: Bool{false}
+    carrier: Int{-1}
+    live: Int{-1}
+    cleanup: Int{-1}
+}
 
 // A write argument passed through a frame cell: after the call the variable
 // `slot` reads its value back from `cell`. A temporary given the cell as its
 // place (`ends`) ends once read back (ir_write_backs).
-IRWriteBack: struct { cell: Int, slot: Int, ends: Bool{false} }
+IRWriteBack: struct {
+    cell: Int
+    slot: Int
+    ends: Bool{false}
+}
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
 // construct that `next` (continue) leaves or restarts; `mark` the bindings
@@ -56,12 +69,24 @@ IRWriteBack: struct { cell: Int, slot: Int, ends: Bool{false} }
 // A valued loop (`x: loop { ... break v }`) writes its break value into
 // `value` (-1: a statement loop). `edge` is the word each `break` sets to
 // tell its path apart where the loop's exits meet (ir_loop_edge; -1: none).
-IRLoopFrame: struct { label: String?, exit: Int, next: Int, mark: Int, guards: Int, value: Int{-1}, edge: Int{-1} }
+IRLoopFrame: struct {
+    label: String?
+    exit: Int
+    next: Int
+    mark: Int
+    guards: Int
+    value: Int{-1}
+    edge: Int{-1}
+}
 
 // A `break` out of the loop whose edge word is `edge`: the id it set that
 // word to and the ownership where it left of the variables bound before
 // the loop (IRLoopFrame.mark), which its drops left as they were.
-IRLoopEdge: struct { edge: Int, id: Int, states: [IROwnState] }
+IRLoopEdge: struct {
+    edge: Int
+    id: Int
+    states: [IROwnState]
+}
 
 // A guard a temporary in the statement being built took, or a temporary
 // with cleanup lent to a read parameter (IRBuilder statement_guards): its
@@ -69,19 +94,38 @@ IRLoopEdge: struct { edge: Int, id: Int, states: [IROwnState] }
 // none) and, for an If, its Else then (-1: the then part), so an early exit
 // ends it only where it is held. `glue` closes the temporary first (-1: it
 // only drops); `drops` is whether its type has a drop.
-IRStatementGuard: struct { slot: Int, opener: Int, part: Int, glue: Int{-1}, drops: Bool{true} }
+IRStatementGuard: struct {
+    slot: Int
+    opener: Int
+    part: Int
+    glue: Int{-1}
+    drops: Bool{true}
+}
 
 // An open `.expect_fail` region (BuildTests.jet ir_scope_member): `scope`
 // the slot holding its scope id, `exit` the Block a caught stop leaves,
 // `mark` the bindings and `transactions` the open #Transact blocks when it
 // opened.
-IRCatchFrame: struct { scope: Int, exit: Int, mark: Int, transactions: Int }
+IRCatchFrame: struct {
+    scope: Int
+    exit: Int
+    mark: Int
+    transactions: Int
+}
 
 // A `#Memo` function's store (BuildMemo.jet): `cell` the slot holding its
 // static cell's address, `entry` the slot holding the entry a miss opened
 // (the arguments' copies at `offsets`, typed `rows`; the result at
 // `value_offset`; `size` bytes in all), `bound` its entry bound (-1: none).
-IRMemo: struct { cell: Int, entry: Int, rows: [Int], offsets: [Int], value_offset: Int, size: Int, bound: Int }
+IRMemo: struct {
+    cell: Int
+    entry: Int
+    rows: [Int]
+    offsets: [Int]
+    value_offset: Int
+    size: Int
+    bound: Int
+}
 
 // Per-function build state. `fresh[slot]` marks a temporary that holds a
 // value nobody else owns yet (a call result, a built String): a borrowing
@@ -252,28 +296,48 @@ IRBuilder: struct {
 }
 
 // One failure of a body: its message and the span it names.
-IRFailureRow: struct { message: String, span: Span }
+IRFailureRow: struct {
+    message: String
+    span: Span
+}
 
 // The entry `found` (negative: none) a probe of the map in slot `map` for the
 // key in slot `key` found.
-IRMapProbe: struct { map: Int, key: Int, found: Int }
+IRMapProbe: struct {
+    map: Int
+    key: Int
+    found: Int
+}
 
 // A generic instance being built: the type parameters it binds
 // (ir_generic_names), their arguments, and sema's types of its checked
 // function's tree at those arguments, row for row with the tree's type table
 // (jet_sema sema_instance_types). The builder reads an instance type by row
 // and never substitutes one (ir_fact_type).
-IRInstance: struct { names: [String], args: [Type], types: [Type] }
+IRInstance: struct {
+    names: [String]
+    args: [Type]
+    types: [Type]
+}
 
 // The Call at instruction `at` of function `function` (-1: the function
 // being built) names the checked function `key` applied to `args`.
-IRDeferredCall: struct { at: Int, key: String, function: Int{-1}, args: [Type]{[Type]{}} }
+IRDeferredCall: struct {
+    at: Int
+    key: String
+    function: Int{-1}
+    args: [Type]{[Type]{}}
+}
 
 // The `bounds` build option (JetFoundation BuildOptions.jet): what a failed
 // list bounds check does. Fatal stops the program (ir_list_bounds_stop);
 // Report writes the failure (ir_list_bounds_report) and goes on with the
 // access; Off drops the check.
-IRBoundsMode: enum { Fatal Report Off }
+IRBoundsMode: enum {
+    Fatal
+    Report
+    Off
+}
 
 // The runtime checks a program keeps, and what else of the build options the
 // builder reads. `bounds` holds in the functions of `modules` (module
@@ -341,7 +405,11 @@ IRJob: struct {
 // The `backtrace` build option: what a native fault report prints after its
 // first line (JetRuntime Fault.jet). Its word is the order here, the value
 // jet_rt_fault_backtrace takes.
-IRBacktrace: enum { Full Brief Off }
+IRBacktrace: enum {
+    Full
+    Brief
+    Off
+}
 
 ir_checks_stock: fn() -> IRChecks Never! {
     IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Full, keep: false}
@@ -369,7 +437,9 @@ ir_checks_of: fn(bounds: String, backtrace: String, dead_code: String, modules: 
 // The bounds mode of checked function `row` (-1: glue, Fatal).
 ir_bounds_mode: fn(p: IRProgram, row: Int) -> IRBoundsMode Never! {
     if row < 0 || p.checks.bounds == .Fatal -> return IRBoundsMode.Fatal
-    if p.checks.modules.get(p.functions[row].module_identity.id) == None -> return IRBoundsMode.Fatal
+    if p.checks.modules.get(p.functions[row].module_identity.id) == None {
+        return IRBoundsMode.Fatal
+    }
     p.checks.bounds
 }
 
@@ -487,7 +557,11 @@ IRProgram: struct {
 
 // A Display, Printable, Close or user Comparable implementation: the
 // method it selects, its trait's short name and its owner's rendered type key.
-IRImplMethod: struct { method: String, trait_short: String, owner_key: String }
+IRImplMethod: struct {
+    method: String
+    trait_short: String
+    owner_key: String
+}
 
 // The checked source files (`path` -> text) as rows of bytes and line starts:
 // IRProgram's `source_bytes`, `source_lines` and `source_rows`.
@@ -539,7 +613,9 @@ ir_source_column: fn(p: IRProgram, path: String, offset: Int) -> Int? Never! {
     at := offset
     loop at > 0 && p.source_bytes[row][at - 1] != (U8{10}) {
         at -= 1
-        if p.source_bytes[row][at] < (U8{128}) || p.source_bytes[row][at] >= (U8{192}) -> column += 1
+        if p.source_bytes[row][at] < (U8{128}) || p.source_bytes[row][at] >= (U8{192}) {
+            column += 1
+        }
     }
     Val(column)
 }
@@ -560,7 +636,12 @@ ir_source_line_text: fn(p: IRProgram, path: String, line: Int) -> String? Never!
 
 // A function waiting to be built: its checked row, IR id and type
 // arguments, or the lambda job it builds (`lambda` >= 0).
-IRQueued: struct { row: Int, id: Int, args: [Type], lambda: Int{-1} }
+IRQueued: struct {
+    row: Int
+    id: Int
+    args: [Type]
+    lambda: Int{-1}
+}
 
 // A lambda body to build as its own function: the box holds its captures
 // at their offsets; the instance it was created under; the checked
@@ -651,14 +732,10 @@ ir_first_function_rows: fn(functions: [FnBody]) -> NameRows Never! {
 }
 
 // The first row of the checked function `key` (IRProgram.rows).
-ir_function_row: fn(p: IRProgram, key: String) -> Int? Never! {
-    name_rows_get_text(p.rows, key)
-}
+ir_function_row: fn(p: IRProgram, key: String) -> Int? Never! { name_rows_get_text(p.rows, key) }
 
 // The key of the run-wide symbol `id` (IRProgram.symbols).
-ir_symbol_key: fn(p: IRProgram, id: SymbolID) -> String Never! {
-    symbol_table_key(p.symbols, id)
-}
+ir_symbol_key: fn(p: IRProgram, id: SymbolID) -> String Never! { symbol_table_key(p.symbols, id) }
 
 // The key of symbol `id` a node of the builder's body names: a local of its
 // checked function's tree, or a run-wide one.
@@ -679,8 +756,12 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     ir_add_union_types(types, functions)
     // A type row by its key, then by its name where no key names one.
     type_keys := [(key: String, at: Int, row: Int)]{}
-    loop (index, definition) in types -> type_keys.push((key: definition.key.copy(), at: index, row: index))
-    loop (index, definition) in types -> type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
+    loop (index, definition) in types {
+        type_keys.push((key: definition.key.copy(), at: index, row: index))
+    }
+    loop (index, definition) in types {
+        type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
+    }
     type_rows: ir_first_rows(type_keys)
     impls: impl_defs.move()
     // A constant by its key, then by the symbol key a ConstRef names
@@ -703,13 +784,15 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     constant_keys := [(key: String, at: Int, row: Int)]{}
     loop (index, definition) in defs {
         constant_keys.push((key: definition.key.copy(), at: 2 * index, row: 2 * index))
-        if definition.symbol_key != "" -> constant_keys.push((key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1))
+        if definition.symbol_key != "" {
+            constant_keys.push((key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1))
+        }
     }
     constant_rows: ir_first_rows(constant_keys)
     constants := [String:Int]{}
     loop (key, at) in constant_rows -> constants[key] = at /% 2
-    // The Display, Printable and Close implementations of the host target,
-    // and the user Comparable ones (a derived Comparable orders
+    // The Display, Printable, Close and KeyBy implementations of the host
+    // target, and the user Comparable ones (a derived Comparable orders
     // structurally). Every trait implementation of the host target also names
     // its methods' traits for ir_trait_methods.
     impl_slots := [String:Int]{}
@@ -738,6 +821,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
             "Printable" -> "show"
             "Close" -> "close"
             "Comparable" -> if implementation.compiler_generated -> "" else -> "compare"
+            "KeyBy" -> "key"
             else -> ""
         }
         if method == "" -> next
@@ -762,7 +846,9 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
-        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
+        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && function.name != "key" {
+            next
+        }
         if function.kind == {
             .TopLevel -> {}
             .Method(_, owner_type) -> {
@@ -787,7 +873,9 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
         row: owner_methods.get("{implementation.method}|{implementation.trait_short}|{implementation.owner_key}") ?? owner_methods.get("{implementation.method}||{implementation.owner_key}") ?? -1
         if row < 0 -> next
         if implementation.trait_short == "Close" {
-            if close_methods.get(implementation.owner_key) == None -> close_methods[implementation.owner_key] = row
+            if close_methods.get(implementation.owner_key) == None {
+                close_methods[implementation.owner_key] = row
+            }
         } else {
             render_key: "{implementation.trait_short}|{implementation.owner_key}"
             if render_impls.get(render_key) == None -> render_impls[render_key] = row
@@ -804,8 +892,12 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
         loop index in (p.trait_methods.get("{trait_short}|{hook}") ?? [Int]{}) {
             if owned[index].params.len() != 1 -> next
             if owned[index].kind == {
-                .Method(_, owner) -> ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
-                .TraitMethod(_, _, owner, _, _) -> ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                .Method(_, owner) -> {
+                    ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                }
+                .TraitMethod(_, _, owner, _, _) -> {
+                    ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                }
                 .TopLevel -> {}
             }
         }
@@ -830,7 +922,11 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
 // copy and fill at the call's one type argument, and the raw heap
 // allocation and release, a region's reserve and release of fresh pages,
 // and `context.allocator`'s take, give and room of a block, which take none.
-IRCoreIntrinsicRow: struct { module_name: String, name: String, intrinsic: IRRuntimeIntrinsic }
+IRCoreIntrinsicRow: struct {
+    module_name: String
+    name: String
+    intrinsic: IRRuntimeIntrinsic
+}
 
 IR_CORE_INTRINSICS: [IRCoreIntrinsicRow]{
     IRCoreIntrinsicRow{module_name: "core.math", name: "__to_bits_i64", intrinsic: IRRuntimeIntrinsic.FloatBits},
@@ -861,7 +957,9 @@ ir_core_intrinsics: fn(functions: [FnBody]) -> [String:IRRuntimeIntrinsic] Never
     loop function in functions {
         loop row in IR_CORE_INTRINSICS {
             if row.name != function.name || row.module_name != function.module_name -> next
-            if ir_core_intrinsic_shaped(function, row.intrinsic) -> intrinsics[function.key] = row.intrinsic.copy()
+            if ir_core_intrinsic_shaped(function, row.intrinsic) {
+                intrinsics[function.key] = row.intrinsic.copy()
+            }
         }
     }
     intrinsics
@@ -935,7 +1033,9 @@ ir_declared_owners: fn(functions: &[FnBody], types: [TTypeDef]) Never! {
         name: ir_declared_owner_name(functions[index].kind) ?? next
         owners[name] = true
     }
-    if owners.len() == 0 -> return
+    if owners.len() == 0 {
+        return
+    }
     declared := [String:String]{}
     loop definition in types {
         if owners.get(definition.name) == None -> next
@@ -1024,7 +1124,9 @@ ir_program_put_constant: fn(p: &IRProgram, definition: &&TConstantDef, taken: &[
     owned := definition.move()
     by_name: owned.symbol_key != "" && taken.get(owned.symbol_key) == None
     by_key: taken.get(owned.key) == None
-    if !by_name && !by_key -> return
+    if !by_name && !by_key {
+        return
+    }
     row: p.constant_defs.len()
     if by_name {
         taken[owned.symbol_key.copy()] = true
@@ -1061,7 +1163,9 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [Stri
     loop (index, function) in functions {
         traits := [String]{}
         if function.kind == {
-            .TraitMethod(_, _, _, trait_name, _) -> traits.push(ir_short_name(symbol_table_key(symbols, trait_name)))
+            .TraitMethod(_, _, _, trait_name, _) -> {
+                traits.push(ir_short_name(symbol_table_key(symbols, trait_name)))
+            }
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(type_rows, types, owner_type)
                 slot: impl_slots.get("{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
@@ -1103,9 +1207,7 @@ ir_short_name: fn(key: String) -> String Never! {
 }
 
 // The declaration a nominal type name or key names.
-ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! {
-    p.type_rows.get(name)
-}
+ir_type_def: fn(p: IRProgram, name: String) -> Int? Never! { p.type_rows.get(name) }
 
 // `ty` with each nominal head spelled by its identity key (ir_identity_key): a
 // type named by its key (`module.Name`) and by its name (`Name`) is one type,
@@ -1204,7 +1306,10 @@ ir_generic_names: fn(p: IRProgram, function: FnBody) -> [String] Never! {
 
 // A type parameter of a generic owner a method binds, at argument `index`
 // of its owner pattern.
-IROwnerBinder: struct { index: Int, name: String }
+IROwnerBinder: struct {
+    index: Int
+    name: String
+}
 
 // The owner type parameters a method of a generic type declaration binds:
 // each argument of its owner pattern that is one of the declaration's
@@ -1214,7 +1319,9 @@ ir_owner_binders: fn(p: IRProgram, function: FnBody) -> [IROwnerBinder] Never! {
     binders := [IROwnerBinder]{}
     owner: if function.kind == {
         .Method(_, owner_type) | .TraitMethod(_, _, owner_type, _, _) -> ir_untag(owner_type)
-        .TopLevel -> { return binders }
+        .TopLevel -> {
+            return binders
+        }
     }
     if owner == .Apply(owner_name, args) {
         row: ir_type_def(p, owner_name) ?? return binders
@@ -1320,7 +1427,9 @@ ir_fact_failure: fn(p: IRProgram, b: &IRBuilder, failure: TFailureCarrier, span:
 
 // Error conversion `conversion` of a `?` with each type ir_fact reads.
 ir_fact_conversion: fn(p: IRProgram, b: &IRBuilder, conversion: TTryConvert, span: Span) -> TTryConvert Never! {
-    if conversion == .Typed(fn_name, source, target) -> return TTryConvert.Typed{fn_name: fn_name.copy(), source: ir_fact(p, b, source, span), target: ir_fact(p, b, target, span)}
+    if conversion == .Typed(fn_name, source, target) {
+        return TTryConvert.Typed{fn_name: fn_name.copy(), source: ir_fact(p, b, source, span), target: ir_fact(p, b, target, span)}
+    }
     conversion.copy()
 }
 
@@ -1331,7 +1440,9 @@ ir_fact_conversion: fn(p: IRProgram, b: &IRBuilder, conversion: TTryConvert, spa
 ir_callee_fact: fn(p: IRProgram, b: &IRBuilder, row: Int, args: [Type], ty: Type, span: Span) -> Type Never! {
     if args.len() == 0 -> return ty.copy()
     names: ir_generic_names(p, p.functions[row])
-    if sema_instance_type(p.functions[row].tree.types, names, args, ty) == .Val(found) -> return found
+    if sema_instance_type(p.functions[row].tree.types, names, args, ty) == .Val(found) {
+        return found
+    }
     if !ir_names_any(ty, names) -> return ty.copy()
     ir_fail(b, span, "missing checked fact: no instance row for {ir_type_name(ty)} in {p.functions[row].key}")
     ty.copy()
@@ -1372,7 +1483,9 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
         loop kept in 0..<p.functions.len() {
             function: p.functions[kept]
             if kept == row || p.checks.modules.get(function.module_identity.id) == None -> next
-            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
+            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None {
+                next
+            }
             roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
             kept_keys.push(function.key.copy())
         }
@@ -1424,7 +1537,9 @@ ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: Compil
 // ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p) && p.sentries) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p) && p.sentries) {
+        return entry
+    }
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key: "{m.functions[entry].key}{IR_ENTRY_WRAPPER_SUFFIX}"
     id: m.functions.len()
@@ -1435,9 +1550,7 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     span: Span{start: 0, end: 0}
     ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)
-    if ir_timing_admitted(p) {
-        _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)
-    }
+    if ir_timing_admitted(p) -> _: ir_runtime(m, b, "jet_rt_timing_admit", [Int]{}, -1)
     ir_observe_link(m, p, b)
     ir_log_configure(m, p, b)
     if p.checks.backtrace != .Full {
@@ -1456,7 +1569,9 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
         if !job.stripped -> selectable = true
     }
     if p.checks.unknown_jobs && selectable {
-        loop name in p.checks.passthrough_jobs -> ir_entry_passthrough(m, p, b, name, entry, row, ty, span)
+        loop name in p.checks.passthrough_jobs {
+            ir_entry_passthrough(m, p, b, name, entry, row, ty, span)
+        }
         ir_entry_unknown_job(m, b, p.checks.declared_jobs)
     }
     ir_entry_call(m, p, b, entry, row, ty, span)
@@ -1490,7 +1605,9 @@ ir_timing_admitted: fn(p: IRProgram) -> Bool Never! {
 // jet_rt_alloc_check_link: the call keeps the runtime's checked heap in the
 // link (JetRuntime Alloc.jet alloc_check_linked).
 ir_checked_alloc_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
-    if !p.checks.checked_alloc -> return
+    if !p.checks.checked_alloc {
+        return
+    }
     word: ir_word_row(m)
     _: ir_runtime(m, b, "jet_rt_alloc_check_link", [Int]{}, word)
 }
@@ -1500,7 +1617,9 @@ ir_checked_alloc_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 // no task, channel, live value or event still publishes its run (JetRuntime
 // ObserveLive.jet jet_rt_observe_start_init).
 ir_observe_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
-    if !p.checks.observe -> return
+    if !p.checks.observe {
+        return
+    }
     word: ir_word_row(m)
     _: ir_runtime(m, b, "jet_rt_observe_link", [Int]{}, word)
 }
@@ -1509,7 +1628,9 @@ ir_observe_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 // both level filters to the runtime first (JetRuntime RouteALog.jet
 // jet_rt_log_configure), which takes the two texts.
 ir_log_configure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
-    if p.checks.log_package == "" && p.checks.log_flag == "" -> return
+    if p.checks.log_package == "" && p.checks.log_flag == "" {
+        return
+    }
     string_row: ir_string_row(m)
     package_args: ir_static_text(m, b, p.checks.log_package)
     package: ir_runtime(m, b, "jet_rt_string_from_static", package_args, string_row)
@@ -1612,7 +1733,9 @@ ir_entry_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: I
             }
         }
         .Option(_) -> {
-            if m.types[row].kind != .Pointer && !ir_option_inline(m, row) -> ir_fail(b, span, "an entry returning {ir_type_name(ty)}")
+            if m.types[row].kind != .Pointer && !ir_option_inline(m, row) {
+                ir_fail(b, span, "an entry returning {ir_type_name(ty)}")
+            }
             null: ir_temp_like(m, b, result)
             ir_option_none(m, b, null)
             absent: ir_bool_op(m, b, IROp.Eq, result, null)
@@ -1637,7 +1760,9 @@ ir_build_all: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable
     ir_foreign_index(p, foreign, decls)
     roots := [IRWaveJob]{}
     loop row in 0..<p.functions.len() {
-        if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 -> next
+        if p.functions[row].generic_params.len() > 0 || ir_owner_binders(p, p.functions[row]).len() > 0 {
+            next
+        }
         if p.intrinsics.get(p.functions[row].key) != None -> next
         roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
     }
@@ -1768,9 +1893,7 @@ ir_stmt_node: fn(b: &IRBuilder, statement: StmtKind) -> Int Never! {
 ir_resolve_deferred: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
     loop call in b.deferred {
         callee: ir_function_id(m, p, call.key, call.args) ?? -1
-        if call.function >= 0 {
-            m.functions[call.function].a[call.at] = callee
-        } else {
+        if call.function >= 0 -> m.functions[call.function].a[call.at] = callee else {
             b.f.a[call.at] = callee
         }
     }
@@ -1785,7 +1908,16 @@ ir_resolve_deferred: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 // `loaded`: an or-pattern already loaded `slot` in its matching alternative.
 // `window`: the subject is a write window (`if &place == ...`), so the name
 // binds the payload's storage and an assignment to it lands in the box.
-IRPending: struct { name: String, slot: Int, subject: Int, offset: Int, selector: Int{-1}, boxed: Bool{false}, loaded: Bool{false}, window: Bool{false} }
+IRPending: struct {
+    name: String
+    slot: Int
+    subject: Int
+    offset: Int
+    selector: Int{-1}
+    boxed: Bool{false}
+    loaded: Bool{false}
+    window: Bool{false}
+}
 
 // Opens the If of a condition and binds its pending payloads in it.
 ir_open_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, test: Int) Never! {
@@ -1843,7 +1975,9 @@ ir_bind_pending: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 ir_pending_windows: fn(p: IRProgram, b: &IRBuilder, subject: Int, from: Int) Never! {
     write := false
     if ir_body_node(p, b, subject).kind == .Borrow(_, access) -> write = access == .Write
-    if !write -> return
+    if !write {
+        return
+    }
     loop index in from..<b.pending.len() {
         row: b.pending[index]
         b.pending[index] = IRPending{name: row.name.copy(), slot: row.slot, subject: row.subject, offset: row.offset, selector: row.selector, boxed: row.boxed, loaded: row.loaded, window: true}
@@ -1863,13 +1997,13 @@ ir_pending_load: fn(m: &IRModule, b: &IRBuilder, row: IRPending, slot: Int) Neve
         wrapper: ir_temp(m, b, pointer_row)
         ir_emit(b.f, IROp.Load, wrapper, row.subject, row.offset, -1, b.line)
         ir_emit(b.f, op, slot, wrapper, 0, -1, b.line)
-    } else {
-        ir_emit(b.f, op, slot, row.subject, row.offset, -1, b.line)
-    }
+    } else { ir_emit(b.f, op, slot, row.subject, row.offset, -1, b.line) }
 }
 
 ir_fail: fn(b: &IRBuilder, span: Span, message: String) Never! {
-    if b.error != "" -> return
+    if b.error != "" {
+        return
+    }
     b.error = message
     b.error_span = span
 }
@@ -1968,7 +2102,9 @@ ir_drop_bindings: fn(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
             ir_run_defer(m, b, binding.cleanup)
             next
         }
-        if binding.indirect < 0 && !alias && !ir_close_is_deferred(b, binding.slot) -> ir_close_now(b, binding.slot)
+        if binding.indirect < 0 && !alias && !ir_close_is_deferred(b, binding.slot) {
+            ir_close_now(b, binding.slot)
+        }
         if !binding.owned -> next
         ir_drop_binding(m, b, binding)
     }
@@ -2031,7 +2167,9 @@ ir_own: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
         // Any other shared List whose items have no clone glue is an internal
         // error (I2): a by-value walk of a shared buffer clones each item
         // (jet_rt_native_iter_from_list), and there is no clone to call.
-        if ir_list_items_lack_clone(m, p, row) -> return ir_fail_slot(b, Span{start: 0, end: 0}, "a shared {ir_type_name(m.types[row].ty)}, whose items have no clone")
+        if ir_list_items_lack_clone(m, p, row) {
+            return ir_fail_slot(b, Span{start: 0, end: 0}, "a shared {ir_type_name(m.types[row].ty)}, whose items have no clone")
+        }
         return ir_copy_value(m, p, b, slot, Span{start: 0, end: 0})
     }
     symbol: m.types[row].clone
@@ -2062,7 +2200,9 @@ ir_payload_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int
     if index < 0 -> return -1
     binding: b.bindings[index]
     carrier: binding.carrier
-    if binding.owned || binding.indirect >= 0 || carrier < 0 || !ir_owned_binding(b, carrier) -> return -1
+    if binding.owned || binding.indirect >= 0 || carrier < 0 || !ir_owned_binding(b, carrier) {
+        return -1
+    }
     carrier_row: b.f.slot_type[carrier]
     if !ir_box_row(m, carrier_row) -> return -1
     if ir_untag(m.types[carrier_row].ty) == {
@@ -2150,7 +2290,9 @@ ir_owned_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, nam
 ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     kind: m.types[row].kind
     if m.types[row].drop == "" || kind == .Int || kind == .String -> return true
-    if kind == .Pointer -> return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop"
+    if kind == .Pointer {
+        return ir_box_row(m, row) || ir_trait_row(m, row) || ir_is_handle(m, row) || m.types[row].drop == "jet_rt_native_shared_drop"
+    }
     if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
     if ir_counted_entry(m, p, row) != None -> return true
     members: ir_inline_members(m, p, row) ?? return false
@@ -2164,7 +2306,9 @@ ir_zeroable: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
 // `base` would end (ir_zeroable): its words, and a counted buffer's length
 // and capacity.
 ir_zero_drops: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, row: Int) Never! {
-    if m.types[row].drop == "" -> return
+    if m.types[row].drop == "" {
+        return
+    }
     if m.types[row].kind != .Aggregate {
         zero: ir_word_const(m, b, 0)
         ir_emit(b.f, IROp.Store, -1, base, offset, zero, b.line)
@@ -2174,7 +2318,9 @@ ir_zero_drops: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: 
         zero: ir_word_const(m, b, 0)
         ir_emit(b.f, IROp.Store, -1, base, offset, zero, b.line)
         ir_emit(b.f, IROp.Store, -1, base, offset + 8, zero, b.line)
-        if ir_ordered_header(m, row) -> ir_emit(b.f, IROp.Store, -1, base, offset + 24, zero, b.line)
+        if ir_ordered_header(m, row) {
+            ir_emit(b.f, IROp.Store, -1, base, offset + 24, zero, b.line)
+        }
         return
     }
     members: ir_inline_members(m, p, row) ?? return
@@ -2191,7 +2337,9 @@ ir_owned_binding_index: fn(b: IRBuilder, slot: Int) -> Int Never! {
     index := b.bindings.len() - 1
     loop index >= 0 {
         binding: b.bindings[index]
-        if binding.slot == slot && binding.indirect < 0 && binding.owned && binding.live < 0 -> return index
+        if binding.slot == slot && binding.indirect < 0 && binding.owned && binding.live < 0 {
+            return index
+        }
         index -= 1
     }
     -1
@@ -2244,7 +2392,10 @@ ir_reown: fn(b: &IRBuilder, binding: IRBinding) Never! {
 
 // A variable's ownership on one path: whether it owns its value, and its
 // live flag (IRBinding.live).
-IROwnState: struct { owned: Bool, live: Int{-1} }
+IROwnState: struct {
+    owned: Bool
+    live: Int{-1}
+}
 
 // The ownership of the variables bound before `count`.
 ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
@@ -2257,7 +2408,9 @@ ir_own_states: fn(b: IRBuilder, count: Int) -> [IROwnState] Never! {
 
 ir_set_own_state: fn(b: &IRBuilder, index: Int, state: IROwnState) Never! {
     row: b.bindings[index]
-    if row.owned == state.owned && row.live == state.live -> return
+    if row.owned == state.owned && row.live == state.live {
+        return
+    }
     b.bindings[index] = IRBinding{name: row.name.copy(), slot: row.slot, indirect: row.indirect, owned: state.owned, symbol: row.symbol, write: row.write, carrier: row.carrier, live: state.live, cleanup: row.cleanup}
 }
 
@@ -2274,7 +2427,9 @@ ir_set_own_states: fn(b: &IRBuilder, states: [IROwnState]) Never! {
 // the other's ownership on unchanged.
 ir_meet_paths: fn(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnState], then_leaves: Bool, else_leaves: Bool) Never! {
     if else_leaves -> return ir_set_own_states(b, then_states)
-    if then_leaves -> return
+    if then_leaves {
+        return
+    }
     else_states: ir_own_states(b, then_states.len())
     ir_join_owned(m, b, test, then_states, else_states)
 }
@@ -2287,15 +2442,13 @@ ir_join_owned: fn(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnSta
         if index >= b.bindings.len() -> break
         kept: then_states[index]
         other: else_states[index]
-        if kept.owned == other.owned && kept.live == other.live {
-            ir_set_own_state(b, index, kept)
-        } else if !kept.owned && !other.owned {
+        if kept.owned == other.owned && kept.live == other.live -> ir_set_own_state(b, index, kept) else if !kept.owned && !other.owned {
             ir_set_own_state(b, index, IROwnState{owned: false})
-        } else {
-            joined.push(index)
-        }
+        } else { joined.push(index) }
     }
-    if joined.len() == 0 -> return
+    if joined.len() == 0 {
+        return
+    }
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     lives := [Int]{}
     loop _ in joined -> lives.push(ir_temp(m, b, bool_row))
@@ -2304,7 +2457,9 @@ ir_join_owned: fn(m: &IRModule, b: &IRBuilder, test: Int, then_states: [IROwnSta
     ir_else(b.f, b.line)
     loop (at, index) in joined -> ir_live_set(b, lives[at], else_states[index])
     ir_end(b.f, b.line)
-    loop (at, index) in joined -> ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
+    loop (at, index) in joined {
+        ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
+    }
 }
 
 // Ends an If whose then path built user code (a pattern's payload value or
@@ -2334,7 +2489,9 @@ ir_end_tested: fn(m: &IRModule, b: &IRBuilder, before: [IROwnState]) Never! {
     ir_else(b.f, b.line)
     loop (at, index) in joined -> ir_live_set(b, lives[at], before[index])
     ir_end(b.f, b.line)
-    loop (at, index) in joined -> ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
+    loop (at, index) in joined {
+        ir_set_own_state(b, index, IROwnState{owned: true, live: lives[at]})
+    }
 }
 
 // Before a loop's exit Block opens: its edge word (IRLoopFrame.edge), 0 on
@@ -2344,7 +2501,9 @@ ir_end_tested: fn(m: &IRModule, b: &IRBuilder, before: [IROwnState]) Never! {
 ir_loop_edge: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
     loop index in 0..<b.bindings.len() {
         binding: b.bindings[index]
-        if binding.indirect < 0 && binding.slot >= 0 && ir_has_drop(m, b, binding.slot) -> return ir_word_const(m, b, 0)
+        if binding.indirect < 0 && binding.slot >= 0 && ir_has_drop(m, b, binding.slot) {
+            return ir_word_const(m, b, 0)
+        }
     }
     -1
 }
@@ -2356,12 +2515,16 @@ ir_loop_edge: fn(m: &IRModule, b: &IRBuilder) -> Int Never! {
 // variable the exits disagree on still owns its value through a live flag
 // each exit's edge word selects, as ir_join_owned does for an If's two.
 ir_loop_join: fn(m: &IRModule, b: &IRBuilder, edge: Int, tested: Bool) Never! {
-    if edge < 0 -> return
+    if edge < 0 {
+        return
+    }
     rows := [Int]{}
     loop at in 0..<b.loop_edges.len() {
         if b.loop_edges[at].edge == edge -> rows.push(at)
     }
-    if rows.len() == 0 -> return
+    if rows.len() == 0 {
+        return
+    }
     first := 0
     if !tested {
         loop index in 0..<b.loop_edges[rows[0]].states.len() {
@@ -2405,9 +2568,7 @@ ir_loop_join: fn(m: &IRModule, b: &IRBuilder, edge: Int, tested: Bool) Never! {
 
 // Sets the live flag `live` to whether a variable in `state` holds its value.
 ir_live_set: fn(b: &IRBuilder, live: Int, state: IROwnState) Never! {
-    if state.owned && state.live >= 0 {
-        ir_emit(b.f, IROp.Copy, live, state.live, -1, -1, b.line)
-    } else {
+    if state.owned && state.live >= 0 -> ir_emit(b.f, IROp.Copy, live, state.live, -1, -1, b.line) else {
         ir_emit(b.f, IROp.Const, live, if state.owned -> 1 else -> 0, -1, -1, b.line)
     }
 }
@@ -2425,7 +2586,9 @@ ir_aggregate_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, add
         return
     }
     row: b.f.slot_type[value]
-    if ir_movable_binding(b, value) || (ir_owned_binding(b, value) && ir_row_lacks_clone(m, p, row)) -> return ir_disown(b, value)
+    if ir_movable_binding(b, value) || (ir_owned_binding(b, value) && ir_row_lacks_clone(m, p, row)) {
+        return ir_disown(b, value)
+    }
     ir_copy_fixup(m, p, b, row, address)
 }
 
@@ -2436,7 +2599,9 @@ IR_BUILD_INSTRUCTION_BUDGET: 1000000
 
 ir_new_slot: fn(b: &IRBuilder, ty: Int, kind: IRSlotKind, name: Int) -> Int Never! {
     emitted: b.f.op.len()
-    if emitted > IR_BUILD_INSTRUCTION_BUDGET -> ir_fail(b, Span{start: 0, end: 0}, "budget exceeded: {emitted} instructions (budget {IR_BUILD_INSTRUCTION_BUDGET})")
+    if emitted > IR_BUILD_INSTRUCTION_BUDGET {
+        ir_fail(b, Span{start: 0, end: 0}, "budget exceeded: {emitted} instructions (budget {IR_BUILD_INSTRUCTION_BUDGET})")
+    }
     b.fresh.push(false)
     ir_slot(b.f, ty, kind, name, b.line)
 }
@@ -2450,6 +2615,7 @@ ir_fresh_temp: fn(m: &IRModule, b: &IRBuilder, ty: Int) -> Int Never! {
     b.fresh[slot] = true
     slot
 }
+
 // A temporary of `slot`'s type.
 ir_temp_like: fn(m: &IRModule, b: &IRBuilder, slot: Int) -> Int Never! {
     ty: b.f.slot_type[slot]
@@ -2471,7 +2637,9 @@ ir_has_drop: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
 
 // Drops `slot` when it is a fresh temporary of a type with a drop.
 ir_release: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
-    if slot < 0 || !b.fresh[slot] -> return
+    if slot < 0 || !b.fresh[slot] {
+        return
+    }
     if ir_has_drop(m, b, slot) -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
 }
@@ -2491,17 +2659,13 @@ ir_write_backs: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, backs: [IRWriteBac
 // ---------------------------------------------------------------------------
 // Names and scopes.
 
-ir_scope_open: fn(b: &IRBuilder) Never! {
-    b.scopes.push(b.bindings.len())
-}
+ir_scope_open: fn(b: &IRBuilder) Never! { b.scopes.push(b.bindings.len()) }
 
 // Closes the innermost scope: its owned variables are dropped, latest first.
 ir_scope_close: fn(m: &IRModule, b: &IRBuilder) Never! {
     mark: b.scopes.pop() ?? 0
     ir_drop_bindings(m, b, mark)
-    loop b.bindings.len() > mark {
-        _: b.bindings.pop()
-    }
+    loop b.bindings.len() > mark -> _: b.bindings.pop()
 }
 
 ir_lookup_binding: fn(b: IRBuilder, name: String) -> IRBinding? Never! {
@@ -2594,8 +2758,12 @@ ir_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int
 // only allocate, free, copy, count or read (an allocation failure is
 // fatal), and the stop rail's own calls.
 ir_route_can_stop: fn(symbol: String) -> Bool Never! {
-    if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") -> return false
-    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") -> return false
+    if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") {
+        return false
+    }
+    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") {
+        return false
+    }
     if symbol == {
         "jet_rt_alloc" | "jet_rt_alloc_8" | "jet_rt_alloc_value" | "jet_rt_alloc_value_grow" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_mem_region_reserve" | "jet_rt_mem_region_release" -> false
@@ -2629,7 +2797,9 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
 // The edge's own cleanup has none. The selector keeps the call and a branch
 // hot and lays the edge out cold (X64Select ir_x64_stop_point).
 ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
-    if !m.stop_points || b.stopping -> return
+    if !m.stop_points || b.stopping {
+        return
+    }
     ir_stop_point(m, b, IR_STOP_POLL_KEY)
 }
 
@@ -2649,7 +2819,9 @@ ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 // rax (X64Select.jet ir_x64_stop_point, ir_x64_stop_poll; JetWeb Select.jet
 // web_stop_point).
 ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
-    if !m.stop_points || b.stopping -> return
+    if !m.stop_points || b.stopping {
+        return
+    }
     ir_stop_point(m, b, IR_STOP_TURN_KEY)
 }
 
@@ -2660,7 +2832,9 @@ ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 // delivered there as it is at a loop's turn. ir_recursion_checks removes
 // it from every body that is not recursive once the module is built.
 ir_entry_check: fn(m: &IRModule, b: &IRBuilder) Never! {
-    if !m.stop_points || b.stopping -> return
+    if !m.stop_points || b.stopping {
+        return
+    }
     b.f.entry_check = b.f.op.len()
     ir_stop_point(m, b, IR_STOP_TURN_KEY)
 }
@@ -2680,7 +2854,9 @@ ir_recursion_checks: fn(m: &IRModule) Never! {
             break
         }
     }
-    if !checked -> return
+    if !checked {
+        return
+    }
     calls := OptCalls{start: [Int]{}, to: [Int]{}}
     taken := [Int]{}
     loop f in m.functions {
@@ -2716,7 +2892,9 @@ ir_recursion_checks: fn(m: &IRModule) Never! {
 // which the selector enters only from that slow path, so the hot path has
 // no poll.
 ir_stop_trap: fn(m: &IRModule, b: &IRBuilder, at: Int) Never! {
-    if !m.stop_points || b.stopping || !ir_op_can_stop(m, b.f, at) -> return
+    if !m.stop_points || b.stopping || !ir_op_can_stop(m, b.f, at) {
+        return
+    }
     ir_stop_point(m, b, IR_STOP_TRAP_KEY)
 }
 
@@ -2755,7 +2933,9 @@ ir_stop_point: fn(m: &IRModule, b: &IRBuilder, key: String) Never! {
 // (the stop stays pending until the region's catch_boundary), and leaves the
 // region.
 ir_stop_catches: fn(m: &IRModule, b: &IRBuilder) Never! {
-    if b.catches.len() == 0 -> return
+    if b.catches.len() == 0 {
+        return
+    }
     b.stopping = true
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     word_row: ir_word_row(m)
@@ -2904,9 +3084,7 @@ ir_word_row: fn(m: &IRModule) -> Int Never! {
     ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? 0
 }
 
-ir_string_row: fn(m: &IRModule) -> Int Never! {
-    ir_type_row(m, Type.String) ?? 0
-}
+ir_string_row: fn(m: &IRModule) -> Int Never! { ir_type_row(m, Type.String) ?? 0 }
 
 // A source location argument triple: (path address, path length, line).
 ir_location: fn(m: &IRModule, b: &IRBuilder, line: Int) -> [Int] Never! {
@@ -2934,9 +3112,7 @@ ir_member_read: fn(m: &IRModule, b: &IRBuilder, base: Int, member: IRMember) -> 
     slot: ir_temp(m, b, member.ty)
     if m.types[member.ty].kind == .Aggregate {
         ir_emit(b.f, IROp.Offset, slot, holder, offset, -1, b.line)
-    } else {
-        ir_emit(b.f, IROp.Load, slot, holder, offset, -1, b.line)
-    }
+    } else { ir_emit(b.f, IROp.Load, slot, holder, offset, -1, b.line) }
     slot
 }
 
@@ -2976,9 +3152,7 @@ ir_member_of: fn(m: &IRModule, p: IRProgram, b: IRBuilder, base: Int, name: Stri
 ir_member_of_row: fn(m: &IRModule, p: IRProgram, row: Int, name: String) -> IRMember? Never! {
     ty: ir_untag(m.types[row].ty)
     members := [IRMember]{}
-    if ty == .Tuple(fields) {
-        members = ir_tuple_members(m, p, fields) ?? return None
-    } else {
+    if ty == .Tuple(fields) -> members = ir_tuple_members(m, p, fields) ?? return None else {
         nominal: ir_nominal_name(ty) ?? return None
         definition: ir_type_def(p, nominal) ?? return None
         members = ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return None
@@ -2990,9 +3164,7 @@ ir_member_of_row: fn(m: &IRModule, p: IRProgram, row: Int, name: String) -> IRMe
 }
 
 ir_truncate_bindings: fn(b: &IRBuilder, mark: Int) Never! {
-    loop b.bindings.len() > mark {
-        _: b.bindings.pop()
-    }
+    loop b.bindings.len() > mark -> _: b.bindings.pop()
 }
 
 // A Bool slot: whether the Result box `value` holds Ok (selector word 1).
@@ -3098,7 +3270,9 @@ ir_wrapper_alloc: fn(m: &IRModule, b: &IRBuilder, size: Int, place: Int) -> Int 
 // the allocator that served `old` (jet_rt_alloc_value_grow), the holder's or
 // an older one, else the heap.
 ir_box_replica: fn(m: &IRModule, b: &IRBuilder, size: Int, old: Int, row: Int) -> Int Never! {
-    if !m.user_values || (row != ir_pointer_row(m) && !ir_box_row(m, row)) -> return ir_box_alloc(m, b, size, row)
+    if !m.user_values || (row != ir_pointer_row(m) && !ir_box_row(m, row)) {
+        return ir_box_alloc(m, b, size, row)
+    }
     bytes: ir_word_const(m, b, ir_align8(size))
     replica: ir_runtime(m, b, "jet_rt_alloc_value_grow", [Int]{bytes, old, old}, row)
     b.fresh[replica] = m.types[row].drop != ""
@@ -3124,9 +3298,13 @@ ir_list_buffer_sized: fn(m: &IRModule, b: &IRBuilder, size: Int) -> Int Never! {
 // Writes `value` at byte `offset` of the storage at `base`: an aggregate's
 // bytes are copied, a Unit value takes no bytes.
 ir_store_at: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, value: Int) Never! {
-    if value < 0 -> return
+    if value < 0 {
+        return
+    }
     kind: ir_kind_of(m, b, value)
-    if kind == .Unit -> return
+    if kind == .Unit {
+        return
+    }
     ir_close_disarm(b, value)
     if kind == .Aggregate {
         address: ir_temp_like(m, b, value)
@@ -3173,9 +3351,7 @@ ir_result_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: 
         ir_view_result_store(m, b, boxed, payload, tail)
         return boxed
     }
-    if payload >= 0 {
-        ir_store_at(m, p, b, boxed, 8, payload)
-    } else {
+    if payload >= 0 -> ir_store_at(m, p, b, boxed, 8, payload) else {
         zero: ir_word_const(m, b, 0)
         ir_emit(b.f, IROp.Store, -1, boxed, 8, zero, line)
     }
@@ -3191,7 +3367,9 @@ ir_result_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: 
 // unwrapped where its plain success is.
 ir_value_as: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int, row: Int, span: Span) -> Int Never! {
     if !ir_is_result(m.types[row].ty) {
-        if ir_body_node(p, b, expression).kind == .Ok(inner) -> return ir_value_as(m, p, b, inner, row, span)
+        if ir_body_node(p, b, expression).kind == .Ok(inner) {
+            return ir_value_as(m, p, b, inner, row, span)
+        }
     }
     slot: ir_expr(m, p, b, expression)
     if ir_failed(b) || slot < 0 -> return slot
@@ -3226,7 +3404,9 @@ ir_adapt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, spa
     }
     // A Result box of another size (an Ok or Err payload narrower or wider)
     // is reboxed: a box is freed with its own type's size (ir_box_bytes).
-    if have_box && want_box && ir_box_bytes(m, p, have) != ir_box_bytes(m, p, row) -> return ir_result_rebox(m, p, b, slot, row, span)
+    if have_box && want_box && ir_box_bytes(m, p, have) != ir_box_bytes(m, p, row) {
+        return ir_result_rebox(m, p, b, slot, row, span)
+    }
     // A member value where its structural union is wanted (a `[A | B]`
     // literal's element) is boxed as that member's variant (widen_to_union).
     // A smaller union, whose every member sema found in the wanted one, is
@@ -3234,23 +3414,33 @@ ir_adapt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, spa
     union_ty: m.types[row].ty
     member_ty: m.types[have].ty
     if ir_untag(union_ty) == .Union(_) {
-        if ir_untag(member_ty) == .Union(_) -> return ir_union_rewiden_fresh(m, p, b, slot, member_ty, union_ty, span)
+        if ir_untag(member_ty) == .Union(_) {
+            return ir_union_rewiden_fresh(m, p, b, slot, member_ty, union_ty, span)
+        }
         return ir_union_box(m, p, b, slot, member_ty, union_ty, span)
     }
     // A record where one of the same named members in another order is
     // wanted is rebuilt member by member in the wanted order.
     if ir_untag(union_ty) == .Tuple(want_fields) {
         if ir_untag(member_ty) == .Tuple(have_fields) {
-            if ir_record_member_order_differs(want_fields, have_fields) -> return ir_record_reorder(m, p, b, slot, have_fields, want_fields, row, span)
+            if ir_record_member_order_differs(want_fields, have_fields) {
+                return ir_record_reorder(m, p, b, slot, have_fields, want_fields, row, span)
+            }
         }
     }
     // An inline `[T#N]` where a `[T]` is wanted is a List copy of it; no
     // other value stands for an inline `[T#N]`.
     have_fixed: ir_fixed_count(m, have) != None
     want_fixed: ir_fixed_count(m, row) != None
-    if have_fixed && !want_fixed && ir_list_element_of(m, p, row) != None -> return ir_fixed_bridge(m, p, b, slot, row, span)
-    if have_fixed != want_fixed -> return ir_fail_slot(b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
-    if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size -> return slot
+    if have_fixed && !want_fixed && ir_list_element_of(m, p, row) != None {
+        return ir_fixed_bridge(m, p, b, slot, row, span)
+    }
+    if have_fixed != want_fixed {
+        return ir_fail_slot(b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
+    }
+    if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size {
+        return slot
+    }
     ir_fail_slot(b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
 }
 
@@ -3273,7 +3463,9 @@ ir_record_reorder: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, have
     ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
     loop member in want_members {
         source: loop candidate in have_members {
-            if candidate.name == member.name -> break candidate
+            if candidate.name == member.name {
+                break candidate
+            }
         } ?? return ir_fail_slot(b, span, "record member {member.name} of {ir_type_name(m.types[row].ty)}")
         loaded: ir_load_at(m, b, slot, source.offset, source.ty)
         owned: ir_own(m, p, b, loaded)
@@ -3295,10 +3487,14 @@ ir_result_rebox: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: I
     to := [Type]{}
     if have_ty == .Result(ok, err) -> from = [Type]{ok.copy(), err.copy()}
     if want_ty == .Result(ok, err) -> to = [Type]{ok.copy(), err.copy()}
-    if from.len() != 2 || to.len() != 2 -> return ir_fail_slot(b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    if from.len() != 2 || to.len() != 2 {
+        return ir_fail_slot(b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    }
     // A view Result's Ok is its allocator's: no other box takes it, and a
     // view Result holds no other Ok; only an Err moves between them.
-    if (ir_view_result(have_raw) || ir_view_result(want_raw)) && !ir_never_type(from[0]) -> return ir_fail_slot(b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    if (ir_view_result(have_raw) || ir_view_result(want_raw)) && !ir_never_type(from[0]) {
+        return ir_fail_slot(b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    }
     boxed: ir_result_box(m, p, b, want_raw, true, -1)
     selector: ir_load_word(m, b, slot, 0)
     ir_emit(b.f, IROp.Store, -1, boxed, 0, selector, b.line)
@@ -3339,9 +3535,7 @@ ir_result_rebox: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: I
 // are the Int's (the runtime's pass the niche by); a scalar's has neither.
 IR_OPTION_INT_NONE: 4611686018427387904
 
-ir_option_inline: fn(m: IRModule, row: Int) -> Bool Never! {
-    m.types[row].option_word
-}
+ir_option_inline: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].option_word }
 
 // The word of an absent Option of row `row`: null for a box or an optional
 // raw pointer.
@@ -3466,7 +3660,12 @@ ir_list_length: fn(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
 // An open walk over a list: its native index and the element at it. A walk
 // over an Iter (ir_pull_open) also has the block its item was pulled into:
 // an Option box, or the runtime's 8-byte block for an inline Option.
-IRWalk: struct { index: Int, item: Int, pulled: Int{-1}, inline: Bool{false} }
+IRWalk: struct {
+    index: Int
+    item: Int
+    pulled: Int{-1}
+    inline: Bool{false}
+}
 
 // Opens a loop over the elements of the list at `list` in order;
 // ir_walk_close advances and closes it.
@@ -3496,12 +3695,18 @@ ir_walk_close: fn(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
 // Ends the item an Iter walk pulled: at each step's close, and before a
 // break out of the walk. A List walk lends its elements, so nothing ends.
 ir_walk_leave: fn(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
-    if walk.pulled < 0 -> return
-    if !walk.inline {
-        if ir_has_drop(m, b, walk.pulled) -> ir_emit(b.f, IROp.Drop, -1, walk.pulled, -1, -1, b.line)
+    if walk.pulled < 0 {
         return
     }
-    if walk.item >= 0 && ir_has_drop(m, b, walk.item) -> ir_emit(b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+    if !walk.inline {
+        if ir_has_drop(m, b, walk.pulled) {
+            ir_emit(b.f, IROp.Drop, -1, walk.pulled, -1, -1, b.line)
+        }
+        return
+    }
+    if walk.item >= 0 && ir_has_drop(m, b, walk.item) {
+        ir_emit(b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+    }
     eight: ir_word_const(m, b, 8)
     ir_free(m, b, walk.pulled, eight)
 }
@@ -3646,9 +3851,7 @@ ir_checked_address: fn(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row:
         length: ir_list_length(m, b, list)
         bad: ir_index_order(m, b, IROp.Ge, native, length)
         ir_open_if(b.f, bad, b.line)
-        if b.bounds == .Report {
-            ir_list_bounds_report(m, b, length, native)
-        } else {
+        if b.bounds == .Report -> ir_list_bounds_report(m, b, length, native) else {
             ir_list_bounds_stop(m, b, length, native)
         }
         ir_end(b.f, b.line)
@@ -3721,6 +3924,8 @@ ir_unreachable_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type) ->
     row: ir_value_type(m, p, ty) ?? return -1
     if m.types[row].kind == .Unit -> return -1
     slot: ir_temp(m, b, row)
-    if m.types[row].kind == .Aggregate -> ir_emit(b.f, IROp.StackAddress, slot, m.types[row].size, 8, -1, b.line)
+    if m.types[row].kind == .Aggregate {
+        ir_emit(b.f, IROp.StackAddress, slot, m.types[row].size, 8, -1, b.line)
+    }
     slot
 }

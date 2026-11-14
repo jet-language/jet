@@ -3594,8 +3594,13 @@ sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: Se
             sibling = state.associated.get("{owner_name}::{other}") ?? [NamedType]{}
         }
     }
+    key_by: trait_name == "KeyBy"
+    if key_by && !sema_key_by_pure(owner_name, methods, diagnostics) {
+        return
+    }
     valid: sema_owned_check_impl(owned, owner_type, rhs, methods, associated, sibling, state.distinct_bases.get(owner_name), span, diagnostics)
     if keyed && valid -> sema_checked_coherence_add_operator(state, owner_name, trait_name, rhs)
+    if key_by && valid -> sema_key_by_alone(graph, module_row, owner_name, span, diagnostics)
 }
 
 // Rust `validate_trait_impl` orphan rule (E0902): neither the trait nor the

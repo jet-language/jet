@@ -1,0 +1,217 @@
+// The KeyBy contract beyond its method shape. The key alone decides `==`,
+// ordering, Map lookup and Set membership, so reading it is pure and can't
+// fail, a written Equatable or Comparable beside it would be a second
+// answer, and a field that can change in place could move a stored key.
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticLabel,
+    Func,
+    Item,
+    Marker,
+    ModuleID,
+    Span,
+    Type,
+    ir_runtime_handle_row,
+    owned_trait_implies,
+    type_name,
+]
+
+// E0502 when `key` declares an error or an effect. False when one was
+// reported, so the contract check doesn't report the same result again.
+sema_key_by_pure: fn(owner_name: String, methods: [Func], diagnostics: &[Diagnostic]) -> Bool {
+    pure := true
+    loop method in methods {
+        if method.name != "key" -> next
+        if method.return_type == .Val(returned) {
+            if returned == .Result(_, err) && err != (Type.Named{name: "Never"}) {
+                diagnostics.push(sema_key_by_unstable("`{owner_name}.key` can fail with `{type_name(err)}`", method.name_span))
+                pure = false
+            }
+        }
+        if method.declared_effects == .Val(rows) {
+            if rows.len() > 0 {
+                names: loop row in rows -> "`{row.name}`"
+                diagnostics.push(sema_key_by_unstable("`{owner_name}.key` performs {names.join(", ")}", method.name_span))
+                pure = false
+            }
+        }
+    }
+    pure
+}
+
+sema_key_by_unstable: fn(what: String, span: Span) -> Diagnostic {
+    sema_error("E0502", span, what, "a key decides `==`, ordering, Map lookup and Set membership, so reading it must give the same value every time and can't fail", "compute the key from the value's own fields, with no effect row and no error suffix")
+}
+
+// E0908 at each written Equatable or Comparable, and each marker for them,
+// on the KeyBy type `owner_name` of this module, labeled at its KeyBy
+// implementation; E0502 when the type holds a value that changes in place,
+// or when its key comes back to it.
+sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, key_span: Span, diagnostics: &[Diagnostic]) {
+    loop item in module_row.program.items {
+        if item == .Impl(definition) {
+            if definition.type_name != owner_name || definition.is_generated_serde -> next
+            written: definition.trait_name ?? next
+            if written != "KeyBy" && owned_trait_implies("KeyBy", written) {
+                diagnostics.push(sema_key_by_second(owner_name, "`impl {owner_name}.{written}`", written, definition.trait_span ?? definition.type_span, key_span))
+            }
+        } else if item == .Struct(definition) {
+            if definition.name == owner_name {
+                sema_key_by_declaration(graph, module_row.module_identity, item, definition.type_markers, owner_name, key_span, diagnostics)
+            }
+        } else if item == .Enum(definition) {
+            if definition.name == owner_name {
+                sema_key_by_declaration(graph, module_row.module_identity, item, definition.type_markers, owner_name, key_span, diagnostics)
+            }
+        }
+    }
+    caller: sema_type_module_row(graph, module_row.module_identity)
+    owner: sema_type_resolve_nominal_row_at(graph, Type.Named{name: owner_name}, caller) ?? return
+    key: sema_comparability_nominal_key(graph, graph.modules[owner.module_index].nominals[owner.row]) ?? return
+    visited := [String:Bool]{}
+    if sema_key_by_reaches(graph, owner, key, owner.module_index, visited) {
+        diagnostics.push(sema_error("E0502", key_span, "the key of `{owner_name}` comes back to `{owner_name}`", "comparing two `{owner_name}` values compares their keys, so a key that holds the type itself would never finish", "key the type by values that don't hold it"))
+    }
+}
+
+// Whether the key type `ty`, followed through the keys of the KeyBy types it
+// holds, reaches the nominal `owner`.
+sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef, ty: Type, caller: Int, visited: &[String:Bool]) -> Bool {
+    if ty == .List(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
+    if ty == .Option(inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
+    if ty == .Tagged(_, inner) -> return sema_key_by_reaches(graph, owner, inner, caller, visited)
+    if ty == .Tuple(fields) {
+        loop field in fields {
+            if sema_key_by_reaches(graph, owner, field.ty, caller, visited) -> return true
+        }
+        return false
+    }
+    if ty == .Named(_) || ty == .Apply(_, _) {
+        row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return false
+        if row.module_index == owner.module_index && row.row == owner.row -> return true
+        seen: "{row.module_index}.{row.row}"
+        if visited.get(seen) != None -> return false
+        visited[seen] = true
+        key: sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row]) ?? return false
+        return sema_key_by_reaches(graph, owner, key, row.module_index, visited)
+    }
+    false
+}
+
+sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, markers: [Marker], owner_name: String, key_span: Span, diagnostics: &[Diagnostic]) {
+    loop block in sema_registration_item_trait_blocks(item) {
+        if block.compiler_generated || block.trait_name == "KeyBy" || !owned_trait_implies("KeyBy", block.trait_name) {
+            next
+        }
+        diagnostics.push(sema_key_by_second(owner_name, "`impl {block.trait_name}`", block.trait_name, block.trait_span, key_span))
+    }
+    loop marker in markers {
+        if marker.name == "KeyBy" || !owned_trait_implies("KeyBy", marker.name) -> next
+        sign: if marker.negated -> "#!" else -> "#"
+        diagnostics.push(sema_key_by_second(owner_name, "`{sign}{marker.name}`", marker.name, marker.name_span, key_span))
+    }
+    visited := [String:Bool]{}
+    if sema_key_by_changing_item(graph, module_identity, item, visited) == .Val(held) {
+        diagnostics.push(sema_error("E0502", key_span, "`{owner_name}` holds `{held}`, so its key could change while it is stored", "a Map or Set files a value under its key once; a Shared, Cell, Atomic, weak or runtime-handle value can change after that", "keep the changing value out of the key type, or store an id for it"))
+    }
+}
+
+sema_key_by_second: fn(owner_name: String, written: String, trait_name: String, span: Span, key_span: Span) -> Diagnostic {
+    error := sema_error("E0908", span, "{written} on `{owner_name}` is a second `{trait_name}` beside its `KeyBy`", "`KeyBy` derives `{trait_name}` from the key, so `==`, ordering, Map lookup and Set membership all agree", "remove {written}, or remove the `KeyBy` implementation")
+    error.labels.push(DiagnosticLabel{span: key_span, message: "`{owner_name}` implements `KeyBy` here"})
+    error
+}
+
+// The first Shared, Cell, Atomic, weak or runtime-handle type `ty` holds at
+// any depth, through the fields of the declared types it names.
+sema_key_by_changing: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, visited: &[String:Bool]) -> String? {
+    if ty == {
+        .Shared(_) -> Val(type_name(ty))
+        .Named(name) -> {
+            leaf: sema_serde_named_leaf(name)
+            if leaf.starts_with("Atomic") || ir_runtime_handle_row(leaf) != None -> return Val(leaf)
+            seen: "{module_identity.id}.{name}"
+            if visited.get(seen) != None -> return None
+            visited[seen] = true
+            resolved: sema_type_graph_lookup_symbol_at(graph, sema_type_module_row(graph, module_identity), name) ?? return None
+            row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if nominal.source == .SourceAST(item) {
+                return sema_key_by_changing_item(graph, nominal.symbol.module_identity, item, visited)
+            }
+            None
+        }
+        .Apply(name, args) -> {
+            leaf: sema_serde_named_leaf(name)
+            if leaf == "Cell" || leaf == "Weak" || leaf.starts_with("Atomic") {
+                return Val(type_name(ty))
+            }
+            loop arg in args {
+                if sema_key_by_changing(graph, module_identity, arg, visited) == .Val(held) {
+                    return Val(held)
+                }
+            }
+            None
+        }
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_key_by_changing(graph, module_identity, inner, visited)
+        .Map(first, _, second) | .Result(first, second) -> {
+            if sema_key_by_changing(graph, module_identity, first, visited) == .Val(held) {
+                return Val(held)
+            }
+            sema_key_by_changing(graph, module_identity, second, visited)
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_key_by_changing(graph, module_identity, field.ty, visited) == .Val(held) {
+                    return Val(held)
+                }
+            }
+            None
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_key_by_changing(graph, module_identity, member, visited) == .Val(held) {
+                    return Val(held)
+                }
+            }
+            None
+        }
+        .Int | .Bool | .String | .Char | .IntN(_, _) | .Float | .Float32 | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> None
+    }
+}
+
+sema_key_by_changing_item: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, visited: &[String:Bool]) -> String? {
+    if item == .Struct(definition) {
+        loop field in definition.fields {
+            if field.computed != None -> next
+            if sema_key_by_changing(graph, module_identity, field.ty, visited) == .Val(held) {
+                return Val(held)
+            }
+        }
+        return None
+    }
+    if item == .Enum(definition) {
+        loop variant in definition.variants {
+            if variant.payload == {
+                .Unit -> {}
+                .Single(ty, _) -> {
+                    if sema_key_by_changing(graph, module_identity, ty, visited) == .Val(held) {
+                        return Val(held)
+                    }
+                }
+                .Named(fields) -> {
+                    loop field in fields {
+                        if sema_key_by_changing(graph, module_identity, field.ty, visited) == .Val(held) {
+                            return Val(held)
+                        }
+                    }
+                }
+            }
+        }
+        return None
+    }
+    if item == .Distinct(definition) {
+        return sema_key_by_changing(graph, module_identity, definition.base, visited)
+    }
+    None
+}

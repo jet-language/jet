@@ -1,0 +1,55 @@
+# The KeyBy contract: one key decides `==`, ordering, Map lookup and Set
+# membership. Both spellings of an Email find one entry and `==` agrees; a
+# path keys by its list of components, which orders item by item with a
+# shorter prefix first; re-inserting an equal key replaces the value and
+# keeps the first stored key; Set union and intersection keep the receiver's
+# values and difference keeps its own; iteration follows key order; a key may
+# be another KeyBy type. Every tier prints the same. The refusals: a fallible
+# or effectful key, a written Equatable or a trait marker beside KeyBy, a
+# Shared field, a key cycle and a Float key.
+fixture: d_key_traits1_contract.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_key_traits1_contract.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_key_traits1_contract.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_key_traits1_contract.stdout.expected
+stderr: empty
+step fallible: jet check fallible/main.jet
+exit: 1
+stderr: ~ "`Email.key` can fail with `Err`" # an error suffix on the key
+stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+step effectful: jet check effectful/main.jet
+exit: 1
+stderr: ~ "`Email.key` performs `Time`" # an effect row on the key
+stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+step written: jet check written/main.jet
+exit: 1
+stderr: ~ "`impl Equatable` on `Email` is a second `Equatable` beside its `KeyBy`" # a hand-written equal
+stderr: ~ "`Email` implements `KeyBy` here" # names the KeyBy declaration too
+stderr: ~ "jet-lang.dev/e/E0908" # the second-rule code
+step marker: jet check marker/main.jet
+exit: 1
+stderr: ~ "`#!Comparable` on `Email` is a second `Comparable` beside its `KeyBy`" # a signed marker
+stderr: ~ "`Email` implements `KeyBy` here" # names the KeyBy declaration too
+stderr: ~ "jet-lang.dev/e/E0908" # the second-rule code
+step shared: jet check shared/main.jet
+exit: 1
+stderr: ~ "`Tracked` holds `Shared<Counter>`, so its key could change while it is stored" # a Shared field
+stderr: ~ "jet-lang.dev/e/E0502" # the KeyBy contract code
+step cycle: jet check cycle/main.jet
+exit: 1
+stderr: ~ "key of `Node` comes back to `Node`" # Node keys by Link, which keys by Node
+step float: jet check float/main.jet
+exit: 1
+stderr: ~ "`Reading` can't be a map key type" # its key is a Float
+stderr: ~ "jet-lang.dev/e/E0502" # the Map-key code
