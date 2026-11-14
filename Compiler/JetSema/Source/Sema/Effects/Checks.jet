@@ -4347,19 +4347,35 @@ SemaStackDispatch: struct {
     targets: [Int]
 }
 
+// Each function's own frame and what its body does with function and trait
+// values (sema_effect_stack_own, sema_effect_stack_dynamic), one row per
+// function with a node, in input module and function order: its `node`, its
+// `#MaxDepth(n)` `depth`, its parameter count `arity`, and `own`, its frame's
+// bytes, or -1 when `why` names a value with no known size ("" otherwise).
+// `values` holds the rows' function values in the same order.
+SemaStackBodies: struct {
+    node: [Int]
+    depth: [Int]
+    arity: [Int]
+    own: [Int]
+    why: [String]
+    values: SemaStackValues
+}
+
+sema_effect_stack_bodies_empty: fn() -> SemaStackBodies Never! {
+    SemaStackBodies{node: [Int]{}, depth: [Int]{}, arity: [Int]{}, own: [Int]{}, why: [String]{}, values: SemaStackValues{calls: [SemaStackDynamicCall]{}, lambdas: [SemaStackLambda]{}, wrappers: [SemaStackTaken]{}, bodiless: [SemaStackTaken]{}, dispatches: [SemaStackDispatch]{}}}
+}
+
 // `closed` is an executable build, whose every function value the program
-// makes; a library's callers may pass any.
-sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool) -> SemaStackFrames {
-    defs := [TTypeDef]{}
-    loop graph in modules {
-        loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
-    }
-    types: jet_frame_types(defs)
+// makes; a library's callers may pass any. `bodies` are the functions' rows
+// (sema_effect_stack_bodies); a node's later function overrides an earlier
+// one's frame, as a walk of the functions in order writes it.
+sema_effect_stack_frames: fn(nodes: [SemaEffectNode], node_by_key: NameRows, bodies: SemaStackBodies, closed: Bool{false}) -> SemaStackFrames {
     frames := SemaStackFrames{
         own: (loop _ in nodes -> -1),
         why: (loop _ in nodes -> ""),
         depth: (loop _ in nodes -> 0),
-        edges: (loop node in nodes -> sema_effect_stack_node_targets(node, facts.node_by_key)),
+        edges: (loop node in nodes -> sema_effect_stack_node_targets(node, node_by_key)),
         carried: (loop _ in nodes -> 0),
         carrier: (loop _ in nodes -> -1),
         sealed: (loop _ in nodes -> ""),
@@ -4367,26 +4383,165 @@ sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffe
         open: (loop _ in nodes -> ""),
     }
     arity := (loop _ in nodes -> -1)
-    values := SemaStackValues{calls: [SemaStackDynamicCall]{}, lambdas: [SemaStackLambda]{}, wrappers: [SemaStackTaken]{}, bodiless: [SemaStackTaken]{}, dispatches: [SemaStackDispatch]{}}
-    loop module_row in inputs {
-        loop function in modules[module_row.module_index].functions {
-            node_index: sema_effect_node_index(facts.node_by_key, function.key) ?? next
-            frames.depth[node_index] = function.max_depth
-            arity[node_index] = function.params.len()
-            sema_effect_stack_own(types, function, node_index, frames)
-            sema_effect_stack_dynamic(function.tree, node_index, nodes, facts, closed, values)
-        }
+    loop (row, node_index) in bodies.node {
+        frames.depth[node_index] = bodies.depth[row]
+        arity[node_index] = bodies.arity[row]
+        if bodies.why[row] == "" -> frames.own[node_index] = bodies.own[row]
+        if bodies.why[row] != "" -> frames.why[node_index] = bodies.why[row]
     }
-    loop call in values.calls -> frames.dynamic_calls[call.node].push(call.span)
+    loop call in bodies.values.calls -> frames.dynamic_calls[call.node].push(call.span)
     if !closed {
-        loop call in values.calls {
+        loop call in bodies.values.calls {
             display: nodes[call.node].display_key
             frames.open[call.node] = if call.arity < 0 -> "a call through a trait value in {display}, whose implementations a library build leaves open" else -> "a call through a function value in {display}, whose targets a library build leaves open"
         }
         return frames
     }
-    sema_effect_stack_seal(frames, nodes, facts.node_by_key, arity, values)
+    sema_effect_stack_seal(frames, nodes, node_by_key, arity, bodies.values)
     frames
+}
+
+// A compiler thread is admitted for at least this many bytes of function
+// source, so a small program sizes its frames on the calling thread.
+SEMA_EFFECT_STACK_MIN_BYTES_PER_THREAD: 65536
+
+// Every function's row of `bodies` (SemaStackBodies), on up to `threads`
+// compiler threads. A function's row reads only its own body, the frame
+// sizes of the program's types, the graph's nodes and the call index, and
+// writes nothing shared. Threads claim consecutive parts of the functions
+// dynamically, each part into its own rows; the parts join in part order,
+// so the rows are the same for any thread count. The modules, the graph's
+// nodes and the call index move into the threads' shared state and back;
+// the index is returned.
+sema_effect_stack_bodies: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex, threads: CompilerThreads, bodies: &SemaStackBodies, closed: Bool{false}) -> SemaEffectCallIndex {
+    index: calls.move()
+    defs := [TTypeDef]{}
+    loop graph in modules {
+        loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
+    }
+    types: jet_frame_types(defs)
+    job_module := [Int]{}
+    job_function := [Int]{}
+    job_node := [Int]{}
+    weights := [Int]{}
+    work := 0
+    loop module_row in inputs {
+        loop (function_index, function) in modules[module_row.module_index].functions {
+            node_index: sema_effect_node_index(index.node_by_key, function.key) ?? next
+            job_module.push(module_row.module_index)
+            job_function.push(function_index)
+            job_node.push(node_index)
+            bodies.depth.push(function.max_depth)
+            bodies.arity.push(function.params.len())
+            weight: function.source_span.end - function.source_span.start
+            weights.push(weight)
+            work += weight
+        }
+    }
+    workers: compiler_threads_admit(threads, job_node.len(), work, SEMA_EFFECT_STACK_MIN_BYTES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop (job, node_index) in job_node {
+            sema_effect_stack_own(types, modules[job_module[job]].functions[job_function[job]], bodies)
+            sema_effect_stack_dynamic(modules[job_module[job]].functions[job_function[job]].tree, node_index, nodes, index, closed, bodies.values)
+        }
+        bodies.node = job_node.move()
+        return index
+    }
+    count := workers * SEMA_EFFECT_COLLECT_PARTS_PER_THREAD
+    if count > job_node.len() -> count = job_node.len()
+    bounds: compiler_threads_partition(weights, count)
+    shared_state: Shared{SemaStackShared{modules: [SemaGraphModuleResult]{}, nodes: [SemaEffectNode]{}, calls: [SemaEffectCallIndex]{}, types: [JetFrameTypes]{types.move()}, job_module: job_module.move(), job_function: job_function.move(), job_node: job_node.move(), closed: closed}}
+    sema_effect_stack_bodies_fill(shared_state, modules, nodes, index)
+    queue: Shared{SemaEffectCollectQueue{next: 0}}
+    parts := [SemaStackBodies]{}
+    loop _ in 0..<count -> parts.push(sema_effect_stack_bodies_empty())
+    sema_effect_stack_bodies_claimers(shared_state, bounds, queue, 0, workers, parts)
+    loop part in 0..<count -> sema_effect_stack_bodies_join(bodies, parts[part])
+    sema_effect_stack_bodies_take(shared_state, modules, nodes, bodies)
+}
+
+// What every frame-sizing thread reads: the modules, the graph's nodes, the
+// call index (its one row) and the program's frame types (its one row),
+// moved in and back out; each function's module, its row there and its node;
+// and whether the build is closed.
+SemaStackShared: struct {
+    modules: [SemaGraphModuleResult]
+    nodes: [SemaEffectNode]
+    calls: [SemaEffectCallIndex]
+    types: [JetFrameTypes]
+    job_module: [Int]
+    job_function: [Int]
+    job_node: [Int]
+    closed: Bool
+}
+
+// A part one thread sized: its number and its functions' rows.
+SemaStackBodiesPart: struct {
+    part: Int
+    bodies: SemaStackBodies
+}
+
+sema_effect_stack_bodies_fill: fn(shared_state: Shared<SemaStackShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], calls: &&SemaEffectCallIndex) {
+    permit: shared_state.guard_edit()
+    compiler_transfer_rows<SemaGraphModuleResult>(permit.value.modules, modules)
+    compiler_transfer_rows<SemaEffectNode>(permit.value.nodes, nodes)
+    permit.value.calls.push(calls)
+}
+
+// Moves the modules and the nodes back, the functions' nodes into `bodies`,
+// and returns the call index.
+sema_effect_stack_bodies_take: fn(shared_state: Shared<SemaStackShared>, modules: &[SemaGraphModuleResult], nodes: &[SemaEffectNode], bodies: &SemaStackBodies) -> SemaEffectCallIndex {
+    permit: shared_state.guard_edit()
+    compiler_transfer_rows<SemaGraphModuleResult>(modules, permit.value.modules)
+    compiler_transfer_rows<SemaEffectNode>(nodes, permit.value.nodes)
+    compiler_transfer_rows<Int>(bodies.node, permit.value.job_node)
+    permit.value.calls.pop() ?? panic("the effect call index left the threads' shared state")
+}
+
+// Appends a part's rows (all but its nodes) to `bodies`, leaving the part
+// empty.
+sema_effect_stack_bodies_join: fn(bodies: &SemaStackBodies, part: &SemaStackBodies) {
+    compiler_transfer_rows<Int>(bodies.own, part.own)
+    compiler_transfer_rows<String>(bodies.why, part.why)
+    compiler_transfer_rows<SemaStackDynamicCall>(bodies.values.calls, part.values.calls)
+    compiler_transfer_rows<SemaStackLambda>(bodies.values.lambdas, part.values.lambdas)
+    compiler_transfer_rows<SemaStackTaken>(bodies.values.wrappers, part.values.wrappers)
+    compiler_transfer_rows<SemaStackTaken>(bodies.values.bodiless, part.values.bodiless)
+    compiler_transfer_rows<SemaStackDispatch>(bodies.values.dispatches, part.values.dispatches)
+}
+
+// Runs frame-sizing threads `from..<workers`, one task each, and moves every
+// part a thread returned into `parts`.
+sema_effect_stack_bodies_claimers: fn(shared_state: Shared<SemaStackShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>, from: Int, workers: Int, parts: &[SemaStackBodies]) {
+    if from >= workers -> return
+    task.group sema_effect_stack_threads {
+        head: task sema_effect_stack_bodies_claimed(shared_state, bounds, queue)
+        sema_effect_stack_bodies_claimers(shared_state, bounds, queue, from + 1, workers, parts)
+        claimed := head.join() ?? panic(compiler_threads_failure_text(err))
+        loop claimed.len() > 0 {
+            done: claimed.pop() ?? break
+            parts[done.part] = done.bodies.move()
+        }
+    }
+}
+
+// One thread: sizes the parts it claims, each into its own rows.
+sema_effect_stack_bodies_claimed: fn(shared_state: Shared<SemaStackShared>, bounds: [Int], queue: Shared<SemaEffectCollectQueue>) -> [SemaStackBodiesPart] {
+    inputs: shared_state.guard_read()
+    claimed := [SemaStackBodiesPart]{}
+    ranks: queue.guard_read()
+    loop {
+        part: ranks.value.next.add(1)
+        if part >= bounds.len() - 1 -> break
+        bodies := sema_effect_stack_bodies_empty()
+        loop job in bounds[part]..<bounds[part + 1] {
+            // Passed straight through: a local binding of a guarded row would copy it.
+            sema_effect_stack_own(inputs.value.types[0], inputs.value.modules[inputs.value.job_module[job]].functions[inputs.value.job_function[job]], bodies)
+            sema_effect_stack_dynamic(inputs.value.modules[inputs.value.job_module[job]].functions[inputs.value.job_function[job]].tree, inputs.value.job_node[job], inputs.value.nodes, inputs.value.calls[0], inputs.value.closed, bodies.values)
+        }
+        claimed.push(SemaStackBodiesPart{part: part, bodies: bodies.move()})
+    }
+    claimed
 }
 
 // The nodes of `keys` that have a body, in order.
@@ -4664,11 +4819,14 @@ sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
     edges.push(target)
 }
 
-sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, node_index: Int, frames: &SemaStackFrames) {
+// One function's frame bytes, or why one of its values has no known size,
+// as the next row of `bodies`.
+sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, bodies: &SemaStackBodies) {
     total := JET_FRAME_ALLOWANCE
     loop parameter in function.params {
         bytes: jet_frame_value_bytes(types, parameter.ty) ?? {
-            frames.why[node_index] = "`{type_name(parameter.ty)}` has no known size"
+            bodies.own.push(-1)
+            bodies.why.push("`{type_name(parameter.ty)}` has no known size")
             return
         }
         total += bytes
@@ -4680,12 +4838,14 @@ sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, node_index: In
             sized[row.ty] = jet_frame_value_bytes(types, function.tree.types.types[row.ty]) ?? -1
         }
         if sized[row.ty] < 0 {
-            frames.why[node_index] = "`{type_name(function.tree.types.types[row.ty])}` has no known size"
+            bodies.own.push(-1)
+            bodies.why.push("`{type_name(function.tree.types.types[row.ty])}` has no known size")
             return
         }
         total += sized[row.ty]
     }
-    frames.own[node_index] = total
+    bodies.own.push(total)
+    bodies.why.push("")
 }
 
 // The worst-case stack of every call path from each node: its own frame
@@ -5411,7 +5571,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // Every call path's stack, by the frame model; FnBody keeps each frame
     // bound and each entry's path bound.
-    frames: sema_effect_stack_frames(modules, inputs, nodes, calls, closed)
+    bodies := sema_effect_stack_bodies_empty()
+    calls = sema_effect_stack_bodies(modules, inputs, nodes, calls, threads, bodies, closed: closed)
+    frames: sema_effect_stack_frames(nodes, calls.node_by_key, bodies, closed: closed)
     stack := sema_effect_stack_walk(nodes)
     loop node_index in 0..<nodes.len() {
         memory_diagnostics := [Diagnostic]{}

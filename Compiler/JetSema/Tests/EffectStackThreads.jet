@@ -1,0 +1,97 @@
+// sema.effects sizes every function's stack frame and reads the function
+// values its body calls and makes on compiler threads
+// (sema_effect_stack_bodies), joining the parts in function order: the
+// checked program is the same on one thread and on eight.
+use {
+    jet_sema.[
+        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge, SemaRegistrationModule,
+        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+        sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_has_error_since, sema_registration_prepare_graph,
+    ]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[CompilerThreads, Span, SymbolKeys, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+}
+
+// `count` groups of a padded leaf, a function that calls through a function
+// value, and two callers that pass it the leaf and a lambda. `run` calls the
+// even groups' callers, so the odd ones keep their own stack bounds. The
+// padding puts enough function source in the program for several threads.
+effect_stack_threads_source: fn(count: Int) -> String {
+    pad := ""
+    loop _ in 0..<40 -> pad = "{pad} frame sizing pads this body past a thread's admission"
+    parts := [String]{}
+    terms := [String]{}
+    loop group in 0..<count {
+        parts.push("step{group}: fn(value: Int) -> Int {{\n    //{pad}\n    value + {group}\n}}\n")
+        parts.push("apply{group}: fn(values: [Int], f: fn(Int) -> Int) -> Int {{\n    total := 0\n    loop value in values -> total += f(value)\n    total\n}}\n")
+        parts.push("named{group}: fn() -> Int {{\n    values: [Int]{{1, 2, {group}}}\n    apply{group}(values, step{group})\n}}\n")
+        parts.push("lambda{group}: fn() -> Int {{\n    values: [Int]{{{group}, 3}}\n    apply{group}(values, fn(value: Int) {{ value * {group} }})\n}}\n")
+        if group % 2 == 0 -> terms.push("named{group}() + lambda{group}()")
+    }
+    parts.push("run: fn() {{\n    print(\"{{{terms.join(" + ")}}}\")\n}}\n")
+    parts.join("")
+}
+
+// Each checked function's solved row, stack and heap bounds and frame bound,
+// then the diagnostics, of `source` checked on `threads`.
+effect_stack_threads_rows: fn(source: String, threads: CompilerThreads, failures: &[String]) -> [String] {
+    label: "{threads.cores} cores"
+    parsed := parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        failures.push("{label}: source parsing failed: {parsed.diagnostics:Debug}")
+        return [String]{}
+    }
+    table := module_table()
+    main_id: module_intern(table, "effect-stack-threads::main")
+    canonical: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\n", table) ?? {
+        failures.push("{label}: canonical effect declaration failed parsing")
+        return [String]{}
+    }
+    canonical_id: canonical.module_identity
+    facts: SemaBuildFacts{package_name: "effect-stack-threads", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "effect-stack-threads", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SymbolKeys]{}, [SemaRegistrationImportEdge]{}, "effect-stack-threads", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+        failures.push("{label}: registration failed: {err}")
+        return [String]{}
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
+    declared := stage.graph.move()
+    stage.graph = None
+    graph = declared.move() ?? {
+        failures.push("{label}: the declaration pass lost its registration graph")
+        return [String]{}
+    }
+    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None, None)
+    if !checked.complete {
+        failures.push("{label}: checking failed {checked.diagnostics:Debug}")
+        return [String]{}
+    }
+    rows := [String]{}
+    bounded := 0
+    loop module_row in checked.modules {
+        loop function in module_row.functions {
+            if function.stack != "" -> bounded += 1
+            rows.push("{function.key} {function.effects.solved:Debug} stack {function.stack} heap {function.heap} frame {function.frame_bound}")
+        }
+    }
+    if bounded == 0 -> failures.push("{label}: no function has a stack bound")
+    loop diagnostic in checked.diagnostics -> rows.push("{diagnostic:Debug}")
+    rows
+}
+
+#Test("effect_stack_threads") {
+    failures := [String]{}
+    source: effect_stack_threads_source(120)
+    single: effect_stack_threads_rows(source, compiler_threads_single(), failures)
+    eight: effect_stack_threads_rows(source, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}, failures)
+    if single.len() != eight.len() -> failures.push("one thread checked {single.len()} rows, eight threads {eight.len()}")
+    loop (row, text) in single {
+        if row < eight.len() && eight[row] != text -> failures.push("row {row}: one thread {text}, eight threads {eight[row]}")
+    }
+    if failures.len() > 0 -> panic("EffectStackThreads collected {failures.len()} failures:\n{failures.join("\n")}")
+}
