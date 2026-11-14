@@ -415,11 +415,11 @@ parser_expression_is_collecting_loop: fn(expr: Expr) -> Bool Never! {
 }
 
 // `prepared_value` marks the block of `name: #run value`. A binding
-// `other: #run { … }` directly inside it means that block was never closed
-// (a prepared value holds one expression, never a binding): report the
-// unclosed `{` and stop before the binding, so it parses on as the next
-// statement or declaration instead of nesting every later prepared binding
-// inside the first one without bound.
+// `other: #run { … }` or `other: #run value` directly inside it means that
+// block was never closed (a prepared value holds one expression, never a
+// binding): report the unclosed `{` and stop before the binding, so it parses
+// on as the next statement or declaration instead of nesting every later
+// prepared binding inside the first one without bound.
 parser_parse_value_block: fn(state: &JetParserState, depth: Int, prepared_value: Bool) -> ParsedBlock {
     if !prepared_value -> return parser_parse_value_lines(state, depth, false)
     // Rust reads a prepared value's lines as a callable body (#18).
@@ -446,7 +446,7 @@ parser_parse_value_lines: fn(state: &JetParserState, depth: Int, prepared_value:
         // As in `parser_parse_body_block`: stop under an enclosing abort.
         if parser_aborting(state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(state).span), statements: statements, tail: tail}
         before := state.position
-        if prepared_value && parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && parser_prep_verb_ahead(state, 2, TOKEN_LBRACE) {
+        if prepared_value && parser_current_kind(state) == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON && (parser_prep_verb_ahead(state, 2, TOKEN_LBRACE) || parser_prep_operand_ahead(state, 2)) {
             binding: parser_current(state)
             binding_name: parser_value(state, binding)
             parser_report_unclosed(state, open, "the binding `{binding_name}`", "prepared value")

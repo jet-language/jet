@@ -88,6 +88,7 @@ use {
         Token,
         TokenTables,
         token_decoded,
+        token_text,
     ]
 }
 
@@ -444,6 +445,27 @@ parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Boo
     kind == TOKEN_IDENT && parser_colon_head_colon(tokens, index) >= 0
 }
 
+// Whether the `{` at `open` begins the value of a prepared binding
+// `name: #run { … }`.
+parser_colon_prepared_value_open: fn(tokens: [Token], tables: TokenTables, open: Int) -> Bool Never! {
+    open >= 2 && tokens[open - 1].kind == TOKEN_PREP && tokens[open - 2].kind == TOKEN_COLON && token_text(tables, tokens[open - 1]) == "#run"
+}
+
+// Whether a prepared binding `name: #run { … }` or `name: #run value` starts
+// at `index`. A prepared value holds one expression, never a binding, so the
+// parser reads such a binding inside a prepared value's braces as the end of
+// a value whose `}` is missing (parser_parse_value_lines); this pass ends
+// that value's frame there too.
+parser_colon_prepared_binding_at: fn(tokens: [Token], tables: TokenTables, index: Int) -> Bool Never! {
+    if tokens[index].kind != TOKEN_IDENT -> return false
+    colon: parser_colon_code_at(tokens, index + 1)
+    if colon >= tokens.len() || tokens[colon].kind != TOKEN_COLON -> return false
+    prep: parser_colon_code_at(tokens, colon + 1)
+    if prep >= tokens.len() || tokens[prep].kind != TOKEN_PREP -> return false
+    after: parser_colon_code_at(tokens, prep + 1)
+    (after < tokens.len() && tokens[after].kind == TOKEN_LBRACE) || token_text(tables, tokens[prep]) == "#run"
+}
+
 // `tables` spells the tokens' names.
 parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] Never! {
     tokens := input.move()
@@ -485,6 +507,16 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             next
         }
         if !at_start && index > head_end && parser_colon_member_frame(frame) && parser_colon_member_break(tokens, index, previous) -> at_start = true
+        // A prepared binding inside a prepared value's braces ends that value,
+        // as if its `}` came first.
+        if at_start && frame == PARSER_COLON_FRAME_CODE && opens.len() > 0 && parser_colon_prepared_value_open(tokens, tables, opens[opens.len() - 1]) && parser_colon_prepared_binding_at(tokens, tables, index) {
+            frame = frames.pop() ?? PARSER_COLON_FRAME_MODULE
+            marker_body = saved_marker_bodies.pop() ?? false
+            head_kind = saved_heads.pop() ?? -1
+            head_marker = saved_marker_heads.pop() ?? PARSER_COLON_MARKER_NONE
+            opened = saved_opened.pop() ?? false
+            closed = opens.pop() ?? -1
+        }
         if at_start && frame != PARSER_COLON_FRAME_GROUP {
             at_start = false
             head: parser_colon_head_at(tokens, index)
