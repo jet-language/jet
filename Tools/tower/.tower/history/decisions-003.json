@@ -18450,6 +18450,193 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-10",
       "retiredAt": "2026-11-13T21:31:05.765Z"
+    },
+    {
+      "id": "D-VIS-ITEM1",
+      "cardId": "c0hmglyn",
+      "group": "design",
+      "title": "`priv` works on any declaration, not only modules and fields",
+      "situation": "Everything in Jet is public by default. Only a private module or a private struct field hides anything. To hide one helper from other packages, an author wraps it in a private module. Then every call needs the module prefix. A promise to add package privacy through the manifest has no form yet. The documented path from internal to public still names a public marker that was removed. The vote decides how one item is hidden, and what package privacy looks like.",
+      "gist": "Should `priv` work on any declaration, so one helper can be hidden without a wrapper module?",
+      "lesson": "Yes: `priv` on any declaration hides it outside its module; at top level, outside the package.",
+      "explainer": "",
+      "story": "Mei writes `priv fn pad` in her library. Her own code calls `pad` freely. Other packages get an error naming the `priv` line.",
+      "inWild": "Option            Hide one helper            Like\nA priv anywhere   priv fn pad                Kotlin, Swift, Rust\nB modules only    wrap in priv module        no peer\nC export list     exports: [banner]          Haskell, OCaml .mli",
+      "detail": "WHAT WE BUILD\n- Remove E0413 for declarations. `priv` = enclosing module and children; top level = package-only. `priv(package)` on nested declarations; at top level refused with a fix to write `priv`. E0417 on fields stays.\n- E0605 names the hidden item and its `priv` line. A `priv` type in a public signature is refused; `pub use` of a `priv` item is refused.\n- Loose files: a loose file is its own module, so `priv` hides from path importers; after `jet init` (D-LOOSE-GROW1) it widens to package-only, and `jet init --check` lists those items.\n\n- Lifecycle (D-STRUCT-LIFE1=A, stale since `pub` was removed): `priv` item, public item, `#Deprecated(since:, use:, removed_in:)`, removed. `_name` keeps only its unused and discovery meanings.\n- Tools/agent/vis-cutover.mjs:262-281 stops deleting `priv` before non-module declarations.\n\nEVIDENCE (r14 jet)\n- Probes q03 and r17: `priv fn` gives E0413 \"priv marks only modules and fields\"; `priv module helpers` with `helpers.pad` checks clean.\n- Audit p07: `_name` has no access meaning; `lib._helper()` is reachable from another package.\n\nIDS\nUnder A reverses two S18 statements (owner directive 2026-10-07, card #4723): no visibility marker on declarations, and package privacy via the manifest. Under B S18 loses its manifest sentence; under C S18 stands. Hosts #6050 (L-12).",
+      "options": [
+        {
+          "key": "A",
+          "name": "`priv` on any declaration",
+          "detail": "The module rule for `priv` applies to one item too. At top level, `priv` means package-only. This reverses two lines of the everything-public ruling. Gains: Hiding one helper is one word. One word works on items, modules and fields. Calls keep their plain names. Losses: Any declaration may now carry `priv`, one more word to read.",
+          "technical": "`priv` on any declaration means usable only in the enclosing module and its children. The package top level is its root module, so a top-level `priv` item is package-only. `priv(package)` works on nested items. A `priv` type in a public signature is refused, naming both lines. `jet doc` lists only public items. `jet explain NAME` prints the visibility and the line that set it.",
+          "code": "// A: priv on any declaration\npriv fn pad(s: String) -> String { \"  {s}\" }   // package only\nfn banner(s: String) -> String { pad(s) }      // public\nmodule io {\n    priv(package) fn width() -> Int { 80 }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Modules and fields only",
+          "detail": "Keep today's rule. A `priv(package) module` is the package level, and the manifest promise is dropped. Gains: No change to the ruling beyond one sentence. Losses: One hidden helper needs a wrapper and prefixed calls.",
+          "technical": "E0413 keeps its fix that moves the item into a `priv` module. The sentence promising manifest privacy is deleted.",
+          "code": "// B: hide one helper with a wrapper module\npriv module helpers {\n    fn pad(s: String) -> String { \"  {s}\" }\n}\nfn banner(s: String) -> String { helpers.pad(s) }"
+        },
+        {
+          "key": "C",
+          "name": "The manifest lists exports",
+          "detail": "package.jet gains `exports:`, a list of the names other packages may use. Gains: The public surface is one list in one file. Losses: Visibility lives far from the code it hides. A second mechanism beside `priv` modules and fields.",
+          "technical": "With no `exports:` everything is public. Importers reaching an unlisted name get E0605 naming the manifest line.",
+          "code": "// C: package.jet lists what importers may use\npackage { name: \"textkit\", exports: [banner] }\nfn pad(s: String) -> String { \"  {s}\" }     // not exported\nfn banner(s: String) -> String { pad(s) }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Public by default; private and internal on any declaration. Source: https://kotlinlang.org/docs/visibility-modifiers.html",
+          "code": "// Kotlin\nprivate fun pad(s: String) = \"  $s\"\ninternal fun width() = 80"
+        },
+        {
+          "lang": "Swift",
+          "note": "Access levels go on any declaration. Source: https://docs.swift.org/swift-book/documentation/the-swift-programming-language/accesscontrol/",
+          "code": "// Swift\nprivate func pad(_ s: String) -> String { \"  \" + s }\npublic func banner(_ s: String) -> String { pad(s) }"
+        },
+        {
+          "lang": "Rust",
+          "note": "Private by default; pub and pub(crate) widen one item. Source: https://doc.rust-lang.org/reference/visibility-and-privacy.html",
+          "code": "// Rust\nfn pad(s: &str) -> String { format!(\"  {s}\") }\npub(crate) fn width() -> usize { 80 }"
+        },
+        {
+          "lang": "Haskell",
+          "note": "A module header lists its exports. Source: https://www.haskell.org/onlinereport/haskell2010/haskellch5.html",
+          "code": "# Haskell: Textkit.hs\nmodule Textkit (banner) where\npad s = \"  \" ++ s"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "`priv` already means \"this module and its children\" on modules. Letting it sit on one item is the same rule, one step smaller.",
+        "gains": [
+          "One word for every level of hiding.",
+          "No wrapper modules or prefixed calls.",
+          "Fills the package level the manifest promise left empty."
+        ],
+        "losses": [
+          {
+            "loss": "Any declaration may now carry `priv`, one more word to read.",
+            "mitigation": "Public stays the default, so most code never writes it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Hiding one helper still costs a wrapper and a prefix on every call."
+          },
+          {
+            "key": "C",
+            "reason": "It adds a second mechanism, far from the code it hides."
+          }
+        ],
+        "tradeoff": "One optional word on declarations, for hiding any helper without a wrapper."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked A's only loss, which named a ruling rather than a cost to users. The reversal now sits in A's description for the owner, and the real cost, one more word any declaration may carry, is the stated loss; A still wins."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `priv` work on any declaration, so one helper can be hidden without a wrapper module?",
+        "lesson": "Yes: `priv` on any declaration hides it outside its module; at top level, outside the package.",
+        "trio": {
+          "current": {
+            "note": "Today: hiding one helper needs a wrapper module and a prefix on every call.",
+            "code": "// Today\npriv fn width() -> Int { 80 }   // E0413: modules and fields only\npriv module helpers {\n    fn pad(s: String) -> String { \"  {s}\" }\n}\nfn banner(s: String) -> String { helpers.pad(s) }"
+          },
+          "wild": {
+            "lang": "Kotlin",
+            "note": "Public by default; `private` and `internal` work on any declaration.",
+            "code": "// Kotlin\nprivate fun pad(s: String) = \"  $s\"   // this file only\ninternal fun width() = 80             // this module only\nfun banner(s: String) = pad(s)        // public"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`priv` on any declaration",
+            "gist": "The module rule for `priv` applies to one item too. At top level, `priv` means package-only. This reverses two lines of the everything-public ruling.",
+            "gains": [
+              "Hiding one helper is one word.",
+              "One word works on items, modules and fields.",
+              "Calls keep their plain names."
+            ],
+            "losses": [
+              "Any declaration may now carry `priv`, one more word to read."
+            ],
+            "proposed": {
+              "code": "// A: priv on any declaration\npriv fn pad(s: String) -> String { \"  {s}\" }   // package only\nfn banner(s: String) -> String { pad(s) }      // public\nmodule io {\n    priv(package) fn width() -> Int { 80 }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Modules and fields only",
+            "gist": "Keep today's rule. A `priv(package) module` is the package level, and the manifest promise is dropped.",
+            "gains": [
+              "No change to the ruling beyond one sentence."
+            ],
+            "losses": [
+              "One hidden helper needs a wrapper and prefixed calls."
+            ],
+            "proposed": {
+              "code": "// B: hide one helper with a wrapper module\npriv module helpers {\n    fn pad(s: String) -> String { \"  {s}\" }\n}\nfn banner(s: String) -> String { helpers.pad(s) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "The manifest lists exports",
+            "gist": "package.jet gains `exports:`, a list of the names other packages may use.",
+            "gains": [
+              "The public surface is one list in one file."
+            ],
+            "losses": [
+              "Visibility lives far from the code it hides.",
+              "A second mechanism beside `priv` modules and fields."
+            ],
+            "proposed": {
+              "code": "// C: package.jet lists what importers may use\npackage { name: \"textkit\", exports: [banner] }\nfn pad(s: String) -> String { \"  {s}\" }     // not exported\nfn banner(s: String) -> String { pad(s) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "`priv` already means \"this module and its children\" on modules. Letting it sit on one item is the same rule, one step smaller.",
+          "gains": [
+            "One word for every level of hiding.",
+            "No wrapper modules or prefixed calls.",
+            "Fills the package level the manifest promise left empty."
+          ],
+          "losses": [
+            {
+              "loss": "Any declaration may now carry `priv`, one more word to read.",
+              "mitigation": "Public stays the default, so most code never writes it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Hiding one helper still costs a wrapper and a prefix on every call."
+            },
+            {
+              "key": "C",
+              "reason": "It adds a second mechanism, far from the code it hides."
+            }
+          ],
+          "tradeoff": "One optional word on declarations, for hiding any helper without a wrapper."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:56:38.413Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-14T03:24:46.581Z"
     }
   ]
 }
