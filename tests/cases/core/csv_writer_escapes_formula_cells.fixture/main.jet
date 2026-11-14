@@ -1,0 +1,32 @@
+use {
+    csv: core.encoding.csv
+    files: core.files
+}
+
+#Codable
+Line: struct { item: String, amount: Int, note: String }
+
+run: fn() {
+    rows: [[String]]{[String]{"=SUM(A1:A2)", "+1", "-12.5", "@cmd", "\tlead", "-2+3", "'quoted", "a,=b", "plain"}}
+    print(csv.to_string(rows))
+    print(csv.to_string(rows, formulas: .Keep))
+
+    lines: [Line]{Line{item: "=HYPERLINK(\"x\")", amount: -5, note: "+fee"}}
+    print(csv.to_string(lines).replace("\n", "|"))
+
+    dicts: csv.dict_rows("item,note\n@SUM(1),-3\n") ?? panic("dict rows")
+    print(csv.write_dict(dicts).replace("\n", "|"))
+    print(csv.write_dict(dicts, formulas: .Keep).replace("\n", "|"))
+
+    output: files.create("out.csv") ?? panic("create")
+    writer := csv.writer(output) ?? panic("writer")
+    writer.write(["=1+1", "-7", "=\"q\",x", "ok"]) ?? panic("record")
+    writer.finish() ?? panic("finish")
+    print((files.read("out.csv") ?? panic("read")).trim())
+
+    kept_output: files.create("kept.csv") ?? panic("create kept")
+    kept := csv.writer(kept_output, formulas: .Keep) ?? panic("kept writer")
+    kept.write(["=1+1", "ok"]) ?? panic("kept record")
+    kept.finish() ?? panic("kept finish")
+    print((files.read("kept.csv") ?? panic("read kept")).trim())
+}

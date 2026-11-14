@@ -1,0 +1,15 @@
+use csv: core.encoding.csv
+
+#Codable
+Note: struct { name: String, text: String }
+
+run: fn() {
+    notes: [Note]{Note{name: "'quoted", text: "'=not a formula"}, Note{name: "plain", text: "'"}}
+    written: csv.to_string(notes)
+    print(written.replace("\n", "|"))
+    back: csv.decode<Note>(written) ?? panic("decode")
+    print(back.len())
+    loop note in back -> print("{note.name}|{note.text}")
+    rows: csv.parse(written) ?? panic("parse")
+    print(rows[1][0])
+}
