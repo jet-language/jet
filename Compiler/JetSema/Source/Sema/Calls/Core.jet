@@ -14,6 +14,7 @@ use jet_foundation.[
     CoreCallDefault,
     CoreCallProjectionError,
     CoreCallRecord,
+    CoreCallPureRoute,
     CoreCallSignatureRequest,
     CoreCallTypeConstraint,
     CoreCallTypeParameter,
@@ -1181,7 +1182,9 @@ sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args:
     if accepted && context.call_facts.len() > start {
         last: context.call_facts.len() - 1
         if record.marker != None -> context.call_facts[last].lifecycle = record.marker
-        if record.symbol == .Prelude(symbol) -> context.call_facts[last].runtime_export = Val(symbol.copy())
+        // A Math route computes from its arguments alone, so its export is
+        // not one the runtime answers from the running program.
+        if record.symbol == .Prelude(symbol) && record.pure_route != CoreCallPureRoute.Math -> context.call_facts[last].runtime_export = Val(symbol.copy())
     }
     accepted
 }

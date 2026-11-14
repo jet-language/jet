@@ -1687,6 +1687,14 @@ sema_codec_impl_pending: fn(implementation: SemaRegistrationImpl) -> Bool Never!
 // has a body.
 sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, method: String) -> [Stmt]? Never! {
     if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> return None
+    sema_codec_generated_body(graph, module_index, row, method)
+}
+
+// The body the codec waves give `method` of generated codec impl `row` of
+// module `module_index`, made from its type's declaration whether or not a
+// wave has filled the impl yet; None for an impl the program wrote.
+sema_codec_generated_body: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, method: String) -> [Stmt]? Never! {
+    if !graph.modules[module_index].impls[row].declaration.is_generated_serde -> return None
     trait_name: graph.modules[module_index].impls[row].trait_name ?? return None
     positions := [String:Int]{}
     sema_codec_index_module(graph.modules[module_index].program.items, module_index, positions)
@@ -1695,12 +1703,15 @@ sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row
     Val(sema_serde_items_method_body(generated, method))
 }
 
-// sema_codec_pending_body of the method `id` of the impl of a nominal
-// named `type_name`, which a nominal's method row shares.
-sema_codec_pending_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: SymbolID) -> [Stmt]? Never! {
+// The generated codec body of the method `id` of the impl of a nominal named
+// `type_name`, which a nominal's method row shares. The nominal's row keeps
+// the empty declaration it was registered with: a codec wave fills only the
+// impl row (sema_codec_set_body), so a compile-time check after the wave
+// still reads the body from here.
+sema_codec_method_body: fn(graph: SemaRegistrationGraph, type_name: String, id: SymbolID) -> [Stmt]? Never! {
     loop reference in sema_registration_impl_rows_named(graph, type_name) {
         loop method in graph.modules[reference.module_index].impls[reference.row].methods {
-            if method.symbol.id == id -> return sema_codec_pending_body(graph, reference.module_index, reference.row, method.declaration.name)
+            if method.symbol.id == id -> return sema_codec_generated_body(graph, reference.module_index, reference.row, method.declaration.name)
         }
     }
     None

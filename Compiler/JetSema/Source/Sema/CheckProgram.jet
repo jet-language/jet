@@ -2709,7 +2709,7 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
             if module_index >= 0 && declaring != module_index -> return None
             // copy: the source is the caller's own; the row stays in the graph.
             declaration := graph.modules[declaring].nominals[owner].methods[index].declaration.copy()
-            if declaration.body.len() == 0 && sema_codec_pending_method_body(graph, graph.modules[declaring].nominals[owner].symbol.name, graph.modules[declaring].nominals[owner].methods[index].symbol.id) == .Val(body) -> declaration.body = body
+            if declaration.body.len() == 0 && sema_codec_method_body(graph, graph.modules[declaring].nominals[owner].symbol.name, graph.modules[declaring].nominals[owner].methods[index].symbol.id) == .Val(body) -> declaration.body = body
             return Val(SemaComptimeFunctionSource{declaration: declaration, symbol: graph.modules[declaring].nominals[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].nominals[owner].methods[index].declaration, graph.modules[declaring].nominals[owner].ty, None), raw_protocol_return: graph.modules[declaring].nominals[owner].methods[index].raw_protocol_return})
         }
         .ImplMethod(declaring, owner, index) -> {
@@ -8564,7 +8564,8 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
 // value's included: the compiler's own process would answer for every run's,
 // and a cross build for another machine's. With
 // `runtime_runs` (a local value), every call the runtime answers is refused
-// too, whatever its row: a Core call a runtime export answers, or a runtime
+// too, whatever its row: a Core call a runtime export answers (a Math route
+// computes from its arguments alone and is not one), or a runtime
 // binding or other foreign body. Their rows grant authority but don't prove
 // the call pure: the runtime reads the process it runs in (the live and auth
 // registry cells, the clocks, entropy), and the compiler's own process would
