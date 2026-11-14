@@ -27,7 +27,7 @@ run: fn() {
     print("argument {total}")
 
     base := 10
-    snapshot: fn() { base }
+    snapshot: fn() -> Int { base }
     kept: [snapshot]
     base = 20
     print("escaping copy {kept[0]()}, source {base}")
@@ -43,7 +43,7 @@ Box: struct {
 // writes 22 through its own `:=` binding.
 closure_capture_snapshot_lesson: fn() {
     count := 10
-    next: fn() {
+    next: fn() -> Int {
         count += 1
         count
     }
@@ -52,14 +52,14 @@ closure_capture_snapshot_lesson: fn() {
     print(count)
 
     boxed := Box{value: 11}
-    read: fn() { boxed.value }
+    read: fn() -> Int { boxed.value }
     boxed.value = 22
     print(read())
     print(boxed.value)
 
     x := 2
-    outer: fn(y: Int) {
-        inner: fn(z: Int) { x + y + z }
+    outer: fn(y: Int) -> Int {
+        inner: fn(z: Int) -> Int { x + y + z }
         inner(4)
     }
     print(outer(3))

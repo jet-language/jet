@@ -1328,22 +1328,28 @@ parameter.
 ## Closures and function values
 
 A lambda is `fn(params) { body }`: the `fn` keyword, its parameters and a
-braced body whose last value is the result. Parameter annotations may be
-omitted when an expected function type supplies them; with no expected type,
-omitted annotations report **E0801** (S46).
-A locally inferred value lambda keeps the failure contract proved by its own
-body; a body with no failure has a `Never` failure rail. A same-named file
-function cannot supply the local binding's call or failure contract.
+braced body whose last value is the result. A lambda passed where a function
+type is expected may leave out the parameter types and result that the
+expected type fixes. With no expected type, omitted parameter annotations
+report **E0801** (S46).
+A lambda stored where no type is expected writes its result as a named
+function does (D-LAMBDA-STORED1=A). With no written result it returns nothing,
+so a value its body ends in is thrown away (**E0433**).
+A stored lambda keeps the failure contract proved by its own body, whether or
+not it writes a result. A body with no failure has a `Never` failure rail. A
+same-named file function cannot supply the local binding's call or failure
+contract.
 Name resolution is lexical for calls as well as value reads: a non-callable
 local also shadows a same-named file function and calling it reports **E0803**.
 Use an explicit module-qualified call to select a declared function while
 keeping a same-named local value in scope.
 
 ```jet
-square: fn(n: Int) { n * n }
-increment: fn(n: Int) {
+square: fn(n: Int) -> Int { n * n }
+increment: fn(n: Int) -> Int {
     n + 1
 }
+show: fn(n: Int) { print(n) }
 ```
 
 `->` is the callable and control arrow. A named function or method has exactly

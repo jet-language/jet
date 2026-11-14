@@ -76,7 +76,7 @@ dc_source_paths: fn() -> [String] {
 // `JT0001`) or a word-shaped code (`E-WEB-RUN`).
 dc_is_code: fn(code: String) -> Bool {
     bytes: code.bytes()
-    digits: fn(from: Int) { bytes.len() > from && bytes.slice(from, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) }) }
+    digits: fn(from: Int) -> Bool { bytes.len() > from && bytes.slice(from, bytes.len()).all(fn(byte) { byte >= (U8{48}) && byte <= (U8{57}) }) }
     if bytes.len() == 5 && (code.starts_with("E") || code.starts_with("L") || code.starts_with("W") || code.starts_with("R")) -> return digits(1)
     if bytes.len() == 6 && code.starts_with("JT") -> return digits(2)
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false

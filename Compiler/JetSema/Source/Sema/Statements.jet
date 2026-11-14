@@ -5792,6 +5792,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     // `:=` number name a use decided on an earlier pass declares that type
     // (Expressions/NumberNames.jet).
     declared: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, environment, program)) else if binding.mutable -> sema_expr_number_retype(binding.name_span, context.number_retypes_known) else -> None
+    init_diagnostic_start: diagnostics.len()
     checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, declared, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, declared, environment, program, scopes, state, tail_store, context, lambda_escapes, diagnostics)
     loop state.deferred_view_opens.len() > deferred_before -> _ := state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
@@ -5801,6 +5802,9 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
         sema_stmt_declare_unchecked_binding(binding, environment, program, scopes, context)
         return None
     }
+    // A body already reported (an unknown parameter type, say) has no
+    // trustworthy last value to call lost.
+    if binding.ty == None && diagnostics.len() == init_diagnostic_start -> sema_stmt_check_stored_lambda_result(binding, checked_value, diagnostics)
     init: sema_stmt_owning_view_init(checked_value, binding, environment, program, scopes, context)
     owned: if !binding.mutable && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_copy_site_check_view_binding(init, environment, program, scopes, state, context, diagnostics) else -> sema_copy_site_check_guard_owned(init, environment, program, scopes, state, context, diagnostics, false)
     if !owned || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, scopes, context, diagnostics)) {
@@ -8699,6 +8703,29 @@ sema_stmt_lost_tail_diagnostic: fn(function: String, value_type: String, tail: E
     span := expr_span(tail)
     if tail == .OrFallback(value, _, _, _, _) -> span = Span{start: expr_span(value).start, end: span.end}
     sema_error("E0433", span, "this {value_type} value is thrown away", "`{function}` has no return type, so it returns nothing and the value of its last line is lost", "if `{function}` should return it, write `-> {value_type}` after its parameter list; to discard it on purpose, write `.drop(\"reason\")`")
+}
+
+// A lambda stored where no type is expected follows the declaration rule: with
+// no written result it returns nothing, as a named function does, so a value
+// its body ends in is thrown away (E0433) and `square: fn(n: Int) -> Int`
+// writes the result. A failure the body passes up stays inferred.
+sema_stmt_check_stored_lambda_result: fn(binding: Binding, init: TExpr, diagnostics: &[Diagnostic]) {
+    if binding.init == .Lambda(lambda, _) && lambda.result == None && sema_expr_unwrap_tag(init.ty) == .Fn(_, ret, _, _, _, _) {
+        result: ret ?? return
+        success: if sema_expr_unwrap_tag(result) == .Result(ok, _) -> ok else -> result
+        if sema_stmt_type_is_unit_success(success) -> return
+        value_type: type_name(success)
+        tail := Expr?{None}
+        if lambda.body == {
+            .Expr(value) -> tail = Val(value)
+            .Block(statements) -> if statements.len() > 0 && statements[statements.len() - 1] == .Expr(last) -> tail = Val(last)
+        }
+        if tail == .Val(last) {
+            diagnostics.push(sema_stmt_lost_tail_diagnostic(binding.name, value_type, last))
+            return
+        }
+        diagnostics.push(sema_error("E0433", lambda.span, "this {value_type} value is thrown away", "`{binding.name}` has no return type, so it returns nothing and the value its body gives back is lost", "if `{binding.name}` should return it, write `-> {value_type}` after its parameter list"))
+    }
 }
 
 // The call a statement drops, under an automatic or written `?` or bare, and

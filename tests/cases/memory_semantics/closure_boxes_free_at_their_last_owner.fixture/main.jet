@@ -67,7 +67,7 @@ by_value: fn(from: Int, to: Int) -> Int {
     name: "capture"
     total := 0
     loop i in from..<to {
-        f: fn(x: Int) { x + data[x % 3] + name.len() }
+        f: fn(x: Int) -> Int { x + data[x % 3] + name.len() }
         total += f(i)
     }
     total
@@ -101,7 +101,7 @@ copied: fn(from: Int, to: Int) -> Int {
     data: [Int]{1, 2, 3}
     total := 0
     loop i in from..<to {
-        f: fn(x: Int) { x + data[x % 3] }
+        f: fn(x: Int) -> Int { x + data[x % 3] }
         held: [fn(Int) -> Int]{f, fn(x: Int) { x * data[0] }}
         total += held[1](i) + held[0](i) + held.len()
     }
@@ -305,7 +305,7 @@ captures_cycle_struct: fn(from: Int, to: Int) -> Int {
     total := 0
     loop i in from..<to {
         x: CycleOnly{ty: CycleShape.Named{name: "n{i % 1000}"}}
-        f: fn(n: Int) { n + cycle_weight(x.ty) }
+        f: fn(n: Int) -> Int { n + cycle_weight(x.ty) }
         total += f(i)
     }
     total

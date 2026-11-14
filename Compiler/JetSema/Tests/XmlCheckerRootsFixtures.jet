@@ -2,8 +2,8 @@
 text: fn(key: String) -> String Never! { key.copy() }
 object: fn(key: Int) -> Int Never! { key }
 xml_roots_predicate: fn() -> Bool Never! {
-    text: fn(key: String) -[]> { key == "value" }
-    object: fn(key: String) -[]> { text(key) }
+    text: fn(key: String) -[]> Bool { key == "value" }
+    object: fn(key: String) -[]> Bool { text(key) }
     object("value")
 }
 xml_roots_byte: fn() -> U8 Never! {
@@ -17,8 +17,8 @@ xml_roots_window: fn(bytes: [U8]) -> U8 Never! {
 }
 has: fn(key: String) -> Bool { Err("global failure") }
 xml_roots_local_failure_contract: fn() -> Bool Never! {
-    has: fn(key: String) { !(key == "") }
-    text: fn(key: String) { has(key) }
+    has: fn(key: String) -> Bool { !(key == "") }
+    text: fn(key: String) -> Bool { has(key) }
     text("value")
 }
 xml_roots_next: fn() -> Int Never! {

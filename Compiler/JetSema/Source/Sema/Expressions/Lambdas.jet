@@ -2446,9 +2446,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             lambda_work.meta.fallible_carrier = Val(ret_ty)
         }
     }
-    // A failure-open slot's row names the success of an inferred carrier.
+    // A failure-open slot's row, and a written plain result (`fn(n: Int) -> Int`,
+    // as on a named function), name the success of an inferred carrier.
     fit_ty := ret_ty
-    if failure_open && lambda_work.meta.fallible_propagation && ret_ty == .Result(success, _) -> fit_ty = success.copy()
+    if (failure_open || (lambda.result != None && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"}))) && lambda_work.meta.fallible_propagation && ret_ty == .Result(success, _) -> fit_ty = success.copy()
     if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? fit_ty, fit_ty, environment, program) {
         // The inferred carrier cannot fit a plain expected return: the failure
         // has no route out of this callback (E0403).

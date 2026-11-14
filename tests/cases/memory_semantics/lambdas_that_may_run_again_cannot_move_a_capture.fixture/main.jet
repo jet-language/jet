@@ -12,7 +12,7 @@ each_item: fn() -> Int {
 // Bound, then passed on: the binding's own calls are not the only ones.
 passed_on: fn() -> Int {
     s: "abc".repeat(3)
-    add: fn(acc: Int, x: Int) { acc + x + consume(s.move()) }
+    add: fn(acc: Int, x: Int) -> Int { acc + x + consume(s.move()) }
     [1, 2, 3].fold(0, add)
 }
 
@@ -25,7 +25,7 @@ handed_back: fn() -> fn() -> Int {
 // Bound and only called directly: its one call is counted.
 called_once: fn() -> Int {
     s: "abc".repeat(3)
-    finish: fn() { consume(s.move()) }
+    finish: fn() -> Int { consume(s.move()) }
     finish()
 }
 

@@ -44,7 +44,7 @@ family_worker: fn(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> 
         )
             .to_list().len() > 0
     }
-    stop: fn(n: Int) {
+    stop: fn(n: Int) -> Int {
         if n == (if family == 0 -> 1 else -> 2) {
             started.send(1)
             blocked.receive() ?? panic("blocking channel closed")

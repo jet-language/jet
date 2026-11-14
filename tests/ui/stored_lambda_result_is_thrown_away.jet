@@ -1,0 +1,23 @@
+// A lambda stored where no type is expected follows the declaration rule: with
+// no written result it returns nothing, so the value its body ends in is thrown
+// away, as a named function's last line is.
+run: fn() {
+    square: fn(n: Int) { n * n }
+    total: fn(values: [Int]) {
+        sum := 0
+        loop value in values {
+            sum += value
+        }
+        sum
+    }
+
+    // Quiet: a written result, a Unit body, and a lambda an expected type
+    // types.
+    cube: fn(n: Int) -> Int { n * n * n }
+    show: fn(n: Int) { print(n) }
+    doubled: [1, 2].map(fn(n: Int) { n * 2 })
+    square(3)
+    total([1, 2])
+    show(cube(2))
+    print(doubled.len())
+}

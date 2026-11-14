@@ -754,9 +754,9 @@ gain_cells: fn(row: GainRow, older: String?) -> [String] Never! {
 }
 
 total_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
-    ns: fn(measured: Measured) { measured.ns }
-    rss: fn(measured: Measured) { measured.rss }
-    bytes: fn(measured: Measured) { measured.bytes }
+    ns: fn(measured: Measured) -> Int { measured.ns }
+    rss: fn(measured: Measured) -> Int { measured.rss }
+    bytes: fn(measured: Measured) -> Int { measured.bytes }
     base_ns: total(rows, "base", ns)
     candidate_ns: total(rows, "candidate", ns)
     control_ns: total(rows, "control", ns)
@@ -769,7 +769,7 @@ total_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
 }
 
 mean_cells: fn(rows: [GainRow], older: String?) -> [String] Never! {
-    ns: fn(measured: Measured) { measured.ns }
+    ns: fn(measured: Measured) -> Int { measured.ns }
     before: if older != None -> ["", ratio(rows, ns, "base", "older")] else -> [String]{}
     to_ceiling: stats.geometric_mean(ratios(rows, ns, "candidate", "ceiling")).map(fn(mean) { fmt.decimal(mean, 2) }) ?? "-"
     before.concat(["", "", ratio(rows, ns, "candidate", "base"), "", ratio(rows, ns, "control", "base"), "", to_ceiling, "", "", ratio(rows, fn(measured: Measured) { measured.rss }, "candidate", "base"), "", "", "", ratio(rows, fn(measured: Measured) { measured.bytes }, "candidate", "base"), "", ""])

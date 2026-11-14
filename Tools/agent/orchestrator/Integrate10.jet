@@ -204,7 +204,7 @@ run: fn() {
         }
         else -> print("no built jetpack (census jetpack row failed); tests use the seed's")
     }
-    runsub: fn(step: String, sub: String) { Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit) }
+    runsub: fn(step: String, sub: String) -> ProcessSpec { Sh{"bash {"{g}/runsub6.sh"} {step} {sub}"}.spec().env("I", i).env("T", t).env("SELF", self_jet).env("ID", id).env("G", g).env("B", "{i}/basetree").env("C0", seed).stdout(.Inherit).stderr(.Inherit) }
     golden_rcs := [String]{}
     if built {
         // Every SUB runs its test lines as one job, four SUBs at a time.

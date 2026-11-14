@@ -25,7 +25,7 @@ make_counter: fn(owner: &&Shared<Int>) -> fn(Int) -> Int {
 }
 
 take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
-    callback: fn() {
+    callback: fn() -> Shared<Int> {
         owner
     }
     return callback()
@@ -33,7 +33,7 @@ take_once: fn(owner: &&Shared<Int>) -> Shared<Int> {
 
 replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
     current := owner.move()
-    callback: fn() {
+    callback: fn() -> Shared<Int> {
         current = Shared{13}
         current
     }
@@ -41,7 +41,7 @@ replace_then_take: fn(owner: &&Shared<Int>) -> Shared<Int> {
 }
 
 take_captured_first: fn(pair: &&SharedPair) -> Shared<Int> {
-    callback: fn() {
+    callback: fn() -> Shared<Int> {
         pair.first
     }
     return callback()

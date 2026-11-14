@@ -62,7 +62,7 @@ elf_symbols: fn(bytes: [U8], name: String) -> Symbols {
     // The magic and EI_CLASS ELFCLASS64.
     if bytes.len() < 64 || (binary.unpack(">IB", bytes.slice(0, 5)) ?? []) != [ELF_MAGIC, 2] -> process.fail(1, "{name}: not an ELF64 object")
     // The little-endian fields `format` reads from the `size` bytes at `at`.
-    fields: fn(at: Int, format: String, size: Int) { binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}") }
+    fields: fn(at: Int, format: String, size: Int) -> [Int] { binary.unpack(format, bytes.slice(at, at + size)) ?? process.fail(1, "an ELF64 object ends inside the {size} bytes at {at}") }
     // e_shoff, e_flags, e_ehsize, e_phentsize, e_phnum, e_shentsize, e_shnum
     header: fields(0x28, "<QIHHHHH", 22)
     symbols := Symbols{name: name.copy(), defines: [], references: []}

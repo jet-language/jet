@@ -23,7 +23,7 @@ seven: fn() -> Int {
 run: fn() {
     feed: Shared{Feed{stream: Stream{fd: 7}, listeners: [], peers: []}}
     back: feed.downgrade()
-    listener: fn() { if back.upgrade() == .Val(f) -> f.stream.fd else -> 0 }
+    listener: fn() -> Int { if back.upgrade() == .Val(f) -> f.stream.fd else -> 0 }
     feed.listeners.push(listener)
     feed.listeners.push(seven)
     twin: Shared{Feed{stream: Stream{fd: 8}, listeners: [], peers: []}}

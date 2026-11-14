@@ -3,10 +3,10 @@ Error [jet.UseAfterMove]: `name` was consumed by `name.move()`, so it can't be u
     |
   5 |     print(name)
     |           ^^^^
-  --> tests/ui/E0121_lambda_move_outer_use.jet:3:15
+  --> tests/ui/E0121_lambda_move_outer_use.jet:3:25
     |
-  3 |     f: fn() { name.move() }
-    |               ^^^^^^^^^ `name` moved to `name.move()` here
+  3 |     f: fn() -> String { name.move() }
+    |                         ^^^^^^^^^ `name` moved to `name.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
  Fix: Stop using `name` after the move, or give `name.move()` a copy with `name.copy()` where it moved.
 More: jet-lang.dev/e/E0121
