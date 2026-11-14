@@ -521,19 +521,21 @@ jet_driver_build_findings: fn(snapshot: JetDriverAuthorizedSourceSnapshot, findi
             report.applicability = Val(DiagnosticFixApplicability.Suggested)
             report.safety = Val(DiagnosticFixSafety.NeedsReview)
         }
-        located: diagnostic_with_source_path(report, finding.module, 0)
+        located: diagnostic_with_source_path(report, finding.file, 0)
         if finding.tier == "Error" -> errors.push(located) else -> tidy.push(located)
     }
 }
 // The edit of a finding's `syntax.rewrite` fix: the callee as the call
 // writes it (the name or `module.name` path its span starts with) becomes
 // the replacement, and the call's arguments stay. None without a rewrite,
-// or when the call's file is not one of the build's sources.
+// or when the call's file is not one of the build's sources. The finding
+// names its file by display path, as a diagnostic does.
 jet_driver_build_finding_rewrite: fn(snapshot: JetDriverAuthorizedSourceSnapshot, finding: BuildSessionFinding) -> TextEdit? Never! {
     if finding.rewrite == "" -> return None
+    physical: jet_driver_physical_path(jet_driver_entry_root_path(snapshot), finding.file)
     loop root in snapshot.roots {
         loop file in root.files {
-            if file.path != finding.module -> next
+            if file.path != physical -> next
             bytes: file.source.bytes()
             end := finding.at_start
             loop end < finding.at_end && end < bytes.len() {

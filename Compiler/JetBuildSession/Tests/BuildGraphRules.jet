@@ -280,12 +280,12 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     texts: [BuildSessionValue]{.Text(value: "mypkg.NoPrintInLib"), .Text(value: "Tidy"), .Text(value: "library code prints"), .Text(value: "the caller owns the terminal"), .Text(value: "log it"), .Text(value: "main.jet")}
     found := [BuildSessionValue]{meta.copy()}
     loop text in texts -> found.push(text.copy())
-    found.push(.Span(start: 40, end: 48))
+    found.push(.Span(start: 40, end: 48, file: ""))
     found.push(.Text(value: "log.info"))
     assert(build_graph_rules_ok(build_session_call(a, "compiler.report", found, None, false, 9, 10)))
     stray := [BuildSessionValue]{foreign}
     loop text in texts -> stray.push(text.copy())
-    stray.push(.Span(start: 50, end: 58))
+    stray.push(.Span(start: 50, end: 58, file: ""))
     stray.push(.Text(value: ""))
     assert(build_graph_rules_failed(build_session_call(a, "compiler.report", stray, None, false, 11, 12)))
     untiered := found.copy()
@@ -302,7 +302,7 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.findings.len(), 2)
     assert_eq(permit.value.findings[0].code, "mypkg.NoPrintInLib")
     assert_eq(permit.value.findings[0].tier, "Tidy")
-    assert_eq(permit.value.findings[0].module, "main.jet")
+    assert_eq(permit.value.findings[0].file, "main.jet")
     assert_eq(permit.value.findings[0].at_start, 40)
     assert_eq(permit.value.findings[0].at_end, 48)
     assert_eq(permit.value.findings[0].rewrite, "log.info")

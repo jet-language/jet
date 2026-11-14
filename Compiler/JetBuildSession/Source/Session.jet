@@ -91,16 +91,16 @@ BuildSessionGeneratedModule: struct {
 
 // `meta.report(finding, at: c)`: a finding a package lint raised at the
 // checked call `c`: its Diagnostic `code`, `tier` (`Error`, `Tidy` or
-// `Report`) and texts, and the file (`module`, as the CompilerCall names
-// it) and byte span of the call. The build query reports it after the build
-// returns (JetDriver BuildQueries.jet jet_driver_build_findings).
+// `Report`) and texts, and the file (by display path, as its SourceSpan
+// names it) and byte span of the call. The build query reports it after
+// the build returns (JetDriver BuildQueries.jet jet_driver_build_findings).
 BuildSessionFinding: struct {
     code: String
     tier: String
     what: String
     why: String
     fix: String
-    module: String
+    file: String
     at_start: Int
     at_end: Int
     // The function the call calls instead under the finding's
@@ -629,7 +629,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if at_start < 0 || at_end < at_start -> return build_session_fail(state, "`meta.report` lost the place of its call")
         rewrite: build_session_text(args, 8) ?? return build_session_fail(state, "`meta.report` lost its rewrite")
         if texts[1] != "Error" && texts[1] != "Tidy" && texts[1] != "Report" -> return build_session_fail(state, "`meta.report` takes a finding of tier `Error`, `Tidy` or `Report`")
-        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], module: texts[5], at_start: at_start, at_end: at_end, rewrite: rewrite})
+        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], file: texts[5], at_start: at_start, at_end: at_end, rewrite: rewrite})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     if method == "args" {
