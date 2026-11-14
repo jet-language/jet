@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102465,
+    "rev": 102467,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73023,6 +73023,11 @@
       "log": [
         {
           "at": "2026-11-14",
+          "by": "Speed-2",
+          "text": "c23 (Speed-2 finding, 2026-11-14): hello starts its threads in finalization for real work. The pass facts (boxed edges, copy facts, fixed-length write params, memory plan; CheckProgram sema_pass_facts) and the side/effects/taint walks walk every seeded Core module on every compile, and with --threads 1 hello's sema tail goes from about 100 ms to about 190 ms. Hello also takes 1007 Core body packets from the record (most of them up front: trait-impl methods, close, generated). So an admission tweak cannot meet c23. Those per-module and per-function facts must ride in the Core record, so that a small program's finalization is proportional to its own code. That input went to PrecompiledCore-2's typed-decode design."
+        },
+        {
+          "at": "2026-11-14",
           "by": "Main",
           "text": "1a defects found by Speed-1 (2026-11-14, gate-p66). (1) The record is off inside any checkout: jet_cli_core_record (CoreRecordCheck.jet:211) returns None whenever jet_cli_toolchain_root finds a root, so examples, tests and every gauntlet entry compile Core from source and never use precompiled Core. Fix rule (Main): use the record whenever the Core being compiled matches the record's Core digest; source only on a mismatch; trace the choice. (2) With the record on, the RCC check loads in 10.0 s at 936 MB (peak 1.46 GB, wall 32 s), against about 2.6 s on the source path, which breaks c37. Both go to PrecompiledCore-2 ahead of further size work. With the record on, #6759 c1 (one landing child) and c5 (one precheck child) hold (traces: $JET_SCRATCH_ROOT/lanes/Speed-1/c1/jt-rec.json, rcc-rec.json)."
         },
@@ -73665,7 +73670,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T16:27:39.982Z",
+      "updated": "2026-11-14T17:58:27.522Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -201752,6 +201757,186 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-14T13:55:21.661Z"
+    },
+    {
+      "id": "D-DECODE-SOURCE1",
+      "cardId": "c08r6ogl",
+      "group": "language",
+      "title": "How a binary format feeds typed decode",
+      "situation": "Typed decode turns stored data into a typed value. JSON streams straight into the value, but every other format must first build a full in-memory tree and then decode that tree. The compiler's saved Core record is the costly case: loading it builds tens of millions of tree values, so checking with the record is slower than reading Core's source again. Only Core may implement the streaming reader, because names that start with two underscores are reserved. The vote decides how a binary format gets the streaming path, and we recommend making the reader a small public Core trait.",
+      "gist": "How should a program feed its own binary format into typed decode without first building a whole tree?",
+      "lesson": "Typed decode turns stored data into a typed value, such as a struct. JSON text streams straight into the value. Any other format must first build a full in-memory tree, then decode that tree. Only Core may implement the streaming reader today. Whichever option wins, the compiler's saved Core record gets the streaming path.",
+      "explainer": "",
+      "story": "Mara maintains the compiler's saved copy of the checked standard library. Loading it should beat checking the library again, but each row first becomes a large in-memory tree and then a typed value. The streaming reader that would skip the tree has a reserved name, so her package may not implement it.",
+      "inWild": "// Rust serde: a format crate implements Deserializer once; every derived type reads from it.\n// https://serde.rs/impl-deserializer.html\nimpl<'de> Deserializer<'de> for &mut RecordReader<'de> { /* deserialize_map, deserialize_seq, ... */ }\nlet row = ModuleRow::deserialize(&mut reader)?;\n// Swift: a third-party format implements the public Decoder protocol.\n// https://developer.apple.com/documentation/swift/decoder\nlet row = try MessagePackDecoder().decode(ModuleRow.self, from: data)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Public decode source",
+          "detail": "Rename Core's private streaming reader trait to a public `DecodeSource` in core.encoding. Its entry becomes `encoding.decode_from<T>(source)`. The trait keeps the cursor shape the JSON reader and the tree reader already implement. Its methods are begin_object, object_members, next_key, key_is, key_text, begin_array, next_item, take_null, skip, capture and four scalar reads.\n\nDerived types are unchanged: their generated reader takes any source. A type's own hand-written Decode impl stays over Dyn, as ratified for codecs. So this adds a format-side trait, not a second type-side surface. The compiler's record reader then implements it with no exception.\n\nCost: rename the trait, the entry and its lowering key. Update the two Core implementations, the generated reader's bound, the Core reference page and one test.\n\nEdge cases: a source that miscounts members gets ordinary FieldError results, never unsafe reads. The trait has no unsafe operations. A source's `capture` must return the value at the cursor as a tree; every non-streamed type falls back to it. The name lives in core.encoding, not the root, so it collides with nothing a program does not import.",
+          "code": "use core.encoding.[DecodeSource]\n\nRecordReader: struct {\n    bytes: [U8]\n    at: Int\n\n    impl DecodeSource {\n        begin_object: fn(&self) -> Bool Never! { self.bytes[self.at] == U8{8} }\n        // ... the other cursor methods\n    }\n}\n\nrow: encoding.decode_from<ModuleRow>(reader) ?? return Err(err)"
+        },
+        {
+          "key": "B",
+          "name": "Compiler-only exception",
+          "detail": "Keep the trait private and add a second exception to the reserved-name rule. In a file of one of the toolchain's own packages, a reserved name Core declares is accepted in two places. Those are right after `impl` and as the head of a `.` path. Declarations, every other reserved spelling, and every file outside those packages still get E0067.\n\nThe toolchain's package census decides membership. It holds the compiler workspace's members and their in-tree path dependencies, read from the tree Core itself comes from. A user manifest cannot add to it.\n\nCost: the lexer rule, a parse lane in the driver and the formatter, and a UI test. That is about 530 lines, already written and checked.\n\nEdge cases: the language server's formatting knows no toolchain lane, so it still rejects those files. Whoever points the toolchain root at a tree also supplies its Core, so the trust equals Core's. Other packages keep the tree path.",
+          "code": "// Compiler/JetFoundation/Source/Record/RecordTree.jet: accepted\nRecordReader: struct {\n    impl __DecodeSource { ... }\n}\nrow: __Decoding.read<ModuleRow, RecordReader>(reader) ?? return Err(err)\n\n// any user package: still rejected\nimpl __DecodeSource {}\n// error: `__DecodeSource` is reserved for Jet (E0067)"
+        },
+        {
+          "key": "C",
+          "name": "Core reads the record",
+          "detail": "Move the compiler's record tree format into a new core.encoding.record module. The format holds strings, shapes, a node table and typed rows. Core implements the private reader there and exposes `record.decode<T>(bytes, at)` and `record.encode(value)`.\n\nToday no Core binary format implements the streaming reader. CBOR, Erlang term format and the rest decode through a tree, so this would be Core's first.\n\nCost: move about 1,400 lines of reader, plus the writer, into Core. Add a format reference and tests.\n\nEdge cases: the layout carries compiler-only parts such as shared-node memo slots. A public format would either carry them or fork. Every record schema change becomes a Core release note. Programs gain a binary codec nobody asked for.",
+          "code": "use core.encoding.record\n\nbytes: record.encode(module_row)\nrow: record.decode<ModuleRow>(bytes, 0) ?? return Err(err)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (serde)",
+          "note": "The public Deserializer trait let bincode, rmp-serde, serde_cbor and others stream into every derived type. Its known cost is size: about thirty methods plus a visitor, which makes a new format hard to write. https://serde.rs/impl-deserializer.html",
+          "code": "impl<'de> Deserializer<'de> for &mut Reader<'de> { fn deserialize_map<V: Visitor<'de>>(self, v: V) -> Result<V::Value> { ... } }"
+        },
+        {
+          "lang": "Swift (Codable)",
+          "note": "Decoder is a public protocol, so third-party formats such as MessagePack plug into every Decodable type. Its keyed and unkeyed containers are often called verbose. https://developer.apple.com/documentation/swift/decoder",
+          "code": "struct MessagePackDecoder: Decoder { func container<Key>(keyedBy: Key.Type) throws -> KeyedDecodingContainer<Key> { ... } }"
+        },
+        {
+          "lang": "Kotlin (kotlinx.serialization)",
+          "note": "Decoder and CompositeDecoder are public; CBOR, ProtoBuf and community YAML formats use them. The format API stayed marked experimental for years while its shape settled. https://kotlinlang.org/api/kotlinx.serialization/kotlinx-serialization-core/kotlinx.serialization.encoding/-decoder/",
+          "code": "class RecordDecoder : AbstractDecoder() { override fun decodeElementIndex(descriptor: SerialDescriptor): Int { ... } }"
+        },
+        {
+          "lang": "Go (encoding)",
+          "note": "Go has no format-neutral decoder interface. Each format (encoding/json, encoding/gob, msgpack libraries) repeats its own reflection walk, the failure mode a shared trait avoids.",
+          "code": "var row ModuleRow\nerr := msgpack.Unmarshal(data, &row)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One small public trait gives every binary format the fast path, keeps the reserved-name rule whole, and matches what serde, Swift and Kotlin proved.",
+        "gains": [
+          "Every format decodes without a full tree.",
+          "The reserved-name rule keeps its one exception."
+        ],
+        "losses": [
+          {
+            "loss": "A new public trait that Core must keep stable.",
+            "mitigation": "It ships with the exact methods the JSON reader already uses and tests."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It bends a ratified rule for one program and still leaves every other format slow."
+          },
+          {
+            "key": "C",
+            "reason": "Core would own a compiler-internal layout that changes with every compiler release."
+          }
+        ],
+        "tradeoff": "Core keeps one more public trait stable; the JSON reader already proves its shape."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "How should a program feed its own binary format into typed decode without first building a whole tree?",
+        "lesson": "Typed decode turns stored data into a typed value, such as a struct. JSON text streams straight into the value. Any other format must first build a full in-memory tree, then decode that tree. Only Core may implement the streaming reader today. Whichever option wins, the compiler's saved Core record gets the streaming path.",
+        "trio": {
+          "current": {
+            "note": "A binary format must build the full tree first. Naming the streaming reader is an error.",
+            "code": "tree: record_tree_row(bytes, at)\nrow: tree.decode<ModuleRow>() ?? return Err(err)\n// impl __DecodeSource { ... }\n// error: `__DecodeSource` is reserved for Jet"
+          },
+          "wild": {
+            "lang": "Rust (serde)",
+            "note": "Any crate can stream its format into any derived type. Source: https://serde.rs/impl-deserializer.html",
+            "code": "impl<'de> Deserializer<'de> for &mut RecordReader<'de> {\n    // one method per value kind\n}\nlet row = ModuleRow::deserialize(&mut reader)?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Public decode source",
+            "gist": "core.encoding exports the streaming reader trait any package may implement.",
+            "gains": [
+              "Any binary format streams into derived types.",
+              "No exception to the reserved-name rule.",
+              "The compiler uses only public Core."
+            ],
+            "losses": [
+              "A new public trait that Core must keep stable."
+            ],
+            "proposed": {
+              "code": "RecordReader: struct {\n    impl DecodeSource { begin_object: fn(&self) -> Bool Never! { ... } }\n}\nrow: encoding.decode_from<ModuleRow>(reader) ?? return Err(err)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Compiler-only exception",
+            "gist": "Only the toolchain's own packages may name Core's private reader.",
+            "gains": [
+              "No new public surface.",
+              "Already built and checked."
+            ],
+            "losses": [
+              "Breaks a ratified rule for one program.",
+              "Editors and the formatter need a second lexing mode.",
+              "Other packages keep the slow tree path."
+            ],
+            "proposed": {
+              "code": "// accepted only inside the compiler's packages\nimpl __DecodeSource { ... }\nrow: __Decoding.read<ModuleRow, RecordReader>(reader) ?? return Err(err)\n// a user package writing this still gets E0067"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Core reads the record",
+            "gist": "Core takes over the compiler's binary record format and its reader.",
+            "gains": [
+              "No new trait and no exception.",
+              "Programs gain one binary codec."
+            ],
+            "losses": [
+              "Every compiler record change becomes a Core change.",
+              "Core ships a format with no outside users."
+            ],
+            "proposed": {
+              "code": "use core.encoding.record\nrow: record.decode<ModuleRow>(bytes, at) ?? return Err(err)\n// Core owns the byte layout; the compiler only writes it"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One small public trait gives every binary format the fast path, keeps the reserved-name rule whole, and matches what serde, Swift and Kotlin proved.",
+          "gains": [
+            "Every format decodes without a full tree.",
+            "The reserved-name rule keeps its one exception."
+          ],
+          "losses": [
+            {
+              "loss": "A new public trait that Core must keep stable.",
+              "mitigation": "It ships with the exact methods the JSON reader already uses and tests."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It bends a ratified rule for one program and still leaves every other format slow."
+            },
+            {
+              "key": "C",
+              "reason": "Core would own a compiler-internal layout that changes with every compiler release."
+            }
+          ],
+          "tradeoff": "Core keeps one more public trait stable; the JSON reader already proves its shape."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-14T17:58:27.522Z"
     }
   ],
   "questions": [
@@ -205213,6 +205398,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T17:58:27.522Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DECODE-SOURCE1",
+      "note": "How a binary format feeds typed decode"
+    },
+    {
+      "at": "2026-11-14T17:22:01.549Z",
+      "by": "Speed-2",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T16:27:39.982Z",
       "by": "Main",
