@@ -1,0 +1,20 @@
+# The ScriptBench w06 script (decode a JSON array into typed records, total
+# the salaries of the active ones, print one summary line) runs unchanged under
+# `jet run` and in the page `jet build --target=web` writes, and both print the
+# same bytes. The input is a small w06.json with escapes, an empty name and a
+# salary past 2^53.
+requires: tool:node
+fixture: scriptbench_w06_prints_the_same_bytes_under_jet_run_and_the_web_build.fixture
+env: NO_COLOR=1
+copy: {root}/Tools/perf/scriptbench/w06-json/run.jet run.jet
+step native: jet run run.jet
+exit: 0
+stdout: = "records=5 active=3 salary=4611686018427608904\n"
+stderr: empty
+step: jet build --target web run.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
+step: node .jet/build/app.js
+exit: 0
+stdout: == native # byte-identical to `jet run`
+stderr: empty
