@@ -728,6 +728,10 @@ sema_map_written_node: fn(node: NodeKind) -> String? Never! {
         if payload == .Unit -> return Val(".{variant}")
         return None
     }
+    if node == .EnumCtor(_, variant, payload) {
+        if payload == .Unit -> return Val("case {variant.id}")
+        return None
+    }
     if node == .StrLit(parts) {
         text := ""
         loop part in parts {
