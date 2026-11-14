@@ -36,15 +36,24 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Implement `Display` for the type or use an explicit formatter.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0915</code>: <code>tests/ui/E0915_names_a_type_without_display_once.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingDisplay]: `ParseError` has no `Display` implementation
-  --&gt; tests/ui/E0915_names_a_type_without_display_once.jet:5:31
+<p>First UI snapshot mentioning <code>E0915</code>: <code>tests/ui/E0915_fix_never_offers_a_failing_debug_hole.stderr</code>.</p>
+<pre class="diag">Error [jet.MissingDisplay]: `Job` has no `Display` implementation
+  --&gt; tests/ui/E0915_fix_never_offers_a_failing_debug_hole.jet:9:21
     |
-  5 |         print(&quot;couldn&#39;t read {err}&quot;)
-    |                               ^^^
+  9 |     print(&quot;running {job}&quot;)
+    |                     ^^^
  Why: Bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: Add `impl ParseError.Display { display: fn(self) -&gt; String { … } }`, or use `{value:Debug}` for debug output
+ Fix: Add `impl Job.Display { display: fn(self) -&gt; String { … } }`
 More: jet-lang.dev/e/E0915
+
+Error [jet.ValueTypeMismatch]: `Job` can&#39;t be shown with :Debug yet
+  --&gt; tests/ui/E0915_fix_never_offers_a_failing_debug_hole.jet:10:19
+    |
+ 10 |     print(&quot;debug {job:Debug}&quot;)
+    |                   ^^^
+ Why: Debug interpolation needs a debuggable value
+ Fix: Implement `Debug` for `Job`
+More: jet-lang.dev/e/E0112
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

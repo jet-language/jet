@@ -224,9 +224,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1521,
+  "total": 1526,
   "counts": {
-    "Compiler": 784,
+    "Compiler": 789,
     "Core": 181,
     "Docs": 10,
     "Examples": 42,
@@ -1155,7 +1155,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1976,
+      "line": 1977,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit"
     },
@@ -3976,7 +3976,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ObserveLive.jet",
-      "line": 514,
+      "line": 516,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -3986,6 +3986,41 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 51,
       "column": 9,
       "reason": "checked System V (env,start,end)->Unit callback; env remains borrowed and each range has exclusive output slots"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "the observation start runs before the timer whose handler reads these is armed"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 46,
+      "column": 5,
+      "reason": "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 52,
+      "column": 9,
+      "reason": "setitimer borrows the four-word itimerval on the stack"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 57,
+      "column": 9,
+      "reason": "no timer is armed, so no handler reads the descriptor"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/PerfSamples.jet",
+      "line": 74,
+      "column": 5,
+      "reason": "one write of a stack-local word, which the kernel copies before the call returns"
     },
     {
       "package": "Compiler",
@@ -10890,14 +10925,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 784 |
+| Compiler | 789 |
 | Core | 181 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 6 |
 | tests | 490 |
-| **total** | **1521** |
+| **total** | **1526** |
 
 ### Regions
 
@@ -11034,7 +11069,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2128:1 | "calls a checked System V void(void) process entry that remains executable for the entire call" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2138:1 | "directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 2240:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1976:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1977:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 147:5 | "pointer is a fresh payload whose align &gt;= 8 block reserved the word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 155:5 | "pointer is an align &gt;= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it" |
 | Compiler | Compiler/JetRuntime/Source/Alloc.jet | 178:5 | "anonymous private mmap owns fresh writable bytes and cannot alias a live heap block; a failed syscall produces no allocation" |
@@ -11437,8 +11472,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 70:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 118:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 247:5 | "vetted Observe Linux file/clock syscalls borrow native buffers only for their duration" |
-| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 514:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 516:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Parallel.jet | 51:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 38:5 | "the observation start runs before the timer whose handler reads these is armed" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 46:5 | "rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 52:9 | "setitimer borrows the four-word itimerval on the stack" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 57:9 | "no timer is armed, so no handler reads the descriptor" |
+| Compiler | Compiler/JetRuntime/Source/PerfSamples.jet | 74:5 | "one write of a stack-local word, which the kernel copies before the call returns" |
 | Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 123:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 352:9 | "ok is the canonical writable Bool output slot" |
 | Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 360:5 | "ok lends exactly the C ABI Bool byte" |

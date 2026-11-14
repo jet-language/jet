@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a value of the expected type, or convert it before passing or interpolating it</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0112</code>: <code>tests/ui/E0112_int_from_float_brace.stderr</code>.</p>
-<pre class="diag">Error [jet.ValueTypeMismatch]: `3.7` isn&#39;t a whole number, so `Int` can&#39;t hold it exactly
-  --&gt; tests/ui/E0112_int_from_float_brace.jet:2:12
+<p>First UI snapshot mentioning <code>E0112</code>: <code>tests/ui/E0112_debug_hole_fix_offers_only_working_spellings.stderr</code>.</p>
+<pre class="diag">Error [jet.ValueTypeMismatch]: `ParseError` can&#39;t be shown with :Debug yet
+  --&gt; tests/ui/E0112_debug_hole_fix_offers_only_working_spellings.jet:6:31
     |
-  2 |     n: Int{3.7}
-    |            ^^^
- Why: An integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you
- Fix: Round it first, as in `Int{math.trunc(value)}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`
+  6 |         print(&quot;couldn&#39;t read {err:Debug}&quot;)
+    |                               ^^^
+ Why: Debug interpolation needs a debuggable value
+ Fix: Show a debuggable part of `err` instead
 More: jet-lang.dev/e/E0112
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
