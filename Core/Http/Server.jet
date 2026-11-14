@@ -100,6 +100,9 @@ C_MAX_REQUEST_ID_BYTES: 128
 C_MAX_CONNECTIONS: 10000
 C_MAX_PEER_CONNECTIONS: 256
 C_DRAIN_POLL_MS: 5
+// The built-in readiness probe's path (HTTPReadiness); a route of the app on
+// it takes its place.
+C_READY_PATH: "/__jet/ready"
 C_ACCEPT_BACKOFF_MIN_MS: 5
 C_ACCEPT_BACKOFF_MAX_MS: 1000
 
@@ -136,13 +139,28 @@ __HTTPTLSOps: struct {
     accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
 }
 
-/// What one served lifetime did: connections accepted, refused for load,
-/// answered, and cancelled at shutdown.
+/// What one served lifetime did: connections accepted, refused (over the
+/// connection limits, or while draining), answered, and cancelled at shutdown.
 HTTPShutdownReport: struct {
     accepted: Int
     overloaded: Int
     completed: Int
     cancelled: Int
+}
+
+/// Whether a server should be sent traffic, as `readiness()` and the built-in
+/// `GET /__jet/ready` probe read it. A bound server is NotReady until `serve`
+/// starts, then Ready. From `shutdown`, or an accept a signal cancelled, it is
+/// Draining while the connections in flight finish, and Closed once `serve`
+/// reports. A server shut down before it served is Closed, never Ready. It
+/// displays as the probe's body: `not ready`, `ready`, `draining`, `closed`.
+HTTPReadiness: enum {
+    NotReady
+    Ready
+    Draining
+    Closed
+
+    impl Display { display: fn(self) -> String { __readiness_word(self) } }
 }
 
 __HTTPHandlerCell: struct {
@@ -256,16 +274,18 @@ __route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
     core.rt.__coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
 }
 
-// `live` counts the connections being served and `peers` how many of them
-// each peer address holds; each connection's task gives its count back.
-// `grace_ns` is the drain budget `shutdown` set (-1 until it does), and
-// `drained` marks that budget run out: a connection whose handler is still
-// running then never sends its response.
+// `live` counts the connections being served, `refusing` those taken while
+// draining only to be answered 503, and `peers` how many of either each peer
+// address holds; each connection's task gives its count back. `grace_ns` is
+// the drain budget `shutdown` set (-1 until it does), and `drained` marks
+// that budget run out: a connection whose handler is still running then
+// never sends its response.
 __HTTPServerState: struct {
     phase: Int
     stopping: Bool
     report: HTTPShutdownReport?
     live: Int{0}
+    refusing: Int{0}
     completed: Int{0}
     peers: [String: Int]{}
     grace_ns: Int{-1}
@@ -274,7 +294,7 @@ __HTTPServerState: struct {
 
 /// A bound listener and its mux. `serve` answers connections until
 /// `shutdown` or a cancelled accept; the report is the same for every caller.
-/// The listener closes when accepting stops, so nothing listens after serving.
+/// The listener closes when the drain ends, so nothing listens after serving.
 HTTPServer: struct {
     __state: Shared<__HTTPServerState>
     // The bound listener, the one item until serving closes it
@@ -290,6 +310,9 @@ HTTPServer: struct {
         listener: __server_listener(self) ?? return Err(.IO{operation: "local address: the server has stopped serving, so its listener is closed"})
         listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
     }
+
+    // What a readiness probe reads now (HTTPReadiness). It does no I/O.
+    readiness: fn(self) -> HTTPReadiness Never! { __readiness(self.__state) }
 
     // Each admitted connection is served by its own task, so a held
     // connection does not hold up the next; one over the connection limits
@@ -312,7 +335,12 @@ HTTPServer: struct {
                     accepted = accepted + 1
                     backoff = 0
                     peer: __peer_host(stream)
-                    if __admit(self.__state, peer) {
+                    if __server_stopping(self) {
+                        // A shutdown began while this accept waited: the
+                        // server reads Draining, so the connection is told so.
+                        overloaded = overloaded + 1
+                        __take_while_draining(self, stream)
+                    } else if __admit(self.__state, peer) {
                         state: self.__state
                         mux: self.__mux
                         tls: self.__tls
@@ -350,15 +378,34 @@ HTTPServer: struct {
                 }
             }
         }
-        // Accepting has stopped: the listener closes now, so the port is free
-        // (a connect is refused) while the connections in flight drain.
-        __server_close_listener(self)
+        // Accepting work has stopped, and the server reads Draining. Until
+        // the connections in flight end or the drain budget runs out, the
+        // listener stays open: a new connection within the connection limits
+        // is answered 503 (the readiness probe reads `draining`) and counts as
+        // overloaded, so a balancer can tell a draining server from a dead
+        // one. Then the listener closes, so the port is free (a connect is
+        // refused), and the server reads Closed once it reports.
+        __server_mark_stopping(self)
         #Shield {
             drain_end: rt.clock_mono_ns() + __drain_budget(self.__state, self.__deadline)
             loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
-                core.tasks.sleep(C_DRAIN_POLL_MS)
+                if __server_listener(self) == .Val(listener) {
+                    if listener.accept(deadline: Duration{ns: C_DRAIN_POLL_MS * 1000000}) == {
+                        .Ok(stream) -> {
+                            accepted = accepted + 1
+                            overloaded = overloaded + 1
+                            __take_while_draining(self, stream)
+                        }
+                        .Err(error) -> {
+                            if !__accept_timed_out(error) -> core.tasks.sleep(C_DRAIN_POLL_MS)
+                        }
+                    }
+                } else {
+                    core.tasks.sleep(C_DRAIN_POLL_MS)
+                }
             }
         }
+        __server_close_listener(self)
         report: __drain_close(self.__state, accepted, overloaded)
         __server_finish(self, report)
         __server_signal_done(self.__done).drop("the server holds its own finish end")
@@ -412,6 +459,34 @@ __server_close_listener: fn(server: HTTPServer) Never! {
 __server_stopping: fn(server: HTTPServer) -> Bool Never! {
     guard: server.__state.guard_read()
     guard.value.stopping
+}
+
+// Accepting work has stopped (a shutdown, a cancelled accept or a failed
+// one): from here the server reads Draining.
+__server_mark_stopping: fn(server: HTTPServer) Never! {
+    guard := server.__state.guard_edit()
+    guard.value.stopping = true
+}
+
+__readiness: fn(state: Shared<__HTTPServerState>) -> HTTPReadiness Never! {
+    guard: state.guard_read()
+    if {
+        guard.value.phase == 2 -> HTTPReadiness.Closed
+        guard.value.phase == 0 && guard.value.stopping -> HTTPReadiness.Closed
+        guard.value.phase == 0 -> HTTPReadiness.NotReady
+        guard.value.stopping -> HTTPReadiness.Draining
+        else -> HTTPReadiness.Ready
+    }
+}
+
+// The body of the readiness probe's answer.
+__readiness_word: fn(readiness: HTTPReadiness) -> String Never! {
+    if readiness == {
+        .NotReady -> "not ready"
+        .Ready -> "ready"
+        .Draining -> "draining"
+        .Closed -> "closed"
+    }
 }
 
 __server_finish: fn(server: HTTPServer, report: HTTPShutdownReport) Never! {
@@ -475,29 +550,74 @@ __admit: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
     true
 }
 
+// Count a connection taken while draining in, unless the server or its peer
+// is at the limit. It is not work, so the drain does not wait for it.
+__admit_refusing: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
+    guard := state.guard_edit()
+    held: guard.value.peers.get(peer) ?? 0
+    if guard.value.live + guard.value.refusing >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
+    guard.value.refusing = guard.value.refusing + 1
+    guard.value.peers[peer] = held + 1
+    true
+}
+
+// One connection of `peer` gives its count back.
+__peer_leave: fn(state: &__HTTPServerState, peer: String) Never! {
+    held: state.peers.get(peer) ?? 1
+    if held <= 1 {
+        _: state.peers.remove(peer)
+    } else {
+        state.peers[peer] = held - 1
+    }
+}
+
 // One admitted connection's task: the TLS handshake and its request, then its
 // count given back, all shielded from cancellation so a signal lets the
 // request finish and the count reach the drain.
 __serve_admitted: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
     #Shield {
-        answered: __serve_taken(state, handoff, tls, mux, deadline)
+        answered: __serve_taken(state, handoff, tls, mux, deadline, false)
         guard := state.guard_edit()
         guard.value.live = guard.value.live - 1
         if answered -> guard.value.completed = guard.value.completed + 1
-        held: guard.value.peers.get(peer) ?? 1
-        if held <= 1 {
-            _: guard.value.peers.remove(peer)
-        } else {
-            guard.value.peers[peer] = held - 1
-        }
+        __peer_leave(guard.value, peer)
+    }
+}
+
+// A connection taken once accepting work stopped: within the limits, its own
+// task answers it 503 (or the readiness probe); past them, it is refused now.
+__take_while_draining: fn(server: HTTPServer, stream: &&TCPStream) Never! -[Net, FS.Read, Time]> {
+    peer: __peer_host(stream)
+    if __admit_refusing(server.__state, peer) {
+        state: server.__state
+        mux: server.__mux
+        tls: server.__tls
+        deadline: server.__deadline
+        handoff: Shared{[TCPStream]{stream}}
+        refusal: task &&handoff { __serve_refusing(state, handoff, peer, tls, mux, deadline) }
+        refusal.detach()
+    } else {
+        __refuse(stream, server.__tls)
+    }
+}
+
+// A connection taken while draining: its request is answered 503, or by the
+// readiness probe, and its count given back.
+__serve_refusing: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+    #Shield {
+        _: __serve_taken(state, handoff, tls, mux, deadline, true)
+        guard := state.guard_edit()
+        guard.value.refusing = guard.value.refusing - 1
+        __peer_leave(guard.value, peer)
     }
 }
 
 // The handed-off stream's handshake and request; true when it was answered.
-__serve_taken: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+// A `refusing` connection, taken while draining, is answered 503.
+__serve_taken: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
     stream: __taken_stream(handoff) ?? return false
     conn: __accept_conn(stream, tls, deadline) ?? return false
-    __serve_connection(conn, mux, deadline, Val(state))
+    __serve_connection(conn, mux, deadline, Val(state), refusing)
 }
 
 // A connection over the limits: a plain one is told 503, then closed.
@@ -570,7 +690,7 @@ __serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read,
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None, None)
+    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None, None, false)
     Ok()
 }
 
@@ -1383,30 +1503,38 @@ __accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?)
 // handler upgraded to a WebSocket gets no HTTP response, and its socket is
 // left to the upgraded connection rather than closed here. When the drain of
 // `server` ran out while the handler ran, the connection was reported
-// cancelled, so its response is not sent and the socket just closes.
-__serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<__HTTPServerState>?) -[Net, FS.Read, Time]> Bool Never! {
+// cancelled, so its response is not sent and the socket just closes. The
+// server answers the readiness probe, and a `refusing` connection, itself
+// (__server_answer).
+__serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<__HTTPServerState>?, refusing: Bool) -[Net, FS.Read, Time]> Bool Never! {
     budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
     upgraded := false
     if __read_request(stream, wire) == {
         .Ok(received) -> {
-            fd: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
-            cell: http.__upgrade_cell(fd)
-            request := received
-            request.__upgrade = Val(cell)
-            // The handler runs as its own task, so a panic in it is this
-            // connection's 500 and serving goes on; it is shielded as its
-            // connection is.
-            routed: request.copy()
-            handling: task { __dispatch_shielded(mux, routed) }
-            reply: handling.join() ?? __status_page(500)
-            upgraded = http.__upgraded(cell)
-            if upgraded {
-                answered = true
-            } else if !__drain_ended(server) {
-                bytes: __response_wire(request.method, reply) ?? __error_wire(500)
+            own: __server_answer(server, mux, received, refusing)
+            if own == .Val(answer) {
+                bytes: __response_wire(received.method, answer) ?? __error_wire(503)
                 answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
+            } else {
+                fd: if stream.tcp == .Val(plain) -> core.net.__tcp_fd(plain) else -> -1
+                cell: http.__upgrade_cell(fd)
+                request := received
+                request.__upgrade = Val(cell)
+                // The handler runs as its own task, so a panic in it is this
+                // connection's 500 and serving goes on; it is shielded as its
+                // connection is.
+                routed: request.copy()
+                handling: task { __dispatch_shielded(mux, routed) }
+                reply: handling.join() ?? __status_page(500)
+                upgraded = http.__upgraded(cell)
+                if upgraded {
+                    answered = true
+                } else if !__drain_ended(server) {
+                    bytes: __response_wire(request.method, reply) ?? __error_wire(500)
+                    answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
+                }
             }
         }
         .Err(fault) -> {
@@ -1424,6 +1552,21 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, se
         }
     }
     answered
+}
+
+// What the server answers itself instead of the mux: `GET /__jet/ready`, 200
+// `ready` or 503 with the state, unless a route of the app takes that path;
+// and a 503 for any other request on a `refusing` connection. None: the mux
+// answers. A lone `serve_once` connection (no `server`) has neither.
+__server_answer: fn(server: Shared<__HTTPServerState>?, mux: HTTPMux, request: HTTPRequest, refusing: Bool) -> HTTPResponse? Never! {
+    state: server ?? return None
+    if request.method == "GET" && request.path == C_READY_PATH && __pick(mux, request).answer == .Val(_) {
+        readiness: __readiness(state)
+        status: if readiness == .Ready -> 200 else -> 503
+        return Val(response(status, __readiness_word(readiness)))
+    }
+    if refusing -> return Val(__status_page(503))
+    None
 }
 
 __send: fn(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {

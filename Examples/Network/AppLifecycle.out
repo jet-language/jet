@@ -1,8 +1,13 @@
 store missing, pool ready: false
 1. pool ready before bind
-2. a handler holds 1 lease
-3. admission stopped: accepted 1, completed 0, cancelled 1
-4. pool drain within 20ms refused: 1 lease still out
-5. the cancelled handler's response was sent: false
-6. db.pool lifecycle=drained max=1 available=0 leased=0 opening=0 ready=0 acquires=2 releases=2 timeouts=1 open_failures=0 unhealthy=0 replacements=0 replacement_failures=0
-7. closed
+2. bound, not serving yet: readiness not ready
+3. serving: readiness ready, probe 200 ready
+4. a handler holds 1 lease
+5. shutting down: readiness draining, probe 503 draining
+6. admission stopped: accepted 3, overloaded 1, completed 1, cancelled 1
+7. reported: readiness closed, probe connect refused
+8. pool drain within 20ms refused: 1 lease still out
+9. the cancelled handler's response was sent: false
+10. db.pool lifecycle=drained max=1 available=0 leased=0 opening=0 ready=0 acquires=2 releases=2 timeouts=1 open_failures=0 unhealthy=0 replacements=0 replacement_failures=0
+11. closed
+shut down before serving: readiness closed

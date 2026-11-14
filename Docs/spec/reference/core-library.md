@@ -1622,17 +1622,29 @@ test's `#Test(faults: [Net.Accept])` schedule fails an accept as a broken
 listener does, so a test can drive that end.
 A connection's request is shielded from cancellation (`#Shield`), so a
 delivered signal, which cancels every task, stops accepting while the
-requests in flight are answered. Once accepting stops, the listener closes,
-so the port is free and a new connect is refused (`local_addr()` then fails
-with an `HTTPError.IO`), and `serve` waits for the connections in flight
-before it reports: up to the `shutdown` grace when `shutdown` stopped it,
-else up to one connection deadline. Connections still
+requests in flight are answered. Once accepting stops, `serve` waits for the
+connections in flight before it reports: up to the `shutdown` grace when
+`shutdown` stopped it, else up to one connection deadline. While it waits the
+listener stays open, and each new connection within the limits is answered
+`503 Service Unavailable` and counts as `overloaded`, so a load balancer can
+tell a draining server from a dead one. Then the listener closes, so the port
+is free and a new connect is refused (`local_addr()` then fails with an
+`HTTPError.IO`). Connections still
 open then count as `cancelled`, and one whose handler is still running never
 sends its response: its socket closes when the handler returns. Every caller
 of `serve` and `shutdown` receives the same
 `HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
 `serve` is an `HTTPError.IO`. The connection deadline bounds each
 connection's reads and writes (30 seconds by default).
+
+`readiness()` reads the server's `HTTPReadiness` without I/O: `NotReady` once
+bound, `Ready` from `serve`, `Draining` from `shutdown` or a cancelled accept
+until the report, and `Closed` once `serve` reports. A server shut down before
+it served is `Closed` and was never `Ready`. The server answers
+`GET /__jet/ready` itself, before the mux, unless the app has a route on that
+path: `200` with body `ready` while `Ready`, else `503` with the state's
+display (`not ready`, `draining`, `closed`). Once closed nothing listens, so
+a probe's connect is refused.
 
 Static files are read through `core.files` and the `Date` field comes from the
 `core.time` wall clock, so serving carries `[Net, FS.Read, Time]`:

@@ -3,6 +3,10 @@
 // drains, a handler still blocked when the shutdown grace runs out is
 // reported cancelled and sends nothing, and the pool closes last, once that
 // handler gives its lease back.
+// Through it, the server's readiness reads not ready once bound, ready while
+// serving, draining from shutdown until the grace ends, and closed once it
+// reports. The built-in `GET /__jet/ready` probe answers from that state:
+// 200 ready, 503 draining, then nothing listens.
 package: {
     name: "app_lifecycle"
     authority: { allow: [DB, FS.Read, IO, Mem.Alloc, Net, Time] }
@@ -16,10 +20,12 @@ use {
     web: core.web
 }
 
+crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
 // The handler holds the pool's one connection well past the shutdown grace.
 place_order: fn(pool: DBPool) -> HTTPResponse HTTPError! {
     lease: pool.acquire(deadline: 1s) ?? return Ok(http_server.response(503, "no connection"))
-    time.sleep(500ms)
+    time.sleep(800ms)
     lease.close() ?? return Ok(http_server.response(500, "lease"))
     Ok(http_server.response(200, "ordered"))
 }
@@ -35,6 +41,18 @@ read_all: fn(stream: TCPStream) -> String {
     parts.join("")
 }
 
+// What a load balancer's readiness probe gets: the status and body of
+// `GET /__jet/ready`, or a refused connect.
+probe: fn(addr: String) -> String {
+    stream: net.tcp_connect(addr) ?? return "connect refused"
+    stream.write_all("GET /__jet/ready HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes()) ?? return "write failed"
+    raw: read_all(stream)
+    status: raw.split(" ").to_list()
+    body: raw.split("{crlf()}{crlf()}").to_list()
+    if status.len() < 2 -> return "no answer"
+    "{status[1]} {body[body.len() - 1]}"
+}
+
 run: fn() (HTTPError | NetError | TaskFailure)! {
     // A pool whose store can't open is not ready, so nothing binds.
     missing: db.pool("missing-dir/orders.sqlite", max: 1) ?? panic("pool")
@@ -48,34 +66,55 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     app: web.app().get("/order", fn(_req: HTTPRequest) { place_order(pool.copy()) })
     listening: app.bind("127.0.0.1:0")
     addr: listening.local_addr()
+    print("2. bound, not serving yet: readiness {listening.readiness()}")
     serving: task { listening.serve() ?? panic("serve") }
-    client: net.tcp_connect(addr)
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
-    client.write_all("GET /order HTTP/1.1{crlf}Host: local{crlf}{crlf}".bytes())
     polls := 0
+    loop listening.readiness() != .Ready && polls < 400 {
+        time.sleep(5ms)
+        polls = polls + 1
+    }
+    print("3. serving: readiness {listening.readiness()}, probe {probe(addr)}")
+
+    client: net.tcp_connect(addr)
+    client.write_all("GET /order HTTP/1.1{crlf()}Host: local{crlf()}{crlf()}".bytes())
+    polls = 0
     loop pool.receipt().leased == 0 && polls < 400 {
         time.sleep(5ms)
         polls = polls + 1
     }
-    print("2. a handler holds {pool.receipt().leased} lease")
+    print("4. a handler holds {pool.receipt().leased} lease")
 
     // Shutdown stops admission and waits at most its grace for the handler.
-    report: listening.shutdown(50ms)
+    // While it waits, the server is draining, and the probe is told so.
+    stopping: task { listening.shutdown(300ms) ?? panic("shutdown") }
+    polls = 0
+    loop listening.readiness() != .Draining && polls < 400 {
+        time.sleep(5ms)
+        polls = polls + 1
+    }
+    print("5. shutting down: readiness {listening.readiness()}, probe {probe(addr)}")
+    report: stopping.join()
     serving.join()
-    print("3. admission stopped: accepted {report.accepted}, completed {report.completed}, cancelled {report.cancelled}")
+    print("6. admission stopped: accepted {report.accepted}, overloaded {report.overloaded}, completed {report.completed}, cancelled {report.cancelled}")
+    print("7. reported: readiness {listening.readiness()}, probe {probe(addr)}")
 
     // The pool drains only after admission stopped; a bounded drain while the
     // handler still holds its lease fails, and says why.
     if pool.drain(deadline: 20ms) == {
-        .Ok(_) -> print("4. pool drained while a lease was out")
-        .Err(_) -> print("4. pool drain within 20ms refused: {pool.receipt().leased} lease still out")
+        .Ok(_) -> print("8. pool drained while a lease was out")
+        .Err(_) -> print("8. pool drain within 20ms refused: {pool.receipt().leased} lease still out")
     }
 
     response: read_all(client)
     answered: response.contains("200")
-    print("5. the cancelled handler's response was sent: {answered}")
+    print("9. the cancelled handler's response was sent: {answered}")
 
     closed: pool.drain(deadline: 2s) ?? panic("drain")
-    print("6. {closed}")
-    print("7. closed")
+    print("10. {closed}")
+    print("11. closed")
+
+    // A server shut down before it ever served was never ready.
+    unserved: web.app().bind("127.0.0.1:0")
+    _: unserved.shutdown()
+    print("shut down before serving: readiness {unserved.readiness()}")
 }
