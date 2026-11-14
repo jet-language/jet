@@ -65,7 +65,11 @@ run: fn() {
 
     tile: compute.matmul_f32_tile(m, m) ?? panic("tile")
     print("tile:{compute.numel(tile)}")
-    print("profile:{compute.profile_show()}")
+    // The SIMD dispatch and its vector width depend on the host CPU (avx2 and
+    // 8 lanes on one machine, scalar and 1 on the web), so the line leaves
+    // them out and reads the same on every target.
+    shown: compute.profile_show().split(";").filter(fn(field) { !field.starts_with("dispatch=") && !field.starts_with("vector_width=") })
+    print("profile:{shown.join(";")}")
 
     stream: compute.stream_new()
     compute.stream_sync(stream) ?? panic("sync")
