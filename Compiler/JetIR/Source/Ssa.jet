@@ -1,10 +1,13 @@
 // SSA over the slot IR (O1, O2, stage A of the optimizing pipeline): every
 // slot write defines a new value, and a construct's join (a Loop's header,
 // the point after a Block's or an If's End) has one phi per slot written
-// inside the construct. The instructions stay where they are: IRSsa maps
-// each instruction's slot operands to the values they read and its result
-// to the value it defines, so a pass rewrites values and SsaOut.jet turns
-// the result back into slot IR.
+// inside the construct that some straight-line run reads before it writes
+// it. That is a semi-pruned form: any other slot is read only after a
+// write in its own run, so nothing would read a phi of it. The
+// instructions stay where they are: IRSsa maps each instruction's slot
+// operands to the values they read and its result to the value it
+// defines, so a pass rewrites values and SsaOut.jet turns the result back
+// into slot IR.
 //
 // The renaming walks the structured code once. A construct's written
 // slots are known before it opens (ir_ssa_written), so a Loop's header phis
@@ -152,11 +155,13 @@ ir_ssa_phi_arg: fn(s: IRSsa, phi: Int, k: Int) -> Int Never! {
     s.edge_vals[s.edge_start[edge] + s.phi_index[phi]]
 }
 
-// The slots each construct writes (its join's merged slots), in first-write
-// order. `depth[slot]` is the depth of the innermost open construct known to
-// write it: a construct that writes a slot makes every enclosing open one
-// write it too.
+// The slots each construct writes that need a phi at its join, in
+// first-write order: those some straight-line run reads before it writes
+// them (ir_ssa_exposed). `depth[slot]` is the depth of the innermost open
+// construct known to write it: a construct that writes a slot makes every
+// enclosing open one write it too.
 ir_ssa_written: fn(s: &IRSsa, f: IRFunction) Never! {
+    exposed: ir_ssa_exposed(f)
     depth := [Int]{}
     loop _ in 0..<f.slot_type.len() -> depth.push(0)
     open := [Int]{}
@@ -182,12 +187,42 @@ ir_ssa_written: fn(s: &IRSsa, f: IRFunction) Never! {
             next
         }
         written: ir_x64_write(f, at)
-        if written < 0 || written >= depth.len() -> next
+        if written < 0 || written >= depth.len() || !exposed[written] -> next
         level: open.len()
         if depth[written] >= level -> next
         loop k in depth[written]..<level -> s.join_slots[open[k]].push(written)
         depth[written] = level
     }
+}
+
+// Per slot, whether an instruction reads it before any write of it in the
+// same straight-line run. A run ends at every Block, Loop, If, Else, End,
+// Br, BrIf, Return and Unreachable, which is at least as often as
+// ir_ssa_build starts a block. The reads are ir_ssa_reads' operands
+// (ir_x64_reads_into), taken before the instruction's own write.
+ir_ssa_exposed: fn(f: IRFunction) -> [Bool] Never! {
+    exposed := [Bool]{}
+    wrote := [Int]{}
+    loop _ in 0..<f.slot_type.len() {
+        exposed.push(false)
+        wrote.push(-1)
+    }
+    reads := [Int]{}
+    run := 0
+    loop at in 0..<f.op.len() {
+        ir_x64_reads_into(f, at, reads)
+        loop slot in reads {
+            if slot >= 0 && slot < wrote.len() && wrote[slot] != run -> exposed[slot] = true
+        }
+        if f.op[at] == {
+            .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable -> run += 1
+            .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Sqrt | .IntBig | .StreamStore -> {
+                written: ir_x64_write(f, at)
+                if written >= 0 && written < wrote.len() -> wrote[written] = run
+            }
+        }
+    }
+    exposed
 }
 
 ir_ssa_new: fn(f: IRFunction) -> IRSsa Never! {
