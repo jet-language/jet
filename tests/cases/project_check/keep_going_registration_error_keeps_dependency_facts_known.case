@@ -1,12 +1,19 @@
 # A registration error in one package leaves the graph incomplete, and
 # JET_KEEP_GOING checks on past it. Every package without such an error keeps
 # its registered facts known (sema_registration_settle_modules), so the clean
-# dependency's copyable `Span` still copies: `first: span` is not refused as a
-# take of a read-only value, and the dependency does not fail. The one E0358
-# is the only problem, with JET_KEEP_GOING as without it.
+# dependency's copyable `Span` still copies: `first: span` copies the local
+# instead of moving it, and the later `span.end` is no use after a move. With
+# Span's copy fact unknown, as in a package that holds its own registration
+# error, the same body reports E0121. The one E0358 is the only problem, with
+# JET_KEEP_GOING as without it.
 fixture: keep_going_registration_error_keeps_dependency_facts_known.fixture
 env: NO_COLOR=1
 env: TERM=dumb
+step: jet check .
+cwd: {work}/base
+env: JET_RECEIPT_BYPASS=1
+exit: 0
+stdout+stderr: ~ "has no problems" # the dependency is clean on its own
 step: jet check .
 cwd: {work}/app
 env: JET_RECEIPT_BYPASS=1
@@ -19,6 +26,6 @@ env: JET_RECEIPT_BYPASS=1
 env: JET_KEEP_GOING=1
 exit: 1
 stdout+stderr: ~ "jet-lang.dev/e/E0358" # the same error
-stdout+stderr: !~ "E0120" # the dependency's `Span` still copies
+stdout+stderr: !~ "E0121" # the dependency's `Span` still copies
 stdout+stderr: !~ "E0626" # so the dependency has no errors
 stdout+stderr: ~ "1 problem found" # and nothing else
