@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6836,
-    "rev": 101860,
+    "rev": 101864,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58654,7 +58654,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-14T00:13:44.501Z",
+      "updated": "2026-11-14T00:24:16.062Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -199638,186 +199638,159 @@
       "id": "D-SPEED-NOAST1",
       "cardId": "c031o59x",
       "group": "other",
-      "title": "Should the compiler skip building a syntax tree for ordinary code?",
-      "situation": "A compiler normally reads source text into a syntax tree: an in-memory diagram of the program, one box per piece of code. The next steps walk that diagram, and it is thrown away at the end. Building and walking it costs memory and time on every line. Fast one-pass compilers such as Tiny C skip it for ordinary code. Jet's speed plan already shrinks the diagram. It also handles one function at a time, while that function's data sits in the processor's fast memory. So nobody yet knows how much the diagram will still cost. You are asked whether, and when, Jet's compiler should drop it for ordinary function bodies. We recommend A: finish the planned one-function-at-a-time pipeline, measure what the diagram still costs, and drop it only if it takes over a tenth of the time per line.",
-      "gist": "Should the compiler check ordinary function bodies straight from the parser's notes, with no syntax tree in between, and if so, when?",
-      "lesson": "A tree is a convenience, not a requirement. Measure what it still costs once the rest is fast.",
-      "explainer": "A parser reads tokens (words and symbols) and recognizes the grammar. An event is a small note the parser writes as it goes, such as 'a call with two arguments ends here'. A consumer is code that reads those notes. The checker (sema) decides whether the code is correct.\n\nGenerics (code written once for many types) and compile-time code are read more than once, so they keep a stored form. The ownership check, which decides when a value is used for the last time, also looks ahead within a function. So the checker always keeps its own record of each function body.",
-      "story": "A team's service has 200,000 lines of plain functions. Every `jet build` builds a diagram for all of it, uses it once and drops it. If that diagram is a large share of the work, removing it speeds up every build; if it is small, a big redesign buys little.",
-      "inWild": "Tiny C Compiler and Wirth's Oberon compilers generate code during parsing with no tree. rust-analyzer's parser emits events that a builder turns into a tree. Roslyn builds an immutable green tree that tools share. Go and Rust build full trees for everything.",
-      "detail": "Today: the parser (Compiler/JetParser) builds payload node enums defined in Compiler/JetFoundation/Source/AST (Expr 51 cases, Stmt 35, Item 24, per the #6793 c1 census), and sema walks them. Sema then writes each function's checked body, which the ownership checks and lowering read. The ownership last-use query reads the statements after a use (Compiler/JetSema/Source/Sema/Ownership/LastUse.jet). So a body cannot be checked in one strictly forward pass, and any replacement keeps a stored checked body per function.\n\nPlanned: #6793 S4 replaces the payload enums with flat per-file columns. #5479 c8 (plan step 4) runs parse, check, lower, select and encode per function while its data is still in cache, with no whole-program intermediate copy. After both, the syntax tree is a small per-function column set that stays in cache.\n\nUnder A, once c8 lands, the c1 throughput cell (#5479 c1) measures the CPU per line spent writing and reading the per-function syntax columns. Above 10% of the CPU per line, the parser is changed to emit events. The compiler's consumer resolves names against the declaration pass's signatures, so a body may call a function declared later. It writes the checked body directly, which ownership and lowering read as today.\n\nGeneric bodies and compile-time functions keep #6793's flat syntax columns. The formatter and the language server build their lossless tree from the same events. Diagnostics keep their spans and order, proven by byte-identical ui snapshots. Below the bar, the measurement is recorded on #5479 and the tree stays.\n\nUnder D, the same parser change is made now, before S4 and c8 land.",
+      "title": "Should the compiler keep a syntax tree, and in what form?",
+      "situation": "A syntax tree is the compiler's in-memory outline of a program, one entry for each piece of code, built while reading the text. Jet builds it from many small boxes; in one measured run, copying and freeing such boxes, with similar compile-time values, took a fifth of the busy time. The tree is not where the finished program gets faster: every optimization runs later, on a lower form of the code. We recommend A: keep one compact outline per file, a flat list that the checker, formatter and editor all share.",
+      "gist": "Should Jet keep one compact syntax list per file, drop the syntax tree, or keep today's tree of small boxes?",
+      "lesson": "Keep the outline, but make it a flat list: the cost was the boxes, not the outline.",
+      "explainer": "A syntax tree, also called an AST, is the outline the parser builds from source text. The checker reads it to find errors. It then writes a checked body for each function. The lowering step turns the checked body into IR, a simple instruction list. The optimizer and the machine-code generator work only on IR.\n\nA flat list stores the outline as a few plain arrays: kind, position and size per entry, children before their parent. It needs no boxes and no pointers, so it is cheap to build, copy and free.",
+      "story": "Priya's team has 200,000 lines of Jet. Every `jet build` and every editor keystroke reads all of it into small boxes, copies some of them, and frees them. A compact list per file removes that waste without taking anything away from the formatter, the editor or the optimizer.",
+      "inWild": "Zig parses each file into one flat node list (std.zig.Ast: tokens, nodes and extra_data arrays). zig fmt, the compiler and the language server read that list. Carbon's toolchain stores its parse tree as one flat array in postorder (toolchain/docs/parse.md). Rust checks ownership on MIR with liveness, not on syntax (RFC 2094). Tiny C emits code while parsing, with no tree, but has no generics, ownership or formatter to serve.",
+      "detail": "Where optimization happens. All 17 optimizer passes run on IR (Compiler/JetIR/Source/Opt.jet:97, IR_OPT_PASS_NAMES). JetIR, JetBackend and JetEval never name the parser's types: their `.Expr` matches are variants of the checked body (BodyLambdaBody.Expr). So the outline's form cannot change the finished program. Rust (MIR), Go (SSA), Swift (SIL) and Zig (AIR) also optimize on a lower form, never on the syntax tree.\n\nWhat it costs today. The parser builds boxed payload enums (Expr 51 variants, Stmt 35, Item 24, Pattern) in Compiler/JetFoundation/Source/AST. Clones and drops of these trees and comptime values were 20.5% of busy samples on the measured slice and 7.8% on `check main.jet` (Docs/research/fast-compiler-architecture-2026-09-30.md, line 83). The ownership last-use query walks the remaining statements' trees by name for each question (Compiler/JetSema/Source/Sema/Ownership/LastUse.jet). The driver's route and plugin scans walk the trees too (Loader.jet, PluginFacts.jet).\n\nUnder A, the parser writes one flat postorder record per file into the file's arena. It holds the lexer's token columns plus node columns: kind tag, span, subtree size, first token and payload. This is #6793 S4. The Expr, Stmt, Pattern and Item enums and the Func struct are deleted, and every reader uses accessors. The checker, formatter, language server, semantic index and driver scans read the same record.\n\nGeneric and compile-time bodies keep their node ranges for later use. The rest of a file's record is freed once its bodies are checked (#6793 S7). The ownership last-use rule moves to one backward liveness pass over the checked body, so the checker no longer walks syntax ahead. The proof is #6793's: the self-host fixed point, byte-identical ui snapshots and cases, and the c1 throughput cell (#5479 c1).",
       "options": [
         {
           "key": "A",
-          "name": "Per-function pipeline first; event parser only past a measured bar",
-          "gist": "Finish the planned per-function pipeline and measure what the tree still costs. Build the event parser only above 10% of the CPU per line.",
-          "detail": "Step 1 is #5479 c8 as planned. Step 2 is a measurement in the c1 cell. Step 3, only past the bar: one event parser feeding the checker and the tools, with ui snapshots byte-identical.",
-          "code": "// Unchanged user code.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// Step 1: parse -> per-function syntax columns -> check -> IR.\n// Step 3, only past the bar: parse events -> checked body -> IR;\n// jet fmt and the editor build their tree from the same events."
+          "name": "One flat syntax list per file, shared by every tool",
+          "gist": "The parser writes a compact list per file. The checker, formatter and editor read it, and ownership moves to the checked body.",
+          "detail": "No boxes, no clones, one parser. Generic and compile-time bodies keep their slice of the list. The rest is freed after checking. The optimizer is unchanged, because it already runs on IR. The list keeps every token with its byte span, comments and blank lines included, so jet fmt stays lossless. Code a compile-time splice generates is written as rows of its own generated file. An editor change re-reads only the edited file.",
+          "code": "// Unchanged user code and unchanged messages.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// text -> one flat list per file -> checked body -> IR -> optimizer -> machine code\n// jet fmt and the editor read the same list."
         },
         {
           "key": "B",
-          "name": "Keep the tree; rely on the planned fused pipeline",
-          "gist": "Every body still becomes a flat tree; #5479 c8 fuses the later steps.",
-          "detail": "No change to the plan. #6793 flattens the tree and #5479 c8 fuses phases per function. Nothing measures what the tree still costs.",
-          "code": "// Unchanged user code; parse -> flat tree -> check -> IR, fused per function.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+          "name": "Keep today's tree of small boxes",
+          "gist": "Every piece of code stays its own box, copied and freed as today.",
+          "detail": "No change to the parser or its readers. The per-function pipeline (#5479 c8) still fuses later steps.",
+          "code": "// Unchanged user code; text -> tree of boxes -> checked body -> IR.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
         },
         {
           "key": "C",
-          "name": "No stored syntax at all, even for generics",
-          "gist": "Generic and compile-time bodies are re-read from source text for each use.",
-          "detail": "No syntax is stored after parsing. Each generic instantiation or compile-time call re-parses its body from the source text.",
-          "code": "// Unchanged user code; generic bodies are re-parsed per instantiation.\nlargest: fn<T: Comparable>(a: T, b: T) -> T { if a > b -> a else -> b }"
-        },
-        {
-          "key": "D",
-          "name": "Build the event parser now, before the fused pipeline",
-          "gist": "Switch the parser to events and the checker to read them now.",
-          "detail": "The event design of A, started before the flat columns and the per-function pipeline exist, with no measurement first.",
-          "code": "// Unchanged user code; parse events -> checked body -> IR, built now.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+          "name": "No stored syntax for ordinary code",
+          "gist": "The parser feeds the checker directly. Generic bodies are re-read from text, and the tools get their own parser.",
+          "detail": "Ordinary bodies go straight from parser notes to the checked body. Generic and compile-time bodies are re-parsed for each use. The formatter and editor keep a separate tree-building parser.",
+          "code": "// Unchanged user code; text -> checked body -> IR, no stored syntax.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// A generic body is re-parsed for each type it is used with."
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A removes the tree only if it still costs enough after the pipeline, so the checker is rewritten once, for a measured gain.",
+        "why": "A removes the measured cost, the boxes and their copies, and keeps everything the outline is for. The finished program is unchanged, because optimization runs on IR.",
         "gains": [
-          "Redesign only for a measured gain",
-          "If built: less work per line, one parser, same diagnostics"
+          "No per-entry boxes or copies, part of a measured fifth of busy time",
+          "One parser and one list for the checker, formatter and editor",
+          "Optimization of the finished program is unchanged"
         ],
         "losses": [
           {
-            "loss": "If the bar is met, the gain arrives after the per-function pipeline.",
-            "mitigation": "That pipeline comes first in the plan anyway, keeps the tree small and in cache, and the existing throughput test measures it."
+            "loss": "Generic and compile-time bodies keep their part of the list after checking.",
+            "mitigation": "Only those bodies' slices stay. They are flat arrays with no boxes, and every other entry is freed once its file is checked."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B never measures whether the tree still costs enough to remove."
+            "reason": "B keeps the boxes and copies that, with compile-time values, took a fifth of busy time in one run, for no gain."
           },
           {
             "key": "C",
-            "reason": "C re-parses generic bodies for every use, which is slower than keeping them."
-          },
-          {
-            "key": "D",
-            "reason": "D rewrites the checker for a tree layout that S4 and c8 replace, before any measurement shows a gain."
+            "reason": "C needs a second parser for the tools, re-parses generic bodies for every use, and saves little over a flat list."
           }
         ],
-        "tradeoff": "Waiting for one planned step in exchange for redesigning the checker once, and only for a measured gain."
+        "tradeoff": "Generic bodies keep a small flat slice after checking, in exchange for no boxes, one parser and an unchanged optimizer."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked the census, #5479 c8, #6793 S4 and every snippet with jet check; fixed invalid option C syntax, 'macros', the Roslyn claim, and A ignoring ownership look-ahead (Ownership/LastUse.jet). Changed: A now waits for c8 and a 10% CPU-per-line bar, and the old build-now A became option D."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The pass attacked A against Zig, Carbon and rowan on lost comments, splice output, editor edits and retained generic slices. A now keeps every token and comment with spans, writes splices as generated-file rows, and names whole-file re-reads and generic-slice memory as costs."
       },
-      "checkInstructions": "Read the payload enums in Compiler/JetFoundation/Source/AST (Expressions.jet, Statements.jet, Items.jet). Read the #6793 census at $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md. Read the ownership last-use query in Compiler/JetSema/Source/Sema/Ownership/LastUse.jet, and #5479 c8 for the planned per-function pipeline.",
+      "checkInstructions": "Read IR_OPT_PASS_NAMES in Compiler/JetIR/Source/Opt.jet. Run `git grep -l -w -e Expr -e Stmt -- Compiler/JetIR Compiler/JetBackend Compiler/JetEval` and check that every match is a checked-body variant. Read the payload enums in Compiler/JetFoundation/Source/AST and the ownership query in Compiler/JetSema/Source/Sema/Ownership/LastUse.jet. Read the 20.5% line in Docs/research/fast-compiler-architecture-2026-09-30.md. Read #6793 S4 and S7 in $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md.",
       "surface": {
-        "gist": "Should the compiler check ordinary function bodies straight from the parser's notes, with no syntax tree in between, and if so, when?",
-        "lesson": "A tree is a convenience, not a requirement. Measure what it still costs once the rest is fast.",
+        "gist": "Should Jet keep one compact syntax list per file, drop the syntax tree, or keep today's tree of small boxes?",
+        "lesson": "Keep the outline, but make it a flat list: the cost was the boxes, not the outline.",
         "trio": {
           "current": {
-            "note": "Today every function body becomes a tree, then is checked and lowered.",
-            "code": "// Any ordinary function; today it is parsed into a tree first.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+            "note": "Today each piece of a function becomes its own box in a tree.",
+            "code": "// Each name, call and statement here is a separate box today.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
           },
           "wild": {
-            "lang": "C (Tiny C Compiler)",
-            "note": "TCC emits machine code while parsing each statement; no tree exists.",
-            "code": "/* tcc parses this and emits code for each statement as it reads it */\nint total(int *items, int n) {\n    int sum = 0;\n    for (int i = 0; i < n; i++) sum += items[i];\n    return sum;\n}"
+            "lang": "Zig",
+            "note": "Zig keeps one flat list per file. The compiler, zig fmt and the editor read it.",
+            "code": "// std.zig.Ast holds tokens, nodes and extra_data as flat arrays.\nfn total(items: []const i64) i64 {\n    var sum: i64 = 0;\n    for (items) |item| sum += item;\n    return sum;\n}"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Per-function pipeline first; event parser only past a measured bar",
-            "gist": "Finish the planned per-function pipeline and measure what the tree still costs. Build the event parser only above 10% of the CPU per line.",
+            "name": "One flat syntax list per file, shared by every tool",
+            "gist": "The parser writes a compact list per file. The checker, formatter and editor read it, and ownership moves to the checked body.",
             "gains": [
-              "Checker redesigned only for a measured gain",
-              "If built: no tree for ordinary code, one parser, same diagnostics"
+              "No boxes or copies per entry",
+              "One parser for compiler and tools",
+              "Finished program optimized exactly as today"
             ],
             "losses": [
-              "If the bar is met, the gain comes after plan step 4"
+              "Generic bodies keep a small slice after checking"
             ],
             "proposed": {
-              "code": "// Unchanged user code.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// Step 1: parse -> per-function syntax columns -> check -> IR.\n// Step 3, only past the bar: parse events -> checked body -> IR;\n// jet fmt and the editor build their tree from the same events."
+              "code": "// Unchanged user code and unchanged messages.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// text -> one flat list per file -> checked body -> IR -> optimizer\n// jet fmt and the editor read the same list."
             }
           },
           {
             "key": "B",
-            "name": "Keep the tree; rely on the planned fused pipeline",
-            "gist": "Every body still becomes a flat tree; #5479 c8 fuses the later steps.",
+            "name": "Keep today's tree of small boxes",
+            "gist": "Every piece of code stays its own box, copied and freed as today.",
             "gains": [
-              "Simplest; no new design work"
+              "No parser or checker changes"
             ],
             "losses": [
-              "Every line still pays a per-function tree, of unmeasured cost"
+              "Box copies keep costing busy time"
             ],
             "proposed": {
-              "code": "// Unchanged user code; parse -> flat tree -> check -> IR, fused per function.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+              "code": "// Unchanged user code; text -> tree of boxes -> checked body -> IR.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
             }
           },
           {
             "key": "C",
-            "name": "No stored syntax at all, even for generics",
-            "gist": "Generic and compile-time bodies are re-read from source text for each use.",
+            "name": "No stored syntax for ordinary code",
+            "gist": "The parser feeds the checker directly. Generic bodies are re-read from text, and the tools get their own parser.",
             "gains": [
-              "No stored syntax columns at all"
+              "Nothing stored for ordinary bodies"
             ],
             "losses": [
-              "Generic-heavy code re-parses the same body many times, slower overall",
-              "Spans must be recomputed per instantiation"
+              "A second parser for the formatter and editor",
+              "Generic bodies re-parsed for every use"
             ],
             "proposed": {
-              "code": "// Unchanged user code; generic bodies are re-parsed per instantiation.\nlargest: fn<T: Comparable>(a: T, b: T) -> T { if a > b -> a else -> b }"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Build the event parser now, before the fused pipeline",
-            "gist": "Switch the parser to events and the checker to read them now.",
-            "gains": [
-              "The tree-free design exists sooner"
-            ],
-            "losses": [
-              "Rewrites the checker for a tree layout about to be replaced",
-              "No evidence that the gain is worth it"
-            ],
-            "proposed": {
-              "code": "// Unchanged user code; parse events -> checked body -> IR, built now.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}"
+              "code": "// Unchanged user code; text -> checked body -> IR, nothing stored.\ntotal: fn(items: [Int]) -> Int {\n    sum := 0\n    loop item in items -> sum += item\n    sum\n}\n// A generic body is re-parsed for each type it is used with."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A removes the tree only if it still costs enough after the pipeline, so the checker is rewritten once, for a measured gain.",
+          "why": "A removes the measured cost, the boxes and their copies, and keeps everything the outline is for. The finished program is unchanged, because optimization runs on IR.",
           "gains": [
-            "Redesign only for a measured gain",
-            "If built: less work per line, one parser, same diagnostics"
+            "No per-entry boxes or copies, part of a measured fifth of busy time",
+            "One parser and one list for the checker, formatter and editor",
+            "Optimization of the finished program is unchanged"
           ],
           "losses": [
             {
-              "loss": "If the bar is met, the gain arrives after the per-function pipeline.",
-              "mitigation": "That pipeline comes first in the plan anyway, keeps the tree small and in cache, and the existing throughput test measures it."
+              "loss": "Generic and compile-time bodies keep their part of the list after checking.",
+              "mitigation": "Only those bodies' slices stay. They are flat arrays with no boxes, and every other entry is freed once its file is checked."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B never measures whether the tree still costs enough to remove."
+              "reason": "B keeps the boxes and copies that, with compile-time values, took a fifth of busy time in one run, for no gain."
             },
             {
               "key": "C",
-              "reason": "C re-parses generic bodies for every use, which is slower than keeping them."
-            },
-            {
-              "key": "D",
-              "reason": "D rewrites the checker for a tree layout that S4 and c8 replace, before any measurement shows a gain."
+              "reason": "C needs a second parser for the tools, re-parses generic bodies for every use, and saves little over a flat list."
             }
           ],
-          "tradeoff": "Waiting for one planned step in exchange for redesigning the checker once, and only for a measured gain."
+          "tradeoff": "Generic bodies keep a small flat slice after checking, in exchange for no boxes, one parser and an unchanged optimizer."
         }
       },
       "draft": false,
@@ -200022,155 +199995,159 @@
       "id": "D-SPEED-SIMDCHECK1",
       "cardId": "c031o59x",
       "group": "other",
-      "title": "May some checks run as vector operations over whole columns of code?",
-      "situation": "After the data-oriented core lands, the program's tokens and nodes sit in flat lists. Some simple checks can then run over a whole list at once using vector instructions, many values per instruction. Today they run one node at a time. The risk is that error messages could change: different order, or a less exact location. You are asked whether to allow vectorized checks. We recommend A: a vector pass finds whether any error exists and the precise pass reports it, so messages stay byte-identical. A check that also computes answers is vectorized only if its answers are proven identical.",
-      "gist": "Should simple checks run as vector operations over token and node columns, with identical diagnostics and results?",
-      "lesson": "Fast path for the common case, precise path for the rare one, and the same answers either way.",
-      "explainer": "A vector instruction (SIMD) handles 16 to 64 values at once. A diagnostic is an error or warning message with its source location (span). Some checks only report errors; others also compute an answer the compiler uses later, such as which declaration a name refers to.",
-      "story": "Almost all code a compiler sees is correct. A fast pass that confirms 'no error here' over a whole column, and hands the rare error region to the precise pass, keeps messages exactly as they are today.",
-      "inWild": "simdutf validates text encoding with vector instructions and, on failure, reports the exact position of the first error. Most compilers check node by node.",
-      "detail": "Depends on #6793's flat columns (S4). The lexer's vector classifier is already planned (#5910 c6, at most 1 ns per byte). This ballot covers checks after lexing. Candidate checks are chosen by measurement.\n\nUnder A, two kinds qualify. A check whose only output is diagnostics runs as a vector pass that answers 'clean or not' per region. On 'not clean', today's scalar check runs on that region and produces the diagnostics. A check that also computes a result, such as name lookup, may be vectorized only if the vector version computes identical results, proven by running both versions over the test corpora. Proof for both: every ui snapshot is byte-identical.",
+      "title": "May a fast vector scan skip clean code before the compiler's checks?",
+      "situation": "Before Jet builds a program, it checks the code for mistakes, one small piece at a time. Processors have vector instructions that look at 16 to 64 pieces in one step, which could speed up the common case of code with no mistakes. The risk is two versions of a check that disagree, or error messages that change. We recommend A: a fast vector scan only marks stretches that might hold a mistake, and today's precise check alone writes every message and answer.",
+      "gist": "Should a fast vector scan mark which stretches of code need checking, while today's checks still write every message?",
+      "lesson": "Use the fast path only to decide where to look; let one precise path decide what to say.",
+      "explainer": "A vector instruction, also called SIMD, does the same small test on 16 to 64 values at once. A diagnostic is an error or warning message with its place in the source. A filter is a quick test that answers either 'certainly fine' or 'maybe not'. A 'maybe' only sends that stretch to the precise check, so a cautious filter costs a little time and never changes a message.",
+      "story": "Sam saves a 5,000-line file and the editor rechecks it. Almost every line is fine. A vector scan clears most of the file in a few steps, and the precise check looks only at the stretch around Sam's typo. Sam sees the same message, in the same place, as before.",
+      "inWild": "simdutf's validate_utf8_with_errors checks text 64 bytes at a time with vector instructions. When a block fails, it rewinds and runs its scalar validator from there to report the exact error position (src/generic/utf8_validation/utf8_validator.h). simdjson finds structure with vectors and parses values with scalar code. Most compilers check node by node with no vector filter.",
+      "detail": "Today every check after lexing is scalar: it looks at one token or node at a time. The optimizer already turns a plain counting loop over bytes into SSE2 vector code (JetIR OptReduce.jet:190 calls Compiler/JetBackend/Source/X64/Count.jet). Jet's lane types, such as U8x16 and U8x32, define each operation as the scalar operation applied lane by lane. So the same source runs on every machine (Docs/spec/reference/core-library.md, SIMD lanes; D-SIMD3=B).\n\nUnder A, the scalar check stays the only code that writes diagnostics or computes results, such as which declaration a name means. A vector filter runs first over blocks of 64 tokens or nodes. It answers 'certainly clean' or 'maybe' per block. Each 'maybe' block, with its neighbors at the edges, goes to the scalar check. A filter tests a simpler, wider condition than its check, for example 'any token of these kinds'.\n\nFilters are written in plain Jet with lane types or loops the optimizer turns into vector code, never with unsafe processor intrinsics. A machine without vector units runs the same code lane by lane. A differential test runs every check over all test corpora and generated inputs twice, with filters on and with filters off. Diagnostics must be byte-identical and results equal. A filter lands only where the throughput cell (#5479 c1) shows a gain. It depends on #6793's flat columns (S4); the lexer's own vector classifier is #5910 c6.",
       "options": [
         {
           "key": "A",
-          "name": "Vector checks with identical diagnostics and results",
-          "gist": "Vector pass says clean or not; the precise pass reports errors; a check that computes answers must compute identical ones.",
-          "detail": "Every ui snapshot stays byte-identical, and a result-computing check is vectorized only with its results proven identical over the test corpora.",
-          "code": "// Unchanged user code and unchanged messages.\nshow: fn(name: String) { print(\"hello {name}\") }"
+          "name": "Vector scan marks the spots; today's check writes every message",
+          "gist": "A portable vector filter clears clean blocks. The existing precise check runs on the rest and alone writes messages and answers.",
+          "detail": "One implementation of each rule. The filter only chooses where the check looks. A test with filters on and off must give byte-identical messages and equal results. A filter may clear a block only by a rule that is conservative by construction: every byte in it belongs to a class the precise check accepts without context. Generated inputs and fuzzing run the on/off differential.",
+          "code": "// A misspelled name. With or without the scan, Jet reports `nmae`\n// at the same place, with the same words, as today.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
         },
         {
           "key": "B",
           "name": "Scalar checks only",
-          "gist": "No vectorized checks.",
-          "detail": "No change.",
-          "code": "show: fn(name: String) { print(\"hello {name}\") }"
+          "gist": "Every check keeps looking at one piece at a time.",
+          "detail": "No change. Checks of clean code cost the same as today.",
+          "code": "// A misspelled name; every token is checked one at a time.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
         },
         {
           "key": "C",
-          "name": "Vector checks with coarser diagnostics",
-          "gist": "Allow message order or span precision to change for speed.",
-          "detail": "Diagnostics may differ in order or span.",
-          "code": "show: fn(name: String) { print(\"hello {name}\") }"
+          "name": "Full vector checks that write their own messages",
+          "gist": "Each chosen check is rewritten in vector form, which reports errors itself, with a coarser place or order.",
+          "detail": "A second implementation of each rule. Messages may point at a block instead of the exact token, or come in a different order.",
+          "code": "// A misspelled name; the message may point at the whole line\n// instead of `nmae`, or arrive in a different order.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "A speeds up checking of correct code, which is almost all code, and keeps every message and every result exactly as it is.",
+        "why": "A speeds up checking of clean code, which is almost all code, while one precise implementation still writes every message and answer.",
         "gains": [
-          "Faster checks",
-          "Identical diagnostics and results"
+          "Clean code is cleared many pieces per step",
+          "Messages and answers come from one implementation",
+          "Same code on every machine, no unsafe intrinsics"
         ],
         "losses": [
           {
-            "loss": "Each vectorized check also keeps its precise version.",
-            "mitigation": "The precise version is today's check, unchanged; only the fast pre-pass is new."
+            "loss": "A filter bug could call a block clean and hide a mistake.",
+            "mitigation": "Filters test a wider, simpler condition than the check. The on-and-off test over every corpus and generated input fails on any difference."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B leaves the speedup unused."
+            "reason": "B leaves the speed-up for clean code unused, with no gain in correctness over A."
           },
           {
             "key": "C",
-            "reason": "C makes error messages worse, which Jet does not trade for speed."
+            "reason": "C keeps two versions of each rule that can drift, and makes messages less exact."
           }
         ],
-        "tradeoff": "A small fast pre-pass beside each chosen check, in exchange for speed with no message changes."
+        "tradeoff": "A small filter beside each chosen check, guarded by an on-and-off test, in exchange for faster checking with unchanged messages."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked the #6793 census, #5910 c6 and the snippet with jet check; clean-or-not only fits diagnostic-only checks, the draft's name-lookup candidate computes results, and simdjson gives no error positions. Changed: A requires identical results for result-computing checks, the vector lexer is placed, the check cites the census, and simdutf's validate_utf8_with_errors is the outside example."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The pass attacked A against simdjson and simdutf on wrongly cleared blocks, corpus-only proof and an unmeasured gain. A now clears blocks only by a rule conservative by construction, fuzzes the on/off differential, and lands a filter only on a measured gain."
       },
-      "checkInstructions": "Read #6793's slice plan ($JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md, S4) and #5910 c6 (the planned vector lexer).",
+      "checkInstructions": "Read Compiler/JetBackend/Source/X64/Count.jet for today's SSE2 counting kernel. Read 'SIMD lanes' in Docs/spec/reference/core-library.md and D-SIMD3 in Docs/spec/syntax-decisions.md. Read generic_validate_utf8_with_errors in simdutf's src/generic/utf8_validation/utf8_validator.h. Read #6793 S4 in $JET_SCRATCH_ROOT/lanes/G11Speed-5/6793/c1-census.md.",
       "surface": {
-        "gist": "Should simple checks run as vector operations over token and node columns, with identical diagnostics and results?",
-        "lesson": "Fast path for the common case, precise path for the rare one, and the same answers either way.",
+        "gist": "Should a fast vector scan mark which stretches of code need checking, while today's checks still write every message?",
+        "lesson": "Use the fast path only to decide where to look; let one precise path decide what to say.",
         "trio": {
           "current": {
-            "note": "Today every check walks nodes one at a time.",
-            "code": "show: fn(name: String) { print(\"hello {name}\") }"
+            "note": "Today every check looks at one token or node at a time.",
+            "code": "// A misspelled name; each token is checked one at a time.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
           },
           "wild": {
             "lang": "C++ (simdutf)",
-            "note": "simdutf checks text with vector instructions, then gives the exact error position.",
-            "code": "// Fast vector check; on failure, r.count is where the error is.\nsimdutf::result r = simdutf::validate_utf8_with_errors(buf, len);\nif (r.error != simdutf::error_code::SUCCESS) { report(r.count); }"
+            "note": "simdutf scans 64 bytes per step, then rewinds to a scalar check for the exact error spot.",
+            "code": "// Vector scan; on failure, r.count is the exact error position.\nsimdutf::result r = simdutf::validate_utf8_with_errors(buf, len);\nif (r.error != simdutf::error_code::SUCCESS) { report(r.count); }"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Vector checks with identical diagnostics and results",
-            "gist": "Vector pass says clean or not; the precise pass reports errors; a check that computes answers must compute identical ones.",
+            "name": "Vector scan marks the spots; today's check writes every message",
+            "gist": "A portable vector filter clears clean blocks. The existing precise check runs on the rest and alone writes messages and answers.",
             "gains": [
-              "Faster checking of correct code",
-              "Messages and results unchanged"
+              "Faster checking of clean code",
+              "One implementation of each rule",
+              "Same code on every machine"
             ],
             "losses": [
-              "Two implementations per vectorized check"
+              "A filter bug could hide a mistake"
             ],
             "proposed": {
-              "code": "// Unchanged user code and unchanged messages.\nshow: fn(name: String) { print(\"hello {name}\") }"
+              "code": "// A misspelled name. With or without the scan, Jet reports `nmae`\n// at the same place, with the same words, as today.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
             }
           },
           {
             "key": "B",
             "name": "Scalar checks only",
-            "gist": "No vectorized checks.",
+            "gist": "Every check keeps looking at one piece at a time.",
             "gains": [
-              "One implementation per check"
+              "No new code"
             ],
             "losses": [
-              "Leaves the speedup unused"
+              "Clean code checks no faster"
             ],
             "proposed": {
-              "code": "show: fn(name: String) { print(\"hello {name}\") }"
+              "code": "// A misspelled name; every token is checked one at a time.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
             }
           },
           {
             "key": "C",
-            "name": "Vector checks with coarser diagnostics",
-            "gist": "Allow message order or span precision to change for speed.",
+            "name": "Full vector checks that write their own messages",
+            "gist": "Each chosen check is rewritten in vector form, which reports errors itself, with a coarser place or order.",
             "gains": [
-              "Simplest fast path"
+              "No precise pass after the scan"
             ],
             "losses": [
-              "Error messages get worse"
+              "Two versions of each rule",
+              "Less exact messages"
             ],
             "proposed": {
-              "code": "show: fn(name: String) { print(\"hello {name}\") }"
+              "code": "// A misspelled name; the message may point at the whole line\n// instead of `nmae`, or arrive in a different order.\nshow: fn(name: String) { print(\"hello {nmae}\") }"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "A speeds up checking of correct code, which is almost all code, and keeps every message and every result exactly as it is.",
+          "why": "A speeds up checking of clean code, which is almost all code, while one precise implementation still writes every message and answer.",
           "gains": [
-            "Faster checks",
-            "Identical diagnostics and results"
+            "Clean code is cleared many pieces per step",
+            "Messages and answers come from one implementation",
+            "Same code on every machine, no unsafe intrinsics"
           ],
           "losses": [
             {
-              "loss": "Each vectorized check also keeps its precise version.",
-              "mitigation": "The precise version is today's check, unchanged; only the fast pre-pass is new."
+              "loss": "A filter bug could call a block clean and hide a mistake.",
+              "mitigation": "Filters test a wider, simpler condition than the check. The on-and-off test over every corpus and generated input fails on any difference."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "B leaves the speedup unused."
+              "reason": "B leaves the speed-up for clean code unused, with no gain in correctness over A."
             },
             {
               "key": "C",
-              "reason": "C makes error messages worse, which Jet does not trade for speed."
+              "reason": "C keeps two versions of each rule that can drift, and makes messages less exact."
             }
           ],
-          "tradeoff": "A small fast pre-pass beside each chosen check, in exchange for speed with no message changes."
+          "tradeoff": "A small filter beside each chosen check, guarded by an on-and-off test, in exchange for faster checking with unchanged messages."
         }
       },
       "draft": false,
@@ -203525,9 +203502,11 @@
       "by": "owner",
       "kind": "question",
       "text": "rewrite in plain english. downside should be engineered away.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-13T22:54:08.016Z"
+      "status": "answered",
+      "answer": "The ballot is rewritten in plain English, and its one downside, two versions of each check that could disagree, is designed away. Under the new A, the fast vector scan never writes a message or computes an answer. It only marks which blocks of code might hold a mistake, and today's precise check runs on those blocks and writes everything, as it does now. This is the same split simdutf uses: it scans text 64 bytes at a time and rewinds to a scalar check to report the exact error position. The scan is written in plain, portable Jet using lane types whose meaning is the scalar operation lane by lane, so every machine runs the same code without unsafe intrinsics. A test runs every check with the scans on and off over all test programs and generated inputs, and any difference in messages or results fails it. The only remaining risk is a scan bug that wrongly clears a block. That risk is held down because each scan tests a wider, simpler condition than its check, and the on-and-off test catches any difference.",
+      "created": "2026-11-13T22:54:08.016Z",
+      "answeredAt": "2026-11-14",
+      "answeredBy": "Main"
     },
     {
       "id": "q2h0znxo",
@@ -203549,9 +203528,11 @@
       "by": "owner",
       "kind": "question",
       "text": "what are the long term ramifications of dropping an ast? that is an important phase of optimization. why would we completely remove it? is that safe? does that limit our ability to optimize the resulting binary? the recommended option should be the best greenfield solution with all downsides engineered away",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-13T22:55:57.544Z"
+      "status": "answered",
+      "answer": "No: the syntax tree is not an optimization phase, and its form cannot limit how well the finished program is optimized. All 17 of Jet's optimizer passes run on IR, the lower instruction form. The IR builder, the backend and the compile-time evaluator never read the syntax tree; they read the checked body (checked with git grep, Opt.jet:97). The tree's real cost is its shape: thousands of small boxes that are copied and freed. In one measured run, that work plus compile-time value copies was 20.5% of busy time. Dropping the tree outright is unsafe in practice. The formatter, the editor, generic code and the ownership check all need a stored outline, so they would need a second parser or repeated re-parsing. The reworked A keeps one flat outline per file, as Zig and Carbon do, which removes the boxes and copies while every tool shares one parser. The old wait-and-measure gate and the tree-free parser are gone, and A's only remaining cost is a small flat slice kept for generic bodies.",
+      "created": "2026-11-13T22:55:57.544Z",
+      "answeredAt": "2026-11-14",
+      "answeredBy": "Main"
     },
     {
       "id": "q09udnvv",
@@ -204446,6 +204427,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T00:24:16.062Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q11ay6zi",
+      "note": ""
+    },
+    {
+      "at": "2026-11-14T00:24:14.793Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SPEED-SIMDCHECK1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-14T00:24:13.657Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0cotbvf",
+      "note": ""
+    },
+    {
+      "at": "2026-11-14T00:24:12.411Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-SPEED-NOAST1",
+      "note": ""
+    },
     {
       "at": "2026-11-14T00:19:44.365Z",
       "by": "Main",
