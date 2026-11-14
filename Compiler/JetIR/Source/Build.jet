@@ -293,6 +293,19 @@ IRBuilder: struct {
     // The breaks built so far (ir_loop_jump), whose ownership meets that of
     // their loop's other exits after it (ir_loop_join).
     loop_edges: [IRLoopEdge]{[IRLoopEdge]{}}
+    // A `??` or `?` that reads its operand's success straight from a Result
+    // route's words (ir_expr_split): `split_armed` holds from the operand's
+    // dispatch to the closing route call of its handle method or Core call
+    // (ir_handle_method, ir_core_call_routed), never across its receiver,
+    // its arguments (ir_expr) or a dedicated builder that may branch around
+    // or use its route call. That call, of type `split_ty`, leaves its
+    // selector and out words in `split` instead of a Result box
+    // (BuildRoutes.jet ir_route_result). `split` holds at most that one
+    // call; it is a list so the `??` or `?` pops it out of the builder
+    // without a copy.
+    split_armed: Bool{false}
+    split_ty: Type{Type.Int}
+    split: [IRRouteSplit]{[IRRouteSplit]{}}
 }
 
 // One failure of a body: its message and the span it names.

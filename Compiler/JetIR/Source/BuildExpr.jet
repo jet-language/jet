@@ -1940,9 +1940,38 @@ ir_condition: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, condition: BodyIfCon
 // ir_fix_expr).
 
 ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    outer: b.split_armed
+    b.split_armed = false
     slot: ir_expr_slot(m, p, b, expression)
+    b.split_armed = outer
     ir_fix_expr(m, p, b, expression, slot)
     slot
+}
+
+// The operand of a `??` or `?`: a handle method or Core call whose Result
+// route call leaves its selector and out words in IRBuilder.split, unboxed,
+// returns -1 (ir_splits); any other operand builds as ir_expr does.
+ir_expr_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    b.split.clear()
+    if !ir_splits(p, b, expression) -> return ir_expr(m, p, b, expression)
+    outer: b.split_armed
+    b.split_ty = ir_ty(p, b, expression)
+    b.split_armed = true
+    slot: ir_expr_slot(m, p, b, expression)
+    b.split_armed = outer
+    if b.split.len() > 0 -> return -1
+    ir_fix_expr(m, p, b, expression, slot)
+    slot
+}
+
+// Whether operand `expression` of a `??` or `?` may leave its Result
+// unboxed (ir_expr_split): a handle method or Core call, which ends in the
+// route call it names, of a Result whose Ok is not an allocator view.
+ir_splits: fn(p: IRProgram, b: IRBuilder, expression: Int) -> Bool Never! {
+    ty: ir_ty(p, b, expression)
+    if !ir_is_result(ty) || ir_view_result(ty) -> return false
+    if ir_body_node(p, b, expression).kind == .HandleMethod(_, _, _) -> return true
+    ir_body_node(p, b, expression).kind == .CoreCall(_, _, _, _, _, _)
 }
 
 ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
@@ -2902,6 +2931,11 @@ ir_args_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, hel
 // Transaction handles, the native Dyn tree, HTTP, Serde, DB, ...) and
 // closure, mutating or frame-scheduled forms are not built here.
 ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
+    // A `??` or `?` operand (ir_expr_split) splits only through the closing
+    // route call below: a dedicated builder may branch around its route call
+    // or use its value, so it gets the boxed Result.
+    split_armed: b.split_armed
+    b.split_armed = false
     if ir_args_helper(operation) == .Val(helper) {
         return ir_args_method(m, p, b, receiver, helper, args, span)
     }
@@ -3053,6 +3087,7 @@ ir_handle_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         return ir_duration_scale(m, p, b, if operation == .DurationScale -> "jet_duration_scale_at" else -> "jet_duration_divide_at", inputs, ty, span)
     }
     result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
+    b.split_armed = split_armed
     ir_route(m, p, b, route.symbol, inputs, route.borrow_mask, result, span)
 }
 
@@ -6504,11 +6539,39 @@ ir_try_starts_failure: fn(p: IRProgram, b: IRBuilder, operand: Int) -> Bool Neve
 // (ir_or_fallback) or replaced by the next failure's start.
 ir_try: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     value_ty: ir_ty(p, b, value)
-    subject: ir_expr(m, p, b, value)
-    if ir_failed(b) || subject < 0 -> return subject
+    subject: ir_expr_split(m, p, b, value)
+    split: b.split.pop()
+    if ir_failed(b) -> return -1
+    if split == .Val(routed) {
+        converted: ir_fact_conversion(p, b, conversion, span)
+        if ir_failed(b) -> return -1
+        return ir_try_split(m, p, b, routed, value_ty, converted, site, span)
+    }
+    if subject < 0 -> return subject
     converted: ir_fact_conversion(p, b, conversion, span)
     if ir_failed(b) -> return -1
     ir_try_slot(m, p, b, subject, value_ty, converted, site, span)
+}
+
+// `value?` over a Result route call left unboxed (ir_expr_split), of checked
+// Result type `carrier`: the failure edge boxes the Err for ir_try_failure;
+// the success edge reads the Ok straight from the route's out words, with no
+// Result built.
+ir_try_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteSplit, carrier: Type, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
+    never := conversion == .Never
+    if ir_untag(carrier) == .Result(_, err_ty) {
+        if ir_never_type(err_ty) -> never = true
+    }
+    zero: ir_word_const(m, b, 0)
+    failed: ir_bool_op(m, b, IROp.Eq, split.selector, zero)
+    ir_open_if(b.f, failed, b.line)
+    // An unboxed split's error is no tuple (ir_route_result): it needs no labels.
+    failure: if never -> -1 else -> ir_route_split_box(m, p, b, split, carrier, [String]{}, false, span)
+    if ir_failed(b) -> return -1
+    ir_try_failure(m, p, b, failure, true, never, conversion, site, span)
+    ir_end(b.f, b.line)
+    if ir_failed(b) -> return -1
+    ir_route_split_ok(m, p, b, split, carrier, span)
 }
 
 // `?` on the value in `subject`, of checked type `carrier`. A fresh carrier
@@ -6775,8 +6838,11 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
     if ir_body_node(p, b, value).kind == .NumericMethod(receiver, .TryFrom(_)) && !ir_fallback_reads_error(p, b, fallback, ambient) {
         return ir_try_from_or(m, p, b, ty, value_ty, receiver, fallback, span)
     }
-    subject: ir_expr(m, p, b, value)
-    if ir_failed(b) || subject < 0 -> return subject
+    subject: ir_expr_split(m, p, b, value)
+    split: b.split.pop()
+    if ir_failed(b) -> return -1
+    if split == .Val(routed) -> return ir_or_split(m, p, b, ty, value_ty, routed, fallback, ambient, span)
+    if subject < 0 -> return subject
     // `held.move() ?? fallback`: the carrier moves into the `??`, which hands its
     // payload on; the variable no longer closes it.
     if b.moving == subject -> ir_close_disarm(b, subject)
@@ -6900,6 +6966,58 @@ ir_or_fallback: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: I
         if viewed >= 0 -> b.fresh[viewed] = false
         return viewed
     }
+    if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
+    result
+}
+
+// `value ?? fallback` over a Result route call left unboxed (ir_expr_split),
+// of checked Result type `carrier`: the success edge reads the Ok straight
+// from the route's out words, with no Result built; only the failure edge
+// boxes the Err, which is dropped before the fallback runs unless the
+// fallback reads it under the ambient binding.
+ir_or_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, carrier: Type, split: IRRouteSplit, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
+    error_ty: if ir_untag(carrier) == .Result(_, err_ty) -> err_ty else -> { return ir_fail_slot(b, span, "`??` on {ir_type_name(carrier)}") }
+    result := -1
+    if !ir_unit_type(ty) && !ir_never_type(ty) {
+        row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+        result = ir_temp(m, b, row)
+    }
+    zero: ir_word_const(m, b, 0)
+    test: ir_bool_op(m, b, IROp.Ne, split.selector, zero)
+    before: ir_own_states(b, b.bindings.len())
+    ir_open_if(b.f, test, b.line)
+    payload: ir_route_split_ok(m, p, b, split, carrier, span)
+    if ir_failed(b) -> return -1
+    if result >= 0 && payload >= 0 {
+        adapted: ir_adapt(m, p, b, payload, b.f.slot_type[result], span)
+        if ir_failed(b) -> return -1
+        ir_store(m, p, b, result, adapted)
+    } else { ir_release(m, b, payload) }
+    then_states: ir_own_states(b, before.len())
+    ir_set_own_states(b, before)
+    ir_else(b.f, b.line)
+    // A failure handled here ends its journey (ir_or_fallback).
+    _: ir_runtime(m, b, "jet_journey_reset", [Int]{}, -1)
+    // An unboxed split's error is no tuple (ir_route_result): it needs no labels.
+    failure: ir_route_split_box(m, p, b, split, carrier, [String]{}, false, span)
+    if ir_failed(b) -> return -1
+    reads: ir_fallback_reads_error(p, b, fallback, ambient)
+    if !reads -> ir_release(m, b, failure)
+    mark: b.bindings.len()
+    if reads && ambient == .Val(local) {
+        error_row: ir_value_type(m, p, error_ty) ?? return ir_type_fail(b, span, error_ty)
+        error: ir_load_at(m, b, failure, 8, error_row)
+        if error >= 0 {
+            _: ir_binder_holds(m, p, b, local, error, span)
+            b.bindings.push(IRBinding{name: local.name, slot: error})
+        }
+    }
+    ir_fallback_route(m, p, b, fallback, result, span)
+    ir_truncate_bindings(b, mark)
+    if reads -> ir_release(m, b, failure)
+    ir_end(b.f, b.line)
+    fallback_leaves: ir_fallback_leaves(p, b, fallback)
+    ir_meet_paths(m, b, test, then_states, false, fallback_leaves)
     if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
     result
 }

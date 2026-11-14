@@ -4609,6 +4609,11 @@ ir_route_labeled: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, 
 // no route table row repeats.
 ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, inputs: [Int], borrowed: [Bool], result: Type, labels: [String], span: Span) -> Int Never! {
     name: ir_route_symbol(symbol)
+    // Only this route's own call may leave a `??` or `?` operand's Result
+    // unboxed (ir_route_result), not the inlined or argument-converting code
+    // before it.
+    split_armed: b.split_armed
+    b.split_armed = false
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None {
         if ir_route_inline(m, p, b, name, inputs, result, span) == .Val(inlined) -> return inlined
     }
@@ -4796,7 +4801,10 @@ ir_route_declared: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
     if route.result == {
         .Plain(carrier) -> dst = ir_route_plain(m, p, b, route.export, lowered, carrier, result, span)
         .Option(some) -> dst = ir_route_option(m, p, b, route.export, lowered, some, result, span)
-        .Result(ok, err) -> dst = ir_route_result(m, p, b, route.export, lowered, ok, err, labels, result, span)
+        .Result(ok, err) -> {
+            b.split_armed = split_armed
+            dst = ir_route_result(m, p, b, route.export, lowered, ok.move(), err.move(), labels, result, span)
+        }
         .Tuple(items) -> dst = ir_route_tuple(m, p, b, route.export, lowered, items, labels, result, span)
     }
     if ir_failed(b) -> return -1
@@ -5465,13 +5473,16 @@ ir_route_option: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
     boxed
 }
 
-ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], ok: IRRouteCarrier, err: IRRouteCarrier, labels: [String], result: Type, span: Span) -> Int Never! {
-    ok_ty := Type.Int
-    err_ty := Type.Int
-    if ir_untag(result) == .Result(success, failure) {
-        ok_ty = success
-        err_ty = failure
-    } else if export == "jet_int_to_radix" && ir_untag(result) == Type.String && ok == .Text && err == .Text {
+ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, args: [Int], ok: &&IRRouteCarrier, err: &&IRRouteCarrier, labels: [String], result: Type, span: Span) -> Int Never! {
+    // The operand of a `??` or `?` (BuildExpr.jet ir_expr_split) reads the
+    // call's words itself and builds no Result. A tuple error is boxed here,
+    // where its declared `labels` are.
+    unboxed: b.split_armed && result == b.split_ty && !(err == .Tuple(_))
+    b.split_armed = false
+    if !ir_is_result(result) {
+        if export != "jet_int_to_radix" || ir_untag(result) != Type.String || ok != .Text || err != .Text {
+            return ir_fail_slot(b, span, "runtime route {export} Result result as {result}")
+        }
         // Int.to_radix is checked String over the kernel's Text/Text Result:
         // the selected text on success, a numeric stop with the error text on
         // failure.
@@ -5495,8 +5506,6 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
         ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
         ir_end(b.f, b.line)
         return text
-    } else {
-        return ir_fail_slot(b, span, "runtime route {export} Result result as {result}")
     }
     // Each side writes its out words from `out` (ir_route_carrier_slots): a
     // List its data then length, an Option its tag then payload words.
@@ -5508,24 +5517,84 @@ ir_route_result: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, a
     loop index in 0..<err_words -> call_args.push(if index == 0 -> out else -> ir_address_at(m, b, out, 8 * index))
     word_row: ir_word_row(m)
     selector: ir_runtime(m, b, export, call_args, word_row)
-    boxed: ir_result_box(m, p, b, result, true, -1)
-    ir_emit(b.f, IROp.Store, -1, boxed, 0, selector, b.line)
-    zero: ir_word_const(m, b, 0)
-    ok_flag: ir_bool_op(m, b, IROp.Ne, selector, zero)
-    ir_open_if(b.f, ok_flag, b.line)
-    ir_route_store_payload(m, p, b, boxed, 8, ok_ty, ok, out, span)
-    ir_else(b.f, b.line)
-    // A tuple error's kernel items carry the declared `labels`.
-    if err == .Tuple(items) {
-        ir_route_store_tuple(m, p, b, boxed, 8, err_ty, items, labels, out, span)
-    } else if err == .Text && ir_default_err(p, err_ty) {
-        ir_route_store_err_message(m, p, b, boxed, 8, err_ty, out, span)
-    } else {
-        ir_route_store_payload(m, p, b, boxed, 8, err_ty, err, out, span)
+    split: IRRouteSplit{selector: selector, out: out, ok: ok.move(), err: err.move()}
+    if unboxed {
+        b.split.push(split)
+        return -1
     }
-    ir_end(b.f, b.line)
+    ir_route_split_box(m, p, b, split, result, labels, true, span)
+}
+
+// A Result route call before its Result is built: the selector word its
+// export answered (nonzero: Ok) and the `out` words the selected side wrote,
+// with the route's carriers.
+IRRouteSplit: struct {
+    selector: Int
+    out: Int
+    ok: IRRouteCarrier
+    err: IRRouteCarrier
+}
+
+// The Result box, of checked type `result`, of route call `split`: the side
+// its selector names, or only the Err side when `either` is false, on a path
+// where the selector is known to be zero.
+ir_route_split_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteSplit, result: Type, labels: [String], either: Bool, span: Span) -> Int Never! {
+    ok_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(result) == .Result(success, failure) {
+        ok_ty = success
+        err_ty = failure
+    } else { return ir_fail_slot(b, span, "runtime route Result as {ir_type_name(result)}") }
+    boxed: ir_result_box(m, p, b, result, true, -1)
+    ir_emit(b.f, IROp.Store, -1, boxed, 0, split.selector, b.line)
+    if either {
+        zero: ir_word_const(m, b, 0)
+        ok_flag: ir_bool_op(m, b, IROp.Ne, split.selector, zero)
+        ir_open_if(b.f, ok_flag, b.line)
+        ir_route_store_payload(m, p, b, boxed, 8, ok_ty, split.ok, split.out, span)
+        ir_else(b.f, b.line)
+    }
+    // A tuple error's kernel items carry the declared `labels`.
+    if split.err == .Tuple(items) {
+        ir_route_store_tuple(m, p, b, boxed, 8, err_ty, items, labels, split.out, span)
+    } else if split.err == .Text && ir_default_err(p, err_ty) {
+        ir_route_store_err_message(m, p, b, boxed, 8, err_ty, split.out, span)
+    } else {
+        ir_route_store_payload(m, p, b, boxed, 8, err_ty, split.err, split.out, span)
+    }
+    if either -> ir_end(b.f, b.line)
     b.fresh[boxed] = true
     boxed
+}
+
+// The owned Ok payload of route call `split`, of checked Result type
+// `result`, read straight from its out words on a path where its selector is
+// known to be nonzero; -1 for Unit. A scalar, text or tag word loads as
+// itself; an aggregate is laid out in fresh frame storage, any other payload
+// through a stack word (ir_route_inline_payload).
+ir_route_split_ok: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, split: IRRouteSplit, result: Type, span: Span) -> Int Never! {
+    ok_ty := Type.Int
+    if ir_untag(result) == .Result(success, _) {
+        ok_ty = success
+    } else { return ir_fail_slot(b, span, "runtime route Result as {ir_type_name(result)}") }
+    if split.ok == .Unit || ir_unit_type(ok_ty) -> return -1
+    row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
+    scalar: split.ok == .Flag || split.ok == .Float || split.ok == .Text || split.ok == .Tag(_, _) || (split.ok == .Word && ir_word_record(m, p, row) == None && m.types[row].kind != .Aggregate)
+    if scalar {
+        value: ir_temp(m, b, row)
+        ir_emit(b.f, IROp.Load, value, split.out, 0, -1, b.line)
+        b.fresh[value] = m.types[row].drop != ""
+        return value
+    }
+    if m.types[row].kind == .Aggregate {
+        storage: ir_fresh_temp(m, b, row)
+        ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+        ir_route_store_payload(m, p, b, storage, 0, ok_ty, split.ok, split.out, span)
+        return storage
+    }
+    value: ir_route_inline_payload(m, p, b, ok_ty, split.ok, split.out, span)
+    b.fresh[value] = m.types[row].drop != ""
+    value
 }
 
 // The default Err a runtime binding's `T Err!` failed with, built from the
@@ -5632,16 +5701,21 @@ ir_reflect_literal: fn(p: IRProgram, b: IRBuilder, node: Int) -> String Never! {
 // build invocation an `#Impure` block's Core call runs between the host marks
 // Impure.enter and Impure.leave (IRProgram.invocation), as its function
 // calls do (ir_call_row_emit).
+// A `??` or `?` operand (BuildExpr.jet ir_expr_split) splits only through the
+// closing route call of ir_core_call_routed: a dedicated builder may branch
+// around its route call or use its value, so it gets the boxed Result.
 ir_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
-    if !p.invocation || b.impure == 0 -> return ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, span)
+    split_armed: b.split_armed
+    b.split_armed = false
+    if !p.invocation || b.impure == 0 -> return ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, split_armed, span)
     _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
-    result: ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, span)
+    result: ir_core_call_routed(m, p, b, ty, record, args, type_args, widen, split_armed, span)
     if ir_failed(b) -> return -1
     _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
     result
 }
 
-ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
+ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
     canonical: ir_canonical_core_record(record)
     if canonical.module_name == "core.crypto" && canonical.member == "wipe" -> return ir_core_crypto_wipe(m, p, b, args, span)
     // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
@@ -5673,6 +5747,7 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     // the checked type: it does not narrow exact Int.
     typed_carrier_value: canonical.module_name == "core.prelude" && canonical.member == "keep"
     labels: core_call_native_return_labels(canonical.module_name, canonical.member)
+    b.split_armed = split_armed
     ir_route_call_args(m, p, b, symbol, None, args, canonical.signature.borrow_mask, ty, labels, typed_carrier_value, span)
 }
 
@@ -5702,6 +5777,10 @@ ir_route_ambient_refusals: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol:
 // consumes (borrow_mask false) crosses as its native I64 unless
 // `typed_carrier_value`.
 ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, declared: IRRoute?, args: [Int], borrow_mask: [Bool], ty: Type, labels: [String], typed_carrier_value: Bool, span: Span) -> Int Never! {
+    // Only the route call itself may split a `??` or `?` operand, not the
+    // argument conversions before it.
+    split_armed: b.split_armed
+    b.split_armed = false
     slots := [Int]{}
     loop (index, arg) in args {
         slot: ir_expr(m, p, b, arg)
@@ -5719,6 +5798,7 @@ ir_route_call_args: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String
         }
     }
     result: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
+    b.split_armed = split_armed
     ir_route_declared(m, p, b, symbol, declared, slots, borrow_mask, result, labels, span)
 }
 
