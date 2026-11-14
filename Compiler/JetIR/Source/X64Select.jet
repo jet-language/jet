@@ -42,6 +42,7 @@ use {
         X64FloatOp,
         X64FunctionDebug,
         X64FunctionID,
+        X64InlineRange,
         X64LineRow,
         X64Reloc,
         X64RelocTarget,
@@ -3980,7 +3981,9 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // a frame slot to the body's end, and a frame address (IRX64Allocation
 // .frames) as the rbp-relative address it is to the body's end. An
 // aggregate's slot carries the address of its bytes, so its variable is
-// `indirect`: the debugger reads the bytes there.
+// `indirect`: the debugger reads the bytes there. A local belongs to the
+// inline site of the instruction that first writes it (a callee's local
+// inlined here: OptInline.jet ir_opt_splice).
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
@@ -3988,7 +3991,8 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IR
         ty: ir_x64_type(m, f, slot)
         variable: variables.len()
         indirect: m.types[f.slot_type[slot]].kind == .Aggregate
-        variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect})
+        site: if al.starts[slot] >= 0 && al.starts[slot] < f.op.len() -> ir_code_line_site(f.code_line[al.starts[slot]]) else -> 0
+        variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect, site: site})
         if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] -> next
         // From the body on: the frame-free prefix keeps its values in
         // registers of its own (ir_x64_wrap).
@@ -4006,6 +4010,57 @@ ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IR
         } else {
             if end > start -> ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
         }
+    }
+}
+
+// The runs of inlined code (X64FunctionDebug.inlines): per inline site
+// (IRFunction.inline_sites) each run of instructions at it or at a site
+// nested in it, from instruction `at`'s code at positions[at] to
+// positions[at + 1]. Code of no size or no source line neither starts nor
+// ends a run. A run goes in when it opens, so the runs are by start and a
+// site's run comes before the runs nested in it.
+ir_x64_inline_ranges: fn(f: IRFunction, positions: [Int]) -> [X64InlineRange] Never! {
+    runs := [X64InlineRange]{}
+    if f.inline_sites.len() == 0 -> return runs
+    // The open runs, outermost first, and the sites of the instruction at
+    // hand, innermost first.
+    open := [Int]{}
+    chain := [Int]{}
+    loop at in 0..<f.op.len() {
+        start: positions[at]
+        end: positions[at + 1]
+        if end <= start || f.code_line[at] < 0 -> next
+        chain.clear()
+        site := ir_code_line_site(f.code_line[at])
+        loop site > 0 {
+            chain.push(site)
+            site = ir_inline_site_parent(f, site)
+        }
+        kept := 0
+        loop kept < open.len() && kept < chain.len() && runs[open[kept]].site == chain[chain.len() - 1 - kept] -> kept += 1
+        loop open.len() > kept -> _ := open.pop()
+        loop depth in kept..<chain.len() {
+            open.push(runs.len())
+            runs.push(X64InlineRange{site: chain[chain.len() - 1 - depth], start: start, end: end})
+        }
+        loop run in open -> runs[run].end = end
+    }
+    runs
+}
+
+// Site 2 sits in site 1. Instructions: own code, site 1, site 2 twice, code
+// with no line, site 1, own code, site 1 again: one run of site 1 holds the
+// run of site 2 and the lineless code, and site 1's second run is apart.
+#Test("Inline runs nest by site and pass over code with no line") {
+    f := ir_function_new("f", "test:inline.jet::f", "", "inline.jet", 1)
+    f.inline_sites = [Int]{7, 0, 3, 8, 1, 4}
+    one: ir_code_line_at(10, 1)
+    two: ir_code_line_at(20, 2)
+    loop line in ([Int]{3, one, two, two, -1, one, 5, one}) -> _ := ir_emit(f, IROp.Nop, -1, -1, -1, -1, line)
+    runs: ir_x64_inline_ranges(f, [Int]{0, 2, 4, 6, 8, 9, 11, 13, 15})
+    assert_eq(runs.len(), 3)
+    loop (k, want) in ([[Int]]{[Int]{1, 2, 11}, [Int]{2, 4, 8}, [Int]{1, 13, 15}}) {
+        assert_eq([Int]{runs[k].site, runs[k].start, runs[k].end}, want)
     }
 }
 
@@ -4041,11 +4096,11 @@ ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64
 ir_x64_log_text: fn(m: IRModule, f: IRFunction, code: X64Code) -> [String] Never! {
     if !code.logging -> return [String]{}
     lines := [String]{"x64 {f.source_file}", ir_function_text(m, f)}
-    count: f.inline_sites.len() /% 2
+    count: f.inline_sites.len() /% IR_INLINE_SITE_WORDS
     loop site in 0..<count {
-        function: f.inline_sites[2 * site]
+        function: f.inline_sites[IR_INLINE_SITE_WORDS * site]
         key: if function >= 0 && function < m.functions.len() -> m.functions[function].key else -> "?"
-        lines.push("inline {site + 1} {f.inline_sites[2 * site + 1]} {key}")
+        lines.push("inline {site + 1} {ir_inline_site_parent(f, site + 1)} {key}")
     }
     if count > 0 {
         sites := [String]{"sites"}
@@ -4622,7 +4677,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic},
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions)},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,

@@ -22,9 +22,11 @@
 // result slot (an aggregate result: fresh frame storage and a copy of its
 // bytes, as the call's result storage) and a Br out of that Block. Lines of
 // a callee from another file become the call's line. The body's code lines
-// name the inline site it came from (IRFunction.inline_sites), so a reader
-// of the IR (the emission check's declassified verdicts) still finds it
-// after the Block goes: a mark that changes no pass's view of the code.
+// name the inline site it came from (IRFunction.inline_sites, which also
+// keeps the call's line), so a reader of the IR (the emission check's
+// declassified verdicts) still finds it after the Block goes: a mark that
+// changes no pass's view of the code. The debug info makes each site an
+// inlined frame (X64Select.jet ir_x64_inline_ranges, Dwarf.jet).
 //
 // Under `inline: always_marked` (IROptInline.Marked) only a callee marked
 // `#Inline(Always)` (IRFunction.inline_always) is taken, at every call site
@@ -239,13 +241,16 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
     callee_facts: ir_opt_facts(callee)
     // This body is a new inline site in the call's own one; the callee's
     // sites nest in it, renumbered as `f`'s (`sites`: by callee site).
-    sites := [Int]{f.inline_sites.len() /% 2 + 1}
+    sites := [Int]{f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1}
     f.inline_sites.push(caller.a[at])
     f.inline_sites.push(ir_code_line_site(site_line))
-    loop row in 0..<(callee.inline_sites.len() /% 2) {
-        sites.push(f.inline_sites.len() /% 2 + 1)
-        f.inline_sites.push(callee.inline_sites[2 * row])
-        f.inline_sites.push(sites[callee.inline_sites[2 * row + 1]])
+    f.inline_sites.push(ir_code_line_source(site_line))
+    loop row in 0..<(callee.inline_sites.len() /% IR_INLINE_SITE_WORDS) {
+        word: IR_INLINE_SITE_WORDS * row
+        sites.push(f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1)
+        f.inline_sites.push(callee.inline_sites[word])
+        f.inline_sites.push(sites[callee.inline_sites[word + 1]])
+        f.inline_sites.push(callee.inline_sites[word + 2])
     }
     _ := ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
     depth := 0

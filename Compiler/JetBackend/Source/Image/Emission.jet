@@ -52,6 +52,10 @@ X64DebugLocation: enum {
 // start..<end.
 X64VariableRange: struct { variable: Int, start: Int, end: Int, location: X64DebugLocation }
 
+// The code offsets start..<end hold code of inline site `site` (a row of
+// X64FunctionSource.inlines, from 1) or of a site nested in it.
+X64InlineRange: struct { site: Int, start: Int, end: Int }
+
 X64FunctionDebug: struct {
     lines: [X64LineRow]
     body: Int
@@ -64,6 +68,9 @@ X64FunctionDebug: struct {
     // Whether it calls through a function value, whose targets the call
     // graph does not name.
     dynamic: Bool{false}
+    // The runs of inlined code, by start, each run before the runs nested
+    // in it; the slow paths after the epilogue are the function's own code.
+    inlines: [X64InlineRange]{[X64InlineRange]{}}
 }
 
 // The source types of the debug variables, described by their machine
@@ -90,13 +97,15 @@ X64DebugType: struct { name: String, size: Int, kind: X64DebugTypeKind }
 
 // A source variable: a parameter or a named local. `indirect` when the
 // carried value is the address of the variable's bytes (an inline aggregate)
-// rather than the variable itself.
+// rather than the variable itself. `site`: the inline site it belongs to
+// (X64FunctionSource.inlines, from 1), 0 for the function's own.
 X64DebugVariable: struct {
     name: String
     ty: Int
     line: Int
     parameter: Bool
     indirect: Bool
+    site: Int{0}
 }
 
 // `directory` is the compilation directory relative `files` resolve
@@ -127,12 +136,28 @@ X64Data: struct {
 
 // The source facts of one compiled function: `file` is a row of
 // X64ModuleDebug.files, -1 for generated code (glue, helpers, the generated
-// entry), which has no source name or variables.
+// entry), which has no source name or variables. `inlines[s - 1]` is inline
+// site s of its optimized body.
 X64FunctionSource: struct {
     name: String
     file: Int
     line: Int
     variables: [X64DebugVariable]
+    inlines: [X64InlineSite]{[X64InlineSite]{}}
+}
+
+// A function inlined into a compiled one (JetIR OptInline.jet): its row in
+// the module (-1 when unknown), which identifies it across sites, its name,
+// file (a row of X64ModuleDebug.files, -1 for generated code) and
+// declaration line, the site it was inlined in (0: the compiled function's
+// own code) and the line of the call there.
+X64InlineSite: struct {
+    function: Int
+    name: String
+    file: Int
+    line: Int
+    parent: Int
+    call_line: Int
 }
 
 x64_function_source_none: fn() -> X64FunctionSource Never! {

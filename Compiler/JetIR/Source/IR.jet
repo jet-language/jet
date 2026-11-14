@@ -296,9 +296,10 @@ IRFunction: struct {
     // The C symbol a host defines in this runtime export's place
     // (IR_HOST_PROVIDER, set by ir_build_library), else empty.
     host_symbol: String{""}
-    // The inline sites of the body (OptInline.jet ir_opt_splice), two words
-    // each: the function inlined there and the site it sits in (0: the
-    // function's own code). Site s (from 1) is words 2s - 2 and 2s - 1.
+    // The inline sites of the body (OptInline.jet ir_opt_splice),
+    // IR_INLINE_SITE_WORDS words each: the function inlined there, the site
+    // it sits in (0: the function's own code) and the source line of the
+    // call there. Site s (from 1) starts at word 3s - 3.
     inline_sites: [Int]{[Int]{}}
     // Per slot, whether it holds a `timing: .Fixed` value: the builder marks
     // each scalar slot whose checked type carries a fixed tag
@@ -677,6 +678,15 @@ ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: In
 
 // Code line bit 32 (IRFunction.code_line): the inline site starts there.
 IR_CODE_LINE_SITE: 4294967296
+
+// The words of one inline site in IRFunction.inline_sites.
+IR_INLINE_SITE_WORDS: 3
+
+// The site inline site `site` (from 1) of `f` sits in, 0 for the function's
+// own code.
+ir_inline_site_parent: fn(f: IRFunction, site: Int) -> Int Never! {
+    f.inline_sites[IR_INLINE_SITE_WORDS * (site - 1) + 1]
+}
 
 // The source line of code line `line`, without its inline site.
 ir_code_line_source: fn(line: Int) -> Int Never! {

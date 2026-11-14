@@ -740,9 +740,13 @@ starts after header padding to the maximum function/data alignment.
 Hosted program and runtime objects share the [section-table writer](../../Compiler/JetBackend/Source/Image/Object.jet).
 Its content rows also determine section names, offsets, links and header count;
 DWARF and unwind relocations use those same indices. Each compiled function has
-one matching debug row, including handwritten entry adapters. Lifecycle exports
-append priority-named init/fini sections and their relocations, with equal
-priorities ordered by export symbol.
+one matching debug row, including handwritten entry adapters. Code the
+optimizer inlined keeps its inline site: the function inlined there and the
+line of the call. Each run of that code becomes a DWARF inlined subroutine of
+an abstract subprogram for that function, holding the inlined locals, so LLDB
+and gdb show an inlined frame above its caller in O1 and O2 images. Lifecycle
+exports append priority-named init/fini sections and their relocations, with
+equal priorities ordered by export symbol.
 
 Runtime fixed-width negation uses `wrapping(I64{0} - value)`: the per-operation
 overflow opt-in admits a binary integer operation (D-NUMOPS1), not unary

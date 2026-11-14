@@ -10,7 +10,7 @@ use {
     jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
     jet_backend.[
         X64CompiledFunction, X64Data, X64DataExport, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
-        X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
+        X64FunctionDebug, X64FunctionID, X64FunctionSource, X64InlineSite, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
         x64_object_functions_threads, x64_object_main, x64_object_main_debug,
     ]
 }
@@ -796,7 +796,8 @@ ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], d
 }
 
 // The object writer's module of `owned`: its data, debug files and types
-// and per IR function its name, file, line and debug variables (taken).
+// and per IR function its name, file, line, debug variables (taken) and
+// inline sites.
 ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     // Popped in function order.
     variables := compiler_take_rows<[X64DebugVariable]>(owned.variables)
@@ -805,7 +806,20 @@ ir_x64_object_module: fn(owned: &IRX64Result) -> X64ObjectModule Never! {
     loop f in owned.program.functions {
         file: owned.tables.file_rows.get(f.source_file) ?? -1
         listed := variables.pop() ?? [X64DebugVariable]{}
-        sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: listed.move()})
+        inlines := [X64InlineSite]{}
+        loop site in 1..<(f.inline_sites.len() /% IR_INLINE_SITE_WORDS + 1) {
+            word: IR_INLINE_SITE_WORDS * (site - 1)
+            row: f.inline_sites[word]
+            parent: ir_inline_site_parent(f, site)
+            call_line: f.inline_sites[word + 2]
+            if row < 0 || row >= owned.program.functions.len() {
+                inlines.push(X64InlineSite{function: -1, name: "?", file: -1, line: 0, parent: parent, call_line: call_line})
+                next
+            }
+            callee: owned.program.functions[row]
+            inlines.push(X64InlineSite{function: row, name: callee.name, file: owned.tables.file_rows.get(callee.source_file) ?? -1, line: callee.line, parent: parent, call_line: call_line})
+        }
+        sources.push(X64FunctionSource{name: f.name, file: file, line: f.line, variables: listed.move(), inlines: inlines.move()})
     }
     X64ObjectModule{
         data: compiler_take_rows<X64Data>(owned.tables.data),

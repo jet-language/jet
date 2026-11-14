@@ -17,7 +17,10 @@
 //   one section per function, a unit without an address range); the
 //   types of X64ModuleDebug.types; one subprogram per function (frame base
 //   rbp) with its parameters and variables, each located by a location list.
-//   Generated functions (glue, helpers, `main`) are artificial subprograms.
+//   Code inlined into a function is an inlined subroutine of an abstract
+//   subprogram of the inlined function, so a debugger shows its frame and
+//   locals. Generated functions (glue, helpers, `main`) are artificial
+//   subprograms.
 // - `.debug_line`: one sequence per function with source lines; the row at
 //   the end of the prologue carries `prologue_end`.
 // - `.debug_jetline`: not DWARF. The location table the runtime's fault
@@ -239,6 +242,9 @@ DWARF_ABBREV_VARIABLE: 15
 DWARF_ABBREV_PARAMETER_UNLOCATED: 16
 DWARF_ABBREV_VARIABLE_UNLOCATED: 17
 DWARF_ABBREV_ANONYMOUS_UNION: 18
+DWARF_ABBREV_ABSTRACT: 19
+DWARF_ABBREV_ABSTRACT_GENERATED: 20
+DWARF_ABBREV_INLINED: 21
 
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
@@ -250,7 +256,9 @@ DW_AT_HIGH_PC: 0x12
 DW_AT_LANGUAGE: 0x13
 DW_AT_COMP_DIR: 0x1b
 DW_AT_CONST_VALUE: 0x1c
+DW_AT_INLINE: 0x20
 DW_AT_PRODUCER: 0x25
+DW_AT_ABSTRACT_ORIGIN: 0x31
 DW_AT_ARTIFICIAL: 0x34
 DW_AT_DATA_MEMBER_LOCATION: 0x38
 DW_AT_DECL_FILE: 0x3a
@@ -260,6 +268,8 @@ DW_AT_ENCODING: 0x3e
 DW_AT_EXTERNAL: 0x3f
 DW_AT_FRAME_BASE: 0x40
 DW_AT_TYPE: 0x49
+DW_AT_CALL_FILE: 0x58
+DW_AT_CALL_LINE: 0x59
 DW_FORM_ADDR: 0x01
 DW_FORM_DATA2: 0x05
 DW_FORM_DATA8: 0x07
@@ -316,6 +326,13 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
     dwarf_abbrev(a, DWARF_ABBREV_PARAMETER_UNLOCATED, 0x05, false, named_variable)
     dwarf_abbrev(a, DWARF_ABBREV_VARIABLE_UNLOCATED, 0x34, false, named_variable)
     dwarf_abbrev(a, DWARF_ABBREV_ANONYMOUS_UNION, 0x17, true, [Int]{DW_AT_BYTE_SIZE, DW_FORM_UDATA})
+    // The abstract subprogram of a function inlined somewhere (DW_INL_inlined)
+    // and one concrete inlined copy.
+    dwarf_abbrev(a, DWARF_ABBREV_ABSTRACT, 0x2e, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA, DW_AT_INLINE, DW_FORM_DATA1})
+    dwarf_abbrev(a, DWARF_ABBREV_ABSTRACT_GENERATED, 0x2e, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_ARTIFICIAL, DW_FORM_FLAG_PRESENT, DW_AT_INLINE, DW_FORM_DATA1})
+    dwarf_abbrev(a, DWARF_ABBREV_INLINED, 0x1d, true, [Int]{
+        DW_AT_ABSTRACT_ORIGIN, DW_FORM_REF4, DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_CALL_FILE, DW_FORM_UDATA, DW_AT_CALL_LINE, DW_FORM_UDATA,
+    })
     dwarf_uleb(a, 0)
     a
 }
@@ -577,13 +594,14 @@ dwarf_function_debug: fn(program: X64ObjectModule, function: X64CompiledFunction
 // the unit header and the types on the calling thread, then one subprogram
 // per function (dwarf_info_function), in function order. The subprograms
 // are built in consecutive function parts on the threads `threads` admits
-// (one part per thread, weighted by the functions' variables and ranges):
-// each part's bytes and relocations are relative to the part's own start,
-// and the join appends the parts in function order, shifting each
-// relocation's offset by the info bytes before its part and the loclists
-// offsets (the relocations against `symbols.loclists`) and the loclists
-// relocations' offsets by the loclists bytes before it, so the sections are
-// those of the one-thread loop.
+// (one part per thread, weighted by the functions' variables, ranges and
+// inline runs): each part's bytes, relocations and references to its own
+// DIEs are relative to the part's own start, and the join appends the
+// parts in function order, shifting each relocation's offset and each such
+// reference (its place and value) by the info bytes before its part and
+// the loclists offsets (the relocations against `symbols.loclists`) and the
+// loclists relocations' offsets by the loclists bytes before it, so the
+// sections are those of the one-thread loop.
 dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
     info := [U8]{}
     relas := [X64ObjectRela]{}
@@ -619,13 +637,15 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     weights := [Int]{}
     total := 0
     loop (index, function) in functions {
-        weight: 1 + dwarf_function_debug(program, function).variables.len() + debug[index].ranges.len()
+        weight: 1 + dwarf_function_debug(program, function).variables.len() + debug[index].ranges.len() + debug[index].inlines.len()
         weights.push(weight)
         total += weight
     }
     workers: compiler_threads_admit(threads, functions.len(), total, DWARF_INFO_MIN_WEIGHT_PER_THREAD, 0, 0)
     if workers <= 1 {
-        loop (index, function) in functions -> dwarf_info_function(info, relas, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
+        // The unit starts `info`: the subprograms' own references need no shift.
+        refs := [Int]{}
+        loop (index, function) in functions -> dwarf_info_function(info, relas, refs, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
     } else {
         bounds: compiler_threads_partition(weights, workers)
         inputs: Shared{DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}}
@@ -645,6 +665,7 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
             // (compiler_take_rows) grew the target per byte.
             info.extend(rows.info)
             lists.extend(rows.lists)
+            loop pair in 0..<(rows.refs.len() >> 1) -> dwarf_patch_u32(info, info_base + rows.refs[2 * pair], info_base + rows.refs[2 * pair + 1])
         }
     }
     dwarf_uleb(info, 0)
@@ -656,9 +677,9 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     sections.loclists_relas = list_relas
 }
 
-// Fewest weight units (a function, each of its variables and each of its
-// ranges count one) a subprogram thread is admitted for: a few hundred DIEs
-// outweigh a thread's start.
+// Fewest weight units (a function, each of its variables, each of its
+// ranges and each of its inline runs count one) a subprogram thread is
+// admitted for: a few hundred DIEs outweigh a thread's start.
 DWARF_INFO_MIN_WEIGHT_PER_THREAD: 400
 
 // The threads' inputs for the subprograms: shared handles of the module,
@@ -683,11 +704,14 @@ DwarfInfoPart: struct {
 
 // The subprograms of one part: its `.debug_info` bytes, their relocations
 // (`at` relative to the part's first byte; a loclists relocation's addend
-// relative to the part's first loclists byte), its `.debug_loclists` bytes
-// and their relocations (`at` relative to the part's first loclists byte).
+// relative to the part's first loclists byte), the references to its own
+// DIEs (dwarf_info_function `refs`, relative to the part's first byte), its
+// `.debug_loclists` bytes and their relocations (`at` relative to the
+// part's first loclists byte).
 DwarfInfoRows: struct {
     info: [U8]
     relas: [X64ObjectRela]
+    refs: [Int]
     lists: [U8]
     list_relas: [X64ObjectRela]
 }
@@ -711,13 +735,14 @@ dwarf_info_part: fn(inputs: Shared<DwarfInfoShared>, part: Shared<DwarfInfoPart>
     reads: inputs.guard_read()
     info := [U8]{}
     relas := [X64ObjectRela]{}
+    refs := [Int]{}
     lists := [U8]{}
     list_relas := [X64ObjectRela]{}
     loop index in permit.value.start..<permit.value.end {
         function: reads.value.functions[index]
-        dwarf_info_function(info, relas, lists, list_relas, reads.value.program, function, reads.value.debug[index], reads.value.offsets[index], dwarf_function_symbol(reads.value.symbols, index), reads.value.type_offsets, reads.value.symbols)
+        dwarf_info_function(info, relas, refs, lists, list_relas, reads.value.program, function, reads.value.debug[index], reads.value.offsets[index], dwarf_function_symbol(reads.value.symbols, index), reads.value.type_offsets, reads.value.symbols)
     }
-    permit.value.outputs.push(DwarfInfoRows{info: info.move(), relas: relas.move(), lists: lists.move(), list_relas: list_relas.move()})
+    permit.value.outputs.push(DwarfInfoRows{info: info.move(), relas: relas.move(), refs: refs.move(), lists: lists.move(), list_relas: list_relas.move()})
     1
 }
 
@@ -733,7 +758,16 @@ dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 // relocation against `symbols.loclists` whose addend is the list's offset
 // in `lists`; the lists' own relocations, with one section per function,
 // go to `list_relas`.
-dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], list_relas: &[X64ObjectRela], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, symbol: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
+//
+// A function with inlined code (X64FunctionSource.inlines) first gets, at
+// the unit's level, one abstract subprogram per function inlined into it.
+// Inside its subprogram each run of inlined code (X64FunctionDebug.inlines)
+// is an inlined subroutine of that origin, nested as the sites are, with
+// the variables of its site; a variable of a site left with no code goes
+// to the nearest enclosing site with code. Each reference to an abstract
+// subprogram is a pair in `refs`: the place of its ref4 in `info` and the
+// DIE's offset, both from `info`'s start.
+dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], refs: &[Int], lists: &[U8], list_relas: &[X64ObjectRela], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, symbol: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
     facts: dwarf_function_debug(program, function)
     if facts.file < 0 {
         dwarf_uleb(info, DWARF_ABBREV_GENERATED)
@@ -745,6 +779,7 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], list
         dwarf_u8(info, 0x56)
         return
     }
+    origins: dwarf_inline_origins(info, facts.inlines)
     dwarf_uleb(info, DWARF_ABBREV_SUBPROGRAM)
     dwarf_string(info, facts.name)
     dwarf_uleb(info, facts.file + 1)
@@ -753,41 +788,128 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], list
     elf64_u64(info, function.code.len())
     dwarf_uleb(info, 1)
     dwarf_u8(info, 0x56)
+    // The location lists first, in variable order: a variable of a site
+    // with several runs is in each run's DIE, all naming its one list.
     buckets: dwarf_variable_buckets(debug.ranges, facts.variables.len())
+    places := [Int]{}
     loop (variable, row) in facts.variables {
         ranges: dwarf_variable_ranges(buckets[variable])
-        located: ranges.len() > 0
-        abbrev := if located -> DWARF_ABBREV_VARIABLE else -> DWARF_ABBREV_VARIABLE_UNLOCATED
-        if row.parameter {
-            abbrev = if located -> DWARF_ABBREV_PARAMETER else -> DWARF_ABBREV_PARAMETER_UNLOCATED
+        if ranges.len() == 0 {
+            places.push(-1)
+            next
         }
-        dwarf_uleb(info, abbrev)
-        dwarf_string(info, row.name)
-        dwarf_uleb(info, facts.file + 1)
-        dwarf_uleb(info, row.line)
-        elf64_u32(info, type_offsets[row.ty])
-        if located {
-            dwarf_section_offset(info, relas, symbols.loclists, lists.len())
-            loop range in ranges {
-                if symbols.functions.len() == 0 {
-                    // DW_LLE_offset_pair from the unit's base, the start of .text.
-                    dwarf_u8(lists, 0x04)
-                    dwarf_uleb(lists, offset + range.start)
-                    dwarf_uleb(lists, offset + range.end)
-                } else {
-                    // DW_LLE_start_length: the function's own section.
-                    dwarf_u8(lists, 0x08)
-                    dwarf_address(lists, list_relas, symbol, offset + range.start)
-                    dwarf_uleb(lists, range.end - range.start)
-                }
-                expr: dwarf_location(range.location, row.indirect)
-                dwarf_uleb(lists, expr.len())
-                lists.extend(expr)
+        places.push(lists.len())
+        loop range in ranges {
+            if symbols.functions.len() == 0 {
+                // DW_LLE_offset_pair from the unit's base, the start of .text.
+                dwarf_u8(lists, 0x04)
+                dwarf_uleb(lists, offset + range.start)
+                dwarf_uleb(lists, offset + range.end)
+            } else {
+                // DW_LLE_start_length: the function's own section.
+                dwarf_u8(lists, 0x08)
+                dwarf_address(lists, list_relas, symbol, offset + range.start)
+                dwarf_uleb(lists, range.end - range.start)
             }
-            dwarf_u8(lists, 0)
+            expr: dwarf_location(range.location, row.indirect)
+            dwarf_uleb(lists, expr.len())
+            lists.extend(expr)
         }
+        dwarf_u8(lists, 0)
     }
+    // Per site, the variables it holds (site 0: the subprogram).
+    count: facts.inlines.len()
+    coded := [Bool]{false}
+    loop _ in 0..<count -> coded.push(false)
+    loop run in debug.inlines {
+        if run.site > 0 && run.site <= count -> coded[run.site] = true
+    }
+    homes := [Int]{0}
+    held := [[Int]]{[Int]{}}
+    loop site in 1..<(count + 1) {
+        parent: facts.inlines[site - 1].parent
+        home: if {
+            coded[site] -> site
+            parent > 0 && parent < site -> homes[parent]
+            else -> 0
+        }
+        homes.push(home)
+        held.push([Int]{})
+    }
+    loop (variable, row) in facts.variables {
+        home: if row.site > 0 && row.site <= count -> homes[row.site] else -> 0
+        held[home].push(variable)
+    }
+    loop variable in held[0] -> dwarf_info_variable(info, relas, facts.variables[variable], facts.file, places[variable], type_offsets, symbols)
+    // The runs, each inside the open run that contains it.
+    ends := [Int]{}
+    loop run in debug.inlines {
+        if run.site <= 0 || run.site > count -> next
+        loop ends.len() > 0 && run.start >= ends[ends.len() - 1] {
+            _ := ends.pop()
+            dwarf_uleb(info, 0)
+        }
+        site: facts.inlines[run.site - 1]
+        dwarf_uleb(info, DWARF_ABBREV_INLINED)
+        refs.push(info.len())
+        refs.push(origins[run.site - 1])
+        elf64_u32(info, origins[run.site - 1])
+        dwarf_address(info, relas, symbol, offset + run.start)
+        elf64_u64(info, run.end - run.start)
+        caller_file: if site.parent > 0 && site.parent <= count -> facts.inlines[site.parent - 1].file else -> facts.file
+        dwarf_uleb(info, if caller_file >= 0 -> caller_file + 1 else -> 0)
+        dwarf_uleb(info, if site.call_line > 0 -> site.call_line else -> 0)
+        file: if site.file >= 0 -> site.file else -> facts.file
+        loop variable in held[run.site] -> dwarf_info_variable(info, relas, facts.variables[variable], file, places[variable], type_offsets, symbols)
+        ends.push(run.end)
+    }
+    loop _ in ends -> dwarf_uleb(info, 0)
     dwarf_uleb(info, 0)
+}
+
+// The abstract subprograms (DW_INL_inlined) of the functions inlined at
+// `sites`, one per function; per site, its function's DIE offset in `info`.
+dwarf_inline_origins: fn(info: &[U8], sites: [X64InlineSite]) -> [Int] Never! {
+    origins := [Int]{}
+    if sites.len() == 0 -> return origins
+    firsts := [Int:Int]{}
+    loop (index, site) in sites {
+        if site.function >= 0 {
+            if firsts.get(site.function) == .Val(first) {
+                origins.push(origins[first])
+                next
+            }
+            firsts.add(site.function, index).drop("checked absent above")
+        }
+        origins.push(info.len())
+        dwarf_uleb(info, if site.file < 0 -> DWARF_ABBREV_ABSTRACT_GENERATED else -> DWARF_ABBREV_ABSTRACT)
+        dwarf_string(info, site.name)
+        if site.file >= 0 {
+            dwarf_uleb(info, site.file + 1)
+            dwarf_uleb(info, site.line)
+        }
+        // DW_INL_inlined.
+        dwarf_u8(info, 1)
+    }
+    origins
+}
+
+// A variable's DIE, declared in `file`; `place` is its location list's
+// offset in the part's lists, -1 for none.
+dwarf_info_variable: fn(info: &[U8], relas: &[X64ObjectRela], row: X64DebugVariable, file: Int, place: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
+    located: place >= 0
+    abbrev: if {
+        row.parameter && located -> DWARF_ABBREV_PARAMETER
+        row.parameter -> DWARF_ABBREV_PARAMETER_UNLOCATED
+        located -> DWARF_ABBREV_VARIABLE
+        else -> DWARF_ABBREV_VARIABLE_UNLOCATED
+    }
+    dwarf_uleb(info, abbrev)
+    dwarf_string(info, row.name)
+    dwarf_uleb(info, file + 1)
+    dwarf_uleb(info, row.line)
+    elf64_u32(info, type_offsets[row.ty])
+    if located -> dwarf_section_offset(info, relas, symbols.loclists, place)
 }
 
 dwarf_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
