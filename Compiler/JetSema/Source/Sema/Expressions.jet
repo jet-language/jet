@@ -4579,8 +4579,12 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     // with plain parentheses (E0802); it is still checked as that call.
     receiver_signature: sema_call_resolved_type(receiver_value.ty, environment, program)
     // `app.Remote<S>` offers only the methods of `S` an endpoint marker marks.
+    // The calls `sema_app_remote_call` lowers a remote call to (`__call`,
+    // `__arg`, …) name the Remote through a generated local, so they reach
+    // the Remote's own methods; a written `__call` is still a remote call.
+    lowered_remote: if receiver == .Ident(_, _, receiver_id) -> receiver_id == AST_NODE_GENERATED else -> false
     if receiver_signature == .Apply(_, remote_args) {
-        if remote_args.len() == 1 && sema_app_is_remote(receiver_signature, environment, program) {
+        if remote_args.len() == 1 && !lowered_remote && sema_app_is_remote(receiver_signature, environment, program) {
             return sema_call_app_remote_method(receiver, remote_args[0], method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
