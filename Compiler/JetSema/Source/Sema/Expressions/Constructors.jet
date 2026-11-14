@@ -2369,10 +2369,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             converted := checked
             value_span: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
-            needs_conversion := (checked.ty == Type.Int && (if result_head == {
-                .IntN(_, _) -> true
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-            })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
+            needs_conversion := sema_expression_typed_literal_needs_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
                 outcome: sema_expr_narrow_outcome(word, context.arithmetic_policy)
@@ -2415,10 +2412,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             converted := checked
             value_span: expr_span(value)
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
-            needs_conversion := (checked.ty == Type.Int && (if result_head == {
-                .IntN(_, _) -> true
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
-            })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
+            needs_conversion := sema_expression_typed_literal_needs_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
                 outcome: sema_expr_narrow_outcome(word, context.arithmetic_policy)
@@ -2568,6 +2562,19 @@ sema_expression_typed_literal_written_float: fn(value: Expr) -> Float? Never! {
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {}
     }
     None
+}
+
+// Whether a typed literal's checked body converts to its head: an `Int`
+// into a fixed-width head, any integer into `Float` or `F32`, a `Float` into
+// `F32`, or a fixed-width carrier change. A tagged body (`#Key U64`) converts
+// as its carrier does; the conversion keeps the value's tags in the taint flow.
+sema_expression_typed_literal_needs_conversion: fn(body: Type, head: Type) -> Bool {
+    source: sema_expr_unwrap_tag(body)
+    integer_to_fixed: source == Type.Int && (if head == {
+        .IntN(_, _) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+    })
+    integer_to_fixed || (sema_expr_is_integer(source) && (head == Type.Float || head == Type.Float32)) || (source == Type.Float && head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(source, head)
 }
 
 // Integer heads own an explicit conversion, including narrowing fixed carriers.
