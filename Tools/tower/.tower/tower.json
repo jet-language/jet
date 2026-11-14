@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102145,
+    "rev": 102146,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98443,6 +98443,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T03:26:13.870Z"
+        },
+        {
+          "n": 22,
+          "text": "Registering a route charges only what registration runs. Sema folds a lambda`s effects and call edges into the function that writes it (sema_effect_merge_lambda, JetSema Effects/Checks.jet:2605, called at :3370), so App.__route`s call_edges contain __app_page_response, and route() with a pure handler reaches FS.Read, Net and Time.Wait through the spooled body reader (Http.jet:967). Interim (2026-11-14): the send_fn_lowering and app-handler fixtures declare those effects, with a comment, which is sound because serving needs them. Fix: a TEffectFacts field that keeps edges from lambdas filling closed-row slots apart from a Core function`s own calls, charged where the lambda runs (app.serve()), not at registration. Proof: a case where route() with a pure handler reaches nothing and serve() reaches FS.Read, Net and Time.Wait; then the fixture rows narrow back.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T03:43:19.027Z"
         }
       ],
       "refs": [],
@@ -98453,9 +98462,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-14T03:35:45.261Z",
+      "updated": "2026-11-14T03:43:19.028Z",
       "updatedBy": "Main",
-      "criteriaLastN": 21
+      "criteriaLastN": 22
     }
   ],
   "decisions": [
@@ -204610,6 +204619,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T03:43:19.028Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#22 Registering a route charges only what registration runs. Sem"
+    },
     {
       "at": "2026-11-14T03:39:41.877Z",
       "by": "Main",
