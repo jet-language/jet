@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Call a named method, or implement `Mul` on a struct or distinct type of your own (an operator hook on `Int` belongs to the package that declares the other operand type).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0301</code>: <code>tests/ui/impl_foreign_trait_on_builtin_type.stderr</code>.</p>
-<pre class="diag">Error [jet.ImplOnBuiltinType]: `impl Int.Printable` needs a user-defined type
-  --&gt; tests/ui/impl_foreign_trait_on_builtin_type.jet:3:6
+<p>First UI snapshot mentioning <code>E0301</code>: <code>tests/ui/computed_alias_bound_is_not_a_trait.stderr</code>.</p>
+<pre class="diag">Error [jet.ImplOnBuiltinType]: The computed alias bound `Heap` is not a trait
+  --&gt; tests/ui/computed_alias_bound_is_not_a_trait.jet:7:18
     |
-  3 | impl Int.Printable {
-    |      ^^^
- Why: `Int` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program
- Fix: Implement `Printable` on a struct or distinct type of your own, or wrap `Int` in one
+  7 | Storage&lt;N: Int&gt;: Heap #run { if N &lt;= 16 -&gt; Heap else -&gt; Heap }
+    |                  ^^^^
+ Why: Every type a computed alias chooses implements its bound, a trait
+ Fix: Write a trait between `:` and `#run`
 More: jet-lang.dev/e/E0301
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

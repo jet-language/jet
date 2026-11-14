@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write `name: #run value` with one final expression, or bind the result inside a `#run { … }` statement block.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0391</code>: <code>tests/ui/e0391_comptime_block_as_value.stderr</code>.</p>
-<pre class="diag">Error [jet.UnsupportedCompileTimeValue]: `#run { … }` is used as a value, which this compiler does not support yet
-  --&gt; tests/ui/e0391_comptime_block_as_value.jet:3:12
+<p>First UI snapshot mentioning <code>E0391</code>: <code>tests/ui/computed_alias_condition_is_not_a_bool.stderr</code>.</p>
+<pre class="diag">Error [jet.UnsupportedCompileTimeValue]: This condition isn&#39;t a `Bool` decided while building
+  --&gt; tests/ui/computed_alias_condition_is_not_a_bool.jet:15:34
     |
-  3 |     total: #run {
-    |            ^^^^^^^^^^
- Why: Jet makes the block&#39;s final expression its value; only a block holding a single final expression is folded today
- Fix: Write `name: #run value` with one final expression, or a `#run { … }` statement
+ 15 | Storage&lt;N: Int&gt;: Store #run { if N -&gt; Heap else -&gt; Heap }
+    |                                  ^
+ Why: A computed alias chooses its type while building, from its number parameters and the module&#39;s constants
+ Fix: Compare the `Int` parameters with literals or constants, such as `N &lt;= 16`
 More: jet-lang.dev/e/E0391
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
