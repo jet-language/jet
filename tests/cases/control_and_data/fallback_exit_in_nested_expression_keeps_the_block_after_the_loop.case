@@ -1,0 +1,19 @@
+# `?? break` inside a conversion inside a compound assignment, inside an
+# interpolation, and beside the same loop with the fallback on its own binding,
+# plus `?? next` and `?? return` in the same nested position: the loop exits on
+# the missing value and the statements after it run with their locals in
+# scope, on every tier. Hand-derived: the reader holds 1, 2 as u16 and one
+# trailing byte, so each sum is 3 with 1 byte left; the interpolation loop runs
+# three times before its third read misses.
+fixture: fallback_exit_in_nested_expression_keeps_the_block_after_the_loop.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "a 3 1\nb 3 1\nc 3 1\nitem 10\nitem 20\nd 103\ne 3\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "a 3 1\nb 3 1\nc 3 1\nitem 10\nitem 20\nd 103\ne 3\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "a 3 1\nb 3 1\nc 3 1\nitem 10\nitem 20\nd 103\ne 3\n"
