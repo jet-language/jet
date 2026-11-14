@@ -10,8 +10,11 @@
 // rotate, comparison and width instructions but not division or remainder,
 // and may decide no branch, select, call target or memory address. Of
 // those, web_timing_row admits the ones the selector (Select.jet) writes
-// for a fixed word. The engine that compiles the module chooses the machine
-// instructions, so the code's timing on a host is the engine's.
+// for a fixed word. Code one public slot alone decides (a shift's check of
+// its public count, WebEmitter.decided) is admitted whole, as JetIR
+// Timing.jet admits a stop whose tested value is public. The engine that
+// compiles the module chooses the machine instructions, so the code's
+// timing on a host is the engine's.
 
 use {
     jet_foundation.[Type]
@@ -42,11 +45,15 @@ web_timing_memory: fn(op: Int) -> Bool Never! {
 // The findings of `body`, the code emitted for `f`, into `st.errors`.
 // `marks` holds pairs: the emitter's code offset where an IR instruction's
 // code starts, and the instruction (-1 for the epilogue after the last).
+// `decided` holds triples: the emitter's code offsets [start, end) of code
+// one slot alone decides, and that slot (WebEmitter.decided).
 // Each wasm instruction in the code of an IR instruction with a fixed
 // operand is in the table, or is a load or store of that instruction's
 // public address (a Load's, Store's or StreamStore's `a`, a CopyBytes' `a`
-// and `b`).
-web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, marks: [Int]) Never! {
+// and `b`), or lies in code a public slot alone decides. The code is
+// decoded with its call indices patched (to 0): an unpatched index's
+// padding bytes are no instructions.
+web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, marks: [Int], decided: [Int]) Never! {
     fixed: ir_timing_fixed(f)
     reads := [Int]{}
     operands := [Bool]{}
@@ -58,7 +65,10 @@ web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, m
         if operand && f.op[at] == .Call && callee >= 0 && callee < m.functions.len() && m.functions[callee].asm != None -> st.errors.push(ir_timing_finding(f, at, "a fixed operand reaches an inline-asm template, whose bytes are not checked"))
     }
     ops: WasmOpTable.new()
-    reader := WasmReader.new(body.code.copy())
+    // copy: the reader owns the bytes it decodes; the body keeps its own.
+    bytes := body.code.copy()
+    loop pair in 0..<(body.fixups.len() /% 2) -> web_patch_padded(bytes, body.fixups[2 * pair], 0)
+    reader := WasmReader.new(bytes.move())
     code: wasm_decode_body(reader, ops, true) ?? {
         st.errors.push("{f.name}: fixed timing: its code does not decode: {err.render()}")
         return
@@ -71,12 +81,22 @@ web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, m
         at: marks[mark + 1]
         if at < 0 || !operands[at] -> next
         op: code.op[k]
+        if web_timing_public_decision(decided, fixed, offset) -> next
         if web_timing_row(op) -> next
         if web_timing_memory(op) && web_timing_public_address(f, fixed, at) -> next
         name := "opcode {op}"
         if ops.info(op) == .Val(info) -> name = info.name
         st.errors.push(ir_timing_finding(f, at, "a fixed operand meets `{name}`, which the wasm32 table has no row for"))
     }
+}
+
+// Whether the code at `offset` lies in a range of `decided` (triples of
+// start, end and slot) whose deciding slot is public.
+web_timing_public_decision: fn(decided: [Int], fixed: [Bool], offset: Int) -> Bool Never! {
+    loop index in 0..<(decided.len() /% 3) {
+        if offset >= decided[3 * index] && offset < decided[3 * index + 1] && !ir_timing_at(fixed, decided[3 * index + 2]) -> return true
+    }
+    false
 }
 
 // Whether instruction `at` of `f` is a memory access at public addresses.
@@ -89,8 +109,12 @@ web_timing_public_address: fn(f: IRFunction, fixed: [Bool], at: Int) -> Bool Nev
 }
 
 // The findings for `code`, the instructions of `f`'s one IR instruction `op`
-// of its fixed `key` and public `data` (no local declarations, no `end`).
-web_timing_test_errors: fn(op: IROp, code: [U8]) -> [String] Never! {
+// (no local declarations, no `end`): `key` (slot 0) is fixed and `data`
+// (slot 1) public, and `op` reads key then data, or data then key with
+// `secret_right`. `fixups` holds the offsets of `code`'s padded call
+// indices, `checks` pairs of the offsets [start, end) of code the right
+// operand alone decides.
+web_timing_test_errors: fn(op: IROp, code: [U8], fixups: [Int], checks: [Int], secret_right: Bool) -> [String] Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: false, bits: 64}) ?? panic("no U64 row")
     f := ir_function_new("mix", "test:timing.jet::mix", "", "timing.jet", 1)
@@ -98,24 +122,58 @@ web_timing_test_errors: fn(op: IROp, code: [U8]) -> [String] Never! {
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     mixed: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     f.slot_fixed[key] = true
-    _ := ir_emit(f, op, mixed, key, data, IR_OVERFLOW_WRAP, 2)
+    left: if secret_right -> data else -> key
+    right: if secret_right -> key else -> data
+    _ := ir_emit(f, op, mixed, left, right, IR_OVERFLOW_WRAP, 2)
     st := WebState{
         app: true, stop_points: false, data_at: [Int]{}, table_base: 0, slots: [Int]{}, slot_rows: [Int]{},
         types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
         exports: [String:String]{}, hosts: [String:Bool]{}, sigs: [String]{}, poll: -1, trap: -1, turn: -1, armed: -1, errors: [String]{},
     }
+    // The body's one byte of local declarations comes first.
     bytes := [U8]{0x00}
     bytes.extend(code.copy())
     bytes.push(0x0b)
-    web_timing_check(st, m, f, WebBody{code: bytes, fixups: [Int]{}}, [Int]{0, 0, code.len(), -1})
+    patches := [Int]{}
+    loop at in fixups {
+        patches.push(at + 1)
+        patches.push(0)
+    }
+    decided := [Int]{}
+    loop pair in 0..<(checks.len() /% 2) {
+        decided.push(checks[2 * pair])
+        decided.push(checks[2 * pair + 1])
+        decided.push(right)
+    }
+    web_timing_check(st, m, f, WebBody{code: bytes, fixups: patches}, [Int]{0, 0, code.len(), -1}, decided)
     st.errors.move()
 }
 
 #Test("A fixed word's xor passes the wasm32 validator and its division does not") {
     // local.get 0, local.get 1, i64.xor, local.set 2
-    assert_eq(web_timing_test_errors(IROp.BitXor, [U8]{0x20, 0x00, 0x20, 0x01, 0x85, 0x21, 0x02}).len(), 0)
+    assert_eq(web_timing_test_errors(IROp.BitXor, [U8]{0x20, 0x00, 0x20, 0x01, 0x85, 0x21, 0x02}, [Int]{}, [Int]{}, false).len(), 0)
     // local.get 0, local.get 1, i64.div_u, local.set 2
-    errors: web_timing_test_errors(IROp.Div, [U8]{0x20, 0x00, 0x20, 0x01, 0x80, 0x21, 0x02})
+    errors: web_timing_test_errors(IROp.Div, [U8]{0x20, 0x00, 0x20, 0x01, 0x80, 0x21, 0x02}, [Int]{}, [Int]{}, false)
     assert_eq(errors.len(), 1)
     assert_eq(errors[0], "mix: instruction 0 (div) at timing.jet:2: fixed timing: a fixed operand meets `i64.div_u`, which the wasm32 table has no row for")
+}
+
+#Test("A call's unpatched index is decoded as its index, not as unreachable padding") {
+    // local.get 0, call (padded index), drop
+    code: [U8]{0x20, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a}
+    assert_eq(web_timing_test_errors(IROp.BitXor, code, [Int]{3}, [Int]{}, false).len(), 0)
+}
+
+#Test("A shift's count check passes the wasm32 validator for a public count and not for a fixed one") {
+    // local.get count, i64.const 64, i64.ge_u, if, unreachable, end (bytes
+    // 0..<10), then local.get value, local.get count, i64.shr_u, local.set 2.
+    public_count: [U8]{0x20, 0x01, 0x42, 0xc0, 0x00, 0x5a, 0x04, 0x40, 0x00, 0x0b, 0x20, 0x00, 0x20, 0x01, 0x88, 0x21, 0x02}
+    assert_eq(web_timing_test_errors(IROp.Shr, public_count, [Int]{}, [Int]{0, 10}, false).len(), 0)
+    // Unrecorded, the same check is refused.
+    assert_eq(web_timing_test_errors(IROp.Shr, public_count, [Int]{}, [Int]{}, false).len(), 2)
+    fixed_count: [U8]{0x20, 0x00, 0x42, 0xc0, 0x00, 0x5a, 0x04, 0x40, 0x00, 0x0b, 0x20, 0x01, 0x20, 0x00, 0x88, 0x21, 0x02}
+    errors: web_timing_test_errors(IROp.Shr, fixed_count, [Int]{}, [Int]{0, 10}, true)
+    assert_eq(errors.len(), 2)
+    assert_eq(errors[0], "mix: instruction 0 (shr) at timing.jet:2: fixed timing: a fixed operand meets `if`, which the wasm32 table has no row for")
+    assert_eq(errors[1], "mix: instruction 0 (shr) at timing.jet:2: fixed timing: a fixed operand meets `unreachable`, which the wasm32 table has no row for")
 }

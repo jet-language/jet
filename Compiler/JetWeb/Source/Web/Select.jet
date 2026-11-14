@@ -109,7 +109,8 @@ web_select_function: fn(st: &WebState, m: IRModule, tables: IRX64Tables, row: In
 }
 
 // A function with a fixed slot (JetIR Timing.jet ir_timing_marked) records
-// where each instruction's code starts, for the fixed-timing check
+// where each instruction's code starts, and the code one slot alone decides
+// (WebEmitter.decided), for the fixed-timing check
 // (Timing.jet web_timing_check). A program's body records its line rows
 // (WebBody.lines): the function's line for the prologue, then each
 // instruction's.
@@ -119,6 +120,7 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
     frame_size: e.frame_size
     frame: e.frame
     checked: ir_timing_marked(f)
+    e.timed = checked
     lined: st.app
     marks := [Int]{}
     if lined -> web_line(e, f.line)
@@ -155,7 +157,7 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
     }
     web_return(e, st, m, f, -1)
     body: web_finish(e)
-    if checked -> web_timing_check(st, m, f, body, marks)
+    if checked -> web_timing_check(st, m, f, body, marks, e.decided)
     body
 }
 
@@ -1029,6 +1031,9 @@ web_word_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, t
             }
         }
         if checked {
+            // The count alone decides the check, as on x86-64 (JetIR
+            // Timing.jet admits a stop whose tested value is public).
+            start: e.code.len()
             web_get(e, right)
             web_i64(e, bits)
             web_op(e, 0x5a)
@@ -1042,6 +1047,11 @@ web_word_binary: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, t
             web_runtime(e, st, f, at, "jet_rt_fixed_shift_stop", "lllllll", "")
             web_stop_action(e, st)
             web_end(e)
+            if e.timed {
+                e.decided.push(start)
+                e.decided.push(e.code.len())
+                e.decided.push(f.b[at])
+            }
         }
         web_get(e, left)
         web_get(e, right)

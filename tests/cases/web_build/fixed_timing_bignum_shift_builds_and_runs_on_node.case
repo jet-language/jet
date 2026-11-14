@@ -1,0 +1,15 @@
+# A web app that links Core's fixed-timing big-number code builds for the web
+# and runs on node. The app's server path reaches Core/Crypto/Bignum.jet, whose
+# checked shifts (core_bits_above, core_exp_mod) test only their public count
+# and whose calls carry a padded index the wasm32 timing check must decode.
+# No web-target API runs that code (core.net.tls is refused on web), so the
+# program links it behind a branch its arguments never take and prints.
+requires: tool:node
+fixture: fixed_timing_bignum_shift_builds_and_runs_on_node.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step build: jet build --target=web main.jet
+exit: 0
+step node: node .jet/build/app.js
+exit: 0
+stdout: = "idle\n"

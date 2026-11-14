@@ -108,6 +108,12 @@ WebEmitter: struct {
     wired: Bool
     // Pairs of byte offset in `code` and source line (web_line).
     lines: [Int]{[Int]{}}
+    // The function has a fixed slot: its code is checked (Timing.jet).
+    timed: Bool{false}
+    // Of a timed function: triples of the byte offsets [start, end) in `code`
+    // of code one slot alone decides (a shift's count check) and that slot.
+    // The fixed-timing check admits that code while the slot is public.
+    decided: [Int]{[Int]{}}
 }
 
 web_type_index: fn(st: &WebState, key: String) -> Int Never! {
