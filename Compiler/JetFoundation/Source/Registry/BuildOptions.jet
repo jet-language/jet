@@ -522,21 +522,6 @@ build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
     }
 }
 
-// Bootstrap step (a) of #6840, deleted with its two callers (the CLI's
-// profile read and Jetpack's pkg_parse_build_profile) in step (b): a
-// package.jet profile may still spell `optimize:` none, basic or full, so
-// the seed jet and this jet both build Compiler/package.jet. Any other
-// field or value is returned as written.
-build_option_profile_value: fn(name: String, value: String) -> String Never! {
-    if name != "optimize" -> return value.copy()
-    if value == {
-        "none" -> "O0"
-        "basic" -> "O1"
-        "full" -> "O2"
-        else -> value.copy()
-    }
-}
-
 // The milliseconds a Duration value (`10min`, `30s`, `1_500ms`) spells: a
 // whole number and one Time unit, ns through h. A value that is not
 // written so, or that comes to less than one millisecond, has none.

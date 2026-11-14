@@ -37,7 +37,6 @@ use {
         build_option_flags,
         build_option_level_of_flag,
         build_option_profile_hint,
-        build_option_profile_value,
         build_option_refusal,
         build_option_row,
         build_options_resolve,
@@ -1338,11 +1337,10 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
                 if build_option_refusal(field.name) == .Val(refusal) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a build option", refusal.law, "remove the `{field.name}` field", color, JET_DRIVER_EXIT_USAGE)}
                 row: build_option_row(field.name) ?? next
                 shown: if field.list -> build_option_argument(row, field.value) else -> field.value.copy()
-                value: build_option_profile_value(field.name, field.value)
-                if field.list != (row.kind == BuildOptionKind.List) || !build_option_accepts(row, value) {
+                if field.list != (row.kind == BuildOptionKind.List) || !build_option_accepts(row, field.value) {
                     return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {shown}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with {build_option_profile_hint(row)}", color, JET_DRIVER_EXIT_USAGE)}
                 }
-                written.push(BuildOptionChoice{name: field.name.copy(), value: value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {shown}", site: site.copy(), pinned: false})
+                written.push(BuildOptionChoice{name: field.name.copy(), value: field.value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {shown}", site: site.copy(), pinned: false})
             }
         } else {
             if {

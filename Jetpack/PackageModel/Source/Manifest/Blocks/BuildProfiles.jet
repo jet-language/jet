@@ -6,7 +6,7 @@ use {
         BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_O0, BUILD_OPTIMIZE_O1,
         BUILD_OPTIMIZE_O2, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE,
     ]
-    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_profile_value, build_option_refusal, build_option_row]
+    jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_refusal, build_option_row]
 }
 
 // The `optimize:` level of a profile: O0, O1 or O2.
@@ -232,7 +232,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
         seen_fields.push(key.copy())
         if key == {
-            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(build_option_profile_value(BUILD_FIELD_OPTIMIZE, pkg_unquote(field.value)))
+            BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
             BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_SMALL -> profile.small = pkg_parse_build_bool(name, field.value)
             BUILD_FIELD_PANIC -> {

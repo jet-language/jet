@@ -20,8 +20,6 @@
 // (O1, not the stock O2 of `jet build`); the selfhost and perf suites of test.jet
 // build with it. Chain, census and release stages pass no profile, since they build trees
 // whose package.jet may predate these profiles: they pass `-O1` instead.
-// Bootstrap step (a) of #6840: the profiles keep the none/basic spelling the seed jet
-// reads; step (b) writes O0 and O1 once a batch jet reads them.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"
@@ -56,8 +54,8 @@ suites: {
     cases: TestSuite{ cases_corpus: "../tests/cases" },
 }
 build: {
-    dev: Build{ optimize: none },
-    ship: Build{ optimize: basic, debug_info: true },
+    dev: Build{ optimize: O0 },
+    ship: Build{ optimize: O1, debug_info: true },
 }
 test: {
     quick: TestProfile{ suites: [tests] },
