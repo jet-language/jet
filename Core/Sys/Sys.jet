@@ -1378,7 +1378,7 @@ Fd: struct {
     // (fewer at its end; none past it). Both bounds are in the types, so a
     // runtime value comes through `Int(lo..hi).from_int(n)?` first.
     read_at: fn(self, offset: Int(0..9223372036854775807), max: Int(1..16777216)) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_at_raw(self.token, wrapping(offset + 0), wrapping(max + 0))
+        core.sys.__fd_read_at_raw(self.token, offset, max)
     }
 
     // The size in bytes of the file behind the descriptor.
@@ -1392,7 +1392,7 @@ Fd: struct {
     // limit). Empty means the writer closed its end; a wait that runs out
     // fails with `.TimedOut`.
     read: fn(self, max: Int(1..16777216), timeout_ns: Int) -[Env]> [U8] IOError! {
-        core.sys.__fd_read_raw(self.token, wrapping(max + 0), timeout_ns)
+        core.sys.__fd_read_raw(self.token, max, timeout_ns)
     }
 
     // Writes the first of `bytes`, at most 4096, once a pipe or socket has
@@ -1466,13 +1466,13 @@ SharedMemory: struct {
     write: fn(&self, offset: Int(0..1073741824), bytes: [U8]) IOError! -[Env]> {
         count: Int(0..1073741824).from_int(bytes.len()) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         if !shared_range_valid(self, offset, count) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
-        core.sys.__shared_write_raw(self.token, wrapping(offset + 0), bytes)
+        core.sys.__shared_write_raw(self.token, offset, bytes)
     }
 
     // `count` bytes from byte `offset`.
     read: fn(self, offset: Int(0..1073741824), count: Int(0..1073741824)) -[Env]> [U8] IOError! {
         if !shared_range_valid(self, offset, count) -> return Err(syscall_input(.Read, None, "shared memory read is out of bounds"))
-        core.sys.__shared_read_raw(self.token, wrapping(offset + 0), wrapping(count + 0))
+        core.sys.__shared_read_raw(self.token, offset, count)
     }
 
     // Copies the rectangle at (`x`, `y`), `width` by `height` pixels, of an
@@ -1483,7 +1483,7 @@ SharedMemory: struct {
     // nothing and costs only its damage. An image side is at most 16384
     // pixels, so its stride is at most 65536 bytes.
     write_pixels: fn(&self, offset: Int(0..1073741824), rgba: [U8], stride: Int(4..65536), x: Int(0..16384), y: Int(0..16384), width: Int(0..16384), height: Int(0..16384), format: PixelFormat) IOError! -[Env]> {
-        row: wrapping(stride + 0)
+        row: Int{stride}
         if row %% 4 != 0 -> return Err(syscall_input(.Write, None, "an RGBA row is a whole number of 4-byte pixels"))
         if wrapping(x + width) > row /% 4 -> return Err(syscall_input(.Write, None, "the pixel rectangle lies outside the image"))
         end: wrapping(y + height) * row
@@ -1491,7 +1491,7 @@ SharedMemory: struct {
         span: Int(0..1073741824).from_int(end) ?? return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         if height > 0 && !shared_range_valid(self, offset, span) -> return Err(syscall_input(.Write, None, "shared memory write is out of bounds"))
         order: if format == .XRGB8888 -> 0 else -> 1
-        core.sys.__shared_write_pixels_raw(self.token, wrapping(offset + 0), rgba, row, wrapping(x + 0), wrapping(y + 0), wrapping(width + 0), wrapping(height + 0), order)
+        core.sys.__shared_write_pixels_raw(self.token, offset, rgba, row, x, y, width, height, order)
     }
 
     // Stores `count` little-endian copies of the 32-bit `value` from byte
@@ -1499,7 +1499,7 @@ SharedMemory: struct {
     fill_u32: fn(&self, offset: Int(0..1073741824), count: Int(0..268435456), value: Int(0..4294967295)) IOError! -[Env]> {
         bytes: Int(0..1073741824).from_int(wrapping(count * 4)) ?? return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
         if !shared_range_valid(self, offset, bytes) -> return Err(syscall_input(.Write, None, "shared memory fill is out of bounds"))
-        core.sys.__shared_fill_raw(self.token, wrapping(offset + 0), wrapping(count + 0), wrapping(value + 0))
+        core.sys.__shared_fill_raw(self.token, offset, count, value)
     }
 
     // The signed 64-bit word at byte `offset`, read atomically. A word
@@ -1539,8 +1539,7 @@ SHARED_MEMORY_MAX: 1073741824
 
 // `size` zeroed bytes of shared memory, 1 B to 1 GiB.
 shared_memory: fn(size: Int(1..1073741824)) -[Env]> SharedMemory IOError! {
-    bytes: wrapping(size + 0)
-    Ok(SharedMemory{token: core.sys.__shared_create_raw(bytes), size: bytes})
+    Ok(SharedMemory{token: core.sys.__shared_create_raw(size), size: size})
 }
 
 // How SharedMemory bounds its accesses: not part of the sys surface. Offsets
