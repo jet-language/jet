@@ -1,0 +1,56 @@
+use {
+    data: core.data
+    files: core.files
+}
+
+#Codable
+Ticket: struct {
+    team: String
+    minutes: Float
+}
+
+// Prints what a core.data call returned: its value, or its typed failure.
+attempt: fn(label: String, body: fn() -> String DataError!) {
+    if body() == {
+        .Ok(text) -> print("{label}: ok {text}")
+        .Err(error) -> print("{label}: {error}")
+    }
+}
+
+run: fn() {
+    nan: Float{0.0} / Float{0.0}
+    huge: Float{1.0e308}
+    attempt("mean of nothing", fn() { Ok("{data.mean([Float]{}) ?? return Err(err)}") })
+    attempt("min with NaN", fn() { Ok("{data.min([Float]{1.0, nan}) ?? return Err(err)}") })
+    attempt("sum past Float", fn() { Ok("{data.sum([Float]{huge, huge}) ?? return Err(err)}") })
+    attempt("quantile q 1.5", fn() { Ok("{data.quantile([Float]{1.0, 2.0}, 1.5) ?? return Err(err)}") })
+    attempt("quantile median", fn() { Ok("{data.quantile([Float]{3.0, 1.0, 2.0}, 0.5) ?? return Err(err)}") })
+    attempt("rolling width 0", fn() { Ok("{(data.rolling_mean([Float]{1.0}, 0) ?? return Err(err)).len()}") })
+    attempt("rolling with NaN", fn() { Ok("{(data.rolling_mean([Float]{1.0, nan}, 2) ?? return Err(err)).len()}") })
+    attempt("csv bad cell", fn() { Ok("{(data.csv<Ticket>("team,minutes\nCore,soon") ?? return Err(err)).len()}") })
+    attempt("json cut short", fn() { Ok("{(data.json<Ticket>("{{") ?? return Err(err)).len()}") })
+    attempt("unknown bridge", fn() {
+        data.require_bridge("cobol") ?? return Err(err)
+        Ok("bridged")
+    })
+    attempt("r bridge off", fn() {
+        data.require_bridge("r") ?? return Err(err)
+        Ok("bridged")
+    })
+    attempt("provider format", fn() {
+        loader: data.load_default<[Ticket]>("tickets.txt") ?? return Err(err)
+        Ok(loader.source.locator)
+    })
+    // A file loader reads nothing until its snapshot; a missing file is IO.
+    missing := data.load_default<[Ticket]>("absent.csv") ?? panic("a csv locator makes a loader")
+    if data.snapshot(missing) == {
+        .Ok(_) -> print("missing file: ok")
+        .Err(error) -> print("missing file: {error.kind} {error.operation}")
+    }
+    files.write("tickets.csv", "team,minutes\nCore,4.0\nTools,5.5\n") ?? panic("write tickets.csv: {err}")
+    present := data.load_default<[Ticket]>("tickets.csv") ?? panic("a csv locator makes a loader")
+    if data.snapshot(present) == {
+        .Ok(snapshot) -> print("present file: ok {snapshot.value.len()} rows, {snapshot.value[1].team} {snapshot.value[1].minutes}")
+        .Err(error) -> print("present file: {error}")
+    }
+}
