@@ -120,23 +120,14 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
 #Export(c) jet_stdio_stdout_tty_raw: fn() -> Bool { host_is_tty(I64{1}) }
 #Export(c) jet_stdio_stderr_tty_raw: fn() -> Bool { host_is_tty(I64{2}) }
 
-// jet.runtime.term stdio_write/stdio_bytes/stdio_flush (Core/Term/Term.jet
-// stdio_write/stdio_bytes/stdio_flush): the source wrapper decides `flush`.
-#Export(c) jet_term_stdio_write_raw: fn(text: I64, newline: Bool, stderr: Bool, flush: Bool, some: I64) -> I64 {
-    host_stdio_option_cause(host_stdio_text_failure(text, newline, stderr, flush), some)
-}
-
-#Export(c) jet_term_stdio_bytes_raw: fn(bytes: I64, length: I64, stderr: Bool, flush: Bool, some: I64) -> I64 {
-    host_stdio_option_cause(host_stdio_bytes_failure(bytes, length, stderr, flush), some)
-}
-
+// jet.runtime.term stdio_flush (Core/Term/Term.jet stdio_flush).
 #Export(c) jet_term_stdio_flush_raw: fn(stderr: Bool, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_flush_failure(stderr), some)
 }
 
-// jet.runtime.term stdio_put_text/stdio_put_bytes: a write asks for no flush
-// of its own; the stdout policy decides, and stdio_flush is the explicit
-// flush.
+// jet.runtime.term stdio_put_text/stdio_put_bytes (Core/Term/Term.jet
+// stdio_write/stdio_bytes): a write asks for no flush of its own; the stdout
+// policy decides, and stdio_flush is the explicit flush.
 #Export(c) jet_term_stdio_put_text_raw: fn(text: I64, newline: Bool, stderr: Bool, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_text_failure(text, newline, stderr, false), some)
 }

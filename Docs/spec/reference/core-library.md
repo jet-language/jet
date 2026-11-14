@@ -298,8 +298,9 @@ runtime member keeps the name of the Core leaf it replaces without the `__`
 no interface module is E1001.
 
 `jet.runtime.term` holds the stdio and terminal functions `core.term` is
-built on: `stdio_write`, `stdio_bytes` and `stdio_flush` (`-[IO]> String?`, the
-write's failure), the pure `stdio_fault`, `stdout_terminal` and
+built on: `stdio_put_text`, `stdio_put_bytes` and `stdio_flush`
+(`-[IO]> String?`, the write's failure; a write asks for no flush of its
+own, the one stdout policy decides), the pure `stdio_fault`, `stdout_terminal` and
 `stderr_terminal`, and the `terminal8_*` reads and writes. A read answers its
 failure as an item: `terminal8_line` is
 `(eof: Bool, line: String, read_error: String?)` and `terminal8_stty` is

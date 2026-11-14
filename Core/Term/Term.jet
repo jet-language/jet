@@ -244,12 +244,11 @@ print: fn(text: String) Never! -[IO, Time.Wait]> {
 }
 
 // The write's failure is discarded, so eprint skips stdio_write's IOError:
-// the same IO.Write checkpoint, then the same raw write (stderr ignores
-// `flush`; stdio_write passes true for any nonempty text), whose cause text
-// is dropped unread.
+// the same IO.Write checkpoint, then the same raw write, whose cause text is
+// dropped unread.
 eprint: fn(text: String) Never! -[IO, Time.Wait]> {
     if rt.stdio_fault("IO.Write") -> return
-    _: rt.stdio_write("{text}\n", false, true, true)
+    _: rt.stdio_put_text("{text}\n", false, true)
 }
 
 // jet_std_io_input: the prompt is written and stdout flushed, then one line
@@ -796,13 +795,13 @@ stdio_result: fn(cause: String?, operation: IOOperation, resource: String) IOErr
 stdio_write: fn(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
-    stdio_result(rt.stdio_write(text, newline, stderr, false), .Write, resource)
+    stdio_result(rt.stdio_put_text(text, newline, stderr), .Write, resource)
 }
 
 stdio_bytes: fn(bytes: [U8], stderr: Bool) IOError! -[IO]> {
     resource: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")
-    stdio_result(rt.stdio_bytes(bytes, stderr, false), .Write, resource)
+    stdio_result(rt.stdio_put_bytes(bytes, stderr), .Write, resource)
 }
 
 stdio_flush: fn(stderr: Bool) IOError! -[IO]> {
