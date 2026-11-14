@@ -1391,32 +1391,56 @@ sema_core_module_usage_assemble: fn(registration_module: SemaRegistrationModule,
 // module by the name it is written with.
 sema_core_registration_imports: fn(registration_module: SemaRegistrationModule, table: ModuleTable) -> [SemaCoreImport] Never! {
     imports := [SemaCoreImport]{}
+    sema_core_registration_imports_into(registration_module, table, None, imports)
+    imports
+}
+
+// The row sema_core_registration_imports lists for `alias` (its first
+// binding), found without building the whole list.
+sema_core_registration_import: fn(registration_module: SemaRegistrationModule, table: ModuleTable, alias: String) -> SemaCoreImport? Never! {
+    found := [SemaCoreImport]{}
+    sema_core_registration_imports_into(registration_module, table, Val(alias), found)
+    found.pop()
+}
+
+// The rows of sema_core_registration_imports in their order into `imports`;
+// with `only`, just the first row bound to that alias, and the walk ends
+// there.
+sema_core_registration_imports_into: fn(registration_module: SemaRegistrationModule, table: ModuleTable, only: String?, imports: &[SemaCoreImport]) Never! {
     loop registration in registration_module.imports {
-        declaration := registration.declaration
+        declaration: registration.declaration
         target := module_text(table, registration.target_module_identity)
         if declaration.kind == {
             .Module(name, span) -> {
                 if target == "" -> target = name
-                alias := if declaration.alias != "" -> declaration.alias else -> name
-                sema_core_import_add(imports, SemaCoreImport{alias: alias, module_name: target, item: None, span: span})
+                alias: if declaration.alias != "" -> declaration.alias else -> name
+                if sema_core_import_offer(imports, only, SemaCoreImport{alias: alias, module_name: target, item: None, span: span}) -> return
             }
             .Unqualified(module_alias, module_alias_span, _, _, span) -> {
                 if target == "" -> target = module_alias
-                sema_core_import_add(imports, SemaCoreImport{alias: module_alias, module_name: target, item: None, span: module_alias_span})
+                if sema_core_import_offer(imports, only, SemaCoreImport{alias: module_alias, module_name: target, item: None, span: module_alias_span}) -> return
                 loop binding in registration.bindings {
                     // A Core submodule member (`use core.mem`) binds a namespace.
                     if binding.declaration == None && binding.symbol.kind == SymbolKind.Import {
-                        sema_core_import_add(imports, SemaCoreImport{alias: binding.local, module_name: module_text(table, binding.target_module_identity), item: None, span: binding.symbol.span})
+                        if sema_core_import_offer(imports, only, SemaCoreImport{alias: binding.local, module_name: module_text(table, binding.target_module_identity), item: None, span: binding.symbol.span}) -> return
                         next
                     }
-                    sema_core_import_add(imports, SemaCoreImport{alias: binding.local, module_name: target, item: Val(binding.original), span: binding.symbol.span})
+                    if sema_core_import_offer(imports, only, SemaCoreImport{alias: binding.local, module_name: target, item: Val(binding.original), span: binding.symbol.span}) -> return
                 }
-                if declaration.alias != "" -> sema_core_import_add(imports, SemaCoreImport{alias: declaration.alias, module_name: target, item: None, span: span})
+                if declaration.alias != "" && sema_core_import_offer(imports, only, SemaCoreImport{alias: declaration.alias, module_name: target, item: None, span: span}) -> return
             }
             .File(_, _) -> {}
         }
     }
-    imports
+}
+
+// Adds `row` as sema_core_import_add does. With `only`, a row of another
+// alias is skipped, and the first row of that alias (`imports` is empty
+// until then) is taken: true once it is.
+sema_core_import_offer: fn(imports: &[SemaCoreImport], only: String?, row: SemaCoreImport) -> Bool Never! {
+    if only == .Val(alias) && row.alias != alias -> return false
+    sema_core_import_add(imports, row)
+    only != None
 }
 
 sema_core_registration_type_names: fn(registration_module: SemaRegistrationModule) -> NameTable Never! {

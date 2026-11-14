@@ -6729,8 +6729,7 @@ sema_expr_require_unsafe: fn(operation: String, span: Span, context: &SemaCheckC
 sema_expr_core_import_module: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
     if program.registration_graph == .Val(graph) {
         module_index: sema_scope_caller_index(environment, graph) ?? return None
-        imports: sema_core_registration_imports(graph.modules[module_index], graph.module_table)
-        imported: sema_core_import_find(imports, alias) ?? return None
+        imported: sema_core_registration_import(graph.modules[module_index], graph.module_table, alias) ?? return None
         target := sema_registration_module_index_text(graph, imported.module_name)
         if target != None {
             index: target ?? return None
