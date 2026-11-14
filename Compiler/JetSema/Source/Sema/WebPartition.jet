@@ -10,7 +10,7 @@
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
 // chosen (`web_reason`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, module_is_core, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NameTable, NamedSpan, Span, StructDef, Type, WebBucket, WebPartitionMarker, module_is_core, name_find, name_index, name_intern, name_table_sized, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -27,16 +27,30 @@ SemaWebMeta: struct {
     registration: Int
 }
 
-// The struct and enum declarations of every module, by name, for the
-// `#Codable` ABI rule.
+// The struct and enum declarations of every module, the first of each name,
+// for the `#Codable` ABI rule: `names` interns the names, and `struct_at` and
+// `enum_at` hold a name id's row in `structs` and `enums` (-1 for none).
 SemaWebTypes: struct {
-    structs: [String:StructDef]
-    enums: [String:EnumDef]
+    names: NameTable
+    struct_at: [Int]
+    enum_at: [Int]
+    structs: [StructDef]
+    enums: [EnumDef]
+}
+
+// The id of `name` in `types`, with its columns grown to cover it.
+sema_web_type_id: fn(types: &SemaWebTypes, name: String) -> Int Never! {
+    id: name_index(name_intern(types.names, name))
+    loop types.struct_at.len() <= id {
+        types.struct_at.push(-1)
+        types.enum_at.push(-1)
+    }
+    id
 }
 
 sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     metas := [SemaWebMeta]{}
-    types := SemaWebTypes{structs: [String:StructDef]{}, enums: [String:EnumDef]{}}
+    types := SemaWebTypes{names: name_table_sized(64), struct_at: [Int]{-1}, enum_at: [Int]{-1}, structs: [StructDef]{}, enums: [EnumDef]{}}
     loop module_index in 0..<modules.len() {
         registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         program: graph.modules[registration].program
@@ -47,10 +61,27 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     }
     if metas.len() == 0 -> return
     active: sema_web_partition_active(graph)
-    rows := [String:Int]{}
+    // The metas by function key (a later one of a key wins), and each
+    // caller's call edges as metas, resolved once for the closure and the
+    // crossing check: callees[callee_first[at]..<callee_first[at + 1]].
+    keys := name_table_sized(64)
+    meta_of := [Int]{-1}
     loop at in 0..<metas.len() {
-        if metas[at].row >= 0 -> rows[modules[metas[at].slot].functions[metas[at].row].key] = at
+        if metas[at].row < 0 -> next
+        id: name_index(name_intern(keys, modules[metas[at].slot].functions[metas[at].row].key))
+        if id == meta_of.len() -> meta_of.push(at) else -> meta_of[id] = at
     }
+    callee_first := [Int]{}
+    callees := [Int]{}
+    loop meta in metas {
+        callee_first.push(callees.len())
+        if meta.row < 0 -> next
+        loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
+            found: name_find(keys, edge) ?? next
+            if meta_of[name_index(found)] >= 0 -> callees.push(meta_of[name_index(found)])
+        }
+    }
+    callee_first.push(callees.len())
     buckets := [WebBucket]{}
     reasons := [String]{}
     loop meta in metas {
@@ -63,9 +94,8 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     loop changed {
         changed = false
         loop caller in 0..<metas.len() {
-            if metas[caller].row < 0 -> next
-            loop edge in modules[metas[caller].slot].functions[metas[caller].row].effects.call_edges {
-                callee: rows.get(edge) ?? next
+            loop edge in callee_first[caller]..<callee_first[caller + 1] {
+                callee: callees[edge]
                 if buckets[caller] == .Wasm && buckets[callee] == .JS && metas[caller].marker == None && metas[caller].ceiling == None {
                     buckets[caller] = WebBucket.JS
                     reasons[caller] = "calls `{metas[callee].name}`, which runs in JS"
@@ -99,19 +129,17 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         if uses_browser {
             found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
-        if meta.row >= 0 {
-            loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
-                callee: rows.get(edge) ?? next
-                if buckets[at] == buckets[callee] -> next
-                // The one sanctioned crossing: JS calling a `#Export(wasm)`.
-                if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
-                // A Core callee is no crossing: a browser API reached from a Wasm
-                // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
-                // uses no `Browser` serves both sides, whichever caller pulled
-                // its bucket (Rust partitioned user functions only).
-                if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_has_root(sema_web_solved(modules, metas[callee]), "Browser")) -> next
-                found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
-            }
+        loop edge in callee_first[at]..<callee_first[at + 1] {
+            callee: callees[edge]
+            if buckets[at] == buckets[callee] -> next
+            // The one sanctioned crossing: JS calling a `#Export(wasm)`.
+            if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
+            // A Core callee is no crossing: a browser API reached from a Wasm
+            // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
+            // uses no `Browser` serves both sides, whichever caller pulled
+            // its bucket (Rust partitioned user functions only).
+            if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_has_root(sema_web_solved(modules, metas[callee]), "Browser")) -> next
+            found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
         }
         if found.len() == 0 -> next
         sema_attach_diagnostic_source_locations(found, 0, graph.modules[meta.registration].source_segments)
@@ -175,14 +203,22 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
         if item == {
             .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
             .Struct(structure) -> {
-                if types.structs.get(structure.name) == None -> types.structs[structure.name] = structure
+                type_id: sema_web_type_id(types, structure.name)
+                if types.struct_at[type_id] < 0 {
+                    types.struct_at[type_id] = types.structs.len()
+                    types.structs.push(structure.copy()) // copy: the program's items keep the declaration
+                }
                 loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in structure.trait_impls {
                     loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 }
             }
             .Enum(enumeration) -> {
-                if types.enums.get(enumeration.name) == None -> types.enums[enumeration.name] = enumeration
+                type_id: sema_web_type_id(types, enumeration.name)
+                if types.enum_at[type_id] < 0 {
+                    types.enum_at[type_id] = types.enums.len()
+                    types.enums.push(enumeration.copy()) // copy: the program's items keep the declaration
+                }
                 loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in enumeration.trait_impls {
                     loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
@@ -334,7 +370,9 @@ sema_web_abi_safe: fn(ty: Type, types: SemaWebTypes) -> Bool Never! {
 }
 
 sema_web_codable_named: fn(name: String, args: [Type], types: SemaWebTypes) -> Bool Never! {
-    if types.structs.get(name) == .Val(structure) {
+    type_id: name_index(name_find(types.names, name) ?? return false)
+    if types.struct_at[type_id] >= 0 {
+        structure: types.structs[types.struct_at[type_id]]
         if !sema_web_codable(structure.derives) -> return false
         if structure.type_params.len() > 0 && args.len() > 0 {
             if args.len() != structure.type_params.len() -> return false
@@ -348,7 +386,8 @@ sema_web_codable_named: fn(name: String, args: [Type], types: SemaWebTypes) -> B
         }
         return true
     }
-    if types.enums.get(name) == .Val(enumeration) {
+    if types.enum_at[type_id] >= 0 {
+        enumeration: types.enums[types.enum_at[type_id]]
         if !sema_web_codable(enumeration.derives) -> return false
         if enumeration.type_params.len() > 0 && args.len() > 0 {
             if args.len() != enumeration.type_params.len() -> return false
