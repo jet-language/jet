@@ -5774,6 +5774,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     range_head: sema_stmt_range_conversion_head(binding.init, environment, program, scopes)
     fact_start: context.call_facts.len()
     reference_start: context.name_references.len()
+    node_start: context.arena.tree.nodes.len()
     previous_binding_initializer: context.binding_initializer
     context.binding_initializer = true
     // `mem.Fixed.new`/`.over` is allowed only as the whole initializer.
@@ -5936,7 +5937,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
         stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
     } else if !binding.mutable && !string_view && binding.name != "_" {
         // Computed while compiling when it can be (Comptime/LocalValues.jet).
-        computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, environment, program, scopes, context)
+        computed := sema_comptime_local_value(binding.name, binding.name_span, binding.init, stored, fact_start, reference_start, node_start, environment, program, scopes, context)
         if computed.value == .Val(value) -> stored = value
         local.run_time_reason = computed.reason
     }
