@@ -20,9 +20,8 @@ classify: fn(flag: Bool) -> Int {
 }
 #Target(JS)
 maybe: fn(flag: Bool) -> Int {
-    x: make_opt(flag)
-    if x == .None { return 0 }
-    if x == .Val(n) { return n }
+    if make_opt(flag) == .None { return 0 }
+    if make_opt(flag) == .Val(n) { return n }
     return -1
 }
 #Target(JS)
@@ -32,9 +31,8 @@ js_make_toggle: fn(flag: Bool) -> Toggle {
 }
 #Target(JS)
 js_matches_and: fn(flag: Bool) -> Int {
-    x: make_opt(flag)
     toggle: js_make_toggle(flag)
-    if x == .Val(n) && toggle == .On && flag { return n }
+    if make_opt(flag) == .Val(n) && toggle == .On && flag { return n }
     return 0
 }
 #Target(Wasm)
@@ -56,9 +54,8 @@ wasm_classify: fn(flag: Bool) -> Int {
 }
 #Export(wasm)
 wasm_maybe: fn(flag: Bool) -> Int {
-    x: wasm_make_opt(flag)
-    if x == .None { return 0 }
-    if x == .Val(n) { return n }
+    if wasm_make_opt(flag) == .None { return 0 }
+    if wasm_make_opt(flag) == .Val(n) { return n }
     return -1
 }
 #Target(Wasm)
@@ -68,9 +65,14 @@ wasm_make_toggle: fn(flag: Bool) -> Toggle {
 }
 #Export(wasm)
 wasm_matches_and: fn(flag: Bool) -> Int {
-    x: wasm_make_opt(flag)
     toggle: wasm_make_toggle(flag)
-    if x == .Val(n) && toggle == .On && flag { return n }
+    if wasm_make_opt(flag) == .Val(n) && toggle == .On && flag { return n }
     return 0
 }
-run: fn() {}
+run: fn() {
+    flags: [Bool]{true, false}
+    loop flag in flags {
+        print("{flag}: {classify(flag)} {maybe(flag)} {js_matches_and(flag)}")
+        print("{flag}: {wasm_classify(flag)} {wasm_maybe(flag)} {wasm_matches_and(flag)}")
+    }
+}
