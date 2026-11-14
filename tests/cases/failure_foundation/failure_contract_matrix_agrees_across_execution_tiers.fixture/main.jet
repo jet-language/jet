@@ -14,7 +14,7 @@ StoreFailure: enum {
     Missing
 }
 
-// Omitted contract: the effective route is Int !Err.
+// Omitted contract: the effective route is Int Err!.
 implicit: fn(value: Int) -> Int {
     if value == 0 {
         return Err("implicit")
@@ -83,7 +83,7 @@ generic_forward: fn<T>(value: T) -> T { value }
 
 generic_caller: fn(value: Int) -> Int { generic_forward<Int>(implicit(value)) }
 
-// No reachable failure: the !Never proof is a valid contract.
+// No reachable failure: the Never! proof is a valid contract.
 impossible: fn() -> Int Never! { 7 }
 
 run: fn() {
