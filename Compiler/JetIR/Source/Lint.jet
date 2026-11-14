@@ -1245,7 +1245,7 @@ ir_lint_word_result: fn(m: IRModule, context: IRLintContext, f: IRFunction, at: 
 ir_lint_param_words: fn(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == {
         .Unit -> 0
-        .List(_) -> 2
+        .List(_) | .Frozen(_) -> 2
         .Word | .Flag | .Float | .Text | .Handle(_) | .HandleMut(_) | .ListMut(_) | .Option(_) | .Tag(_, _) | .Tuple(_) -> 1
     }
 }
@@ -1255,7 +1255,7 @@ ir_lint_param_words: fn(carrier: IRRouteCarrier) -> Int Never! {
 ir_lint_out_words: fn(carrier: IRRouteCarrier) -> Int Never! {
     if carrier == {
         .Option(some) -> 1 + ir_lint_out_words(some)
-        .List(_) -> 2
+        .List(_) | .Frozen(_) -> 2
         .Tuple(items) -> {
             words := 0
             loop item in items -> words += ir_lint_out_words(item)
@@ -1274,7 +1274,7 @@ ir_lint_result_words: fn(result: IRRouteResult) -> (words: Int, value: Bool) Nev
             if carrier == .List(_) -> return (words: 1, value: true)
             (words: 0, value: true)
         }
-        .Option(some) -> (words: if some == .List(_) || some == .Tuple(_) -> ir_lint_out_words(some) else -> 1, value: true)
+        .Option(some) -> (words: if some == .List(_) || some == .Frozen(_) || some == .Tuple(_) -> ir_lint_out_words(some) else -> 1, value: true)
         .Result(ok, err) -> (words: (if ok == .Unit -> 0 else -> ir_lint_out_words(ok)) + (if err == .Unit -> 0 else -> ir_lint_out_words(err)), value: true)
         .Tuple(items) -> {
             words := 0
@@ -1294,7 +1294,7 @@ ir_lint_carrier_kinds: fn(carrier: IRRouteCarrier) -> Int Never! {
         .Float -> IR_LINT_FLOAT
         .Text -> IR_LINT_STRING
         .Tag(_, _) -> IR_LINT_WORD
-        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Option(_) | .Tuple(_) -> 0
+        .Unit | .Handle(_) | .HandleMut(_) | .List(_) | .ListMut(_) | .Frozen(_) | .Option(_) | .Tuple(_) -> 0
     }
 }
 

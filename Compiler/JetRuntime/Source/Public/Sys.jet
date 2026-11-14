@@ -101,8 +101,10 @@ sys: module {
     // At most `limit` bytes of the part `name` the build added to this
     // executable, from its byte `offset`, and the part's byte length; None
     // when it has no such part. The part is mapped with the program, so
-    // neither reads a file. Not `priv`: the CLI's Core record check
-    // (CoreRecordCheck.jet) reads them.
+    // neither reads a file, and image_part lends the mapped bytes in place:
+    // its List is frozen, never copied or freed, and a writer copies it
+    // first. Not `priv`: the CLI's Core record check (CoreRecordCheck.jet)
+    // reads them.
     #Import(c) image_part: fn(name: String, offset: Int, limit: Int) -[Env]> [U8]? = "jet_sys_image_part_raw"
     #Import(c) image_part_size: fn(name: String) -[Env]> Int? = "jet_sys_image_part_size_raw"
 

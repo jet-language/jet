@@ -39,8 +39,12 @@ runtime_abi_atom: fn(name: String) -> String Never! {
 // Tuple carrier (an Option's tuple payload) writes its items' slots in the
 // checked tuple's member order. `ListMut` lends a `&` List argument's
 // 24-byte header in place (one word): the route rewrites its length inside
-// the buffer it already has, never growing it.
-IRRouteCarrier: enum { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: IRRouteCarrier) ListMut(elem: IRRouteCarrier) Option(some: IRRouteCarrier) Tag(name: String, variants: String) Tuple(items: [IRRouteCarrier]) }
+// the buffer it already has, never growing it. `Frozen` is a List result
+// whose (data, length) the runtime lends for the process's life (a part of
+// the mapped executable, IR_ROUTES_FROZEN): its header is frozen (cap 0), so
+// no owner frees the bytes and a writer copies them first; it crosses only
+// as an Option's payload.
+IRRouteCarrier: enum { Word Flag Float Text Unit Handle(name: String) HandleMut(name: String) List(elem: IRRouteCarrier) ListMut(elem: IRRouteCarrier) Frozen(elem: IRRouteCarrier) Option(some: IRRouteCarrier) Tag(name: String, variants: String) Tuple(items: [IRRouteCarrier]) }
 
 IRRouteResult: enum {
     Plain(carrier: IRRouteCarrier)
@@ -783,7 +787,7 @@ IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_sys_groups_count_raw", export: "jet_sys_groups_count_raw", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Option{some: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_sys_groups_fill_raw", export: "jet_sys_groups_fill_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_host_env_raw", export: "jet_sys_host_env_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
-    IRRoute{symbol: "jet_sys_image_part_raw", export: "jet_sys_image_part_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
+    IRRoute{symbol: "jet_sys_image_part_raw", export: "jet_sys_image_part_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Option{some: IRRouteCarrier.Frozen{elem: IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_image_part_size_raw", export: "jet_sys_image_part_size_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_sys_initgroups_raw", export: "jet_sys_initgroups_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_kill_raw", export: "jet_sys_kill_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
@@ -1808,7 +1812,7 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
     if carrier == {
         .Handle(name) | .HandleMut(name) -> out.push(name.copy())
         .Tag(name, _) -> out.push(name.copy())
-        .List(elem) | .ListMut(elem) -> ir_route_carrier_names(elem, out)
+        .List(elem) | .ListMut(elem) | .Frozen(elem) -> ir_route_carrier_names(elem, out)
         .Option(some) -> ir_route_carrier_names(some, out)
         .Tuple(items) -> { loop item in items -> ir_route_carrier_names(item, out) }
         .Word | .Flag | .Float | .Text | .Unit -> {}

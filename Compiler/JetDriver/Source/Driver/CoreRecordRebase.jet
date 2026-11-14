@@ -123,16 +123,23 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
         module_values := jet_driver_core_record_values(record, position) ?? return Err(err)
         values.extend(module_values.move())
     }
+    // Each taken module's body keys are one run of section 4, found by
+    // binary search; no other module's key is read.
     rows := [U32:SemaCoreBodyRow]{}
-    loop index in 0..<record.body_keys.len() {
-        position: record.module_rows.get(record.body_modules[index].id) ?? return Err("Core function `{record.body_keys[index]}` belongs to {module_text(record.module_table, record.body_modules[index])}, which the record doesn't key")
-        module_index: graph_modules[position]
-        if module_index < 0 -> next
-        // The graph interned the record's symbol ranges, so every recorded
-        // body's key names its function there.
-        id: symbol_find(graph.symbols, record.body_keys[index]) ?? return Err("the Core record's function `{record.body_keys[index]}` has no symbol in its symbol ranges")
-        if rows.get(id.id) != None -> return Err("the Core record keys function `{record.body_keys[index]}` twice")
-        rows[id.id] = SemaCoreBodyRow{element: index, module_index: module_index}
+    bodies: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_BODY_KEYS)
+    loop (module_index, position) in positions {
+        identity: module_text(record.module_table, record.module_identities[position])
+        at := jet_driver_core_record_module_first_body(record, identity) ?? return Err(err)
+        loop at < bodies {
+            body_key: jet_driver_core_record_body_key(record, at) ?? return Err(err)
+            if body_key.owner != identity -> break
+            // The graph interned the taken modules' symbol ranges, so each
+            // of their bodies' keys names its function there.
+            id: symbol_find(graph.symbols, body_key.key) ?? return Err("the Core record's function `{body_key.key}` has no symbol in its symbol ranges")
+            if rows.get(id.id) != None -> return Err("the Core record keys function `{body_key.key}` twice")
+            rows[id.id] = SemaCoreBodyRow{element: at, module_index: module_index}
+            at += 1
+        }
     }
     decls: jet_driver_core_record_decls(record) ?? return Err(err)
     keyed: rows.len()

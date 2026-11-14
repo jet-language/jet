@@ -403,11 +403,15 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     core_seeds := [SemaRegistrationModule]{}
     // A seeded Core module interns into the symbol range it had in the
-    // record's check, so the ids its taken rows name are the compile's.
+    // record's check, so the ids its taken rows name are the compile's; the
+    // record's keys of the modules not seeded are left unread.
     core_symbols := [SymbolKeys]{}
     if input.request.core_record == .Val(record) {
         core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), false) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
-        if core_seeds.len() > 0 -> core_symbols = record.symbols.copy()
+        if core_seeds.len() > 0 {
+            seeded_identities: loop seed in core_seeds -> seed.module_identity
+            core_symbols = jet_driver_core_record_symbols(record, seeded_identities) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
+        }
     }
     canonical_identity := canonical.module_identity
     registration_inputs.push(canonical)

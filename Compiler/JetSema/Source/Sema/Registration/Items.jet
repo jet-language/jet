@@ -5067,6 +5067,10 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
             next
         }
         source_module_index: source_index ?? 0
+        // A seeded module came registered: its row holds the imports its
+        // edges name, rebased to the graph (the Core record's), and its
+        // source declarations stay out of `declared_spans`.
+        if source_module_index < graph.seeded -> next
         declared: declared_spans.get("{source_module_index}|{edge.declaration.span.start}|{edge.declaration.span.end}") != None
         if {
             !declared -> sema_registration_push_graph_diagnostic(graph, source_module_index, sema_error("E0003", edge.declaration.span, "an import edge has no source declaration", "semantic preparation only registers imports present in the source program", "retain the original ImportDecl when constructing the resolved edge"))

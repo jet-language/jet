@@ -348,6 +348,8 @@ pack: fn(args: [String]) {
     root: absolute(".")
     identity: flag(flags, "identity")
     jet: absolute(flag(flags, "jet"))
+    // Seed seam (#6328): remove once an admitted seed's build executor publishes runnable outputs 0755 and the s3 gate passes without this.
+    files.set_mode(jet, 493) ?? fail("cannot make `{jet}` executable: {err}")
     tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{built_version(jet)}", out: absolute(flag(flags, "out"))}
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
     sources := runtime_sources(manifest)

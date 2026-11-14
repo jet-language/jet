@@ -4932,11 +4932,15 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
     core_seeds := [SemaRegistrationModule]{}
     // A seeded Core module interns into the symbol range it had in the
-    // record's check, so the ids its taken rows name are the compile's.
+    // record's check, so the ids its taken rows name are the compile's; the
+    // record's keys of the modules not seeded are left unread.
     core_symbols := [SymbolKeys]{}
     if request.core_record == .Val(record) {
         core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), release_programs) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
-        if core_seeds.len() > 0 -> core_symbols = record.symbols.copy()
+        if core_seeds.len() > 0 {
+            seeded_identities: loop seed in core_seeds -> seed.module_identity
+            core_symbols = jet_driver_core_record_symbols(record, seeded_identities) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
+        }
     }
     canonical_effect_module_identity := canonical_effect_module.module_identity
     registration_inputs.push(canonical_effect_module)

@@ -275,10 +275,12 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
     I64{1}
 }
 
-// jet_sys_image_part_raw: a copy of at most `limit` bytes of the part
-// `name` from its byte `offset` (fewer at its end, none past it or for a
-// limit below 1), None when the executable has no such part. Only the bytes
-// asked for are copied; the rest stay unread in the mapping.
+// jet_sys_image_part_raw: at most `limit` bytes of the part `name` from its
+// byte `offset` (fewer at its end, none past it or for a limit below 1),
+// None when the executable has no such part. The bytes are lent where the
+// kernel mapped them, never copied: the route gives them a frozen List
+// header (JetIR BuildRoutes.jet IR_ROUTES_FROZEN), which no owner frees, and
+// a page is read only when a reader touches it.
 #Export(c) jet_sys_image_part_raw: fn(name: I64, offset: I64, limit: I64, data_out: I64, length_out: I64) -> I64 {
     start: jet_int_owned_to_i64(offset)
     wanted: jet_int_owned_to_i64(limit)
@@ -295,7 +297,7 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
         if (wanted < taken) -> taken = wanted
     }
     bytes: wrapping(note + wrapping(I64{16} + wrapping(host_image_part_label(name) + begin)))
-    rt_text_store(data_out, host_startup_bytes(bytes, taken))
+    rt_text_store(data_out, bytes)
     rt_text_store(length_out, taken)
     I64{1}
 }

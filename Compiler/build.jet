@@ -3,13 +3,19 @@
 // them). The `prelude-sources` and `lexer-keywords` steps first regenerate
 // the sources that copy or project other sources (Toolchain/PreludeSources.jet,
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
-// rewritten and a hand edit is refused. The jet this build makes carries no
-// Core record part yet: the `core-record` step (`jet self devtools core-record
-// --embed`, JetCli CoreRecordCheck.jet) needs a runtime image for Core's
-// compile-time values, and that image is the `runtime` step's output, so jet
-// parses Core from its sources. The `runtime` step puts jet's runtime
-// pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet this build
-// made lowers the runtime, and no C compiler runs. It also fails when the
+// rewritten and a hand edit is refused. That compile is `jet-bare`; the
+// `core-record` step runs it to check Core and the Prelude and writes `jet`,
+// the same executable with their precompiled record added as a part it maps
+// at load (JetCli CoreRecordCheck.jet), so the record is the Core of that
+// very compiler, and a compile outside a toolchain tree takes its Core
+// modules from the record, not from Core's sources. jet-bare has no
+// runtime image yet, so the step can't run Core code at compile time: every
+// Core module value must be a constant the compiler folds, and one that
+// calls Core code is E0643 here (Core/Ui Draw.jet's built-in face is a
+// `#Memo` function for this). The `runtime` step puts jet's runtime pack and
+// IDENTITY beside it (Toolchain/RuntimePack.jet): the jet the `core-record`
+// step wrote lowers the runtime, its bytes, the record included, are jet's
+// identity, and no C compiler runs. It also fails when the
 // jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
 // disagrees with the one the runtime source renders. The pack carries no C or
 // libc: a program's C closure links the musl sysroot of jet's C toolchain
@@ -39,7 +45,7 @@ PRELUDE_COPIES: [String]{
 KEYWORD_SOURCES: [String]{"JetLexer/Data/Lexer/Keywords.jet", "JetLexer/Source/Lexer/Tokens.jet", "JetLexer/Source/Lexer/Terminators.jet"}
 
 build: fn(b: Build) -[Exec, FS]> {
-    #Impure("run the source generators and the runtime pack step with jet") {
+    #Impure("run the source generators, the Core record step and the runtime pack step") {
         prelude: b.run("prelude-sources", b.jet(), ["Exec", "FS"])
         prelude.arg("run")
         prelude.arg("--allow=FS")
@@ -57,21 +63,30 @@ build: fn(b: Build) -[Exec, FS]> {
         keywords.file(b.folder("JetFoundation/Data/Syntax"), flag: "--syntax=")
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
-        jet: b.add_executable("jet", ["JetCli/run.jet"], [prelude, keywords])
+        bare: b.add_executable("jet-bare", ["JetCli/run.jet"], [prelude, keywords])
+        core: b.run("core-record", b.host(bare), ["Exec", "FS"])
+        core.arg("self")
+        core.arg("devtools")
+        core.arg("core-record")
+        core.arg("--embed")
+        core.file(b.host(bare))
+        jet: core.output("JetCli/.jet/build/jet")
+        // Checking every Core body takes most of it (a v5 write took 14 min).
+        core.timeout(30min)
         runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
         runtime.arg("run")
         runtime.arg("--allow=Env,Exec,FS")
         runtime.input("Toolchain/RuntimePack.jet")
         runtime.arg("--")
         runtime.arg("pack")
-        runtime.file(b.host(jet), flag: "--jet=")
+        runtime.file(jet, flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
         runtime.reads("JetFoundation/Source/Registry/RuntimeInterface.jet")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
         runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")
         runtime.timeout(10min)
-        toolchain: b.add_install("toolchain", [], [runtime], [jet])
+        toolchain: b.add_install("toolchain", [], [core, runtime], [bare])
         b.default(toolchain)
     }
 }

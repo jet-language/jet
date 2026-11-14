@@ -8,9 +8,9 @@
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
-        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_module,
-        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
-        jet_driver_core_record_symbol_rows, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_body_key, jet_driver_core_record_module,
+        jet_driver_core_record_module_first_body, jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
+        jet_driver_core_record_symbol_rows, jet_driver_core_record_symbols, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -77,11 +77,21 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
         at: usage_at.get(record.module_identities[index].id) ?? panic("module {index} has no Core usage in the check")
         assert_eq("{usage:Debug}", "{inputs.core_usage[at]:Debug}")
     }
-    assert_eq(record.symbols.len(), reserved.len())
+    symbols: jet_driver_core_record_symbols(record, recorded) ?? panic("the record's symbol keys don't read: {err}")
+    assert_eq(symbols.len(), reserved.len())
     loop (index, keys) in reserved {
-        assert_eq(record.symbols[index].base, keys.base)
-        assert(record.symbols[index].keys.texts == keys.keys.texts)
+        assert_eq(symbols[index].base, keys.base)
+        assert(symbols[index].keys.texts == keys.keys.texts)
     }
+    // A compile that takes no module reads the serial ranges' keys alone.
+    bare: jet_driver_core_record_symbols(record, [ModuleID]{}) ?? panic("the record's serial symbol keys don't read: {err}")
+    loop (index, keys) in bare {
+        assert_eq(keys.base, reserved[index].base)
+        serial: Int{keys.module_identity.id} == 0
+        if !serial -> assert_eq(keys.keys.texts.len(), 1)
+    }
+    first: jet_driver_core_record_body_key(record, 0) ?? panic("the first body key doesn't read: {err}")
+    assert_eq(jet_driver_core_record_module_first_body(record, first.owner) ?? panic("no first body: {err}"), 0)
 }
 
 #Test("symbol keys read back from their parts") {
