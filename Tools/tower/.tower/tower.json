@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102227,
+    "rev": 102228,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90691,11 +90691,11 @@
         {
           "n": 9,
           "text": "D-F32-RECORDS1=A is built (ratified 2026-11-13). math.rem_quo, math.remainder and math.fmod given two F32 arguments return an F32 (rem_quo's quotient stays an Int), computed in Float and rounded once, which gives the exact F32 result; Float arguments keep their Float results, and no public name is added. The sema rule lives with the other F32 math rules (sema_call_try_core_math_f32). Proof: a golden over edge inputs (signed zeros, subnormals, huge quotients) comparing with the C library's remainderf, fmodf and remquof on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T12:16:09.961Z"
+          "evidence": "18cd07d573 (on dev): math.rem_quo, math.remainder and math.fmod given two F32 arguments return an F32 through sema_call_try_core_math_f32 (computed in Float on the exactly widened operands and rounded once). rem_quo gives (rem: F32, quo: Int) through the internal Core __rem_quo_f32, and no public name is added. On the gate-p55 jet (dev 9623399213): `jet test Compiler --profile cases --filter core_math_f32_exact_and_bit_functions_match_c23_on_every_tier` rc 0, 1/0 (the fmod, remainder and rem_quo corpora cover signed zeros, subnormals, infinities, NaN payloads, halfway and past-2^31 quotients against glibc 2.42 and musl remquof, at O0, O1, O2 and web); `--filter core_math_matches_musl_bit_for_bit_on_every_tier` rc 0, 1/0 (Float arguments keep Float results).",
+          "at": "2026-11-14T06:24:30.898Z"
         }
       ],
       "refs": [
@@ -90711,7 +90711,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-13T12:16:09.961Z",
+      "updated": "2026-11-14T06:24:30.898Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -204811,6 +204811,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:24:30.898Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c028lxdd",
+      "note": "#9"
+    },
     {
       "at": "2026-11-14T06:21:31.317Z",
       "by": "Main",
