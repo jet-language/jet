@@ -1564,9 +1564,12 @@ type has text to give: a Core error family member, a showable type the
 program marks `#Error` (the type minted from an unannotated function's
 `Err(.Case(…))` cases is one), or a union of those and `Err`. The failure's
 text becomes the `Err` message, and an unhandled report names the conversion
-(`conversion: FindError -> Err`). A declared conversion wins over this
-route. A `#Error` type that can't be shown, such as one holding a function,
-still needs a declared conversion (E2402).
+(`conversion: FindError -> Err`); a union's own `Err` member passes through
+whole, code and cause kept. A declared conversion wins over this route. A
+`#Error` type that can't be shown, such as one holding a function, still
+needs a declared conversion (E2402). A catch-all `.Err(e)` arm over a union
+that holds `Err` binds `e` the same way, as an `Err`; over a union without
+`Err`, `e` is the union.
 
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:

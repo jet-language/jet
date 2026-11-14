@@ -1595,6 +1595,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         // (sema_stmt_type_switch_rebind after the branch mark below).
         arm_target := Type?{None}
         arm_return := Type?{None}
+        caught := SemaCatchAllErr?{None}
         // A guard arm `T == Int` (the one-arm `if T == Int { … }`, or an
         // `else if` link) is the same type test.
         arm_param := type_param.copy()
@@ -1614,7 +1615,10 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
                 conditions.push(None)
             }
         } else {
-            condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, scopes, state, tail_store, context, diagnostics)
+            // A catch-all `.Err(e)` over an open failure union binds `e` as `Err`
+            // (sema_catch_all_err_arm).
+            caught = sema_catch_all_err_arm(arms[arm_index].cond, scopes, environment, program)
+            condition_result := if caught == .Val(found) -> sema_expression_check_condition(found.cond, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_expression_check_condition(arms[arm_index].cond, environment, program, scopes, state, tail_store, context, diagnostics)
             if condition_result.checked == None -> complete = false
             arm_bindings = condition_result.bindings
             conditions.push(condition_result.checked)
@@ -1626,7 +1630,11 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         sema_scope_enter(scopes, state, "if.arm@{arms[arm_index].span.start}")
         sema_expression_declare_condition_bindings(arm_bindings, scopes, state, true, diagnostics)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arms[arm_index].body)
-        branch := if arm_return != None -> sema_check_statements(arms[arm_index].body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_check_statements(arms[arm_index].body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+        branch := if {
+            caught == .Val(found) -> if arm_return != None -> sema_catch_all_err_check_body(found, arms[arm_index].body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> sema_catch_all_err_check_body(found, arms[arm_index].body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+            arm_return != None -> sema_check_statements(arms[arm_index].body, arm_return, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+            else -> sema_check_statements(arms[arm_index].body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+        }
         // An arm whose body did not check leaves no complete checked tree for it; the
         // table must not lower that arm as an empty fall-through.
         if !branch.complete -> complete = false

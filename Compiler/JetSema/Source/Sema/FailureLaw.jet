@@ -8,6 +8,7 @@ use {
         module_is_none,
         module_none,
         AppliedRuleApplication,
+        Binding,
         BodyNode,
         Call,
         CallArg,
@@ -24,11 +25,14 @@ use {
         JET_TYPE_NAMES,
         MARKER_ERROR,
         Marker,
+        PatSlot,
+        Pattern,
         Param,
         ParamZone,
         RuleSite,
         Span,
         Stmt,
+        StrFormat,
         StrPart,
         SymbolKind,
         TFuncKind,
@@ -152,9 +156,8 @@ sema_program_error_nominal: fn(ty: Type, environment: SemaScopeEnvironment, prog
 
 // The source a Prelude conversion parses under: the member's leaf, for the
 // `[FieldError]` list its element's, for a generic member its head's, and
-// for a union `Err`, which shows whichever member arrived, since a written
-// conversion source is one named type. The routine binds the exercised
-// source type either way.
+// for a union `Err`, since a written conversion source is one named type.
+// The routine binds the exercised source type either way.
 sema_prelude_conversion_spelling: fn(source: Type) -> String Never! {
     if source == .List(element) -> return sema_error_conversion_leaf(type_name(element))
     if source == .Apply(name, _) -> return sema_error_conversion_leaf(name)
@@ -171,6 +174,96 @@ sema_prelude_conversion_message: fn(leaf: String) -> String Never! {
     if leaf == "SendError" -> return "send on a closed channel"
     if leaf == "AllocError" -> return "memory allocation refused"
     "{{self}}"
+}
+
+// The body of a Prelude conversion into the default `Err`. A union passes its
+// own `Err` member through whole, code and cause kept, and shows any other
+// member; every other source gives its message.
+sema_prelude_conversion_body: fn(source: Type, leaf: String) -> String Never! {
+    if source == .Union(members) {
+        arms := ""
+        loop member in members {
+            member_tag: sema_pattern_union_tag(member)
+            arms = if member_tag == "Err" -> "{arms}        .Err(inner) -> inner\n" else -> "{arms}        .{member_tag}(member) -> Err(\"{{member}}\")\n"
+        }
+        return "    converted: if self == {{\n{arms}    }}\n    return converted\n"
+    }
+    "    return Err(\"{sema_prelude_conversion_message(leaf)}\")\n"
+}
+
+// A catch-all `.Err(e)` arm whose subject fails with an open union (the
+// general `Err` beside members that reach it) binds `e` as that `Err`. The
+// arm tests the union under a hidden name (`cond`), and its body runs behind
+// `bind`, which binds `e`: the `Err` member itself, code and cause kept, or
+// an `Err` that shows any other member, as the conversion into `Err` does. A
+// closed union still binds whole.
+SemaCatchAllErr: struct {
+    cond: Expr
+    bind: [Stmt]
+}
+
+SEMA_CATCH_ALL_ERR_PREFIX: "__caught_"
+
+sema_catch_all_err_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCatchAllErr? {
+    if cond == .PatternTest(subject, pattern, span, node) {
+        if pattern == .Err(name, name_span, inner, pattern_span) {
+            if inner == None -> return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, scopes, environment, program)
+        }
+        if pattern == .Variant(variant, slots, leading_dot, pattern_span) {
+            if variant == "Err" && leading_dot && slots.len() == 1 {
+                if slots[0] == .Bind(name, name_span) -> return sema_catch_all_err_rewrite(subject, name, name_span, pattern_span, span, node, scopes, environment, program)
+            }
+        }
+    }
+    None
+}
+
+sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pattern_span: Span, span: Span, node: Int, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCatchAllErr? {
+    if name == "_" || name.starts_with(SEMA_CATCH_ALL_ERR_PREFIX) -> return None
+    index := Int?{None}
+    if subject == .Ident(subject_name, _, _) -> index = sema_scope_resolve_index(scopes, subject_name)
+    found: index ?? return None
+    carrier: sema_expr_unwrap_tag(scopes.bindings[found].symbol.ty ?? return None)
+    failure: if carrier == .Result(_, error) -> sema_expr_unwrap_tag(error) else -> return None
+    if failure == .Union(members) {
+        open := false
+        loop member in members {
+            if sema_expr_unwrap_tag(member) == (Type.Named{name: "Err"}) -> open = true
+        }
+        if !open || !sema_error_source_reaches_err(failure, environment, program) -> return None
+        hidden: "{SEMA_CATCH_ALL_ERR_PREFIX}{name}"
+        payload: "{SEMA_CATCH_ALL_ERR_PREFIX}{name}_member"
+        // The value table `if hidden == { .Member(payload) -> … }`, one arm a
+        // member, nested as the parser nests a value dispatch.
+        chain := Expr.NoElse{span: name_span, id: AST_NODE_GENERATED}
+        position := members.len() - 1
+        loop position >= 0 {
+            value := Expr.Ident{name: "{payload}", span: name_span, id: AST_NODE_GENERATED}
+            if sema_expr_unwrap_tag(members[position]) != (Type.Named{name: "Err"}) {
+                shown: Expr.Str{parts: [StrPart]{StrPart.Interp{expr: value, format: StrFormat.Display}}, span: name_span, id: AST_NODE_GENERATED}
+                argument: CallArg{convention: AccessConvention.Read, expr: shown, span: name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+                value = Expr.Call{call: Call{name: "Err", name_span: name_span, type_args: [Type]{}, args: [CallArg]{argument}}, id: AST_NODE_GENERATED}
+            }
+            test: Expr.PatternTest{subject: Expr.Ident{name: "{hidden}", span: name_span, id: AST_NODE_GENERATED}, pattern: Pattern.Variant{variant: sema_pattern_union_tag(members[position]), bindings: [PatSlot]{PatSlot.Bind{name: "{payload}", span: name_span}}, leading_dot: true, span: name_span}, span: name_span, id: AST_NODE_GENERATED}
+            chain = Expr.If{cond: test, then_body: [Stmt]{}, then_value: value, else_body: [Stmt]{}, else_value: chain, span: name_span, id: AST_NODE_GENERATED}
+            position -= 1
+        }
+        bind: Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: "{name}", name_span: name_span, sigil_span: None, pattern: None, ty: Val(Type.Named{name: "Err"}), ty_span: None, init: chain, is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
+        test: Expr.PatternTest{subject: subject, pattern: Pattern.Err{binding: hidden, binding_span: name_span, inner: None, span: pattern_span}, span: span, id: node}
+        return Val(SemaCatchAllErr{cond: test, bind: [Stmt]{bind}})
+    }
+    None
+}
+
+// A catch-all arm's body, checked in the arm's open scope behind the `Err`
+// binding it starts with (SemaCatchAllErr).
+sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
+    bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    if !bound.complete -> return bound
+    rest := sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    loop statement in rest.value -> bound.value.push(statement)
+    bound.complete = rest.complete
+    bound
 }
 
 sema_core_error_type: fn(name: String) -> Bool Never! {
@@ -603,7 +696,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, 
 // finds it.
 sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> Func? {
     leaf: sema_prelude_conversion_spelling(source)
-    parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{sema_prelude_conversion_message(leaf)}\")\n}}\n".bytes()) ?? return None
+    parsed: parse_source("impl {leaf} -> Err {{\n{sema_prelude_conversion_body(source, leaf)}}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 {
         loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
         return None
