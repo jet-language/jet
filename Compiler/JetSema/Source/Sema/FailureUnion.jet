@@ -218,9 +218,14 @@ sema_failure_union_same_payload: fn(left: VariantPayload, right: VariantPayload)
     }
 }
 
+// The minted type is the `#Error #Printable #Debug enum` the function's cases
+// spell, so its report shows with `{e}` and `{e:Debug}` when every payload
+// can be shown. It takes no structural equality: those providers attach at
+// registration, before any type is minted.
 sema_failure_union_enum: fn(type_name_text: String, function: Func, variants: [Variant]) -> EnumDef Never! {
-    marker: Marker{name: "Error", negated: false, name_span: function.name_span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: function.name_span, ct: None}
-    EnumDef{
+    span: function.name_span
+    markers: [Marker]{sema_failure_union_marker("Error", span), sema_failure_union_marker("Printable", span), sema_failure_union_marker("Debug", span)}
+    definition := EnumDef{
         span: function.span,
         is_pub: function.is_pub,
         is_package_pub: function.is_package_pub,
@@ -237,9 +242,17 @@ sema_failure_union_enum: fn(type_name_text: String, function: Func, variants: [V
         is_must_use: false,
         must_use_span: None,
         serde_markers: [Marker]{},
-        type_markers: [Marker]{marker},
+        type_markers: markers,
         groups: [EnumGroup]{},
     }
+    if sema_type_metadata_enum_auto_ok(definition) {
+        definition.derives = [NamedSpan]{NamedSpan{name: "Printable", span: span}, NamedSpan{name: "Debug", span: span}}
+    }
+    definition
+}
+
+sema_failure_union_marker: fn(name: String, span: Span) -> Marker Never! {
+    Marker{name: name, negated: false, name_span: span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: span, ct: None}
 }
 
 // Mint the function's own closed `#Error enum` from the cases
