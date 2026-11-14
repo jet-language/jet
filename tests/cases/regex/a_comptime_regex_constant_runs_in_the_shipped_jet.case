@@ -1,0 +1,13 @@
+# A Regex constant compiles its pattern at compile time, which runs in the
+# comptime child bound to the runtime image. The shipped jet reads that image
+# from its own part at /proc/self/exe (JetCli Host.jet JET_CLI_SELF_EXECUTABLE),
+# a link whose identity must be the executable's (JetBackend Image/Loader.jet
+# loader_file_stamp); a link stamp found no part, and every compile-time
+# evaluation stopped with E0956.
+fixture: a_comptime_regex_constant_runs_in_the_shipped_jet.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run run.jet
+exit: 0
+stdout: = "true\nfalse\n"
+stderr: empty

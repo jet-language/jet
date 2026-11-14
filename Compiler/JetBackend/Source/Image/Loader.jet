@@ -819,12 +819,22 @@ x64_executable_write: fn(exe: X64Executable, path: String) -> String {
 }
 
 // The identity of the file at `path`: device, inode, size, and modification
-// and status-change times in nanoseconds; empty when it can't be read.
+// and status-change times in nanoseconds; empty when it can't be read. A
+// final link is followed, as the reads that open `path` follow it: a jet
+// reads its own parts at /proc/self/exe (JetCli Host.jet
+// JET_CLI_SELF_EXECUTABLE), whose own size is 0.
 loader_file_stamp: fn(path: String) -> [Int] {
-    found: loader_files.stat(path) ?? return [Int]{}
+    found: loader_files.stat(path, Val(loader_files.LinkPolicy.Follow)) ?? return [Int]{}
     modified: found.modified.to_unix_ns() ?? return [Int]{}
     changed: found.changed.to_unix_ns() ?? return [Int]{}
     [Int]{found.id.device, found.id.inode, found.size, modified, changed}
+}
+
+#Test("a file's stamp follows a final link, so /proc/self/exe stamps as the running executable") {
+    stamp: loader_file_stamp("/proc/self/exe")
+    assert_eq(stamp.len(), 5)
+    // The link's own size is 0; the executable's is not.
+    assert(stamp[2] > 0, "/proc/self/exe stamps with size {stamp[2]}")
 }
 
 // Open `path` read-only and close-on-exec: the descriptor, or -errno.
