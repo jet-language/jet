@@ -12331,6 +12331,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         modules[module_index].exports = final_graph.modules[module_index].exports
         modules[module_index].imports = final_graph.modules[module_index].imports
     }
+    // A case creation the mint reported (E0105) reports nothing more.
+    sema_failure_union_drop_settled(modules, unions.settled)
     loop module_result in modules {
         loop diagnostic in module_result.diagnostics -> diagnostics.push(diagnostic)
         if !module_result.complete -> complete = false

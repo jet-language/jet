@@ -26,6 +26,7 @@ use jet_foundation.[
     Item,
     Marker,
     MarkerCallArg,
+    expr_span,
     NamedSpan,
     ModuleTable,
     Span,
@@ -51,6 +52,8 @@ JET_FAILURE_UNION_JOIN_ROUND_CAP: 64
 SemaFailureCaseField: struct {
     label: String?
     ty: Type
+    // The argument's span, where a check against another payload reports.
+    span: Span
 }
 
 // One `Err(.Case(payload))` written where the default `Err`
@@ -71,6 +74,18 @@ SemaFailureUnionRow: struct {
     cases: [SemaFailureCase]
     // Position of the function's registry row in its module's `functions`.
     function_row: Int
+}
+
+// A case creation the mint already reported: a case of a type it refused, or
+// a creation whose payload differs from the case's first. Checking that
+// creation can only restate the report, so the errors the check gives at it
+// leave (sema_failure_union_drop_settled): any at the case itself (an untyped
+// case, another payload count or label) and a payload type mismatch (E0108)
+// at one of its `arguments`.
+SemaFailureSettledCase: struct {
+    module_index: Int
+    site: Span
+    arguments: [Span]
 }
 
 // A typed failure a caller could match: not the general `Err`, a message,
@@ -148,8 +163,8 @@ sema_failure_union_record_err: fn(call: Call, environment: SemaScopeEnvironment,
             payload := [SemaFailureCaseField]{}
             loop argument in args {
                 if argument == {
-                    .Positional(inner) -> payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}})
-                    .Named(label, inner) -> payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}})
+                    .Positional(inner) -> payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}, span: expr_span(inner)})
+                    .Named(label, inner) -> payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}, span: expr_span(inner)})
                 }
             }
             context.failure_union_cases.push(SemaFailureCase{name: variant, payload: payload, span: span})
@@ -231,8 +246,9 @@ sema_failure_union_enum: fn(type_name_text: String, function: Func, variants: [V
 // its body creates, register it in the owning module and add it to the
 // module's items so every tier emits it. Returns the minted type. The
 // replaced module row and (before the first mint) the nominal indexes are
-// recorded on `trail`.
-sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnionRow, diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> Type? {
+// recorded on `trail`. Each case creation a report here covers is listed on
+// `settled`.
+sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnionRow, diagnostics: &[Diagnostic], trail: &SemaGraphTrail, settled: &[SemaFailureSettledCase]) -> Type? {
     if row.cases.len() == 0 -> return None
     name: row.name
     owned: sema_failure_union_type_name(name)
@@ -242,6 +258,7 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     if clash {
         diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
+        sema_failure_union_settle_untyped(row, settled)
         return None
     }
     variants := [Variant]{}
@@ -254,6 +271,9 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
         if existing_index >= 0 {
             if !sema_failure_union_same_payload(variants[existing_index].payload, payload) {
                 diagnostics.push(sema_error("E0105", case_row.span, "case `.{case_row.name}` of `{owned}` is created with two different payloads", "every `Err(.{case_row.name}(…))` in `{name}` adds to the one type `{owned}`, so each case has one payload", "give the two failures different case names, or pass the same payload types to `.{case_row.name}`"))
+                arguments := [Span]{}
+                loop field in case_row.payload -> arguments.push(field.span)
+                settled.push(SemaFailureSettledCase{module_index: row.module_index, site: case_row.span, arguments: arguments})
             }
             next
         }
@@ -275,6 +295,7 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
         sema_graph_module_rollback(graph.modules[module_index], mark, owned)
         loop diagnostic in register_diagnostics -> diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
+        sema_failure_union_settle_untyped(row, settled)
         return None
     }
     // copy: the minted enum is stored twice in the graph: as a program item here and as the
@@ -293,6 +314,39 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     sema_registration_index_nominal_rows(graph, module_index, first_nominal)
     sema_attach_diagnostic_source_locations(diagnostics, start, segments)
     Val(Type.Named{name: owned})
+}
+
+// A refused mint leaves every case `row` creates without a type; its report
+// covers them all.
+sema_failure_union_settle_untyped: fn(row: SemaFailureUnionRow, settled: &[SemaFailureSettledCase]) Never! {
+    loop case_row in row.cases -> settled.push(SemaFailureSettledCase{module_index: row.module_index, site: case_row.span, arguments: [Span]{}})
+}
+
+// Whether `diagnostic` restates the mint's report on `case_row`: an error at
+// the case itself, or a payload type mismatch at one of its arguments.
+sema_failure_union_restates: fn(diagnostic: Diagnostic, case_row: SemaFailureSettledCase) -> Bool Never! {
+    if !diagnostic.code.starts_with("E") -> return false
+    span: diagnostic.span ?? return false
+    if span.start == case_row.site.start && span.end == case_row.site.end -> return true
+    if diagnostic.code != "E0108" -> return false
+    loop argument in case_row.arguments {
+        if span.start == argument.start && span.end == argument.end -> return true
+    }
+    false
+}
+
+// Drops from each module's reports the errors that restate a settled case
+// (SemaFailureSettledCase), from the back, so the kept reports are never
+// copied.
+sema_failure_union_drop_settled: fn(modules: &[SemaGraphModuleResult], settled: [SemaFailureSettledCase]) Never! {
+    loop case_row in settled {
+        if case_row.module_index < 0 || case_row.module_index >= modules.len() -> next
+        index := modules[case_row.module_index].diagnostics.len()
+        loop index > 0 {
+            index -= 1
+            if sema_failure_union_restates(modules[case_row.module_index].diagnostics[index], case_row) -> _ := modules[case_row.module_index].diagnostics.remove(index, .Slot)
+        }
+    }
 }
 
 sema_failure_union_flatten: fn(ty: Type, flat: &[Type]) Never! {
@@ -471,18 +525,20 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
 
 // The union contracts one bundle projected: their function keys, the
 // modules whose declarations changed (a projected function's or a minted
-// `#Error enum`'s declaring module), and whether any type was minted.
+// `#Error enum`'s declaring module), whether any type was minted, and the
+// case creations the mint's reports cover.
 SemaFailureUnionProjected: struct {
     keys: [String]
     modules: [Int]
     minted: Bool
+    settled: [SemaFailureSettledCase]
 }
 
 // Join the default-route rows of the unannotated
 // top-level functions, mint their own cases and project every set that holds
 // a typed member.
 sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic], trail: &SemaGraphTrail) -> SemaFailureUnionProjected {
-    projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false}
+    projected := SemaFailureUnionProjected{keys: [String]{}, modules: [Int]{}, minted: false, settled: [SemaFailureSettledCase]{}}
     rows := [SemaFailureUnionRow]{}
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     loop module_result in modules {
@@ -499,7 +555,7 @@ sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphM
     }
     if rows.len() == 0 -> return projected
     loop row_index in 0..<rows.len() {
-        minted: sema_failure_union_mint(graph, rows[row_index], diagnostics, trail) ?? next
+        minted: sema_failure_union_mint(graph, rows[row_index], diagnostics, trail, projected.settled) ?? next
         rows[row_index].members.push(minted)
         projected.modules.push(rows[row_index].module_index)
         projected.minted = true
