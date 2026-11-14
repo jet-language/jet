@@ -27,6 +27,13 @@ use {
     envmodel_test_check_snapshot("E0977", envmodel_test_render("config.jet", src, error))
 }
 
+#Test("image from undeclared environment is e1327") {
+    src: "image.demo: module {{ from: env.staging }}"
+    error: envmodel_test_env_error(envmodel_evaluate_env(src, sys.temp_dir()))
+    assert_eq(error.code, "E1327")
+    envmodel_test_check_snapshot("E1327", envmodel_test_render("config.jet", src, error))
+}
+
 #Test("image restating inherited field is e0977") {
     src: "m: module {{ system.s: {{ target: linux.x64 }} image.i: {{ from: system.s, packages: [default.fd] }} }}"
     error: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
