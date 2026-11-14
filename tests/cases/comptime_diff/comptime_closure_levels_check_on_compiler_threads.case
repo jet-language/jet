@@ -1,0 +1,20 @@
+# Card #6793 c6: a comptime closure walks the functions it reaches breadth
+# first, and checks each level ahead on the compiler threads when the level
+# admits more than one (JetDriver Driver/Pipeline.jet,
+# jet_driver_comptime_closure_prefetch; JetSema Sema/CheckProgram.jet,
+# sema_comptime_function_prechecks). A pass of small local values makes no
+# item prechecks, so its pass prefetch checks nothing ahead. Here one local
+# value's closure reaches nineteen sizable functions at one level, more
+# source than one thread takes (SEMA_BODY_MIN_BYTES_PER_THREAD). The value
+# equals its runtime run, and one compiler thread and eight print the same
+# value.
+fixture: comptime_closure_levels_check_on_compiler_threads.fixture
+env: NO_COLOR=1
+step serial: jet run --threads 1 closure_levels.jet
+env: JET_STORE_DIR={work}/cache-serial
+exit: 0
+stdout: = "digest 544436448 true\n"
+step: jet run --threads 8 closure_levels.jet
+env: JET_STORE_DIR={work}/cache-threads
+exit: 0
+stdout: == serial

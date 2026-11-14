@@ -1250,7 +1250,10 @@ jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: &JetD
 // check re-targets the environment instead of copying the graph per function.
 // A function the run already checked completely is reused from
 // `checked_functions`, and one whose last check waits on constants that still
-// have no value from `index` (JetDriverComptimeRunIndex.waiting_rows).
+// have no value from `index` (JetDriverComptimeRunIndex.waiting_rows). The
+// queue is walked breadth first, and each level's functions are checked
+// ahead on the compiler threads when they admit more than one
+// (jet_driver_comptime_closure_prefetch).
 // Function sources and module rows are read from `program`'s graph, whose
 // staged values never change them. `memory_plan`
 // holds the run's memory plan once a function is checked (zero or one row):
@@ -1275,6 +1278,9 @@ jet_driver_comptime_function_closure: fn(
     // run time quietly, where a refused module value fails the build.
     local_value: Bool,
     diagnostics: &[Diagnostic],
+    // Each breadth-first level of the queue is checked ahead on these
+    // (jet_driver_comptime_closure_prefetch).
+    threads: CompilerThreads,
 ) -> JetDriverComptimeFunctionClosure {
     graph_option: program.registration_graph
     graph: graph_option ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false, incomplete: [SemaTotalityRow]{SemaTotalityRow{owner: environment.module_name.copy(), function: "-", reason: "the staged comptime environment lost its registration graph"}}}
@@ -1309,7 +1315,14 @@ jet_driver_comptime_function_closure: fn(
     // #3708: obligations against unannotated callees settle over the closure.
     failure_closure := SemaComptimeFailureClosure{}
     cursor := 0
+    // The queue's end when the current level began: the functions queued
+    // since are the next level.
+    level_end := 0
     loop cursor < queue.len() {
+        if cursor == level_end {
+            level_end = queue.len()
+            jet_driver_comptime_closure_prefetch(environment, program, available, index, memory_plan, values, queue, cursor, level_end, threads)
+        }
         current := queue[cursor]
         cursor += 1
         checked_key: "{current.module_identity.id}\n{current.function_key}"
@@ -1463,10 +1476,36 @@ jet_driver_comptime_prefetch: fn(environments: &[SemaScopeEnvironment], programs
             if programs[0].registration_graph == .Val(graph) -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
             if memory_plan.len() == 0 -> break
         }
-        checks: sema_comptime_function_prechecks(environments, programs, available, values, memory_plan[0], frontier, threads)
+        checks: sema_comptime_function_prechecks(environments[0], programs[0], available, values, memory_plan[0], frontier, threads)
         frontier = jet_driver_comptime_prefetch_keep(programs[0], index, frontier, checks, seen, kept)
     }
     kept
+}
+
+// The checks of one breadth-first level of a closure's queue
+// (`queue[start..<end]`, jet_driver_comptime_function_closure), made on the
+// compiler threads just before the closure checks them one at a time, and
+// kept in `index.prefetched` as a pass's are (jet_driver_comptime_prefetch).
+// A pass's prefetch starts only from items whose prechecks the threads made,
+// so a pass of small items, as a body pass of local values, prefetches
+// nothing, though one of its closures may reach a thousand functions; its
+// levels are checked here. The level's functions the run already checked,
+// holds a waiting or prefetched check of, or settled are not checked again,
+// and a level that admits one thread is left to the closure. The next wave
+// the kept checks reach is dropped: the closure queues it as its next level.
+jet_driver_comptime_closure_prefetch: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, index: &JetDriverComptimeRunIndex, memory_plan: &[SemaFunctionMemoryPlan], values: [SemaComptimeItemValue], queue: [JetDriverComptimeFunctionRef], start: Int, end: Int, threads: CompilerThreads) {
+    if end - start < 2 || compiler_threads_admit(threads, 2, 2, 1, 0, 0) <= 1 -> return
+    seen := [String:Bool]{}
+    jobs := [SemaComptimeFunctionJob]{}
+    loop at in start..<end -> jet_driver_comptime_prefetch_add(index, seen, jobs, queue[at].module_identity, queue[at].function_key)
+    if jobs.len() < 2 -> return
+    if memory_plan.len() == 0 {
+        if program.registration_graph == .Val(graph) -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
+        if memory_plan.len() == 0 -> return
+    }
+    checks: sema_comptime_function_prechecks(environment, program, available, values, memory_plan[0], jobs, threads)
+    kept := 0
+    _ := jet_driver_comptime_prefetch_keep(program, index, jobs, checks, seen, kept)
 }
 
 // The functions the complete prechecks of the pass's items reach first, as
@@ -1527,12 +1566,12 @@ jet_driver_comptime_prefetch_keys: fn(graph: SemaRegistrationGraph, index: &JetD
 }
 
 // Queues function `function_key` of `module_identity` once, unless the run
-// already checked it, holds a waiting check of it or settled it.
+// already checked it, holds a waiting or prefetched check of it or settled it.
 jet_driver_comptime_prefetch_add: fn(index: JetDriverComptimeRunIndex, seen: &[String:Bool], jobs: &[SemaComptimeFunctionJob], module_identity: ModuleID, function_key: String) {
     key: "{module_identity.id}\n{function_key}"
     if seen.get(key) != None -> return
     seen[key] = true
-    if index.checked_rows.get(key) != None || index.waiting_rows.get(key) != None -> return
+    if index.checked_rows.get(key) != None || index.waiting_rows.get(key) != None || index.prefetched.has_key(key) -> return
     if index.node_ids.get(key) == .Val(node) {
         if index.nodes[node].settled -> return
     }
@@ -2773,7 +2812,7 @@ jet_driver_comptime_run: fn(
                 checked_mark := checked_functions.len()
                 closure_diagnostic_start: diagnostics.len()
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
-                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics)
+                closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics, request.compiler_threads)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len() + closure.rows.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, !source.local_value && (diagnostics.len() > item_diagnostic_start || !closure.complete)) {
                     loop diagnostics.len() > item_diagnostic_start {

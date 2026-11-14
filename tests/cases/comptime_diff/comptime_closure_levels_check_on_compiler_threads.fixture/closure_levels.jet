@@ -1,0 +1,361 @@
+
+// One local value whose closure reaches nineteen sizable functions at one
+// breadth-first level (digest calls each), more source than one compiler
+// thread takes: with compiler threads that level is checked ahead of the
+// closure (jet_driver_comptime_closure_prefetch), and the value must equal
+// its runtime run.
+
+adler: fn(values: [Int]) -> Int {
+    low := 1
+    high := 0
+    loop value in values {
+        low = (low + value) % 65521
+        high = (high + low) % 65521
+    }
+    // Fold the two halves the way the real checksum packs them, then mix
+    // once more so a reordered input moves every digit of the result.
+    packed := high * 65536 + low
+    mixed := packed
+    loop round in 0..<3 {
+        mixed = (mixed * 31 + round + values.len()) % 1000000007
+    }
+    mixed
+}
+
+fletcher: fn(values: [Int]) -> Int {
+    first := 0
+    second := 0
+    block := 0
+    loop value in values {
+        first = (first + value) % 255
+        second = (second + first) % 255
+        block += 1
+        // Every eight values close a block: the sums restart from a seed
+        // drawn from the block count, as a blocked variant does.
+        if block == 8 {
+            first = (first + block) % 255
+            second = (second * 3 + 1) % 255
+            block = 0
+        }
+    }
+    second * 256 + first
+}
+
+run_lengths: fn(values: [Int]) -> Int {
+    if values.len() == 0 -> return 0
+    runs := 1
+    longest := 1
+    current := 1
+    encoded := 0
+    loop index in 1..<values.len() {
+        if values[index] % 7 == values[index - 1] % 7 {
+            current += 1
+            if current > longest -> longest = current
+        } else {
+            encoded = (encoded * 13 + current) % 1000003
+            runs += 1
+            current = 1
+        }
+    }
+    encoded = (encoded * 13 + current) % 1000003
+    runs * 1000 + longest * 100 + encoded % 100
+}
+
+sorted_weight: fn(values: [Int]) -> Int {
+    sorted := [Int]{}
+    loop value in values {
+        // Insertion: shift every larger value one place right.
+        sorted.push(value)
+        position := sorted.len() - 1
+        loop position > 0 && sorted[position - 1] > value {
+            sorted[position] = sorted[position - 1]
+            position -= 1
+        }
+        sorted[position] = value
+    }
+    total := 0
+    loop (index, value) in sorted {
+        total = (total + (index + 1) * value) % 1000000007
+    }
+    total
+}
+
+histogram_score: fn(values: [Int]) -> Int {
+    buckets := [Int]{}
+    loop _ in 0..<16 -> buckets.push(0)
+    loop value in values {
+        bucket: value % 16
+        buckets[bucket] = buckets[bucket] + 1
+    }
+    // A cheap spread score: squares reward a lopsided histogram, and the
+    // number of empty buckets is folded in as the high digits.
+    score := 0
+    empty := 0
+    loop count in buckets {
+        score += count * count
+        if count == 0 -> empty += 1
+    }
+    empty * 100000 + score
+}
+
+best_span: fn(values: [Int]) -> Int {
+    best := 0
+    running := 0
+    start := 0
+    best_start := 0
+    best_end := 0
+    loop (index, value) in values {
+        // Centre each value so the span sums can turn negative.
+        centred: value - 125
+        if running <= 0 {
+            running = centred
+            start = index
+        } else {
+            running += centred
+        }
+        if running > best {
+            best = running
+            best_start = start
+            best_end = index
+        }
+    }
+    best * 10000 + best_start * 100 + best_end
+}
+
+gcd: fn(left: Int, right: Int) -> Int {
+    a := left
+    b := right
+    loop b != 0 {
+        rest: a % b
+        a = b
+        b = rest
+    }
+    a
+}
+
+divisor_chain: fn(values: [Int]) -> Int {
+    common := 0
+    lcm := 1
+    loop value in values {
+        if value == 0 -> next
+        common = gcd(common, value)
+        // Keep the running least common multiple bounded: it only needs
+        // to stay deterministic, not exact.
+        lcm = (lcm /% gcd(lcm, value) * value) % 1000000007
+        if lcm == 0 -> lcm = 1
+    }
+    common * 1000000 + lcm % 1000000
+}
+
+reversed_digits: fn(values: [Int]) -> Int {
+    total := 0
+    loop value in values {
+        rest := value
+        reversed := 0
+        loop rest > 0 {
+            reversed = reversed * 10 + rest % 10
+            rest = rest /% 10
+        }
+        // Palindromic values count double, so the result depends on
+        // the digits and not only on the sum.
+        weight: if reversed == value -> 2 else -> 1
+        total = (total + reversed * weight) % 1000000007
+    }
+    total
+}
+
+xor_fold: fn(values: [Int]) -> Int {
+    folded := 0
+    rotated := 0
+    loop (index, value) in values {
+        folded = folded.bit_xor(value * (index + 1))
+        // A rotation by the index keeps equal values at different places
+        // from cancelling each other out.
+        shift: index % 5
+        rotated = (rotated * 2 + (value << shift)) % 1000003
+    }
+    folded * 1000003 + rotated
+}
+
+poly_hash: fn(values: [Int]) -> Int {
+    forward := 0
+    backward := 0
+    power := 1
+    loop value in values {
+        forward = (forward * 257 + value + 1) % 998244353
+        backward = (backward + (value + 1) * power) % 998244353
+        power = (power * 257) % 998244353
+    }
+    // Both directions: a palindrome hashes the same either way round.
+    same: if forward == backward -> 1 else -> 0
+    (forward * 3 + backward + same) % 998244353
+}
+
+widest_gap: fn(values: [Int]) -> Int {
+    if values.len() < 2 -> return 0
+    widest := 0
+    narrowest := 1000000
+    rises := 0
+    loop index in 1..<values.len() {
+        gap := values[index] - values[index - 1]
+        if gap > 0 -> rises += 1
+        if gap < 0 -> gap = 0 - gap
+        if gap > widest -> widest = gap
+        if gap < narrowest -> narrowest = gap
+    }
+    widest * 1000000 + narrowest * 1000 + rises
+}
+
+inversions: fn(values: [Int]) -> Int {
+    count := 0
+    loop left in 0..<values.len() {
+        loop right in left + 1..<values.len() {
+            // Only pairs a quarter of the range apart count, so close
+            // neighbours that swap do not dominate.
+            if values[left] > values[right] + 60 -> count += 1
+        }
+    }
+    equal := 0
+    loop index in 1..<values.len() {
+        if values[index] == values[index - 1] -> equal += 1
+    }
+    count * 100 + equal
+}
+
+parity_bits: fn(values: [Int]) -> Int {
+    odd_parity := 0
+    total_bits := 0
+    loop value in values {
+        bits := 0
+        rest := value
+        loop rest > 0 {
+            bits += rest % 2
+            rest = rest /% 2
+        }
+        total_bits += bits
+        if bits % 2 == 1 -> odd_parity += 1
+    }
+    odd_parity * 100000 + total_bits
+}
+
+window_peaks: fn(values: [Int]) -> Int {
+    width: 5
+    total := 0
+    peaks := 0
+    loop start in 0..<values.len() {
+        if start + width > values.len() -> break
+        top := values[start]
+        loop offset in 1..<width {
+            if values[start + offset] > top -> top = values[start + offset]
+        }
+        // A window whose first value is its top starts a peak.
+        if top == values[start] -> peaks += 1
+        total = (total + top) % 1000003
+    }
+    peaks * 1000003 + total
+}
+
+digit_spread: fn(values: [Int]) -> Int {
+    counts := [Int]{}
+    loop _ in 0..<10 -> counts.push(0)
+    loop value in values {
+        rest := value
+        loop rest > 0 {
+            digit: rest % 10
+            counts[digit] = counts[digit] + 1
+            rest = rest /% 10
+        }
+    }
+    spread := 0
+    loop (digit, count) in counts {
+        spread = (spread * 7 + count * (digit + 1)) % 1000000007
+    }
+    spread
+}
+
+step_walk: fn(values: [Int]) -> Int {
+    position := 0
+    visits := 0
+    seen := [Int]{}
+    loop _ in 0..<values.len() -> seen.push(0)
+    // Jump by each visited value until a slot repeats or the walk has
+    // taken as many steps as there are values.
+    loop visits < values.len() {
+        if seen[position] == 1 -> break
+        seen[position] = 1
+        visits += 1
+        position = (position + values[position]) % values.len()
+    }
+    visits * 1000 + position
+}
+
+triangle_mix: fn(values: [Int]) -> Int {
+    total := 0
+    loop (index, value) in values {
+        // Weigh each value by the triangle number of its place, so the
+        // result tells a shifted input from the original.
+        triangle: index * (index + 1) /% 2
+        total = (total + value * (triangle % 97 + 1)) % 1000000007
+    }
+    total
+}
+
+square_steps: fn(values: [Int]) -> Int {
+    squares := 0
+    near := 0
+    loop value in values {
+        root := 0
+        loop root * root + 2 * root + 1 <= value -> root += 1
+        // Exact squares count apart from values one away from a square.
+        if root * root == value {
+            squares += 1
+        } else if (root + 1) * (root + 1) == value + 1 {
+            near += 1
+        }
+    }
+    squares * 1000 + near
+}
+
+even_odd_split: fn(values: [Int]) -> Int {
+    evens := 0
+    odds := 0
+    swaps := 0
+    last_even := false
+    loop (index, value) in values {
+        even: value % 2 == 0
+        if even -> evens += value else -> odds += value
+        // A change of parity between neighbours is one swap.
+        if index > 0 && even != last_even -> swaps += 1
+        last_even = even
+    }
+    (evens % 100000) * 100000 + (odds % 1000) * 100 + swaps % 100
+}
+
+digest: fn(count: Int) -> Int {
+    data := [Int]{}
+    loop index in 0..<count -> data.push((index * 37 + 11) % 251)
+    total := adler(data)
+    total = (total * 31 + fletcher(data)) % 1000000007
+    total = (total * 31 + run_lengths(data)) % 1000000007
+    total = (total * 31 + sorted_weight(data)) % 1000000007
+    total = (total * 31 + histogram_score(data)) % 1000000007
+    total = (total * 31 + best_span(data)) % 1000000007
+    total = (total * 31 + divisor_chain(data)) % 1000000007
+    total = (total * 31 + reversed_digits(data)) % 1000000007
+    total = (total * 31 + xor_fold(data)) % 1000000007
+    total = (total * 31 + poly_hash(data)) % 1000000007
+    total = (total * 31 + widest_gap(data)) % 1000000007
+    total = (total * 31 + inversions(data)) % 1000000007
+    total = (total * 31 + parity_bits(data)) % 1000000007
+    total = (total * 31 + window_peaks(data)) % 1000000007
+    total = (total * 31 + digit_spread(data)) % 1000000007
+    total = (total * 31 + step_walk(data)) % 1000000007
+    total = (total * 31 + triangle_mix(data)) % 1000000007
+    total = (total * 31 + square_steps(data)) % 1000000007
+    (total * 31 + even_odd_split(data)) % 1000000007
+}
+
+run: fn() {
+    value: #run digest(64)
+    print("digest {value} {value == digest(64)}")
+}
