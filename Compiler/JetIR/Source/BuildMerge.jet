@@ -660,10 +660,10 @@ IRMergeTaken: struct {
 }
 
 // Moves the merged functions out of their parts into `functions`, in merged
-// order (no function is copied). Each part's functions but the last part's
+// order (no function is copied). Each part's functions but the first part's
 // move to a thread of their own, which rewrites the merged ones to the
-// merged rows and drops the rest (ir_merge_rewrite_part); the last part's are
-// rewritten on this thread. The merged ones then go into their merged
+// merged rows and drops the rest (ir_merge_rewrite_part); the first part's
+// are rewritten on this thread. The merged ones then go into their merged
 // id's slot, and the slots pop from the last id down and are reversed.
 ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunction]) Never! {
     count: g.function_part.len()
@@ -675,7 +675,7 @@ ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunct
         lists.push(compiler_take_rows<IRFunction>(parts[part].functions))
     }
     loop id in 0..<count -> ids[g.function_part[id]][g.function_local[id]] = id
-    taken := ir_merge_rewrite_parts(lists, g.sides, ids, 0)
+    taken := ir_merge_rewrite_parts(lists, g.sides, ids)
     slots := [IRFunction?]{}
     loop _ in 0..<count -> slots.push(None)
     loop taken.len() > 0 {
@@ -694,21 +694,21 @@ ir_merge_take_functions: fn(parts: &[IRModule], g: IRMerge, functions: &[IRFunct
     functions.reverse()
 }
 
-// The rewritten merged functions of parts `at` on, in part order, each
-// part's on its own thread and the last part's on this one
-// (ir_merge_rewrite_part).
-ir_merge_rewrite_parts: fn(lists: &[[IRFunction]], sides: [IRMergeSide], ids: &[[Int]], at: Int) -> [[IRMergeTaken]] Never! {
+// The rewritten merged functions of every part in `lists`, in part order:
+// each part's on its own thread and the first part's on this one
+// (ir_merge_rewrite_part). The parts pop off `lists` and `ids` whole, last
+// first, so no row moves one at a time.
+ir_merge_rewrite_parts: fn(lists: &[[IRFunction]], sides: [IRMergeSide], ids: &[[Int]]) -> [[IRMergeTaken]] Never! {
+    at: lists.len() - 1
+    if at < 0 -> return [[IRMergeTaken]]{}
+    functions: lists.pop() ?? panic("a nonempty part function list failed to pop")
+    part_ids: ids.pop() ?? panic("a nonempty part id list failed to pop")
+    if at == 0 -> return [[IRMergeTaken]]{ir_merge_rewrite_part(functions, sides[0], part_ids)}
     taken := [[IRMergeTaken]]{}
-    if at >= lists.len() -> return taken
-    if at == lists.len() - 1 {
-        taken.push(ir_merge_rewrite_part(compiler_take_rows<IRFunction>(lists[at]), sides[at], compiler_take_rows<Int>(ids[at])))
-        return taken
-    }
     task.group ir_merge_rewrite_threads {
-        head: task ir_merge_rewrite_part(compiler_take_rows<IRFunction>(lists[at]), sides[at].copy(), compiler_take_rows<Int>(ids[at]))
-        rest := ir_merge_rewrite_parts(lists, sides, ids, at + 1)
-        taken.push(head.join() ?? panic(compiler_threads_failure_text(err)))
-        loop part_taken in rest.move() -> taken.push(part_taken)
+        last: task ir_merge_rewrite_part(functions, sides[at].copy(), part_ids)
+        taken = ir_merge_rewrite_parts(lists, sides, ids)
+        taken.push(last.join() ?? panic(compiler_threads_failure_text(err)))
     }
     taken
 }
