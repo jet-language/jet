@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102195,
+    "rev": 102197,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48676,11 +48676,11 @@
         {
           "n": 5,
           "text": "D-STDOUT-BUFFER1=A: Measurement-before-change receipts include syscall counts and matched timings for 1M/2M lines/file/pipe/terminal; one shared Jet stdout buffering policy selected from TTY fact; stderr never delayed; flush occurs before every named boundary including first report/stderr; prompt visible before input; explicit flush works; native image print issues one buffered write; existing interleaving and stop-prefix goldens retained.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-07T21:04:54.227Z"
+          "evidence": "585db1bd73 (light37) adds the explicit-flush case; the rest holds on dev. G3Core-2 ran Tools/perf/stdout-buffer/run.sh --jet <gate-p45 jet> --runs 3 on an export of f27b382429: rc 0, 36 PASS, 0 FAIL. fd-1 writes under strace, Jet against the old per-write flush: file and pipe 1M lines 1452 vs 1,000,000; 2M lines 3039 vs 2,000,000; chars 123 and 245 vs 1M+1 and 2M+1; a terminal gets one write per LF. Best walls: 1M file lines 65 ms vs 589 ms (per-write flush) and 2132 ms (python3); 2M pipe lines 124 ms vs 1650 and 4713 ms. Receipts in $JET_SCRATCH_ROOT/lanes/Main/inbox/G3Core2-stdout-receipts/. On the gate-p48 jet: cases terminal/stdout_flush_shows_piped_lines_before_the_program_ends 1/0 (an explicit out.flush() makes exactly the two earlier lines visible on a pipe at none, basic and full) and stdout_buffer_keeps_stream_order_on_every_level 1/0 (stdout is flushed before the first plain eprint and the stop report on o0, o1 and o2). On p43/p45, terminal/ 11/0: one policy chosen by the TTY fact, the prompt visible before input, and the .merged golden unchanged.",
+          "at": "2026-11-14T05:04:36.805Z"
         },
         {
           "n": 6,
@@ -48708,7 +48708,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.718Z",
-      "updated": "2026-11-14T05:02:22.799Z",
+      "updated": "2026-11-14T05:04:36.805Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -64912,6 +64912,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c2 progress (gate-p48 jet): golden --filter Battery 21/0 with Game/Battery PASS at o0, o1 and o2 (the ir.build ICE was fixed by f54aae3a78, writepin); WebBuild/Battery 3/0 at o0, o1 and o2; the games and gui batteries are renamed game and ui (03ef4d26a2). Still red: cases http_router_duplicate_route (E2804 naming both lines), http_router_retired_bare_catchall and explain_routes_lists_every_row (`jet explain --routes`). Routed to G5DevX-2."
+        },
+        {
           "at": "2026-11-09",
           "by": "Main",
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gate met: D-ROUTE-ONE1=A (ratified 2026-10-29) is the ballot this card waited for; c2 now states what it builds."
@@ -64949,7 +64954,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:14.888Z",
-      "updated": "2026-11-13T02:23:56.952Z",
+      "updated": "2026-11-14T05:04:58.466Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -204723,6 +204728,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:04:58.466Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rtxw7u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T05:04:36.805Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8dr0e",
+      "note": "#5"
+    },
     {
       "at": "2026-11-14T05:02:22.799Z",
       "by": "Main",
