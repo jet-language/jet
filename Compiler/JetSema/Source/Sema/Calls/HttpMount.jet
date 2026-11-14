@@ -239,14 +239,22 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
     encoded := [Expr]{}
     reads := [CallArg]{}
     loop index in 0..<args.len() {
-        local_name: "{hidden}_{index}"
-        binding := ast_binding(local_name, args[index].span, false, args[index].expr, None)
-        binding.ty = Val(sema_type_resolve_declared(graph, declaration.params[index + 1].ty, service_module))
-        statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
-            sema_single_use_leave_scope(scopes, state, diagnostics)
-            return None
+        // A bare name is read where it stands (a read parameter cannot be
+        // moved into a local); any other argument is bound once, as its
+        // parameter's type, so it runs once.
+        local_name: if {
+            args[index].expr == .Ident(written, _, _) -> "{written}"
+            else -> "{hidden}_{index}"
         }
-        body.push(statement)
+        if !(args[index].expr == .Ident(_, _, _)) {
+            binding := ast_binding(local_name, args[index].span, false, args[index].expr, None)
+            binding.ty = Val(sema_type_resolve_declared(graph, declaration.params[index + 1].ty, service_module))
+            statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+                sema_single_use_leave_scope(scopes, state, diagnostics)
+                return None
+            }
+            body.push(statement)
+        }
         encoded.push(sema_app_remote_method_call(remote, SEMA_APP_REMOTE_ARG, [Type]{}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span)}, args[index].span))
         reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span))
     }
