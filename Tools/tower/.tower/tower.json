@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102149,
+    "rev": 102150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48006,11 +48006,11 @@
         {
           "n": 5,
           "text": "Runtime detection adds no extra hashing or pass: the existing slot lookup during construction reports the collision (cite the construction path in the log).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:49.267Z"
+          "evidence": "Construction path on origin/dev (landed f0419c4198), checked by Main: ir_map_literal (Compiler/JetIR/Source/BuildMaps.jet:1020-1062) inserts each entry with one map.add call (:1040). map.add is ir_map_add_body (:797-810): it runs the insertion`s own map.find slot lookup (:800), returns the found index when the key is present (:803-804), and otherwise places the new entry (ir_map_place_new, :807). The literal branches on that index (:1044-1052) and stops once, after the block (:1056-1060, ir_map_literal_stop). There is no second hash or extra pass. #run builds through the same IR; case map_literal_computed_duplicate_key_stops_on_every_tier pins O0, O1, O2 and comptime.",
+          "at": "2026-11-14T03:48:33.403Z"
         },
         {
           "n": 6,
@@ -48040,7 +48040,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:49.267Z",
-      "updated": "2026-11-14T03:46:39.632Z",
+      "updated": "2026-11-14T03:48:33.403Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -204624,6 +204624,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T03:48:33.403Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c012s7jk",
+      "note": "#5"
+    },
     {
       "at": "2026-11-14T03:46:39.632Z",
       "by": "Main",
