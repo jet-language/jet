@@ -802,8 +802,9 @@ MEM_ALLOC_FREE: "free"
 /// Whether a `core.mem` item needs only its import, or an audited boundary too.
 CoreMemGate: enum { Import Audit }
 
-/// S58: one tier for every current `core.mem` module item. Keep this table
-/// aligned with `core_module_items("core.mem")` in `jet-sema`.
+/// S58: one tier for every current `core.mem` module item. The compiler build
+/// refuses an export missing here, and the core-declarations guard requires
+/// the Audit items to be exactly core.mem's `#Unsafe("…")` functions.
 CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: TYPE_PTR, field_1: CoreMemGate.Import),
     (field_0: MEM_FROM_ADDR, field_1: CoreMemGate.Audit),

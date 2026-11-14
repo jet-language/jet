@@ -790,19 +790,16 @@ core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [Strin
     out
 }
 
+// The `{ … }` body of the syntax registry's core.mem gate-tier map.
+core_decl_mem_tiers_body: fn(syntax: [CoreDeclarationFile]) -> String CoreDeclarationError! {
+    surface: core_decl_source_text(syntax, CORE_DECLARATIONS_SURFACE_PATH) ?? return Err(core_decl_fail("{CORE_DECLARATIONS_SURFACE_PATH} is not among the Syntax files"))
+    Ok(core_decl_list_body(surface, "CORE_MEM_GATE_TIERS: ", CORE_DECLARATIONS_SURFACE_PATH) ?? return Err(err))
+}
+
 // What is wrong with core.mem's exports, or "": they are exactly the named
 // items of the syntax registry's core.mem gate-tier map.
 core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], constants: [String: String]) -> String CoreDeclarationError! {
-    surface := ""
-    found := false
-    loop file in syntax {
-        if file.path == CORE_DECLARATIONS_SURFACE_PATH {
-            surface = file.text.copy()
-            found = true
-        }
-    }
-    if !found -> return Err(core_decl_fail("{CORE_DECLARATIONS_SURFACE_PATH} is not among the Syntax files"))
-    tiers: core_decl_resolve_items(core_decl_list_body(surface, "CORE_MEM_GATE_TIERS: ", CORE_DECLARATIONS_SURFACE_PATH) ?? return Err(err), constants)
+    tiers: core_decl_resolve_items(core_decl_mem_tiers_body(syntax) ?? return Err(err), constants)
     owner: core_declarations_module(declared.modules, "core.mem") ?? return Ok("{CORE_DECLARATIONS_CORE_PATH} declares no core.mem module")
     members := owner.members.copy()
     members.sort()
@@ -810,6 +807,32 @@ core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFi
     missing: loop name in tiers if !members.contains(name) -> name
     extra: loop name in members if !tiers.contains(name) -> name
     Ok("{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: core.mem exports drift from CORE_MEM_GATE_TIERS: missing={missing.join(",")} extra={extra.join(",")}")
+}
+
+// What is wrong with the core.mem gate tiers against the checker, or "". The
+// checker asks for an enclosing `#Unsafe("reason")` at a call exactly when
+// the called declaration carries `#Unsafe("…")`, so the items the map tiers
+// Audit are exactly core.mem's `#Unsafe` functions.
+core_decl_mem_tier_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], sources: [CoreDeclarationFile]) -> String CoreDeclarationError! {
+    body: core_decl_mem_tiers_body(syntax) ?? return Err(err)
+    audit_entries: loop entry in body.split("(field_0:") if entry.find("CoreMemGate.Audit") >= 0 -> entry
+    tiered: core_decl_resolve_items(audit_entries.join("\n"), core_decl_syntax_constants(syntax) ?? return Err(err))
+    text := ""
+    loop row in declared.source_rows {
+        if row.module_name == "core.mem" -> text = core_decl_source_text(sources, row.path) ?? ""
+    }
+    if text == "" -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: core.mem has no source module among the Core sources")
+    marked := [String]{}
+    loop line in text.split("\n") {
+        if line.starts_with(" ") || line.starts_with("\t") -> next
+        name: core_decl_fn_name(line)
+        if name != "" && core_decl_slice(line, 0, core_decl_attributes_end(line)).find("#Unsafe(\"") >= 0 -> marked.push(name)
+    }
+    marked.sort()
+    if tiered.join("\n") == marked.join("\n") -> return Ok("")
+    unmarked: loop name in tiered if !marked.contains(name) -> name
+    untiered: loop name in marked if !tiered.contains(name) -> name
+    Ok("{CORE_DECLARATIONS_SURFACE_PATH}: CORE_MEM_GATE_TIERS disagrees with core.mem's source: tiered Audit but not declared `#Unsafe(\"…\")`={unmarked.join(",")} declared `#Unsafe(\"…\")` but not tiered Audit={untiered.join(",")}")
 }
 
 // ---- Parts and runtime units ----------------------------------------------

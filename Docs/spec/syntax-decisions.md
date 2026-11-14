@@ -4341,8 +4341,10 @@ address-stable pins are import-gated because they cannot corrupt memory by
 existing. Raw-pointer construction, raw-pointer dereference, and MMIO are
 audit-gated because their use can. The canonical named-item table is
 `CORE_MEM_GATE_TIERS` in `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet`.
-The `jet-sema` gate test requires every current `core.mem` export to have one
-tier.
+The compiler build refuses a `core.mem` export with no tier there, and the
+core-declarations guard (`tests/guards/core_declarations`) requires the items
+tiered Audit to be exactly the `#Unsafe("…")` functions of `Core/Mem/Mem.jet`,
+the declarations the checker gates.
 
 **D-UNSAFE-OBLIG1=A — gate-only default with optional typed obligations and
 per-site control**
