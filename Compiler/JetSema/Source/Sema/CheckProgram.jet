@@ -8491,7 +8491,9 @@ sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, mo
 
 // The methods of type `ty`'s implementation of the trait written `bound`
 // (`Roundable` or `math.Roundable`), `ty` named from module
-// `module_identity`, added to `found`.
+// `module_identity`, added to `found`: a standalone `impl` row's, or an
+// `impl Trait { … }` block's in the type's own body, whose methods the
+// nominal registers.
 sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, bound: String, module_identity: ModuleID, found: &[(module_identity: ModuleID, key: String)]) {
     owner: sema_expr_unwrap_tag(ty)
     parts: bound.split(".").to_list()
@@ -8500,9 +8502,21 @@ sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, boun
     target := type_name(owner)
     if owner == .Named(_) || owner == .Apply(_, _) {
         row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return
-        nominal = Val(graph.modules[row.module_index].nominals[row.row].symbol.id)
+        declared: graph.modules[row.module_index].nominals[row.row]
+        nominal = Val(declared.symbol.id)
         // copy: the name keys the impl lookup; the nominal row stays in the graph.
-        target = graph.modules[row.module_index].nominals[row.row].symbol.name.copy()
+        target = declared.symbol.name.copy()
+        if declared.source == .SourceAST(item) {
+            loop block in sema_registration_item_trait_blocks(item) {
+                written: block.trait_name.split(".").to_list()
+                if written[written.len() - 1] != trait_name -> next
+                loop method in declared.methods {
+                    loop body_method in block.methods {
+                        if body_method.span == method.declaration.span -> found.push((module_identity: graph.modules[row.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+                    }
+                }
+            }
+        }
     }
     loop reference in sema_registration_impl_rows_named(graph, target) {
         implementation: graph.modules[reference.module_index].impls[reference.row]
