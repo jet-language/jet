@@ -7897,7 +7897,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: &&TExpr, op:
     sema_ownership_release_value_only_views(state, target, tail_store, context)
     if !sema_ownership_check_lvalue_write_as(state, target, !sema_stmt_place_writes_through_view(place), scopes, diagnostics) -> return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
     if !sema_stmt_move_direct(expr, state, scopes, "the assignment", diagnostics) -> return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 7")
-    // A compound update under a `#Policy(arithmetic:)` mode reads the place as a
+    // A compound update under an `#Overflow` mode reads the place as a
     // value (sema_stmt_policy_compound), before it becomes the write.
     read := TExpr?{None}
     if op != None -> read = Val(place.copy())
@@ -7934,7 +7934,7 @@ sema_stmt_field_write_mismatch: fn(target: LValue, required: Type, value: Expr, 
 }
 
 // A compound update `place op= value` of a fixed-width integer under the
-// function's `#Policy(arithmetic:)` mode, for + - * **: `place = OverflowOpt(read,
+// function's `#Overflow` mode, for + - * **: `place = OverflowOpt(read,
 // value)`, the policy's operation exactly as the binary form lowers it
 // (Expressions.jet sema_expr_check_binary, sema_expr_arithmetic_policy_value).
 // `read` is the place read as a value. None outside a policy, for any other
@@ -10611,7 +10611,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         .Policy(declarations, body, span) -> {
             previous_unit_policy := sema_scope_push_unit_policy(scopes, declarations)
             previous_copies_policy := sema_string_view_push_copies_policy(scopes, declarations)
-            // `#Policy(arithmetic: mode) { … }` is one lexical
+            // `#Overflow(mode) { … }` is one lexical
             // fixed-width arithmetic mode over the block, read by the
             // operator checks as `context.arithmetic_policy`.
             outer_arithmetic: context.arithmetic_policy

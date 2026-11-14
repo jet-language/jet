@@ -1330,10 +1330,10 @@ D-FIXED-WRAP1)*: the overflow mode is the `#Overflow(mode)` marker at
 function, method and block scope. Written on the line directly above a
 declaration, it belongs to that declaration. It has no module or package
 site: written at file or module scope it is E0355, and a package
-`policy: { arithmetic: … }` is an invalid manifest (E1215). A mode outside the
-`.Stop | .Wrapping | .Saturating` menu is E0930. The earlier spelling
-`#Policy(arithmetic: .Checked | .Wrapping | .Saturating)` is read the same way
-until its in-repo callers move to `#Overflow`, and is then removed. The
+`policy: { arithmetic: … }` names no registered package policy (E1215). A mode
+outside the `.Stop | .Wrapping | .Saturating` menu is E0930. Arithmetic is not
+a `#Policy` setting: the earlier spelling `#Policy(arithmetic: mode)` is
+removed and does not match the `#Policy` signature (E0930), and the
 standalone `#Arithmetic(mode)` marker is retired and is an unknown marker
 (E0927).
 

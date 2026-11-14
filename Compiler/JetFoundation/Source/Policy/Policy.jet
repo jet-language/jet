@@ -55,7 +55,6 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
         "sentries" -> Val(PolicyKey.Sentries)
-        "arithmetic" -> Val(PolicyKey.Arithmetic)
         "writes" -> Val(PolicyKey.Writes)
         else -> None
     }
@@ -86,26 +85,7 @@ policy_value_display: fn(value: PolicyValue) -> String Never! {
         .On -> ".On"
         .Off -> ".Off"
         .Explicit -> ".Explicit"
-        .Arithmetic(mode) -> ".{arithmetic_mode_name(mode)}"
-    }
-}
-
-// The variant name of an arithmetic mode, as `.Wrapping` writes it.
-arithmetic_mode_name: fn(mode: ArithmeticMode) -> String Never! {
-    if mode == {
-        .Checked -> "Checked"
-        .Wrapping -> "Wrapping"
-        .Saturating -> "Saturating"
-    }
-}
-
-// The arithmetic mode a written variant name selects.
-arithmetic_mode_parse: fn(name: String) -> ArithmeticMode? Never! {
-    if name == {
-        "Checked" -> Val(ArithmeticMode.Checked)
-        "Wrapping" -> Val(ArithmeticMode.Wrapping)
-        "Saturating" -> Val(ArithmeticMode.Saturating)
-        else -> None
+        .Arithmetic(mode) -> ".{overflow_mode_name(mode)}"
     }
 }
 
@@ -173,7 +153,7 @@ PolicyRule: struct {
 
 POLICY_PACKAGE_SCOPES: #run { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 POLICY_ALL_SCOPES: #run { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
-// Arithmetic is a function, method or block policy.
+// The overflow mode (`#Overflow`) is a function, method or block policy.
 POLICY_BODY_SCOPES: #run { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
@@ -311,7 +291,7 @@ policy_value_debug_text: fn(value: PolicyValue) -> String Never! {
         .On -> "On"
         .Off -> "Off"
         .Explicit -> "Explicit"
-        .Arithmetic(mode) -> "Arithmetic({arithmetic_mode_name(mode)})"
+        .Arithmetic(mode) -> "Arithmetic({overflow_mode_name(mode)})"
     }
 }
 
@@ -431,7 +411,6 @@ policy_parse_value: fn(key: PolicyKey, raw: String) -> PolicyValue PolicyValueEr
             else -> return Err(PolicyValueError{detail: "`sentries` must be `.On` or `.Off`"})
         }
     }
-    if key == PolicyKey.Arithmetic -> return Err(PolicyValueError{detail: "`arithmetic` is not a package policy; write `#Policy(arithmetic: …)` on the function, method or block"})
     if !policy_key_is_audited_gate(key) -> return Err(PolicyValueError{detail: "package policy `{policy_key_name(key)}` has an unsupported value"})
     if key != PolicyKey.Unsafe && key != PolicyKey.Impure && key != PolicyKey.Nondeterministic {
         if value == {

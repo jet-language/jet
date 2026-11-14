@@ -1,0 +1,20 @@
+
+Key: tag { deny: [Exec], timing: .Fixed }
+// An `#Overflow(.Wrapping)` block wraps the arithmetic in its body.
+wrapped_block: fn(k: #Key U64, m: U64) -> U64 {
+    out := U64{0}
+    #Overflow(.Wrapping) {
+        out = k + m
+    }
+    out
+}
+// A `.Stop` block inside a wrapping function checks its body's arithmetic
+// again; the function's mode resumes after the block.
+#Overflow(.Wrapping)
+stop_block: fn(k: #Key U64, m: U64) -> U64 {
+    out := U64{0}
+    #Overflow(.Stop) {
+        out = k + m
+    }
+    out * m
+}

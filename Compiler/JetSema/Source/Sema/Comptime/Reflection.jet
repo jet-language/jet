@@ -80,6 +80,7 @@ use jet_foundation.[
     foundation_named_type,
     module_is_core,
     module_text,
+    overflow_mode_name,
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
@@ -1496,11 +1497,7 @@ sema_comptime_reflection_arithmetic_fact: fn(fact: ArithmeticPolicyFact, file: S
         .Neg -> "neg"
         .Pow -> "pow"
     }
-    mode: if fact.mode == {
-        .Checked -> "Checked"
-        .Wrapping -> "Wrapping"
-        .Saturating -> "Saturating"
-    }
+    mode: overflow_mode_name(fact.mode)
     sema_comptime_reflection_struct("ArithmeticOperationInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "operation", value: TComptimeValue.String{value: operation_name}},
         SemaComptimeReflectionField{name: "policy", value: TComptimeValue.String{value: ".{mode}"}},
@@ -1517,7 +1514,7 @@ SemaArithmeticSite: struct {
 }
 
 // The arithmetic syntax of one function body: every candidate operation and
-// every `#Policy(arithmetic: mode) { … }` block, in source order.
+// every `#Overflow(mode) { … }` block, in source order.
 SemaArithmeticScan: struct {
     sites: [SemaArithmeticSite]
     scopes: [ArithmeticPolicyFact]
@@ -1534,9 +1531,9 @@ sema_arithmetic_binary_operation: fn(op: BinOp) -> ArithmeticOperation? Never! {
 }
 
 // The arithmetic policy facts of one function: each candidate operation
-// written inside a lexical `#Policy(arithmetic: mode)` scope, with that mode
-// and the innermost enclosing scope. A `#Policy(arithmetic: mode) { … }`
-// block scopes its own span; the function's `#Policy(arithmetic: mode)`
+// written inside a lexical `#Overflow(mode)` scope, with that mode and the
+// innermost enclosing scope. An `#Overflow(mode) { … }` block scopes its own
+// span; the function's `#Overflow(mode)`
 // marker scopes the whole function from the marker. The facts are lexical,
 // as the policy is: the checker lowers the fixed-width ones through the
 // mode's overflow route (Expressions.jet sema_expr_arithmetic_policy_value).

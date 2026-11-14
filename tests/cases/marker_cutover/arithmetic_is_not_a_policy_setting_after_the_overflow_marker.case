@@ -1,0 +1,46 @@
+# `#Overflow(mode)` is the only spelling of a body's fixed-width overflow mode
+# (overflow_marker_scopes_function_method_and_block_bodies covers it).
+# Arithmetic is not a `#Policy` setting: `#Policy(arithmetic: .Mode)` on a
+# function, on the line above one, or on a block does not match the `#Policy`
+# signature (E0930); a bare `arithmetic` is not a scoped policy (E0355); a
+# package `arithmetic` policy is an unregistered package policy (E1215); and
+# the older `#Arithmetic` marker is an unknown marker (E0927). None of them
+# teaches the old spelling.
+fixture: arithmetic_is_not_a_policy_setting_after_the_overflow_marker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step function: jet check function/main.jet
+exit: 1
+stderr: ~ "`#Policy` arguments do not match `Policy(PolicySetting...)`" # `arithmetic` is no setting
+stderr: ~ "--> main.jet:1:2" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0930" # the marker-signature code
+stderr: ~ "1 problem found" # one diagnostic only
+step line-above: jet check line_above/main.jet
+exit: 1
+stderr: ~ "`#Policy` arguments do not match `Policy(PolicySetting...)`" # read as a module policy, which has no arithmetic key
+stderr: ~ "--> main.jet:1:2" # located at the marker
+stderr: ~ "jet-lang.dev/e/E0930" # the marker-signature code
+stderr: ~ "1 problem found" # one diagnostic only
+step block: jet check block/main.jet
+exit: 1
+stderr: ~ "`#Policy` arguments do not match `Policy(PolicySetting...)`" # the block marker has no arithmetic key either
+stderr: ~ "--> main.jet:2:6" # located at the block marker
+stderr: ~ "jet-lang.dev/e/E0930" # the marker-signature code
+stderr: ~ "1 problem found" # one diagnostic only
+step bare: jet check bare/main.jet
+exit: 1
+stderr: ~ "`arithmetic` is not a scoped policy" # the policy registry has no arithmetic key
+stderr: !~ "arithmetic: .Wrapping" # the fix no longer offers it
+stderr: ~ "--> main.jet:1:9" # located at the bare key
+stderr: ~ "jet-lang.dev/e/E0355" # the scoped-policy code
+step package: jet check package/run.jet
+exit: 1
+stderr: ~ "`arithmetic` is not a registered package policy" # the package manifest has no arithmetic key
+stderr: ~ "jet-lang.dev/e/E1215" # the invalid-manifest code
+step retired: jet check retired/main.jet
+exit: 1
+stderr: ~ "`#Arithmetic` isn't a known applied rule" # the old marker is retired
+stderr: ~ "--> main.jet:1:2" # located at the retired marker
+stderr: ~ "jet-lang.dev/e/E0927" # unknown marker, no teaching diagnostic
+stderr: ~ "1 problem found" # one diagnostic only

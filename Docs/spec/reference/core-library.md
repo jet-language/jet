@@ -336,7 +336,7 @@ use the same names.
 | Declaration | Kind | Purpose |
 | --- | --- | --- |
 | `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
-| `ArithmeticMode`, `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound` | enum | Arithmetic, inlining, publication scope, parallel-kernel, representation, and memoization choices |
+| `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound`, `OverflowMode` | enum | Inlining, publication scope, parallel-kernel, representation, memoization, and fixed-width overflow choices |
 | `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, field naming, proof obligations, policy, and taint values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
 
@@ -352,7 +352,7 @@ parse_fast: fn(text: String) -> Int {
 ```
 
 `#Inline(.Always)` is the corresponding expected-type form. The language
-module contains `ArithmeticMode`, `JobScope`, `KernelMode`, and `MemoBound`;
+module contains `JobScope`, `KernelMode`, `MemoBound`, and `OverflowMode`;
 it does not export the retired `IntType` declaration. Marker sites are the
 prelude's `Site` enum.
 

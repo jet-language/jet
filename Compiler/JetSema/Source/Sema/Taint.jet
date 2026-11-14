@@ -2376,7 +2376,7 @@ sema_taint_check_method_crossing: fn(graph: SemaRegistrationGraph, state: &SemaT
     sema_taint_check_crossings(graph, state, fact.module_identity, owner, function, args, offset)
 }
 
-// Whether the `Arithmetic` scope argument `mode` wraps or saturates.
+// Whether the overflow mode `mode` wraps or saturates.
 sema_taint_mode_wraps: fn(mode: ArithmeticMode?) -> Bool Never! {
     if mode == .Val(value) -> return value == .Wrapping || value == .Saturating
     false
@@ -2760,14 +2760,18 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             sema_taint_check_expr(graph, state, reason_expr)
             sema_taint_check_block(graph, state, body)
         }
-        .ScopeMember(name, _, args, _, body, _, _, _) -> {
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
             loop argument in args -> sema_taint_check_expr(graph, state, argument)
-            wrapped := state.wrapping
-            if name == "Arithmetic" && args.len() > 0 -> state.wrapping = sema_taint_mode_wraps(sema_function_arithmetic_mode(args[0]))
+            sema_taint_check_block(graph, state, body)
+        }
+        // An `#Overflow(mode) { … }` block sets the overflow mode of its body.
+        .Policy(declarations, body, _) -> {
+            wrapped: state.wrapping
+            if sema_policy_arithmetic_mode(declarations) == .Val(mode) -> state.wrapping = sema_taint_mode_wraps(Val(mode))
             sema_taint_check_block(graph, state, body)
             state.wrapping = wrapped
         }
-        .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .Live(body, _) -> sema_taint_check_block(graph, state, body)
+        .Reactive(body, _) | .Shield(body, _) | .Defer(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .Live(body, _) -> sema_taint_check_block(graph, state, body)
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
             sema_taint_check_expr(graph, state, cond)
             before := sema_taint_snapshot(state)
