@@ -2,7 +2,7 @@ Error [jet.ValueNotSendable]: `flag` cannot be shared into this task: it holds a
   --> tests/ui/atomic_task_capture_outlives_its_cell.jet:8:10
     |
   8 |     task raise(flag)
-    |          ^^^^^^^^^^^
+    |          ^^^^^
  Why: The task holds the cell by address, and a task outside a `task.group` can outlive the block that owns the cell
  Fix: Spawn the task in a `task.group` the cell outlives, give the cell to the task with `task &&flag`, or share it with `Shared{…}`
 More: jet-lang.dev/e/E1102
