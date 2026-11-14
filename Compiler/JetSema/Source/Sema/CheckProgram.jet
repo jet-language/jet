@@ -10809,6 +10809,15 @@ sema_finalize_seeded_taken: fn(graph: SemaRegistrationGraph) -> Int Never! {
     0
 }
 
+// How many leading modules of `graph` the finalization walks take the Core
+// usage of as given (SemaRegistrationGraph.seeded_core_usage): the taken
+// modules (sema_finalize_seeded_taken), when their usage came with them, and
+// none otherwise, when every module's bodies are walked for it.
+sema_finalize_seeded_usage: fn(graph: SemaRegistrationGraph, taken: Int) -> Int Never! {
+    if taken > 0 && graph.seeded_core_usage.len() == taken -> return taken
+    0
+}
+
 // The body half of sema_finalize_graph: the body pass over every module but
 // the taken ones (sema_finalize_seeded_taken), whose results it takes, and the
 // codec and derive waves it demands, into `bodies`. The graph moves in and
@@ -11299,6 +11308,8 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 // script-body usages and the reachable closure); a module's first job
 // otherwise hands back its context, and the caller joins the module's rows in
 // job order (sema_core_collected_append) and assembles it.
+// A taken seeded module whose Core usage came with it (the Core record's
+// row, sema_finalize_seeded_usage) is given that row and has no Core walk.
 //
 // So the reports, the usage sets, the first span of each usage and the
 // callback keys read exactly as one thread's taint walk and then Core walk of
@@ -11308,8 +11319,15 @@ SEMA_CORE_JOBS_PER_THREAD: 8
 sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPrepared, existing_diagnostics: [Diagnostic], modules: &[SemaGraphModuleResult], threads: CompilerThreads, reports: &[Diagnostic], cores: &[SemaCoreModuleUsageResult], seeded_writes: &Int) -> SemaRegistrationGraph {
     owned := graph.move()
     // A taken seeded module's bodies are final: the branches the walk would
-    // mask on one are counted in `seeded_writes`, not marked.
+    // mask on one are counted in `seeded_writes`, not marked. Its Core usage,
+    // when it came with it, is not walked again.
     seeded_taken: sema_finalize_seeded_taken(owned)
+    seeded_usage: sema_finalize_seeded_usage(owned, seeded_taken)
+    // The walks are the rows' one reader, so they leave the graph. Reversed,
+    // so each module's row pops in module order.
+    seeded_rows := owned.seeded_core_usage.move()
+    owned.seeded_core_usage = [SemaCoreModuleUsageResult]{}
+    seeded_rows.reverse()
     taken := prepared.move()
     catalog := taken.catalog.move()
     reports.extend(taken.reports.move())
@@ -11319,7 +11337,7 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     owners := [Int]{}
     work := 0
     loop weight in taint_weights -> work += weight
-    loop module_index in 0..<owned.modules.len() {
+    loop module_index in seeded_usage..<owned.modules.len() {
         loop item_index in 0..<owned.modules[module_index].program.items.len() {
             span: sema_compiler_index_item_span(owned.modules[module_index].program.items[item_index])
             weight: span.end - span.start
@@ -11337,7 +11355,8 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
             sema_taint_join_reports(reports, existing_diagnostics, found)
             sema_finalize_mask(modules, module_index, state.masked, state.fixed_tags, seeded_taken, seeded_writes)
         }
-        loop module_index in 0..<owned.modules.len() {
+        loop _ in 0..<seeded_usage -> cores.push(seeded_rows.pop() ?? panic("a taken module left no Core usage row"))
+        loop module_index in seeded_usage..<owned.modules.len() {
             context: sema_core_module_context(owned, owned.modules[module_index], modules[module_index].call_facts)
             collected := sema_core_collected_empty()
             sema_core_collect_item_range(owned.modules[module_index].program.items, 0, owned.modules[module_index].program.items.len(), context, collected)
@@ -11381,6 +11400,10 @@ sema_finalize_walks: fn(graph: &&SemaRegistrationGraph, prepared: &&SemaTaintPre
     contexts.reverse()
     job := 0
     loop module_index in 0..<returned.modules.len() {
+        if module_index < seeded_usage {
+            cores.push(seeded_rows.pop() ?? panic("a taken module left no Core usage row"))
+            next
+        }
         collected := sema_core_collected_empty()
         whole := SemaCoreModuleUsageResult?{None}
         context := SemaCoreModuleContext?{None}

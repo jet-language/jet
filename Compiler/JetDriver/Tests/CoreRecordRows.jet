@@ -2,14 +2,15 @@
 // check (every Core body of the Prelude, as `jet self devtools core-record`
 // checks it) decodes: each row reads back from its record tree (JetFoundation
 // RecordTree.jet) and encodes to the tree it was read from, it holds every
-// comptime value the check landed on a Core module, and each symbol range
-// reads back with the keys the check reserved.
+// comptime value the check landed on a Core module and each Core module's
+// Core usage as the check walked it, and each symbol range reads back with
+// the keys the check reserved.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_module,
         jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
-        jet_driver_core_record_symbol_rows, jet_driver_core_record_values, jet_driver_core_record_write,
+        jet_driver_core_record_symbol_rows, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -69,6 +70,13 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
         held += values.len()
     }
     assert_eq(held, landed)
+    usage_at := [U32:Int]{}
+    loop (index, usage) in inputs.core_usage -> usage_at[usage.module_identity.id] = index
+    loop index in 0..<record.module_names.len() {
+        usage: jet_driver_core_record_usage(record, index) ?? panic("module {index}'s usage row doesn't decode: {err}")
+        at: usage_at.get(record.module_identities[index].id) ?? panic("module {index} has no Core usage in the check")
+        assert_eq("{usage:Debug}", "{inputs.core_usage[at]:Debug}")
+    }
     assert_eq(record.symbols.len(), reserved.len())
     loop (index, keys) in reserved {
         assert_eq(record.symbols[index].base, keys.base)

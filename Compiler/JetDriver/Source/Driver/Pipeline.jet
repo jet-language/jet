@@ -17,6 +17,7 @@ use {
         SemaComptimeItemRequest,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
+        SemaCoreModuleUsageResult,
         SemaComptimeValueSites,
         SemaForeignProviderInput,
         SemaFunctionMemoryPlan,
@@ -4015,6 +4016,9 @@ JetDriverLoweringInputs: struct {
     deep_checks: [String]{[String]{}}
     registration_modules: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
+    // Each checked module's Core usage (SemaCoreUsageResult.modules), for the
+    // Core record to hold its Core modules' rows.
+    core_usage: [SemaCoreModuleUsageResult]{[SemaCoreModuleUsageResult]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5039,8 +5043,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
         // `jet prove --lens solver` reads every checked function, unpruned,
         // with the declaration table their direct calls name; the Core
-        // record also writes the finalized registration modules and the
-        // landed comptime values.
+        // record also writes the finalized registration modules, the
+        // landed comptime values and each module's Core usage.
         if capture.stop_before_lowering {
             sources := [String:String]{}
             loop file in load.source_files {
@@ -5052,13 +5056,16 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
             registration_modules := [SemaRegistrationModule]{}
             landed_values := [SemaComptimeItemValue]{}
+            usage_rows := [SemaCoreModuleUsageResult]{}
             if request.every_core_body {
                 registration_modules = registration_graph.modules.move()
                 registration_graph.modules = [SemaRegistrationModule]{}
                 landed_values = comptime_values.move()
                 comptime_values = [SemaComptimeItemValue]{}
+                usage_rows = checked_graph.core_usage.modules.move()
+                checked_graph.core_usage.modules = [SemaCoreModuleUsageResult]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move(), core_usage: usage_rows.move()})
         }
         return result
     }

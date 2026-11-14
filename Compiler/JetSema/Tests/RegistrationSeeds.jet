@@ -4,7 +4,8 @@
 // them register against them. A check that reports on a module's own
 // declarations doesn't report on a seeded one again, and a seeded module that
 // comes with its finalized result is taken as it is: finalization checks none
-// of its bodies and writes none of its slot. A finalized row splits into
+// of its bodies and writes none of its slot, and its Core usage, when it
+// comes with it, is that row, not walked again. A finalized row splits into
 // the Core record's body packets, which take back to the same row. A taken
 // seeded module's comptime sources are not collected again: its values come
 // from the record.
@@ -12,6 +13,7 @@ use {
     jet_parser.[parse_source]
     jet_sema.[
         SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue,
+        SemaCoreModuleUsageResult, SemaCoreUsageSpan,
         SemaForeignProviderInput, SemaGraphModuleResult, SemaGraphResult,
         SemaRegistrationForeignHandleFacts, SemaRegistrationGraph,
         SemaRegistrationHostHooks, SemaRegistrationImportEdge,
@@ -24,7 +26,7 @@ use {
         sema_registration_reserved_symbols,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Diagnostic, FnBody, ModuleID, ModuleTable, Span, SymbolKeys, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
+    jet_foundation.[Diagnostic, FnBody, ModuleID, ModuleTable, RuntimeLayer, Span, SymbolKeys, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
 SEEDS_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
@@ -91,10 +93,10 @@ registration_seeds_finalized: fn(source: String, seeds: &[SemaRegistrationModule
     module_result
 }
 
-// `seeds` with their finalized `results` taken by a graph of the canonical
-// effect module over the seeds' module `table` and `reserved` symbol ranges,
-// finalized.
-registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&[SemaGraphModuleResult], table: &&ModuleTable, reserved: &&[SymbolKeys]) -> SemaGraphResult {
+// `seeds` with their finalized `results` and Core `usage` rows (none: each
+// is walked) taken by a graph of the canonical effect module over the seeds'
+// module `table` and `reserved` symbol ranges, finalized.
+registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&[SemaGraphModuleResult], usage: &&[SemaCoreModuleUsageResult], table: &&ModuleTable, reserved: &&[SymbolKeys]) -> SemaGraphResult {
     owned := table.move()
     main_id: module_intern(owned, "seeds::main")
     effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS, owned) ?? panic("the canonical effect source does not parse")
@@ -102,6 +104,7 @@ registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&
     second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{effects}, seeds, reserved, [SemaRegistrationImportEdge]{}, "seeds", main_id, effect_identity, owned, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
     assert_eq(second.seeded, 1)
     second.seeded_results = results.move()
+    second.seeded_core_usage = usage.move()
     registration_seeds_finalize(second)
 }
 
@@ -208,7 +211,8 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table, reserved)
     assert(module_result.functions.len() >= 2)
     taken := [SemaGraphModuleResult]{module_result.copy()}
-    checked := registration_seeds_refinalize(seeds, taken, seeded_table, reserved)
+    walked := [SemaCoreModuleUsageResult]{}
+    checked := registration_seeds_refinalize(seeds, taken, walked, seeded_table, reserved)
     assert(checked.complete)
     // Finalizing against the same Core changes nothing on the taken slot.
     assert_eq(checked.seeded_writes, 0)
@@ -226,10 +230,38 @@ registration_seeds_sources: fn(graph: &&SemaRegistrationGraph, main: ModuleID) -
     stale := module_result.copy()
     loop index in 0..<stale.functions.len() -> stale.functions[index].effects.solved.push("Stale")
     taken := [SemaGraphModuleResult]{stale.copy()}
-    checked := registration_seeds_refinalize(seeds, taken, seeded_table, reserved)
+    walked := [SemaCoreModuleUsageResult]{}
+    checked := registration_seeds_refinalize(seeds, taken, walked, seeded_table, reserved)
     assert(checked.seeded_writes > 0)
     // The slot stays as it was given.
     assert_eq("{checked.modules[0].functions:Debug}", "{stale.functions:Debug}")
+}
+
+#Test("a taken seeded module's Core usage is the row it came with, not walked again") {
+    seeds := [SemaRegistrationModule]{}
+    seeded_table := module_table()
+    reserved := [SymbolKeys]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds, seeded_table, reserved)
+    identity: module_result.module_identity
+    // A usage no walk of the module notes: it can only come from the row.
+    given := [SemaCoreModuleUsageResult]{SemaCoreModuleUsageResult{
+        module_identity: identity,
+        used_core: [String]{"core.fixture::given"},
+        usage_spans: [SemaCoreUsageSpan]{},
+        ffi_callback_keys: [String]{},
+        closure: [String]{"core.fixture::given"},
+        inferred_layer: RuntimeLayer.Core,
+    }}
+    taken := [SemaGraphModuleResult]{module_result.move()}
+    checked := registration_seeds_refinalize(seeds, taken, given, seeded_table, reserved)
+    assert(checked.complete)
+    assert(checked.core_usage.modules[0].module_identity == identity)
+    assert_eq(checked.core_usage.modules[0].used_core, [String]{"core.fixture::given"})
+    found := 0
+    loop name in checked.core_usage.used_core {
+        if name == "core.fixture::given" -> found += 1
+    }
+    assert_eq(found, 1)
 }
 
 #Test("a taken seeded module's comptime sources are not collected again") {

@@ -11,7 +11,7 @@
 // graph indexes become module key positions before a row is encoded.
 use {
     jet_foundation.[Item, compiler_transfer_rows, module_text, symbol_find]
-    jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, sema_core_body_store_new]
+    jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaCoreModuleUsageResult, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, sema_core_body_store_new]
 }
 
 // Module index `index` under the map `modules`. A row that names a module
@@ -91,12 +91,13 @@ jet_driver_core_record_seeds: fn(modules: &[JetDriverLoadedModule], record_modul
 }
 
 // Gives the seeded modules of `graph` (its first `seeded` rows, the ones
-// jet_driver_core_record_seeds took from `record`) their finalized results
-// and the store their bodies are taken from: each result is the record's
-// module row with its module indexes rebased to the graph, and the store
-// keys the body packets of those modules by function SymbolID
-// (SemaRegistrationGraph.seeded_results, .core_bodies). Finalization then
-// takes the seeded modules as they are and checks none of their bodies.
+// jet_driver_core_record_seeds took from `record`) their finalized results,
+// their Core usage and the store their bodies are taken from: each result is
+// the record's module row with its module indexes rebased to the graph, each
+// usage the record's usage row, and the store keys the body packets of those
+// modules by function SymbolID (SemaRegistrationGraph.seeded_results,
+// .seeded_core_usage, .core_bodies). Finalization then takes the seeded
+// modules as they are and checks or walks none of their bodies.
 // The seeded modules' comptime values (section 8) are pushed to `values`, in
 // graph order: the declaration pass collects no source of a taken module
 // (sema_collect_comptime_declarations), so the compile's comptime run starts
@@ -113,10 +114,12 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
         positions.push(position)
     }
     results := [SemaGraphModuleResult]{}
+    usage := [SemaCoreModuleUsageResult]{}
     loop position in positions {
         row := jet_driver_core_record_module(record, position) ?? return Err(err)
         _: jet_driver_core_record_rebase_imports(row.imports, graph_modules)
         results.push(row.move())
+        usage.push(jet_driver_core_record_usage(record, position) ?? return Err(err))
         module_values := jet_driver_core_record_values(record, position) ?? return Err(err)
         values.extend(module_values.move())
     }
@@ -134,6 +137,7 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
     decls: jet_driver_core_record_decls(record) ?? return Err(err)
     keyed: rows.len()
     graph.seeded_results = results.move()
+    graph.seeded_core_usage = usage.move()
     graph.core_bodies = Val(sema_core_body_store_new(record.reader, record.tree, JET_CORE_RECORD_BODY_ROWS, rows.move(), decls))
     Ok(keyed)
 }
