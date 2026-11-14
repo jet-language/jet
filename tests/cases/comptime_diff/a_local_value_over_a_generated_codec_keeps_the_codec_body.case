@@ -6,10 +6,14 @@
 # Encode demand its check recorded (SemaDemandCapture), so the recheck
 # generates Point's encode body, which the built `show` calls. Before, the
 # reused result demanded nothing and IR found Point's encode method
-# unlowered.
+# unlowered. The refused run is not kept for the body pass
+# (JetDriver BodyComptime.jet jet_driver_run_demands_generated): the
+# whole-program half generates the codec's body, so the pass run after it
+# checks another closure, which the suite's JET_RECHECK_VERIFY=1 run
+# reported as a difference.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
 step: jet run main.jet
 exit: 0
-stdout: ~ '{"x":3,"y":4}' # the value the pass computed with the generated codec
+stdout: ~ '{"x":3,"y":4}' # the built `show` calls Point's generated encode body
