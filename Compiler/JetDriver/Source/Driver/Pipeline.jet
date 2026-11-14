@@ -216,6 +216,9 @@ use {
         name_rows,
         name_rows_get_text,
         name_rows_set_first,
+        NameTable,
+        name_intern,
+        name_table_sized,
         ast_job_metadata,
         RuntimeInterfaceRow,
     ]
@@ -3972,18 +3975,18 @@ jet_driver_prunable_entry_modules: fn(load: JetDriverLoadResult, modules: [SemaG
 // it by name; and every function a foreign call or C handle names as its
 // callback, `#Close` or `undo` inverse. A callback Jet code passes is reached
 // through the function value its taker names.
-jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID], semantic_graph: SemaGraphResult, entry_module_identity: ModuleID, entry_key: String?) -> [String:Bool] Never! {
+jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID], semantic_graph: SemaGraphResult, entry_module_identity: ModuleID, entry_key: String?) -> NameTable Never! {
     listed := [U32:Bool]{}
     loop identity in modules -> listed[identity.id] = true
-    roots := [String:Bool]{}
-    if entry_key == .Val(key) -> roots[key] = true
-    roots[symbol_key_text(SymbolKind.Function, module_text(graph.module_table, entry_module_identity), "", "run")] = true
+    roots := name_table_sized(64)
+    if entry_key == .Val(key) -> _ := name_intern(roots, key)
+    _ := name_intern(roots, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, entry_module_identity), "", "run"))
     loop registration_module in graph.modules {
         if !listed.has_key(registration_module.module_identity.id) -> next
         loop row in registration_module.functions {
             declaration: row.declaration
             if declaration.compiler_generated || declaration.name.starts_with("__jet_") || declaration.is_job || declaration.every != None || declaration.web_marker != None || declaration.markers.len() > 0 {
-                roots[symbol_table_key(graph.symbols, row.symbol.id)] = true
+                _ := name_intern(roots, symbol_table_key(graph.symbols, row.symbol.id))
             }
         }
     }
@@ -3993,21 +3996,21 @@ jet_driver_entry_root_keys: fn(graph: SemaRegistrationGraph, modules: [ModuleID]
                 if !output.selected || output.kind == OutputKind.Check || output.module_id < 0 || output.module_id >= semantic_graph.modules.len() {
                     next
                 }
-                roots[symbol_key_text(SymbolKind.Function, module_text(graph.module_table, semantic_graph.modules[output.module_id].module_identity), "", output.semantic_name)] = true
+                _ := name_intern(roots, symbol_key_text(SymbolKind.Function, module_text(graph.module_table, semantic_graph.modules[output.module_id].module_identity), "", output.semantic_name))
             }
         }
         if listed.has_key(semantic_module.module_identity.id) {
-            loop key in semantic_module.injected_function_keys -> roots[key] = true
+            loop key in semantic_module.injected_function_keys -> _ := name_intern(roots, key)
         }
         loop foreign in semantic_module.foreign_functions {
-            if foreign.callback_key == .Val(key) -> roots[key] = true
-            if foreign.close_function_key == .Val(key) -> roots[key] = true
-            if foreign.undo_function_key == .Val(key) -> roots[key] = true
+            if foreign.callback_key == .Val(key) -> _ := name_intern(roots, key)
+            if foreign.close_function_key == .Val(key) -> _ := name_intern(roots, key)
+            if foreign.undo_function_key == .Val(key) -> _ := name_intern(roots, key)
         }
         loop provider in semantic_module.foreign_providers {
             loop handle in provider.handles {
-                if handle.close_function_key == .Val(key) -> roots[key] = true
-                if handle.undo_function_key == .Val(key) -> roots[key] = true
+                if handle.close_function_key == .Val(key) -> _ := name_intern(roots, key)
+                if handle.undo_function_key == .Val(key) -> _ := name_intern(roots, key)
             }
         }
     }
@@ -5617,7 +5620,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // Core source runs is rooted whole, as an entry is, so its #Test bodies
     // lower.
     prunable_modules := jet_driver_prunable_core_modules(load, request.core_sources, runtime_semantic_modules)
-    entry_roots := [String:Bool]{}
+    entry_roots := name_table_sized(2)
     if request.mode != JetDriverCompileMode.Test {
         loop identity in registration_graph.comptime_only_modules -> prunable_modules.push(identity)
         loop identity in jet_driver_prunable_dependency_modules(load, runtime_semantic_modules) {
