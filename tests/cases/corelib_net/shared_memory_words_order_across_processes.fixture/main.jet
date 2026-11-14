@@ -1,0 +1,59 @@
+// Two processes share one SharedMemory through fork and both count word 0
+// up with compare_exchange; no increment is lost. The child then writes a
+// byte region with plain writes and publishes it by storing word 8; once the
+// parent loads that flag, the region reads whole. Misaligned and
+// out-of-bounds words and values wider than 64 bits are refused. Nothing
+// prints before the fork, so the child holds no buffered output to repeat.
+use sys: core.sys
+
+ROUNDS: 20000
+
+run: fn() {
+    memory := sys.shared_memory(4096) ?? panic("shared memory: {err}")
+    misaligned: memory.load(4) ?? -1
+    outside: memory.load(4096) ?? -2
+    wide := "stored"
+    if memory.store(16, 9223372036854775808) == {
+        .Err(_) -> wide = "refused"
+        .Ok(_) -> {}
+    }
+    memory.store(16, -9223372036854775807 - 1) ?? panic("store the least word: {err}")
+    least: memory.load(16) ?? panic("load the least word: {err}")
+    swapped: memory.compare_exchange(16, 0, 1) ?? panic("exchange: {err}")
+
+    region := ""
+    #Unsafe("fork a peer that shares the mapping, and reap it") {
+        child: sys.fork() ?? panic("fork: {err}")
+        if child == 0 {
+            count_up(memory)
+            memory.write(64, "ready".bytes()) ?? panic("write: {err}")
+            memory.store(8, 1) ?? panic("publish: {err}")
+            return
+        }
+        count_up(memory)
+        loop {
+            flag: memory.load(8) ?? panic("flag: {err}")
+            if flag == 1 -> break
+        }
+        region = String.from_bytes(memory.read(64, 5) ?? panic("read: {err}")) ?? ""
+        sys.wait() ?? panic("wait: {err}")
+    }
+    print(misaligned)
+    print(outside)
+    print("a value wider than 64 bits is {wide}")
+    print(least)
+    print(swapped)
+    print(region)
+    print(memory.load(0) ?? panic("count: {err}"))
+    memory.close()
+}
+
+// Adds 1 to word 0 ROUNDS times, retrying each add a racing peer beat.
+count_up: fn(memory: &sys.SharedMemory) {
+    loop _ in 0..<ROUNDS {
+        loop {
+            seen: memory.load(0) ?? panic("load: {err}")
+            if memory.compare_exchange(0, seen, seen + 1) ?? panic("exchange: {err}") -> break
+        }
+    }
+}

@@ -20,7 +20,7 @@ use {
     core.sys.[EnvError]
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
-    shared_bounds.[shared_range_valid]
+    shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
     process_errors.[process_error]
     id_rows.[ids_of, set_ids, database_lines, passwd_entry, group_entry]
 }
@@ -1478,6 +1478,34 @@ SharedMemory: struct {
         core.sys.__shared_fill_raw(self.token, wrapping(offset + 0), wrapping(count + 0), wrapping(value + 0))
     }
 
+    // The signed 64-bit word at byte `offset`, read atomically. A word
+    // offset is a multiple of 8. Word loads, stores and exchanges are
+    // sequentially consistent across every process mapping this memory:
+    // whatever a process wrote before a `store` is visible to a process
+    // whose `load` reads the stored value. Plain `read` and `write` give no
+    // such ordering, so a byte region handed between processes is guarded
+    // by a word.
+    load: fn(self, offset: Int(0..1073741816)) -[Env]> Int IOError! {
+        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Read, None, "a shared word is 8 aligned bytes inside the memory"))
+        core.sys.__shared_load_raw(self.token, wrapping(offset + 0))
+    }
+
+    // Stores `value` atomically into the word at byte `offset`.
+    store: fn(&self, offset: Int(0..1073741816), value: Int) IOError! -[Env]> {
+        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
+        if !shared_word_fits(value) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        core.sys.__shared_store_raw(self.token, wrapping(offset + 0), value)
+    }
+
+    // Atomically replaces the word at byte `offset` with `replacement` if it
+    // holds `expected`; whether it did.
+    compare_exchange: fn(&self, offset: Int(0..1073741816), expected: Int, replacement: Int) -[Env]> Bool IOError! {
+        if !shared_word_valid(self, offset) -> return Err(syscall_input(.Write, None, "a shared word is 8 aligned bytes inside the memory"))
+        if !shared_word_fits(expected) || !shared_word_fits(replacement) -> return Err(syscall_input(.Write, None, "a shared word holds a signed 64-bit value"))
+        swapped: core.sys.__shared_compare_exchange_raw(self.token, wrapping(offset + 0), expected, replacement)
+        Ok(swapped == 1)
+    }
+
     // A new descriptor for this memory, to pass to another process.
     descriptor: fn(self) -[Env]> Fd IOError! { Ok(Fd{token: core.sys.__fd_duplicate_raw(self.token)}) }
 }
@@ -1498,6 +1526,16 @@ priv shared_bounds: module {
     // Whether `count` bytes from byte `offset` lie inside `memory`.
     shared_range_valid: fn(memory: SharedMemory, offset: Int(0..1073741824), count: Int(0..1073741824)) -> Bool {
         wrapping(offset + count) <= memory.size
+    }
+
+    // Whether the word at byte `offset` is 8-aligned and inside `memory`.
+    shared_word_valid: fn(memory: SharedMemory, offset: Int(0..1073741816)) -> Bool {
+        offset %% 8 == 0 && wrapping(offset + 8) <= memory.size
+    }
+
+    // Whether `value` fits a signed 64-bit word.
+    shared_word_fits: fn(value: Int) -> Bool {
+        value >= -9223372036854775807 - 1 && value <= 9223372036854775807
     }
 }
 
