@@ -2094,7 +2094,10 @@ exit. `.map(fn(value) { value.field })` narrows one guard to a field. `.split(fi
 second)` is legal only when sema proves the stored field paths disjoint. Guards
 are task-local and cannot be copied or sent. A public guard parameter reads by
 default; `&guard: SharedGuard<T>` requires and preserves edit access
-(D-SHAREDGUARD1=A, D-SHAREDGUARD2=A).
+(D-SHAREDGUARD1=A, D-SHAREDGUARD2=A). `try_guard_read()`/`try_guard_edit()`
+take the guard only when the lock is free now, and `guard_read_within(limit)`/
+`guard_edit_within(limit)` wait at most the `Duration` `limit`; each returns
+`SharedGuard<T>?`, `None` when the lock stayed taken.
 
 `Condition.new()` creates a wait set. `guard.wait(condition, predicate)` requires
 an edit guard, registers before releasing the lock, reacquires the same lock,

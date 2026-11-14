@@ -2041,6 +2041,47 @@ ir_shared_guard: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     guard
 }
 
+// `shared.try_guard_read()` / `try_guard_edit()` and `guard_read_within(limit)`
+// / `guard_edit_within(limit)`: the guard when the runtime takes the permit
+// within `limit` (no argument: only if it is free now), else None. The
+// guard's checked read/edit provenance must match the method.
+ir_shared_guard_within: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, editable: Bool, args: [Int], span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    guard_ty: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Shared guard attempt producing {ir_type_name(ty)}") }
+    if ir_shared_guard_editable(guard_ty) != Val((editable)) -> return ir_fail_slot(b, span, "Shared guard attempt without its checked read/edit provenance")
+    guard_row: ir_value_type(m, p, guard_ty) ?? return ir_type_fail(b, span, guard_ty)
+    shared: ir_expr(m, p, b, receiver)
+    if ir_failed(b) || shared < 0 -> return -1
+    wait := -1
+    if args.len() == 1 {
+        limit: ir_expr(m, p, b, args[0])
+        if ir_failed(b) || limit < 0 -> return -1
+        int_row: ir_type_row(m, Type.Int) ?? 0
+        ns: ir_runtime(m, b, "jet_rt_record_get_duration_ns", [Int]{limit}, int_row)
+        word_row: ir_word_row(m)
+        wait = ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{ns}, word_row)
+        ir_release(m, b, ns)
+        ir_release(m, b, limit)
+    } else {
+        wait = ir_word_const(m, b, 0)
+    }
+    out: ir_out_slot(m, b, 1)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    mode: ir_word_const(m, b, if editable -> 1 else -> 0)
+    taken: ir_runtime(m, b, "jet_rt_native_shared_guard_within", [Int]{shared, mode, wait, out}, bool_row)
+    result: ir_temp(m, b, row)
+    ir_option_none(m, b, result)
+    ir_open_if(b.f, taken, b.line)
+    guard: ir_load_at(m, b, out, 0, guard_row)
+    b.fresh[guard] = true
+    made: ir_option_make(m, p, b, row, guard, m.types[guard_row].size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    ir_release(m, b, shared)
+    b.fresh[result] = true
+    result
+}
+
 // What a `SharedSnapshot<T, U>` is laid out as: a retained handle of the
 // cell it was captured from, the committed revision it saw, and the
 // captured value.

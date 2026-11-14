@@ -4747,6 +4747,12 @@ arrives meanwhile waits and then returns `false`; the work must not call the
 same Once. `Semaphore.acquire` waits on a `Condition` under the cell's edit
 guard. A `Shared<T>` cell is itself the reader-writer lock:
 `guard_read()` holds shared read access, `guard_edit()` exclusive write access.
+`try_guard_read()` and `try_guard_edit()` return `SharedGuard<T>?`: the guard
+when the permit is free now, else `None`, without waiting. `guard_read_within(limit:
+Duration)` and `guard_edit_within(limit)` wait at most `limit` on the monotonic
+clock (`-[Time.Wait]>`) and return `None` when it passes first. A writer that
+gives up stops holding back new readers. Unwrap the guard to use it:
+`guard: cell.try_guard_edit() ?? return false`.
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that

@@ -19,6 +19,7 @@ extern W jet_rt_native_shared_guard_edit(W), jet_rt_native_shared_guard_read(W);
 extern W jet_rt_native_shared_edit_guard_edit(W), jet_rt_native_shared_edit_guard_read(W);
 extern W jet_rt_native_shared_read_guard_read(W), jet_rt_native_shared_read_guard_deref(W);
 extern W jet_rt_native_shared_guard_revision(W);
+extern bool jet_rt_native_shared_guard_within(W,W,W,W);
 extern void jet_rt_native_shared_edit_guard_drop(W), jet_rt_native_shared_read_guard_drop(W);
 extern W jet_rt_native_condition_new(void), jet_rt_native_condition_clone(W);
 extern void jet_rt_native_condition_drop(W), jet_rt_native_condition_notify_one(W), jet_rt_native_condition_notify_all(W);
@@ -167,6 +168,31 @@ static void rejected_stm(void) {
     jet_rt_control_leave((W)save); jet_rt_scheduler_control_drop(control);
     puts("STM prepare rejection/no publication/drop/revision stop ok");
 }
+// try_guard_*/guard_*_within: a held permit refuses at once (wait 0) or once
+// the limit passes, leaving `out` and the owner count alone; a writer that
+// gives up withdraws its wait so readers are not held back; a free permit is
+// taken and released like guard_read/guard_edit's.
+static void guard_attempts(void) {
+    W value=5,cell=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word),out=123;
+    W edit=jet_rt_native_shared_guard_edit(cell);
+    assert(!jet_rt_native_shared_guard_within(cell,0,0,(W)&out) && out==123);
+    assert(!jet_rt_native_shared_guard_within(cell,1,0,(W)&out) && out==123);
+    struct timespec before,after; clock_gettime(CLOCK_MONOTONIC,&before);
+    assert(!jet_rt_native_shared_guard_within(cell,0,20000000,(W)&out) && out==123);
+    clock_gettime(CLOCK_MONOTONIC,&after);
+    assert((after.tv_sec-before.tv_sec)*1000000000+(after.tv_nsec-before.tv_nsec)>=20000000);
+    assert(jet_rt_sync_fixture_cell_word(cell,0)==2 && jet_rt_sync_fixture_cell_word(cell,40)==0);
+    jet_rt_native_shared_edit_guard_drop(edit);
+    W read=jet_rt_native_shared_guard_read(cell);
+    assert(!jet_rt_native_shared_guard_within(cell,1,1000000,(W)&out) && out==123);
+    assert(jet_rt_sync_fixture_cell_word(cell,40)==0);
+    assert(jet_rt_native_shared_guard_within(cell,0,0,(W)&out) && out==cell);
+    jet_rt_native_shared_read_guard_drop(out); jet_rt_native_shared_read_guard_drop(read);
+    out=0; assert(jet_rt_native_shared_guard_within(cell,1,20000000,(W)&out) && out==cell);
+    *(W *)jet_rt_native_shared_edit_guard_edit(out)=6; jet_rt_native_shared_edit_guard_drop(out);
+    assert(cell_value(cell)==6); clean_cell(cell,1);
+    jet_rt_native_shared_drop(cell); puts("Shared try/timed guard attempts ok");
+}
 #ifdef JET_CONDITION_FIXTURE
 typedef struct { W cell,condition,control; _Atomic unsigned done; unsigned cancel; } Wait;
 static W ready_word(W env,W input,W output) { (void)env; *(uint8_t *)output=*(W *)input!=0; return 0; }
@@ -281,7 +307,7 @@ static void observe_parked(void) {
 #endif
 int main(void) {
     jet_rt_thread_attach(); nested_stm(); gate_stm(); rejected_stm();
-    dropped_root_stm();
+    dropped_root_stm(); guard_attempts();
 #ifdef JET_CONDITION_FIXTURE
     condition_tests();
 #endif

@@ -2390,6 +2390,12 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 {
                         return ir_shared_guard(m, p, b, expression_ty, receiver, method == "guard_edit", span)
                     }
+                    if (method == "try_guard_read" || method == "try_guard_edit") && args.len() == 0 {
+                        return ir_shared_guard_within(m, p, b, expression_ty, receiver, method == "try_guard_edit", args, span)
+                    }
+                    if (method == "guard_read_within" || method == "guard_edit_within") && args.len() == 1 {
+                        return ir_shared_guard_within(m, p, b, expression_ty, receiver, method == "guard_edit_within", args, span)
+                    }
                     if method == "shared.read" || method == "shared.edit" {
                         return ir_shared_read(m, p, b, expression_ty, receiver, args, method, if method == "shared.edit" -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", span)
                     }

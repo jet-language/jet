@@ -1,5 +1,6 @@
 // Shared owner methods: `Shared<T>` capture/try_replace/same/guard_read/
-// guard_edit/downgrade/strong_count, `SharedSnapshot<T, U>.value()` and
+// guard_edit (and their try_ and _within attempts)/downgrade/strong_count,
+// `SharedSnapshot<T, U>.value()` and
 // `Shared.Weak<T>.upgrade()`, plus the local `Cell<T>` and its
 // `CellReadGuard<T>`/`CellEditGuard<T>` handles. The plain-access read/edit
 // seam stays in Methods.jet and projected SharedGuard operations stay in
@@ -159,15 +160,42 @@ sema_call_shared_owner_nullary: fn(receiver: Expr, receiver_value: TExpr, method
     sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{}, result, span, expected, environment, program, scopes, context, diagnostics)
 }
 
-sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// `guard_read()`/`guard_edit()` wait for the permit. `try_guard_read()`/
+// `try_guard_edit()` take it only when it is free now, and
+// `guard_read_within(limit)`/`guard_edit_within(limit)` wait at most the
+// Duration `limit`; both answer None when the permit stayed taken.
+sema_call_shared_owner_guard: fn(receiver: Expr, receiver_value: TExpr, inner: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    timed: method == "guard_read_within" || method == "guard_edit_within"
+    wanted: if timed -> 1 else -> 0
+    if args.len() != wanted {
+        diagnostics.push(sema_wrong_core_arity(method, wanted, args.len(), span))
+        sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return failed
+    }
     if sema_call_shared_owner_lexical_tail_len(tail_store, context) >= SEMA_SHARED_GUARD_LONG_SCOPE {
         diagnostics.push(sema_lint("L0206", span, "`Shared.{method}()` keeps its lock through a long lexical scope", "the guard releases at scope exit, so later statements and nested guard acquisitions run while this lock is held", "move the guarded work into a smaller block; when nesting guards is necessary, acquire them in one stable order"))
     }
-    marker: TagMarker.Internal{internal_tag: if method == "guard_edit" -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead}
-    result: Type.Tagged{marker: marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{inner}}}
+    editable: method == "guard_edit" || method == "try_guard_edit" || method == "guard_edit_within"
+    marker: TagMarker.Internal{internal_tag: if editable -> InternalTag.SharedGuardEdit else -> InternalTag.SharedGuardRead}
+    guard: Type.Tagged{marker: marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{inner}}}
+    result: if method == "guard_read" || method == "guard_edit" -> guard else -> Type.Option{inner: guard}
+    values := [TExpr]{}
+    if timed {
+        duration: Type.Named{name: "Duration"}
+        updated_args := args
+        checked: sema_check_expression(updated_args[0].expr, Val(duration), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+        limit: sema_expr_expected(checked, Val(duration), environment, program, diagnostics) ?? return failed
+        params: [SemaCallParam]{sema_call_shared_owner_param("limit", AccessConvention.Read, duration)}
+        ownership := sema_ownership_check_method_call(state, "Shared.{method}", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
+        if !ownership.accepted || !ownership.complete -> return failed
+        values.push(limit)
+    } else if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        return failed
+    }
     // An edit lease is the write: every edit through the guard reaches the cell.
-    if method == "guard_edit" -> sema_scope_record_module_write(receiver, span, environment, scopes, context)
-    sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, scopes, state, context, diagnostics)
+    if editable -> sema_scope_record_module_write(receiver, span, environment, scopes, context)
+    sema_call_shared_owner_host_value(receiver_value, method, values, result, span, expected, environment, program, scopes, context, diagnostics)
 }
 
 // (`Cell` receivers), `finish_cell_*` and `cell_method_return` /
@@ -425,8 +453,9 @@ sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, met
             if method == "capture" -> return sema_call_shared_owner_capture(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if method == "try_replace" -> return sema_call_shared_owner_try_replace(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if method == "same" -> return sema_call_shared_owner_same(receiver, receiver_value, inner, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if method == "try_guard_read" || method == "try_guard_edit" || method == "guard_read_within" || method == "guard_edit_within" -> return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if args.len() != 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
-            if method == "guard_read" || method == "guard_edit" -> return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            if method == "guard_read" || method == "guard_edit" -> return sema_call_shared_owner_guard(receiver, receiver_value, inner, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             // Expert weak edge for intentional cycles.
             if method == "downgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Apply{name: SEMA_SHARED_WEAK_TYPE, args: [Type]{inner}}, span, expected, environment, program, scopes, state, context, diagnostics)
             if method == "strong_count" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Int, span, expected, environment, program, scopes, state, context, diagnostics)

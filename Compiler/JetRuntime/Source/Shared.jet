@@ -65,7 +65,12 @@ shared_spin: fn(mutex: I64, round: I64) -> Bool {
     true
 }
 
-shared_acquire: fn(shared: I64, editable: Bool) {
+shared_acquire: fn(shared: I64, editable: Bool) { _ := shared_acquire_until(shared, editable, I64{-1}) }
+
+// Takes the permit unless `deadline_ns` (sync_now_ns; -1: none) passes
+// first, true when it was taken. A waiting writer that gives up withdraws
+// its claim and wakes the readers it held back.
+shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool {
     mutex: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
@@ -81,14 +86,23 @@ shared_acquire: fn(shared: I64, editable: Bool) {
                 else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
             sync_mutex_unlock(mutex)
-            return
+            return true
+        }
+        if (deadline_ns >= I64{0} && sync_now_ns() >= deadline_ns) {
+            if editable {
+                _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                sync_cond_notify_all(wrapping(shared + I64{16}))
+            }
+            sync_mutex_unlock(mutex)
+            return false
         }
         if shared_spin(mutex, round) {
             round += I64{1}
             next
         }
+        wake: sync_deadline(I64{10000000})
         // These callback doors never observe cancellation.
-        _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, sync_deadline(I64{10000000}))
+        _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, if (deadline_ns >= I64{0} && deadline_ns < wake) -> deadline_ns else -> wake)
     }
 }
 
@@ -281,6 +295,21 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     shared_retain(shared)
     shared_acquire(shared, true)
     shared
+}
+
+// `try_guard_read()`/`try_guard_edit()` (wait_ns 0) and
+// `guard_read_within(limit)`/`guard_edit_within(limit)`: writes the guard to
+// `out` and answers true when the permit (edit when `editable` is nonzero) is
+// taken within `wait_ns` nanoseconds; false leaves `out` alone.
+#Export(c) jet_rt_native_shared_guard_within: fn(shared: I64, editable: I64, wait_ns: I64, out: I64) -> Bool {
+    deadline: sync_deadline(if (wait_ns < I64{0}) -> I64{0} else -> wait_ns)
+    shared_retain(shared)
+    if !shared_acquire_until(shared, editable != I64{0}, deadline) {
+        jet_rt_native_shared_drop(shared)
+        return false
+    }
+    sync_store(out, shared)
+    true
 }
 
 #Export(c) jet_rt_native_shared_read_guard_read: fn(guard: I64) -> I64 { shared_guard_payload(guard) }
