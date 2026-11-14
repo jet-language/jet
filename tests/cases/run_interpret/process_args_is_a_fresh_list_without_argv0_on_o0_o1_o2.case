@@ -1,0 +1,26 @@
+# process.args() returns the words after the program name, never argv[0], as
+# the host passed them: a flag, a word with a space, a non-ASCII word, an
+# empty word, a second `--` and what follows it. Each call returns a fresh
+# List<String>: growing one result leaves the next call's untouched. There is
+# no second argv view. Each optimize level prints the same lines, with
+# arguments and without.
+fixture: process_args_is_a_fresh_list_without_argv0_on_o0_o1_o2.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet -- --flag "two words" Δ "" -- tail
+exit: 0
+stdout: = args.out
+step o0_empty: jet run --optimize=none main.jet --
+exit: 0
+stdout: = empty.out
+step o1: jet run --optimize=basic main.jet -- --flag "two words" Δ "" -- tail
+exit: 0
+stdout: = args.out
+step o1_empty: jet run --optimize=basic main.jet --
+exit: 0
+stdout: = empty.out
+step o2: jet run --optimize=full main.jet -- --flag "two words" Δ "" -- tail
+exit: 0
+stdout: = args.out
+step o2_empty: jet run --optimize=full main.jet --
+exit: 0
+stdout: = empty.out
