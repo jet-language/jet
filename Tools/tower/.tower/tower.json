@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102180,
+    "rev": 102186,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48364,11 +48364,11 @@
         {
           "n": 11,
           "text": "D-STR-ESCAPE1=A: Quoted/triple/Char literals accept r and 1..6-hex scalar escapes, Char accepts escaped quote; bytes accept r/xNN but not Unicode; E0001 precise scalar-invalid diagnostics; Debug prints NUL as u{0} and lexes back exactly including braces; fmt canonicalization stable; migrate listed CR workarounds and all relevant registry/spec/UI rows.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-07T21:04:48.902Z"
+          "evidence": "025afcd397 (batch 39) builds the last parts of D-STR-ESCAPE1=A on top of c4 and c7 (164477023b, e6c242297f). On the gate-p45 jet: case char_debug_nul_reads_back_on_every_tier 1/0 (Debug prints NUL as \\u{0} and lexes back exactly); ui scalar_escape_out_of_range, bad_escape and char_escape_unknown 1/0 each (E0001 at exact spans); the JetParser test scalar_escapes_format_to_one_spelling 1/0 (stable fmt canonicalization); the 5 JetLexer tests 1/0 each (\\r and \\u{H} in quoted, triple and Char literals, an escaped apostrophe in Char, \\xNN in bytes, no scalar escape in bytes); the greps for rust_debug_char and \"not yet built\" are both 0.",
+          "at": "2026-11-14T04:31:24.306Z"
         }
       ],
       "refs": [
@@ -48387,7 +48387,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:52.711Z",
-      "updated": "2026-11-14T03:46:38.250Z",
+      "updated": "2026-11-14T04:31:24.306Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -49035,11 +49035,11 @@
         {
           "n": 6,
           "text": "A deadline or cancel delivered at a stop poll names the wait or operation that polled. Since b7ef696d5a, every stop poll reports an elapsed deadline as \"waiting in a loop\", including the polls Core time.sleep makes before its wait (after jet_rt_record_get_duration_ns and jet_int_checked_fixed) and a spawn`s post-call poll. Polls after read-only or trap-only runtime calls must not deliver as \"a loop\": a second poll kind in JetIR. Proof: cases nonpositive_sleeps_check_the_task_deadline with exact stderr lines (no `~` prefix match) on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T03:04:18.965Z"
+          "evidence": "edcd16c03d (batch 39, the second poll kind: only a loop turn or a recursive entry reports \"a loop\") plus d049ae24d9 (light33, exact whole-stream stderr). Case nonpositive_sleeps_check_the_task_deadline 1/0: all 9 steps match a sibling .stderr byte for byte (\"deadline exceeded while waiting in time sleep\", with its Why, Fix and More lines) on o0, o1 and o2, with no ~ prefix match.",
+          "at": "2026-11-14T04:31:22.943Z"
         }
       ],
       "refs": [
@@ -49061,7 +49061,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:58.443Z",
-      "updated": "2026-11-14T03:04:18.965Z",
+      "updated": "2026-11-14T04:31:22.943Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -86738,7 +86738,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "checkSteps": null,
@@ -86747,6 +86747,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -86762,11 +86767,11 @@
         {
           "n": 3,
           "text": "Examples/Math/Compute/ComputeAutoDiff.jet (gradient, jvp, vjp, value_and_gradient) passes on O0, O1, O2 and web with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #3955 c3)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:02:56.936Z"
+          "evidence": "ae47d251e4 (light33, dev b11c9391b4..d049ae24d9): following Main`s decision (b) logged on this card (a host-dependent golden breaks I5 and I9), ComputeAutoDiff prints a profile line that reads the same on every target, and its .out changed once for that; it is otherwise unchanged. Golden Compute/ComputeAutoDiff 3/0 (o0, o1, o2); `jet build --target web` plus `node app.js` rc 0 with 23 lines, diff 0 against the .out. ComputeModels.jet keeps the gradient, jvp and vjp checks (E0112 transform checks at lines 255-303).",
+          "at": "2026-11-14T04:31:21.773Z"
         }
       ],
       "refs": [],
@@ -86777,9 +86782,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:43.242Z",
-      "updated": "2026-11-14T03:26:32.235Z",
+      "updated": "2026-11-14T04:31:26.624Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-14T04:31:26.624Z"
     },
     {
       "id": "c0bcerww",
@@ -98191,7 +98197,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98199,16 +98205,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c1 met by 08130d813a (batch 41)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A task spawned with an Atomic argument shares the caller`s atomic (borrowed by address), so a store in either is seen by the other, on o0, o1 and o2. Proof: a run case where a spawned task stores true and main loads true, and golden Concurrency/BusyTurns passes 3/3 with no TIMEOUT.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T01:12:26.044Z"
+          "evidence": "08130d813a (batch 41): a carrier whose fiber just gave its turn starts a queued task first, so busy fibers that outnumber carriers no longer starve the task that stops them. On the gate-p47 jet: `jet run tests/run/Concurrency/AtomicTaskShare.jet` diff 0 against .out on none, basic and full (main sees the spawned task`s store); golden Concurrency/BusyTurns 3/0; case fiber_liveness/more_busy_tasks_than_carriers_still_start_a_queued_task 1/0; golden Concurrency/ 189/0 (run twice, with no fairness change); fiber_ 21/0; scheduler 8/0/1KF.",
+          "at": "2026-11-14T04:31:18.217Z"
         }
       ],
       "refs": [],
@@ -98219,9 +98231,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T01:12:16.479Z",
-      "updated": "2026-11-14T01:12:28.468Z",
+      "updated": "2026-11-14T04:31:20.379Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T04:31:20.379Z"
     },
     {
       "id": "c0623tfx",
@@ -204688,6 +204701,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:31:26.625Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wyaelh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T04:31:24.306Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m1e5o0",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-14T04:31:22.943Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08u6j84",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-14T04:31:21.773Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wyaelh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-14T04:31:20.379Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pc0jb9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T04:31:18.217Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pc0jb9",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T04:26:23.112Z",
       "by": "Main",
