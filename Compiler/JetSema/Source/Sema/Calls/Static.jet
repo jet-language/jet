@@ -1662,7 +1662,9 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
     ownership_args := args
     ownership := sema_ownership_check_call_arguments(state, callee, params, ownership_args, scopes, diagnostics)
     if !ownership.accepted || !ownership.complete -> return sema_call_distinct_conversion_failed()
-    success: Type.Named{name: display_name}
+    // The owner as written (`model.ProjectID`) names the type in this module;
+    // its value carries the declared type the backend lowers.
+    success: sema_expr_expected_type(Type.Named{name: display_name}, environment, program)
     row: numeric_row ?? {
         constructed: sema_tree_node(success, TExprKind.DistinctCtor{argument: argument}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, diagnostics)}
