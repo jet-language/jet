@@ -933,6 +933,11 @@ SemaRegistrationGraph: struct {
     // checked for their diagnostics only; nothing is lowered or registered,
     // so no "not built yet" E2104 applies (sema_refuses_unbuilt).
     check_tests: Bool{false}
+    // Program mode (`jet build`, `jet run`), set by the driver: the root
+    // package's named `#Test` bodies are checked for their diagnostics only,
+    // as under `jet check`, so a body `jet test` refuses is refused here too
+    // (sema_check_module_tests). E2104 still applies.
+    check_root_tests: Bool{false}
     // `#run use` (ComptimeUse.jet): "{module}\n{target}" -> the
     // `#run ` prefix of the import that brings `target` into `module`
     // for compile-time code only, so a runtime read of a value of its types

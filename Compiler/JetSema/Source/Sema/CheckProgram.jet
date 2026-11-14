@@ -1015,7 +1015,7 @@ sema_incremental_begin: fn(cache: SemaIncrementalCache, graph: SemaRegistrationG
     header_text: "{headers:Debug}"
     // The module table's texts lead the input: every ModuleID the rest dumps
     // reads through them, so a renamed module never matches an old input.
-    input: "modules={graph.module_table.identities.texts:Debug};package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callables:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};check_tests={graph.check_tests:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
+    input: "modules={graph.module_table.identities.texts:Debug};package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callables:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};check_tests={graph.check_tests:Debug};check_root_tests={graph.check_root_tests:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
     permit := cache.state.guard_edit()
     if permit.value.frozen == input -> return
     permit.value.generation += 1
@@ -3696,7 +3696,7 @@ sema_check_record_unusable_bodies: fn(program: SemaProgramTables, module_index: 
                 sema_check_record_skipped_body("function `{func.name}`", module_result)
             }
             if item == .Test(test) {
-                if !(graph.test_mode || graph.check_tests) || test.name == None || !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, module_row.module_identity), test.span)) -> next
+                if !sema_check_module_tests(graph, module_index) || test.name == None || !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, module_row.module_identity), test.span)) -> next
                 sema_check_record_skipped_body("test `{test.name ?? ""}`", module_result)
             }
         }
@@ -3938,14 +3938,23 @@ sema_check_registration_module_foreign: fn(environment: SemaScopeEnvironment, pr
     panic("an owning registered-module pass lost its registration graph")
 }
 
+// Whether module `module_index` has its named `#Test` bodies checked: every
+// module's under `jet test` and `jet check`, and the root package's under a
+// build or run (check_root_tests). The same body is refused, with the same
+// diagnostic, by every command that reads it.
+sema_check_module_tests: fn(graph: SemaRegistrationGraph, module_index: Int) -> Bool Never! {
+    if graph.test_mode || graph.check_tests -> return true
+    graph.check_root_tests && graph.modules[module_index].package_identity == graph.package_identity
+}
+
 // Tests stay synthetic owned AST inputs to the existing checker, never a fake
 // registration index. Their property diagnostics precede their body reports.
 // A test that reaches an unusable declaration (sema_checked_unusable_bodies)
-// is not checked.
+// is not checked. Outside `jet test` a test is checked only, never lowered.
 sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?, module_result: &SemaGraphModuleResult) {
     if program.registration_graph == .Val(graph) {
         if graph.modules[module_index].program.items[item_index] == .Test(test) {
-            if (graph.test_mode || graph.check_tests) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, graph.modules[module_index].module_identity), test.span)) {
+            if sema_check_module_tests(graph, module_index) && test.name != None && !sema_check_unusable_body(graph, sema_check_test_key(module_text(graph.module_table, graph.modules[module_index].module_identity), test.span)) {
                 loop diagnostic in sema_property_param_diagnostics(test) -> module_result.diagnostics.push(diagnostic)
                 checked_test: sema_check_test_function(test, environment, program, scopes, host_hooks)
                 loop diagnostic in checked_test.diagnostics -> module_result.diagnostics.push(diagnostic)

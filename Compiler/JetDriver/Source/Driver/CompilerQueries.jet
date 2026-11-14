@@ -444,6 +444,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     registration.plugin_facts = plugin_facts
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
     if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
+    if input.request.mode == JetDriverCompileMode.Program -> registration.check_root_tests = true
     output_intent: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent
     output_diagnostics: sema_output_resolve(registration, output_intent, input.request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> registration.diagnostics.push(diagnostic)

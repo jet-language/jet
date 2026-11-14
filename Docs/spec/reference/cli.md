@@ -991,6 +991,9 @@ own the same way, so a change it makes to the environment or working
 directory reaches no other test. If the batch died and no rerun fails, the
 run fails with a `native test batch` record naming the tests the batch left
 unreported (under `--serial`, the one it was running).
+`jet check`, `jet build` and `jet run` check the root package's `#Test`
+bodies too, without lowering them. So a body that `jet test` refuses, each of
+them refuses with the same diagnostic.
 Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its

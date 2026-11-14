@@ -1,0 +1,23 @@
+# A `#Test` body is checked the same way by `jet test`, `jet run` and
+# `jet build`: a body one of them refuses, the others refuse with the same
+# diagnostic. Here the test reads a script's top-level binding, which no
+# function can see.
+fixture: run_and_test_refuse_a_test_body_alike.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet test main.jet
+exit: 1
+stderr: ~ "`total` is a local of this file's top-level statements" # the test body is refused
+capture: test_err = text stderr
+write: test.err = "{cap:test_err}"
+step: jet run main.jet
+exit: 1
+stdout: !~ "5" # the script never runs
+capture: run_err = text stderr
+write: run.err = "{cap:run_err}"
+file: run.err == test.err # the same diagnostic, word for word
+step: jet build main.jet
+exit: 1
+capture: build_err = text stderr
+write: build.err = "{cap:build_err}"
+file: build.err == test.err
