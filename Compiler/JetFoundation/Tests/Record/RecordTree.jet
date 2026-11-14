@@ -80,11 +80,32 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     }
 }
 
+#Test("a record tree writes each string as the bytes it does not share with the one before it") {
+    // More strings than RECORD_TREE_HOT_STRINGS, so the rest are in byte
+    // order; each shares its leading `core.list::item/` with its neighbours.
+    texts := [Dyn]{}
+    loop index in 0..<16500 -> texts.push(Dyn.Text("core.list::item/{index}"))
+    rows: [Dyn]{Dyn.Array(texts), Dyn.Text("core.list::item/16499")}
+    tables := record_tree_test_tables(rows)
+    assert_eq(tables.problem, None)
+    if tables.strings[1] == .Bytes(data) -> assert(data.len() < 16500 * 8, "the string table shares leading bytes ({data.len()} bytes)") else -> panic("the string data is bytes")
+    reader: record_tree_test_reader(tables.move(), false)
+    view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
+    loop (index, row) in rows {
+        read: record_tree_row(reader, view, 1, index)
+        assert_eq(read.problem, None)
+        assert_eq(record_tree_difference(read.value ?? panic("row {index} reads"), row), None)
+    }
+}
+
 #Test("a record tree stores a repeated subtree once and writes a single use in place") {
     tables: record_tree_test_tables(record_tree_test_rows())
     // The `push` symbol (three uses) and the span both symbols share are
     // stored; the `pop` symbol and every scalar are written in place.
     if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 8) else -> panic("the node end column is bytes")
+    // The most named node takes the first id: the `push` symbol (three node
+    // items) before its span (two), though the span was interned first.
+    if tables.rows[0][0] == .Bytes(row) -> assert_eq(row.slice(0, 6), [U8]{7, 3, 9, 0, 9, 0}) else -> panic("a tree row is bytes")
     again: record_tree_test_tables(record_tree_test_rows())
     assert(again.nodes == tables.nodes && again.rows == tables.rows && again.strings == tables.strings && again.shapes == tables.shapes)
 }
@@ -107,6 +128,6 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     tables := record_tree_test_tables(record_tree_test_rows())
     reader: record_tree_test_reader(tables.move(), true)
     view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
-    assert_eq(record_tree_row(reader, view, 1, 2).problem, Val("record is malformed: tree entry 120 is out of range"))
+    assert_eq(record_tree_row(reader, view, 1, 2).problem, Val("record is malformed: tree string 120 is out of range"))
     assert_eq(record_tree_view(reader, 2, 3, 9).problem, Val("record section 9 is missing"))
 }

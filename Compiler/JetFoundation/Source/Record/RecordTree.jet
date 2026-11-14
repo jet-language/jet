@@ -31,10 +31,18 @@
 //
 // Each of the three tables is two `Bytes` elements of one record section:
 // the end of each entry as a little-endian u32 (entry `n` starts where entry
-// `n - 1` ends), then the entries back to back. A string entry is UTF-8, a
-// shape entry its key string ids (uvarints) and a node entry one item. A
-// reader decodes a row on demand from the record's own bytes, reading only
-// the entries the row names, with no table built when the record opens.
+// `n - 1` ends), then the entries back to back. A shape entry is its key
+// string ids (uvarints) and a node entry one item. The string table's entry
+// is a block of RECORD_TREE_STRING_BLOCK strings (the last block may hold
+// fewer), string `n` the `n % RECORD_TREE_STRING_BLOCK`th of block
+// `n / RECORD_TREE_STRING_BLOCK`: the block's first string as its uvarint
+// length and its UTF-8, each later one as the uvarint count of leading bytes
+// it shares with the string before it, the uvarint length of the rest and
+// the rest. The writer gives the RECORD_TREE_HOT_STRINGS most used strings
+// the smallest ids, most used first, and the rest ids in byte order, so a
+// string follows the one it shares most with. A reader decodes a row on
+// demand from the record's own bytes, reading only the entries the row
+// names, with no table built when the record opens.
 use {
     tree_math: core.math
 }
@@ -55,6 +63,10 @@ RECORD_TREE_WIDE_INT: 10
 // does (core.encoding.cbor's own depth ceiling).
 RECORD_TREE_MAX_DEPTH: 4096
 RECORD_TREE_INITIAL_SLOTS: 1024
+// A string block's size, 1 << RECORD_TREE_STRING_BLOCK_BITS.
+RECORD_TREE_STRING_BLOCK: 16
+RECORD_TREE_STRING_BLOCK_BITS: 4
+RECORD_TREE_HOT_STRINGS: 16384
 
 // Interned byte strings: each distinct one stored once, back to back, and
 // named by a dense id in first-seen order. The open addressing of NameTable
@@ -243,10 +255,13 @@ RecordTreeTables: struct {
 }
 
 // Where each interned node goes: its id in the node table when it is stored
-// there, else -1 (written in place), with the bytes it takes in place.
+// there, else -1 (written in place); the stored nodes in stored id order;
+// each interned string's written id; and the strings in written id order.
 RecordTreeLayout: struct {
     stored: [Int]
-    sizes: [Int]
+    order: [Int]
+    strings: [Int]
+    string_order: [Int]
 }
 
 // The tables of `writer` and the rows `sections` (each section's rows from
@@ -254,11 +269,10 @@ RecordTreeLayout: struct {
 // writer's string and shape bytes move into the tables.
 record_tree_tables: fn(writer: &&RecordTreeWriter, sections: [[[U8]]]) -> RecordTreeTables Never! {
     if writer.problem != None -> return RecordTreeTables{strings: [RecordValue]{}, shapes: [RecordValue]{}, nodes: [RecordValue]{}, rows: [[RecordValue]]{}, problem: writer.problem.move()}
-    layout: record_tree_layout(writer)
+    layout: record_tree_layout(writer, sections)
     node_ends := [Int]{}
     node_data := [U8]{}
-    loop (id, stored) in layout.stored {
-        if stored < 0 -> next
+    loop id in layout.order {
         record_tree_emit_node(writer, layout, id, node_data)
         node_ends.push(node_data.len())
     }
@@ -272,39 +286,133 @@ record_tree_tables: fn(writer: &&RecordTreeWriter, sections: [[[U8]]]) -> Record
         }
         rows.push(written)
     }
-    shape_ends: loop id in 0..<writer.shapes.ends.len() -> writer.shapes.ends[id]
+    shape_ends := [Int]{}
+    shape_data := [U8]{}
+    loop id in 0..<writer.shapes.ends.len() {
+        keys := RecordCursor{at: record_tree_table_start(writer.shapes, id), end: writer.shapes.ends[id], problem: None}
+        loop keys.at < keys.end -> record_put_uvarint(shape_data, layout.strings[record_read_uvarint(writer.shapes.bytes, keys)])
+        shape_ends.push(shape_data.len())
+    }
+    string_ends := [Int]{}
+    string_data := [U8]{}
+    previous := 0
+    loop (written, id) in layout.string_order {
+        start: if id == 0 -> 0 else -> writer.strings.ends[id - 1]
+        end: writer.strings.ends[id]
+        if written % RECORD_TREE_STRING_BLOCK == 0 {
+            if written > 0 -> string_ends.push(string_data.len())
+            record_put_uvarint(string_data, end - start)
+            string_data.extend(writer.strings.bytes[start..<end])
+        } else {
+            before: if previous == 0 -> 0 else -> writer.strings.ends[previous - 1]
+            shared := 0
+            loop start + shared < end && before + shared < writer.strings.ends[previous] && writer.strings.bytes[start + shared] == writer.strings.bytes[before + shared] -> shared += 1
+            record_put_uvarint(string_data, shared)
+            record_put_uvarint(string_data, end - start - shared)
+            string_data.extend(writer.strings.bytes[start + shared..<end])
+        }
+        previous = id
+    }
+    if layout.string_order.len() > 0 -> string_ends.push(string_data.len())
     RecordTreeTables{
-        strings: [RecordValue]{RecordValue.Bytes{value: record_tree_u32s(writer.strings.ends)}, RecordValue.Bytes{value: writer.strings.bytes.move()}},
-        shapes: [RecordValue]{RecordValue.Bytes{value: record_tree_u32s(shape_ends)}, RecordValue.Bytes{value: writer.shapes.bytes.move()}},
+        strings: [RecordValue]{RecordValue.Bytes{value: record_tree_u32s(string_ends)}, RecordValue.Bytes{value: string_data}},
+        shapes: [RecordValue]{RecordValue.Bytes{value: record_tree_u32s(shape_ends)}, RecordValue.Bytes{value: shape_data}},
         nodes: [RecordValue]{RecordValue.Bytes{value: record_tree_u32s(node_ends)}, RecordValue.Bytes{value: node_data}},
         rows: rows,
         problem: None,
     }
 }
 
-// Each node's place, in id order (a child's id is below its parent's, so
-// its size is known first). A node is stored when more than one place names
-// it and its bytes in place are more than a node item naming it.
-record_tree_layout: fn(writer: RecordTreeWriter) -> RecordTreeLayout Never! {
+// Each node's and each string's place. A node is stored when more than one
+// place names it and its bytes in place are more than a node item naming
+// it, sized in id order (a child's interned id is below its parent's, so its
+// size is known first). The stored nodes take ids by how many node items
+// name them once every row (of `sections`) and stored entry is written,
+// most first, so the most named have the shortest items; the strings take
+// theirs as the string table's order has it (RECORD_TREE_HOT_STRINGS).
+record_tree_layout: fn(writer: RecordTreeWriter, sections: [[[U8]]]) -> RecordTreeLayout Never! {
+    count: writer.uses.len()
     stored := [Int]{}
     sizes := [Int]{}
-    next := 0
-    loop id in 0..<writer.uses.len() {
+    kept := 0
+    loop id in 0..<count {
         start: record_tree_table_start(writer.nodes, id)
-        end: writer.nodes.ends[id]
-        size := end - start
-        loop child in record_tree_node_children(writer, start, end) {
+        size := writer.nodes.ends[id] - start
+        loop child in record_tree_node_children(writer, start, writer.nodes.ends[id]) {
             if stored[child] < 0 -> size += sizes[child] - record_tree_node_item_bytes(child)
         }
         sizes.push(size)
-        if writer.uses[id] > 1 && size > record_tree_node_item_bytes(next) {
-            stored.push(next)
-            next += 1
+        if writer.uses[id] > 1 && size > record_tree_node_item_bytes(kept) {
+            stored.push(kept)
+            kept += 1
         } else {
             stored.push(-1)
         }
     }
-    RecordTreeLayout{stored: stored, sizes: sizes}
+    // A node's uses count each row and each node entry naming it. A node
+    // written in place is written once per item naming it, and so is each
+    // item it holds; parents first (a parent's id is above its children's).
+    // A string's uses count each text item so written and each shape key.
+    items := (loop id in 0..<count -> writer.uses[id])
+    texts := (loop _ in 0..<writer.strings.ends.len() -> 0)
+    loop step in 0..<count {
+        id: count - 1 - step
+        written: if stored[id] >= 0 -> 1 else -> items[id]
+        start: record_tree_table_start(writer.nodes, id)
+        loop child in record_tree_node_children(writer, start, writer.nodes.ends[id]) -> items[child] = items[child] + written - 1
+        record_tree_count_texts(writer, start, writer.nodes.ends[id], written, texts)
+    }
+    loop section in sections {
+        loop row in section {
+            if row.len() > 0 && row[0] == RECORD_TREE_TEXT {
+                cursor := RecordCursor{at: 1, end: row.len(), problem: None}
+                text: record_read_uvarint(row, cursor)
+                texts[text] = texts[text] + 1
+            }
+        }
+    }
+    keys := RecordCursor{at: 0, end: writer.shapes.bytes.len(), problem: None}
+    loop keys.at < keys.end {
+        key: record_read_uvarint(writer.shapes.bytes, keys)
+        texts[key] = texts[key] + 1
+    }
+    order := [Int]{}
+    loop id in 0..<count {
+        if stored[id] >= 0 -> order.push(id)
+    }
+    order.sort_by(fn(left: Int, right: Int) { (items[right] <=> items[left]).then(left <=> right) })
+    loop (rank, id) in order -> stored[id] = rank
+    string_order := (loop id in 0..<texts.len() -> id)
+    string_order.sort_by(fn(left: Int, right: Int) { (texts[right] <=> texts[left]).then(left <=> right) })
+    if string_order.len() > RECORD_TREE_HOT_STRINGS {
+        rest := string_order.slice(RECORD_TREE_HOT_STRINGS, string_order.len())
+        rest.sort_by(fn(left: Int, right: Int) { writer.strings.texts[left] <=> writer.strings.texts[right] })
+        loop (offset, id) in rest -> string_order[RECORD_TREE_HOT_STRINGS + offset] = id
+    }
+    strings := (loop _ in 0..<texts.len() -> 0)
+    loop (written, id) in string_order -> strings[id] = written
+    RecordTreeLayout{stored: stored, order: order, strings: strings, string_order: string_order}
+}
+
+// Adds `written` to `texts` at each string id a text item of node entry
+// `writer.nodes.bytes[start..<end]` names.
+record_tree_count_texts: fn(writer: RecordTreeWriter, start: Int, end: Int, written: Int, texts: &[Int]) Never! {
+    bytes: writer.nodes.bytes
+    cursor := RecordCursor{at: start, end: end, problem: None}
+    kind: record_read_byte(bytes, cursor)
+    count: if kind == RECORD_TREE_OBJECT -> writer.shape_keys[record_read_uvarint(bytes, cursor)] else -> record_read_uvarint(bytes, cursor)
+    loop _ in 0..<count {
+        item: record_read_byte(bytes, cursor)
+        if item == RECORD_TREE_NODE {
+            _: record_read_uvarint(bytes, cursor)
+        } else if item == RECORD_TREE_TEXT {
+            text: record_read_uvarint(bytes, cursor)
+            texts[text] = texts[text] + written
+        } else {
+            cursor.at -= 1
+            record_tree_skip_scalar(bytes, cursor)
+        }
+    }
 }
 
 // The node ids that node entry `writer.nodes.bytes[start..<end]` names.
@@ -361,12 +469,13 @@ record_tree_emit_node: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, id
 }
 
 // `count` items of `bytes` from `at`, each node item written in place or
-// as its stored id.
+// as its stored id and each text item naming its written string id.
 record_tree_emit_items: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, bytes: [U8], at: Int, count: Int, out: &[U8]) Never! {
     cursor := RecordCursor{at: at, end: bytes.len(), problem: None}
     loop _ in 0..<count {
         start: cursor.at
-        if record_read_byte(bytes, cursor) == RECORD_TREE_NODE {
+        item: record_read_byte(bytes, cursor)
+        if item == RECORD_TREE_NODE {
             child: record_read_uvarint(bytes, cursor)
             stored: layout.stored[child]
             if stored < 0 {
@@ -375,6 +484,9 @@ record_tree_emit_items: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, b
                 out.push(U8{RECORD_TREE_NODE})
                 record_put_uvarint(out, stored)
             }
+        } else if item == RECORD_TREE_TEXT {
+            out.push(U8{RECORD_TREE_TEXT})
+            record_put_uvarint(out, layout.strings[record_read_uvarint(bytes, cursor)])
         } else {
             cursor.at = start
             record_tree_skip_scalar(bytes, cursor)
@@ -487,10 +599,35 @@ record_tree_entry: fn(bytes: [U8], column: RecordTreeColumn, id: Int, cursor: &R
     RecordCursor{at: column.data + start, end: column.data + end, problem: None}
 }
 
+// String `id`: the first string of its block, then each later one in turn
+// from the bytes it shares with the one before it.
 record_tree_string: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor) -> String Never! {
-    entry: record_tree_entry(bytes, view.strings, id, cursor)
     if cursor.problem != None -> return ""
-    String.from_bytes(bytes.slice(entry.at, entry.end)) ?? {
+    block: id >> RECORD_TREE_STRING_BLOCK_BITS
+    if block >= view.strings.count {
+        record_malformed(cursor, "tree string {id} is out of range")
+        return ""
+    }
+    entry := record_tree_entry(bytes, view.strings, block, cursor)
+    if cursor.problem != None -> return ""
+    text := [U8]{}
+    loop step in 0..<id % RECORD_TREE_STRING_BLOCK + 1 {
+        if step > 0 {
+            shared: record_read_uvarint(bytes, entry)
+            if entry.problem == None && shared > text.len() -> record_malformed(entry, "tree string {id} shares more bytes than the string before it has")
+            if entry.problem != None -> break
+            text = text.slice(0, shared)
+        }
+        len: record_read_len(bytes, entry)
+        if entry.problem != None -> break
+        text.extend(bytes[entry.at..<entry.at + len])
+        entry.at += len
+    }
+    if entry.problem != None {
+        cursor.problem = entry.problem.move()
+        return ""
+    }
+    String.from_bytes(text) ?? {
         record_malformed(cursor, "tree string {id} is not UTF-8")
         ""
     }
