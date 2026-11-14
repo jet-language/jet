@@ -53,6 +53,18 @@ sema_serde_has_name: fn(values: [String], name: String) -> Bool Never! {
     false
 }
 
+// E2411's fix for a type with no `direction` codec.
+sema_serde_wire_fix: fn(shown: String, direction: SemaSerdeDirection) -> String Never! {
+    "add `#[Codable]` or `#[{sema_serde_codec_name(direction)}]` to {shown}, or remove it from the encoded value"
+}
+
+// E2411's fix for a distinct type with no `direction` codec: it codes as its
+// base only through `#CodableAsBase` (D-CAPBUNDLE1); the struct and enum
+// markers do not apply to it.
+sema_serde_distinct_wire_fix: fn(shown: String, direction: SemaSerdeDirection) -> String Never! {
+    "add `#CodableAsBase` to {shown} so it is {if direction == SemaSerdeDirection.Encode -> "encoded" else -> "decoded"} as its base type, or remove it from the encoded value"
+}
+
 sema_serde_implementation: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, definition: TTypeDef, direction: SemaSerdeDirection) -> Bool Never! {
     if sema_serde_has_name(definition.derives, sema_serde_codec_name(direction)) || sema_serde_has_name(definition.derives, "Codable") -> return true
     if program.registration_graph == .Val(graph) {

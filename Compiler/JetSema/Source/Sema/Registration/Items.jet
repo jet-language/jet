@@ -3965,12 +3965,22 @@ sema_registration_serde_any_explicit: fn(items: [Item]) -> Bool Never! {
 sema_registration_serde_wire_form: fn(items: [Item], facts: SemaDeriveItemIndex, no_auto: [String:Bool], ty: Type, encode: Bool, decode: Bool, span: Span, diagnostics: &[Diagnostic]) {
     if encode && !sema_serde_items_codable(items, facts, ty, "Encode", no_auto) {
         shown: sema_type_show_quoted(ty)
-        diagnostics.push(sema_error("E2411", span, "{shown} can't be serialized", "only types that opt in (and their fields) have a wire form; {shown} does not", "add `#[Codable]` or `#[Encode]` to {shown}, or remove it from the encoded value"))
+        diagnostics.push(sema_error("E2411", span, "{shown} can't be serialized", "only types that opt in (and their fields) have a wire form; {shown} does not", sema_registration_serde_wire_fix(items, facts, ty, shown, SemaSerdeDirection.Encode)))
     }
     if decode && !sema_serde_items_codable(items, facts, ty, "Decode", no_auto) {
         shown: sema_type_show_quoted(ty)
-        diagnostics.push(sema_error("E2411", span, "{shown} can't be decoded", "only types that opt in (and their fields) have a wire form; {shown} does not", "add `#[Codable]` or `#[Decode]` to {shown}, or remove it from the encoded value"))
+        diagnostics.push(sema_error("E2411", span, "{shown} can't be decoded", "only types that opt in (and their fields) have a wire form; {shown} does not", sema_registration_serde_wire_fix(items, facts, ty, shown, SemaSerdeDirection.Decode)))
     }
+}
+
+// E2411's fix for `ty`; a distinct type this module declares gets its own.
+sema_registration_serde_wire_fix: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type, shown: String, direction: SemaSerdeDirection) -> String Never! {
+    if ty == .Named(name) {
+        if facts.nominals.get(name) == .Val(position) {
+            if items[position] == .Distinct(_) -> return sema_serde_distinct_wire_fix(shown, direction)
+        }
+    }
+    sema_serde_wire_fix(shown, direction)
 }
 
 // (Rust `check_deprecated_visibility`, E0932): a
