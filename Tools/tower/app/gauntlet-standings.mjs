@@ -30,30 +30,34 @@ async function entryPlans() {
 // The standings section for `table`: each entry's plan with the table's rows.
 // Each measured cell also names how it was measured (the row's provenance:
 // when, which run, commit, toolchain) and how many timed runs it holds.
-// Jet is judged twice: `jet build`'s binary is the section's Jet, and the
-// same entries judged with `jet run` standing as Jet are its `run` section.
+// Each peer is judged against the Jet that matches how it runs: interpreted
+// peers (they start from source) against `jet run`, every other peer and the
+// asm ceiling against the binary `jet build` writes. `jet_modes` names each
+// peer's Jet; an entry's `jet` is `jet build`'s row and `jet_run` `jet run`'s.
 export async function tableStandings(table) {
-  const { buildStandings, entryStandings } = await import('../../gauntlet/harness/standings.mjs');
+  const { buildStandings, entryStandings, summarize } = await import('../../gauntlet/harness/standings.mjs');
   const { tableResult, JET_RUN } = await import('../../gauntlet/harness/table.mjs');
+  const { STANDINGS_INTERPRETERS } = await import('../../gauntlet/harness/run.mjs');
   const { policy, plans } = await entryPlans();
   const runtimes = table.runtimes ?? {};
+  const modeOf = (peer) => Object.hasOwn(STANDINGS_INTERPRETERS, peer) ? 'run' : 'build';
   const facts = (row) => row ? { measured: row.measured ?? null, runs: row.runtime?.samples?.length ?? null } : {};
-  const judged = (jet) => {
-    const standings = buildStandings(
-      plans.map(({ plan }) => entryStandings(plan, tableResult(table, plan.entry, jet), { runtimes, pending: true })),
-      policy,
-      { generated: table.updated ?? null, runtimes },
-    );
-    for (const entry of standings.entries ?? []) {
-      const rows = table.rows?.[entry.entry] ?? {};
-      for (const [language, item] of Object.entries(entry.peers ?? {})) Object.assign(item, facts(rows[language]));
-      if (entry.jet) Object.assign(entry.jet, facts(rows[jet]));
-    }
-    return standings;
-  };
-  const standings = judged('jet');
-  const run = judged(JET_RUN);
-  standings.run = { summary: run.summary, losses: run.losses, entries: run.entries };
+  const entries = plans.map(({ plan }) => {
+    const judged = (jet) => entryStandings(plan, tableResult(table, plan.entry, jet), { runtimes, pending: true });
+    const build = judged('jet');
+    const run = judged(JET_RUN);
+    const peers = {};
+    for (const [peer, item] of Object.entries(build.peers)) peers[peer] = modeOf(peer) === 'run' ? run.peers[peer] : item;
+    return { ...build, jet_run: run.jet, peers, summary: summarize([{ peers }]) };
+  });
+  const standings = buildStandings(entries, policy, { generated: table.updated ?? null, runtimes });
+  for (const entry of standings.entries ?? []) {
+    const rows = table.rows?.[entry.entry] ?? {};
+    for (const [language, item] of Object.entries(entry.peers ?? {})) Object.assign(item, facts(rows[language]));
+    if (entry.jet) Object.assign(entry.jet, facts(rows.jet));
+    if (entry.jet_run) Object.assign(entry.jet_run, facts(rows[JET_RUN]));
+  }
+  standings.jet_modes = Object.fromEntries([...standings.peers, standings.ceiling].filter(Boolean).map((peer) => [peer, modeOf(peer)]));
   return standings;
 }
 

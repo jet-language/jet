@@ -2597,7 +2597,7 @@ async function viewGauntlet() {
   const body = view ? renderGauntletStandings(view)
     : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the table has no standings section')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">Jet, as jet build's binary and as jet run, against every peer and the asm ceiling · click a cell for its details</span>
+      <span class="viewhead__sub">One line per entry: compiled peers and the asm ceiling against jet build's binary, interpreted peers against jet run · click a cell for its details</span>
     </div>${body}`;
   if (!view) return;
   const open = (event) => {

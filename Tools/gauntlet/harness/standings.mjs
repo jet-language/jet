@@ -361,7 +361,9 @@ export function entryStandings(plan, result, { runtimes = {}, pending = false } 
   };
 }
 
-function summarize(entries) {
+// The verdict tallies of `entries`: the floor's over peers, the ceiling's over
+// the asm ceiling, and every verdict's count.
+export function summarize(entries) {
   const floor = { pass: 0, fail: 0, other: 0 };
   const ceiling = { meet: 0, miss: 0, other: 0 };
   const statuses = {};

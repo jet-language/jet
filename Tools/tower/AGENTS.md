@@ -420,13 +420,17 @@ results file of `Tools/gauntlet/harness/run.mjs` (a whole run, or a
 run: its id, date and commit (the harness records `provenance.commit`; an older
 file says "commit not recorded"), and for a merged run the run it merged into.
 
-The page opens with a grid: two lines per comparison entry, one with Jet as the
-binary `jet build` writes and one with Jet as `jet run` (compile and run in one
-step, no binary written), each with one column for Jet, Rust, C, Zig, Go,
-Python, Node, Bun, Vite, Lua, LuaJIT and the asm ceiling, and every peer cell
-coloured by how that line's Jet does against it. The harness records the
-`jet run` tier as the table row `jet-run`, beside the built binary's `jet` row;
-`jet run` has no size.
+The page opens with a grid: one line per comparison entry, in two column
+groups. Compiled peers (Rust, C, Zig, Go, Vite) and the asm ceiling ship a
+built program, so they are judged against the binary `jet build` writes; the
+first group is that Jet's column and theirs. Interpreted peers (Python, Node,
+Bun, Lua, LuaJIT) start from source, so they are judged against `jet run`
+(compile and run in one step, no binary written); the second group is that
+Jet's column and theirs. Every peer cell is coloured by how its group's Jet
+does against it. The standings section names each peer's Jet in `jet_modes`
+(the interpreter set is `STANDINGS_INTERPRETERS` in `run.mjs`). The harness
+records the `jet run` tier as the table row `jet-run`, beside the built
+binary's `jet` row; `jet run` has no size.
 A cell is measured (with its verdict tally once Jet is measured), not measured
 yet, uncovered (a peer with no program, with the missing path; the asm ceiling
 with no reference reads "uncovered: no ceiling reference"), not applicable, or
@@ -459,10 +463,10 @@ and reuses a row whose program and toolchain are unchanged instead of
 measuring it again (`--remeasure` forces it). Cells the table has no row for
 read "not measured yet". A measured cell shows its values at a glance and is
 grey until Jet is measured, then green or red by whether Jet beats it; an asm
-ceiling a peer beats is flagged red. Clicking a cell opens its detail with
-both Jet modes' distance on every metric, and each chart shows a bar for each
-mode. The summary pills and the text table give both modes' verdicts. The page
-refetches the table every 20 s.
+ceiling a peer beats is flagged red. Clicking a cell opens its detail against
+the Jet that judges it, on every metric, and each chart shows a bar for each
+Jet mode. The summary pills and the text table give the one judgement. The
+page refetches the table every 20 s.
 `node Tools/gauntlet/harness/table.mjs import
 RESULTS.json` adds an earlier run report's rows. Reload the page to see new rows.
 

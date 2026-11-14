@@ -1992,8 +1992,11 @@ async function interpreterFootprint(cwd, interpreter) {
   };
 }
 
-// The interpreter each interpreted standings peer runs.
-const STANDINGS_INTERPRETERS = Object.freeze({ python: "python3", node: "node", bun: "bun", lua: "lua", luajit: "luajit" });
+// The interpreter each interpreted standings peer runs. These peers start
+// from source, so the standings judge them against `jet run`, which does too;
+// every other peer and the asm ceiling ship a built program, judged against
+// the binary `jet build` writes.
+export const STANDINGS_INTERPRETERS = Object.freeze({ python: "python3", node: "node", bun: "bun", lua: "lua", luajit: "luajit" });
 
 async function freePort() {
   return new Promise((resolve, reject) => {

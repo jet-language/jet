@@ -923,12 +923,15 @@ button.queue__row:hover { border-color: var(--edge-hi); color: var(--blue); }
 .gauntlet__table tbody th small { color: var(--faint); font: 500 9px/1.2 var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gauntlet__table tbody tr:last-child th, .gauntlet__table tbody tr:last-child td { border-bottom: 0; }
 .gauntlet__table tbody tr:hover th { background: var(--hover); }
-/* Two grid lines per entry: Jet as `jet build`'s binary, then as `jet run`. */
-.gauntlet__table thead th:nth-child(2) { width: 70px; }
-.gauntlet__table tbody th.ggrid__mode { padding: 2px 6px; color: var(--blue); font: 700 9.5px/1.2 var(--mono); white-space: nowrap; }
-.gauntlet__table tbody th[rowspan] { border-right: 1px solid var(--edge); }
-.ggrid__line--build td, .ggrid__line--build th.ggrid__mode { border-bottom-style: dashed; }
-.ggrid__line--run th.ggrid__mode { color: var(--frost); }
+/* One grid line per entry in two column groups: `jet build`'s Jet with the
+   compiled peers and the asm ceiling, then `jet run`'s with the interpreted
+   peers. Each group opens with its Jet column, set off by a rule. */
+.gauntlet__table thead th.ggrid__group { text-align: center; color: var(--blue); font: 700 9.5px/1.2 var(--mono); border-bottom: 1px solid var(--edge); }
+.gauntlet__table thead th.ggrid__group--run { color: var(--frost); }
+.gauntlet__table .ggrid__jet { border-left: 2px solid var(--edge); }
+.gauntlet__table thead th.ggrid__jet--build { color: var(--blue); }
+.gauntlet__table thead th.ggrid__jet--run { color: var(--frost); }
+.gauntlet__modes span { display: block; }
 
 /* A grid cell: a measured row's values at a glance (run wall · peak RSS,
    then cycles · size), else its state and reason. Colour = how Jet stands:
