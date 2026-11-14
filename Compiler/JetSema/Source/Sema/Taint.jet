@@ -1335,6 +1335,17 @@ sema_taint_finding_what: fn(finding: SemaTaintFinding) -> String {
     sema_error_optional(finding.code, None, finding.what, finding.why, finding.fix).what
 }
 
+// Whether `finding`'s printed `what` (sema_taint_finding_what) holds
+// `marker`, a tag in backticks. Printing changes only a type identity's
+// spelling (diagnostic_display_identities) and the case of the leading
+// lowercase letter, which no backtick precedes, so a `what` that spells no
+// identity holds the marker exactly when its raw prose does; only one that
+// spells one is printed to tell.
+sema_taint_finding_names: fn(finding: SemaTaintFinding, marker: String) -> Bool {
+    if finding.what.contains("module:") || finding.what.contains("<corelib>/") -> return sema_taint_finding_what(finding).contains(marker)
+    finding.what.contains(marker)
+}
+
 // E0737 when `value` carries a fixed tag.
 sema_taint_check_steer: fn(state: &SemaTaintFlowState, value: Expr, steers: String) {
     tag_value: sema_taint_fixed_in(state, value) ?? return
@@ -2113,8 +2124,19 @@ sema_taint_cycle_paths: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSt
 // read as its report would print it.
 sema_taint_crossing_walk: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
     saved_module: state.module_identity
-    saved_imports: state.imports.copy()
-    saved_scope: state.callable_scope.copy()
+    // The walked module's imports and callable scope replace the caller's,
+    // which come back after the walk; a walk in the caller's own module
+    // keeps them as they are.
+    entering: module_identity.id != state.module_identity.id
+    saved_imports := [SemaTaintImportAlias]{}
+    saved_scope := SemaTaintSlots?{None}
+    if entering {
+        // copy: the walk replaces the caller's imports and scope, restored after it.
+        saved_imports = state.imports.copy()
+        saved_scope = Val(state.callable_scope.copy())
+        state.imports = sema_taint_collect_imports(graph, module_identity)
+        state.callable_scope = sema_taint_callable_scope(graph, state.catalog, module_identity)
+    }
     saved_fixed: state.fixed_tags.copy()
     saved_bindings: state.bindings.copy()
     saved_diagnostics: state.diagnostics.copy()
@@ -2130,8 +2152,6 @@ sema_taint_crossing_walk: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     saved_cross_at: state.cross_at
     saved_cross_path: state.cross_path.copy()
     state.module_identity = module_identity
-    state.imports = sema_taint_collect_imports(graph, module_identity)
-    state.callable_scope = sema_taint_callable_scope(graph, state.catalog, module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, module_identity)
     sema_taint_add(state.fixed_tags, tag_value)
     state.bindings = [SemaTaintBindingFact]{}
@@ -2159,15 +2179,17 @@ sema_taint_crossing_walk: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     marker: "`{tag_value}`"
     path := ""
     loop (at, finding) in state.findings {
+        if !sema_taint_finding_names(finding, marker) -> next
         what: sema_taint_finding_what(finding)
-        if !what.contains(marker) -> next
         path = if at == state.cross_at -> "`{callee.name}`, then {state.cross_path}" else -> "`{callee.name}`, where {sema_taint_clause(what)}"
         break
     }
     if path == "" && (state.masked.len() > 0 || state.exits.len() > 0) -> path = "`{callee.name}`, where a `{tag_value}` value decides a branch or an early return"
     state.module_identity = saved_module
-    state.imports = saved_imports
-    state.callable_scope = saved_scope
+    if entering {
+        state.imports = saved_imports
+        state.callable_scope = saved_scope.move() ?? panic("a crossing walk lost its caller's callable scope")
+    }
     state.fixed_tags = saved_fixed
     state.bindings = saved_bindings
     state.diagnostics = saved_diagnostics
