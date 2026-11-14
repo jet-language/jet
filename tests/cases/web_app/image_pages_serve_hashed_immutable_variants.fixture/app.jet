@@ -1,0 +1,15 @@
+// A page with one PNG and one JPEG placed by web.image.
+package: {
+    name: "image_page"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+
+use web: core.web
+
+home: fn() -> WebPage {
+    web.page("Gallery", "<h1>Gallery</h1>{web.image("Public/hero.png", alt: "A \"wide\" gradient")}{web.image("Public/photo.jpg", alt: "A photo")}{web.image("Public/icon.png", alt: "An icon")}")
+}
+
+run: fn() {
+    web.app().route("/", home).serve()
+}

@@ -1,0 +1,112 @@
+// Fetches the page, then every image address it names, and prints one line
+// per address: the status, type and cache policy it was answered with and
+// the size of the image it holds. Then two addresses no source makes.
+package: {
+    name: "image_page_client"
+    authority: { allow: [Env, FS.Write, Net, Time] }
+}
+
+use {
+    image: core.image
+    files: core.files
+    net: core.net
+    sys: core.sys
+    time: core.time
+}
+
+Answer: struct {
+    status: String
+    head: String
+    body: [U8]
+}
+
+// Whether a blank line, CR LF CR LF, starts at `index`.
+header_end: fn(bytes: [U8], index: Int) -> Bool {
+    ends: "\r\n\r\n".bytes()
+    loop at in 0..<4 {
+        if bytes[index + at] != ends[at] -> return false
+    }
+    true
+}
+
+get_address: fn(port: String, path: String) -> Answer {
+    deadline: time.instant() + 30s
+    connected := net.TCPStream?{None}
+    loop {
+        if net.tcp_connect("127.0.0.1:{port}") == {
+            .Ok(stream) -> {
+                connected = Val(stream)
+                break
+            }
+            .Err(error) -> {
+                if time.instant() >= deadline -> panic("the app did not listen on {port}: {error}")
+                time.sleep(50ms)
+            }
+        }
+    }
+    stream := connected ?? panic("connected stream")
+    stream.write_all("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    bytes := [U8]{}
+    loop {
+        part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")
+        if part.len() == 0 -> break
+        loop byte in part -> bytes.push(byte)
+    }
+    split := -1
+    loop index in 0..<bytes.len() - 3 {
+        if header_end(bytes, index) {
+            split = index
+            break
+        }
+    }
+    if split < 0 -> panic("no header end in the answer to {path}")
+    head: String.from_bytes(bytes.slice(0, split)) ?? panic("header UTF-8")
+    lines: head.split("\r\n").to_list()
+    Answer{status: lines[0].split(" ").to_list()[1].copy(), head: head.lower(), body: bytes.slice(split + 4, bytes.len())}
+}
+
+header: fn(answer: Answer, name: String) -> String {
+    loop line in answer.head.split("\r\n") {
+        if line.starts_with("{name}: ") -> return line.slice(name.len() + 2, line.len())
+    }
+    "none"
+}
+
+describe: fn(answer: Answer) -> String {
+    limits: image.Limits{max_input_bytes: 100000000, max_pixels: 10000000, max_output_bytes: 100000000}
+    size: if image.inspect(answer.body, limits) == {
+        .Ok(info) -> "{info.width}x{info.height}"
+        .Err(error) -> "{error:Debug}"
+    }
+    "{answer.status} | {header(answer, "content-type")} | {header(answer, "cache-control")} | {size}"
+}
+
+run: fn() {
+    port: sys.get("IMAGE_PAGE_PORT") ?? panic("missing IMAGE_PAGE_PORT")
+    page: get_address(port, "/")
+    text: String.from_bytes(page.body) ?? panic("page UTF-8")
+    files.write("page.html", text) ?? panic("record page: {err}")
+    addresses := [String]{}
+    loop (index, piece) in text.split("\"/a/").to_list() {
+        if index == 0 -> next
+        address: "/a/{piece.split("\"").to_list()[0].split(" ").to_list()[0]}"
+        if !addresses.contains(address) -> addresses.push(address)
+    }
+    loop piece in text.split(", /a/") {
+        if piece.starts_with("<") -> next
+        address: "/a/{piece.split(" ").to_list()[0]}"
+        if !addresses.contains(address) -> addresses.push(address)
+    }
+    rows := [String]{}
+    loop address in addresses {
+        name: address.split("/").to_list()
+        pieces: name[name.len() - 1].split(".").to_list()
+        role: if pieces.len() == 4 -> "{pieces[0]} {pieces[2]}w" else -> "{pieces[0]} original"
+        rows.push("{role}: {describe(get_address(port, address))}")
+    }
+    rows.sort()
+    loop row in rows -> print(row)
+    print("unknown key: {get_address(port, "/a/Public/photo.0000000000000000.640.jpg").status}")
+    print("climbing out: {get_address(port, "/a/Public/..%2Fapp.0000000000000000.png").status}")
+}

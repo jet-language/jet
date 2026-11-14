@@ -5345,6 +5345,7 @@ route list.
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
+| `image(src: String, alt: String) -> String` | markup | Place the PNG or JPEG at `src` on a page; an app page serves it as a `<picture>` of resized variants. |
 | `serve<Settings: Decode>(prefix: String, build: fn(Settings) -> App, port: Int?)` | never returns | Decode the typed settings, then serve the app `build` makes on the port `App.serve`'s rule chooses; a decode failure stops with E2416, exit 78. |
 | `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
@@ -5399,6 +5400,31 @@ server functions and static files are not API operations. `jet explain
 with its method, address, what answers it, how it was registered (`page`,
 `action`, `handler`, `mount`, `marked` or `static`) and its file:line;
 `--json` gives the same rows.
+
+`web.image(src, alt:)` places an image on a page. `src` is a PNG or JPEG
+file, relative to the working directory, that no part climbs out of or
+hides. When an app's route returns the page, the app plans one asset node for
+the source:
+
+- The original, at `/a/<dir>/<stem>.<digest16>.<ext>`.
+- One variant for each width of 640, 1280 and 1920 below the source's own,
+  at `/a/<dir>/<stem>.<key16>.<width>.<ext>`. Variants keep the source's format.
+  The aspect ratio holds, and JPEG variants use quality 75.
+
+The key is the SHA-256 of the source digest, width, format, quality and
+encoder version, so any change to them gives a new address and leaves the
+others valid. The page gets a `<picture>` with one `<source srcset>` per
+variant format, the original among its own format's candidates. The
+original, with its width and height, is the fallback `<img>`. A source with
+no variants gets the `<img>` alone. Each address answers `GET` with its bytes
+and `Cache-Control: public, max-age=31536000, immutable`. A variant is
+decoded, scaled by area average and encoded (`core.image`) the first time it
+is asked for, then kept for the run. A variant in the source's format that
+comes out no smaller than the source is the source's bytes. Under `jet dev`
+the page reads the source each time, so an edited image gets new addresses.
+A source the app cannot read or decode fails the route with its error
+boundary. `App.serve` answers image addresses after the app's own routes, so
+a route of the app's own, including a root catch-all, takes precedence.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.

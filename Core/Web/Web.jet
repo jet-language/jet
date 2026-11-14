@@ -12,6 +12,9 @@ package: {
 use {
     core: core
     core.http.[HTTPError, HTTPRequest, HTTPResponse, HTTPRouter]
+    core.image.[ImageError, ImageFormat, Limits]
+    codec: core.image
+    crypto: core.crypto
     web_http: core.http
     core.http.server.[HTTPCorsPolicy, HTTPHandler, HTTPMux, HTTPServer, HTTPServerTLS]
     http_server: core.http.server
@@ -177,6 +180,11 @@ __AppState: struct {
     explicit_mode: Bool
     // The one route table every row of the graph registers in.
     table: HTTPMux
+    // The images pages placed (`web.image`), the bytes of each variant
+    // answered so far by URL path, and how variants are made.
+    images: [__ImageNode]
+    image_bytes: [String: [U8]]
+    image_settings: __ImageSettings
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -449,6 +457,9 @@ app: fn() -> App Never! {
         mode: "csr",
         explicit_mode: false,
         table: http_server.__mux_new(),
+        images: [__ImageNode]{},
+        image_bytes: [String: [U8]]{},
+        image_settings: __image_settings(),
     }}}
 }
 
@@ -665,7 +676,11 @@ __app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.
         }
     }
     if route.handler.run(call) == {
-        .Page(rendered) -> __app_html(200, rendered, __app_route_data(path, request.path, call.data))
+        .Page(rendered) -> {
+            placed: __app_images(app, rendered.body)
+            if placed.failure != "" -> return __app_boundary(500, route.error, "Route error", placed.failure, call)
+            __app_html(200, WebPage{title: "{rendered.title}", body: placed.body}, __app_route_data(path, request.path, call.data))
+        }
         .Rejected(message) -> __app_boundary(400, route.error, "Route error", message, call)
         .Failed(message) -> __app_boundary(500, route.error, "Route error", message, call)
         .JSON(_) -> __app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
@@ -673,8 +688,312 @@ __app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.
 }
 
 __app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    // An image address no route claims is answered by the app's images.
+    if request.path.starts_with(C_IMAGE_PREFIX) && __app_image_answer(app, request.path) == .Val(answer) -> return answer
     state: __app_state(app)
     __app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
+}
+
+// ── Images ──────────────────────────────────────────────────────────────
+//
+// `web.image(src, alt:)` puts an image on a page. It writes a placeholder
+// `<img data-jet-image …>`, which the app's page response turns into a
+// `<picture>` with the app's images settings. The source is a PNG or JPEG at
+// `src`, relative to the working directory like every app path. The app plans
+// one asset node for it: the original, served under its digest, plus a
+// variant for each configured width below the source's own, in each
+// configured format. A variant's key hashes everything that decides its
+// bytes: the source digest, width, format, quality and encoder version.
+// Changing any of them gives a new URL and leaves every other URL valid.
+// Every image URL answers GET with immutable caching. A variant is encoded
+// the first time it is asked for, by `__image_variant_bytes`, the one
+// function every variant is made by.
+
+// The encoder version in every variant key: a changed encoder renames every
+// variant.
+C_IMAGE_ENCODER: "core.image/1"
+// The JPEG quality variants use unless the images settings name one.
+C_IMAGE_QUALITY: 75
+// The URL prefix images are served under.
+C_IMAGE_PREFIX: "/a/"
+// The placeholder `web.image` writes, up to its source.
+C_IMAGE_MARK: "<img data-jet-image src=\""
+// A year, never revalidated: an image URL names its bytes.
+C_IMAGE_CACHE: "public, max-age=31536000, immutable"
+// The decoder and encoder budgets for an image source.
+C_IMAGE_LIMITS: Limits{max_input_bytes: 268435456, max_pixels: 40000000, max_output_bytes: 268435456}
+
+// How variants are made. No formats means each source's own format.
+__ImageSettings: struct {
+    formats: [ImageFormat]
+    widths: [Int]
+    quality: Int
+    enabled: Bool
+}
+
+// One resized, re-encoded copy of a source, and the URL path naming it.
+__ImageVariant: struct {
+    width: Int
+    height: Int
+    format: ImageFormat
+    // The JPEG quality; 0 for a format without one.
+    quality: Int
+    key: String
+    path: String
+}
+
+// One image source: its digest and size, the URL path of the original, and
+// its variants.
+__ImageNode: struct {
+    source: String
+    digest: String
+    width: Int
+    height: Int
+    format: ImageFormat
+    path: String
+    variants: [__ImageVariant]
+}
+
+// A page body with its images placed, or why one could not be.
+__ImagePage: struct {
+    body: String
+    failure: String
+}
+
+__image_settings: fn() -> __ImageSettings Never! {
+    __ImageSettings{formats: [ImageFormat]{}, widths: [Int]{640, 1280, 1920}, quality: C_IMAGE_QUALITY, enabled: true}
+}
+
+// An image on a page: `src` names a PNG or JPEG file, `alt` its text. Inside
+// an app page it becomes a `<picture>` of the source's variants, with the
+// original as the fallback `<img>`.
+image: fn(src: String, *, alt: String) -> String Never! {
+    "{C_IMAGE_MARK}{__app_html_attr(src)}\" alt=\"{__app_html_attr(alt)}\">"
+}
+
+__image_mime: fn(format: ImageFormat) -> String Never! {
+    if format == {
+        .PNG -> "image/png"
+        .JPEG -> "image/jpeg"
+        .GIF -> "image/gif"
+    }
+}
+
+__image_extension: fn(format: ImageFormat) -> String Never! {
+    if format == {
+        .PNG -> "png"
+        .JPEG -> "jpg"
+        .GIF -> "gif"
+    }
+}
+
+// The URL path an image source's names start with: the prefix, its directory
+// and its file stem ("Public/hero.jpg" is "/a/Public/hero"). None for a path
+// that is absolute, climbs out, names a hidden part, or has no stem.
+__image_url_stem: fn(source: String) -> String? Never! {
+    parts: source.split("/").to_list()
+    kept := [String]{}
+    loop (index, part) in parts {
+        if part == "" || part.starts_with(".") || part.contains("\\") || part.contains("%") || part.contains("?") || part.contains("#") -> return None
+        if index + 1 < parts.len() {
+            kept.push("{part}")
+            next
+        }
+        pieces: part.split(".").to_list()
+        if pieces.len() < 2 -> return None
+        stem := [String]{}
+        loop (at, piece) in pieces {
+            if at + 1 < pieces.len() -> stem.push("{piece}")
+        }
+        kept.push(stem.join("."))
+    }
+    Val("{C_IMAGE_PREFIX}{kept.join("/")}")
+}
+
+// The key of one variant: a hash of every input that decides its bytes.
+__image_key: fn(digest: String, width: Int, format: ImageFormat, quality: Int, encoder: String) -> String Never! {
+    crypto.sha256("jet-image\n{digest}\n{width}\n{__image_extension(format)}\n{quality}\n{encoder}").hex()
+}
+
+// The asset node of the source `data` read from `source`.
+__image_node: fn(source: String, data: [U8], settings: __ImageSettings) -> __ImageNode ImageError! {
+    stem: __image_url_stem(source) ?? return Err(.Unsupported)
+    info: codec.inspect(data, C_IMAGE_LIMITS) ?? return Err(err)
+    if info.format == .GIF -> return Err(.Unsupported)
+    digest: crypto.sha256(data).hex()
+    formats := [ImageFormat]{}
+    loop format in settings.formats {
+        formats.push(format.copy())
+    }
+    if formats.len() == 0 -> formats.push(info.format.copy())
+    variants := [__ImageVariant]{}
+    if settings.enabled {
+        loop format in formats {
+            quality: if format == .JPEG -> settings.quality else -> 0
+            loop width in settings.widths {
+                if width < 1 || width >= info.width -> next
+                scaled: (info.height * width + info.width /% 2) /% info.width
+                height: if scaled < 1 -> 1 else -> scaled
+                key: __image_key(digest, width, format, quality, C_IMAGE_ENCODER)
+                path: "{stem}.{key.slice(0, 16)}.{width}.{__image_extension(format)}"
+                variants.push(__ImageVariant{width: width, height: height, format: format.copy(), quality: quality, key: key, path: path})
+            }
+        }
+    }
+    path: "{stem}.{digest.slice(0, 16)}.{__image_extension(info.format)}"
+    Ok(__ImageNode{source: "{source}", digest: digest, width: info.width, height: info.height, format: info.format, path: path, variants: variants})
+}
+
+// The bytes of `variant` of the source `data`: decoded, scaled by area
+// average, and encoded. A variant in the source's own format that comes out
+// no smaller than the source is the source's bytes.
+__image_variant_bytes: fn(data: [U8], node: __ImageNode, variant: __ImageVariant) -> [U8] ImageError! {
+    decoded: codec.decode(data, C_IMAGE_LIMITS) ?? return Err(err)
+    scaled: codec.resize(decoded, variant.width, variant.height, .Area, C_IMAGE_LIMITS) ?? return Err(err)
+    quality: if variant.format == .JPEG -> variant.quality else -> C_IMAGE_QUALITY
+    encoded: codec.__encode_quality(scaled, variant.format, quality, C_IMAGE_LIMITS) ?? return Err(err)
+    if variant.format != node.format || encoded.len() < data.len() -> return Ok(encoded)
+    original := [U8]{}
+    loop byte in data {
+        original.push(byte)
+    }
+    Ok(original)
+}
+
+// The markup of `node` with `alt` text: a `<picture>` with one `<source>`
+// per variant format, the original among its own format's candidates, and
+// the original as the fallback `<img>`; the `<img>` alone without variants.
+__image_picture: fn(node: __ImageNode, alt: String) -> String Never! {
+    fallback: "<img src=\"{__app_html_attr(node.path)}\" alt=\"{__app_html_attr(alt)}\" width=\"{node.width}\" height=\"{node.height}\">"
+    if node.variants.len() == 0 -> return fallback
+    formats := [ImageFormat]{}
+    loop variant in node.variants {
+        if !formats.contains(variant.format) -> formats.push(variant.format.copy())
+    }
+    sources := [String]{}
+    loop format in formats {
+        candidates := [String]{}
+        loop variant in node.variants {
+            if variant.format == format -> candidates.push("{variant.path} {variant.width}w")
+        }
+        if format == node.format -> candidates.push("{node.path} {node.width}w")
+        sources.push("<source type=\"{__image_mime(format)}\" srcset=\"{__app_html_attr(candidates.join(", "))}\">")
+    }
+    "<picture>{sources.join("")}{fallback}</picture>"
+}
+
+__image_problem: fn(problem: ImageError) -> String Never! {
+    if problem == {
+        .Malformed -> "it is not a PNG or JPEG file it can read"
+        .Unsupported -> "it is a kind of image web.image does not serve (a GIF, or a JPEG that is not baseline or extended sequential)"
+        .TooLarge -> "it is larger than an image may be"
+    }
+}
+
+// An attribute value `__app_html_attr` wrote, as it was.
+__image_unescape: fn(value: String) -> String Never! {
+    value.replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+// `body` with each `web.image` placeholder replaced by its markup.
+__app_images: fn(app: App, body: String) -[FS.Read]> __ImagePage Never! {
+    pieces: body.split(C_IMAGE_MARK).to_list()
+    out := [String]{}
+    loop (index, piece) in pieces {
+        if index == 0 {
+            out.push("{piece}")
+            next
+        }
+        // `src" alt="alt">rest`: attribute values hold no raw quote.
+        parts: piece.split("\"").to_list()
+        if parts.len() < 4 || parts[1] != " alt=" || !parts[3].starts_with(">") -> return __ImagePage{body: "", failure: "an `<img data-jet-image>` the page wrote is not one web.image made"}
+        placed: __app_image(app, __image_unescape(parts[0]), __image_unescape(parts[2]))
+        if placed.failure != "" -> return placed
+        out.push(placed.body)
+        rest := [String]{}
+        loop (at, part) in parts {
+            if at >= 3 -> rest.push("{part}")
+        }
+        tail: rest.join("\"")
+        out.push(tail.slice(1, tail.len()))
+    }
+    __ImagePage{body: out.join(""), failure: ""}
+}
+
+// The markup of the image at `source`. A served app plans each source once;
+// under `jet dev` it reads the source on every page, so an edited image gets
+// new URLs.
+__app_image: fn(app: App, source: String, alt: String) -[FS.Read]> __ImagePage Never! {
+    if !__app_dev() {
+        guard: app.__state.guard_read()
+        loop node in guard.value.images {
+            if node.source == source -> return __ImagePage{body: __image_picture(node, alt), failure: ""}
+        }
+    }
+    if __image_url_stem(source) == None -> return __ImagePage{body: "", failure: "web.image can't use `{source}`: name a file with an extension under the working directory, through no hidden part and no `..`"}
+    data: core.files.read_bytes(source) ?? return __ImagePage{body: "", failure: "web.image can't read `{source}`: {err}"}
+    guard := app.__state.guard_edit()
+    node: __image_node(source, data, guard.value.image_settings) ?? return __ImagePage{body: "", failure: "web.image can't use `{source}`: {__image_problem(err)}"}
+    markup: __image_picture(node, alt)
+    known := false
+    loop existing in guard.value.images {
+        if existing.path == node.path -> known = true
+    }
+    if !known -> guard.value.images.push(node)
+    __ImagePage{body: markup, failure: ""}
+}
+
+// The answer to GET `path` under the image prefix: the original or a
+// variant of the source its name comes from, planned afresh so an address
+// is valid exactly while its source and settings still make it. None when
+// no source makes it.
+__app_image_answer: fn(app: App, path: String) -[FS.Read]> HTTPResponse? Never! {
+    if __app_image_cached(app, path) == .Val(answer) -> return Val(answer)
+    name: path.slice(C_IMAGE_PREFIX.len(), path.len())
+    if __image_url_stem(name) == None -> return None
+    pieces: name.split(".").to_list()
+    // `stem.digest.ext` names an original, `stem.key.width.ext` a variant.
+    loop dropped in ([Int]{2, 3}) {
+        if pieces.len() <= dropped -> next
+        stem := [String]{}
+        loop (at, piece) in pieces {
+            if at + dropped < pieces.len() -> stem.push("{piece}")
+        }
+        loop extension in ([String]{"png", "jpg", "jpeg", "PNG", "JPG", "JPEG"}) {
+            if __app_image_from(app, "{stem.join(".")}.{extension}", path) == .Val(answer) -> return Val(answer)
+        }
+    }
+    None
+}
+
+// The answer to GET `path` when the source at `source` makes it.
+__app_image_from: fn(app: App, source: String, path: String) -[FS.Read]> HTTPResponse? Never! {
+    data: core.files.read_bytes(source) ?? return None
+    guard := app.__state.guard_edit()
+    node: __image_node(source, data, guard.value.image_settings) ?? return None
+    if node.path == path -> return Val(__image_response(data, node.format))
+    loop variant in node.variants {
+        if variant.path != path -> next
+        bytes: __image_variant_bytes(data, node, variant) ?? return None
+        answer: __image_response(bytes, variant.format)
+        guard.value.image_bytes["{path}"] = bytes
+        return Val(answer)
+    }
+    None
+}
+
+// The answer to a variant encoded before.
+__app_image_cached: fn(app: App, path: String) -> HTTPResponse? Never! {
+    guard: app.__state.guard_read()
+    format: if path.ends_with(".png") -> ImageFormat.PNG else -> ImageFormat.JPEG
+    if guard.value.image_bytes.get(path) == .Val(bytes) -> return Val(__image_response(bytes, format))
+    None
+}
+
+__image_response: fn(bytes: [U8], format: ImageFormat) -> HTTPResponse Never! {
+    typed: web_http.headers_set(web_http.headers(), "content-type", __image_mime(format))
+    fields: web_http.headers_set(typed, "cache-control", C_IMAGE_CACHE)
+    http_server.response_body(200, web_http.body_bytes(bytes), fields)
 }
 
 // The boundary's page, or a page of `title` and `message` without one; a

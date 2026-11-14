@@ -28,9 +28,9 @@ use core: core
 // zlib stream deflated by core.archive, every chunk with its CRC-32.
 //
 // JPEG encodes here too: baseline, at libjpeg quality 90 with the standard
-// tables, 4:4:4 YCbCr (or one gray component when every pixel is gray),
-// through libjpeg's integer forward DCT and color conversion. Alpha is
-// dropped.
+// tables (core.web's image variants pick their own quality), 4:4:4 YCbCr (or
+// one gray component when every pixel is gray), through libjpeg's integer
+// forward DCT and color conversion. Alpha is dropped.
 //
 // `resize` scales by nearest pixel or by area average, alpha-weighted.
 
@@ -125,13 +125,20 @@ decode: fn(data: [U8], limits: Limits) -> Image ImageError! {
 // bytes written against the output budget. An image whose pixels are not
 // `width * height * 4` bytes is `Malformed`.
 encode: fn(image: Image, format: ImageFormat, limits: Limits) -> [U8] ImageError! {
+    __encode_quality(image, format, C_JPEG_QUALITY, limits)
+}
+
+// `encode`, with JPEG at `quality` on libjpeg's 1..100 scale; PNG is lossless
+// and ignores it. A quality outside 1..100 is `Unsupported`.
+__encode_quality: fn(image: Image, format: ImageFormat, quality: Int, limits: Limits) -> [U8] ImageError! {
     if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
     if image.width < 1 || image.height < 1 -> return Err(.Malformed)
     if image.width > limits.max_pixels /% image.height || image.width * image.height > limits.max_input_bytes /% 4 -> return Err(.TooLarge)
     if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
+    if quality < 1 || quality > 100 -> return Err(.Unsupported)
     if format == {
         .PNG -> __png_encode(image, limits)
-        .JPEG -> __jpeg_encode(image, limits)
+        .JPEG -> __jpeg_encode(image, quality, limits)
         .GIF -> Err(.Unsupported)
     }
 }
@@ -1103,12 +1110,15 @@ __jpeg_codes: fn(table: [Int]) -> JPEGCodes {
     codes
 }
 
-// A quantization table at `C_JPEG_QUALITY`, scaled the way libjpeg scales
-// qualities from 50 up. At 90 every entry stays within 1..255.
-__jpeg_quant: fn(base: [Int]) -> [Int] {
-    scale: 200 - C_JPEG_QUALITY * 2
+// A quantization table at `quality`, scaled the way libjpeg scales it for a
+// baseline file: every entry within 1..255.
+__jpeg_quant: fn(base: [Int], quality: Int) -> [Int] {
+    scale: if quality < 50 -> 5000 /% quality else -> 200 - quality * 2
     table := [Int]{}
-    loop value in base -> table.push((value * scale + 50) /% 100)
+    loop value in base {
+        entry: __at_most((value * scale + 50) /% 100, 255)
+        table.push(if entry < 1 -> 1 else -> entry)
+    }
     table
 }
 
@@ -1200,8 +1210,9 @@ __at_most: fn(value: Int, last: Int) -> Int {
     if value > last -> last else -> value
 }
 
-// A baseline JPEG of `image`, which `encode` has checked.
-__jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
+// A baseline JPEG of `image` at `quality`, which `__encode_quality` has
+// checked.
+__jpeg_encode: fn(image: Image, quality: Int, limits: Limits) -> [U8] ImageError! {
     if image.width > 65535 || image.height > 65535 -> return Err(.Unsupported)
     gray := true
     at := 0
@@ -1223,8 +1234,8 @@ __jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
         ycc.push((0 - 11059 * red - 21709 * green + 32768 * blue + 8421375) >> 16)
         ycc.push((32768 * red - 27439 * green - 5329 * blue + 8421375) >> 16)
     }
-    luma_quant: __jpeg_quant(C_JPEG_LUMA_QUANT)
-    chroma_quant: __jpeg_quant(C_JPEG_CHROMA_QUANT)
+    luma_quant: __jpeg_quant(C_JPEG_LUMA_QUANT, quality)
+    chroma_quant: __jpeg_quant(C_JPEG_CHROMA_QUANT, quality)
     out := [U8]{0xFF}
     out.push(U8{C_JPEG_SOI})
     __push_marker(out, 0xE0, [U8]{74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0})
@@ -1864,6 +1875,36 @@ __squared_error: fn(left: Image, right: Image) -> Int {
         assert_eq(back.pixels[3], U8{255})
     }
     assert(__encode_error(__smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
+}
+
+// The error `__encode_quality` returns at `quality`, or None.
+__quality_error: fn(picture: Image, quality: Int, limits: Limits) -> ImageError? {
+    if __encode_quality(picture, .JPEG, quality, limits) == {
+        .Ok(_) -> None
+        .Err(error) -> Val(error)
+    }
+}
+
+#Test("jpeg quality scales the tables like libjpeg within 1..100") {
+    // The base luminance table starts at 16; libjpeg scales by 5000 / q
+    // below 50 and 200 - 2q from 50, clamping every entry to 1..255.
+    assert_eq(__jpeg_quant(C_JPEG_LUMA_QUANT, 50)[0], 16)
+    assert_eq(__jpeg_quant(C_JPEG_LUMA_QUANT, 75)[0], 8)
+    assert_eq(__jpeg_quant(C_JPEG_LUMA_QUANT, 10)[0], 80)
+    assert_eq(__jpeg_quant(C_JPEG_LUMA_QUANT, 1)[0], 255)
+    assert_eq(__jpeg_quant(C_JPEG_LUMA_QUANT, 100)[0], 1)
+    limits: Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 8192}
+    picture: __smooth_image(21, 13, 0)
+    standard: encode(picture, .JPEG, limits) ?? panic("encode: {err:Debug}")
+    at_90: __encode_quality(picture, .JPEG, 90, limits) ?? panic("q90: {err:Debug}")
+    assert(standard == at_90)
+    at_20: __encode_quality(picture, .JPEG, 20, limits) ?? panic("q20: {err:Debug}")
+    assert(at_20.len() < standard.len())
+    assert(__quality_error(picture, 0, limits) == Val(ImageError.Unsupported))
+    assert(__quality_error(picture, 101, limits) == Val(ImageError.Unsupported))
+    // PNG is lossless: quality changes nothing.
+    png: __encode_quality(picture, .PNG, 20, limits) ?? panic("png: {err:Debug}")
+    assert(png == (encode(picture, .PNG, limits) ?? panic("png: {err:Debug}")))
 }
 
 __resize_error: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: Limits) -> ImageError {

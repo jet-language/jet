@@ -1,0 +1,35 @@
+# web.image on an app page: a <picture> of hashed variants with the original
+# as the fallback <img>, every address answered with immutable caching, and
+# an address no source makes is not found.
+fixture: image_pages_serve_hashed_immutable_variants.fixture
+step: jet run make_images.jet
+exit: 0
+spawn server: jet run app.jet
+env: JET_APP_PORT={free-port:app}
+step: jet run client.jet
+env: IMAGE_PAGE_PORT={free-port:app}
+exit: 0
+file: page.html ~ "<h1>Gallery</h1><picture><source type=\"image/png\" srcset=\"/a/Public/hero." # the PNG's variants keep its format
+file: page.html ~ ".640.png 640w, /a/Public/hero." # widths below the source's own, smallest first
+file: page.html ~ ".1280.png 1280w, /a/Public/hero." # the original is the widest candidate of its format
+file: page.html ~ ".png 1500w\"><img src=\"/a/Public/hero." # the original is the fallback <img>
+file: page.html ~ "alt=\"A &quot;wide&quot; gradient\" width=\"1500\" height=\"1000\"></picture>" # alt text stays escaped; the <img> keeps the source's size
+file: page.html ~ "<picture><source type=\"image/jpeg\" srcset=\"/a/Public/photo." # the JPEG's variants keep its format
+file: page.html ~ ".1920.jpg 1920w, /a/Public/photo." # 1920 is below the JPEG's 2000
+file: page.html ~ ".jpg 2000w\"><img src=\"/a/Public/photo." # the JPEG original
+file: page.html ~ "</picture><img src=\"/a/Public/icon." # a source below every width is the <img> alone
+file: page.html ~ "alt=\"An icon\" width=\"64\" height=\"64\">" # the small PNG's own size
+file: page.html !~ "data-jet-image" # no placeholder reaches the browser
+stdout: ~ "hero 640w: 200 | image/png | public, max-age=31536000, immutable | 640x427" # a PNG variant at its width, aspect kept
+stdout: ~ "hero 1280w: 200 | image/png | public, max-age=31536000, immutable | 1280x853"
+stdout: ~ "hero original: 200 | image/png | public, max-age=31536000, immutable | 1500x1000" # the original's bytes under its digest
+stdout: ~ "icon original: 200 | image/png | public, max-age=31536000, immutable | 64x64"
+stdout: ~ "photo 640w: 200 | image/jpeg | public, max-age=31536000, immutable | 640x427" # JPEG variants decode at their widths
+stdout: ~ "photo 1280w: 200 | image/jpeg | public, max-age=31536000, immutable | 1280x853"
+stdout: ~ "photo 1920w: 200 | image/jpeg | public, max-age=31536000, immutable | 1920x1280"
+stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333"
+stdout: ~ "unknown key: 404" # a key no source and setting makes is not found
+stdout: ~ "climbing out: 404" # an address that leaves the working directory is not found
+signal server: KILL
+wait: server
+exit: any # the case kills the server; its status is not part of this proof
