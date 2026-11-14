@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102471,
+    "rev": 102472,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73023,6 +73023,11 @@
       "log": [
         {
           "at": "2026-11-14",
+          "by": "Main",
+          "text": "2026-11-14 jet run traces on the p66 jet (Speed-2, one run each, nice 19, fresh cache). The embedded Core record (BARE, the gauntlet's path) is 10x slower than parsing reached Core sources (ROOT, JET_TOOLCHAIN_ROOT). fft-4096: BARE wall 6688 ms, 1.66 GB (load 3960, register 1370, sema.finalize 820); ROOT wall 693 ms, 121 MB (load 180). datasummary: BARE wall 29504 ms, 4.76 GB (load 10130, sema.finalize 7130, comptime.bodies 7120, register 3540); ROOT wall 4940 ms, 1.21 GB. Cause: the record path loads, registers, finalizes and comptime-evaluates every record module level (4/13/71/26 files) whatever the program reaches. Plan: PrecompiledCore-2 makes record load and decode reach-limited (modules, then declarations lazily); Speed-2 makes register, finalize/core_demand and comptime.bodies demand-driven over record modules. Bar: BARE at or below ROOT in wall time and peak RSS on both entries, with the same output."
+        },
+        {
+          "at": "2026-11-14",
           "by": "Speed-2",
           "text": "c23 (Speed-2 finding, 2026-11-14): hello starts its threads in finalization for real work. The pass facts (boxed edges, copy facts, fixed-length write params, memory plan; CheckProgram sema_pass_facts) and the side/effects/taint walks walk every seeded Core module on every compile, and with --threads 1 hello's sema tail goes from about 100 ms to about 190 ms. Hello also takes 1007 Core body packets from the record (most of them up front: trait-impl methods, close, generated). So an admission tweak cannot meet c23. Those per-module and per-function facts must ride in the Core record, so that a small program's finalization is proportional to its own code. That input went to PrecompiledCore-2's typed-decode design."
         },
@@ -73670,8 +73675,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T18:13:00.085Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-14T18:37:42.373Z",
+      "updatedBy": "Main",
       "criteriaLastN": 38
     },
     {
@@ -205449,6 +205454,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T18:37:42.374Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T18:35:54.165Z",
       "by": "Main",
