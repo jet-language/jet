@@ -1,0 +1,27 @@
+use collections: core.collections
+
+// Each line pairs a call whose body calls another member of its own module
+// with that member called from outside. Both run the member's Jet body.
+run: fn() {
+    base: collections.counter_from([String]{"a", "b", "a"})
+    print("inc {collections.get(collections.inc(base, "a"), "a")} {collections.get(collections.add(base, "a", 1), "a")}")
+    print("dec {collections.get(collections.dec(base, "b"), "b")} {collections.get(collections.add(base, "b", -1), "b")}")
+    print("set_count {collections.get(collections.set_count(base, "a", 7), "a")} total {collections.total(base)}")
+    print("clear {collections.total(collections.clear_counter(base))} {collections.total(collections.counter())}")
+    print("names {collections.names(base)} elements {collections.elements(base)}")
+    common: collections.most_common(collections.add(base, "c", 5), 2)
+    print("most_common {collections.names(common)}")
+    other: collections.counter_from([String]{"a", "c"})
+    print("subtract {collections.names(collections.subtract(base, other))} merge_add {collections.total(collections.merge_add(base, other))}")
+    m: collections.map_set(collections.map_set(collections.ordered_map(), "k", "v"), "j", "w")
+    print("map_contains {collections.map_contains(m, "k")} {collections.map_get(m, "k") != None} {collections.map_contains(m, "z")}")
+    print("map_len {collections.map_len(m)} keys {collections.map_keys(m)} values {collections.map_values(m)}")
+    print("map_remove {collections.map_keys(collections.map_remove(m, "k"))}")
+    c: collections.chain_push(collections.chain_push(collections.chain(), [String]{"x"}, [String]{"1"}), [String]{"x", "y"}, [String]{"2", "3"})
+    print("chain_contains {collections.chain_contains(c, "y")} {collections.chain_get(c, "y") != None} {collections.chain_get(c, "x") ?? "-"}")
+    xs: [Int]{1, 3, 3, 7}
+    print("bisect {collections.bisect_left(xs, 3)} {collections.bisect_right(xs, 3)} insort {collections.insort_left(xs, 4)} {collections.insort_right(xs, 3)}")
+    print("merge_sorted {collections.merge_sorted([Int]{1, 4}, [Int]{2, 3})}")
+    print("heap {collections.heapify([Int]{5, 1, 4, 2})} {collections.heappush([Int]{1, 5}, 0)}")
+    print("select {collections.nsmallest(2, [Int]{5, 1, 4})} {collections.nlargest(2, [Int]{5, 1, 4})}")
+}

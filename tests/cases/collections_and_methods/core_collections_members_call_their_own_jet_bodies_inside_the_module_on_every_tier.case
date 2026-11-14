@@ -1,0 +1,19 @@
+# core.collections members have one meaning, their Jet body. A member called
+# from inside its own module (inc and dec call add, set_count calls get and add,
+# clear_counter calls counter, map_contains calls map_get, chain_contains calls
+# chain_get) runs the same body an outside caller gets, so each line's two
+# spellings agree, on every tier.
+fixture: core_collections_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run -O0 main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = core_collections_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o1: jet run -O1 main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = core_collections_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
+step o2: jet run -O2 main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = core_collections_members_call_their_own_jet_bodies_inside_the_module_on_every_tier.out
