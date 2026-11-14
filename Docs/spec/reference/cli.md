@@ -159,10 +159,9 @@ Other unlisted CLI sources still fail assembly.
 The CLI maps a failed byte fetch into the driver's typed build-HTTP error before
 examining response bytes; it never lets the provider's failure carrier escape
 through that boundary.
-The held-link leaf carries `FS.Write`, not the broad `FS` root. Raw file
-routes preserve their source wrappers' narrow read or write contract;
-inspection of already-held path, scope, platform, and process-ID facts
-does not acquire filesystem authority.
+Raw file routes preserve their source wrappers' narrow read or write contract;
+inspection of already-held path, scope, platform, and process-ID facts does not
+acquire filesystem authority.
 
 Remote builder records accept LF or CRLF line endings, removing only the single
 carriage return immediately before a newline. Extra or interior control bytes

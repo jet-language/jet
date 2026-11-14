@@ -491,32 +491,6 @@ fd_dup_number: fn(state: I64) -> I64 {
     result
 }
 
-// link(2): AT_EMPTY_PATH requires CAP_DAC_READ_SEARCH (otherwise ENOENT).
-// Historical `jet_fs_link_fd_at_raw` passes 0x1000 once and returns errno, with
-// no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
-#Export(c) jet_fd_link_at_raw: fn(source: I64, directory: I64, path: I64, errno: I64) {
-    a: fd_dup_number(source)
-    if (a < I64{0}) {
-        _ := fd_error(a, errno)
-        return
-    }
-    b: fd_dup_number(directory)
-    if (b < I64{0}) {
-        _ := host_call(I64{3}, a, I64{0}, I64{0})
-        _ := fd_error(b, errno)
-        return
-    }
-    name: fd_c_path(path)
-    result := I64{0}
-    #Unsafe("both duplicated descriptors and the terminated name live through the held-inode linkat syscall") {
-        result = os_link_fd_i64(a, b, name)
-    }
-    fd_c_path_drop(name, path)
-    _ := host_call(I64{3}, a, I64{0}, I64{0})
-    _ := host_call(I64{3}, b, I64{0}, I64{0})
-    _ := fd_error(result, errno)
-}
-
 // BirthTime24: available word, signed seconds, nanoseconds. Linux statx's
 // BTIME support mask is a fact, not a source-level Unsupported error.
 fd_created_finish: fn(result: I64, output: I64, errno: I64) {

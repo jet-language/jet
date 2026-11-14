@@ -290,19 +290,6 @@ web_leaf: fn(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: B
             web_get(e, args[5])
             web_host_syscall(e, st)
         }
-        // linkat(source, "", directory, name, AT_EMPTY_PATH).
-        "os_link_fd_i64" -> {
-            web_scratch(e)
-            web_scratch_const(e, 0, 0)
-            web_i64(e, 265)
-            web_get(e, args[0])
-            web_get(e, scratch)
-            web_get(e, args[1])
-            web_get(e, args[2])
-            web_i64(e, 4096)
-            web_i64(e, 0)
-            web_host_syscall(e, st)
-        }
         // ioctl(fd, request, word).
         "os_ioctl_word_i64" -> {
             web_scratch(e)

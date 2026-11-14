@@ -42,14 +42,6 @@ raw_host_key_fixture: fn(module_name: String, key: String, retired: String, para
     wire: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
     result: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, "Net", Val("Time.Wait"))
-    // The signature row lists the members in the kernel's slot order.
-    link_facts: Type.Tuple{fields: [TypeTupleField]{
-        {name: "available", ty: Type.Bool},
-        {name: "held", ty: Type.Bool},
-        {name: "value", ty: Type.Int},
-        {name: "errno", ty: Type.Int}
-    }}
-    raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, "FS", Val("FS.Write"))
     read_members: [String]{"__read_bytes_os", "__read_at_os", "__read_link_os", "__reader_line_bytes"}
     loop member in read_members {
         row: core_call("core.files", member) ?? panic("file read leaf is registered")

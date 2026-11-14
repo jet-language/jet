@@ -2000,29 +2000,6 @@ os_call5_i64: fn(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
     """
 }
 
-// Linux AT_EMPTY_PATH refers to the held source inode, never reopens an old
-// pathname. The borrowed empty path is one stack-local zero.
-#[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
-os_link_fd_i64: fn(source: I64, directory: I64, name: I64) -> I64 {
-    """
-    push {source}
-    push {directory}
-    push {name}
-    pop r10
-    pop rdx
-    pop rdi
-    mov rax, 0
-    push rax
-    mov rsi, rsp
-    mov r8, 4096
-    mov rax, 265
-    syscall
-    pop rdx
-    mov rax, rax ; -> return
-    ; clobbers rcx, r11, rdi, rsi, rdx, r8, r10
-    """
-}
-
 #[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
 os_ioctl_word_i64: fn(fd: I64, request: I64, word: I64) -> I64 {
     """

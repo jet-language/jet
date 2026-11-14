@@ -48,7 +48,6 @@ extern FD *jet_fd_retain_raw(FD *);
 extern void jet_fd_drop_raw(FD *);
 extern FD *jet_fd_dup_raw(FD *, W *);
 extern W jet_fd_directory_raw(FD *, void *, W, W *);
-extern void jet_fd_link_at_raw(FD *, FD *, Text *, W *);
 extern void jet_fd_truncate_raw(FD *, W, W *);
 extern void jet_fd_mkdir_at_raw(FD *, Text *, W, W *);
 extern void jet_fd_unlink_at_raw(FD *, Text *, bool, W *);
@@ -91,7 +90,6 @@ static void closed(FD *fd) {
     jet_fd_mkdir_at_raw(fd,&name,0700,error); assert(posix(error, EBADF));
     jet_fd_unlink_at_raw(fd,&name,false,error); assert(posix(error, EBADF));
     assert(jet_fd_readlink_at_raw(fd,&name,&byte,1,error)==-1 && posix(error, EBADF));
-    jet_fd_link_at_raw(fd,fd,&name,error); assert(posix(error, EBADF));
     jet_fd_rename_at_raw(fd,&name,fd,&name,0,error); assert(posix(error, EBADF));
     jet_fd_close_raw(fd,error,&z); assert(success(error) && !z); // idempotent
 }
@@ -170,7 +168,7 @@ int main(void) {
     FD *duplicate=jet_fd_dup_raw(reader,error); assert(duplicate && duplicate!=reader && success(error));
     jet_fd_drop_raw(duplicate);
     FD *directory=jet_fd_open_raw(&d,PF_READ|PF_DIRECTORY,0,error); assert(directory && success(error));
-    Text member=text("file"), hard=text("hard"), dir=text("dir"), renamed=text("renamed");
+    Text member=text("file"), dir=text("dir"), renamed=text("renamed");
     FD *at=jet_fd_open_at_raw(directory,&member,PF_READ|PF_NOFOLLOW,0,error); assert(at && success(error)); jet_fd_drop_raw(at);
     jet_fd_stat_at_raw(directory,&member,facts,error); assert(success(error));
     assert((uint64_t)facts[1]==expected.st_ino && facts[7]==5);
@@ -178,16 +176,6 @@ int main(void) {
     jet_fd_stat_at_raw(directory,&empty,facts,error); assert(success(error) && (facts[2]&S_IFMT)==S_IFDIR);
     jet_fd_stat_at_raw(directory,&absent,facts,error); assert(posix(error,ENOENT));
     assert(jet_fd_directory_raw(directory,bytes,sizeof bytes,error)>0 && success(error));
-    // Compare the exact held-inode syscall, not a broad allowed-error set.
-    // link(2): no CAP_DAC_READ_SEARCH => ENOENT. The Rust original does not try
-    // /proc/self/fd + AT_SYMLINK_FOLLOW, so the native leaf must not either.
-    int reference_link=linkat((int)jet_fd_number_raw(reader),"",
-                             (int)jet_fd_number_raw(directory),"hard",AT_EMPTY_PATH);
-    int link_errno=errno;
-    if (!reference_link) assert(!unlinkat((int)jet_fd_number_raw(directory),"hard",0));
-    jet_fd_link_at_raw(reader,directory,&hard,error);
-    assert(reference_link ? posix(error,link_errno) : success(error));
-    if (!reference_link) { jet_fd_unlink_at_raw(directory,&hard,false,error); assert(success(error)); }
     jet_fd_mkdir_at_raw(directory,&dir,0700,error); assert(success(error));
     jet_fd_rename_at_raw(directory,&dir,directory,&renamed,1,error); assert(success(error));
     jet_fd_unlink_at_raw(directory,&renamed,true,error); assert(success(error));
