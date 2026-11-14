@@ -52,7 +52,9 @@ web_timing_memory: fn(op: Int) -> Bool Never! {
 // public address (a Load's, Store's or StreamStore's `a`, a CopyBytes' `a`
 // and `b`), or lies in code a public slot alone decides. The code is
 // decoded with its call indices patched (to 0): an unpatched index's
-// padding bytes are no instructions.
+// padding bytes are no instructions. A direct tail call (`return_call`) is
+// decoded as the `call` it starts with: its callee is checked on its own,
+// and the return it stands for decides nothing.
 web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, marks: [Int], decided: [Int]) Never! {
     fixed: ir_timing_fixed(f)
     reads := [Int]{}
@@ -67,7 +69,11 @@ web_timing_check: fn(st: &WebState, m: IRModule, f: IRFunction, body: WebBody, m
     ops: WasmOpTable.new()
     // copy: the reader owns the bytes it decodes; the body keeps its own.
     bytes := body.code.copy()
-    loop pair in 0..<(body.fixups.len() /% 2) -> web_patch_padded(bytes, body.fixups[2 * pair], 0)
+    loop pair in 0..<(body.fixups.len() /% 2) {
+        at: body.fixups[2 * pair]
+        if at > 0 && bytes[at - 1] == 0x12 -> bytes[at - 1] = U8{0x10}
+        web_patch_padded(bytes, at, 0)
+    }
     reader := WasmReader.new(bytes.move())
     code: wasm_decode_body(reader, ops, true) ?? {
         st.errors.push("{f.name}: fixed timing: its code does not decode: {err.render()}")
@@ -161,6 +167,12 @@ web_timing_test_errors: fn(op: IROp, code: [U8], fixups: [Int], checks: [Int], s
 #Test("A call's unpatched index is decoded as its index, not as unreachable padding") {
     // local.get 0, call (padded index), drop
     code: [U8]{0x20, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a}
+    assert_eq(web_timing_test_errors(IROp.BitXor, code, [Int]{3}, [Int]{}, false).len(), 0)
+}
+
+#Test("A direct tail call passes the wasm32 validator as the call it starts with") {
+    // local.get 0, return_call (padded index)
+    code: [U8]{0x20, 0x00, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00}
     assert_eq(web_timing_test_errors(IROp.BitXor, code, [Int]{3}, [Int]{}, false).len(), 0)
 }
 
