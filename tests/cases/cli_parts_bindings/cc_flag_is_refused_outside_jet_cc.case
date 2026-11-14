@@ -1,0 +1,16 @@
+# `-o` and `-c` belong to `jet cc` and `jet c++`. `jet build` refuses them
+# through the canonical flag refusal (E2102, exit 2) before it reads the
+# words after them, so `-o x` is never taken for a file and a dropped `x`.
+fixture: fixtures/unknown_flag
+env: NO_COLOR=1
+step: jet build -o x jet_cli_ok2.jet
+exit: 2
+stdout: = ""
+stderr: = cc-flag-build.stderr
+step: jet run -c jet_cli_ok2.jet
+exit: 2
+stdout: = ""
+stderr: ~ "Error [jet.UnknownFlag]: `-c` is only valid with `jet cc` or `jet c++`" # the same refusal on run
+step: jet run -A jet_cli_ok2.jet
+exit: 0
+stderr: !~ "UnknownFlag" # a short form still goes wherever its long flag goes

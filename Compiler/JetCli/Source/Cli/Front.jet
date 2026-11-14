@@ -600,9 +600,10 @@ jet_cli_positionals: fn(jet_argv: [String]) -> [String] Never! {
 }
 
 // `check_flags`: the first flag no registry row has teaches E2102, a `--flag`
-// and a single-dash word alike, and so does the first registered `--flag`
-// whose registry row scopes it to other commands. The word after a
-// separate-value flag is its value, never a flag.
+// and a single-dash word alike, and so does the first registered flag whose
+// own registry row scopes it to other commands (`--canvas` is dev's, `-o`
+// cc's). A short form (`-A`, `-O1`) goes wherever jet accepts it. The word
+// after a separate-value flag is its value, never a flag.
 jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
     external_fmt := false
     if command == "fmt" {
@@ -621,8 +622,12 @@ jet_cli_check_flags: fn(jet_argv: [String], command: String, color: Bool) -> Jet
         head: argument.split("=").to_list()[0]
         if jet_cli_is_help_flag(head) -> next
         if !argument.starts_with("--") {
-            if jet_cli_is_known_flag(head) -> next
-            return Val(jet_cli_unknown_flag(head, command, color))
+            if !jet_cli_is_known_flag(head) -> return Val(jet_cli_unknown_flag(head, command, color))
+            if jet_cli_flag_spec(head) == .Val(spec) {
+                takers: jet_cli_flag_commands(spec.help) ?? next
+                if !jet_cli_flag_takes(spec, command) -> return Val(jet_cli_misplaced_flag(head, command, takers, color))
+            }
+            next
         }
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
         if jet_cli_flag_spec(head) == .Val(spec) {
