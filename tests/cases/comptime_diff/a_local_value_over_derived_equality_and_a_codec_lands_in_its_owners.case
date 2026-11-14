@@ -10,7 +10,11 @@
 # body, so it lands before the finalization's Core demand
 # (JetDriver BodyComptime.jet jet_driver_land_local_values), and the demand
 # then checks the Core bodies the pass's closure names, as the full recheck
-# does. Whether `text` is computed while compiling is
+# does. The Core bodies that demand reaches have local values of their own
+# (the trace's `s, hex, digits` pass); those land only after the demand, and
+# their pass may fall back to the full recheck (landing Core sites before
+# the demand is #6759 phase 2). Whether `text` is computed while
+# compiling is
 # a_local_value_over_derived_equality_and_a_codec_is_computed_while_compiling.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -23,5 +27,6 @@ stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
 step: jet run --trace main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
-stderr: !~ "# sema.local_values_refused" # the pass lands before the Core demand, so a closure that names Core bodies no longer sends it back to the full recheck
+stderr: ~ "# sema.local_values_spliced = " # `text` lands in `run` before the Core demand
+stderr: !~ "> comptime.body.recheck text" # the program's pass does not fall back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
