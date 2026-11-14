@@ -5001,6 +5001,21 @@ CollectionChangedWhileRead: struct {
     }
 }
 
+MapLiteralDuplicateKey: struct {
+    key: String
+
+    impl Diagnostic {
+        code: "E0508"
+        safety_class: .Opinion
+        safety_reason: "The literal would keep the later value and run safely, and Jet refuses the repeat so no entry is silently lost."
+        meaning: "A map literal writes one key twice"
+        detail: true
+        what: fn(self) -> String { "This map literal writes the key `{self.key}` twice" }
+        why: fn(self) -> String { "A map holds one value per key, so one of the two values would be lost without a word." }
+        fix: fn(self) -> String { "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`." }
+    }
+}
+
 DeferLeavesItsBlock: struct {
     word: String
 

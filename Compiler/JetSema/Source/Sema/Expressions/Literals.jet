@@ -5,6 +5,7 @@ use jet_foundation.[
     Call,
     CallArg,
     Diagnostic,
+    DiagnosticLabel,
     Expr,
     ExprMember,
     ExprPair,
@@ -17,6 +18,7 @@ use jet_foundation.[
     StrPart,
     SymbolKind,
     TBinaryOp,
+    TComptimeValue,
     TGenericParam,
     TIndexProof,
     TupleField,
@@ -638,6 +640,8 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
     lowered := [TMapEntry]{}
     inferred_key := Type?{None}
     inferred_value := Type?{None}
+    written := [String:Int]{}
+    position := 0
     loop entry in entries {
         key: if expected_key != None -> sema_check_expression(entry.key, expected_key, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(entry.key, None, environment, program, scopes, state, tail_store, context, diagnostics)
         value: if expected_value != None -> sema_check_expression(entry.value, expected_value, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(entry.value, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -668,7 +672,14 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
                 return None
             }
         }
+        if sema_map_written_key(checked_key, context) == .Val(same) {
+            if written.get(same) == {
+                .Val(first) -> diagnostics.push(sema_map_duplicate_key(entries[first].key, entry.key, same))
+                .None -> written[same] = position
+            }
+        }
         lowered.push(TMapEntry{key: checked_key, value: checked_value})
+        position += 1
     }
     if result_ty == None -> result_ty = Val(Type.Map{key: inferred_key ?? Type.Int, key_span: Val(expr_span(entries[0].key)), value: inferred_value ?? Type.Int})
     ty: result_ty ?? Type.Map{key: Type.Int, key_span: None, value: Type.Int}
@@ -679,6 +690,105 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
 // reference's declared-type and map-literal sites print it.
 sema_map_key_error: fn(what: String, span: Span) -> Diagnostic {
     sema_error("E0502", span, what, "map keys must be Int, String, Bool, Char, U8/IntN, a payload-free enum, or a tuple/struct whose fields recursively follow these rules; Float, views, Shared, functions, lists, maps, sets, and payload-carrying enums are not key-eligible", "use an eligible scalar, enum, tuple, or struct key; remove non-key fields or store the value separately")
+}
+
+// A map literal key written out in the source, as text two keys of one
+// literal share exactly when they are equal: an integer, text, Bool or Char
+// literal, a payload-free enum case, or a constant (equal to itself). Any
+// other key is computed, and building the literal checks it (JetIR
+// ir_map_literal).
+sema_map_written_key: fn(key: TExpr, context: SemaCheckContext) -> String? Never! {
+    if key.kind == .IntLit(value, _) -> return Val("{value}")
+    if key.kind == .CtLit(value) -> return sema_map_written_value(value)
+    if key.kind == .EnumLit(_, variant, payload) {
+        if payload == .Unit -> return Val(".{variant}")
+        return None
+    }
+    if key.kind == .StrLit(parts) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Literal(piece) -> text = "{text}{piece}"
+                .Interpolation(_, _) -> return None
+            }
+        }
+        return Val("\"{text}\"")
+    }
+    if key.kind == .Flat(index) -> return sema_map_written_node(context.arena.tree.nodes[index - context.arena.tree.node_base].kind)
+    None
+}
+
+sema_map_written_node: fn(node: NodeKind) -> String? Never! {
+    if node == .IntLit(value, _) -> return Val("{value}")
+    if node == .BoolLit(value) -> return Val("{value}")
+    if node == .CharLit(value) -> return Val("char {value}")
+    if node == .CtLit(value) -> return sema_map_written_value(value)
+    if node == .ConstRef(symbol) -> return Val("constant {symbol.id}")
+    if node == .EnumLit(_, variant, payload) {
+        if payload == .Unit -> return Val(".{variant}")
+        return None
+    }
+    if node == .StrLit(parts) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Literal(piece) -> text = "{text}{piece}"
+                .Interpolation(_, _) -> return None
+            }
+        }
+        return Val("\"{text}\"")
+    }
+    None
+}
+
+sema_map_written_value: fn(value: TComptimeValue) -> String? Never! {
+    if value == .Int(number) -> return Val("{number}")
+    if value == .BigInt(decimal) -> return Val(decimal)
+    if value == .Bool(flag) -> return Val("{flag}")
+    if value == .Char(code) -> return Val("char {code}")
+    if value == .String(text) -> return Val("\"{text}\"")
+    if value == .Enum(_, variant, args) {
+        if args.len() == 0 -> return Val(".{variant}")
+    }
+    None
+}
+
+// E0508: entry `second` of a map literal writes the key entry `first` wrote.
+sema_map_duplicate_key: fn(first: Expr, second: Expr, same: String) -> Diagnostic {
+    written: sema_map_key_text(second)
+    key: if written == "" -> same else -> written
+    diagnostic := sema_error("E0508", expr_span(second), "This map literal writes the key `{key}` twice", "A map holds one value per key, so one of the two values would be lost without a word.", "Delete one of the two entries; to replace a value on purpose, assign it after the literal, as in `stats[\"level\"] = 99`.")
+    diagnostic.labels.push(DiagnosticLabel{span: expr_span(first), message: "first written here"})
+    diagnostic
+}
+
+// A key as the source writes it, or "" for a form it doesn't spell back.
+sema_map_key_text: fn(key: Expr) -> String Never! {
+    if key == .Paren(value, _, _) -> return sema_map_key_text(value)
+    if key == .Int(value, _, _, raw, _) -> return raw ?? "{value}"
+    if key == .Bool(value, _, _) -> return "{value}"
+    if key == .Char(value, _, _) -> return "'{value}'"
+    if key == .Ident(name, _, _) -> return name
+    if key == .EnumLit(owner, variant, _, _, leading_dot, _, _) {
+        if leading_dot -> return ".{variant}"
+        return "{owner}.{variant}"
+    }
+    if key == .Field(base, member, _, _) {
+        owner: sema_map_key_text(base)
+        if owner == "" -> return ""
+        return "{owner}.{member}"
+    }
+    if key == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(piece) -> text = "{text}{piece}"
+                .Interp(_, _) | .Byte(_) -> return ""
+            }
+        }
+        return "\"{text}\""
+    }
+    ""
 }
 
 sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

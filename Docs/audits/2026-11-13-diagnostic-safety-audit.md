@@ -957,6 +957,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E0505 | InvalidIndexType | soundness | An index or key of the wrong type names no position or entry in the collection. |
 | E0506 | UnhashableSetElement | soundness | A set finds its elements by hash and equality, so a type without them gives the set no way to tell elements apart. |
 | E0507 | CollectionChangedWhileRead | soundness | Changing the collection while the loop reads it can move or free the elements the loop is visiting. |
+| E0508 | MapLiteralDuplicateKey | opinion | The literal would keep the later value and run safely, and Jet refuses the repeat so no entry is silently lost. |
 | E0509 | DeferLeavesItsBlock | soundness | A `defer` body runs after its block's exit was chosen, so a second exit from it would give one block two exits. |
 | E0510 | CryptoExpertNotAllowed | soundness | The raw crypto primitives skip the checks that keep keys and nonces from being reused or leaked. |
 | E0511 | ExpiringForce | opinion | Reading the cached value past its expiry would run safely, and Jet refuses it so a stale value is never read as fresh. |

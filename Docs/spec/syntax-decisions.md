@@ -1859,6 +1859,13 @@ parse error (E0003), no special-cased teaching text.
 **D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)* amends this:
 `[T]{}` and `[K:V]{}` are the explicit empty forms that name the collection type on the
 value; bare `[]` keeps working wherever context already supplies the type.
+**D-MAPLIT-DUP1=A** *(ratified)*: a map literal never loses an entry. Two
+written-out keys that are equal (literals, payload-free enum cases, or one
+constant) are E0508 at the second entry, with a note at the first. Computed
+keys that collide stop the program on every tier and in `#run`, naming the
+key and both entries; the check is the slot lookup the insertion already
+does. To replace a value on purpose, assign after the literal:
+`stats["level"] = 99`.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
 
