@@ -88,6 +88,18 @@ datetime_refusal: fn(text: String) -> String {
     assert_eq(built.text(), "<p>&lt;b&gt;</p>")
 }
 
+#Test("HTML escapes a hole in an attribute value apart from one in text") {
+    hole: HTML.encode_hole("say \"hi\" 'x'")
+    assert_eq(hole, "say \"hi\" 'x'")
+    quoted: HTML.build([String]{"<a title=\"", "\">", "</a>"}, [String]{hole, hole})
+    assert_eq(quoted.text(), "<a title=\"say &quot;hi&quot; &#x27;x&#x27;\">say \"hi\" 'x'</a>")
+    unquoted: HTML.build([String]{"<a data-x=", ">", "</a>"}, [String]{"a=b c", "a=b c"})
+    assert_eq(unquoted.text(), "<a data-x=a&#61;b&#32;c>a=b c</a>")
+    // An HTML hole among a tag's attributes stays markup.
+    flag: HTML.build([String]{"<a", ">x</a>"}, [String]{HTML.encode_hole(HTML.raw(" aria-current=\"page\""))})
+    assert_eq(flag.text(), "<a aria-current=\"page\">x</a>")
+}
+
 #Test("DateTime accepts one RFC 3339 instant and refuses interpolation") {
     assert_eq(datetime_refusal("2024-02-29T13:04:05Z"), "")
     assert_eq(datetime_refusal("2024-02-29T{{}}:04:05Z"), "a `DateTime` literal cannot contain interpolation")

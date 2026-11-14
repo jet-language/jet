@@ -86,7 +86,11 @@ vocabulary](vocabulary.md).
 - `SQL{"…"}`, `HTML{"…"}`, and `Sh{"…"}` use the checked interpolation
   engine. In `Sh`, literal words become argv items and each hole becomes one
   argv item; no word splitting, glob expansion, or shell parsing is applied to
-  a hole. Converting a runtime `String` to checked text is E0149; the audited
+  a hole. In `HTML`, a hole typed `HTML` composes as markup, and any other
+  hole is escaped for where it sits: in text `&`, `<` and `>`; inside an
+  attribute value its quotes as well, and inside an unquoted value its
+  whitespace, `=` and backtick too. Converting a runtime `String` to checked
+  text is E0149; the audited
   `Sh.raw(text)` operation is the escape hatch. A bare string never silently
   changes into one of these types (D-TYPEDTEXT1/2, D-FFI-SH1,
   D-UNIFYLIT1=A). Jet has no string prefixes: a name written against quoted
