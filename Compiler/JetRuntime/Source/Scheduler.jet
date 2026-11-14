@@ -17,21 +17,52 @@ SCHEDULER_SCOPE_INHERITED_STOP: I64{8}
 SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN: I64{16}
 SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
-// Nonzero once any task's stop poll may have something to deliver that no
+// Nonzero while any task's stop poll may have something to deliver that no
 // call of its own published: a stop published to another task's control, an
-// interrupt, a cancel, a strong pause or a turn request. A program's loops
-// read it (as the runtime object's data symbol jet_rt_checks_armed, JetIR
-// X64Select.jet ir_x64_stop_point; on the web, at the address the runtime
-// partition's receipt names, JetWeb Select.jet web_stop_point) before a stop
-// poll that checks no call, and enter the poll's routine only once it is
-// set. It is never cleared, so from then on those polls test the task
-// control and the turn word as every other poll does.
+// interrupt, a cancel, a strong pause, a deadline or a turn request. A
+// program's loops read it (as the runtime object's data symbol
+// jet_rt_checks_armed, JetIR X64Select.jet ir_x64_stop_point; on the web, at
+// the address the runtime partition's receipt names, JetWeb Select.jet
+// web_stop_point) before a stop poll that checks no call, and enter the
+// poll's routine only while it is set; that routine tests the task control
+// and the turn word as every other poll does. A program that asks for none
+// of these runs its loops unarmed.
 scheduler_checks_armed := I64{0}
 
+// Nonzero once a request other than a turn armed the polls (stops, cancels,
+// pauses, deadlines: scheduler_checks_arm). Those stay pending on a task's
+// own control, which no other task can see, so they keep the polls armed for
+// good. Turn requests alone are the monitor's, which settles the word once
+// no work waits (scheduler_checks_settle).
+scheduler_checks_held := I64{0}
+
 scheduler_checks_arm: fn() {
+    #Unsafe("idempotent flags: every writer stores the same 1, the held one first") {
+        scheduler_checks_held = I64{1}
+        scheduler_checks_armed = I64{1}
+    }
+}
+
+// The monitor asked a busy fiber for its turn (scheduler_monitor_scan): its
+// loops must enter the poll's routine to give the carrier up.
+scheduler_checks_arm_turns: fn() {
     #Unsafe("an idempotent flag: every writer stores the same 1") {
         scheduler_checks_armed = I64{1}
     }
+}
+
+// The monitor found no work waiting for a carrier: a turn it asked for
+// earlier would give the carrier to nobody, so unless another request holds
+// the polls armed, the loops run unarmed again. The locked add on `root`'s
+// monitor word orders the cleared word before the held flag's read, so an
+// arm racing the clear has either been seen here or stores its 1 after it.
+scheduler_checks_settle: fn(root: I64) {
+    if (scheduler_checks_held != I64{0} || scheduler_checks_armed == I64{0}) -> return
+    #Unsafe("the monitor is the only thread that clears the flag; an arm it races restores it") {
+        scheduler_checks_armed = I64{0}
+    }
+    _ := sync_add(wrapping(root + I64{216}), I64{0})
+    if (scheduler_checks_held != I64{0}) -> scheduler_checks_arm()
 }
 
 // A control's attention word (+24): what its stop polls take beyond a
@@ -1358,7 +1389,7 @@ scheduler_monitor_scan: fn(root: I64, buffer: I64, turns: Bool) -> I64 {
             if (same && cpu >= I64{0} && seen >= I64{0} && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) -> blocked += I64{1}
             fiber: sync_load(wrapping(record + I64{64}))
             if (turns && same && fiber != I64{0}) {
-                scheduler_checks_arm()
+                scheduler_checks_arm_turns()
                 sync_store(wrapping(sync_load(wrapping(fiber + I64{24})) + SCHEDULER_TCB_TURN), I64{1})
             }
         }
@@ -1398,9 +1429,9 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
 
 // The monitor thread (Scheduler232). Asleep until armed; then each tick,
 // while it has carriers to watch, it recounts the blocked ones, asks busy
-// fibers for their turns while work waits, starts carriers into the room
-// the blocked ones leave and wakes idle carriers past it, which retire. It
-// leaves on shutdown's stop.
+// fibers for their turns while work waits (and settles the loops' armed word
+// once none does), starts carriers into the room the blocked ones leave and
+// wakes idle carriers past it, which retire. It leaves on shutdown's stop.
 #Export(c) jet_rt_scheduler_monitor: fn(root: I64) -> I64 {
     armed: wrapping(root + I64{216})
     buffer: jet_rt_alloc(SCHEDULER_STAT_BYTES, I64{8})
@@ -1413,13 +1444,16 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
         }
         if !scheduler_monitor_needed(root) {
             sync_store(wrapping(root + I64{208}), I64{0})
+            scheduler_checks_settle(root)
             sync_store(armed, I64{0})
             sync_thread_unlock(root)
             _ := sync_futex_wait(armed, I64{0}, I64{-1})
             next
         }
         sync_store(armed, I64{1})
-        sync_store(wrapping(root + I64{208}), scheduler_monitor_scan(root, buffer, scheduler_work_waits(root)))
+        waits: scheduler_work_waits(root)
+        sync_store(wrapping(root + I64{208}), scheduler_monitor_scan(root, buffer, waits))
+        if !waits -> scheduler_checks_settle(root)
         starts: scheduler_monitor_starts(root)
         wakes := I64{0}
         if scheduler_carrier_excess(root) {
