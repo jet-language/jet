@@ -4,7 +4,7 @@
   "cells": ["time.script", "time.notebook"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "python", "rust", "node", "go", "lua", "luajit"],
+  "languages": ["jet", "python", "rust", "node", "go", "lua", "luajit", "c", "zig"],
   "spec": {
     "behavior": "Read named meetings with RFC3339 timestamps carrying explicit numeric offsets, normalize them to UTC, sort by UTC instant, print each meeting's UTC RFC3339 form, UTC weekday, and minute gap from its predecessor, then print total span and meeting count.",
     "args": ["meetings.txt"],
@@ -40,7 +40,9 @@
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node Date rail for offset normalization, UTC weekday output, and deterministic gaps."},
     "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only: time.Parse with time.RFC3339, UTC normalization, and Format for the UTC form and weekday; sort.Slice orders by instant then name."},
     "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Lua's os.time and os.date read local time, so the RFC 3339 timestamp and its numeric offset are normalized through the civil-date day count and formatted back from it; the weekday comes from the same day number."},
-    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: timegm normalizes the offsets, gmtime_r/strftime print the UTC stamp and weekday, and qsort with a file-order tiebreak keeps equal instants in file order."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std has no calendar API, so, like the Rust rail, it hand-parses RFC3339 and does civil-date arithmetic (days_from_civil); std.sort.insertion keeps equal instants in file order."}
   },
   "rewrite_provenance": {
     "worker": "ScriptAPI",

@@ -4,11 +4,13 @@
   "cells": ["webfront.app"],
   "mode": "web-app",
   "perf": false,
-  "languages": ["jet", "js", "node", "go", "rust", "python", "lua", "luajit"],
+  "languages": ["jet", "js", "node", "go", "rust", "python", "lua", "luajit", "c", "zig"],
   "build": {
     "jet": ["build", "--target=web", "--release", "run.jet"],
     "go": ["sh", "-c", "cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" . && env GOOS=js GOARCH=wasm GO111MODULE=off GOCACHE=\"$PWD/go-cache\" go build -o main.wasm main.go"],
-    "rust": ["rustc", "--target", "wasm32-unknown-unknown", "-O", "--crate-type", "cdylib", "main.rs", "-o", "main.wasm"]
+    "rust": ["rustc", "--target", "wasm32-unknown-unknown", "-O", "--crate-type", "cdylib", "main.rs", "-o", "main.wasm"],
+    "c": ["sh", "-c", "NIX_HARDENING_ENABLE= clang --target=wasm32 -nostdlib -Os -c main.c -o main.o && wasm-ld --no-entry -o main.wasm main.o"],
+    "zig": ["zig", "build-exe", "-target", "wasm32-freestanding", "-fno-entry", "-rdynamic", "-O", "ReleaseSmall", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "-femit-bin=main.wasm", "main.zig"]
   },
   "spec": {
     "behavior": "Mount a long-lived DOM counter with a count display initially showing `count: 0`, an increment button, and a reset button. Replay three increment clicks, read the display, click reset, and read the display again.",
@@ -105,6 +107,20 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "Runs lua/main.lua."
+    },
+    "c": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Freestanding C to wasm32, no libc and no library. The module owns the counter and renders `count: <n>` into linear memory. runner.mjs mounts the display and buttons through the JS peer's `fixtures/domshim.mjs` and binds the clicks to the exports, the JS glue any C-to-Wasm page needs for the DOM. Built like web-widget's C rail: clang --target=wasm32 with NIX_HARDENING_ENABLE cleared, then wasm-ld."
+    },
+    "zig": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Freestanding Zig to wasm32 with std.fmt.bufPrint for the label, no other library. The module owns the counter and renders `count: <n>` into linear memory. runner.mjs (shared with the C rail) mounts the DOM through the JS peer's `fixtures/domshim.mjs` and binds the clicks to the exports."
     }
   },
   "rewrite_provenance": {

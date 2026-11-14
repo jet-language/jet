@@ -4,14 +4,16 @@
   "cells": ["webfront.widget"],
   "mode": "web",
   "perf": false,
-  "languages": ["jet", "js", "rust", "node", "go", "python", "lua", "luajit"],
+  "languages": ["jet", "js", "rust", "node", "go", "python", "lua", "luajit", "c", "zig"],
   "build": {
     "jet": ["build", "--target=web", "--release", "run.jet"],
     "rust": ["rustc", "--target", "wasm32-unknown-unknown", "-O", "--crate-type", "cdylib", "main.rs", "-o", "main.wasm"],
-    "go": ["sh", "-c", "cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" . && env GOOS=js GOARCH=wasm GO111MODULE=off GOCACHE=\"$PWD/go-cache\" go build -o main.wasm main.go"]
+    "go": ["sh", "-c", "cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" . && env GOOS=js GOARCH=wasm GO111MODULE=off GOCACHE=\"$PWD/go-cache\" go build -o main.wasm main.go"],
+    "c": ["sh", "-c", "NIX_HARDENING_ENABLE= clang --target=wasm32 -nostdlib -Os -c main.c -o main.o && wasm-ld --no-entry -o main.wasm main.o"],
+    "zig": ["zig", "build-exe", "-target", "wasm32-freestanding", "-fno-entry", "-rdynamic", "-O", "ReleaseSmall", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "-femit-bin=main.wasm", "main.zig"]
   },
   "spec": {
-    "behavior": "Compute the first 12 triangular numbers and print each as `t<i> <value>` on its own line, followed by `sum <total>`. Jet, Rust, and Go compute the series in Wasm; JavaScript runs the equivalent kernel directly.",
+    "behavior": "Compute the first 12 triangular numbers and print each as `t<i> <value>` on its own line, followed by `sum <total>`. Jet, Rust, Go, C, and Zig compute the series in Wasm; JavaScript runs the equivalent kernel directly.",
     "args": [],
     "fixtureGen": null,
     "expected": "expected.out",
@@ -36,7 +38,9 @@
     "js": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": ""},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "`wasm32-unknown-unknown` target available; bare rustc cdylib build passes."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Mirrors the JavaScript triangular-number kernel and output contract."},
-    "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "GOOS=js GOARCH=wasm with a //go:wasmexport triangular kernel; main parks so runner.mjs (Go's own wasm_exec.js, copied from GOROOT by the build) calls the export like the Rust rail."}
+    "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "GOOS=js GOARCH=wasm with a //go:wasmexport triangular kernel; main parks so runner.mjs (Go's own wasm_exec.js, copied from GOROOT by the build) calls the export like the Rust rail."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": ["clang (nix cc-wrapper): unsupported option '-fzero-call-used-regs=used-gpr' for target 'wasm32'", "wasm-ld: unknown argument: -dynamic-linker"], "notes": "Freestanding C, no libc and no library: clang --target=wasm32 compiles the exported kernel and wasm-ld links it directly. NIX_HARDENING_ENABLE is cleared because the nix cc-wrapper adds native hardening flags; the link skips the wrapper because it adds the native dynamic linker. runner.mjs is the Rust peer's runner."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Freestanding Zig, no library: wasm32-freestanding with -fno-entry and -rdynamic exports the kernel. runner.mjs is the Rust peer's runner."}
   },
   "rewrite_provenance": {
     "worker": "CorpusWebWidget",

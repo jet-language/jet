@@ -72,7 +72,7 @@ const COMPARISON_METRICS = [
   "tokens",
   "source_tokens",
 ];
-const WEB_WASM_LANGUAGES = new Set(["jet", "rust", "go"]);
+const WEB_WASM_LANGUAGES = new Set(["jet", "rust", "go", "c", "zig"]);
 const WEB_ARTIFACT_ASSET_PATTERN = /\.(?:js|mjs|wasm)$/i;
 const TIMER_SCHEMA = "jet.gauntlet.timer.v2";
 const MODE_PRIMARY_METRIC = {
