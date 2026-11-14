@@ -1,0 +1,32 @@
+// Only A-Z and a-z change; every other byte stays where it was.
+only_letters_moved: fn(before: String, after: String, upper: Bool) -> Bool {
+    a: before.bytes()
+    b: after.bytes()
+    if a.len() != b.len() -> return false
+    loop index in 0..<a.len() {
+        n: Int{a[index]}
+        m: Int{b[index]}
+        expected := n
+        if upper && n >= 97 && n <= 122 -> expected = n - 32
+        if !upper && n >= 65 && n <= 90 -> expected = n + 32
+        if m != expected -> return false
+    }
+    true
+}
+
+run: fn() {
+    samples: [String]{
+        "Hello, World! 0123456789",
+        "@AZ[`az{{ ~",
+        "ÄÖÜ äöü ß ẞ",
+        "İstanbul ıi KELVIN K",
+        "ǅungla Σίσυφος ς",
+        "𝐀𝐁 é É ﬀ",
+        "",
+    }
+    loop text in samples {
+        lower: text.to_ascii_lower()
+        upper: text.to_ascii_upper()
+        print("{lower} | {upper} | {only_letters_moved(text, lower, false)} {only_letters_moved(text, upper, true)} {lower.len() == text.len()} {upper.len() == text.len()}")
+    }
+}
