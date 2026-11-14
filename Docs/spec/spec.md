@@ -5588,7 +5588,11 @@ together with `debug_info: false` is refused with E2104. The stock `full` under
 `panic`, a failed `assert` or `assert_eq`, a bounds or arithmetic stop)
 follows the same rule: `brief` prints its stopping frame (location, source
 line and locals), and `off` prints none of it, only the stop line and its Why,
-Fix and More.
+Fix and More. A stop raised inside Core names the user's code, not a Core
+line. Its location is the innermost calling frame outside Core, the user's
+call that reached it, with no source line. The Core site is printed only when
+the image has no location table to find that frame in. Example:
+[`Examples/Math/IntPowNegativeStop`](../../Examples/Math/IntPowNegativeStop.jet).
 
 `dead_code` (stock `remove`) says whether the image keeps functions the entry
 never reaches. `remove` builds only the reached ones, and for `jet build`,

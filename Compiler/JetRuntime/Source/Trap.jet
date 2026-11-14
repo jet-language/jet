@@ -225,9 +225,13 @@ trap_header_bytes: fn(code: I64) {
 }
 
 // A stop's frame: its `-->` location, source line and caret. `backtrace:
-// off` prints none (fault_frames_off).
+// off` prints none (fault_frames_off). A site in Core is not a line the user
+// wrote. Its location is the user's call that reached it
+// (trap_user_location), with no source line or caret. The Core site
+// stays only when the calling chain names no other frame.
 trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
     if fault_frames_off() -> return
+    if trap_core_site(file, file_len) && trap_user_location(function_len != I64{0}) -> return
     if (file_len != I64{0}) {
         trap_msg_location()
         trap_write(file, file_len)
@@ -275,6 +279,58 @@ trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_le
         spaces += I64{1}
     }
     trap_msg_newline()
+}
+
+// Whether `file` names a Core source, which starts `<corelib>/`.
+trap_core_site: fn(file: I64, file_len: I64) -> Bool {
+    prefix: rt_static_text("<corelib>/")
+    length: rt_text_len(prefix)
+    file_len >= length && rt_text_equal_bytes(file, rt_text_data(prefix), length)
+}
+
+// The `-->` line of a stop raised in Core: the innermost frame of the
+// calling chain (Fault.jet trace_text, one `function\tfile\tline\n` line per
+// frame) whose file is not Core's. It includes that frame's function when
+// the stop names one. Returns false and writes nothing when no frame
+// qualifies: every frame is Core's, or the image keeps no location table.
+trap_user_location: fn(with_function: Bool) -> Bool {
+    frames: trace_text()
+    if (frames == I64{0}) -> return false
+    data: rt_text_data(frames)
+    length: rt_text_len(frames)
+    at := I64{0}
+    found := false
+    loop !found && at < length {
+        end := rt_text_find_byte(data, length, I64{10}, at, false)
+        if (end < I64{0}) -> end = length
+        name_end: rt_text_find_byte(data, end, I64{9}, at, false)
+        file_end: if (name_end < I64{0}) -> I64{-1} else -> rt_text_find_byte(data, end, I64{9}, wrapping(name_end + I64{1}), false)
+        if (file_end > wrapping(name_end + I64{1})) {
+            file: wrapping(data + wrapping(name_end + I64{1}))
+            file_len: wrapping(file_end - wrapping(name_end + I64{1}))
+            if !trap_core_site(file, file_len) {
+                line := I64{0}
+                digit := wrapping(file_end + I64{1})
+                loop digit < end {
+                    line = wrapping(wrapping(line * I64{10}) + wrapping(rt_text_byte(wrapping(data + digit)) - I64{48}))
+                    digit = wrapping(digit + I64{1})
+                }
+                trap_msg_location()
+                trap_write(file, file_len)
+                trap_msg_colon()
+                trap_number(trap_line(line))
+                if (with_function && name_end > at) {
+                    trap_msg_in_function()
+                    trap_write(wrapping(data + at), wrapping(name_end - at))
+                }
+                trap_msg_newline()
+                found = true
+            }
+        }
+        at = wrapping(end + I64{1})
+    }
+    jet_rt_string_drop(frames)
+    found
 }
 
 trap_footer: fn(code: I64) {

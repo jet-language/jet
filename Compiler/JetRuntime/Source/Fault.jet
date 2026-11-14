@@ -166,14 +166,20 @@ fault_raise: fn(signal: I64) {
 // an image without a table. A function the table holds with no row for the
 // address gets line 0. As in the report's walk, it stops after 4096 frames
 // or at a link that doesn't ascend by less than 16 MiB.
-#Export(c) jet_rt_context_trace: fn() -> I64 {
+#Export(c) jet_rt_context_trace: fn() -> I64 { trace_text() }
+
+// The calling chain's frame lines, innermost first, as
+// jet_rt_context_trace returns them. A stop raised in Core reads it too
+// (Trap.jet trap_user_location). Its own frame and every runtime frame on
+// the way add no line, because the table doesn't hold them.
+trace_text: fn() -> I64 {
     text: rt_text_builder_with_capacity(I64{0})
     if (text == I64{0}) -> return I64{0}
     // The frame walk needs rbp, which no admitted asm leaf reads. As
     // alloc_check_start does, this maps the four-byte stub `mov rax, rbp;
     // ret`. os_call_address_i64 is an inline leaf, so the stub returns this
-    // function's frame pointer, and that frame's return address is in the
-    // reading function.
+    // function's frame pointer, and that frame's return address is in its
+    // caller.
     stub: alloc_map_try(I64{4096})
     if (stub == I64{0}) -> return text
     frame := I64{0}
