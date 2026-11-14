@@ -1204,7 +1204,7 @@ median_of: fn(values: [Float]) -> Dyn {
 percentile_of: fn(values: [Float], quantile: Float) -> Dyn {
     numbers: sorted_numbers(values)
     if numbers.len() == 0 -> return Dyn.Null
-    rank: Int.from_float(math.ceil(quantile * Float.from_int(numbers.len()))) ?? 0
+    rank: checked(Int{math.ceil(quantile * Float.from_int(numbers.len()))}) ?? 0
     index: if rank - 1 < 0 -> 0 else -> rank - 1
     Dyn.Float(numbers[if index > numbers.len() - 1 -> numbers.len() - 1 else -> index])
 }

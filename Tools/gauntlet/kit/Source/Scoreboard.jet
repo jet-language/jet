@@ -254,8 +254,12 @@ entry_record: fn(result: Dyn, matrix: Dyn, owners: Dyn, tower: TowerState) -> Dy
     loop item in metrics {
         verdict: text_at(metric_verdicts, item) ?? ""
         if verdict == "win" || verdict == "not_applicable" -> next
-        wanted: item.copy()
-        peer_failures := applicable.flat_map(fn(peer) { items_at(peer, "metric_failures").filter(fn(failure) { text_at(failure, "metric") == Val(wanted.copy()) }) })
+        peer_failures := [Dyn]{}
+        loop peer in applicable {
+            loop failure in items_at(peer, "metric_failures") {
+                if text_at(failure, "metric") == Val(item.copy()) -> peer_failures.push(failure.copy())
+            }
+        }
         if item == "runtime_wall_seconds" && run_reference == .Val(reference) && text_at(reference, "verdict") != Val("win") {
             failure := Dyn.object()
             failure["metric"] = item
