@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `C
     |
   2 | run: fn() { facts.lock() }
     |                   ^^^^
- Why: Ordinary fallible calls propagate automatically; `CompilerPackageError` can reach `Err` only through `impl CompilerPackageError -> Err`
- Fix: Handle this call locally with `??`, add `impl CompilerPackageError -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CompilerPackageError` can reach `Err` only through `impl Err.From(CompilerPackageError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(CompilerPackageError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402

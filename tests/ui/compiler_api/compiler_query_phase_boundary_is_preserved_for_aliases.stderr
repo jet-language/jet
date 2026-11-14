@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `C
     |
   2 | run: fn() { compiler.lex(`run: fn() {}`) }
     |                      ^^^
- Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl CompilerError -> Err`
- Fix: Handle this call locally with `??`, add `impl CompilerError -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl Err.From(CompilerError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(CompilerError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402
