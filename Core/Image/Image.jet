@@ -22,6 +22,10 @@ use core: core
 // YCbCr converts to RGB with libjpeg's fixed-point arithmetic, so every tier
 // writes the same bytes. Progressive, lossless, arithmetic-coded, 12-bit,
 // CMYK and multi-scan frames are `ImageError.Unsupported`.
+//
+// PNG encodes here: 8-bit RGB when every pixel is opaque, else RGBA, each
+// row under the filter whose bytes sum smallest as signed values, in one
+// zlib stream deflated by core.archive, every chunk with its CRC-32.
 
 #Error
 ImageError: enum {
@@ -105,6 +109,22 @@ decode: fn(data: [U8], limits: Limits) -> Image ImageError! {
             frame: jpeg_frame(data, limits) ?? return Err(err)
             jpeg_decode(data, frame, limits)
         }
+        .GIF -> Err(.Unsupported)
+    }
+}
+
+// `image` encoded as `format`. The pixel bytes are the input: they count
+// against the input budget and the image against the pixel budget, and the
+// bytes written against the output budget. An image whose pixels are not
+// `width * height * 4` bytes is `Malformed`.
+encode: fn(image: Image, format: ImageFormat, limits: Limits) -> [U8] ImageError! {
+    if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
+    if image.width < 1 || image.height < 1 -> return Err(.Malformed)
+    if image.width > limits.max_pixels /% image.height || image.width * image.height > limits.max_input_bytes /% 4 -> return Err(.TooLarge)
+    if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
+    if format == {
+        .PNG -> png_encode(image, limits)
+        .JPEG -> Err(.Unsupported)
         .GIF -> Err(.Unsupported)
     }
 }
@@ -329,6 +349,85 @@ put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
 
 png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
     (red << 24) + (green << 16) + (blue << 8) + alpha
+}
+
+push_be32: fn(out: &[U8], value: Int) {
+    loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift).bit_and(255)})
+}
+
+// Appends a chunk: its length, its type and body, and their CRC-32.
+png_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
+    push_be32(out, body.len())
+    typed := [U8]{}
+    push_be32(typed, kind)
+    loop byte in body -> typed.push(byte)
+    checksum: core.archive.crc32(typed)
+    loop byte in typed -> out.push(byte)
+    push_be32(out, checksum)
+}
+
+// The byte at `at` of a scanline under PNG filter `filter`, given the
+// unfiltered scanline above (empty for the first).
+png_filtered: fn(line: [U8], previous: [U8], at: Int, channels: Int, filter: Int) -> Int {
+    left: if at >= channels -> byte_at(line, at - channels) else -> 0
+    up: if previous.len() > 0 -> byte_at(previous, at) else -> 0
+    corner: if at >= channels && previous.len() > 0 -> byte_at(previous, at - channels) else -> 0
+    predicted: if filter == {
+        0 -> 0
+        1 -> left
+        2 -> up
+        3 -> (left + up) >> 1
+        else -> paeth(left, up, corner)
+    }
+    (byte_at(line, at) - predicted).bit_and(255)
+}
+
+// A PNG of `image`, which `encode` has checked.
+png_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
+    channels := 3
+    at := 3
+    loop at < image.pixels.len() {
+        if byte_at(image.pixels, at) != 255 {
+            channels = 4
+            break
+        }
+        at += 4
+    }
+    raw := [U8]{}
+    previous := [U8]{}
+    loop y in 0..<image.height {
+        line := [U8]{}
+        loop x in 0..<image.width {
+            loop channel in 0..<channels -> line.push(image.pixels[(y * image.width + x) * 4 + channel])
+        }
+        best := 0
+        best_cost := -1
+        loop filter in 0..<5 {
+            cost := 0
+            loop index in 0..<line.len() {
+                value: png_filtered(line, previous, index, channels, filter)
+                cost += if value < 128 -> value else -> 256 - value
+            }
+            if best_cost < 0 || cost < best_cost {
+                best = filter
+                best_cost = cost
+            }
+        }
+        raw.push(U8{best})
+        loop index in 0..<line.len() -> raw.push(U8{png_filtered(line, previous, index, channels, best)})
+        previous = line
+    }
+    stream: core.archive.compress(raw) ?? return Err(.TooLarge)
+    header := [U8]{}
+    push_be32(header, image.width)
+    push_be32(header, image.height)
+    loop value in ([Int]{8, if channels == 4 -> 6 else -> 2, 0, 0, 0}) -> header.push(U8{value})
+    out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
+    png_chunk(out, C_PNG_IHDR, header)
+    png_chunk(out, C_PNG_IDAT, stream)
+    png_chunk(out, C_PNG_IEND, [U8]{})
+    if out.len() > limits.max_output_bytes -> return Err(.TooLarge)
+    Ok(out)
 }
 
 // Whether tRNS's 16-bit key word at `index` equals the full sample value.
@@ -894,17 +993,6 @@ jpeg_sample: fn(planes: JPEGPlanes, frame: JPEGFrame, component: Int, x: Int, y:
 
 C_TEST_LIMITS: Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 256}
 
-push_be32: fn(out: &[U8], value: Int) {
-    loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift).bit_and(255)})
-}
-
-push_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
-    push_be32(out, body.len())
-    push_be32(out, kind)
-    loop byte in body -> out.push(byte)
-    push_be32(out, 0)
-}
-
 // A PNG of one zlib stream of already filtered scanlines.
 png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
     out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
@@ -912,11 +1000,11 @@ png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: I
     push_be32(header, width)
     push_be32(header, height)
     loop value in ([Int]{depth, color_type, 0, 0, interlace}) -> header.push(U8{value})
-    push_chunk(out, C_PNG_IHDR, header)
-    if palette.len() > 0 -> push_chunk(out, C_PNG_PLTE, palette)
-    if key.len() > 0 -> push_chunk(out, C_PNG_TRNS, key)
-    push_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
-    push_chunk(out, C_PNG_IEND, [U8]{})
+    png_chunk(out, C_PNG_IHDR, header)
+    if palette.len() > 0 -> png_chunk(out, C_PNG_PLTE, palette)
+    if key.len() > 0 -> png_chunk(out, C_PNG_TRNS, key)
+    png_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
+    png_chunk(out, C_PNG_IEND, [U8]{})
     out
 }
 
@@ -1361,4 +1449,45 @@ word_hash: fn(words: [Int]) -> Int {
     assert_eq(word_hash(jpeg_words(C_TEST_JPEG_420)), 988099183)
     assert_eq(word_hash(jpeg_words(C_TEST_JPEG_444_RESTART)), 403664533)
     assert_eq(word_hash(jpeg_words(C_TEST_JPEG_GRAY)), 458349796)
+}
+
+// A `width` x `height` image whose bytes run 0, 37, 74, ... mod 256, with
+// alpha `alpha` (or the running byte when `alpha` is negative).
+test_image: fn(width: Int, height: Int, alpha: Int) -> Image {
+    pixels := [U8]{}
+    loop index in 0..<(width * height * 4) {
+        running: (index * 37) % 256
+        pixels.push(U8{if index % 4 == 3 && alpha >= 0 -> alpha else -> running})
+    }
+    Image{width: width, height: height, pixels: pixels}
+}
+
+encode_error: fn(image: Image, format: ImageFormat, limits: Limits) -> ImageError {
+    if encode(image, format, limits) == {
+        .Ok(_) -> panic("encoded")
+        .Err(error) -> error
+    }
+}
+
+#Test("png encode round-trips through decode") {
+    loop alpha in ([Int]{255, -1}) {
+        original: test_image(5, 3, alpha)
+        bytes: encode(original, .PNG, C_TEST_LIMITS) ?? panic("encode: {err:Debug}")
+        info: inspect(bytes, C_TEST_LIMITS) ?? panic("inspect: {err:Debug}")
+        assert(info.format == .PNG && info.color == (if alpha < 0 -> ImageColor.RGBA else -> ImageColor.RGB))
+        assert_eq(decoded_words(bytes), image_words(original))
+        // Every chunk carries its CRC-32; IEND's is fixed.
+        tail: bytes.len() - 4
+        assert_eq(be32(bytes, tail), 0xAE426082)
+    }
+}
+
+#Test("png encode refuses bad images and budgets") {
+    short: Image{width: 2, height: 2, pixels: [U8]{1, 2, 3}}
+    assert(encode_error(short, .PNG, C_TEST_LIMITS) == .Malformed)
+    assert(encode_error(Image{width: 0, height: 2, pixels: [U8]{}}, .PNG, C_TEST_LIMITS) == .Malformed)
+    // 9 x 8 is 72 pixels, above the 64 the limits allow.
+    assert(encode_error(test_image(9, 8, 255), .PNG, C_TEST_LIMITS) == .TooLarge)
+    assert(encode_error(test_image(5, 3, 255), .PNG, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 20}) == .TooLarge)
+    assert(encode_error(test_image(5, 3, 255), .GIF, C_TEST_LIMITS) == .Unsupported)
 }

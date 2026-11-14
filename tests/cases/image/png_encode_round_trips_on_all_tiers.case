@@ -1,0 +1,13 @@
+# core.image encodes PNG that decodes back to the same pixels, RGB when opaque and RGBA otherwise, and refuses output over its budget, under jet run and a built binary.
+fixture: png_encode_round_trips_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = png_encode_round_trips_on_all_tiers.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = png_encode_round_trips_on_all_tiers.out
+stdout: == default # the built binary agrees with jet run

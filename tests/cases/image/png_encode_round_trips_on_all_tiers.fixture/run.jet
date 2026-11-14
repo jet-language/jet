@@ -1,0 +1,36 @@
+// A decoded JPEG and a translucent gradient encode to PNG, decode back to
+// the same pixels, and name the color type the encoder picked.
+use {
+    files: core.files
+    image: core.image
+}
+
+gradient: fn() -> image.Image {
+    pixels := [U8]{}
+    loop y in 0..<6 {
+        loop x in 0..<7 {
+            loop value in ([Int]{x * 36, y * 40, (x * y * 7) % 256, 40 + x * 30}) -> pixels.push(U8{value})
+        }
+    }
+    image.Image{width: 7, height: 6, pixels: pixels}
+}
+
+round_trip: fn(name: String, original: image.Image, limits: image.Limits) {
+    bytes: image.encode(original, .PNG, limits) ?? panic("encode {name}")
+    files.write_bytes(name, bytes) ?? panic("write {name}")
+    written: files.read_bytes(name) ?? panic("read {name}")
+    info: image.inspect(written, limits) ?? panic("inspect {name}")
+    back: image.decode(written, limits) ?? panic("decode {name}")
+    print("{name} {info.format:Debug} {info.color:Debug} {back.width}x{back.height} same pixels: {back.pixels == original.pixels}")
+}
+
+run: fn() {
+    limits: image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 400000}
+    photo: files.read_bytes("photo.jpg") ?? panic("read photo.jpg")
+    round_trip("photo.png", image.decode(photo, limits) ?? panic("decode photo.jpg"), limits)
+    round_trip("gradient.png", gradient(), limits)
+    if image.encode(gradient(), .PNG, image.Limits{max_input_bytes: 100000, max_pixels: 100000, max_output_bytes: 20}) == {
+        .Ok(_) -> { print("over budget: encoded") }
+        .Err(error) -> { print("over budget: {error:Debug}") }
+    }
+}
