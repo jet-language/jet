@@ -1,0 +1,27 @@
+# Claim (#6328 c22 r9d): Core functions a `#run` reaches give the same value against the precompiled Core record as against Core checked from source, at O0, O1 and O2.
+# `#run view()` runs Core's generic sort with a user closure whose failure crosses the Core body, Core's tally and a String method while compiling; the program prints that value, then what `view()` gives at run time.
+# The `source` steps read Core from the toolchain tree, so the comptime check reads every Core function's source; the `record` steps run without one, so a comptime check of a taken Core function reads its checked packet from the record (CheckProgram.jet sema_comptime_packet_result).
+# JET_PHASE_COUNTERS prints the finalization counters: only the record steps take Core bodies (`core_taken`).
+fixture: core_record_and_core_source_run_the_same_comptime/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PHASE_COUNTERS=1
+step source_o0: jet run --optimize=none --trace=source_o0.json run.jet
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # stderr holds every phase counter; source Core takes no record body
+step record_o0: jet run --optimize=none --trace=record_o0.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # stderr holds every phase counter; the record's Core bodies are taken
+step record_o1: jet run --optimize=basic --trace=record_o1.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # stderr holds every phase counter; the record's Core bodies are taken
+step record_o2: jet run --optimize=full --trace=record_o2.json run.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout: = "abc after cab|ezd after ez, E_POINT:negative z|core|3|2\nabc after cab|ezd after ez, E_POINT:negative z|core|3|2\n"
+stderr: !~ "JET_PHASE_COUNTERS {\"phase\":\"sema\",\"core_taken\":0}" # stderr holds every phase counter; the record's Core bodies are taken

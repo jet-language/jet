@@ -24,7 +24,7 @@
 // taken body names is read when it is first named and mapped into the
 // graph's table (sema_core_body_rebase_tree), and no other row is read.
 use {
-    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclRow, DeclTable, FnBody, ModuleID, NameTable, NodeKind, RecordReader, RecordTreeView, Span, SymbolID, SymbolTable, body_tree_pack, body_tree_unpack, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, name_find, name_index, name_intern, name_table, record_tree_row, symbol_find, symbol_table_key]
+    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclRow, DeclTable, FnBody, ModuleID, NameTable, NodeKind, RecordReader, RecordTreeView, Span, SymbolID, SymbolTable, body_tree_pack, body_tree_unpack, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, module_text, name_find, name_index, name_intern, name_table, record_tree_row, symbol_find, symbol_table_key]
 }
 
 // `moved` split into one packet per body of `bodies` (the module's checked
@@ -372,6 +372,24 @@ sema_core_body_packet_stored: fn(moved: &&SemaComptimeFunctionResult) -> SemaCom
 // DeclIDs rebased into `table`. Each declaration row it names that no taken
 // body named before is read here, and no other row.
 sema_core_body_read: fn(store: &SemaCoreBodyStore, table: &DeclTable, element: Int) -> SemaComptimeFunctionResult Err! {
+    packet := sema_core_body_unpacked(store, element) ?? return Err(err)
+    held := packet.function.move()
+    packet.function = None
+    function := held.move() ?? return Err("its packet holds no body")
+    loop row in sema_core_body_tree_decl_rows(function.tree) {
+        if store.rebase.decls.get(row) != None -> next
+        decl := sema_core_body_decl_row(store, row) ?? return Err(err)
+        _: sema_core_body_rebase_row(store.rebase, table, row, decl) ?? return Err(err)
+    }
+    _: sema_core_body_rebase_tree(store.rebase, function.tree) ?? return Err(err)
+    decl_table_index(table)
+    packet.function = Val(function.move())
+    Ok(packet)
+}
+
+// The packet of element `element` as it was before it was stored, its
+// DeclIDs still the record's (sema_core_body_packet_stored undone).
+sema_core_body_unpacked: fn(store: SemaCoreBodyStore, element: Int) -> SemaComptimeFunctionResult Err! {
     read: record_tree_row(store.reader, store.tree, store.section, element)
     value: read.value ?? return Err(read.problem ?? "the record has no element {element} in section {store.section}")
     packet := value.decode<SemaComptimeFunctionResult>() ?? return Err("it doesn't decode: {sema_core_record_field_errors(err)}")
@@ -387,18 +405,91 @@ sema_core_body_read: fn(store: &SemaCoreBodyStore, table: &DeclTable, element: I
         packet.name_references[index].body = packet.function_key.copy()
     }
     loop index in 0..<packet.call_facts.len() -> packet.call_facts[index].caller_key = packet.function_key.copy()
-    loop row in sema_core_body_tree_decl_rows(function.tree) {
-        if store.rebase.decls.get(row) != None -> next
-        if row < 0 || row >= store.rebase.count -> return Err("a Core body names declaration row {row}, but the record has {store.rebase.count} rows")
-        stored: record_tree_row(store.reader, store.tree, store.decl_section, row)
-        stored_value: stored.value ?? return Err(stored.problem ?? "the record has no declaration row {row}")
-        decl := stored_value.decode<DeclRow>() ?? return Err("the Core record's declaration row {row} doesn't decode: {sema_core_record_field_errors(err)}")
-        _: sema_core_body_rebase_row(store.rebase, table, row, decl) ?? return Err(err)
-    }
-    _: sema_core_body_rebase_tree(store.rebase, function.tree) ?? return Err(err)
-    decl_table_index(table)
     packet.function = Val(function.move())
     Ok(packet)
+}
+
+// The record's declaration row `row`, read from its section.
+sema_core_body_decl_row: fn(store: SemaCoreBodyStore, row: Int) -> DeclRow Err! {
+    if row < 0 || row >= store.rebase.count -> return Err("a Core body names declaration row {row}, but the record has {store.rebase.count} rows")
+    stored: record_tree_row(store.reader, store.tree, store.decl_section, row)
+    stored_value: stored.value ?? return Err(stored.problem ?? "the record has no declaration row {row}")
+    decl: stored_value.decode<DeclRow>() ?? return Err("the Core record's declaration row {row} doesn't decode: {sema_core_record_field_errors(err)}")
+    Ok(decl)
+}
+
+// A taken Core function's packet, and the packets of the Prelude error
+// conversions its propagation sites name, read for a comptime check of it
+// (sema_check_comptime_function).
+SemaCoreComptimePackets: struct {
+    // None when a check of the function's source serves it.
+    packet: SemaComptimeFunctionResult?
+    // In the order the body names them (sema_prelude_conversion_demands).
+    conversions: [SemaComptimeFunctionResult]
+}
+
+// One taken body read for a comptime check (sema_core_body_view).
+SemaCoreBodyView: struct {
+    // None when the store holds no packet of it, or its body names a
+    // declaration the graph's table doesn't hold.
+    packet: SemaComptimeFunctionResult?
+}
+
+// The packets of the function `function_key` of the taken module
+// `module_identity` (SemaCoreComptimePackets). A comptime check only reads
+// the graph, so each DeclID the bodies name is found among the graph's
+// registered callables, where finalization maps it into the graph's table
+// (sema_core_body_read). No packet when the graph took none of the
+// function, or when a body names a declaration the graph hasn't registered
+// (a generated codec or derived method, registered at finalization), which a
+// check of the source serves. A packet that doesn't read is an Err.
+sema_core_body_comptime_packets: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, function_key: String) -> SemaCoreComptimePackets Err! {
+    unserved := SemaCoreComptimePackets{packet: None, conversions: [SemaComptimeFunctionResult]{}}
+    if graph.core_bodies == .Val(store) {
+        viewed := sema_core_body_view(store, graph.decls, graph.symbols, function_key) ?? return Err(err)
+        held := viewed.packet.move()
+        found := held.move() ?? return Ok(unserved)
+        if found.module_identity != module_identity -> return Err("the Core record keys `{function_key}` to a module other than `{module_text(graph.module_table, module_identity)}`")
+        // The demand walk reads a list of bodies: the body moves into a
+        // one-row list and back.
+        body := found.function.move()
+        found.function = None
+        bodies := [FnBody]{body.move() ?? return Err("the Core record's body `{function_key}` holds no body")}
+        demands: sema_prelude_conversion_demands(module_text(graph.module_table, module_identity), bodies, [Int:[SemaPreludeConversionDemand]]{})
+        found.function = bodies.pop()
+        conversions := [SemaComptimeFunctionResult]{}
+        loop demand in demands {
+            // A routine's own propagation sites convert through itself.
+            if demand.key == function_key -> next
+            conversion := sema_core_body_view(store, graph.decls, graph.symbols, demand.key) ?? return Err(err)
+            routine := conversion.packet.move()
+            conversions.push(routine.move() ?? return Ok(unserved))
+        }
+        return Ok(SemaCoreComptimePackets{packet: Val(found.move()), conversions: conversions.move()})
+    }
+    Ok(unserved)
+}
+
+// The packet of the function `key` with its DeclIDs found in `table`
+// (sema_core_body_comptime_packets).
+sema_core_body_view: fn(store: SemaCoreBodyStore, table: DeclTable, symbols: SymbolTable, key: String) -> SemaCoreBodyView Err! {
+    id: symbol_find(symbols, key) ?? return Ok(SemaCoreBodyView{packet: None})
+    stored: store.rows.get(id.id) ?? return Ok(SemaCoreBodyView{packet: None})
+    packet := sema_core_body_unpacked(store, stored.element) ?? return Err("the Core record's body `{key}` can't be read: {err}")
+    if packet.function_key != key -> return Err("the Core record's body `{key}` holds `{packet.function_key}`")
+    held := packet.function.move()
+    packet.function = None
+    function := held.move() ?? return Err("the Core record's body `{key}` holds no body")
+    rebase := sema_core_decl_rebase_new(store.rebase.count)
+    loop row in sema_core_body_tree_decl_rows(function.tree) {
+        if rebase.decls.get(row) != None -> next
+        decl: sema_core_body_decl_row(store, row) ?? return Err("the Core record's body `{key}` can't be read: {err}")
+        mapped: decl_table_find(table, decl.key) ?? return Ok(SemaCoreBodyView{packet: None})
+        rebase.decls[row] = mapped
+    }
+    _: sema_core_body_rebase_tree(rebase, function.tree) ?? return Err("the Core record's body `{key}` can't be read: {err}")
+    packet.function = Val(function.move())
+    Ok(SemaCoreBodyView{packet: Val(packet.move())})
 }
 
 // A decode's field errors, one `path: reason` each.

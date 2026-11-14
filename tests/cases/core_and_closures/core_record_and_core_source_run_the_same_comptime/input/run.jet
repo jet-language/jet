@@ -1,0 +1,48 @@
+// Core bodies run while compiling: `#run view()` reaches Core's generic sort
+// with a user closure whose failure crosses the Core body, Core's tally and a
+// String method, and gives what `view()` gives at run time.
+Point: struct {
+    x: Int
+    name: String
+}
+
+point_key: fn(p: Point, seen: &String) -> Int Err! {
+    seen += p.name
+    if p.x < 0 { return Err("negative {p.name}", code: "E_POINT") }
+    return p.x
+}
+
+names: fn(points: [Point]) -> String Never! {
+    out := ""
+    loop p in points -> out += p.name
+    out
+}
+
+unit: fn() {}
+
+view: fn() -> String {
+    points := [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
+    seen := ""
+    points.sort_by(fn(p: Point) { point_key(p, seen) }) ?? {
+        seen += "!{err.code}"
+        unit()
+    }
+    stopped := [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
+    tried := ""
+    failure := ""
+    stopped.sort_by(fn(p: Point) { point_key(p, tried) }) ?? {
+        failure = "{err.code}:{err.message}"
+        unit()
+    }
+    tally := Tally<String>.new()
+    loop p in stopped -> tally.add(p.name)
+    tally.add("e")
+    return "{names(points)} after {seen}|{names(stopped)} after {tried}, {failure}|{"  core  ".trim()}|{tally.len()}|{tally.count("e")}"
+}
+
+EXPECTED: #run view()
+
+run: fn() {
+    print("{EXPECTED}")
+    print("{view()}")
+}

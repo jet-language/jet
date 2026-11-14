@@ -3133,6 +3133,14 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         unresolved.complete = true
         return unresolved
     }
+    // A taken Core module's function is served from the Core record: its
+    // packet holds the body and facts the record's check of Core gave it,
+    // which checking its source here gives again.
+    served := sema_core_body_comptime_packets(graph, module_identity, function_key) ?? {
+        unresolved.incomplete_reasons = [String]{"{err}"}
+        return unresolved
+    }
+    if served.packet != None -> return sema_comptime_packet_result(environment, program, available, values, served)
     // Any function a compile-time body reaches runs while building; the
     // native run's effect gate (E3401) rejects an effectful call. No
     // `#run fn` or `pure` marker is required.
@@ -3288,6 +3296,45 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         derive_demand: demand.derived.move(),
         conversions: conversions,
     }
+}
+
+// The comptime check result of a taken Core function from its record
+// packets (sema_core_body_comptime_packets): the packet's body and facts,
+// complete and clean as the record holds only a clean check, with the
+// constants it waits on and the functions it reaches derived from its facts
+// as sema_check_comptime_function derives them, its conversions' calls
+// included. A taken body's codec and derive demand names Core types, whose
+// generated bodies the taken modules hold already, so it records none, as
+// a body taken at finalization records none.
+sema_comptime_packet_result: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, available: SemaComptimeAvailableConstants, values: [SemaComptimeItemValue], served: &&SemaCoreComptimePackets) -> SemaComptimeFunctionResult {
+    owned := served.move()
+    held := owned.packet.move()
+    result := held.move() ?? panic("a served Core packet was lost")
+    reachable := sema_comptime_environment_reachable_function_keys(environment, program, result.call_facts)
+    loop conversion in owned.conversions {
+        loop key in sema_comptime_environment_reachable_function_keys(environment, program, conversion.call_facts) {
+            if !reachable.contains(key) -> reachable.push(key)
+        }
+    }
+    conversions := [FnBody]{}
+    loop owned.conversions.len() > 0 {
+        conversion := owned.conversions.pop() ?? break
+        conversions.push(conversion.function.move() ?? panic("a served conversion packet holds no body"))
+    }
+    conversions.reverse()
+    dependencies := sema_comptime_environment_dependencies(environment, program, result.name_references, values) ?? {
+        result.complete = false
+        result.incomplete_reasons.push("the comptime environment carries no registration graph")
+        return result
+    }
+    result.waiting_dependencies = sema_comptime_waiting_dependencies(available, dependencies)
+    if result.waiting_dependencies.len() > 0 -> result.complete = false
+    if result.function == .Val(body) {
+        if program.registration_graph == .Val(resolved_graph) -> sema_comptime_drop_close_keys(resolved_graph, body.tree, result.module_identity, reachable)
+    }
+    result.reachable_function_keys = reachable
+    result.conversions = conversions
+    result
 }
 
 // Read-only graph reads of a comptime function check: the environment is
