@@ -10,7 +10,7 @@
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
 // chosen (`web_reason`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, module_is_core, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, FnBody, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, module_is_core, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -42,7 +42,8 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
         program: graph.modules[registration].program
         is_entry: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
-        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, metas, types)
+        spans: sema_web_rows(modules[module_index].functions)
+        sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, spans, metas, types)
     }
     if metas.len() == 0 -> return
     active: sema_web_partition_active(graph)
@@ -169,31 +170,31 @@ sema_web_methods_marked: fn(methods: [Func]) -> Bool Never! {
     false
 }
 
-sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
+sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
     loop item in items {
         if item == {
-            .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+            .Func(function) -> sema_web_push(function, None, file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
             .Struct(structure) -> {
                 if types.structs.get(structure.name) == None -> types.structs[structure.name] = structure
-                loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+                loop method in structure.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in structure.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+                    loop method in implementation.methods -> sema_web_push(method, Val(structure.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 }
             }
             .Enum(enumeration) -> {
                 if types.enums.get(enumeration.name) == None -> types.enums[enumeration.name] = enumeration
-                loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+                loop method in enumeration.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 loop implementation in enumeration.trait_impls {
-                    loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+                    loop method in implementation.methods -> sema_web_push(method, Val(enumeration.name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
                 }
             }
             .Impl(implementation) -> {
-                loop method in implementation.methods -> sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, modules, metas)
+                loop method in implementation.methods -> sema_web_push(method, Val(implementation.type_name), file_ceiling, module_ceiling, module_prefix, file_prefix, module_index, registration, spans, metas)
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     inner: sema_web_ceiling_or(code_module.web_target, sema_web_ceiling_or(module_ceiling, file_ceiling))
-                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, modules, metas, types)
+                    sema_web_collect(body, file_ceiling, inner, Val(code_module.name), file_prefix, module_index, registration, spans, metas, types)
                 }
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -201,7 +202,45 @@ sema_web_collect: fn(items: [Item], file_ceiling: WebBucket?, module_ceiling: We
     }
 }
 
-sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta]) Never! {
+// A module's checked bodies by source span: each body's span, and the first
+// body of each span start.
+SemaWebRows: struct {
+    spans: [Span]
+    starts: [Int:Int]
+}
+
+sema_web_rows: fn(functions: [FnBody]) -> SemaWebRows Never! {
+    sema_web_rows_of(loop function in functions -> function.source_span)
+}
+
+sema_web_rows_of: fn(spans: &&[Span]) -> SemaWebRows Never! {
+    starts := [Int:Int]{}
+    loop (at, span) in spans {
+        if starts.get(span.start) == None -> starts[span.start] = at
+    }
+    SemaWebRows{spans: spans.move(), starts: starts.move()}
+}
+
+// The first checked body whose source span is `span`, -1 for none.
+sema_web_row: fn(rows: SemaWebRows, span: Span) -> Int Never! {
+    first: rows.starts.get(span.start) ?? return -1
+    // Bodies may share a start but not an end: the first whose span matches.
+    loop at in first..<rows.spans.len() {
+        if rows.spans[at] == span -> return at
+    }
+    -1
+}
+
+#Test("a declaration finds the first checked body with its span") {
+    rows: sema_web_rows_of([Span]{Span{start: 4, end: 9}, Span{start: 12, end: 20}, Span{start: 4, end: 7}, Span{start: 4, end: 7}})
+    assert_eq(sema_web_row(rows, Span{start: 4, end: 9}), 0)
+    assert_eq(sema_web_row(rows, Span{start: 12, end: 20}), 1)
+    assert_eq(sema_web_row(rows, Span{start: 4, end: 7}), 2)
+    assert_eq(sema_web_row(rows, Span{start: 4, end: 8}), -1)
+    assert_eq(sema_web_row(rows, Span{start: 5, end: 9}), -1)
+}
+
+sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, spans: SemaWebRows, metas: &[SemaWebMeta]) Never! {
     name: if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
     key := name
     if module_prefix == .Val(module_name) {
@@ -209,14 +248,7 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
     } else if file_prefix == .Val(alias) {
         key = "{alias}::{name}"
     }
-    row := -1
-    functions: modules[module_index].functions
-    loop at in 0..<functions.len() {
-        if functions[at].source_span == function.span {
-            row = at
-            break
-        }
-    }
+    row: sema_web_row(spans, function.span)
     params := [Type]{}
     loop param in function.params -> params.push(param.ty)
     ceiling: sema_web_ceiling_or(module_ceiling, file_ceiling)
