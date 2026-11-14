@@ -868,6 +868,10 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
         MessageLiteral{name: "list_plural", text: "s"},
         MessageLiteral{name: "list_position", text: ", so position "},
         MessageLiteral{name: "list_end", text: " doesn't exist`\n  --> <core.prelude>:0\n"},
+        // The reason's tail for a list position at the item count or below 0
+        // (JetRuntime trap_list_bounds_reason); the E3010 row keeps its Why/Fix.
+        MessageLiteral{name: "list_count_hint", text: "; positions stop one below the count, and xs.last() reads the last item"},
+        MessageLiteral{name: "list_negative_hint", text: "; positions count up from 0, and xs.get(i) gives None outside the list"},
         // `bounds: report` (JetRuntime jet_rt_report_list_bounds): the failed
         // check's line, then its file and line; the program goes on.
         MessageLiteral{name: "report_list_head", text: "bounds report: the list has "},

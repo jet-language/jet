@@ -478,6 +478,10 @@ trap_native_index_range_root: fn() {
     trap_msg_list_noun(len)
     trap_msg_list_position()
     trap_number(native)
+    if {
+        (native == len) -> trap_msg_list_count_hint()
+        (native < I64{0}) -> trap_msg_list_negative_hint()
+    }
     trap_msg_list_end()
     trap_footer(I64{1})
 }
@@ -493,6 +497,11 @@ trap_list_bounds_reason: fn(len: I64, index: I64) -> I64 {
     rt_text_push_number(message, index)
     rt_text_push_word(message, I64{8369779874393449504}, I64{8})
     rt_text_push_word(message, I64{128039039558944}, I64{6})
+    // A position at the count or below 0 names the read that fits it.
+    if {
+        (index == len) -> trap_build_msg_list_count_hint(message)
+        (index < I64{0}) -> trap_build_msg_list_negative_hint(message)
+    }
     message
 }
 
