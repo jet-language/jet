@@ -1351,9 +1351,12 @@ sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaS
 }
 
 // The indices of the targets among `targets` whose parameters take the
-// probed types of `args`: those that take each type exactly, else those each
-// type is assignable to. Labeled arguments, an argument that does not probe,
-// or no target taking them picks none, leaving every target to the shape check.
+// probed types of `args`: those that take each type exactly, else those
+// whose every other parameter the argument checks under. An argument checked
+// against its parameter is what the call itself does, so a decimal literal
+// (or a binding of one) that meets `Float` adopts it, and meets no `Int`.
+// Labeled arguments, an argument that does not probe, or no target taking
+// them picks none, leaving every target to the shape check.
 sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> [Int] {
     argument_types := [Type]{}
     probe_diagnostics := [Diagnostic]{}
@@ -1375,8 +1378,9 @@ sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: 
                 break
             }
             required: sema_call_resolved_type(declared, environment, program)
-            if required != argument_types[index] -> same = false
-            if sema_call_type_assignable(required, argument_types[index], environment, program) != .Val(true) {
+            if required == argument_types[index] -> next
+            same = false
+            if !sema_call_static_argument_checks_under(args[index].expr, required, environment, program, scopes, state, tail_store, context) {
                 accepts = false
                 break
             }
@@ -1385,6 +1389,15 @@ sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: 
         if accepts && !same -> assignable.push(target_index)
     }
     if exact.len() > 0 -> exact else -> assignable
+}
+
+// Whether `value` checks under the parameter type `required` with no report
+// and a type `required` takes.
+sema_call_static_argument_checks_under: fn(value: Expr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    probe_diagnostics := [Diagnostic]{}
+    probed: sema_probe_expression(value, Val(required.copy()), environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
+    if probe_diagnostics.len() > 0 -> return false
+    sema_call_type_assignable(required, sema_call_resolved_type(probed.ty, environment, program), environment, program) ?? false
 }
 
 // `ExpiringSecret.new` owns only the closed secret family (E0112 at the value)
