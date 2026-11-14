@@ -116,6 +116,20 @@
           fetchPnpmDeps = args: pkgs.fetchPnpmDeps (args // { pnpm = pkgs.pnpm_10; });
         };
 
+        # The gauntlet's Lua and LuaJIT peers use the ecosystem's standard
+        # modules where Lua's standard library stops: LuaSocket (sockets),
+        # LuaFileSystem (directory listing), luaposix (process control), and
+        # lua-cjson (JSON). withPackages wraps each interpreter with LUA_PATH
+        # and LUA_CPATH set and keeps its headers, libraries, and luac.
+        luaPeerModules = modules: [
+          modules.luasocket
+          modules.luafilesystem
+          modules.luaposix
+          modules.lua-cjson
+        ];
+        jetLua = pkgs.lua5_4.withPackages luaPeerModules;
+        jetLuaJIT = pkgs.luajit.withPackages luaPeerModules;
+
         # `jet` / `jetpack` in the dev shell: run the admitted native binaries
         # named by $JET / $JETPACK from anywhere, with the runtime tools on PATH.
         # Without $JET, `jet` runs the installed release that `jet-use` picked.
@@ -178,10 +192,11 @@
             # release admit) counts each compile's instructions:u with
             # `perf stat`.
             pkgs.perf
-            # The run tier's interpreter peers next to python3 and node. luajit
-            # also installs a `lua`; lua5_4 comes first, so `lua` is Lua 5.4.
-            pkgs.lua5_4
-            pkgs.luajit
+            # The run tier's interpreter peers next to python3 and node, with
+            # the gauntlet's Lua modules. luajit also installs a `lua`; Lua 5.4
+            # comes first, so `lua` is Lua 5.4.
+            jetLua
+            jetLuaJIT
             pkgs.nixfmt
             pkgs.ripgrep
             pkgs.jq
@@ -246,11 +261,12 @@
             pkgs.dotnet-sdk_8
             # D-FFI-TCL1=A: provision embeddable Tcl headers, runtime, and shell.
             pkgs.tcl
-            # D-FFI-LUA1=A: provision Lua's in-process VM, headers, and compiler.
-            pkgs.lua5_4
+            # D-FFI-LUA1=A: provision Lua's in-process VM, headers, and compiler
+            # (with the gauntlet's Lua modules, as in the default shell).
+            jetLua
             # The run tier's LuaJIT peer, as in the default shell; after
-            # lua5_4, so `lua` is Lua 5.4.
-            pkgs.luajit
+            # Lua 5.4, so `lua` is Lua 5.4.
+            jetLuaJIT
             pkgs.lld
             # D-FFI-RUBY1=A: provision the supervised Ruby worker and stdlib JSON/Ripper.
             pkgs.ruby
