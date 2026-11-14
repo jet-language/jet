@@ -693,6 +693,13 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             if function.key == demand.key -> present = true
         }
         if present -> next
+        // The module's own conversion of the same pair carries the demanded
+        // key, so it serves the site even where `functions` holds only the
+        // bodies of one check (a compile-time closure's) and not the declared
+        // routine.
+        if sema_scope_resolve_index(scopes, sema_failure_conversion_function_name(demand.source, Type.Named{name: "Err"})) == .Val(index) {
+            if scopes.bindings[index].key == demand.key -> next
+        }
         label: "prelude error conversion `impl Err.From({type_name(demand.source)})`"
         conversion: sema_prelude_error_conversion(demand.source, diagnostics) ?? {
             complete = false
