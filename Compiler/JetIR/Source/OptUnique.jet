@@ -343,12 +343,18 @@ ir_opt_header_store_keeps: fn(m: IRModule, f: IRFunction, facts: OptFacts, at: I
 // function is not its entry, a type's drop or clone routine, or named by any
 // FunctionAddress; and every Call of it passes a header of the parameter's
 // own type row.
-// Returns the calls ir_opt_hoist_unique moved on the way.
+// Returns the calls ir_opt_hoist_unique moved on the way. Each walk over the
+// bodies finds a Call's candidates by its callee (`by_callee`), so the pass
+// costs the module's size, not its size times the candidates.
 ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [String], notes: &[String]) -> Int Never! {
     count: functions.len()
     if m.entry < 0 || m.entry >= count -> return 0
     addressed := [Bool]{}
-    loop _ in 0..<count -> addressed.push(false)
+    unique := [Bool]{}
+    loop _ in 0..<count {
+        addressed.push(false)
+        unique.push(false)
+    }
     addressed[m.entry] = true
     loop ty in m.types {
         drop: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
@@ -356,10 +362,15 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
         clone: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
         if clone >= 0 && clone < count -> addressed[clone] = true
     }
+    // One walk finds the functions a FunctionAddress names and those that
+    // make a parameter unique anywhere.
+    id := 0
     loop f in functions {
         loop at in 0..<f.op.len() {
             if f.op[at] == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> addressed[f.a[at]] = true
+            if !unique[id] && ir_opt_unique_param(f, keys, at) >= 0 -> unique[id] = true
         }
+        id += 1
     }
     // The candidates: callee, parameter, the call's index and its helper.
     hoisted := 0
@@ -367,20 +378,28 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
     params := [Int]{}
     sites := [Int]{}
     helpers := [Int]{}
-    loop id in 0..<count {
-        if addressed[id] || !ir_opt_unique_on_param(functions[id], keys) -> next
-        hoisted += ir_opt_hoist_unique(m, functions[id], keys, notes)
-        ir_opt_entry_uniques(m, functions[id], keys, id, callees, params, sites, helpers)
+    loop row in 0..<count {
+        if addressed[row] || !unique[row] -> next
+        hoisted += ir_opt_hoist_unique(m, functions[row], keys, notes)
+        ir_opt_entry_uniques(m, functions[row], keys, row, callees, params, sites, helpers)
     }
     if callees.len() == 0 -> return hoisted
+    // Each function's candidates, in candidate order.
+    by_callee := [[Int]]{}
+    loop _ in 0..<count -> by_callee.push([Int]{})
+    loop k in 0..<callees.len() -> by_callee[callees[k]].push(k)
     ok := [Bool]{}
     loop _ in callees -> ok.push(true)
+    // Whether each function calls a candidate: only those take uniques.
+    calling := [Bool]{}
     loop g in functions {
+        found := false
         loop at in 0..<g.op.len() {
-            if g.op[at] != .Call -> next
-            loop k in 0..<callees.len() {
-                if callees[k] != g.a[at] || !ok[k] -> next
-                callee: callees[k]
+            callee: g.a[at]
+            if g.op[at] != .Call || callee < 0 || callee >= count -> next
+            loop k in by_callee[callee] {
+                found = true
+                if !ok[k] -> next
                 if g.c[at] != functions[callee].param_count {
                     ok[k] = false
                     next
@@ -389,16 +408,18 @@ ir_opt_unique_to_callers: fn(m: IRModule, functions: &[IRFunction], keys: [Strin
                 if arg < 0 || g.slot_type[arg] != functions[callee].slot_type[params[k]] -> ok[k] = false
             }
         }
+        calling.push(found)
     }
     loop k in 0..<callees.len() {
         if ok[k] -> ir_opt_kill(functions[callees[k]], sites[k])
     }
-    loop id in 0..<count {
+    loop row in 0..<count {
         killed := false
-        loop k in 0..<callees.len() {
-            if ok[k] && callees[k] == id -> killed = true
+        loop k in by_callee[row] {
+            if ok[k] -> killed = true
         }
-        if ir_opt_put_uniques(functions[id], callees, params, helpers, ok) || killed -> ir_opt_compact(functions[id])
+        put: calling[row] && ir_opt_put_uniques(functions[row], by_callee, params, helpers, ok)
+        if put || killed -> ir_opt_compact(functions[row])
     }
     hoisted
 }
@@ -411,14 +432,6 @@ ir_opt_unique_param: fn(f: IRFunction, keys: [String], at: Int) -> Int Never! {
     slot: f.args[f.b[at]]
     if slot < 0 || slot >= f.param_count -> return -1
     slot
-}
-
-// Whether `f` makes a parameter unique anywhere.
-ir_opt_unique_on_param: fn(f: IRFunction, keys: [String]) -> Bool Never! {
-    loop at in 0..<f.op.len() {
-        if ir_opt_unique_param(f, keys, at) >= 0 -> return true
-    }
-    false
 }
 
 // The `#unique<..>` calls on parameters that function `id` (`f`) makes
@@ -457,22 +470,26 @@ ir_opt_param_written: fn(f: IRFunction, param: Int) -> Bool Never! {
 }
 
 // Puts the `#unique<..>` call of each accepted candidate (`ok`) before each
-// Call of its callee in `f`, on that Call's argument. Returns whether any went in.
-ir_opt_put_uniques: fn(f: &IRFunction, callees: [Int], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
+// Call of its callee in `f`, on that Call's argument; `by_callee` holds each
+// function's candidates. Returns whether any went in.
+ir_opt_put_uniques: fn(f: &IRFunction, by_callee: [[Int]], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
+    count: by_callee.len()
     found := false
     loop at in 0..<f.op.len() {
-        if f.op[at] != .Call -> next
-        loop k in 0..<callees.len() {
-            if ok[k] && callees[k] == f.a[at] -> found = true
+        callee: f.a[at]
+        if f.op[at] != .Call || callee < 0 || callee >= count -> next
+        loop k in by_callee[callee] {
+            if ok[k] -> found = true
         }
         if found -> break
     }
     if !found -> return false
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Call {
-            loop k in 0..<callees.len() {
-                if !ok[k] || callees[k] != f.a[at] -> next
+        callee: f.a[at]
+        if f.op[at] == .Call && callee >= 0 && callee < count {
+            loop k in by_callee[callee] {
+                if !ok[k] -> next
                 arg: f.args[f.b[at] + params[k]]
                 start: ir_args(f, [Int]{arg})
                 ir_opt_code_put(code, IROp.Call, -1, helpers[k], start, 1, f.code_line[at])
@@ -559,4 +576,56 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
 #Test("A Loop that hands on the struct or writes the field's header keeps its unique call") {
     assert_eq(ir_opt_unique_field_test(1), "unique fill [I64]: declined (the Loop hands on the list by its call)")
     assert_eq(ir_opt_unique_field_test(2), "unique fill [I64]: declined (the Loop hands on the list by its store)")
+}
+
+// main calls fill(list) twice, then fill(word) `words` times with a word in
+// the list's place; fill's first step makes its `&` list parameter unique
+// (the `#unique<..>` helper, row 1). Returns the unique calls in main and in
+// fill after ir_opt_unique_to_callers.
+ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
+    main := ir_function_new("main", "test:main.jet::main", "", "main.jet", 1)
+    list: ir_slot(main, list_row, IRSlotKind.Temp, -1, 1)
+    loop _ in 0..<2 {
+        list_args: ir_args(main, [Int]{list})
+        _ := ir_emit(main, IROp.Call, -1, 2, list_args, 1, 1)
+    }
+    loop _ in 0..<words {
+        n: ir_slot(main, word, IRSlotKind.Temp, -1, 1)
+        _ := ir_emit(main, IROp.Const, n, 0, -1, -1, 1)
+        word_args: ir_args(main, [Int]{n})
+        _ := ir_emit(main, IROp.Call, -1, 2, word_args, 1, 1)
+    }
+    _ := ir_emit(main, IROp.Return, -1, -1, -1, -1, 1)
+    helper := ir_function_new("#unique", "#unique<Aggregate:24:64:false:[I64]>", "", "", 1)
+    _ := ir_slot(helper, list_row, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
+    _ := ir_emit(helper, IROp.Return, -1, -1, -1, -1, 1)
+    fill := ir_function_new("fill", "test:main.jet::fill", "", "main.jet", 2)
+    xs: ir_slot(fill, list_row, IRSlotKind.Param, ir_intern_name(m, "xs"), 2)
+    unique_args: ir_args(fill, [Int]{xs})
+    _ := ir_emit(fill, IROp.Call, -1, 1, unique_args, 1, 2)
+    _ := ir_emit(fill, IROp.Return, -1, -1, -1, -1, 2)
+    m.entry = 0
+    functions := [IRFunction]{main.move(), helper.move(), fill.move()}
+    loop id in 0..<functions.len() -> ir_opt_compact(functions[id])
+    keys: [String]{"test:main.jet::main", "#unique<Aggregate:24:64:false:[I64]>", "test:main.jet::fill"}
+    notes := [String]{}
+    _ := ir_opt_unique_to_callers(m, functions, keys, notes)
+    counts := [Int]{}
+    rows: [Int]{0, 2}
+    loop id in rows {
+        made := 0
+        loop at in 0..<functions[id].op.len() {
+            if functions[id].op[at] == .Call && functions[id].a[at] == 1 -> made += 1
+        }
+        counts.push(made)
+    }
+    counts
+}
+
+#Test("A list parameter only direct calls reach is made unique at each call") {
+    assert_eq(ir_opt_unique_callers_test(0), [Int]{2, 0})
+    assert_eq(ir_opt_unique_callers_test(1), [Int]{0, 1})
 }
