@@ -572,26 +572,39 @@ sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: Sem
     false
 }
 
-// The declaration scope of one module for compile-time probes (dependency
-// probes, item checks, function checks): sema_registration_apply_graph_module
-// runs once into `table` instead of once per probe, and each probe checks
-// inside a mark and rolls back (sema_comptime_probe_prepare). The probing
-// environment's graph changes only by staged values
-// (sema_comptime_graph_apply_values), which type waiting constants and nothing
-// else, so `constants` names the only bindings a rebuilt table could differ
-// in, and where their graph rows live.
+// The declaration scopes of the modules compile-time probes (dependency
+// probes, item checks, function checks) check in:
+// sema_registration_apply_graph_module runs once into a module's table instead
+// of once per probe, and each probe checks inside a mark and rolls back
+// (sema_comptime_probe_prepare). The probing environment's graph changes only
+// by staged values (sema_comptime_graph_apply_values), which type waiting
+// constants and nothing else, so a slot's `constants` names the only bindings
+// a rebuilt table could differ in, and where their graph rows live.
+// The probe keeps the slots of the last SEMA_COMPTIME_PROBE_SLOTS modules it
+// entered, so a closure walk that moves back and forth between modules builds
+// each one's table once; `slots[current]` is the current module's.
 SemaScopeProbe: struct {
+    slots: [SemaScopeProbeSlot]
+    current: Int{0}
+    // The host callbacks the probe's checks reach (SemaHostHookAccess).
+    host_hooks: SemaHostHookAccess?{None}
+    // How many times the probe entered a slot; a slot's `used` is the count
+    // at its last entry, so a new module replaces the least recent.
+    entries: Int{0}
+}
+
+// One module's probe scope.
+SemaScopeProbeSlot: struct {
     module_identity: ModuleID
     table: SemaScopeTable
     // sema_registration_apply_graph_module's result and its diagnostics.
     applied: Bool
     diagnostics: [Diagnostic]
     constants: [SemaScopeProbeConstant]
-    // The host callbacks the probe's checks reach (SemaHostHookAccess).
-    host_hooks: SemaHostHookAccess?{None}
     // The graph state `constants` were last compared with: the number of
     // staged values applied to the probing graph (-1: none yet).
     version: Int
+    used: Int{0}
 }
 
 // A module-scope binding whose symbol is a constant still waiting for its
