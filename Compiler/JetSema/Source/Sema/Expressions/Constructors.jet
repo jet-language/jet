@@ -883,19 +883,15 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         core_variants := core_enum_payload_variants(resolved_name)
         if core_variants == None -> core_variants = core_enum_variants(resolved_name)
         if core_variants == .Val(variants) {
-            // A source-owned Core enum is named by its dotted path.
-            modules: core_type_modules(resolved_name)
-            display_name: if core_source_owns_type(resolved_name) && modules.len() == 1 -> "{modules[0]}.{core_module_type_leaf(resolved_name)}" else -> resolved_name
-            return sema_expression_core_enum_literal(resolved_name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            // A Core enum is named the way user code writes it, by its type
+            // name (`DataEvent`), never its module path.
+            return sema_expression_core_enum_literal(resolved_name, core_module_type_leaf(resolved_name), variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if owner_symbol == .Val(core_owner) {
         if sema_expression_core_export_variants(environment, program, core_owner) == .Val(variants) {
             context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
-            // A payload diagnostic names a Core enum by its dotted path, such
-            // as `core.term.Color`.
-            display_name: "{sema_scope_module_text(environment, program, core_owner.module_identity).removeprefix("<corelib>/")}.{core_owner.name}"
-            return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            return sema_expression_core_enum_literal(core_owner.name, core_owner.name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if type_name == "" {
@@ -961,9 +957,6 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         return None
     }
     payload := TEnumPayload.Unit
-    // The enum as diagnostics name it: a Core enum by its dotted path, a
-    // program enum by its declared name.
-    payload_owner: if module_is_core(owner.module_identity) -> "{sema_scope_module_text(environment, program, owner.module_identity).removeprefix("<corelib>/")}.{owner.name}" else -> owner.name
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {
@@ -990,13 +983,13 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
             diagnostic_start: diagnostics.len()
             checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
-                sema_expression_enum_payload_replace_mismatch(payload_owner, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
+                sema_expression_enum_payload_replace_mismatch(owner.name, variant, None, payload_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
                 return None
             }
             if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
             compatible: sema_expr_expected_assignable(payload_ty, checked.ty, environment, program) ?? return None
             if !compatible {
-                diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
+                diagnostics.push(sema_expression_enum_payload_mismatch(owner.name, variant, None, payload_ty, checked.ty, expr_span(payload_expr), environment, program))
                 return None
             }
             if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, state, tail_store, context, diagnostics) -> return None
@@ -1047,7 +1040,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                 diagnostic_start: diagnostics.len()
                 checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, scopes, state, tail_store, context, diagnostics)
                 if checked_value == None {
-                    sema_expression_enum_payload_replace_mismatch(payload_owner, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
+                    sema_expression_enum_payload_replace_mismatch(owner.name, variant, Val(label), field_ty, payload_expr, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
                     failed = true
                     next
                 }
@@ -1055,7 +1048,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                 if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, diagnostics, false) -> return None
                 compatible: sema_expr_expected_assignable(field_ty, checked.ty, environment, program) ?? return None
                 if !compatible {
-                    diagnostics.push(sema_expression_enum_payload_mismatch(payload_owner, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
+                    diagnostics.push(sema_expression_enum_payload_mismatch(owner.name, variant, Val(label), field_ty, checked.ty, expr_span(payload_expr), environment, program))
                     failed = true
                     next
                 }
