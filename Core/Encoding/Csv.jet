@@ -96,16 +96,16 @@ decode: fn<T: Decode>(text: String) -> [T] [FieldError]! {
             next
         }
         csv.cursor = TYPED_CSV_RECORD
-        if __Decoding.read<T, TypedCSV>(csv) == {
-            .Ok(value) -> values.push(value)
-            .Err(failures) -> {
-                loop failure in failures {
-                    out := failure
-                    out.path = if out.path == "" -> "row {index}" else if out.path.starts_with("[") -> "row {index}{out.path}" else -> "row {index}.{out.path}"
-                    errors.push(out)
-                }
+        // `??` hands the decoded row over; a match would copy it out.
+        value: __Decoding.read<T, TypedCSV>(csv) ?? {
+            loop failure in err {
+                out := failure
+                out.path = if out.path == "" -> "row {index}" else if out.path.starts_with("[") -> "row {index}{out.path}" else -> "row {index}.{out.path}"
+                errors.push(out)
             }
+            next
         }
+        values.push(value)
     }
     rt.text_cells_leave(previous)
     if csv.failure == .Val(error) -> return Err([FieldError]{FieldError{path: "", reason: error.reason}})

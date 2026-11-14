@@ -279,10 +279,12 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
             values := [Item]{}
             failures := [FieldError]{}
             loop (index, item) in items {
-                if item.decode<Item>() == {
-                    .Ok(value) -> values.push(value)
-                    .Err(errors) -> loop error in errors -> failures.push(decode_under("[{index}]", error))
+                // `??` hands each decoded item over; a match would copy it out.
+                value: item.decode<Item>() ?? {
+                    loop error in err -> failures.push(decode_under("[{index}]", error))
+                    next
                 }
+                values.push(value)
             }
             if failures.len() > 0 -> return Err(failures)
             Ok(values)
@@ -409,11 +411,14 @@ __Decoding: struct {
         failures := [FieldError]{}
         index := 0
         loop reader.next_item() {
-            if __Decoding.read<Item, Source>(reader) == {
-                .Ok(value) -> values.push(value)
-                .Err(errors) -> loop error in errors -> failures.push(decode_under("[{index}]", error))
-            }
+            at: index
             index += 1
+            // `??` hands each read item over; a match would copy it out.
+            value: __Decoding.read<Item, Source>(reader) ?? {
+                loop error in err -> failures.push(decode_under("[{at}]", error))
+                next
+            }
+            values.push(value)
         }
         if failures.len() > 0 -> return Err(failures)
         Ok(values)

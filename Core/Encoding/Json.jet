@@ -1158,16 +1158,16 @@ __decode_typed: fn<Target: Decode>(text: String) -> Target [FieldError]! {
 __decode_typed_from: fn<Target: Decode>(text: String, first_line: Int) -> Target [FieldError]! {
     cursor := Parser.new(text.bytes(), false)
     cursor.typed_numbers = true
-    decoded := Target?{None}
-    failures := [FieldError]{}
-    if __Decoding.read<Target, Parser>(cursor) == {
-        .Ok(value) -> decoded = Val(value)
-        .Err(errors) -> failures = errors
+    // `??` hands the read value over; a match would copy it out. A syntax
+    // error outranks the read's own failures.
+    decoded: __Decoding.read<Target, Parser>(cursor) ?? {
+        cursor.__cursor_finish()
+        if cursor.failure == .Val(error) -> return Err(typed_parse_error(error, first_line))
+        return Err(err)
     }
     cursor.__cursor_finish()
     if cursor.failure == .Val(error) -> return Err(typed_parse_error(error, first_line))
-    value: decoded ?? return Err(failures)
-    Ok(value)
+    Ok(decoded)
 }
 
 typed_parse_error: fn(error: EncodingError, first_line: Int) -> [FieldError] Never! {
@@ -1199,15 +1199,17 @@ __input_json: fn<Row: Decode>(&&lines: Iter<String>) -> [Row] Err! {
         pending += "\n"
         depth += __input_json_depth(line)
         if depth > 0 -> next
-        if __decode_typed_from<Row>(pending, start) == {
-            .Ok(value) -> values.push(value)
-            .Err(errors) -> {
-                loop failure in errors {
-                    at: if failure.path.is_empty() -> "" else if failure.path.starts_with("[") -> failure.path.copy() else -> ".{failure.path}"
-                    failures.push(FieldError{path: "line {start}{at}", reason: failure.reason})
-                }
+        // `??` hands each decoded value over; a match would copy it out.
+        value: __decode_typed_from<Row>(pending, start) ?? {
+            loop failure in err {
+                at: if failure.path.is_empty() -> "" else if failure.path.starts_with("[") -> failure.path.copy() else -> ".{failure.path}"
+                failures.push(FieldError{path: "line {start}{at}", reason: failure.reason})
             }
+            pending = ""
+            depth = 0
+            next
         }
+        values.push(value)
         pending = ""
         depth = 0
     }
