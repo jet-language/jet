@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102171,
+    "rev": 102175,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48905,38 +48905,38 @@
         {
           "n": 1,
           "text": "A golden spawns a task running `loop { n += 1 }`, calls `handle.pause(mode: .CheckLoops)`, observes `paused=true` within a bounded wait, then resumes and cancels it; identical on every execution level.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:57.669Z"
+          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). Case task_control_tiers/pause_holds_a_busy_loop_only_under_check_loops_on_every_tier 1/0 on the gate-p43 jet (O0, O1, O2, AOT and web steps): a task running loop { n += 1 } prints \"pause(mode: .CheckLoops) holds it: true\" within a bounded wait, then resumes and cancels (\"cancel stopped it\"). Golden Concurrency/TaskControls 3/0.",
+          "at": "2026-11-14T04:15:34.700Z"
         },
         {
           "n": 2,
           "text": "The same program with default `pause()` documents that the loop keeps running (wait-point law), with identical output on every level.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:57.669Z"
+          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). The same case prints \"pause() leaves it running: true\" (the wait-point law) on every level; golden Concurrency/TaskControls 3/0 (gate-p43).",
+          "at": "2026-11-14T04:15:36.674Z"
         },
         {
           "n": 3,
           "text": "The back-edge check comes from one shared lowering rule; a test fails if any engine omits it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:57.669Z"
+          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). One lowering rule, JetIR Build.jet ir_loop_check. The case's jet inspect decisions steps (basic and release) count the stop poll in spin, and its web step greps the wasm for the poll routine, so an engine or pass that drops the check fails the case (1/0 on gate-p43).",
+          "at": "2026-11-14T04:15:38.617Z"
         },
         {
           "n": 5,
           "text": "Spec, core-library and examples updated; no second cancellation or scheduling mechanism is added.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-05T21:07:57.669Z"
+          "evidence": "bddd8905d3 (strong pause) with edcd16c03d (batch 39, which moved the case`s counts to jet_ir_stop_turn). Docs/spec/spec.md:3771-3773 and core-library.md:4628 state the strong pause once; Examples/Concurrency/TaskControls.jet uses .CheckLoops; cancellation uses only the existing stop poll, with no second mechanism.",
+          "at": "2026-11-14T04:15:40.111Z"
         }
       ],
       "refs": [
@@ -48962,7 +48962,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:57.670Z",
-      "updated": "2026-11-09T19:40:47.146Z",
+      "updated": "2026-11-14T04:15:40.111Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -204667,6 +204667,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:15:40.111Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1f3xa",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-14T04:15:38.617Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1f3xa",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-14T04:15:36.674Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1f3xa",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T04:15:34.700Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w1f3xa",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T04:08:04.411Z",
       "by": "Main",
