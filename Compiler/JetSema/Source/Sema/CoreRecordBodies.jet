@@ -309,9 +309,11 @@ sema_core_body_take_from: fn(store: &SemaCoreBodyStore, table: &DeclTable, symbo
 }
 
 // `moved` as the record stores it: its body tree packed against the body's
-// source start (body_tree_pack), and each name reference's span written as
-// its start's offset from there and its length; sema_core_body_read undoes
-// both.
+// source start (body_tree_pack), each name reference's span written as its
+// start's offset from there and its length, and the packet's own key left
+// out of its name references' `body` and its call facts' `caller_key`
+// (every one is the packet's, sema_core_body_packets); sema_core_body_read
+// undoes all three.
 sema_core_body_packet_stored: fn(moved: &&SemaComptimeFunctionResult) -> SemaComptimeFunctionResult Err! {
     packet := moved.move()
     held := packet.function.move()
@@ -322,6 +324,12 @@ sema_core_body_packet_stored: fn(moved: &&SemaComptimeFunctionResult) -> SemaCom
     loop index in 0..<packet.name_references.len() {
         span: packet.name_references[index].span
         packet.name_references[index].span = Span{start: span.start - base, end: span.end - span.start}
+        if packet.name_references[index].body != packet.function_key -> return Err("Core function `{packet.function_key}` holds a name reference of `{packet.name_references[index].body}`")
+        packet.name_references[index].body = ""
+    }
+    loop index in 0..<packet.call_facts.len() {
+        if packet.call_facts[index].caller_key != packet.function_key -> return Err("Core function `{packet.function_key}` holds a call fact of `{packet.call_facts[index].caller_key}`")
+        packet.call_facts[index].caller_key = ""
     }
     packet.function = Val(function.move())
     Ok(packet)
@@ -342,7 +350,9 @@ sema_core_body_read: fn(store: &SemaCoreBodyStore, table: &DeclTable, element: I
         span: packet.name_references[index].span
         start: base + span.start
         packet.name_references[index].span = Span{start: start, end: start + span.end}
+        packet.name_references[index].body = packet.function_key.copy()
     }
+    loop index in 0..<packet.call_facts.len() -> packet.call_facts[index].caller_key = packet.function_key.copy()
     _: sema_core_body_rebase_tree(store.rebase, table, function.tree) ?? return Err(err)
     decl_table_index(table)
     packet.function = Val(function.move())

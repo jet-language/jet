@@ -1466,9 +1466,10 @@ leaves out what a load gets back without it: a module's source text when the
 jet embeds that Core source, the bodies of an export's declaration, in its
 registration row and its checked module row alike (a check
 reads another module's export for its header), the lookup columns of a
-body's symbol-key and type tables, which follow from their rows, and the ids
-of a body's expression-type rows, which are its nodes'. It writes each body
-node's id as its step from the node before, and each node's and name
+body's symbol-key and type tables, which follow from their rows, the ids
+of a body's expression-type rows, which are its nodes', and the body's key in
+each of its name references and call facts, which is its packet's. It writes
+each body node's id as its step from the node before, and each node's and name
 reference's span as an offset from the body's start and a length. It writes
 each symbol key as its parts (kind, module, owner and name), with an owner
 that is an earlier key of the same range named by that key's row. Each tree
