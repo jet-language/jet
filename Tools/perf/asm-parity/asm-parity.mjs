@@ -33,6 +33,9 @@
 //   has `node script port delay_ms` serve it: started before the cell's
 //   first run, waited for until the port accepts, stopped after the cell;
 //   its port and delay must be those of the ScriptBench workloads it names.
+//   A cell with `service: true` is a server (its `args` name its port) that
+//   the gauntlet harness (Tools/gauntlet/harness/run.mjs) starts, replays
+//   its entry's probes against and measures; this tool skips it.
 //   A cell with `steps` (argument lists) runs them
 //   in order in a `work` directory emptied before every run, in place of
 //   `args` (a program that keeps state between invocations); stdout is the
@@ -325,7 +328,7 @@ const geomean = (xs) => Math.exp(xs.reduce((s, x) => s + Math.log(x), 0) / xs.le
 // against the hand-asm ceiling where the cell has one.
 function gains(all) {
   const extra = JSON.parse(readFileSync(join(HERE, 'gains.json'), 'utf8'));
-  const cells = [...all, ...extra].filter((c) => !o.cells || o.cells.includes(c.name));
+  const cells = [...all, ...extra].filter(selected);
   const compilers = [...(o.older ? [['older', o.older]] : []), ['base', o.jet], ['candidate', o.candidate]];
   const launcher = assemble(join(HERE, 'launch.S'), join(o.out, 'launch'));
   const results = [];
@@ -390,13 +393,15 @@ function gains(all) {
 const o = options(process.argv.slice(2));
 const all = JSON.parse(readFileSync(join(HERE, 'cells.json'), 'utf8'));
 const issues = scriptbenchIssues(all);
+// A `service` cell is measured by the gauntlet's service replay, never here.
+const selected = (c) => !c.service && (!o.cells || o.cells.includes(c.name));
 if (issues.length) {
   for (const issue of issues) console.error(`cells.json: ${issue}`);
   process.exit(1);
 }
 mkdirSync(o.out, { recursive: true });
 if (o.candidate) gains(all);
-const cells = all.filter((c) => !o.cells || o.cells.includes(c.name));
+const cells = all.filter(selected);
 const rows = [];
 let wrong = 0, gated = 0;
 for (const cell of cells) {

@@ -212,5 +212,30 @@
     "fixture": { "script": "../../gauntlet/entries/parallel-grep/fixtures/gen.py", "out": "files" },
     "args": ["files", "needle-7f"],
     "expect_file": "../../gauntlet/entries/parallel-grep/expected.out"
+  },
+  {
+    "name": "httpclient",
+    "what": "the gauntlet netserv.client cell: four HTTP GETs of a JSON item service (the listing, two items and a 404), decoded and printed with the listing's count and total quantity",
+    "gauntlet": ["netserv.client"],
+    "jet": "../../gauntlet/entries/http-client/jet",
+    "server": { "script": "httpclient/peer.mjs", "port": 18400, "delay_ms": 0 },
+    "args": ["http://127.0.0.1:18400"],
+    "expect_file": "../../gauntlet/entries/http-client/expected.out"
+  },
+  {
+    "name": "concurrencyservice",
+    "what": "the gauntlet concurrency.service cell: a line TCP service whose batch command fans 1..N out to four workers (1ms of work each) and answers their squares' sum; measured by the gauntlet's service replay",
+    "gauntlet": ["concurrency.service"],
+    "jet": "../../gauntlet/entries/concurrency-service/jet",
+    "service": true,
+    "args": ["18080"]
+  },
+  {
+    "name": "httpservice",
+    "what": "the gauntlet netserv.service cell: a JSON key-value HTTP/1.1 service (GET /health, PUT and GET /kv/<key>, GET /shutdown); measured by the gauntlet's service replay",
+    "gauntlet": ["netserv.service"],
+    "jet": "../../gauntlet/entries/http-service/jet",
+    "service": true,
+    "args": ["18080"]
   }
 ]

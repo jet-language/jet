@@ -25,9 +25,12 @@
 //   every run. A cell with `server` {script, port, delay_ms} has `node script
 //   port delay_ms` serve it from before the cell's first run (waited for until
 //   the port accepts) until after its last; its port and delay must be those of
-//   the ScriptBench workloads it names. A cell with `steps` (argument lists)
-//   runs them in order in a `work` directory emptied before every run, in
-//   place of `args`; stdout is the steps' together and cycles their sum;
+//   the ScriptBench workloads it names. A cell with `service: true` is a
+//   server (its `args` name its port) that the gauntlet harness
+//   (Tools/gauntlet/harness/run.mjs) starts, replays its entry's probes
+//   against and measures; this tool skips it. A cell with `steps` (argument
+//   lists) runs them in order in a `work` directory emptied before every run,
+//   in place of `args`; stdout is the steps' together and cycles their sum;
 // - output: every binary's stdout must equal the cell's `expect` (or the file
 //   `expect_file`) with exit status 0 (exit 1 otherwise);
 // - size: file bytes, and Jet / reference;
@@ -167,6 +170,7 @@ Bench: struct {
     expect_file: String?
     fixture: Fixture?
     server: Server?
+    service: Bool{false}
     scriptbench: [String]{[String]{}}
 }
 
@@ -357,7 +361,8 @@ options: fn(argv: [String], here: String) -[Env, FS]> Options Err! {
     })
 }
 
-selected: fn(o: Options, cell: Bench) -> Bool Never! { o.cells.map(fn(names) { names.contains(cell.name) }) ?? true }
+// A `service` cell is measured by the gauntlet's service replay, never here.
+selected: fn(o: Options, cell: Bench) -> Bool Never! { !cell.service && (o.cells.map(fn(names) { names.contains(cell.name) }) ?? true) }
 
 // `argv` run in `cwd` to its end; a failure to start, or a nonzero status,
 // is an error.
