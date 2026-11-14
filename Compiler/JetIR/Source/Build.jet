@@ -1425,7 +1425,7 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     row: m.functions[entry].result
     if m.functions[entry].param_count > 0 || (row < 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc && !p.checks.observe && p.checks.log_package == "" && p.checks.log_flag == "" && !ir_timing_admitted(p) && p.sentries) -> return entry
     ty: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
-    key: "{m.functions[entry].key}#entry"
+    key: "{m.functions[entry].key}{IR_ENTRY_WRAPPER_SUFFIX}"
     id: m.functions.len()
     m.functions.push(ir_function_new("entry", key, "{m.functions[entry].symbol}__entry", m.functions[entry].source_file, m.functions[entry].line))
     name_rows_set(m.function_rows, key, id)
@@ -1466,6 +1466,15 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
     ir_resolve_deferred(m, p, b)
     m.functions[id] = b.f.move()
     id
+}
+
+// The suffix ir_entry_function adds to the key of the entry it runs.
+IR_ENTRY_WRAPPER_SUFFIX: "#entry"
+
+// The key of the entry a generated entry function runs, when `key` is one's.
+ir_entry_wrapped_key: fn(key: String) -> String? Never! {
+    if !key.ends_with(IR_ENTRY_WRAPPER_SUFFIX) -> return None
+    Val(key.remove_suffix(IR_ENTRY_WRAPPER_SUFFIX))
 }
 
 // Whether the entry admits the host first: the entry package sets

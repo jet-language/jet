@@ -19,7 +19,9 @@ IRX64StackBound: struct {
     entry: Int
     // Bytes along the deepest chain; -1 when unbounded.
     bytes: Int
-    // The function names of that chain, the entry first. When unbounded:
+    // The Jet function names of that chain (IRFunction.name, not the
+    // module-qualified object symbol), the entry first; a generated entry
+    // function (ir_entry_function) is left out. When unbounded:
     // the chain into the recursion, its repeated function last, or to the
     // function that calls through a function value.
     path: [String]
@@ -87,7 +89,10 @@ ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
         seen := [Int:Bool]{}
         row := entry
         loop row >= 0 {
-            path.push(compiled.functions[row].name.copy())
+            // A generated entry function is no Jet function: the chain names
+            // the entry it runs, its next step.
+            wrapper: ir_entry_wrapped_key(compiled.program.functions[row].key) != None && walk.next[row] >= 0
+            if !wrapper -> path.push(compiled.program.functions[row].name.copy())
             if seen.get(row) != None -> break
             seen[row] = true
             row = walk.next[row]

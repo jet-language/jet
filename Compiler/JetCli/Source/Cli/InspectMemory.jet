@@ -13,7 +13,7 @@
 use {
     jet_driver.[JetDriverCompileMode, JetDriverIceRow, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_entry_root_path, jet_driver_ice_record, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, build_options_stock]
-    jet_ir.[IRX64StackBound, ir_x64_compile_module, ir_x64_stack_bounds]
+    jet_ir.[IRX64StackBound, ir_entry_wrapped_key, ir_x64_compile_module, ir_x64_stack_bounds]
 }
 
 // What sema proved of function `key`: its stack bound when no function
@@ -42,6 +42,12 @@ jet_cli_memory_sema_row: fn(sema: [JetCLIMemorySema], key: String) -> Int Never!
         if proved.key == key -> return row
     }
     -1
+}
+
+// The function whose sema bounds an entry row reports: a generated entry
+// function reports the entry it runs.
+jet_cli_memory_entry_key: fn(key: String) -> String Never! {
+    ir_entry_wrapped_key(key) ?? key.copy()
 }
 
 // One entry's stack line: its bytes and deepest chain, or why it has none.
@@ -122,7 +128,7 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
             loop error in compiled.errors -> jet_driver_ice_record(census, "-", "ir.x64", "select", error)
             if census.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_ice_census(job.file, census))
             bounds: ir_x64_stack_bounds(compiled)
-            keys: loop bound in bounds -> compiled.program.functions[bound.entry].key.copy()
+            keys: loop bound in bounds -> jet_cli_memory_entry_key(compiled.program.functions[bound.entry].key)
             report: jet_cli_memory_report(bounds, keys, sema, job.scope, job.file, job.profile, jet_cli_native_level(build), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
