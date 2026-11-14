@@ -9184,8 +9184,9 @@ default are `Int?{…}` and `span: Span?{None}`. The error contract follows the
 success type: `-> Int ParseError!`, `-> Entry? (DBError | TimeoutError)!`,
 unit-fallible `save: fn(entry: Entry) SaveError!`, and `Err!` pins the default;
 an omitted contract is still the implicit default `Err`. `A | B!` is E-ERR-UNION
-with a fix to `(A | B)!`. Prefix `?T`, `!E`, and `!(A | B)` are E-TYPE-PREFIX
-with a machine-applicable fix, never an alias. Effect denials
+with a fix to `(A | B)!`. Prefix `?T`, `!E`, and `!(A | B)` are not Jet
+syntax: they get the parser's generic type-position error (E0003), never a
+teaching diagnostic or an alias (E-TYPE-PREFIX is retired, #3662). Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
