@@ -111,13 +111,54 @@ sema_core_error_family_source: fn(source: Type) -> Bool Never! {
     sema_core_error_family_member(type_name(source))
 }
 
+// Whether `source` reaches the default `Err` with no written conversion, by
+// the routine that shows it (`return Err("{self}")`): a Core error family
+// member, a showable type the program declares `#Error` (the type minted
+// from an unannotated function's `Err(.Case(…))` cases is one), or a union
+// of those and `Err` itself.
+sema_error_source_reaches_err: fn(source: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if sema_core_error_family_source(source) -> return true
+    normalized: sema_expr_unwrap_tag(source)
+    if normalized == .Union(members) {
+        if members.len() == 0 -> return false
+        loop member in members {
+            if sema_expr_unwrap_tag(member) == (Type.Named{name: "Err"}) -> next
+            if !sema_error_source_reaches_err(member, environment, program) -> return false
+        }
+        return true
+    }
+    if normalized == .Named(_) -> return sema_program_error_nominal(normalized, environment, program) && sema_expression_displayable(normalized, environment, program)
+    false
+}
+
+// Whether `ty` names a struct, enum or distinct type outside Core that is
+// declared `#Error`.
+sema_program_error_nominal: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        name: sema_type_graph_base_name(ty) ?? return false
+        resolved: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.target_module_identity) -> return false
+        row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(item) {
+            if item == .Enum(definition) -> return sema_failure_markers_name_error(definition.type_markers)
+            if item == .Struct(definition) -> return sema_failure_markers_name_error(definition.type_markers)
+            if item == .Distinct(definition) -> return sema_failure_markers_name_error(definition.type_markers)
+        }
+    }
+    false
+}
+
 // The source a Prelude conversion parses under: the member's leaf, for the
-// `[FieldError]` list its element's, and for a generic member its head's,
-// since a written conversion source is one named type. The routine binds the
-// exercised source type either way.
+// `[FieldError]` list its element's, for a generic member its head's, and
+// for a union `Err`, which shows whichever member arrived, since a written
+// conversion source is one named type. The routine binds the exercised
+// source type either way.
 sema_prelude_conversion_spelling: fn(source: Type) -> String Never! {
     if source == .List(element) -> return sema_error_conversion_leaf(type_name(element))
     if source == .Apply(name, _) -> return sema_error_conversion_leaf(name)
+    if source == .Union(_) -> return "Err"
     sema_error_conversion_leaf(type_name(source))
 }
 
@@ -582,12 +623,13 @@ sema_module_no_prelude: fn(environment: SemaScopeEnvironment, program: SemaProgr
     false
 }
 
-// The route of one propagation site: a family member reaching the
-// default `Err` with no module-declared conversion. The routine key is the one
+// The route of one propagation site: a source that reaches the default `Err`
+// by itself (sema_error_source_reaches_err) with no module-declared
+// conversion. The routine key is the one
 // `sema_inject_prelude_error_conversions` checks after the module's bodies.
 sema_prelude_error_conversion_key: fn(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
-    if !sema_core_error_family_source(error) || sema_module_no_prelude(environment, program) -> return None
+    if sema_module_no_prelude(environment, program) || !sema_error_source_reaches_err(error, environment, program) -> return None
     Val(symbol_key_text(SymbolKind.Function, sema_scope_environment_module_text(environment, program), "", sema_failure_conversion_function_name(error, target)))
 }
 
@@ -605,7 +647,7 @@ SemaPreludeDemandWalk: struct {
 }
 
 // One node of the demand walk: a propagation site whose conversion is
-// this module's prelude routine for a Core error family member reaching `Err`
+// this module's prelude routine for a source reaching `Err` by itself
 // demands it (first site per routine); the effect walk then walks its
 // children (Effects/Checks.jet sema_effect_walk_enter), in the order
 // body_each_expr_child visits them.
@@ -622,10 +664,13 @@ sema_prelude_conversion_demands_enter: fn(state: Shared<SemaPreludeDemandWalk>, 
     }
 }
 
+// A declared conversion under the routine's key is a module function, which
+// the injection keeps (sema_inject_prelude_error_conversions), so the key
+// alone selects the demand.
 sema_prelude_conversion_demand_add: fn(state: Shared<SemaPreludeDemandWalk>, key: String, source: Type, target: Type, site: Span) {
     permit: state.guard_edit()
     expected: symbol_key_text(SymbolKind.Function, permit.value.module_identity, "", sema_failure_conversion_function_name(source, target))
-    if key != expected || target != (Type.Named{name: "Err"}) || !sema_core_error_family_source(source) -> return
+    if key != expected || target != (Type.Named{name: "Err"}) -> return
     loop demand in permit.value.demands {
         if demand.key == key -> return
     }

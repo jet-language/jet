@@ -1559,6 +1559,15 @@ rule as E2406. A `From` impl into a value type such as `Float` is a value
 conversion (`Float.from(reading)`), never a failure route. (D-ERR-CONV,
 D-FAIL-CONV1, D-FAIL-CONV2, D-CONVERT-TRAIT1)
 
+A failure needs no declared conversion to reach the default `Err` when its
+type has text to give: a Core error family member, a showable type the
+program marks `#Error` (the type minted from an unannotated function's
+`Err(.Case(…))` cases is one), or a union of those and `Err`. The failure's
+text becomes the `Err` message, and an unhandled report names the conversion
+(`conversion: FindError -> Err`). A declared conversion wins over this
+route. A `#Error` type that can't be shown, such as one holding a function,
+still needs a declared conversion (E2402).
+
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:
 an `Unsent<Int>` and an `Unsent<String>` failure both convert through it. It is

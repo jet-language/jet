@@ -9,11 +9,10 @@
 // - Result table: `if result == { .Ok(...) ... .Err(...) ... }` reads both
 //   routes and handles each one in place.
 // `#Error` makes this application-owned family eligible for a typed failure
-// contract. `run` names no failure type, and `ParseError` declares no
-// conversion into the default `Err`, so each fallible call in `run` needs a
-// fallback or a table: a bare `age: parse_age("7")` there is rejected
-// (tests/ui/fallible_entry_unhandled.jet records the rejection and its
-// repair).
+// contract. `run` names no failure type, so a bare `age: parse_age("x")`
+// there would pass the failure up as the default `Err`, the case's text
+// (`BadDigit(x)`) as its message. Here each fallible call in `run` handles
+// its failure in place instead.
 #Error
 ParseError: enum {
     Empty
