@@ -313,6 +313,23 @@ App: struct {
         self.copy()
     }
 
+    // An `#App.Public` method of `app.mount(service)` answers POST `path`
+    // (sema lowers each here): `answer` decodes the posted JSON array of the
+    // method's arguments, runs it, and gives the encoded reply.
+    __remote_public: fn(self, path: String, answer: &&fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!, at: SourceLocation{#caller}) -> App Never! {
+        endpoint: __AppRemote{answer: answer}
+        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_remote_response(endpoint, request)) }), "", at)
+        self.copy()
+    }
+
+    // An `#App.SignedIn` method of `app.mount(service)` answers POST `path`.
+    // An App has no sign-in yet, so no call has a signed-in caller: each one
+    // is refused with 401, which a Remote reads as `CallError.SignedOut`.
+    __remote_signed_in: fn(self, path: String, at: SourceLocation{#caller}) -> App Never! {
+        http_server.__route_add(__app_table(self), "POST", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_json(401, __app_error_json("`{request.path}` needs a signed-in caller"))) }), "", at)
+        self.copy()
+    }
+
     // `app.get(path, handler)` and its sibling verbs, `app.custom(method,
     // path, handler)` and each marked method of `app.mount(value)` land here
     // with the route's checked contract (sema lowers each). `at` is the
@@ -1119,6 +1136,50 @@ __app_mount_response: fn(handler: __AppHandler, request: HTTPRequest) -[Net, FS.
         .Rejected(message) -> __app_json(400, __app_error_json(message))
         .Failed(message) -> __app_json(500, __app_error_json(message))
     }
+}
+
+// One endpoint method of a mounted service; sema builds `answer` from it.
+__AppRemote: struct {
+    answer: fn(__RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+}
+
+// The arguments of one call of an endpoint method: the JSON array the
+// Remote posted.
+__RemoteArgs: struct {
+    tree: Dyn
+
+    // The argument at `index`, decoded as the method's parameter type.
+    __take: fn<T: Decode>(self, index: Int) -> T [FieldError]! {
+        live_json.at<T>(self.tree, "/{index}")
+    }
+
+    // The reply of a call that failed: `{"err": error}`.
+    __reply_err: fn<E: Encode>(self, error: E) -> String Never! {
+        "{{\"err\":{live_json.to_string<E>(error) ?? "null"}}}"
+    }
+
+    // The reply of a call that gave `value`: `{"ok": value}`.
+    __reply_value: fn<R: Encode>(self, value: R) -> String Never! {
+        "{{\"ok\":{live_json.to_string<R>(value) ?? "null"}}}"
+    }
+}
+
+// A call of an endpoint method: 200 with its reply, or 422 with the field
+// errors (`__app_invalid_json`) when the body is no JSON array of arguments
+// the method takes.
+__app_remote_response: fn(endpoint: __AppRemote, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    text: request.text() ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments can't be read: {err}"}}))
+    tree: live_json.parse(text) ?? return __app_json(422, __app_invalid_json([FieldError]{FieldError{path: "", reason: "the call's arguments are not JSON: {err}"}}))
+    reply: endpoint.answer(__RemoteArgs{tree: tree}) ?? return __app_json(422, __app_invalid_json(err))
+    __app_json(200, reply)
+}
+
+// `{"invalid": [{"path": …, "reason": …}, …]}`, the 422 body a Remote reads
+// back as `CallError.Invalid`.
+__app_invalid_json: fn(errors: [FieldError]) -> String Never! {
+    entries := [String]{}
+    loop error in errors -> entries.push("{{\"path\":{__app_json_string(error.path)},\"reason\":{__app_json_string(error.reason)}}}")
+    "{{\"invalid\":[{entries.join(",")}]}}"
 }
 
 __app_json: fn(status: Int, text: String) -> HTTPResponse Never! {

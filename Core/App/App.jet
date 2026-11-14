@@ -19,6 +19,7 @@ SYNC_MAX_INT: 9223372036854775807
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
     unicode: core.text
+    http: core.http
     live_json: core.encoding.json
     core.reactive.loadable.[Loadable]
     rt: jet.runtime.time
@@ -49,16 +50,110 @@ Public: struct {
 
 // A client of the service `S`. It offers only the methods of `S` that
 // `#App.SignedIn` or `#App.Public` marks: a call of any other method of `S`
-// is E2812, and the service itself stays out of reach. A call through the
-// Remote `remote` makes runs the method directly on that service.
+// is E2812, and the service itself stays out of reach. A call through a
+// Remote that `remote` made runs the method directly on that service; one
+// through a Remote that `remote_at` made posts it to the server. Either way
+// the call's error type takes a `CallError`: a method that fails with `E`
+// needs `impl CallError -> E`, and one that can't fail answers
+// `R CallError!`.
 Remote: struct<S> {
-    priv service: S
+    priv service: S?
+    priv address: String
+
+    // A call of the endpoint method `method` of `S`, which can fail with
+    // `E`. The compiler lowers each such call here: `direct` runs it on the
+    // service the Remote holds; otherwise `args`, the encoded arguments, go to
+    // the server, and `fail` gives a `CallError` as the method's own error.
+    __call: fn<R: [Encode, Decode], E: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R E!, fail: fn(CallError) -> R E!) -[Net, Time.Wait]> R E! {
+        if self.service == .Val(service) -> return direct(service)
+        reply: remote_post(self.address, method, args) ?? return fail(err)
+        tree: live_json.parse(reply) ?? return fail(.Unreachable("the server's reply to `{method}` is not JSON"))
+        if live_json.at<E>(tree, "/err") == .Ok(error) -> return Err(error)
+        value: live_json.at<R>(tree, "/ok") ?? return fail(.Unreachable("the server's reply to `{method}` has no value"))
+        Ok(value)
+    }
+
+    // A call of the endpoint method `method` of `S`, which can't fail.
+    __call_value: fn<R: [Encode, Decode]>(self, method: String, args: [String], direct: fn(S) -> R Never!) -[Net, Time.Wait]> R CallError! {
+        if self.service == .Val(service) -> return Ok(direct(service))
+        reply: remote_post(self.address, method, args)
+        tree: live_json.parse(reply) ?? return Err(.Unreachable("the server's reply to `{method}` is not JSON"))
+        value: live_json.at<R>(tree, "/ok") ?? return Err(.Unreachable("the server's reply to `{method}` has no value"))
+        Ok(value)
+    }
+
+    // One argument of a remote call, encoded.
+    __arg: fn<A: Encode>(self, value: A) -> String Never! {
+        live_json.to_string<A>(value) ?? "null"
+    }
+
+    // `failure` as an error of the call; the compiler's `fail` binds it, so
+    // the method's error type takes it through its conversion.
+    __raise: fn<R>(self, failure: CallError) -> R CallError! {
+        Err(failure)
+    }
 }
+
+// How a remote call failed. Every call through a `Remote` can fail this way,
+// so the error type of a service method converts from it.
+#Error
+CallError: enum {
+    // No answer: the server is down or unreachable, or its reply was not one
+    // a Remote reads.
+    Unreachable(String)
+    // The server could not decode the call's arguments (HTTP 422): the field
+    // errors its reply names.
+    Invalid([FieldError])
+    // The method needs a signed-in caller, and the call had none (HTTP 401).
+    SignedOut
+    // The server no longer accepts this client's wire version (HTTP 426).
+    UpdateRequired
+}
+
+// The largest reply a remote call reads.
+REMOTE_MAX_REPLY: 16777216
 
 // The Remote of a service the server holds: each call through it runs the
 // marked method on `service` directly.
 remote: fn<S>(service: &&S) -> Remote<S> Never! {
-    Remote<S>{service: service}
+    Remote<S>{service: Val(service), address: ""}
+}
+
+// The Remote of a service a server mounts at `address`, its mount prefix
+// (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
+// `{address}/{method}`.
+remote_at: fn<S>(address: String) -> Remote<S> Never! {
+    Remote<S>{service: None, address: address}
+}
+
+// One remote call: POST the JSON array of `args` to `{address}/{method}`;
+// the reply's body on 200, else the failure its status names.
+remote_post: fn(address: String, method: String, args: [String]) -[Net, Time.Wait]> String CallError! {
+    response: http.post("{address}/{method}", "[{args.join(",")}]") ?? return Err(.Unreachable("{address}/{method}: {err}"))
+    text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}/{method}: {err}"))
+    if {
+        response.status == 200 -> Ok(text)
+        response.status == 401 -> Err(.SignedOut)
+        response.status == 422 -> Err(.Invalid(remote_invalid(text)))
+        response.status == 426 -> Err(.UpdateRequired)
+        else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+    }
+}
+
+// The field errors of a 422 reply, `{"invalid": [{"path": …, "reason":
+// …}, …]}`; a reply that is not that shape is one error with its text.
+remote_invalid: fn(text: String) -> [FieldError] Never! {
+    tree: live_json.parse(text) ?? return [FieldError]{FieldError{path: "", reason: "{text}"}}
+    errors := [FieldError]{}
+    index := 0
+    loop {
+        reason: live_json.at<String>(tree, "/invalid/{index}/reason") ?? break
+        path: live_json.at<String>(tree, "/invalid/{index}/path") ?? ""
+        errors.push(FieldError{path: path, reason: reason})
+        index += 1
+    }
+    if errors.len() == 0 -> return [FieldError]{FieldError{path: "", reason: "{text}"}}
+    errors
 }
 
 Auth: struct {

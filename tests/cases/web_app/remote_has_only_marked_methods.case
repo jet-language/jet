@@ -2,7 +2,10 @@
 # methods `#App.SignedIn` or `#App.Public` marks. The probe calls the signing
 # key and the job of Crew through app.Remote<Crew>: each call is E2812, which
 # names the method and suggests a marker. The client calls the marked methods
-# through the server's own Remote, which runs them on its Crew.
+# through the server's own Remote, which runs them on its Crew. The wire
+# program mounts a Crew at /api and calls it through `app.remote_at`: each
+# call is a POST whose reply is the method's value or its error, and the
+# signed-in method is refused, since the App has no sign-in.
 fixture: remote_has_only_marked_methods.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -16,3 +19,7 @@ stderr: ~ "Mark `webhook_secret` `#App.SignedIn`" # the fix suggests a marker
 step: jet run client/main.jet
 exit: 0
 stdout: = "crew is up\n42\n"
+
+step: jet run wire/main.jet
+exit: 0
+stdout: = "crew is up\n42\nnot found\nsigned out\n"

@@ -14,8 +14,10 @@ use jet_foundation.[
     LambdaParam,
     Marker,
     NamedSpan,
+    OrFallback,
     Span,
     StrPart,
+    Stmt,
     Symbol,
     SymbolKind,
     TLetTy,
@@ -56,15 +58,22 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
 SEMA_APP_MARKER_MODULE: "app"
 SEMA_APP_ENDPOINT_MARKERS: [String]{"SignedIn", "Public"}
 
+// The app endpoint marker `marker` is, written in module `module_identity`:
+// "SignedIn" or "Public"; None for any other marker.
+sema_app_endpoint_access: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String? {
+    if marker.negated -> return None
+    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+    if resolved.status != "found" -> return None
+    declaration: resolved.declaration ?? return None
+    module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return None
+    if graph.modules[module_index].module_name != SEMA_APP_MARKER_MODULE || !SEMA_APP_ENDPOINT_MARKERS.contains(declaration.name) -> return None
+    Val("{declaration.name}")
+}
+
 // Whether `marker`, written in module `module_identity`, is one of the app
 // module's endpoint markers.
 sema_app_endpoint_marker: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool {
-    if marker.negated -> return false
-    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
-    if resolved.status != "found" -> return false
-    declaration: resolved.declaration ?? return false
-    module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
-    graph.modules[module_index].module_name == SEMA_APP_MARKER_MODULE && SEMA_APP_ENDPOINT_MARKERS.contains(declaration.name)
+    sema_app_endpoint_access(marker, graph, module_identity) != None
 }
 
 // The marker that makes method `func` an endpoint, written in module
@@ -93,10 +102,13 @@ sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_iden
     ""
 }
 
-// `app.Remote<S>`, the app module's client of a service, and its private
-// field that holds the service.
+// `app.Remote<S>`, the app module's client of a service, and the methods
+// the client calls of it lower to.
 SEMA_APP_REMOTE: "Remote"
-SEMA_APP_REMOTE_SERVICE: "service"
+SEMA_APP_REMOTE_CALL: "__call"
+SEMA_APP_REMOTE_CALL_VALUE: "__call_value"
+SEMA_APP_REMOTE_ARG: "__arg"
+SEMA_APP_REMOTE_RAISE: "__raise"
 
 // Whether `ty`, a resolved type of one type argument, is `app.Remote<S>`.
 sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
@@ -106,45 +118,164 @@ sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: Sem
 }
 
 // `remote.method(args…)` on an `app.Remote<S>`. A method of `S` that
-// `#App.SignedIn` or `#App.Public` marks checks as that method called on the
-// Remote's service. Any other method of `S` is server-only (E2812), and a
-// name `S` does not declare is no method of the Remote (E0102).
-sema_call_app_remote_method: fn(receiver: Expr, receiver_value: TExpr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// `#App.SignedIn` or `#App.Public` marks is a remote call
+// (`sema_app_remote_call`). Any other method of `S` is server-only (E2812),
+// and a name `S` does not declare is no method of the Remote (E0102).
+sema_call_app_remote_method: fn(receiver: Expr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     graph: program.registration_graph ?? return None
     shown := "app.Remote<{type_name(service)}>"
     declared := false
-    endpoint := false
     if sema_type_resolve_nominal_row(graph, service, environment.module_identity) == .Val(row) {
         shown = "app.Remote<{graph.modules[row.module_index].nominals[row.row].symbol.name}>"
+        service_module: graph.modules[row.module_index].module_identity
         if sema_http_route_find_struct(environment, program, service, environment.module_identity) == .Val(definition) {
             loop declaration in definition.methods {
                 if declaration.name != method -> next
                 declared = true
-                loop marker in declaration.markers {
-                    if sema_app_endpoint_marker(marker, graph, graph.modules[row.module_index].module_identity) -> endpoint = true
+                endpoint: loop marker in declaration.markers {
+                    if sema_app_endpoint_marker(marker, graph, service_module) -> break true
+                } ?? false
+                if !endpoint -> next
+                if owner_type_args.len() != 0 || type_args.len() != 0 {
+                    diagnostics.push(sema_call_not_generic_diagnostic(method, method_span))
+                    sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+                    return None
                 }
+                return sema_app_remote_call(receiver, service, shown, declaration, service_module, method_span, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             }
         }
     }
-    if !endpoint {
-        if {
-            declared -> {
-                entry: diagnostic_registry_row("E2812") ?? panic("E2812 must have a registry row")
-                diagnostics.push(sema_error("E2812", method_span, entry.what.replace("{{remote}}", shown).replace("{{method}}", method), entry.why, entry.fix.replace("{{method}}", method)))
-            }
-            else -> diagnostics.push(sema_error("E0102", method_span, "`{shown}` has no method `{method}`", "`{shown}` offers only the methods of its service that `#App.SignedIn` or `#App.Public` marks", "call a marked method of the service"))
+    if {
+        declared -> {
+            entry: diagnostic_registry_row("E2812") ?? panic("E2812 must have a registry row")
+            diagnostics.push(sema_error("E2812", method_span, entry.what.replace("{{remote}}", shown).replace("{{method}}", method), entry.why, entry.fix.replace("{{method}}", method)))
         }
+        else -> diagnostics.push(sema_error("E0102", method_span, "`{shown}` has no method `{method}`", "`{shown}` offers only the methods of its service that `#App.SignedIn` or `#App.Public` marks", "call a marked method of the service"))
+    }
+    sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+    None
+}
+
+sema_app_remote_ident: fn(name: String, span: Span) -> Expr Never! {
+    Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+// `remote.method<type_args>(args)`, where `remote` names the hidden local
+// or the caller's local that holds the Remote.
+sema_app_remote_method_call: fn(remote: String, method: String, type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
+    Expr.MethodCall{receiver: sema_app_remote_ident(remote, span), method: method, method_span: span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
+}
+
+// The endpoint method `declaration` of `S`, called through a Remote. The
+// Remote, unless it is a local, and each argument are evaluated once into
+// hidden locals, the arguments with their parameters' types, and the call
+// lowers to the Remote's `__call` (a method that can fail with `E`) or
+// `__call_value` (one that can't): `direct` runs the method on the service
+// the Remote holds, and otherwise the encoded arguments go to the server.
+// The call's type is `R E!`, or `R app.CallError!` for a method that can't
+// fail.
+sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declaration: Func, service_module: ModuleID, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    method: declaration.name
+    concrete: declaration.params.len() > 0 && declaration.params[0].name == "self" && declaration.params[0].convention == AccessConvention.Read && declaration.type_params.len() == 0
+    read_only: loop index in 1..<declaration.params.len() {
+        if declaration.params[index].convention != AccessConvention.Read -> break false
+    } ?? true
+    if !concrete || !read_only {
+        diagnostics.push(sema_error("E2805", method_span, "`{shown}.{method}` needs read-only self, read parameters and a concrete signature", "a remote call sends its arguments to the server as data and runs the method on the server's service", "write `{method}: fn(self, ...)` with read parameters and without method type parameters"))
         sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
-    // The service is the Remote's private field, which only this call reads.
-    generated: context.compiler_generated
-    context.compiler_generated = true
-    service_value: sema_expression_field_checked(receiver_value, SEMA_APP_REMOTE_SERVICE, expr_span(receiver), None, environment, program, scopes, context, diagnostics)
-    context.compiler_generated = generated
-    value: service_value ?? return None
-    place: Expr.Field{base: receiver, member: SEMA_APP_REMOTE_SERVICE, span: expr_span(receiver), id: AST_NODE_GENERATED}
-    sema_expr_check_declared_method(place, value, method, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    wanted: declaration.params.len() - 1
+    if args.len() != wanted {
+        diagnostics.push(sema_call_arity_diagnostic(method, wanted, args.len(), false, method_span))
+        sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return None
+    }
+    loop index in 0..<args.len() {
+        name: declaration.params[index + 1].name
+        named_other: if {
+            args[index].label == .Val(label) -> label.name != name
+            else -> false
+        }
+        if args[index].spread || named_other {
+            diagnostics.push(sema_error("E0104", args[index].span, "`{shown}.{method}` takes its arguments in order", "a remote call checks each argument against the parameter in its place", "pass `{name}` as argument {index + 1}, without a spread or another label"))
+            sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+            return None
+        }
+    }
+    start: method_span.start
+    hidden: "__jet_app_remote_{start}"
+    sema_scope_enter(scopes, state, "app.remote:{start}")
+    body := [TStmt]{}
+    remote: if {
+        receiver == .Ident(written, _, _) -> "{written}"
+        else -> "{hidden}"
+    }
+    if !(receiver == .Ident(_, _, _)) {
+        held: sema_stmt_check_binding(ast_binding(remote, expr_span(receiver), false, receiver, None), None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_single_use_leave_scope(scopes, state, diagnostics)
+            return None
+        }
+        body.push(held)
+    }
+    encoded := [Expr]{}
+    reads := [CallArg]{}
+    loop index in 0..<args.len() {
+        local_name: "{hidden}_{index}"
+        binding := ast_binding(local_name, args[index].span, false, args[index].expr, None)
+        binding.ty = Val(sema_type_resolve_declared(graph, declaration.params[index + 1].ty, service_module))
+        statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_single_use_leave_scope(scopes, state, diagnostics)
+            return None
+        }
+        body.push(statement)
+        encoded.push(sema_app_remote_method_call(remote, SEMA_APP_REMOTE_ARG, [Type]{}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span)}, args[index].span))
+        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, args[index].span), args[index].span))
+    }
+    service_name: "{hidden}_service"
+    invocation: Expr.MethodCall{receiver: sema_app_remote_ident(service_name, method_span), method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
+    direct: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: service_name, name_span: method_span, ty: Val(service), ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Expr{value: invocation}, span: method_span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    wire: [CallArg]{
+        sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: method}}, span: method_span, id: AST_NODE_GENERATED}, method_span),
+        sema_http_mount_arg(Expr.ListLit{elements: encoded, span: method_span, id: AST_NODE_GENERATED}, method_span),
+        sema_http_mount_arg(direct, method_span),
+    }
+    returned: declaration.return_type ?? Type.Named{name: "Unit"}
+    declared_return: sema_type_resolve_declared(graph, returned, service_module)
+    raised_return: sema_type_resolve_declared(graph, returned, service_module)
+    lowered: if {
+        declared_return == .Result(ok, failure) -> sema_app_remote_fallible(remote, hidden, wire, ok, failure, raised_return, method_span)
+        else -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL_VALUE, [Type]{declared_return}, wire, method_span)
+    }
+    checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_single_use_leave_scope(scopes, state, diagnostics)
+        return None
+    }
+    result_type: checked.ty
+    body.push(TStmt.ExprStmt{value: checked, span: method_span})
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    sema_expression_call_expected(sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, method_span), expected, environment, program, context, diagnostics)
+}
+
+// `remote.__call<R, E>(method, args, direct, fail)` for an endpoint method
+// that fails with `E`: `fail` binds the transport's `CallError` raised as an
+// `R CallError!`, so it converts to `E` as any propagated error does.
+// `raised_return` is the method's `R E!` once more, for `__raise<R>`;
+// `hidden` prefixes the closure's names.
+sema_app_remote_fallible: fn(remote: String, hidden: String, wire: &&[CallArg], ok: Type, failure: Type, raised_return: Type, span: Span) -> Expr Never! {
+    failure_name: "{hidden}_failure"
+    raised_name: "{hidden}_raised"
+    raised_ok: if {
+        raised_return == .Result(success, _) -> success
+        else -> Type.Named{name: "Unit"}
+    }
+    raise: sema_app_remote_method_call(remote, SEMA_APP_REMOTE_RAISE, [Type]{raised_ok}, [CallArg]{sema_http_mount_arg(sema_app_remote_ident(failure_name, span), span)}, span)
+    fail_body: [Stmt]{Stmt.Val{binding: ast_binding(raised_name, span, false, raise, None)}, Stmt.Expr{expr: Expr.Ok{value: sema_app_remote_ident(raised_name, span), span: span, id: AST_NODE_GENERATED}}}
+    fail: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: failure_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: fail_body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    filled := wire.move()
+    filled.push(sema_http_mount_arg(fail, span))
+    sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL, [Type]{ok, failure}, filled, span)
 }
 
 // The module that declares the web markers. The web rules key on its
@@ -202,9 +333,11 @@ sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
         flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
-// `app.mount(value)` and `app.mount(prefix, value)`: each marked method of
-// the struct value registers as the single route its marker names, under the
-// static `prefix` when there is one; the call is the App, so it chains.
+// `app.mount(value)` and `app.mount(prefix, value)`: each route-marked method
+// of the struct value registers as the single route its marker names, and
+// each endpoint-marked one as POST `{prefix}/{name}`
+// (`sema_app_mount_endpoint`), under the static `prefix` when there is one;
+// the call is the App, so it chains.
 sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 && args.len() != 2 {
         diagnostics.push(sema_call_arity_diagnostic("mount", 2, args.len(), false, span))
@@ -246,6 +379,14 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
             nominal_row: sema_type_resolve_nominal_row(graph, value_ty, environment.module_identity) ?? panic("mount has no nominal row")
             method_module: graph.modules[nominal_row.module_index].module_identity
             loop method in definition.methods {
+                // An endpoint method answers POST `{prefix}/{name}`, once
+                // whatever markers it carries.
+                loop marker in method.markers {
+                    access: sema_app_endpoint_access(marker, graph, method_module) ?? next
+                    endpoint: sema_app_mount_endpoint(sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), value_name, method, method_module, access, prefix, marker.span, environment, program, scopes, state, tail_store, context, diagnostics)
+                    if endpoint == .Val(value) -> body.push(TStmt.ExprStmt{value: value, span: marker.span})
+                    break
+                }
                 loop marker in method.markers {
                     verb: sema_http_route_marker_verb(marker, graph, method_module) ?? next
                     if method.params.len() == 0 || method.params[0].name != "self" || method.params[0].convention != AccessConvention.Read || method.type_params.len() != 0 {
@@ -305,6 +446,65 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     sema_single_use_leave_scope(scopes, state, diagnostics)
     value: sema_tree_node(receiver_value.ty, TExprKind.InlineBlock{body: body}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// The endpoint method `method` of the mounted value `value_name` answers
+// POST `{prefix}/{name}` on the App `mux`, where a Remote that `remote_at`
+// made posts its calls. An `#App.Public` method registers through the App's
+// `__remote_public` with a handler that decodes each argument from the
+// posted JSON array and encodes the method's reply; an `#App.SignedIn` one
+// through `__remote_signed_in`.
+sema_app_mount_endpoint: fn(mux: TExpr, value_name: String, method: Func, method_module: ModuleID, access: String, prefix: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    concrete: method.params.len() > 0 && method.params[0].name == "self" && method.params[0].convention == AccessConvention.Read && method.type_params.len() == 0
+    read_only: loop index in 1..<method.params.len() {
+        if method.params[index].convention != AccessConvention.Read -> break false
+    } ?? true
+    if !concrete || !read_only {
+        diagnostics.push(sema_error("E2805", span, "endpoint method `{method.name}` needs read-only self, read parameters and a concrete signature", "a mounted endpoint decodes its arguments from the request and runs on request workers", "write `{method.name}: fn(self, ...)` with read parameters and without method type parameters"))
+        return None
+    }
+    address: "{prefix}/{method.name}"
+    path: sema_call_http_static_tree_arg(sema_call_http_core_string(address, span), sema_http_mount_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: address}}, span: span, id: AST_NODE_GENERATED}, span))
+    if access == "SignedIn" -> return sema_call_http_mux_source_call(mux, "__remote_signed_in", [TCallArg]{path}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
+    candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, mux.ty, "__remote_public", [Type]{}, [Type]{}, span, environment, program, diagnostics)
+    candidate: candidates.pop() ?? panic("App.__remote_public is not registered")
+    params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("App.__remote_public has no parameter list")
+    declared_answer: params[1].ty ?? panic("App.__remote_public's answer has no type")
+    answer_type: sema_call_resolved_type(declared_answer, environment, program)
+    args_name: "__jet_http_mount_args_{span.start}"
+    statements := [Stmt]{}
+    reads := [CallArg]{}
+    loop index in 1..<method.params.len() {
+        local_name: "{args_name}_{index}"
+        decoded: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__take", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{sema_type_resolve_declared(graph, method.params[index].ty, method_module)}, args: [CallArg]{sema_http_mount_arg(Expr.Int{value: index - 1, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span)}, id: AST_NODE_GENERATED}
+        statements.push(Stmt.Val{binding: ast_binding(local_name, span, false, decoded, None)})
+        reads.push(sema_http_mount_arg(sema_app_remote_ident(local_name, span), span))
+    }
+    invocation: Expr.MethodCall{receiver: sema_app_remote_ident(value_name, span), method: method.name, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: reads, id: AST_NODE_GENERATED}
+    declared_return: sema_type_resolve_declared(graph, method.return_type ?? Type.Named{name: "Unit"}, method_module)
+    // A method that can fail replies with its error: `value: method(...) ??
+    // return Ok(args.__reply_err<E>(err))`; then `Ok(args.__reply_value<R>(value))`.
+    replied: "{args_name}_value"
+    reply_type: if {
+        declared_return == .Result(ok, err) -> {
+            failed: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__reply_err", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{err}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident("err", span), span)}, id: AST_NODE_GENERATED}
+            settled: Expr.OrFallback{value: invocation, fallback: OrFallback.Return{value: Val(Expr.Ok{value: failed, span: span, id: AST_NODE_GENERATED}), span: span}, is_option: false, span: span, id: AST_NODE_GENERATED}
+            statements.push(Stmt.Val{binding: ast_binding(replied, span, false, settled, None)})
+            ok
+        }
+        else -> {
+            statements.push(Stmt.Val{binding: ast_binding(replied, span, false, invocation, None)})
+            declared_return
+        }
+    }
+    statements.push(Stmt.Expr{expr: Expr.Ok{value: Expr.MethodCall{receiver: sema_app_remote_ident(args_name, span), method: "__reply_value", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{reply_type}, args: [CallArg]{sema_http_mount_arg(sema_app_remote_ident(replied, span), span)}, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}})
+    handler: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{LambdaParam{name: args_name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}}, effects: None, body: LambdaBody.Block{body: statements}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    answer_arg := sema_http_mount_arg(handler, span)
+    answer: sema_check_expression_with_lambda_escapes(answer_arg.expr, Val(answer_type), environment, program, scopes, state, tail_store, context, Val(true), diagnostics) ?? return None
+    if !sema_call_http_check_middleware_callback(answer, environment, program, scopes, state, context, diagnostics) -> return None
+    answer_arg.convention = AccessConvention.Move
+    sema_call_http_mux_source_call(mux, "__remote_public", [TCallArg]{path, sema_call_http_static_tree_arg(answer, answer_arg)}, span, None, environment, program, scopes, state, tail_store, context, diagnostics).value
 }
 
 // A mount prefix as it leads each mounted path: no trailing slash, so `/api`

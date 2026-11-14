@@ -5387,6 +5387,7 @@ tasks never read or change the process registry. The module source is
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
+| `remote_at<S>(address: String) -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. `T` and `E` must be `Encode` and `Decode`, and the
@@ -5407,6 +5408,21 @@ a webhook or a signing key, is E2812 (`jet.ServerOnlyMethod`): the report
 names the method and suggests a marker. The service is a private field of the
 Remote, which no code outside `app` reads. A call through the Remote that
 `remote(service)` makes runs the method on that service directly.
+
+A call through the Remote that `remote_at(address)` makes is a POST of the
+arguments, encoded as one JSON array, to `{address}/{method}`. A Public
+method answers `{"ok": value}` or `{"err": error}`, which the call returns as
+the method's value or error. `web.app().mount(prefix, service)` registers
+each marked method of the service as that POST route `{prefix}/{method}`; a
+SignedIn method answers 401 there until the App signs callers in. Since a
+call can fail on the way, its type adds `CallError`, whichever Remote makes
+it: a method `-> T E!` is called as `T E!` and needs an
+`impl app.CallError -> E` conversion, and a method `-> T` is called as
+`T CallError!`. `CallError` is `Unreachable(String)` (no answer, or a status
+or reply the call does not understand), `Invalid([FieldError])` (status 422:
+the arguments did not decode; the body
+`{"invalid": [{"path": …, "reason": …}]}` names each field error),
+`SignedOut` (401) and `UpdateRequired` (426).
 
 ### `core.web` — server-rendered applications
 

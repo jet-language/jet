@@ -1,4 +1,4 @@
-// The Crew service. Its two marked methods are endpoints; the signing key
+// The Crew service. Its three marked methods are endpoints; the signing key
 // and the job are unmarked, so they stay on the server.
 use app
 
@@ -13,6 +13,28 @@ TaskID: struct {
 #Error
 TaskError: enum {
     NotFound
+    Unreachable(String)
+    SignedOut
+}
+
+// A call through an `app.Remote<Crew>` can fail on the way; each failure
+// has a case.
+impl app.CallError -> TaskError {
+    if self == {
+        .Unreachable(why) -> TaskError.Unreachable(why)
+        .Invalid(errors) -> TaskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> TaskError.SignedOut
+        .UpdateRequired -> TaskError.Unreachable("update required")
+    }
+}
+
+// What a failed call says.
+reason: fn(error: TaskError) -> String {
+    if error == {
+        .NotFound -> "not found"
+        .Unreachable(why) -> "unreachable: {why}"
+        .SignedOut -> "signed out"
+    }
 }
 
 new_task_id: fn() -> TaskID {
@@ -25,6 +47,13 @@ Crew: struct {
     // A signed-in caller moves a task.
     #App.SignedIn
     move_task: fn(self, id: TaskID) -> Int TaskError! {
+        if id.value < 0 -> return Err(TaskError.NotFound)
+        Ok(id.value + 1)
+    }
+
+    // Any caller looks a task up.
+    #App.Public
+    lookup: fn(self, id: TaskID) -> Int TaskError! {
         if id.value < 0 -> return Err(TaskError.NotFound)
         Ok(id.value + 1)
     }
