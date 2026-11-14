@@ -2006,6 +2006,13 @@ async function freePort() {
   });
 }
 
+// How long a service may take to answer its readiness probe before its row is
+// broken. It only guards a hang: startup is timed from the launcher's start
+// line, so the deadline never changes a measured value. `jet run` and `jet dev`
+// compile the program before it starts, so a slow compile is a long startup,
+// not a broken service.
+const SERVICE_READY_DEADLINE_MS = 120_000;
+
 // Polls the service started through the launcher until it answers its
 // readiness probe. Its startup runs from the launcher's start line (just
 // before the service's exec; node's hrtime and the launcher both read
@@ -2020,7 +2027,7 @@ async function waitForReady(child, port, service, report) {
     if (start === null) throw new Error("service answered before its launcher's report began");
     return { seconds: Number(readyNs - BigInt(start[1])) / 1e9, result };
   };
-  while (performance.now() - started < 10000) {
+  while (performance.now() - started < SERVICE_READY_DEADLINE_MS) {
     if (child.exitCode !== null) throw new Error(`service exited ${child.exitCode}${child.stderrText() ? `: ${child.stderrText()}` : ""}`);
     if (protocol === "line") {
       const ready = service.ready ?? { send: "ready\n", expect: "ready\n" };
