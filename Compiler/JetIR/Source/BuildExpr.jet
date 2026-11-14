@@ -3838,7 +3838,7 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
     if bracketed {
         _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
     }
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)
     loop (index, slot) in slots {
         if moves[index] {
@@ -4225,20 +4225,31 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
             return ir_write_window(m, p, b, list_row, base, start, end, range, location, span)
         }
     }
-    // `f(make())` into a write parameter: the call's fresh aggregate result is
-    // its own place, which the call releases after the callee wrote it; a
-    // literal (`f(&[...])`) is one too.
+    // `f(make())` into a write parameter: a value a call, constructor,
+    // literal or operator makes is a temporary the call gives a place. A
+    // fresh aggregate is its own place, which the call releases after the
+    // callee wrote it; any other moves into a frame cell, read back out after
+    // the call, where it ends (ir_write_backs).
     temporary: if ir_body_node(p, b, place).kind == {
         .Call(_, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) -> true
         .List(_, _) | .ListLit(_) | .Tuple(_) | .Map(_) | .MapLit(_) -> true
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Range(_, _, _) | .EnumCtor(_, _, _) | .Lambda(_) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptMethodCall(_, _, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) -> true
+        .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .TraitBox(_, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .ListSpread(_) | .PoolSlot(_, _, _, _, _, _) | .MaterializeView(_) | .DecodeUnder(_, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .OptField(_, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .OverflowOpt(_, _, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> false
     }
     if temporary {
         value: ir_expr(m, p, b, place)
         if ir_failed(b) || value < 0 -> return -1
-        if ir_kind_of(m, b, value) == .Aggregate -> return ir_own(m, p, b, value)
-        place_kind: ir_expr_kind_name(ir_body_node(p, b, place).kind)
-        return ir_fail_slot(b, span, "write place {place_kind} of {ir_type_name(place_ty)}")
+        owned: ir_own(m, p, b, value)
+        if ir_kind_of(m, b, owned) == .Aggregate -> return owned
+        row: b.f.slot_type[owned]
+        size: m.types[row].size
+        pointer_row: ir_pointer_row(m)
+        cell: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.StackAddress, cell, if size < 8 -> 8 else -> size, 8, -1, b.line)
+        ir_emit(b.f, IROp.Store, -1, cell, 0, owned, b.line)
+        b.fresh[owned] = false
+        backs.push(IRWriteBack{cell: cell, slot: ir_fresh_temp(m, b, row), ends: true})
+        return cell
     }
     place_kind: ir_expr_kind_name(ir_body_node(p, b, place).kind)
     ir_fail_slot(b, span, "write place {place_kind}")
@@ -7342,7 +7353,7 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
     boxed: ir_load_at(m, b, address, 0, row)
     ir_box_make_unique(m, p, b, boxed)
     ir_emit(b.f, IROp.Store, -1, address, 0, boxed, b.line)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     boxed
 }
 
@@ -7628,7 +7639,7 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
     }
     start: ir_args(b.f, slots)
     ir_emit(b.f, IROp.CallIndirect, dst, code, start, slots.len(), b.line)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)
     // The call only lends its box and its arguments.
     loop slot in slots -> ir_release(m, b, slot)

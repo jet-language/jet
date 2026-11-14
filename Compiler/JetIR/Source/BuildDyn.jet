@@ -343,7 +343,7 @@ ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, 
     ir_emit(b.f, IROp.Drop, -1, place.current, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, place.cell, 0, updated, b.line)
     b.fresh[updated] = false
-    loop back in place.backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, place.backs, span)
 }
 
 // `tree.a[0].b = value` (JetRuntime jet_dyn_set_path): the steps cross as one
@@ -430,7 +430,7 @@ ir_dyn_set_key: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, rece
     ir_emit(b.f, IROp.Load, current, cell, 0, -1, b.line)
     ir_box_make_unique(m, p, b, current)
     ir_emit(b.f, IROp.Store, -1, cell, 0, current, b.line)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     selector: ir_load_word(m, b, current, 0)
     expected: ir_word_const(m, b, layout.object)
     is_object: ir_bool_op(m, b, IROp.Eq, selector, expected)

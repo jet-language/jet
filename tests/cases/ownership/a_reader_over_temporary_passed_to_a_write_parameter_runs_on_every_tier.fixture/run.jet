@@ -1,0 +1,19 @@
+// A `Reader.over(…)` temporary passed to a `&term.Reader` parameter: the call
+// gives the cursor a place, the callee's reads advance it, and it ends after
+// the call.
+use term: core.term
+
+// Reads one byte of `source`, then `count - 1` more: ten per byte of the
+// first read plus one per byte of the second.
+head: fn(&source: term.Reader, count: Int) -> Int IOError! {
+    first: source.read(1) ?? return Err(err)
+    rest: source.read(count - 1) ?? return Err(err)
+    Ok(first.len() * 10 + rest.len())
+}
+
+run: fn() {
+    print(head(Reader.over([U8]{1, 2, 3, 4, 5}), 3) ?? panic("head"))
+    loop size in 2..<5 {
+        print(head(Reader.over([U8]{1, 2, 3, 4, 5}), size) ?? panic("head"))
+    }
+}

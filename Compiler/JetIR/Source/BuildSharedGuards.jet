@@ -34,7 +34,7 @@ ir_shared_guard_wait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, gu
     args: [Int]{token, mode, wake, closure, invoke, out}
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.CallRuntime, status, ir_intern_name(m, "jet_rt_native_shared_guard_wait"), start, args.len(), b.line)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     ir_stop_check(m, b)
     ir_release(m, b, wake)
     ir_release(m, b, closure)

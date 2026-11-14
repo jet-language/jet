@@ -744,7 +744,7 @@ ir_string_try_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     ir_emit(b.f, IROp.Copy, result, pushed, -1, -1, b.line)
     b.fresh[pushed] = false
     ir_end(b.f, b.line)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     ir_release(m, b, text)
     result
 }
@@ -782,7 +782,7 @@ ir_string_edit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, met
     if ir_failed(b) -> return -1
     ir_emit(b.f, IROp.Store, -1, address, 0, edited, b.line)
     b.fresh[edited] = false
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     loop text in texts -> ir_release(m, b, text)
     return -1
 }
@@ -5849,7 +5849,7 @@ ir_core_stream_store: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int],
             b.fresh[owned] = false
         }
     }
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     return -1
 }
 
@@ -6015,7 +6015,7 @@ ir_core_list_leaf: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, operation: IRRu
     width: ir_word_const(m, b, stride)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     reserved: ir_runtime(m, b, "jet_rt_encoding_list_reserve_exact", [Int]{list, width, native}, bool_row)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     ir_release(m, b, list)
     reserved
 }
@@ -6094,7 +6094,7 @@ ir_core_crypto_wipe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], 
     list: ir_place_address(m, p, b, args[0], backs, span)
     if ir_failed(b) || list < 0 -> return -1
     _: ir_runtime(m, b, "jet_rt_crypto_wipe", [Int]{list}, -1)
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     ir_release(m, b, list)
     return -1
 }

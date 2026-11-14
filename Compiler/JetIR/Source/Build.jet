@@ -44,8 +44,9 @@ IRBuildKept: struct {
 IRBinding: struct { name: String, slot: Int, indirect: Int{-1}, owned: Bool{false}, symbol: SymbolID{symbol_none()}, write: Bool{false}, carrier: Int{-1}, live: Int{-1}, cleanup: Int{-1} }
 
 // A write argument passed through a frame cell: after the call the variable
-// `slot` reads its value back from `cell`.
-IRWriteBack: struct { cell: Int, slot: Int }
+// `slot` reads its value back from `cell`. A temporary given the cell as its
+// place (`ends`) ends once read back (ir_write_backs).
+IRWriteBack: struct { cell: Int, slot: Int, ends: Bool{false} }
 
 // An open loop: `exit` is the Block that `break` leaves, `next` the
 // construct that `next` (continue) leaves or restarts; `mark` the bindings
@@ -2473,6 +2474,18 @@ ir_release: fn(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
     if slot < 0 || !b.fresh[slot] -> return
     if ir_has_drop(m, b, slot) -> ir_emit(b.f, IROp.Drop, -1, slot, -1, -1, b.line)
     b.fresh[slot] = false
+}
+
+// After the call that wrote them, each write-back's slot reads its value back
+// from its cell, and a temporary that was given the cell as its place ends.
+ir_write_backs: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, backs: [IRWriteBack], span: Span) Never! {
+    loop back in backs {
+        ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+        if back.ends {
+            ir_close_temporary(m, p, b, back.slot, span)
+            ir_release(m, b, back.slot)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

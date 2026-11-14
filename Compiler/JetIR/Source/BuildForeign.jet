@@ -359,7 +359,7 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
         }
         .Word | .Float | .Float32 | .Char | .Pointer -> dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
     }
-    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_write_backs(m, p, b, backs, span)
     loop (index, pointer) in strings {
         _: ir_runtime(m, b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
     }
