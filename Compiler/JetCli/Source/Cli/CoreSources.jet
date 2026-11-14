@@ -1,11 +1,11 @@
 // The Core sources and assets this jet is built with, for a compile with no
 // toolchain tree (jet_cli_core_sources): the text of every
 // CORE_SOURCE_OWNED_ROWS row and the bytes of every file a Core source embeds
-// beside it, read from the toolchain tree when jet is built. The build checks
-// the sources against Core.rows's declarations (core_declarations_checked_sources)
-// and stops, naming each problem, when they disagree.
+// beside it, read from the toolchain tree when jet is built. The guard
+// tests/guards/core_declarations checks the sources against Core.rows's
+// declarations on every commit.
 use {
-    jet_foundation.[CORE_DECLARATIONS, CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_SOURCE, core_declarations_assets, core_declarations_checked_sources]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_SOURCE, core_declarations_assets]
 }
 
 // The canonical effect source: Compiler/Prelude/Effects.jet, then
@@ -20,7 +20,7 @@ JetCLICoreAsset: struct {
     bytes: [U8]
 }
 
-JET_CLI_CORE_SOURCES: #run core_declarations_checked_sources(CORE_DECLARATIONS, loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")})
+JET_CLI_CORE_SOURCES: #run { loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")} }
 
 // The files the Core sources embed (core_declarations_assets), read from the
 // toolchain tree; a #Test below holds the list to the sources.

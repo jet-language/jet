@@ -1,0 +1,51 @@
+// Core.rows's declarations, read the way the compiler build reads them, pass
+// every check against the checkout's Core sources
+// (jet_foundation's core_declarations_source_problems). jet embeds the Core
+// sources without checking them (Compiler/JetCli/Source/Cli/CoreSources.jet),
+// so this guard, which runs on every commit, is where a Core source that
+// disagrees with its declarations is refused.
+use {
+    jet_foundation.[
+        CORE_DECLARATIONS, CORE_DECLARATIONS_CORE_PATH, CORE_DECLARATIONS_ENCODING_PATH,
+        CORE_DECLARATIONS_PARTS_PATH, CORE_DECLARATIONS_RUNTIME_FILES, CORE_DECLARATIONS_SYNTAX_FILES,
+        CoreDeclarationError, CoreDeclarationFile, CoreDeclarations, EFFECT_VOCABULARY_ROOTS,
+        EFFECT_VOCABULARY_ROWS, core_declarations_read, core_declarations_source_problems,
+        core_decl_lang_type_problem, core_decl_mem_problem, core_decl_syntax_constants,
+    ]
+    corpus_manifest.[guards_enter_root]
+    core_guard_files: core.files
+}
+
+// Core.rows's declarations as the checkout has them, read with the build's
+// other inputs.
+core_guard_declared: fn() -[FS]> CoreDeclarations CoreDeclarationError! {
+    source: core_guard_files.read(CORE_DECLARATIONS_CORE_PATH) ?? panic("{CORE_DECLARATIONS_CORE_PATH} did not read")
+    parts: core_guard_files.read(CORE_DECLARATIONS_PARTS_PATH) ?? panic("{CORE_DECLARATIONS_PARTS_PATH} did not read")
+    core_declarations_read(source, parts, CORE_DECLARATIONS_SYNTAX_FILES, CORE_DECLARATIONS_RUNTIME_FILES, EFFECT_VOCABULARY_ROWS)
+}
+
+// The text of every source `declared` names (its source rows and parts, and
+// the encoding source), as the checkout has it.
+core_guard_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] {
+    paths := [String]{}
+    loop row in declared.source_rows {
+        if !paths.contains(row.path) -> paths.push(row.path.copy())
+    }
+    loop part in declared.parts {
+        if !paths.contains(part.path) -> paths.push(part.path.copy())
+    }
+    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) -> paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    loop path in paths -> CoreDeclarationFile{path: path.copy(), text: core_guard_files.read(path) ?? panic("{path} did not read")}
+}
+
+#Test("the declarations the build reads pass every check against the checkout") {
+    guards_enter_root()
+    declared: core_guard_declared() ?? panic("Core.rows was refused: {err.message}")
+    assert_eq(declared.dispatchers.len(), CORE_DECLARATIONS.dispatchers.len())
+    assert_eq(core_declarations_source_problems(declared, core_guard_sources(declared)).join("\n"), "")
+    constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
+    assert_eq(core_decl_mem_problem(CORE_DECLARATIONS, CORE_DECLARATIONS_SYNTAX_FILES, constants) ?? panic("the core.mem tiers did not read: {err.message}"), "")
+    assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
+    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
+    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
+}

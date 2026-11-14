@@ -496,15 +496,6 @@ core_decl_first_owner: fn(rows: [CoreDeclarationSource], module_name: String, me
     0
 }
 
-// `sources`, the text of every CORE_SOURCE_OWNED_ROWS row, once the checks
-// of the sources `declared` names pass; the build stops with every problem
-// otherwise.
-core_declarations_checked_sources: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [CoreDeclarationFile] {
-    problems: core_declarations_source_problems(declared, sources)
-    if problems.len() > 0 -> panic(problems.join("\n"))
-    sources.copy()
-}
-
 // The files `text` names with an `embed_bytes` or `embed_file` call outside
 // comments, each once in source order, as written (relative to the file's
 // own directory).

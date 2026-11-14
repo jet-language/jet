@@ -681,11 +681,12 @@ jet_cli_picker_current: fn(state: JetCLIPickerState) -> Int? Never! {
 // ---- Keys and state ----
 
 jet_cli_picker_state: fn(width: Int, height: Int, color: Bool) -> JetCLIPickerState Never! {
-    index: jet_cli_picker_index()
-    categories: jet_cli_picker_categories(index)
-    JetCLIPickerState{
-        index: index,
-        categories: categories,
+    // The index is built when the picker opens. Bound to an immutable local,
+    // it would be computed while compiling jet, and every build of jet would
+    // pay for it.
+    state := JetCLIPickerState{
+        index: jet_cli_picker_index(),
+        categories: [String]{},
         width: width,
         height: height,
         color: color,
@@ -701,6 +702,8 @@ jet_cli_picker_state: fn(width: Int, height: Int, color: Bool) -> JetCLIPickerSt
         ref_query: "",
         ref_scroll: 0,
     }
+    state.categories = jet_cli_picker_categories(state.index)
+    state
 }
 
 // `at` moved by `delta` around a list of `count`.

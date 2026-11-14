@@ -10,12 +10,12 @@ use {
         CORE_CALL_EXTENSIONS, CORE_CALLS, CORE_DECLARATIONS, CORE_DECLARATIONS_CORE_PATH,
         CORE_DECLARATIONS_ENCODING_PATH, CORE_DECLARATIONS_PARTS_PATH, CORE_DECLARATIONS_RUNTIME_FILES,
         CORE_DECLARATIONS_SYNTAX_FILES, CoreCapabilityKind, CoreDeclPublic, CoreDeclarationDispatcher,
-        CoreDeclarationError, CoreDeclarationFile, CoreDeclarationType, CoreDeclarations, EFFECT_VOCABULARY_ROOTS,
+        CoreDeclarationError, CoreDeclarationFile, CoreDeclarationType, CoreDeclarations,
         EFFECT_VOCABULARY_ROWS, EffectVocabularyRow, core_call_key, core_declarations_module,
         core_declarations_read, core_declarations_source_problems, core_decl_call_record,
         core_decl_constructor_offsets, core_decl_directory, core_decl_dispatcher,
-        core_decl_effect_roots_problem, core_decl_embedded_names, core_decl_lang_type_problem,
-        core_decl_list_body, core_decl_mem_problem, core_decl_problem, core_decl_public_problem,
+        core_decl_effect_roots_problem, core_decl_embedded_names,
+        core_decl_list_body, core_decl_problem, core_decl_public_problem,
         core_decl_register_public, core_decl_resolve_items, core_decl_rust_string_text,
         core_decl_snake_segment, core_decl_source_lines, core_decl_source_locals,
         core_decl_syntax_constants, core_decl_wrapper_unit,
@@ -119,17 +119,6 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
         if row.effect_kind == (Val("Net")) -> network += 1
     }
     assert(network > 0, "CORE_CALLS has no Net route row")
-}
-
-#Test("the declarations the build reads pass every check against the checkout") {
-    declared: core_declarations_fixture(core_declarations_core()) ?? panic("Core.rows was refused: {err.message}")
-    assert_eq(declared.dispatchers.len(), CORE_DECLARATIONS.dispatchers.len())
-    assert_eq(core_declarations_source_problems(declared, core_declarations_sources(declared)).join("\n"), "")
-    constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
-    assert_eq(core_decl_mem_problem(CORE_DECLARATIONS, CORE_DECLARATIONS_SYNTAX_FILES, constants) ?? panic("the core.mem tiers did not read: {err.message}"), "")
-    assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
-    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
-    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
 }
 
 #Test("Core type references resolve to their defining type and refuse a missing or cyclic target") {

@@ -57,7 +57,8 @@
 // compiler lowers, as chain s1 does, and regenerates the sources git keeps,
 // which must come out as committed or the census prints STALE); and
 // `jet test tests/guards` in GUARD_SHARDS shards (every guard: many walk the
-// whole tree). Then, with the compiler the build made, at once (phase B):
+// whole tree), beside one `jet test tests/guards/NAME` run per GUARD_PACKAGES
+// package. Then, with the compiler the build made, at once (phase B):
 // its own `jet check Compiler/JetCli` (as chain s2 does), its `jet check
 // Core` (every Core body, called or not; it moves to the seed's check once
 // the seed carries `jet check Core`) and Jetpack/Bootstrap/Check.jet of each
@@ -203,6 +204,11 @@ CENSUS_CPUS: "8-31"
 HEAVY_STACK: "--stack=1073741824:1073741824"
 // The census runs tests/guards as GUARD_SHARDS `--shard=I/N` runs at once.
 GUARD_SHARDS: 4
+// The guard packages under tests/guards (each with its own package.jet, so a
+// `jet test tests/guards` run leaves it out) the census runs, each whole,
+// beside the shards. They compile Compiler packages, so each takes
+// CORE_MEMORY.
+GUARD_PACKAGES: [String]{"core_declarations"}
 // The Jetpack areas' check scopes share area_budget bytes (MemAvailable at
 // launch less TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX): each is capped at
 // its last measured peak (r14/area-peaks.tsv; AREA_UNMEASURED when it has
@@ -1045,14 +1051,16 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     // the chain stages do (Chain.jet build_stage). The check reads no build
     // output, so it runs beside it.
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
-    task.group phase_a(limit: 2 + GUARD_SHARDS) {
+    task.group phase_a(limit: 2 + GUARD_SHARDS + GUARD_PACKAGES.len()) {
         checking: task compile_pass("check", snap, out, CHECK_MEMORY, 0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}, identity, package_dirs, 21)
         building: task build_pass(passes, worktree, head, snap, out, seed_jet, identity, package_dirs, named)
         shards: loop at in 0..<GUARD_SHARDS -> task guard_shard(snap, out, seed_jet, identity, at + 1)
+        packages: loop name in GUARD_PACKAGES -> task guard_package(snap, out, seed_jet, identity, name)
         runs.push(checking.join() ?? lost_pass("check"))
         runs.push(building.join() ?? lost_pass("build"))
         shard_runs := [PassRun]{}
         loop shard in shards -> shard_runs.push(shard.join() ?? lost_pass("guards"))
+        loop package in packages -> shard_runs.push(package.join() ?? lost_pass("guards"))
         runs.push(guards_run(shard_runs))
     }
     if !passes.build || !pass_clean(runs, "build") -> return census_finish(runs, out)
@@ -1189,12 +1197,24 @@ build_pass: fn(passes: Passes, worktree: String, head: String, snap: String, out
 // Shard `shard` of GUARD_SHARDS of tests/guards, run by the seed behind the
 // dev shell: its failing tests, and whether it finished.
 guard_shard: fn(snap: String, out: String, seed_jet: String, identity: String, shard: Int) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    guard_test(snap, seed_jet, identity, "{out}/guards.{shard}", GUARD_MEMORY, [String]{"tests/guards", "--shard={shard}/{GUARD_SHARDS}"}, "shard {shard}/{GUARD_SHARDS}")
+}
+
+// The GUARD_PACKAGES package `name`, run whole like a shard.
+guard_package: fn(snap: String, out: String, seed_jet: String, identity: String, name: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
+    guard_test(snap, seed_jet, identity, "{out}/guards.{name}", CORE_MEMORY, [String]{"tests/guards/{name}"}, "package {name}")
+}
+
+// `jet test` with `args`, run by the seed behind the dev shell under
+// `memory`, logged at `log`: its failing tests, and whether it finished.
+guard_test: fn(snap: String, seed_jet: String, identity: String, log: String, memory: String, args: &&[String], note: String) -[Exec, FS, Time, Time.Wait]> PassRun Never! {
     watch: time.start()
-    log: "{out}/guards.{shard}"
-    code: run_heavy(snap, 2400, GUARD_MEMORY, CENSUS_CPUS, [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "test", "tests/guards", "--shard={shard}/{GUARD_SHARDS}"}, compile_env(identity, snap, ""), log)
+    argv := [String]{seed_jet, "{snap}/Tools/agent/JetEnv.jet", seed_jet, "test"}
+    argv.extend(args)
+    code: run_heavy(snap, 2400, memory, CENSUS_CPUS, argv, compile_env(identity, snap, ""), log)
     text: "{files.read("{log}.out") ?? ""}{files.read("{log}.err") ?? ""}"
     lines: guard_failures(text)
-    PassRun{name: "guards", rc: if code == 0 && lines.len() == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "shard {shard}/{GUARD_SHARDS} rc={code}", lines: lines}
+    PassRun{name: "guards", rc: if code == 0 && lines.len() == 0 -> 0 else -> 1, seconds: time.elapsed(watch).ns /% 1000000000, peak: 0, note: "{note} rc={code}", lines: lines}
 }
 
 // The failing tests of a `jet test` run's output, and a line when it did not
