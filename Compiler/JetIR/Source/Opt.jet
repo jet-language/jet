@@ -339,14 +339,25 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
         compiler_transfer_rows<IRFunction>(m.functions, functions)
         return
     }
-    bounds: compiler_threads_partition(weights, workers)
+    shared: ir_opt_facts_threads(view.move(), functions, compiler_threads_partition(weights, workers), workers, options, false, report)
+    held := shared.guard_edit()
+    ir_opt_unview(m, held.value.views[0])
+    compiler_transfer_rows<IRFunction>(m.functions, functions)
+}
+
+// Splits `functions` into `workers` consecutive parts at `bounds`, runs a
+// facts thread per part over `view` (ir_opt_facts_part; `versions` for
+// ir_opt_version_entries), then puts the functions back in order and adds
+// each part's report to `report`, in part order. Returns what the threads
+// shared, so the caller takes its view back.
+ir_opt_facts_threads: fn(view: &&IRModule, functions: &[IRFunction], bounds: [Int], workers: Int, options: IROptOptions, versions: Bool, report: &IROptReport) -> Shared<IROptFactsView> Never! {
     // Parts leave the list last-first: part `workers - 1` pops first.
     slots := [Shared<IROptFactsPart>]{}
     part := workers - 1
     loop part >= 0 {
         rows := [IRFunction]{}
         loop functions.len() > bounds[part] {
-            row: functions.pop() ?? panic("the IR optimizer lost a function to its facts")
+            row: functions.pop() ?? panic("the IR optimizer lost a function to its facts threads")
             rows.push(row)
         }
         rows.reverse()
@@ -354,16 +365,14 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
         part -= 1
     }
     slots.reverse()
-    shared: Shared{IROptFactsView{views: [IRModule]{view.move()}, options: options.copy(), versions: false}}
+    shared: Shared{IROptFactsView{views: [IRModule]{view.move()}, options: options.copy(), versions: versions}}
     _: ir_opt_fact_finders(slots, shared, 0) ?? panic("the IR facts threads failed")
     loop slot in slots {
         held := slot.guard_edit()
         functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
         ir_opt_report_add(report, held.value.report)
     }
-    held := shared.guard_edit()
-    ir_opt_unview(m, held.value.views[0])
-    compiler_transfer_rows<IRFunction>(m.functions, functions)
+    shared
 }
 
 // The functions of one thread of ir_opt_module_facts or
@@ -429,29 +438,7 @@ ir_opt_version_entries: fn(m: &IRModule, functions: &[IRFunction], options: IROp
         loop id in 0..<count -> ir_opt_version_body(m, functions[id], options, lint, report)
         return
     }
-    bounds: compiler_threads_partition(weights, workers)
-    // Parts leave the list last-first: part `workers - 1` pops first.
-    slots := [Shared<IROptFactsPart>]{}
-    part := workers - 1
-    loop part >= 0 {
-        rows := [IRFunction]{}
-        loop functions.len() > bounds[part] {
-            row: functions.pop() ?? panic("the IR optimizer lost a function to versioning")
-            rows.push(row)
-        }
-        rows.reverse()
-        slots.push(Shared{IROptFactsPart{functions: rows.move(), report: ir_opt_report(options.level)}})
-        part -= 1
-    }
-    slots.reverse()
-    lent: ir_opt_lend(m)
-    shared: Shared{IROptFactsView{views: [IRModule]{lent.move()}, options: options.copy(), versions: true}}
-    _: ir_opt_fact_finders(slots, shared, 0) ?? panic("the IR versioning threads failed")
-    loop slot in slots {
-        held := slot.guard_edit()
-        functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
-        ir_opt_report_add(report, held.value.report)
-    }
+    shared: ir_opt_facts_threads(ir_opt_lend(m), functions, compiler_threads_partition(weights, workers), workers, options, true, report)
     held := shared.guard_edit()
     ir_opt_lend_into(m, held.value.views[0])
 }
