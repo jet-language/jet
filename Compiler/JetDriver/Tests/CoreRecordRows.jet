@@ -15,7 +15,7 @@ use {
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[ModuleID, compiler_threads_single, symbol_keys, symbol_keys_intern]
+    jet_foundation.[ModuleID, compiler_threads_single, symbol_find, symbol_keys, symbol_keys_intern, symbol_table_of]
     jet_sema.[sema_registration_reserved_symbols]
 }
 
@@ -102,11 +102,15 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     }
     // Core loops, so its effect rows hold loop spans.
     assert(looped > 0)
-    symbols: jet_driver_core_record_symbols(record, recorded) ?? panic("the record's symbol keys don't read: {err}")
+    // Each range reads back with the keys the check reserved, then the key of
+    // each body the check generated with no symbol of its own (a Prelude error
+    // conversion), so every body key has an id in the ranges.
+    symbols := jet_driver_core_record_symbols(record, recorded) ?? panic("the record's symbol keys don't read: {err}")
     assert_eq(symbols.len(), reserved.len())
     loop (index, keys) in reserved {
         assert_eq(symbols[index].base, keys.base)
-        assert(symbols[index].keys.texts == keys.keys.texts)
+        assert(symbols[index].keys.texts.len() >= keys.keys.texts.len())
+        loop (at, text) in keys.keys.texts -> assert_eq(symbols[index].keys.texts[at], text)
     }
     // A compile that takes no module reads the serial ranges' keys alone.
     bare: jet_driver_core_record_symbols(record, [ModuleID]{}) ?? panic("the record's serial symbol keys don't read: {err}")
@@ -117,6 +121,11 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     }
     first: jet_driver_core_record_body_key(record, 0) ?? panic("the first body key doesn't read: {err}")
     assert_eq(jet_driver_core_record_module_first_body(record, first.owner) ?? panic("no first body: {err}"), 0)
+    table: symbol_table_of(symbols)
+    loop index in 0..<counts.bodies {
+        body: jet_driver_core_record_body_key(record, index) ?? panic("body key {index} doesn't read: {err}")
+        assert(symbol_find(table, body.key) != None)
+    }
 }
 
 #Test("symbol keys read back from their parts") {
