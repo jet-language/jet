@@ -80,11 +80,36 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
     // `registry.method` on the resolved owner), in module/row order.
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
-        if implementation.trait_name != None -> next
-        if implementation.target_identity_key != nominal.identity_key && (module_is_none(implementation.target_module_identity) || implementation.target_module_identity != nominal_module || implementation.target_type_name != nominal.symbol.name) -> next
+        if !sema_call_impl_targets(implementation, nominal) -> next
         loop function in implementation.methods {
             is_static: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
             if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) -> names.push(function.symbol.name.copy())
+        }
+    }
+    names
+}
+
+// Whether `implementation` is an inherent impl of `nominal`: registered under
+// its identity, or under its module and name.
+sema_call_impl_targets: fn(implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal) -> Bool Never! {
+    if implementation.trait_name != None -> return false
+    if implementation.target_identity_key == nominal.identity_key -> return true
+    !module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name
+}
+
+// The associated methods registration generated for `nominal`, such as a
+// codec's `decode` and `__read`. The type's source never declares them, so a
+// Fix listing what it declares leaves them out.
+sema_call_generated_method_names: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> [String] Never! {
+    names := [String]{}
+    loop function in nominal.methods {
+        if function.declaration.compiler_generated -> names.push(function.symbol.name.copy())
+    }
+    loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+        implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+        if !sema_call_impl_targets(implementation, nominal) -> next
+        loop function in implementation.methods {
+            if implementation.compiler_generated || function.declaration.compiler_generated -> names.push(function.symbol.name.copy())
         }
     }
     names
@@ -122,11 +147,10 @@ sema_call_static_missing_member: fn(receiver: Expr, method: String, method_span:
         if sema_call_registered_method_names(graph, nominal, false, environment, program).contains(method) {
             diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
         } else {
-            // A reserved `__` member (a codec's `__read`) is compiler-generated
-            // and user code cannot spell it, so it is never offered.
+            generated: sema_call_generated_method_names(graph, nominal)
             statics := [String]{}
             loop name in sema_call_registered_method_names(graph, nominal, true, environment, program) {
-                if !name.starts_with("__") -> statics.push(name.copy())
+                if !generated.contains(name) -> statics.push(name.copy())
             }
             shown: loop name in statics -> "`{name}`"
             fix: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
