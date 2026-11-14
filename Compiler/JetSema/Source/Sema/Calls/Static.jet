@@ -1088,7 +1088,11 @@ sema_call_static_source_owner: fn(receiver: Expr, method: String, owner_type_arg
             args = target.owner_type_args
         }
         nominal: graph.modules[row.module_index].nominals[row.row]
-        if !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
+        // A user distinct type's base conversion (`pkg.ID.from_int(n)`) is no
+        // registered method; sema_call_try_distinct_conversion builds it. A
+        // Core owner keeps its built-in rows (sema_call_try_builtin_static_field).
+        user_distinct: nominal.kind == SemaRegistrationNominalKind.Distinct && !module_is_core(nominal.symbol.module_identity)
+        if !user_distinct && !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) {
             return None
         }
         return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, resolved), owner_type_args: args})
@@ -1359,6 +1363,10 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
     owner_symbol: static_owner.symbol
     static_args: static_owner.owner_type_args
     type_name: owner_symbol.name
+    // The distinct conversion names its owner as written: `pkg.ID` resolves
+    // from this module where the bare declared name does not.
+    written_name := type_name.copy()
+    if receiver == .Field(.Ident(alias, _, _), leaf, _, _) -> written_name = "{alias}.{leaf}"
     if owner_symbol.kind != SymbolKind.Type {
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
@@ -1394,7 +1402,7 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         if diagnostics.len() > diagnostics_before {
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        distinct := sema_call_try_distinct_conversion(owner_symbol, type_name, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        distinct := sema_call_try_distinct_conversion(owner_symbol, written_name, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if distinct.handled -> return distinct
         // `T.reflect()` on a declared type is that type's TypeInfo record,
         // computed while compiling: in compile-time code, in `build: fn` and in
@@ -1671,23 +1679,6 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
                 literal_in_range = true
                 if literal < bounds.lo || literal > bounds.hi {
                     diagnostics.push(sema_error("E0135", argument.span, "`{literal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{literal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
-                }
-            }
-        }
-        // A literal beyond i64 keeps its exact decimal (a BigInt constant);
-        // it is still known at compile time, so the interval check sees it.
-        if argument.kind == .CtLit(constant) {
-            if constant == .BigInt(decimal) {
-                if sema_expr_is_integer(source) && sema_expr_is_integer(facts.base) {
-                    literal_in_range = true
-                    // Core Int is exact, so the decimal parses to the literal itself.
-                    outside: if Int.parse(decimal) == {
-                        .Ok(literal) -> literal < bounds.lo || literal > bounds.hi
-                        .Err(_) -> true
-                    }
-                    if outside {
-                        diagnostics.push(sema_error("E0135", argument.span, "`{decimal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{decimal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
-                    }
                 }
             }
         }

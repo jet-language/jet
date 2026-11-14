@@ -1,0 +1,17 @@
+# A distinct type's base conversion works through a module path: from a
+# local module (`model.ProjectID.from_int(2)`) and from a dependency package
+# (`logic.TaskID.from_int(7)`, `logic.Label.from_string("ops")`), and the
+# value is the same type the qualified name spells in a signature or a typed
+# literal. A range type still proves a literal through the path (E0135, named
+# as written). seed-b14 refused every one with E0629 ModuleAsValue (#6819 c2).
+fixture: distinct_conversion_through_a_module_path.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: app
+exit: 0
+stdout: = "project 2\ntask 7\nops\ntrue\n3\n"
+step: jet check main.jet
+cwd: outside
+exit: nonzero
+stderr: ~ "`9` is outside `logic.Level`'s range 1..5" # E0135 through the module path
+stderr: ~ "More: jet-lang.dev/e/E0135"
