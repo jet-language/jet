@@ -66,6 +66,41 @@ LSP_TEST_PROVIDERS: [String]{
     assert_eq(lsp_test_text(lsp_test_field(result, "serverInfo"), "name"), "jet")
 }
 
+// The request each advertised provider answers.
+LSP_TEST_PROVIDER_METHODS: [String]{
+    "textDocument/formatting",
+    "textDocument/rangeFormatting",
+    "textDocument/onTypeFormatting",
+    "textDocument/codeAction",
+    "textDocument/completion",
+    "textDocument/signatureHelp",
+    "textDocument/hover",
+    "textDocument/definition",
+    "textDocument/references",
+    "textDocument/documentHighlight",
+    "textDocument/prepareRename",
+    "textDocument/rename",
+    "textDocument/documentSymbol",
+    "workspace/symbol",
+    "textDocument/foldingRange",
+    "textDocument/selectionRange",
+    "textDocument/documentLink",
+    "textDocument/semanticTokens/full",
+    "textDocument/semanticTokens/range",
+}
+
+#Test("initialize speaks only LSP, and every advertised provider's request is answered") {
+    server := lsp_test_main_server()
+    result: lsp_test_result(server, "initialize", "{{}}")
+    assert(lsp_member(result, "protocolVersion") == None, "initialize has no protocolVersion")
+    assert(lsp_member(result, "resources") == None, "initialize has no resources")
+    params: lsp_test_at(LSP_TEST_MAIN_URI, 0, 0)
+    loop method in LSP_TEST_PROVIDER_METHODS {
+        response: lsp_test_response(server, method, params)
+        if lsp_member(response, "error") == .Val(error) -> assert(lsp_test_int(error, "code") != -32601, "{method} is answered")
+    }
+}
+
 #Test("an unknown method is not found and shutdown is acknowledged") {
     server := lsp_test_server()
     assert_eq(lsp_test_error_code(server, "textDocument/codeLens", "{{}}"), -32601)
