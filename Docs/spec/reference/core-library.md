@@ -672,7 +672,12 @@ follows key order.
 A type that writes its own `Equatable` or `Comparable` and has no `KeyBy` is
 not a Map key (E0502), a Set element (E0506) or a `#Memo` argument: its `==`
 can call two values the same that a field walk would file apart. Name the
-value it compares with `KeyBy` instead.
+value it compares with `KeyBy` instead. When the written rule compares one
+field path of both sides (`self.start == rhs.start`, or
+`self.start.compare(rhs.start)`) and is written in the file that uses the
+type, `jet fix` replaces it with `impl KeyBy` keyed by that path. It then
+deletes the E0908 written `Equatable` or `Comparable` that compares the same
+path, so `==` and ordering give the same answers.
 
 A finite `loop ... -> value` evaluates immediately to a list. An expected type
 does not change collection choice or evaluation time. The naming law in

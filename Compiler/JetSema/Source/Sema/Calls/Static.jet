@@ -941,7 +941,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
     if (row.owner == "Set" || row.owner == "Tally") && result == .Apply(_, result_args) && result_args.len() == 1 && !sema_type_hashable(environment, program, result_args[0]) {
         element_name: type_name(result_args[0])
         if sema_comparability_written_order_of(environment, program, result_args[0]) == .Val(written) {
-            diagnostics.push(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "`{element_name}` writes its own `{written}`, so values its `==` calls the same could still be separate elements", "implement `KeyBy` with the value `{element_name}` compares, and remove the written `{written}`"))
+            diagnostics.push(sema_key_by_migrated(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "`{element_name}` writes its own `{written.trait_name}`, so values its `==` calls the same could still be separate elements", "implement `KeyBy` with the value `{element_name}` compares, and remove the written `{written.trait_name}`"), environment, program, written))
         } else {
             diagnostics.push(sema_error("E0506", span, "`{row.owner}<{element_name}>` is not valid — `{element_name}` is not hashable", "{row.owner} elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type", "change the element type to a hashable type, or use a `[{element_name}]` list instead"))
         }

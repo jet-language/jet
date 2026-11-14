@@ -1,0 +1,30 @@
+# `jet fix` moves a type used as a Map key whose written equality reads one
+# field path to KeyBy. The Map-key refusal carries an edit that replaces the
+# written Equatable with `impl KeyBy` keyed by that path. The E0908 beside
+# the new KeyBy carries an edit that deletes a written Comparable reading
+# the same path. The fixed file runs with the same `==` and order. A rule
+# that reads anything else is left for a hand edit.
+fixture: d_key_traits1_fix.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet fix fix/main.jet
+exit: in [0, 1] # the first round may leave the E0908 its own edit fixes for the next
+step: jet fix fix/main.jet
+exit: in [0, 1] # the second round leaves nothing it can fix
+file: fix/main.jet ~ "impl KeyBy {" # the written equality became KeyBy
+file: fix/main.jet ~ "key: fn(self) -> Int { self.start_ns }" # keyed by the path the rule read
+file: fix/main.jet !~ "impl Equatable" # the written equality is gone
+file: fix/main.jet !~ "impl Comparable" # the written order that agrees with the key is gone
+step: jet run fix/main.jet
+exit: 0
+stdout: ~ "slots: 1 bob" # equal starts are one key
+stdout: ~ "earlier: true" # the order follows the key
+step: jet fix keep/main.jet
+exit: in [0, 1] # the refusal stays, with no edit to apply
+file: keep/main.jet ~ "impl Equatable" # a rule over a computed value stays
+file: keep/main.jet !~ "impl KeyBy" # no key is guessed
+step: jet check keep/main.jet
+exit: 1
+stderr: ~ "`Reading` writes its own `Equatable`" # still refused as a Map key

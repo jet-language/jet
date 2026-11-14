@@ -7151,6 +7151,9 @@ InvalidMapKeyType: struct {
         expert_path: "none: a map key is an eligible scalar, enum, tuple or struct"
         meaning: "Type can't be a map key"
         detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
 
         what: fn(self) -> String {
             "Map keys are Int, String, Bool, Char, U8/IntN, payload-free enums, lists, tuples and structs whose parts recursively follow these rules, or KeyBy types whose key does"
@@ -13228,7 +13231,9 @@ DuplicateTraitImpl: struct {
         safety_reason: "Two impls of one trait for one type leave every call with two bodies."
         expert_path: "none: a type implements a trait once"
         meaning: "A trait implemented twice for one type"
-        no_fix: .Ambiguous
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
 
         what: fn(self) -> String { "Duplicate trait impl" }
 

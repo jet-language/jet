@@ -8,6 +8,8 @@
 use jet_foundation.[
     BinOp,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     Span,
     SymbolKind,
     ModuleID,
@@ -19,6 +21,7 @@ use jet_foundation.[
     TraitImplBlock,
     IR_RUNTIME_HANDLES,
     ir_runtime_handle_row,
+    diagnostic_with_edit_grade,
     owned_trait_implies,
 ]
 
@@ -743,27 +746,41 @@ sema_comparability_nominal_key: fn(graph: SemaRegistrationGraph, nominal: SemaRe
     None
 }
 
-// The trait of a written `impl Equatable` or `impl Comparable` of
-// `definition`, which has no KeyBy: the type's own `==` or order can call two
-// values the same that a field walk keeps apart, so it is no Map key or Set
-// element. None when every such impl is derived.
-sema_comparability_written_order: fn(program: SemaProgramTables, definition: TTypeDef) -> String? Never! {
+// A written `impl Equatable` or `impl Comparable` of the nominal at `row`:
+// its trait, the module row it is written in, and the source it spans from
+// `impl` through its brace. `impl_index` is the top-level `impl Owner.Trait`
+// of that module; None for a block in the type's body.
+SemaWrittenOrder: struct {
+    trait_name: String
+    module_index: Int
+    row: SemaRegistrationRowRef
+    impl_index: Int?
+    span: Span?
+}
+
+// The written Equatable or Comparable of `definition`, which has no KeyBy:
+// the type's own `==` or order can call two values the same that a field
+// walk keeps apart, so it is no Map key or Set element. None when every such
+// impl is derived.
+sema_comparability_written_order: fn(program: SemaProgramTables, definition: TTypeDef) -> SemaWrittenOrder? Never! {
     if program.registration_graph == .Val(graph) {
         caller: sema_type_module_row(graph, definition.module_identity)
         row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
-        return sema_comparability_nominal_written_order(graph, graph.modules[row.module_index].nominals[row.row])
+        return sema_comparability_nominal_written_order(graph, row)
     }
     None
 }
 
-sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> String? Never! {
+sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> SemaWrittenOrder? Never! {
+    nominal: graph.modules[row.module_index].nominals[row.row]
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
             if graph.modules[module_index].impls[impl_index].compiler_generated -> next
             written: graph.modules[module_index].impls[impl_index].declaration.trait_name ?? next
             if written == "KeyBy" || !owned_trait_implies("KeyBy", written) -> next
             target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
-            if target_matches -> return Val(sema_comparability_order_trait(written))
+            if !target_matches -> next
+            return Val(SemaWrittenOrder{trait_name: sema_comparability_order_trait(written), module_index: module_index, row: row, impl_index: Val(impl_index), span: Val(graph.modules[module_index].impls[impl_index].declaration.span)})
         }
     }
     if nominal.source == .SourceAST(item) {
@@ -771,7 +788,7 @@ sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, nomin
             if block.compiler_generated || block.trait_name == "KeyBy" || !owned_trait_implies("KeyBy", block.trait_name) {
                 next
             }
-            return Val(sema_comparability_order_trait(block.trait_name))
+            return Val(SemaWrittenOrder{trait_name: sema_comparability_order_trait(block.trait_name), module_index: row.module_index, row: row, impl_index: None, span: block.span})
         }
     }
     None
@@ -784,15 +801,26 @@ sema_comparability_order_trait: fn(written: String) -> String Never! {
 }
 
 // E0502 for a Map key type `key` that isn't key-eligible. A type that writes
-// its own `equal` or `compare` is told to name its key with KeyBy.
+// its own `equal` or `compare` is told to name its key with KeyBy, and
+// `jet fix` moves a rule that reads one field path to KeyBy.
 sema_type_map_key_refusal: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, key: Type, what: String, span: Span) -> Diagnostic {
     written: sema_comparability_written_order_of(environment, program, key) ?? return sema_map_key_error(what, span)
-    sema_error("E0502", span, what, "`{type_name(key)}` writes its own `{written}`, so values its `==` calls the same could still be separate keys", "implement `KeyBy` with the value `{type_name(key)}` compares, and remove the written `{written}`")
+    sema_key_by_migrated(sema_error("E0502", span, what, "`{type_name(key)}` writes its own `{written.trait_name}`, so values its `==` calls the same could still be separate keys", "implement `KeyBy` with the value `{type_name(key)}` compares, and remove the written `{written.trait_name}`"), environment, program, written)
+}
+
+// `error` with the `jet fix` edit that moves `written`, a type's written
+// rule, to KeyBy (sema_key_by_migration_edit), when there is one.
+sema_key_by_migrated: fn(error: &&Diagnostic, environment: SemaScopeEnvironment, program: SemaProgramTables, written: SemaWrittenOrder) -> Diagnostic {
+    if program.registration_graph == .Val(graph) {
+        edit: sema_key_by_migration_edit(graph, written, environment.module_identity) ?? return error
+        return diagnostic_with_edit_grade(error, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+    }
+    error
 }
 
 // The written Equatable or Comparable of the nominal `ty` names, when it has
 // no KeyBy (sema_comparability_written_order).
-sema_comparability_written_order_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? Never! {
+sema_comparability_written_order_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> SemaWrittenOrder? Never! {
     if ty == .Named(name) {
         definition: sema_comparability_definition(environment, program, environment.module_identity, name) ?? return None
         if sema_comparability_key_type(program, definition) != None -> return None

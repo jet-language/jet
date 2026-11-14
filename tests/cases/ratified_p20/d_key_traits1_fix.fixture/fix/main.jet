@@ -1,0 +1,22 @@
+// A slot keyed by its start: the written equality and order both read
+// `start_ns`, so the start is the key.
+Slot: struct {
+    start_ns: Int
+    label: String
+
+    impl Equatable {
+        equal: fn(self, rhs: Slot) -> Bool { self.start_ns == rhs.start_ns }
+    }
+
+    impl Comparable {
+        compare: fn(self, rhs: Slot) -> Ordering { self.start_ns.compare(rhs.start_ns) }
+    }
+}
+
+run: fn() {
+    owners := [Slot: String]{}
+    owners[Slot{start_ns: 10, label: "a"}] = "ann"
+    owners[Slot{start_ns: 10, label: "b"}] = "bob"
+    print("slots: {owners.len()} {owners.get(Slot{start_ns: 10, label: "c"}) ?? "none"}")
+    print("earlier: {Slot{start_ns: 1, label: "x"} < Slot{start_ns: 2, label: "y"}}")
+}

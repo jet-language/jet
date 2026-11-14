@@ -2,15 +2,23 @@
 // ordering, Map lookup and Set membership, so reading it is pure and can't
 // fail, a written Equatable or Comparable beside it would be a second
 // answer, and a field that can change in place could move a stored key.
+// `jet fix` moves a written rule that reads one field path to KeyBy.
 use jet_foundation.[
+    BinOp,
     Diagnostic,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
     DiagnosticLabel,
+    Expr,
     Func,
     Item,
     Marker,
     ModuleID,
     Span,
+    TextEdit,
     Type,
+    diagnostic_with_edit_grade,
+    expr_span,
     ir_runtime_handle_row,
     owned_trait_implies,
     type_name,
@@ -48,28 +56,31 @@ sema_key_by_unstable: fn(what: String, span: Span) -> Diagnostic {
 // implementation; E0502 when the type holds a value that changes in place,
 // or when its key comes back to it.
 sema_key_by_alone: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, key_span: Span, diagnostics: &[Diagnostic]) {
+    caller: sema_type_module_row(graph, module_row.module_identity)
+    owner: sema_type_resolve_nominal_row_at(graph, Type.Named{name: owner_name}, caller)
+    key_fields: if owner == .Val(found) -> sema_key_by_key_fields(graph, found, module_row.program.items, owner_name) else -> None
     loop item in module_row.program.items {
         if item == .Impl(definition) {
             if definition.type_name != owner_name || definition.is_generated_serde -> next
             written: definition.trait_name ?? next
             if written != "KeyBy" && owned_trait_implies("KeyBy", written) {
-                diagnostics.push(sema_key_by_second(owner_name, "`impl {owner_name}.{written}`", written, definition.trait_span ?? definition.type_span, key_span))
+                removal: sema_key_by_agreeing(graph, owner, module_row.source, definition.methods, Val(definition.span), key_fields)
+                diagnostics.push(sema_key_by_second(owner_name, "`impl {owner_name}.{written}`", written, definition.trait_span ?? definition.type_span, key_span, removal))
             }
         } else if item == .Struct(definition) {
             if definition.name == owner_name {
-                sema_key_by_declaration(graph, module_row.module_identity, item, definition.type_markers, owner_name, key_span, diagnostics)
+                sema_key_by_declaration(graph, module_row, item, definition.type_markers, owner_name, key_span, owner, key_fields, diagnostics)
             }
         } else if item == .Enum(definition) {
             if definition.name == owner_name {
-                sema_key_by_declaration(graph, module_row.module_identity, item, definition.type_markers, owner_name, key_span, diagnostics)
+                sema_key_by_declaration(graph, module_row, item, definition.type_markers, owner_name, key_span, owner, key_fields, diagnostics)
             }
         }
     }
-    caller: sema_type_module_row(graph, module_row.module_identity)
-    owner: sema_type_resolve_nominal_row_at(graph, Type.Named{name: owner_name}, caller) ?? return
-    key: sema_comparability_nominal_key(graph, graph.modules[owner.module_index].nominals[owner.row]) ?? return
+    row: owner ?? return
+    key: sema_comparability_nominal_key(graph, graph.modules[row.module_index].nominals[row.row]) ?? return
     visited := [String:Bool]{}
-    if sema_key_by_reaches(graph, owner, key, owner.module_index, visited) {
+    if sema_key_by_reaches(graph, row, key, row.module_index, visited) {
         diagnostics.push(sema_error("E0502", key_span, "the key of `{owner_name}` comes back to `{owner_name}`", "comparing two `{owner_name}` values compares their keys, so a key that holds the type itself would never finish", "key the type by values that don't hold it"))
     }
 }
@@ -98,28 +109,248 @@ sema_key_by_reaches: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRow
     false
 }
 
-sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, item: Item, markers: [Marker], owner_name: String, key_span: Span, diagnostics: &[Diagnostic]) {
+sema_key_by_declaration: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, item: Item, markers: [Marker], owner_name: String, key_span: Span, owner: SemaRegistrationRowRef?, key_fields: [Int]?, diagnostics: &[Diagnostic]) {
     loop block in sema_registration_item_trait_blocks(item) {
         if block.compiler_generated || block.trait_name == "KeyBy" || !owned_trait_implies("KeyBy", block.trait_name) {
             next
         }
-        diagnostics.push(sema_key_by_second(owner_name, "`impl {block.trait_name}`", block.trait_name, block.trait_span, key_span))
+        removal: sema_key_by_agreeing(graph, owner, module_row.source, block.methods, block.span, key_fields)
+        diagnostics.push(sema_key_by_second(owner_name, "`impl {block.trait_name}`", block.trait_name, block.trait_span, key_span, removal))
     }
     loop marker in markers {
         if marker.name == "KeyBy" || !owned_trait_implies("KeyBy", marker.name) -> next
         sign: if marker.negated -> "#!" else -> "#"
-        diagnostics.push(sema_key_by_second(owner_name, "`{sign}{marker.name}`", marker.name, marker.name_span, key_span))
+        diagnostics.push(sema_key_by_second(owner_name, "`{sign}{marker.name}`", marker.name, marker.name_span, key_span, None))
     }
     visited := [String:Bool]{}
-    if sema_key_by_changing_item(graph, module_identity, item, visited) == .Val(held) {
+    if sema_key_by_changing_item(graph, module_row.module_identity, item, visited) == .Val(held) {
         diagnostics.push(sema_error("E0502", key_span, "`{owner_name}` holds `{held}`, so its key could change while it is stored", "a Map or Set files a value under its key once; a Shared, Cell, Atomic, weak or runtime-handle value can change after that", "keep the changing value out of the key type, or store an id for it"))
     }
 }
 
-sema_key_by_second: fn(owner_name: String, written: String, trait_name: String, span: Span, key_span: Span) -> Diagnostic {
+// E0908 for `written` beside KeyBy. `removal` is the source `jet fix`
+// deletes when the written rule agrees with the key (sema_key_by_agreeing).
+sema_key_by_second: fn(owner_name: String, written: String, trait_name: String, span: Span, key_span: Span, removal: Span?) -> Diagnostic {
     error := sema_error("E0908", span, "{written} on `{owner_name}` is a second `{trait_name}` beside its `KeyBy`", "`KeyBy` derives `{trait_name}` from the key, so `==`, ordering, Map lookup and Set membership all agree", "remove {written}, or remove the `KeyBy` implementation")
     error.labels.push(DiagnosticLabel{span: key_span, message: "`{owner_name}` implements `KeyBy` here"})
-    error
+    deleted: removal ?? return error
+    diagnostic_with_edit_grade(error, TextEdit{span: deleted, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+}
+
+// The stored fields, outermost first, that the `key` of the KeyBy
+// implementation of `owner_name` in `items` reads from the struct at `row`,
+// when its body is that field path alone (`self.at`).
+sema_key_by_key_fields: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, items: [Item], owner_name: String) -> [Int]? {
+    loop item in items {
+        if item == .Impl(definition) {
+            if definition.type_name != owner_name || definition.trait_name != (Val("KeyBy")) -> next
+            fields: sema_key_by_methods_key_fields(graph, row, definition.methods) ?? next
+            return Val(fields)
+        }
+        if !sema_key_by_item_named(item, owner_name) -> next
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.trait_name != "KeyBy" -> next
+            fields: sema_key_by_methods_key_fields(graph, row, block.methods) ?? next
+            return Val(fields)
+        }
+    }
+    None
+}
+
+sema_key_by_item_named: fn(item: Item, name: String) -> Bool {
+    if item == .Struct(definition) -> return definition.name == name
+    if item == .Enum(definition) -> return definition.name == name
+    false
+}
+
+sema_key_by_methods_key_fields: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, methods: [Func]) -> [Int]? {
+    loop method in methods {
+        if method.name != "key" || method.body.len() != 1 -> next
+        if method.body[0] == .Expr(value) {
+            fields := [Int]{}
+            if sema_key_by_path_fields(graph, row, value, fields) != None -> return Val(fields)
+        }
+    }
+    None
+}
+
+// The source `jet fix` deletes for the written rule `methods` spanning
+// `span` when it reads the same fields of the struct at `owner` that the key
+// reads (`key_fields`): from the end of the code before it through its
+// closing brace.
+sema_key_by_agreeing: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationRowRef?, source: String, methods: [Func], span: Span?, key_fields: [Int]?) -> Span? {
+    expected: key_fields ?? return None
+    row: owner ?? return None
+    block: span ?? return None
+    written := [Int]{}
+    if sema_key_by_written_path(graph, row, methods, written) == None || written != expected {
+        return None
+    }
+    Val(Span{start: sema_key_by_code_end(source, block.start), end: block.end})
+}
+
+// The `jet fix` edit that moves `written` to KeyBy when its rule reads one
+// field path of each side the same way (`self.at == rhs.at`,
+// `self.at.compare(rhs.at)`): the key is that path, so `==` and ordering
+// keep their answers. None when the rule reads anything else, or when the
+// rule or the type lives in another module than `module_identity`, the one
+// whose source the fix edits.
+sema_key_by_migration_edit: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, module_identity: ModuleID) -> TextEdit? {
+    if graph.modules[written.module_index].module_identity != module_identity || written.row.module_index != written.module_index {
+        return None
+    }
+    home: graph.modules[written.module_index]
+    if written.impl_index == .Val(index) {
+        declaration: home.impls[index].declaration
+        return sema_key_by_migration_text(graph, written, declaration.methods, "impl {declaration.type_name}.KeyBy")
+    }
+    nominal: home.nominals[written.row.row]
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.span == written.span {
+                return sema_key_by_migration_text(graph, written, block.methods, "impl KeyBy")
+            }
+        }
+    }
+    None
+}
+
+// The KeyBy block `head` opens for `written`, whose rule is `methods`.
+sema_key_by_migration_text: fn(graph: SemaRegistrationGraph, written: SemaWrittenOrder, methods: [Func], head: String) -> TextEdit? {
+    span: written.span ?? return None
+    fields := [Int]{}
+    path: sema_key_by_written_path(graph, written.row, methods, fields) ?? return None
+    type_span: sema_key_by_field_type_span(graph, path.last) ?? return None
+    source: graph.modules[written.module_index].source
+    key_text: sema_call_histories_span_text(source, path.span)
+    type_text: sema_call_histories_span_text(source, type_span)
+    if key_text == "" || type_text == "" -> return None
+    indent: sema_key_by_line_indent(source, span.start)
+    Val(TextEdit{span: span, new_text: "{head} {{\n{indent}    Key: {type_text}\n\n{indent}    key: fn(self) -> {type_text} {{ {key_text} }}\n{indent}}}"})
+}
+
+// A stored field `field` of the struct at `row`.
+SemaKeyByField: struct {
+    row: SemaRegistrationRowRef
+    field: Int
+}
+
+// The `self` field path a written rule reads, and the last field it reads.
+SemaKeyByPath: struct {
+    span: Span
+    last: SemaKeyByField
+}
+
+// The field path of `self` a written rule reads the same way on both sides,
+// walked from the struct at `row` (sema_key_by_path_fields): `equal`
+// returning `self.p == rhs.p`, or `compare` returning
+// `self.p.compare(rhs.p)`, where `rhs` is its other parameter.
+sema_key_by_written_path: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, methods: [Func], fields: &[Int]) -> SemaKeyByPath? {
+    if methods.len() != 1 || methods[0].body.len() != 1 || methods[0].params.len() == 0 {
+        return None
+    }
+    other: methods[0].params[methods[0].params.len() - 1].name
+    if other == "self" -> return None
+    if methods[0].body[0] == .Expr(value) {
+        if methods[0].name == "equal" && value == .Binary(op, left, right, _, _) && op == BinOp.Eq && sema_key_by_same_path(left, right, other) {
+            return sema_key_by_path_at(graph, row, left, fields)
+        }
+        if methods[0].name == "compare" && value == .MethodCall(receiver, called, _, _, _, args, _) && called == "compare" && args.len() == 1 && sema_key_by_same_path(receiver, args[0].expr, other) {
+            return sema_key_by_path_at(graph, row, receiver, fields)
+        }
+    }
+    None
+}
+
+sema_key_by_path_at: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: &[Int]) -> SemaKeyByPath? {
+    last: sema_key_by_path_fields(graph, row, path, fields) ?? return None
+    Val(SemaKeyByPath{span: expr_span(path), last: last})
+}
+
+// Whether `left` is a field path of `self` (`self.a.b`) and `right` the
+// same path of `other`.
+sema_key_by_same_path: fn(left: Expr, right: Expr, other: String) -> Bool {
+    if left == .Field(left_base, left_member, _, _) && right == .Field(right_base, right_member, _, _) {
+        if left_member != right_member -> return false
+        if left_base == .Ident(left_name, _, _) && right_base == .Ident(right_name, _, _) {
+            return left_name == "self" && right_name == other
+        }
+        return sema_key_by_same_path(left_base, right_base, other)
+    }
+    false
+}
+
+// Walks the `self` field path `path` from the struct at `row`: pushes the
+// index of each stored field it reads onto `fields`, outermost first, and
+// gives the last one. None when `path` is no such path, or when a struct on
+// the way is declared in another module than `row`'s.
+sema_key_by_path_fields: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, path: Expr, fields: &[Int]) -> SemaKeyByField? {
+    if path == .Field(base, member, _, _) {
+        holder := row
+        if base == .Ident(root, _, _) {
+            if root != "self" -> return None
+        } else {
+            inner: sema_key_by_path_fields(graph, row, base, fields) ?? return None
+            holder = sema_key_by_field_type_row(graph, inner) ?? return None
+        }
+        if holder.module_index != row.module_index -> return None
+        index: sema_key_by_stored_field(graph.modules[holder.module_index].nominals[holder.row], member) ?? return None
+        fields.push(index)
+        return Val(SemaKeyByField{row: holder, field: index})
+    }
+    None
+}
+
+sema_key_by_stored_field: fn(nominal: SemaRegistrationNominal, name: String) -> Int? {
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            loop (index, field) in definition.fields {
+                if field.name == name && field.computed == None -> return Val(index)
+            }
+        }
+    }
+    None
+}
+
+// The struct the declared type of `at` names.
+sema_key_by_field_type_row: fn(graph: SemaRegistrationGraph, at: SemaKeyByField) -> SemaRegistrationRowRef? {
+    nominal: graph.modules[at.row.module_index].nominals[at.row.row]
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) {
+            return sema_type_resolve_nominal_row_at(graph, definition.fields[at.field].ty, at.row.module_index)
+        }
+    }
+    None
+}
+
+// The span of the declared type of `at`.
+sema_key_by_field_type_span: fn(graph: SemaRegistrationGraph, at: SemaKeyByField) -> Span? {
+    nominal: graph.modules[at.row.module_index].nominals[at.row.row]
+    if nominal.source == .SourceAST(item) {
+        if item == .Struct(definition) -> return Val(definition.fields[at.field].ty_span)
+    }
+    None
+}
+
+// The spaces and tabs that open the line holding `offset`.
+sema_key_by_line_indent: fn(source: String, offset: Int) -> String {
+    bytes: source.bytes()
+    start := if offset < bytes.len() -> offset else -> bytes.len()
+    loop start > 0 && bytes[start - 1] != 10 -> start -= 1
+    end := start
+    loop end < bytes.len() && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
+    source.slice(start, end)
+}
+
+// The offset just past the last code before `offset`: blank lines and the
+// indentation before it go with a deleted block.
+sema_key_by_code_end: fn(source: String, offset: Int) -> Int {
+    bytes: source.bytes()
+    at := if offset < bytes.len() -> offset else -> bytes.len()
+    loop at > 0 && (bytes[at - 1] == 32 || bytes[at - 1] == 9 || bytes[at - 1] == 10 || bytes[at - 1] == 13) {
+        at -= 1
+    }
+    at
 }
 
 // The first Shared, Cell, Atomic, weak or runtime-handle type `ty` holds at

@@ -1,0 +1,15 @@
+// The written equality compares a computed value, not one field path, so
+// `jet fix` leaves it for a hand edit.
+Reading: struct {
+    celsius: Int
+
+    impl Equatable {
+        equal: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }
+    }
+}
+
+run: fn() {
+    seen := [Reading: Bool]{}
+    seen[Reading{celsius: 21}] = true
+    print(seen.len())
+}
