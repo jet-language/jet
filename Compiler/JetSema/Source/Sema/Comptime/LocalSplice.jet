@@ -525,14 +525,14 @@ sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: [String:Bool])
 // refuses a splice into a finalized result then.
 sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
     if graph.core_demand_rows.len() == 0 -> return false
-    keys := [String]{}
+    names := sema_core_demand_names_new()
     loop result in functions {
-        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, keys)
+        if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
         loop fact in result.call_facts {
-            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, keys)
+            if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
         }
     }
-    loop key in keys {
+    loop key in names.keys {
         if graph.core_demand_rows.get(key) != None || graph.core_demand_rows.get(sema_core_demand_template_key(key)) != None -> return true
     }
     false
@@ -549,16 +549,17 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
 sema_local_splice_named_core: fn(graph: SemaRegistrationGraph, rows: [SemaModuleBodyRows], owners: [String:Bool]) -> [String:Bool] Never! {
     named := [String:Bool]{}
     if graph.core_demand_rows.len() == 0 -> return named
-    keys := [String]{}
+    names := sema_core_demand_names_new()
     called := [String:Bool]{}
     loop module_rows in rows {
         loop function in module_rows.functions {
-            if owners.get(function.key) != None -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, keys)
+            if owners.get(function.key) != None -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, names)
         }
         loop fact in module_rows.call_facts {
             if fact.callee == .Val(callee) && !symbol_is_local(callee) -> called[sema_core_demand_template_key(symbol_table_key(graph.symbols, callee))] = true
         }
     }
+    keys := names.keys.move()
     loop keys.len() > 0 {
         key := keys.pop() ?? break
         template := sema_core_demand_template_key(key)
