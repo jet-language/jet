@@ -113,6 +113,9 @@ SemaScopeBinding: struct {
     compiler_builtin: Bool
     // A `name: #run { … }` local reads as this value.
     prepared: TComptimeValue?{None}
+    // A `name: #run value` local whose value has not landed yet: compile-time
+    // code that reads it waits for it (sema_comptime_reads_pending_local).
+    pending_prepared: Bool{false}
     // The `#Track` origin row for this binding; `None`
     // is the untracked row.
     origin: SemaOriginFact?{None}
@@ -2442,6 +2445,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
                 string_view: binding.string_view,
                 compiler_builtin: binding.compiler_builtin,
                 prepared: binding.prepared,
+                pending_prepared: binding.pending_prepared,
                 origin: binding.origin,
                 place_alias: binding.place_alias,
             })

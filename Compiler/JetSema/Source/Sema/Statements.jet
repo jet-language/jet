@@ -6254,6 +6254,7 @@ sema_stmt_is_path_op: fn(operation: THandleOp, normalize: Bool) -> Bool Never! {
 // finalizing the program again.
 sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     fact_start: context.call_facts.len()
+    reference_start: context.name_references.len()
     scopes.comptime_execution_depth += 1
     checked: sema_check_expression(binding.init, binding.ty, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.comptime_execution_depth -= 1
@@ -6270,6 +6271,12 @@ sema_stmt_check_prepared_binding: fn(binding: Binding, environment: SemaScopeEnv
     ty := init.ty
     init_span: expr_span(binding.init)
     if value == None {
+        // An initializer that reads a local still waiting for its value
+        // waits with it, and its own name waits in turn.
+        if sema_comptime_reads_pending_local(scopes, context, reference_start) {
+            _ := sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, state, context, diagnostics)
+            return None
+        }
         body_value: sema_comptime_body_value_find(context, environment.module_identity, sema_scope_function_owner_key(scopes), init_span, binding.name_span) ?? {
             sema_comptime_body_capture_binding(context, environment, scopes, binding.name, binding.init, init.ty, init_span, binding.name_span)
             if !sema_stmt_declare_comptime_local(binding, ty, None, environment, program, scopes, state, context, diagnostics) -> return None
@@ -6298,10 +6305,14 @@ sema_stmt_declare_comptime_local: fn(binding: Binding, ty: Type, known: TComptim
         diagnostics.push(sema_already_defined(binding.name, binding.name_span))
         return false
     }
-    if binding.name != "_" && known == .Val(value) {
+    if binding.name != "_" {
         last: scopes.bindings.len() - 1
         sema_scope_note_binding_edit(scopes, last)
-        scopes.bindings[last].prepared = Val(value)
+        if known == .Val(value) {
+            scopes.bindings[last].prepared = Val(value)
+        } else {
+            scopes.bindings[last].pending_prepared = true
+        }
     }
     sema_ownership_declare_binding(state, symbol, key, false)
     sema_stmt_track_origin(binding, environment, program, scopes)
@@ -9945,11 +9956,15 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
         return sema_stmt_check_prep_type_table(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [SwitchArm]{arm}, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
     }
     fact_start: context.call_facts.len()
+    reference_start: context.name_references.len()
     scopes.comptime_execution_depth += 1
     checked: sema_check_expression(cond, None, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.comptime_execution_depth -= 1
     condition: checked ?? return false
     if sema_stmt_comptime_site_refused(program, context, fact_start, diagnostics) -> return false
+    // A condition that reads a `name: #run value` local still waiting for
+    // its value waits with it.
+    if sema_comptime_reads_pending_local(scopes, context, reference_start) -> return false
     // A prepared local reads as its value, so a local left in the checked
     // condition is known only at run time.
     runtime_local := false
@@ -10012,11 +10027,13 @@ sema_stmt_check_comptime_block: fn(body: [Stmt], span: Span, environment: SemaSc
         id: AST_NODE_GENERATED,
     }
     fact_start: context.call_facts.len()
+    reference_start: context.name_references.len()
     scopes.comptime_execution_depth += 1
     checked: sema_check_expression(block, None, environment, program, scopes, state, tail_store, context, diagnostics)
     scopes.comptime_execution_depth -= 1
     checked_block: checked ?? return false
     if sema_stmt_comptime_site_refused(program, context, fact_start, diagnostics) -> return false
+    if sema_comptime_reads_pending_local(scopes, context, reference_start) -> return false
     _ := sema_comptime_body_capture(context, environment, program, scopes, "comptime block", block, checked_block.ty, span, span)
     false
 }

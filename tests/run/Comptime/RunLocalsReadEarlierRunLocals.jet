@@ -1,0 +1,19 @@
+// Compile-time code may read a `name: #run value` local computed earlier in
+// the same body: a later `#run` local, a `#run { … }` block and a `#if`
+// condition each read its finished value.
+double: fn(n: Int) -> Int { n * 2 }
+
+run: fn() {
+    base: #run double(4)
+    scaled: #run double(base)
+    #run {
+        if scaled != 16 -> panic("scaled is wrong")
+    }
+    large: #run { scaled > 10 }
+    #if large {
+        print("large: {scaled}")
+    } else {
+        print("small: {scaled}")
+    }
+    print(base)
+}
