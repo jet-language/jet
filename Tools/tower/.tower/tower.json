@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102021,
+    "rev": 102025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73959,6 +73959,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T02:12:59.419Z"
+        },
+        {
+          "n": 34,
+          "text": "(moved from #6836) GauntletTower probe 2026-11-13 ($JET_SCRATCH_ROOT/lanes/GauntletTower/csize/probe.txt, probe2.txt): Jet hello is 109,976 bytes unstripped and 95,552 stripped, all static. C hello is 15,888 dynamic, 16,512 static and 13,352 static stripped. Jet/C is 6.0 to 7.2 under every fair pairing, so this is a real loss on the binary-size floor. The cause is the runtime, which links 76 KB of code and 11 KB of unwind tables into every program, used or not: jet_rt core 17.2 KB, allocator 13.2, production receipt 6.5, trap and fault report 5.7, helpers 5.0, scheduler 4.5, host 4.3, sync/vDSO 3.5, plus threads, sentry and comptime-stop. General fix: the runtime links by reach, as Core does, so a program pays only for the runtime parts it calls. The scheduler, threads, sentry and receipt come in only when used. Features that every program genuinely needs (fault report, trap) stay, minimized and never drop — Criterion: The runtime links by reach: a hello program links no scheduler, threads, sentry or production-receipt code, and every runtime part it does link is called on its path. Proof: `nm --size-sort` of the batch-jet hello build lists no jet_rt scheduler, thread, sentry or receipt symbols, and a second program that spawns a task does link the scheduler and prints the same output on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:24:07.183Z"
+        },
+        {
+          "n": 35,
+          "text": "(moved from #6836) Hello beats C on the binary-size floor under a fair basis (both static, both stripped): the Jet/C size ratio is below 1.00 in the gauntlet hello entry, with the fault report and trap still present. Proof: the #6834 harness hello row on the batch jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T02:24:09.595Z"
         }
       ],
       "refs": [],
@@ -73969,9 +73987,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T02:12:59.419Z",
+      "updated": "2026-11-14T02:24:09.595Z",
       "updatedBy": "Main",
-      "criteriaLastN": 33
+      "criteriaLastN": 35
     },
     {
       "id": "c0l7lwif",
@@ -98207,56 +98225,6 @@
       "criteriaLastN": 1
     },
     {
-      "id": "c0om9sdv",
-      "num": 6836,
-      "title": "Hello binary carries the whole runtime: 95.5 KB stripped against C static 13.4 KB",
-      "body": "GauntletTower probe 2026-11-13 ($JET_SCRATCH_ROOT/lanes/GauntletTower/csize/probe.txt, probe2.txt): Jet hello is 109,976 bytes unstripped and 95,552 stripped, all static. C hello is 15,888 dynamic, 16,512 static and 13,352 static stripped. Jet/C is 6.0 to 7.2 under every fair pairing, so this is a real loss on the binary-size floor. The cause is the runtime, which links 76 KB of code and 11 KB of unwind tables into every program, used or not: jet_rt core 17.2 KB, allocator 13.2, production receipt 6.5, trap and fault report 5.7, helpers 5.0, scheduler 4.5, host 4.3, sync/vDSO 3.5, plus threads, sentry and comptime-stop. General fix: the runtime links by reach, as Core does, so a program pays only for the runtime parts it calls. The scheduler, threads, sentry and receipt come in only when used. Features that every program genuinely needs (fault report, trap) stay, minimized and never dropped.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "ready",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The runtime links by reach: a hello program links no scheduler, threads, sentry or production-receipt code, and every runtime part it does link is called on its path. Proof: `nm --size-sort` of the batch-jet hello build lists no jet_rt scheduler, thread, sentry or receipt symbols, and a second program that spawns a task does link the scheduler and prints the same output on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T00:49:36.927Z"
-        },
-        {
-          "n": 2,
-          "text": "Hello beats C on the binary-size floor under a fair basis (both static, both stripped): the Jet/C size ratio is below 1.00 in the gauntlet hello entry, with the fault report and trap still present. Proof: the #6834 harness hello row on the batch jet.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T00:49:38.038Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G11"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-14T00:49:27.240Z",
-      "updated": "2026-11-14T00:49:40.846Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2
-    },
-    {
       "id": "c0pc0jb9",
       "num": 6837,
       "title": "A task spawned with an Atomic argument gets a copy of the word, so its stores are invisible to the caller",
@@ -98306,7 +98274,7 @@
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98314,7 +98282,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Both criteria met: batch 18 (d0030eb537..dacd7dc104), G6Meta-6838 at dacd7dc104."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98343,9 +98317,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T01:16:32.174Z",
-      "updated": "2026-11-14T02:14:47.327Z",
+      "updated": "2026-11-14T02:24:15.889Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T02:24:15.889Z"
     },
     {
       "id": "c0oe96sn",
@@ -204904,6 +204879,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T02:24:15.889Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0623tfx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T02:24:11.785Z",
+      "by": "Main",
+      "action": "card.delete",
+      "ref": "c0om9sdv",
+      "note": "Hello binary carries the whole runtime: 95.5 KB stripped against C static 13.4 KB"
+    },
+    {
+      "at": "2026-11-14T02:24:09.595Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#35 (moved from #6836) Hello beats C on the binary-size floor un"
+    },
+    {
+      "at": "2026-11-14T02:24:07.183Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#34 (moved from #6836) GauntletTower probe 2026-11-13 ($JET_SCRA"
+    },
     {
       "at": "2026-11-14T02:22:44.879Z",
       "by": "Main",
