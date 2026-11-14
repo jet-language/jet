@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102260,
+    "rev": 102261,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90530,12 +90530,12 @@
         },
         {
           "n": 22,
-          "text": "Regression from 0a13861243 (the fixed-timing instruction check): a web build that reaches Core/Crypto/Bignum.jet is an internal compiler error (exit 101, I2), reporting \"115 compiler faults: web select: core_bits_above instruction 129 (shr) at Bignum.jet:161: fixed timing: a fixed operand meets `if` (and `unreachable`), which the wasm32 table has no row for\", and the same at core_exp_mod Bignum.jet:515. Seen in tests/cases/web_build/forms_table_web_lowering_preserves_typed_form_contract on gate-p56 (and in b29proofs and b33proofs). Web select lowers a checked shift of a fixed operand to a branch and trap. Fix: lower it branch-free on wasm32 (mask the count, or prove it in range), so the table check passes, or have sema refuse the program with a registered diagnostic. Proof: that case passes `jet build --target=web`, and a web case that calls the fixed-timing Bignum shift path builds and runs on node.",
+          "text": "Regression from 0a13861243 (the fixed-timing instruction check): a web build that reaches Core/Crypto/Bignum.jet is an internal compiler error (exit 101, I2), reporting \"115 compiler faults: web select: core_bits_above instruction 129 (shr) at Bignum.jet:161: fixed timing: a fixed operand meets `if` (and `unreachable`), which the wasm32 table has no row for\", and the same at core_exp_mod Bignum.jet:515. Seen in tests/cases/web_build/forms_table_web_lowering_preserves_typed_form_contract on gate-p56 (and in b29proofs and b33proofs). Web select lowers a checked shift of a fixed operand to a branch and trap. Fix: lower it branch-free on wasm32 (mask the count, or prove it in range), so the table check passes, or have sema refuse the program with a registered diagnostic. Proof: that case passes `jet build --target=web`, and a web case that links the fixed-timing Bignum shift path builds and runs on node. No web-legal public API executes that path: core.net.tls is refused on web, and ClientIdentity.from_pem never reaches core_bits_above or core_exp_mod. A web check test refuses a fixed (secret) shift count.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T07:05:05.333Z"
+          "at": "2026-11-14T07:18:57.068Z"
         }
       ],
       "refs": [],
@@ -90551,7 +90551,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-14T07:05:05.333Z",
+      "updated": "2026-11-14T07:18:57.068Z",
       "updatedBy": "Main",
       "criteriaLastN": 22,
       "completedAt": "2026-11-11T19:44:02.334Z"
@@ -205085,6 +205085,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T07:18:57.068Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bnp1zw",
+      "note": "#22: No web-legal API executes the Bignum shift (G3Core-2 checked this natively with probe panics), so the case can only link it. The validator tests pin both the admission and the refusal.; was: Regression from 0a13861243 (the fixed-timing instruction check): a web build that reaches Core/Crypto/Bignum.jet is an internal compiler error (exit 101, I2), reporting \"115 compiler faults: web selec"
+    },
     {
       "at": "2026-11-14T07:17:08.966Z",
       "by": "Main",
