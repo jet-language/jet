@@ -1,4 +1,4 @@
-use jet_foundation.[expr_span, pattern_binding_names, type_name]
+use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names, type_name]
 
 #Test("generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics") {
     result: parser_test_result("Weird: module<lower>(UPPER: Int) {{ ready: fn() -> Bool {{ return true }} }}\nUse: Weird<String>(32)")
@@ -286,6 +286,18 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
             }
         }
     }
+}
+
+#Test("a byte text body keeps each run of byte escapes as one part") {
+    result: parser_test_result("TABLE: [U8]{{\"\\x4A\\x00\\xFFab\\x07\"}}")
+    assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
+    result.program.items[0] == .Const(def) ?? panic("expected a constant")
+    def.value == .TypedLit(_, body, _, _) ?? panic("expected a typed literal")
+    body == .ByteText(parts) ?? panic("expected a byte text body")
+    assert_eq(parts.len(), 3)
+    assert(parts[0] == ByteTextPart.Bytes{values: [U8]{0x4A, 0x00, 0xFF}})
+    assert(parts[1] == ByteTextPart.Lit{text: "ab"})
+    assert(parts[2] == ByteTextPart.Bytes{values: [U8]{0x07}})
 }
 
 #Test("comptime_eof_termination_keeps_newline_item_boundaries") {

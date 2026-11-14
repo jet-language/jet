@@ -417,9 +417,12 @@ TypedLitBody: enum {
     Empty
 }
 
+// A `[U8]{"…"}` body: its text, and each run of `\xNN` escapes as one part
+// holding the run's bytes (a generated table is one part, not a part per
+// byte).
 ByteTextPart: enum {
     Lit(text: String)
-    Byte(value: U8)
+    Bytes(values: [U8])
 }
 
 ArithmeticPolicyFact: struct {

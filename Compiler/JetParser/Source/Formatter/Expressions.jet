@@ -2339,7 +2339,7 @@ jfmt_fmt_byte_text_parts: fn(f: &JetFmt, parts: [ByteTextPart]) Never! {
     loop part in parts {
         if part == {
             .Lit(text) -> jfmt_write(f, jfmt_escape_str_lit(text))
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
+            .Bytes(values) -> loop value in values -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
     }
     jfmt_write(f, "\"")
