@@ -1,0 +1,18 @@
+# #6793 c2: the build plan's staged check fails here, because the package
+# module calls a generated JSON codec, so the plan checks it again under
+# keep-going. That check traps `kit_report_document`, whose own check failed
+# on `nope()`. The function's local references (`jet`, `compiler`) stay in
+# the semantic index, keyed in the trap that stands in for its body. Before
+# the fix they kept rows of the failed body's keys, and the index read past
+# the trap's two keys ("position 3 doesn't exist").
+fixture: keep_going_trap_keys_failed_function_references.fixture
+env: NO_COLOR=1
+step: jet build
+exit: 1
+stderr: ~ "Nothing named `nope` exists here" # the build reports the failed function's own error
+stdout+stderr: !~ "doesn't exist" # the index keys every reference of the trapped function in range
+stdout+stderr: !~ "outside their body's keys" # the index refuses no local: each one is keyed in its trap
+step: jet fix --dry-run build.jet
+exit: 0
+stdout+stderr: ~ "build.jet: no changes made" # the build findings come from the same keep-going plan, which completes
+stdout+stderr: !~ "outside their body's keys" # and refuses no local reference either

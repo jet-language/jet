@@ -9,10 +9,11 @@
 // grows by exactly the bodies the compile demands and their facts.
 //
 // A fact belongs to the body that recorded it: a call-site fact by its
-// caller key; a failure row, a compute row and a comptime body source by
-// function key; a comptime request, a name reference and a copy event by
-// span, to the innermost body whose source span holds it. The hardware-use
-// rows name no body and stay with the module.
+// caller key; a failure row, a compute row, a comptime body source and a
+// name reference by function key (a reference's `body`, so a local keeps the
+// symbols it is a row of); a comptime request and a copy event by span, to
+// the innermost body whose source span holds it. The hardware-use rows name
+// no body and stay with the module.
 //
 // A graph seeded from a record reads the packets of its taken modules
 // through a store the driver fills (SemaRegistrationGraph.core_bodies). A
@@ -48,7 +49,7 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
         name: name_index(name_intern(keys, function.key))
         if name == at.len() {
             at.push(packets.len())
-        } else {
+        } else if name > 0 {
             at[name] = packets.len()
         }
         spans.push(function.source_span.copy())
@@ -72,7 +73,8 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     }
     loop owned.len() > 0 {
         function := owned.pop() ?? break
-        position: sema_core_body_at(keys, at, function.key) ?? panic("body `{function.key}` was interned above")
+        // A body keyed "" has no name row; it fills its own packet.
+        position: sema_core_body_at(keys, at, function.key) ?? first + owned.len()
         packets[position].function = Val(function)
     }
     row.functions = [FnBody]{}
@@ -124,8 +126,8 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
     references := row.name_references.move()
     row.name_references = [SemaNameReferenceFact]{}
     loop reference in references {
-        if sema_core_body_owner(spans, reference.span) == .Val(position) {
-            packets[first + position].name_references.push(reference)
+        if sema_core_body_at(keys, at, reference.body) == .Val(position) {
+            packets[position].name_references.push(reference)
             next
         }
         row.name_references.push(reference)
@@ -143,12 +145,13 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
 }
 
 // The packet position of the body whose key is `key`, by its id in `keys`
-// (`at` indexed by id); None for a key no body has.
+// (`at` indexed by id, every read bounds-checked); None for a key no body
+// has, the empty key (id 0) included.
 sema_core_body_at: fn(keys: NameTable, at: [Int], key: String) -> Int? Never! {
     name: name_find(keys, key) ?? return None
-    position: at[name_index(name)]
-    if position < 0 -> return None
-    Val(position)
+    index: name_index(name)
+    if index <= 0 || index >= at.len() || at[index] < 0 -> return None
+    Val(at[index])
 }
 
 // The position in `spans` of the innermost body source span that holds

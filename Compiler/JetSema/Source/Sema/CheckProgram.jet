@@ -70,6 +70,7 @@ use jet_foundation.[
     Stmt,
     Symbol,
     SymbolID,
+    SymbolKeys,
     SymbolKind,
     TComptimeValue,
     TConstantDef,
@@ -104,6 +105,8 @@ use jet_foundation.[
     symbol_is_local,
     symbol_is_none,
     symbol_key_text,
+    symbol_keys_intern,
+    symbol_keys_text_at,
     symbol_mint,
     symbol_none,
     symbol_table,
@@ -1170,6 +1173,9 @@ SemaFunctionResult: struct {
     // The value's prelude conversion demands (sema_prelude_conversion_demands),
     // when the compiler thread that checked the body walked it there.
     prelude_demands: [SemaPreludeConversionDemand]?{None}
+    // The symbols of a check that built no `value`: the local ids its name
+    // references carry are rows of these (sema_keep_going_trap_references).
+    failed_locals: SymbolKeys?{None}
 }
 sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext) -> SemaComputeFunctionFacts Never! {
     SemaComputeFunctionFacts{
@@ -1211,6 +1217,7 @@ sema_function_result: fn(value: &&FnBody?, function_key: String, context: &&Sema
             union_general: context.failure_union_general || context.failure_direct_source,
         }),
         incomplete_reasons: if complete -> [String]{} else -> context.incomplete_reasons.move(),
+        failed_locals: if complete -> None else -> Val(context.arena.tree.symbols.move()),
     }
 }
 
@@ -2381,6 +2388,12 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.call_facts = [SemaCallSiteFact]{}
     comptime_requests.extend(context.comptime_requests.move())
     context.comptime_requests = [SemaComptimeRequest]{}
+    // Each reference names the body that recorded it, so a reader keys a
+    // local in that body's symbols whatever its span. A nested check that
+    // ran its own body keeps its name.
+    loop index in 0..<context.name_references.len() {
+        if context.name_references[index].body == "" -> context.name_references[index].body = owner_key
+    }
     name_references.extend(context.name_references.move())
     context.name_references = [SemaNameReferenceFact]{}
     sema_single_use_leave_scope(scopes, state, diagnostics)
@@ -2959,6 +2972,63 @@ sema_keep_going_push_stub: fn(stub: &&SemaFunctionResult?, label: String, cause:
         return
     }
     reasons.push("{label}: lowered as a keep-going trap: {cause}")
+}
+
+// The name references a trapped function's check recorded (`references`
+// from `start` on) are kept, keyed in the trap that stands in for its body:
+// a local's id is a row of the failed check's own symbols (its body's, else
+// its `failed_locals`), which the trap does not share, so the local's key is
+// interned in the trap's symbols and the reference takes that id. A reader
+// keys a local in the body its reference names (SemaNameReferenceFact.body),
+// the function's key, which is now the trap's. A reference a nested body
+// recorded names that body and keeps its id. A failed check with neither
+// symbols drops its own local references, and with no trap (or a trap with
+// no body) every local reference from `start` on is dropped: no body holds
+// their keys. Returns `trap`.
+sema_keep_going_trap_references: fn(references: &[SemaNameReferenceFact], start: Int, failed: SemaFunctionResult, trap: &&SemaFunctionResult?) -> SemaFunctionResult? Never! {
+    stubbed := trap.move() ?? {
+        sema_keep_going_drop_local_references(references, start, None)
+        return None
+    }
+    // A trap always has its body (sema_keep_going_stub).
+    if stubbed.value == None {
+        sema_keep_going_drop_local_references(references, start, None)
+        return Val(stubbed)
+    }
+    body := stubbed.value.move() ?? return None
+    if failed.value == .Val(failed_body) {
+        sema_keep_going_rekey_references(references, start, body.key, failed_body.tree.symbols, body.tree.symbols)
+    } else if failed.failed_locals == .Val(locals) {
+        sema_keep_going_rekey_references(references, start, body.key, locals, body.tree.symbols)
+    } else {
+        sema_keep_going_drop_local_references(references, start, Val(body.key))
+    }
+    stubbed.value = Val(body)
+    Val(stubbed)
+}
+
+// Drops the local references from `start` on that body `owner` recorded,
+// every one when `owner` is None (sema_keep_going_trap_references).
+sema_keep_going_drop_local_references: fn(references: &[SemaNameReferenceFact], start: Int, owner: String?) Never! {
+    kept := [SemaNameReferenceFact]{}
+    loop index in start..<references.len() {
+        dropped := symbol_is_local(references[index].symbol.id)
+        if owner == .Val(key) -> dropped = dropped && references[index].body == key
+        if !dropped -> kept.push(references[index].copy())
+    }
+    loop references.len() > start -> _ := references.pop()
+    references.extend(kept)
+}
+
+// Re-keys the local references from `start` on that body `owner` recorded,
+// minted in `from`, into `into` (sema_keep_going_trap_references). A local
+// `from` does not hold keeps its id.
+sema_keep_going_rekey_references: fn(references: &[SemaNameReferenceFact], start: Int, owner: String, from: SymbolKeys, into: &SymbolKeys) Never! {
+    loop index in start..<references.len() {
+        if !symbol_is_local(references[index].symbol.id) || references[index].body != owner -> next
+        key: symbol_keys_text_at(from, references[index].symbol.id) ?? next
+        references[index].symbol.id = symbol_keys_intern(into, key)
+    }
 }
 
 // Why a trapped function's check failed: the causes it recorded, else the
@@ -4022,20 +4092,27 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             result.copy_events.extend(checked.copy_events.move())
             result.call_facts.extend(function_call_facts)
             result.comptime_requests.extend(function_comptime_requests)
-            result.name_references.extend(function_name_references)
+            // A trapped function's references are keyed in its trap before
+            // they join the module's (sema_keep_going_trap_references).
             if !checked.complete {
                 result.complete = false
                 if keep_going {
                     cause: sema_keep_going_cause(checked.incomplete_reasons, result.diagnostics, function_diagnostic_start)
-                    sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks), "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
+                    trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                    result.name_references.extend(function_name_references)
+                    sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
                 } else {
+                    result.name_references.extend(function_name_references)
                     sema_check_push_function_reasons("function `{function_name}`", checked.incomplete_reasons, result.incomplete_reasons)
                 }
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
                 cause: sema_keep_going_cause([String]{}, result.diagnostics, function_diagnostic_start)
-                sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks), "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
+                trap := sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                result.name_references.extend(function_name_references)
+                sema_keep_going_push_stub(trap, "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
                 result.complete = false
             } else {
+                result.name_references.extend(function_name_references)
                 position: result.functions.len()
                 if sema_append_function(result.functions, checked.value.move()) {
                     if checked.prelude_demands == .Val(demands) -> prelude_demands[position] = demands
@@ -4163,7 +4240,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     check_failed: keep_going && sema_check_function_failed(diagnostics, function_diagnostic_start, pending_obligations)
     keep_going_stub := SemaFunctionResult?{None}
     if keep_going && (!memory_complete || !owner_generic_complete || !checked.complete || check_failed) {
-        keep_going_stub = sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
+        keep_going_stub = sema_keep_going_trap_references(function_name_references, 0, checked, sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks))
     }
     scopes.location_function = previous_location
     environment.generic_params = base_generic_params.move()

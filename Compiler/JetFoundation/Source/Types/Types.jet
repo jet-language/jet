@@ -587,6 +587,14 @@ symbol_keys_text: fn(keys: SymbolKeys, id: SymbolID) -> String Never! {
     keys.keys.texts[Int{id.id} - keys.base]
 }
 
+// The key of `id` when `keys` holds its row, else None: a reader that can't
+// prove `id` came from `keys` refuses it instead of reading past the keys.
+symbol_keys_text_at: fn(keys: SymbolKeys, id: SymbolID) -> String? Never! {
+    row: Int{id.id} - keys.base
+    if row < 0 || row >= keys.keys.texts.len() -> return None
+    Val(keys.keys.texts[row])
+}
+
 // A table of the builtin range (symbol_builtin_keys) and one open range
 // after it.
 symbol_table: fn() -> SymbolTable Never! {

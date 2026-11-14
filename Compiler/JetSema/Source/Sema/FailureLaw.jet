@@ -714,6 +714,7 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             next
         }
         before: diagnostics.len()
+        references_before: name_references.len()
         checked: sema_function_check(conversion, key, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
         // The routine is the shipped Prelude declaration checked under this
         // module's name: its spans are offsets into that generated text, not
@@ -722,7 +723,8 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
         if !checked.complete {
             complete = false
             if keep_going {
-                sema_keep_going_push_stub(sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks), label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, before), functions, reasons)
+                trap := sema_keep_going_trap_references(name_references, references_before, checked, sema_keep_going_stub(conversion, symbol.id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks))
+                sema_keep_going_push_stub(trap, label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, before), functions, reasons)
                 next
             }
             loop reason in checked.incomplete_reasons -> reasons.push("{label}: {reason}")

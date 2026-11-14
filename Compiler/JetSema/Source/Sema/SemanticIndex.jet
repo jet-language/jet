@@ -3,9 +3,14 @@
 // finalized checked result so imported modules and solved effects stay intact.
 use jet_foundation.[
     symbol_is_local,
-    symbol_key,
+    symbol_keys_text_at,
     symbol_table_key,
     authority_grantable_roots,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
+    NameTable,
     ArithmeticMode,
     ArithmeticOperation,
     ArithmeticPolicyFact,
@@ -1665,28 +1670,54 @@ sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, c
     definitions.push(sema_compiler_index_definition(registration, key, caller, symbol, views.get(key) ?? TComptimeValue.List{values: [TComptimeValue]{}}))
 }
 
-// A checked body's local, keyed in the body's own symbols `locals`.
-sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
-    local_id: local.symbol_id ?? return
-    symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
-    sema_compiler_index_append_definition(registration, caller, symbol, Val(symbol_key(registration.symbols, locals, local_id)), views, definitions, seen)
+// The key of `id` in a checked body: a run-wide id's in `symbols`, a local's
+// in the body's own `locals`. A local id outside `locals` names some other
+// body's row: it is refused as one row of `refused` (every one is listed) and
+// has no key, never read past the keys.
+sema_compiler_index_body_key: fn(symbols: SymbolTable, locals: SymbolKeys, id: SymbolID, name: String, span: Span, owner: String, refused: &[String]) -> String? Never! {
+    if !symbol_is_local(id) -> return Val(symbol_table_key(symbols, id))
+    if symbol_keys_text_at(locals, id) == .Val(key) -> return Val(key)
+    refused.push("`{name}` at offset {span.start} in `{owner}`: local row {Int{id.id} - locals.base} is outside the body's {locals.keys.texts.len()} keys")
+    None
 }
 
-sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
+// The row in its module's functions of the body that recorded a local
+// reference (SemaNameReferenceFact.body), by `keys` and `rows` as
+// sema_compiler_semantic_index_from_checked builds them; every index is
+// bounds-checked. A body with no row (an empty key, or one no checked body
+// of the module has) is refused as one row of `refused` and has no row.
+sema_compiler_index_body_row: fn(keys: NameTable, rows: [Int], body: String, name: String, span: Span, refused: &[String]) -> Int? Never! {
+    if name_find(keys, body) == .Val(found) {
+        at: name_index(found)
+        if at > 0 && at < rows.len() -> return Val(rows[at])
+    }
+    refused.push("`{name}` at offset {span.start}: its body `{body}` has no checked row")
+    None
+}
+
+// A checked body's local, keyed in the body's own symbols `locals`.
+sema_compiler_index_append_checked_local: fn(local: TLocal, locals: SymbolKeys, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
+    local_id: local.symbol_id ?? return
+    key: sema_compiler_index_body_key(registration.symbols, locals, local_id, local.name, local.span, owner, refused) ?? return
+    symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
+    sema_compiler_index_append_definition(registration, caller, symbol, Val(key), views, definitions, seen)
+}
+
+sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: ModuleID, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool], refused: &[String]) {
     loop statement in function.body {
         if function.tree.stmts[statement] == {
-            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
+            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
             .TupleDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
             }
             .StructDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
             }
             .ListDestructure(temp, _, _, _, elements, _) -> {
-                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
-                loop local in elements -> sema_compiler_index_append_checked_local(local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
+                loop local in elements -> sema_compiler_index_append_checked_local(local, function.tree.symbols, module_identity, owner, registration, caller, views, definitions, seen, refused)
             }
             .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
@@ -1702,6 +1733,8 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
     effects := [TComptimeValue]{}
     outputs := [TComptimeValue]{}
     state_graphs := [TComptimeValue]{}
+    // Every local the index could not key in its body (sema_compiler_index_body_key).
+    refused := [String]{}
     loop registered_module_index in 0..<registration.modules.len() {
         loop symbol_index in 0..<registration.modules[registered_module_index].symbols.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].symbols[symbol_index], None, function_views, definitions, definition_keys)
         loop nominal_index in 0..<registration.modules[registered_module_index].nominals.len() {
@@ -1743,16 +1776,24 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
     loop checked_module in graph.modules {
         module_index: sema_registration_module_index(registration, checked_module.module_identity) ?? next
         registered_module: registration.modules[module_index]
-        // A local's key is in the symbols of the checked body around its
-        // span (the innermost, as the Core record's split finds it).
-        body_spans := (loop function in checked_module.functions -> function.source_span.copy())
+        // A local's key is in the symbols of the body whose check recorded
+        // the reference (SemaNameReferenceFact.body), found by that body's
+        // key; the first body of a key is the one its references were
+        // checked in (a keep-going trap of a cached body follows it). A span
+        // names no body: a generated body's span overlaps other bodies'.
+        // Name 0 is the empty spelling, which keys no body.
+        body_keys := name_table()
+        body_rows := [Int]{-1}
+        loop (row, function) in checked_module.functions {
+            if name_index(name_intern(body_keys, function.key)) == body_rows.len() -> body_rows.push(row)
+        }
         loop reference in checked_module.name_references {
             target_index := sema_registration_module_index(registration, reference.symbol.module_identity) ?? module_index
             key := String?{None}
             if !symbol_is_local(reference.symbol.id) {
                 key = Val(symbol_table_key(registration.symbols, reference.symbol.id))
-            } else if sema_core_body_owner(body_spans, reference.span) == .Val(body) {
-                key = Val(symbol_key(registration.symbols, checked_module.functions[body].tree.symbols, reference.symbol.id))
+            } else if sema_compiler_index_body_row(body_keys, body_rows, reference.body, reference.symbol.name, reference.span, refused) == .Val(body) {
+                key = sema_compiler_index_body_key(registration.symbols, checked_module.functions[body].tree.symbols, reference.symbol.id, reference.symbol.name, reference.span, checked_module.functions[body].key, refused)
             }
             if key != None -> sema_compiler_index_append_definition(registration, target_index, reference.symbol, key, function_views, definitions, definition_keys)
             references.push(sema_compiler_index_reference(reference, key, registration, checked_module.module_path, registered_module.source_file))
@@ -1762,9 +1803,10 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             loop parameter in function.params {
                 parameter_id: parameter.local.symbol_id ?? next
                 parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_identity: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
-                sema_compiler_index_append_definition(registration, module_index, parameter_symbol, Val(symbol_key(registration.symbols, function.tree.symbols, parameter_id)), function_views, definitions, definition_keys)
+                parameter_key: sema_compiler_index_body_key(registration.symbols, function.tree.symbols, parameter_id, parameter.name, parameter.span, function.key, refused) ?? next
+                sema_compiler_index_append_definition(registration, module_index, parameter_symbol, Val(parameter_key), function_views, definitions, definition_keys)
             }
-            sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registration, module_index, function_views, definitions, definition_keys)
+            sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registration, module_index, function_views, definitions, definition_keys, refused)
         }
         loop call in checked_module.call_facts {
             value: sema_compiler_index_call(call, registration, checked_module.module_path, registered_module.source_file) ?? next
@@ -1800,6 +1842,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         if !found && missing == "" -> missing = "checked module `{module_text(registration.module_table, checked_module.module_identity)}` is not registered"
     }
     if derivations.missing != "" && missing == "" -> missing = "derivations: {derivations.missing}"
+    if refused.len() > 0 && missing == "" -> missing = "{refused.len()} local references are outside their body's keys: {refused.join("; ")}"
     index := TComptimeValue.Struct{type_name: "CompilerSemanticIndex", fields: [TComptimeField]{
         TComptimeField{name: "schema_version", value: sema_compiler_index_int(20)},
         TComptimeField{name: "source_digest", value: sema_compiler_index_string(sha256_hex(source))},
