@@ -1820,14 +1820,16 @@ ir_x64_magic_division: fn(e: &IRX64Emitter, d: Int, op: IROp) Never! {
     x64_mov_rr(e.code, X64_RDX, X64_R11)
 }
 
-// The Div or Rem at `at` of a nonnegative dividend n (IR_OVERFLOW_NONNEG) by
-// the positive constant d. The shifted high product is the quotient: no +1
-// rounds it toward zero, as a negative n would need. n stays in its own
-// register (its home, else r11). A Div's quotient is stored from rdx. A
-// Rem's n - q * d is computed as -d * q + n into dst's own register: when
+// The quotient (`op` Div or FloorDiv) or remainder (Rem or Mod) at `at` of a
+// nonnegative dividend n (IR_OVERFLOW_NONNEG, or an unsigned word narrower
+// than 64 bits) by the positive constant d; truncating and flooring agree on
+// such operands. The shifted high product is the quotient: no +1 rounds it
+// toward zero, as a negative n would need. n stays in its own register (its
+// home, else r11). A quotient is stored from rdx. A
+// remainder's n - q * d is computed as -d * q + n into dst's own register: when
 // that is not n's, by the three-operand imul; when it is (n dies there),
 // by adding -d * q, built in rdx, to it. Neither copies n or the result.
-ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int) Never! {
+ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int, op: IROp) Never! {
     n: ir_x64_use(e, m, f, al, f.a[at], X64_R11)
     magic: ir_x64_magic(d)
     x64_mov_rr(e.code, X64_RAX, n)
@@ -1835,7 +1837,7 @@ ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, a
     x64_imul_wide(e.code, X64_RCX)
     if magic.add -> x64_alu_rr(e.code, X64Alu.Add, X64_RDX, n)
     if magic.shift > 0 -> x64_shift_ri(e.code, X64Shift.Sar, X64_RDX, magic.shift)
-    if f.op[at] == .Div -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
+    if op == .Div || op == .FloorDiv -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
     home: ir_x64_home_reg(m, f, al, f.dst[at], X64_RDX)
     if x64_fits_i32(d) && home != n {
         x64_imul_rri(e.code, home, X64_RDX, 0 - d)
@@ -1851,6 +1853,38 @@ ir_x64_nonneg_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, a
     target: if home == n -> n else -> X64_RDX
     x64_alu_rr(e.code, X64Alu.Add, target, if home == n -> X64_RDX else -> n)
     ir_x64_store(e, m, f, al, f.dst[at], target)
+}
+
+// The quotient (`op` Div or FloorDiv) or remainder (Rem or Mod) at `at` of a
+// U64 dividend n by the constant d (3 <= d < 2^62, not a power of two) as an
+// unsigned multiply (Granlund and Montgomery 1994, 4.1): with l = ceil(log2
+// d) and multiplier floor(2^64 * (2^l - d) / d) + 1 (below 2^64), t is the
+// high word of n * multiplier and the quotient is (t + ((n - t) >> 1)) >>
+// (l - 1); no step overflows for any n. The remainder is n - q * d. n stays
+// in its own register (its home, else r11).
+ir_x64_unsigned_magic_division: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, d: Int, op: IROp) Never! {
+    n: ir_x64_use(e, m, f, al, f.a[at], X64_R11)
+    l := 0
+    loop d > (1 << l) -> l += 1
+    multiplier: ((1 << 64) * ((1 << l) - d)) /% d + 1
+    x64_mov_ri(e.code, X64_RAX, if multiplier >= (1 << 63) -> multiplier - (1 << 64) else -> multiplier)
+    x64_mul(e.code, n)
+    x64_mov_rr(e.code, X64_RAX, n)
+    x64_alu_rr(e.code, X64Alu.Sub, X64_RAX, X64_RDX)
+    x64_shift_ri(e.code, X64Shift.Shr, X64_RAX, 1)
+    x64_alu_rr(e.code, X64Alu.Add, X64_RAX, X64_RDX)
+    if l > 1 -> x64_shift_ri(e.code, X64Shift.Shr, X64_RAX, l - 1)
+    if op == .Div || op == .FloorDiv -> return ir_x64_store(e, m, f, al, f.dst[at], X64_RAX)
+    // q * d <= n, so the low word of the product is exact.
+    if x64_fits_i32(d) {
+        x64_imul_rri(e.code, X64_RAX, X64_RAX, d)
+    } else {
+        x64_mov_ri(e.code, X64_RCX, d)
+        x64_imul_rr(e.code, X64_RAX, X64_RCX)
+    }
+    x64_mov_rr(e.code, X64_RDX, n)
+    x64_alu_rr(e.code, X64Alu.Sub, X64_RDX, X64_RAX)
+    ir_x64_store(e, m, f, al, f.dst[at], X64_RDX)
 }
 
 ir_x64_division_symbol: fn(op: IROp) -> String Never! {
@@ -2183,12 +2217,20 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     magic: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
     if magic != 0 {
         // Neither is the divisor 0 or -1.
-        if nonneg && magic > 0 && (op == .Div || op == .Rem) -> return ir_x64_nonneg_magic_division(e, m, f, al, at, magic)
+        if nonneg && magic > 0 && (op == .Div || op == .Rem) -> return ir_x64_nonneg_magic_division(e, m, f, al, at, magic, op)
         ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
         ir_x64_magic_division(e, magic, op)
         if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(e, op)
         if op == .Mod -> x64_mov_rr(e.code, X64_RAX, X64_RDX)
         return ir_x64_store(e, m, f, al, f.dst[at], if op == .Rem -> X64_R11 else -> X64_RAX)
+    }
+    // An unsigned word by a constant divides by a multiply too (truncating
+    // and flooring agree): a narrower one is a nonnegative I64 dividend, a
+    // U64 one takes the unsigned multiplier.
+    unsigned_magic: if division && !ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
+    if unsigned_magic > 0 {
+        if ir_x64_bits(ty) < 64 -> return ir_x64_nonneg_magic_division(e, m, f, al, at, unsigned_magic, op)
+        return ir_x64_unsigned_magic_division(e, m, f, al, at, unsigned_magic, op)
     }
     if op == .Mul && f.c[at] == IR_OVERFLOW_WRAP {
         // A wrapping product by 2^k is a left shift (the same low bits).

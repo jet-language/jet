@@ -1,0 +1,30 @@
+// Unsigned words divided by constants (a multiply instead of a divide on
+// x86-64) answer what the divide does, across the whole range: every
+// operator, the narrow widths and U64 dividends at and above 2^63.
+wide: fn(values: [U64]) {
+    loop n in values {
+        print("{n}: {n / U64{7}} {n % U64{7}} {n /% U64{10}} {n %% U64{10}} {n / U64{1000003}} {n % U64{1000003}} {n / U64{4611686018427387903}} {n % U64{4611686018427387903}}")
+    }
+}
+
+narrow: fn(values: [U32]) {
+    loop n in values {
+        print("{n}: {n / U32{7}} {n % U32{7}} {n /% U32{3}} {n %% U32{3}} {n / U32{4294967295}} {n % U32{4294967291}}")
+        small: U16{n % U32{65536}}
+        byte: U8{n % U32{256}}
+        print("  {small / U16{7}} {small % U16{7}} {small / U16{65535}} {byte / U8{7}} {byte % U8{7}} {byte /% U8{255}} {byte %% U8{254}}")
+    }
+}
+
+run: fn() {
+    wide([U64]{0, 1, 6, 7, 8, 1000, 1000002, 1000003, 9223372036854775807, 9223372036854775808, 12345678901234567890, 18446744073709551615})
+    narrow([U32]{0, 6, 7, 255, 256, 65535, 65536, 4294967290, 4294967291, 4294967295})
+    // A counter proved nonnegative divides as an unsigned word.
+    count := 0
+    sum := 0
+    loop i in 0..<1000 {
+        if i % 7 == 0 -> count += 1
+        sum += i /% 13
+    }
+    print("{count} {sum}")
+}
