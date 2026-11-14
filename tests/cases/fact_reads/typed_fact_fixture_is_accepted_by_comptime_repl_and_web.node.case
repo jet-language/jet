@@ -4,10 +4,16 @@
 requires: tool:node
 fixture: typed_fact_fixture_is_accepted_by_comptime_repl_and_web.fixture
 env: NO_COLOR=1
+# The web page prints what `jet run` prints. The fixture's own golden is
+# typed_fact_fixture_matches_aot_default_and_interpreter's to pin.
+step native: jet run Examples/features/reflection/fact_reads.jet
+exit: 0
+stdout: nonempty # the bytes are compared against the web page below; the native golden is the other case's
 step: jet build --target=web Examples/features/reflection/fact_reads.jet
 exit: 0
 file: Examples/features/reflection/.jet/build/app.wasm is-file
 step: node app.js
 cwd: Examples/features/reflection/.jet/build
 exit: 0
-stdout: = typed_fact_fixture_is_accepted_by_comptime_repl_and_web.stdout.expected
+stdout: == native
+stderr: empty
