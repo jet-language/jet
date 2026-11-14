@@ -1,0 +1,59 @@
+use fs: core.files
+
+show: fn(label: String, entries: [fs.WalkEntry]) {
+    line := label
+    loop entry in entries {
+        kind: if entry.is_dir -> "/" else -> ""
+        line = "{line} {entry.relative}{kind}@{entry.depth}"
+    }
+    print(line)
+}
+
+// walk_files keeps exactly walk's regular files, in walk order: no directory and
+// no link (the fixture names every link `link_*`).
+same_order: fn(all: [fs.WalkEntry], files: [fs.WalkEntry]) -> Bool {
+    at := 0
+    loop entry in all {
+        if entry.is_dir || entry.relative.starts_with("link") -> next
+        if at >= files.len() || files[at].path != entry.path -> return false
+        at += 1
+    }
+    at == files.len()
+}
+
+run: fn() IOError! {
+    tree := fs.temp_dir("walk-files") ?? return Err(err)
+    root: tree.path
+    fs.create_dir_all("{root}/b/d") ?? return Err(err)
+    fs.create_dir_all("{root}/c") ?? return Err(err)
+    fs.write("{root}/a.txt", "a") ?? return Err(err)
+    fs.write("{root}/b/x.txt", "x") ?? return Err(err)
+    fs.write("{root}/b/d/y.txt", "y") ?? return Err(err)
+    fs.write("{root}/z.txt", "z") ?? return Err(err)
+    fs.symlink("{root}/a.txt", "{root}/link_file") ?? return Err(err)
+    fs.symlink("{root}/b", "{root}/link_dir") ?? return Err(err)
+
+    all: fs.walk(root).list() ?? return Err(err)
+    files: fs.walk_files(root).list() ?? return Err(err)
+    show("walk:", all)
+    show("walk_files:", files)
+    print("walk_files is walk's regular files in walk order: {same_order(all, files)}")
+
+    // Early exit from a direct loop stops the walk.
+    first := ""
+    loop entry in fs.walk_files(root) {
+        first = (entry ?? return Err(err)).relative
+        break
+    }
+    print("first file: {first}")
+
+    // Skip prunes the same names in both.
+    show("walk skip b:", fs.walk(root, skip: [String]{"b"}).list() ?? return Err(err))
+    show("walk_files skip b:", fs.walk_files(root, skip: [String]{"b"}).list() ?? return Err(err))
+
+    // A missing root is the same error in both.
+    missing: "{root}/missing"
+    walk_error: if fs.walk(missing).list() == { .Ok(_) -> "none", .Err(.NotFound(_)) -> "NotFound", .Err(_) -> "other" }
+    files_error: if fs.walk_files(missing).list() == { .Ok(_) -> "none", .Err(.NotFound(_)) -> "NotFound", .Err(_) -> "other" }
+    print("missing root: walk {walk_error} walk_files {files_error}")
+}

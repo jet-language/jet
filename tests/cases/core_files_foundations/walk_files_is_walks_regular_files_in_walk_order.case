@@ -1,0 +1,24 @@
+# fs.walk_files inherits fs.walk's policy and yields regular files only. Over
+# one tree with nested directories, a link to a file and a link to a
+# directory, walk_files is exactly walk's regular files in walk order. Neither
+# walk follows the directory link, and walk_files yields no link. A direct
+# loop's break ends the walk at the first file. `skip` prunes the same
+# subtree in both, and a missing root is NotFound in both. Each tier prints
+# the same lines.
+fixture: walk_files_is_walks_regular_files_in_walk_order.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o1: jet run --optimize=basic --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o2: jet run --optimize=full --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step: jet build --target web --allow=FS main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = expected.out
