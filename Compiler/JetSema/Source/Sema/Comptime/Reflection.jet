@@ -1332,10 +1332,18 @@ sema_comptime_reflection_type_id_record: fn(identity: String, name: String) -> T
 // that name is its identity: the prelude's internal module name never reaches
 // tooling, and the default `Err!` route stays implicit, as hover prints it.
 sema_comptime_reflection_qualified_name: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> String {
-    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return name
+    row: sema_comptime_reflection_module_declared_row(graph, caller, name) ?? return name
     declaring: graph.modules[row.module_index]
-    if declaring.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> return name.copy()
     "{declaring.module_name}.{declaring.nominals[row.row].symbol.name}"
+}
+
+// The row of the declared type `name` names from module row `caller`; None
+// for a name no declared type answers and for a type the compiler's own
+// prelude declares (sema_comptime_reflection_qualified_name keeps both bare).
+sema_comptime_reflection_module_declared_row: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> SemaRegistrationRowRef? {
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return None
+    if graph.modules[row.module_index].package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> return None
+    Val(row)
 }
 
 // `ty` with every declared type it names qualified by its module
