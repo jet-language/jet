@@ -105,12 +105,12 @@ testkit holds that port's host-wide lock while it runs, so concurrent runs on
 one host take turns instead of failing to bind.
 
 A lesson that reads files by their repository path, such as
-[`Systems/Files/Path.jet`](Systems/Files/Path.jet) walking `Examples/Systems`,
-declares `repo-cwd: <reason>` once, before any steps, in its `.case`. The
-testkit then runs the built program from the root of its staged source copy,
-which keeps the repository layout, instead of from the project directory.
-The checkout is never written, and `file:` assertions stay relative to the
-project. Only goldens take the header; a `tests/cases` case refuses it.
+[`Interop/FFI/OpaqueHandles`](Interop/FFI/OpaqueHandles/run.jet) opening its
+gzip sample, declares `repo-cwd: <reason>` once, before any steps, in its
+`.case`. The testkit then runs the built program from the root of its staged
+source copy, which keeps the repository layout, instead of from the project
+directory. The checkout is never written, and `file:` assertions stay relative
+to the project. Only goldens take the header; a `tests/cases` case refuses it.
 
 Examples that depend on environment or process identity should print checked
 relationships instead of raw paths or process IDs. For example,
