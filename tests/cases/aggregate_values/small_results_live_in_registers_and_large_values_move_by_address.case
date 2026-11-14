@@ -20,7 +20,7 @@ step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=run
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
-stdout: ~ "scalar-replaced 3," # both tuples, and big's fields around its loans
+stdout: ~ "scalar-replaced 4," # both tuples, and big's fields around its loans, which run#entry replaces again: at O2 it inlines run's final body (its only call), big's storage and all
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied
 stdout: count "jet_rt_string_clone" = 1 # the literal's clone before the passes; none after
