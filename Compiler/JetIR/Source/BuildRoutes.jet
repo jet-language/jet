@@ -5910,7 +5910,7 @@ ir_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Co
 
 ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
     canonical: ir_canonical_core_record(record)
-    if canonical.module_name == "core.crypto" && (canonical.member == "wipe" || canonical.member == "__wipe") -> return ir_core_crypto_wipe(m, p, b, args, span)
+    if canonical.module_name == "core.crypto" && canonical.member == "__wipe" -> return ir_core_crypto_wipe(m, p, b, args, span)
     // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
     // only, the compiler answers it (ir_host_method `compiler.member`).
     if canonical.module_name == "core.compiler" -> return ir_host_method(m, p, b, ty, "compiler.{canonical.member}", args, span)
@@ -6397,11 +6397,11 @@ ir_core_word_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, span:
     word
 }
 
-// `crypto.wipe(bytes)`: the runtime wipes the written List header's buffer
+// `crypto.__wipe(bytes)`: the runtime wipes the written List header's buffer
 // (jet_rt_crypto_wipe), so it reaches spare capacity and the buffer's owner
 // count, which a pointer and length would not.
 ir_core_crypto_wipe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "crypto.wipe has invalid checked arity")
+    if args.len() != 1 -> return ir_fail_slot(b, span, "crypto.__wipe has invalid checked arity")
     backs := [IRWriteBack]{}
     list: ir_place_address(m, p, b, args[0], backs, span)
     if ir_failed(b) || list < 0 -> return -1

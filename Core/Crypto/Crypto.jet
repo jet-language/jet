@@ -369,10 +369,9 @@ pbkdf2_hmac: fn(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U
     Ok(hashes.pbkdf2_with(hashes.SHA256Hash{}, .SHA256, password, salt, iterations, key_len))
 }
 
-// Zeroes the buffer in place. The qualified call is deliberate: inside this
-// package it selects the primitive Core route, so this public entry owns the
-// user-facing signature.
-wipe: fn(bytes: &[U8]) Never! { core.crypto.wipe(bytes) }
+// Zeroes the buffer in place through the raw wipe leaf; this public entry owns
+// the user-facing signature.
+wipe: fn(bytes: &[U8]) Never! { core.crypto.__wipe(bytes) }
 
 /// Whether a and b hold the same bytes, in time that depends only on their
 /// lengths: the bytes fold into one U8 difference, with no branch on them.

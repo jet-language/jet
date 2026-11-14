@@ -2153,7 +2153,7 @@ It samples that observer under the storage guard, and expires only when
 `now > deadline`; at equality the credential remains available. Expiry takes
 the payload out of its slot and ends the owned payload's scope, so its
 `Close` follows the same zeroization path as dropping still-live storage.
-The sole wipe host operation is the plain-byte `crypto.wipe` kernel.
+The sole wipe host operation is the plain-byte `crypto.__wipe` kernel beneath `crypto.wipe`.
 No observer or loan callback crosses that host boundary.
 Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
 is the fallible credential accessor. This is Main's owner-approved, veto-able
