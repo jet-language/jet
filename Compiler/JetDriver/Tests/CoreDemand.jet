@@ -1,7 +1,8 @@
-// The loader's syntactic Core demand: which spellings load core.encoding.
+// The loader's syntactic Core demand: which spellings load core.encoding and
+// core.math.
 use {
-    jet_driver.[JetDriverParseJob, jet_driver_has_errors, jet_driver_parse_one]
-    jet_foundation.[compiler_threads_single]
+    jet_driver.[JetDriverParseJob, jet_driver_has_errors, jet_driver_parse_one, jet_driver_unit_conversion]
+    jet_foundation.[compiler_threads_single, name_table]
 }
 
 jet_driver_test_codec_demand: fn(source: String) -> Bool {
@@ -17,4 +18,25 @@ jet_driver_test_codec_demand: fn(source: String) -> Bool {
     assert(jet_driver_test_codec_demand(framed), "FieldError.under lowers to the core.encoding helper")
     typed: "typed: fn(tree: Dyn) -> [Int] [FieldError]! {{\n    tree.decode<[Int]>()\n}}\n"
     assert(jet_driver_test_codec_demand(typed), "a generic decode lowers to the core.encoding helper")
+}
+
+// The `Dest.from_<unit>(…)` receivers `source` spells, and whether they load
+// core.math.
+jet_driver_test_conversion_demand: fn(source: String) -> (receivers: [String], math: Bool) {
+    parsed: jet_driver_parse_one(JetDriverParseJob.Source{text: source}, compiler_threads_single())
+    assert(!jet_driver_has_errors(parsed.parsed.diagnostics), "demand fixture parses")
+    catalog := name_table()
+    math: jet_driver_unit_conversion(parsed.demand.conversion_receivers, catalog)
+    (receivers: parsed.demand.conversion_receivers, math: math)
+}
+
+#Test("String.from_bytes does not load core.math; a Prelude unit conversion does") {
+    bytes: jet_driver_test_conversion_demand("text: fn(raw: [U8]) -> String {{\n    String.from_bytes(raw) ?? \"\"\n}}\n")
+    assert_eq(bytes.receivers, [String]{"String"})
+    assert(!bytes.math, "String is no unit type")
+    unit: jet_driver_test_conversion_demand("long: fn(feet: Foot) -> Meter {{\n    Meter.from_foot(feet)\n}}\n")
+    assert_eq(unit.receivers, [String]{"Meter"})
+    assert(unit.math, "Meter is a Prelude catalog unit")
+    time: jet_driver_test_conversion_demand("span: fn(n: Int) -> Duration {{\n    Duration.from_ns(n)\n}}\n")
+    assert(time.math, "Duration is core.units' compiler-owned unit")
 }

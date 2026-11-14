@@ -132,6 +132,9 @@ use {
         sema_effect_parse_name,
         sema_effect_root,
         sema_registration_unit_family_type_names,
+        sema_registration_builtin_unit_facts,
+        sema_registration_unit_type_name,
+        sema_units_catalog_outline,
         sema_marker_rules_applied_row,
         sema_core_error_family_member,
         sema_eval_entry_show,
@@ -3589,13 +3592,19 @@ JetDriverCoreIdentifierDemand: struct {
     // and the `.key_by`/`.window` stages after it run
     // their `Core/Data/Data.jet` source stages, so core.data loads.
     stream_event_time: Bool{false}
-    // A `#UnitFamily` declaration or a `Dest.from_<unit>(…)` call: explicit
-    // unit conversions lower to their `Core/Math/Math.jet` exact-conversion
-    // helpers, so core.math loads.
+    // A `#UnitFamily` declaration: its units' explicit conversions lower to
+    // their `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
     unit_family: Bool{false}
+    // The receiver of each `Dest.from_<unit>(…)` call (`Dest` capitalized):
+    // an explicit conversion between Prelude unit types lowers to its
+    // `Core/Math/Math.jet` exact helper, so core.math loads when a receiver
+    // can name one (jet_driver_unit_conversion); `String.from_bytes` loads
+    // nothing. Syntactic, as for `.abs`: Sema alone decides whether `Dest`
+    // is a unit type.
+    conversion_receivers: [String]{[String]{}}
     // A `Dest.from_<unit>_rounded(…)` call: a rounded conversion across a
     // measured unit wraps its scalar in a `core.units` Measurement
-    // (`__measurement_result`), so core.units loads.
+    // (`__measurement_result`), so core.units and core.math load.
     rounded_conversion: Bool{false}
     // A generic `.decode<T>()` call or a `FieldError.under(…)` call: Dyn decode
     // and `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
@@ -3647,6 +3656,34 @@ JetDriverParsedUnit: struct {
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
     JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_receiver: false, core_paths: [String]{}}
+}
+
+// Whether a receiver of `receivers` (conversion_receivers) can name a unit
+// type whose explicit conversion lowers to core.math: a Prelude catalog unit
+// (each member's type name, and its `…Point` and `…Delta` for an affine
+// family) or a compiler-owned unit (sema_registration_builtin_unit_facts).
+// A unit the program declares loads core.math through its `#UnitFamily`
+// (unit_family). `catalog` interns those unit names on the first call with
+// a receiver and is kept for the load; a receiver is a unit when the catalog
+// holds its spelling (name_find).
+jet_driver_unit_conversion: fn(receivers: [String], catalog: &NameTable) -> Bool Never! {
+    if receivers.len() == 0 -> return false
+    // A fresh table holds only the empty spelling.
+    if name_count(catalog) == 1 {
+        loop fact in sema_registration_builtin_unit_facts() -> _ := name_intern(catalog, fact.name)
+        loop family in sema_units_catalog_outline() {
+            loop member in family.members {
+                type_name: sema_registration_unit_type_name(member)
+                _ := name_intern(catalog, "{type_name}Point")
+                _ := name_intern(catalog, "{type_name}Delta")
+                _ := name_intern(catalog, type_name)
+            }
+        }
+    }
+    loop receiver in receivers {
+        if name_find(catalog, receiver) != None -> return true
+    }
+    false
 }
 
 // The spellings the demand scan looks for, as ids of one lexed source's
@@ -3828,15 +3865,13 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             }
             if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
             // `Dest.from_<unit>(x)` (or `_rounded`): an explicit conversion
-            // between Prelude unit types lowers to its `Core/Math/Math.jet`
-            // exact helper. Syntactic, as for `.abs`: Sema alone decides
-            // whether `Dest` is a unit type.
+            // between unit types (conversion_receivers).
             if index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && token_decoded(tables, tokens[index]).starts_with("from_") {
                 receiver: token_decoded(tables, tokens[index - 2])
                 first: Int{receiver.bytes()[0]}
                 if first >= 65 && first <= 90 {
-                    demand.unit_family = true
                     if token_decoded(tables, tokens[index]).ends_with("_rounded") -> demand.rounded_conversion = true
+                    if !demand.conversion_receivers.contains(receiver) -> demand.conversion_receivers.push(receiver)
                 }
             }
             if name >= 0 && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN {
@@ -3964,6 +3999,9 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.codec_decode -> demand.codec_decode = true
         if output.channel_send -> demand.channel_send = true
         if output.unit_family -> demand.unit_family = true
+        loop receiver in output.conversion_receivers {
+            if !demand.conversion_receivers.contains(receiver) -> demand.conversion_receivers.push(receiver)
+        }
         if output.rounded_conversion -> demand.rounded_conversion = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare)
@@ -5209,6 +5247,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         generated_records.push(SourceFile{id: source_file_id(path), path: path, source: generated.source.copy()})
     }
     bare_modules := [String]{}
+    // jet_driver_unit_conversion's catalog unit names.
+    unit_receivers := name_table()
     reach := jet_driver_reach(use_driven)
     // The Core modules whose parse held declarations back, for
     // jet_driver_reach_parse_held once the load has reached them.
@@ -5411,7 +5451,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         // A Core module's demands that one word spells wait for reached code
         // of it to spell that word (CoreReach.jet JetDriverReachDemand).
-        if demand.unit_family || (demand.math_receiver && !defers) {
+        if demand.unit_family || demand.rounded_conversion || (demand.math_receiver && !defers) || jet_driver_unit_conversion(demand.conversion_receivers, unit_receivers) {
             if !bare_modules.contains("core.math") -> bare_modules.push("core.math")
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if owner_index == .Val(index) {

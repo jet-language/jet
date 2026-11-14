@@ -305,11 +305,18 @@ sema_registration_unit_family_type_names: fn(definition: UnitFamilyDef) -> [Name
     names
 }
 
-sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrationUnitFact] Never! {
-    facts := [SemaRegistrationUnitFact]{}
+// The compiler-owned unit facts every program has, before any family's:
+// core.units' `Duration` and `Instant` carriers on the Time axis.
+sema_registration_builtin_unit_facts: fn() -> [SemaRegistrationUnitFact] Never! {
     time_dimension: Val(Dimension{axes: [DimensionAxis]{DimensionAxis{name: "core.units::Time", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}})
-    sema_registration_unit_fact_push(facts, SemaRegistrationUnitFact{name: "Duration", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Delta})
-    sema_registration_unit_fact_push(facts, SemaRegistrationUnitFact{name: "Instant", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Point})
+    [SemaRegistrationUnitFact]{
+        SemaRegistrationUnitFact{name: "Duration", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Delta},
+        SemaRegistrationUnitFact{name: "Instant", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Point}
+    }
+}
+
+sema_registration_unit_facts: fn(graph: SemaRegistrationGraph) -> [SemaRegistrationUnitFact] Never! {
+    facts := sema_registration_builtin_unit_facts()
     loop module_row_index in 0..<graph.modules.len() {
         loop item_index in 0..<graph.modules[module_row_index].program.items.len() {
             if graph.modules[module_row_index].program.items[item_index] == {
