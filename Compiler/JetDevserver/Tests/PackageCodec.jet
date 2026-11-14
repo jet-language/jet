@@ -140,9 +140,9 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
 }
 
 #Test("semindex_output_keeps_reference_span_and_absent_return") {
-    entry: OutputEntryFact{identity: "fn:launch", name: "launch", module_path: "./run.jet", definition_span: SourceSpan{start: 3, end: 9}, reference_span: SourceSpan{start: 40, end: 46}, params: [String]{"Int", "Int"}, return_type: None, failure_contract: "!Err", failure_source: "implicit default !Err", authority: "safe-jet", effects: [String]{"IO", "IO"}}
+    entry: OutputEntryFact{identity: "fn:launch", name: "launch", module_path: "./run.jet", definition_span: SourceSpan{start: 3, end: 9}, reference_span: SourceSpan{start: 40, end: 46}, params: [String]{"Int", "Int"}, return_type: None, failure_contract: "Err!", failure_source: "implicit default Err!", authority: "safe-jet", effects: [String]{"IO", "IO"}}
     output: SemIndexOutputFact{binding: "app", kind: "Executable", name: "checked-output", module_path: "./run.jet", span: SourceSpan{start: 20, end: 50}, entry: entry}
-    assert_eq(semindex_json_output(output), `{"binding":"app","kind":"Executable","name":"checked-output","module_path":"./run.jet","span":{"start":20,"end":50},"entry":{"identity":"fn:launch","name":"launch","module_path":"./run.jet","definition_span":{"start":3,"end":9},"reference_span":{"start":40,"end":46},"params":["Int","Int"],"return_type":null,"failure_contract":"!Err","failure_source":"implicit default !Err","authority":"safe-jet","effects":["IO","IO"]}}`)
+    assert_eq(semindex_json_output(output), `{"binding":"app","kind":"Executable","name":"checked-output","module_path":"./run.jet","span":{"start":20,"end":50},"entry":{"identity":"fn:launch","name":"launch","module_path":"./run.jet","definition_span":{"start":3,"end":9},"reference_span":{"start":40,"end":46},"params":["Int","Int"],"return_type":null,"failure_contract":"Err!","failure_source":"implicit default Err!","authority":"safe-jet","effects":["IO","IO"]}}`)
     returning := output.copy()
     returning.entry.return_type = Val("")
     assert(semindex_json_output(returning).contains(`"return_type":""`))
@@ -247,11 +247,11 @@ semindex_package_codec_test_checked_output: fn(output: SemIndexOutputFact, index
     assert_eq(output.name, "checked-output")
     assert_eq(output.entry.name, "launch")
     assert(output.entry.identity.ends_with(".launch"))
-    assert_eq(output.entry.failure_contract, "!Err")
-    assert_eq(output.entry.failure_source, "implicit default !Err")
+    assert_eq(output.entry.failure_contract, "Err!")
+    assert_eq(output.entry.failure_source, "implicit default Err!")
     assert_eq(output.entry.authority, "safe-jet")
     assert(output.entry.definition_span != output.entry.reference_span)
-    fields: [String]{`"outputs":[{`, `"entry":{"identity"`, `"failure_contract":"!Err"`, `"failure_source":"implicit default !Err"`, `"authority":"safe-jet"`, `"effects":["IO"]`}
+    fields: [String]{`"outputs":[{`, `"entry":{"identity"`, `"failure_contract":"Err!"`, `"failure_source":"implicit default Err!"`, `"authority":"safe-jet"`, `"effects":["IO"]`}
     loop field in fields -> assert(index_json.contains(field))
 }
 
