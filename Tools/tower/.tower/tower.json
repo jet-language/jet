@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6836,
-    "rev": 101903,
+    "nextNum": 6837,
+    "rev": 101908,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98059,6 +98059,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T00:14:32.532Z"
+        },
+        {
+          "n": 6,
+          "text": "Fair size basis: the harness records each binary`s linkage and compares sizes on one stated basis (static and stripped for every peer that can build so, or dynamic peers charged their shared libc), and the Tower page names that basis. Proof: the harness dry-run lists the basis per cell, and the hello row shows it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T00:49:39.033Z"
         }
       ],
       "refs": [],
@@ -98069,9 +98078,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T00:14:11.855Z",
-      "updated": "2026-11-14T00:19:44.364Z",
+      "updated": "2026-11-14T00:49:39.033Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0afoylf",
@@ -98113,6 +98122,56 @@
       "updated": "2026-11-14T00:15:21.580Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0om9sdv",
+      "num": 6836,
+      "title": "Hello binary carries the whole runtime: 95.5 KB stripped against C static 13.4 KB",
+      "body": "GauntletTower probe 2026-11-13 ($JET_SCRATCH_ROOT/lanes/GauntletTower/csize/probe.txt, probe2.txt): Jet hello is 109,976 bytes unstripped and 95,552 stripped, all static. C hello is 15,888 dynamic, 16,512 static and 13,352 static stripped. Jet/C is 6.0 to 7.2 under every fair pairing, so this is a real loss on the binary-size floor. The cause is the runtime, which links 76 KB of code and 11 KB of unwind tables into every program, used or not: jet_rt core 17.2 KB, allocator 13.2, production receipt 6.5, trap and fault report 5.7, helpers 5.0, scheduler 4.5, host 4.3, sync/vDSO 3.5, plus threads, sentry and comptime-stop. General fix: the runtime links by reach, as Core does, so a program pays only for the runtime parts it calls. The scheduler, threads, sentry and receipt come in only when used. Features that every program genuinely needs (fault report, trap) stay, minimized and never dropped.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The runtime links by reach: a hello program links no scheduler, threads, sentry or production-receipt code, and every runtime part it does link is called on its path. Proof: `nm --size-sort` of the batch-jet hello build lists no jet_rt scheduler, thread, sentry or receipt symbols, and a second program that spawns a task does link the scheduler and prints the same output on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T00:49:36.927Z"
+        },
+        {
+          "n": 2,
+          "text": "Hello beats C on the binary-size floor under a fair basis (both static, both stripped): the Jet/C size ratio is below 1.00 in the gauntlet hello entry, with the fault report and trap still present. Proof: the #6834 harness hello row on the batch jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T00:49:38.038Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T00:49:27.240Z",
+      "updated": "2026-11-14T00:49:40.846Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -204432,6 +204491,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T00:49:40.847Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0om9sdv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T00:49:39.033Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0w0b4wd",
+      "note": "#6 Fair size basis: the harness records each binary`s linkage a"
+    },
+    {
+      "at": "2026-11-14T00:49:38.039Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0om9sdv",
+      "note": "#2 Hello beats C on the binary-size floor under a fair basis (b"
+    },
+    {
+      "at": "2026-11-14T00:49:36.927Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0om9sdv",
+      "note": "#1 The runtime links by reach: a hello program links no schedul"
+    },
+    {
+      "at": "2026-11-14T00:49:27.241Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0om9sdv",
+      "note": "Hello binary carries the whole runtime: 95.5 KB stripped against C static 13.4 KB"
+    },
     {
       "at": "2026-11-14T00:45:20.590Z",
       "by": "Main",
