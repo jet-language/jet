@@ -1464,11 +1464,14 @@ sema_inline_rewrite_error_conv: fn(rewrite: &SemaInlineRewrite, definition: Erro
     updated
 }
 
-// Rust `specialize_impl`.
+// Rust `specialize_impl`. An operator's right-hand type and a conversion's
+// source rename with the methods that name them, as an in-body block's do
+// (sema_inline_rewrite_trait_blocks).
 sema_inline_rewrite_impl: fn(rewrite: &SemaInlineRewrite, definition: ImplDef) -> ImplDef Never! {
     updated := definition
     updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
     if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
+    updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, definition.operator_rhs)
     updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
     updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, definition.assoc_type_impls)
     updated.constants = sema_inline_rewrite_impl_constants(rewrite, definition.constants)
