@@ -26,6 +26,11 @@ use core: core
 // PNG encodes here: 8-bit RGB when every pixel is opaque, else RGBA, each
 // row under the filter whose bytes sum smallest as signed values, in one
 // zlib stream deflated by core.archive, every chunk with its CRC-32.
+//
+// JPEG encodes here too: baseline, at libjpeg quality 90 with the standard
+// tables, 4:4:4 YCbCr (or one gray component when every pixel is gray),
+// through libjpeg's integer forward DCT and color conversion. Alpha is
+// dropped.
 
 #Error
 ImageError: enum {
@@ -124,7 +129,7 @@ encode: fn(image: Image, format: ImageFormat, limits: Limits) -> [U8] ImageError
     if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
     if format == {
         .PNG -> png_encode(image, limits)
-        .JPEG -> Err(.Unsupported)
+        .JPEG -> jpeg_encode(image, limits)
         .GIF -> Err(.Unsupported)
     }
 }
@@ -991,6 +996,289 @@ jpeg_sample: fn(planes: JPEGPlanes, frame: JPEGFrame, component: Int, x: Int, y:
     byte_at(planes.samples, planes.offsets[component] + row * planes.strides[component] + column)
 }
 
+// The JPEG quality `encode` writes, on libjpeg's 1..100 scale.
+C_JPEG_QUALITY: 90
+
+// The standard (Annex K) quantization tables at quality 50, zigzag order.
+C_JPEG_LUMA_QUANT: [Int]{16, 11, 12, 14, 12, 10, 16, 14, 13, 14, 18, 17, 16, 19, 24, 40, 26, 24, 22, 22, 24, 49, 35, 37, 29, 40, 58, 51, 61, 60, 57, 51, 56, 55, 64, 72, 92, 78, 64, 68, 87, 69, 55, 56, 80, 109, 81, 87, 95, 98, 103, 104, 103, 62, 77, 113, 121, 112, 100, 120, 92, 101, 103, 99}
+
+C_JPEG_CHROMA_QUANT: [Int]{17, 18, 18, 24, 21, 24, 47, 26, 26, 47, 99, 66, 56, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99}
+
+// The standard (Annex K) Huffman tables: 16 code-length counts, then the
+// symbols in code order.
+C_JPEG_DC_LUMA: [Int]{0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+
+C_JPEG_DC_CHROMA: [Int]{0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+
+C_JPEG_AC_LUMA: [Int]{
+    0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125,
+    1, 2, 3, 0, 4, 17, 5, 18, 33, 49, 65, 6, 19, 81, 97, 7, 34, 113, 20, 50, 129, 145, 161, 8,
+    35, 66, 177, 193, 21, 82, 209, 240, 36, 51, 98, 114, 130, 9, 10, 22, 23, 24, 25, 26, 37, 38,
+    39, 40, 41, 42, 52, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84, 85,
+    86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120, 121,
+    122, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149, 150, 151, 152, 153, 154, 162, 163,
+    164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182, 183, 184, 185, 186, 194, 195, 196, 197,
+    198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 225, 226, 227, 228, 229, 230,
+    231, 232, 233, 234, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250,
+}
+
+C_JPEG_AC_CHROMA: [Int]{
+    0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119,
+    0, 1, 2, 3, 17, 4, 5, 33, 49, 6, 18, 65, 81, 7, 97, 113, 19, 34, 50, 129, 8, 20, 66, 145,
+    161, 177, 193, 9, 35, 51, 82, 240, 21, 98, 114, 209, 10, 22, 36, 52, 225, 37, 241, 23, 24, 25,
+    26, 38, 39, 40, 41, 42, 53, 54, 55, 56, 57, 58, 67, 68, 69, 70, 71, 72, 73, 74, 83, 84,
+    85, 86, 87, 88, 89, 90, 99, 100, 101, 102, 103, 104, 105, 106, 115, 116, 117, 118, 119, 120,
+    121, 122, 130, 131, 132, 133, 134, 135, 136, 137, 138, 146, 147, 148, 149, 150, 151, 152, 153, 154,
+    162, 163, 164, 165, 166, 167, 168, 169, 170, 178, 179, 180, 181, 182, 183, 184, 185, 186, 194, 195,
+    196, 197, 198, 199, 200, 201, 202, 210, 211, 212, 213, 214, 215, 216, 217, 218, 226, 227, 228, 229,
+    230, 231, 232, 233, 234, 242, 243, 244, 245, 246, 247, 248, 249, 250,
+}
+
+// JPEG entropy-coded output: whole bytes with 0xFF stuffed, then the
+// pending bits and their count.
+JPEGWriter: struct {
+    out: [U8]
+    pending: Int
+    count: Int
+}
+
+// A Huffman table for writing: each symbol's code and code length.
+JPEGCodes: struct {
+    codes: [Int]
+    sizes: [Int]
+}
+
+jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
+    loop index in 0..<size {
+        bits.pending = (bits.pending << 1) + (value >> (size - 1 - index)).bit_and(1)
+        bits.count += 1
+        if bits.count == 8 {
+            bits.out.push(U8{bits.pending})
+            if bits.pending == 0xFF -> bits.out.push(U8{0})
+            bits.pending = 0
+            bits.count = 0
+        }
+    }
+}
+
+// Pads the last byte with one bits.
+jpeg_flush: fn(bits: &JPEGWriter) {
+    loop bits.count > 0 -> jpeg_put(bits, 1, 1)
+}
+
+// The bits a coefficient's magnitude needs.
+bit_size: fn(value: Int) -> Int {
+    magnitude := value.abs()
+    size := 0
+    loop magnitude > 0 {
+        size += 1
+        magnitude = magnitude >> 1
+    }
+    size
+}
+
+// A coefficient's bits after its size: negative values are one less, in
+// `size` bits.
+jpeg_amplitude: fn(bits: &JPEGWriter, value: Int) {
+    size: bit_size(value)
+    jpeg_put(bits, if value < 0 -> value + (1 << size) - 1 else -> value, size)
+}
+
+// The canonical codes of `table`: 16 code-length counts, then the symbols.
+jpeg_codes: fn(table: [Int]) -> JPEGCodes {
+    codes := JPEGCodes{codes: zeros(256), sizes: zeros(256)}
+    code := 0
+    at := 16
+    loop length in 1..<17 {
+        loop _ in 0..<table[length - 1] {
+            codes.codes[table[at]] = code
+            codes.sizes[table[at]] = length
+            code += 1
+            at += 1
+        }
+        code = code << 1
+    }
+    codes
+}
+
+// A quantization table at `C_JPEG_QUALITY`, scaled the way libjpeg scales
+// qualities from 50 up. At 90 every entry stays within 1..255.
+jpeg_quant: fn(base: [Int]) -> [Int] {
+    scale: 200 - C_JPEG_QUALITY * 2
+    table := [Int]{}
+    loop value in base -> table.push((value * scale + 50) /% 100)
+    table
+}
+
+// One pass of libjpeg's integer forward DCT: eight inputs `step` apart from
+// `from`, eight outputs `step` apart. The first pass (`pass` 1) keeps two
+// fraction bits that the second descales away.
+jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int) {
+    d0: input[from]
+    d1: input[from + step]
+    d2: input[from + 2 * step]
+    d3: input[from + 3 * step]
+    d4: input[from + 4 * step]
+    d5: input[from + 5 * step]
+    d6: input[from + 6 * step]
+    d7: input[from + 7 * step]
+    tmp10: d0 + d7 + d3 + d4
+    tmp13: d0 + d7 - d3 - d4
+    tmp11: d1 + d6 + d2 + d5
+    tmp12: d1 + d6 - d2 - d5
+    shift: if pass == 1 -> 11 else -> 15
+    output[from] = if pass == 1 -> (tmp10 + tmp11) << 2 else -> descale(tmp10 + tmp11, 2)
+    output[from + 4 * step] = if pass == 1 -> (tmp10 - tmp11) << 2 else -> descale(tmp10 - tmp11, 2)
+    rotation: (tmp12 + tmp13) * 4433
+    output[from + 2 * step] = descale(rotation + tmp13 * 6270, shift)
+    output[from + 6 * step] = descale(rotation - tmp12 * 15137, shift)
+    tmp4: d3 - d4
+    tmp5: d2 - d5
+    tmp6: d1 - d6
+    tmp7: d0 - d7
+    shared: (tmp4 + tmp6 + tmp5 + tmp7) * 9633
+    z1: (tmp4 + tmp7) * -7373
+    z2: (tmp5 + tmp6) * -20995
+    z3: (tmp4 + tmp6) * -16069 + shared
+    z4: (tmp5 + tmp7) * -3196 + shared
+    output[from + 7 * step] = descale(tmp4 * 2446 + z1 + z3, shift)
+    output[from + 5 * step] = descale(tmp5 * 16819 + z2 + z4, shift)
+    output[from + 3 * step] = descale(tmp6 * 25172 + z2 + z3, shift)
+    output[from + step] = descale(tmp7 * 12299 + z1 + z4, shift)
+}
+
+// `value` divided by `divisor`, rounded half away from zero.
+jpeg_divide: fn(value: Int, divisor: Int) -> Int {
+    if value < 0 -> return 0 - (0 - value + (divisor >> 1)) /% divisor
+    (value + (divisor >> 1)) /% divisor
+}
+
+// Codes one block of level-shifted samples: forward DCT, quantization by
+// the zigzag `quant`, then Huffman codes after the DC `predictor`. Returns
+// the quantized DC, the next prediction.
+jpeg_encode_block: fn(samples: [Int], work: &[Int], coef: &[Int], quant: [Int], dc: JPEGCodes, ac: JPEGCodes, predictor: Int, bits: &JPEGWriter) -> Int {
+    loop row in 0..<8 -> jpeg_fdct_pass(samples, work, row * 8, 1, 1)
+    loop column in 0..<8 -> jpeg_fdct_pass(work, coef, column, 8, 2)
+    value: jpeg_divide(coef[0], quant[0] * 8)
+    difference: value - predictor
+    size: bit_size(difference)
+    jpeg_put(bits, dc.codes[size], dc.sizes[size])
+    jpeg_amplitude(bits, difference)
+    run := 0
+    loop at in 1..<64 {
+        level: jpeg_divide(coef[C_JPEG_NATURAL[at]], quant[at] * 8)
+        if {
+            level == 0 -> { run += 1 }
+            else -> {
+                loop run > 15 {
+                    jpeg_put(bits, ac.codes[0xF0], ac.sizes[0xF0])
+                    run -= 16
+                }
+                symbol: (run << 4) + bit_size(level)
+                jpeg_put(bits, ac.codes[symbol], ac.sizes[symbol])
+                jpeg_amplitude(bits, level)
+                run = 0
+            }
+        }
+    }
+    if run > 0 -> jpeg_put(bits, ac.codes[0], ac.sizes[0])
+    value
+}
+
+push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
+    out.push(U8{0xFF})
+    out.push(U8{marker})
+    out.push(U8{(body.len() + 2) >> 8})
+    out.push(U8{(body.len() + 2).bit_and(255)})
+    loop byte in body -> out.push(byte)
+}
+
+// The nearer of `value` and `last`.
+at_most: fn(value: Int, last: Int) -> Int {
+    if value > last -> last else -> value
+}
+
+// A baseline JPEG of `image`, which `encode` has checked.
+jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
+    if image.width > 65535 || image.height > 65535 -> return Err(.Unsupported)
+    gray := true
+    at := 0
+    loop at < image.pixels.len() {
+        if image.pixels[at] != image.pixels[at + 1] || image.pixels[at] != image.pixels[at + 2] {
+            gray = false
+            break
+        }
+        at += 4
+    }
+    count: if gray -> 1 else -> 3
+    // Each pixel's Y, Cb and Cr, the way libjpeg converts them.
+    ycc := [Int]{}
+    loop index in 0..<(image.width * image.height) {
+        red: byte_at(image.pixels, index * 4)
+        green: byte_at(image.pixels, index * 4 + 1)
+        blue: byte_at(image.pixels, index * 4 + 2)
+        ycc.push((19595 * red + 38470 * green + 7471 * blue + 32768) >> 16)
+        ycc.push((0 - 11059 * red - 21709 * green + 32768 * blue + 8421375) >> 16)
+        ycc.push((32768 * red - 27439 * green - 5329 * blue + 8421375) >> 16)
+    }
+    luma_quant: jpeg_quant(C_JPEG_LUMA_QUANT)
+    chroma_quant: jpeg_quant(C_JPEG_CHROMA_QUANT)
+    out := [U8]{0xFF}
+    out.push(U8{C_JPEG_SOI})
+    push_marker(out, 0xE0, [U8]{74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0})
+    loop slot in 0..<count {
+        body := [U8]{U8{slot}}
+        loop value in (if slot == 0 -> luma_quant else -> chroma_quant) -> body.push(U8{value})
+        push_marker(out, C_JPEG_DQT, body)
+    }
+    frame := [U8]{8}
+    loop value in ([Int]{image.height >> 8, image.height.bit_and(255), image.width >> 8, image.width.bit_and(255), count}) -> frame.push(U8{value})
+    loop component in 0..<count {
+        loop value in ([Int]{component + 1, 0x11, if component == 0 -> 0 else -> 1}) -> frame.push(U8{value})
+    }
+    push_marker(out, 0xC0, frame)
+    tables: [[Int]]{C_JPEG_DC_LUMA, C_JPEG_AC_LUMA, C_JPEG_DC_CHROMA, C_JPEG_AC_CHROMA}
+    loop index in 0..<(if count == 1 -> 2 else -> 4) {
+        body := [U8]{U8{(index % 2) * 16 + index /% 2}}
+        loop value in tables[index] -> body.push(U8{value})
+        push_marker(out, C_JPEG_DHT, body)
+    }
+    scan := [U8]{U8{count}}
+    loop component in 0..<count {
+        scan.push(U8{component + 1})
+        scan.push(U8{if component == 0 -> 0 else -> 0x11})
+    }
+    loop value in ([Int]{0, 63, 0}) -> scan.push(U8{value})
+    push_marker(out, C_JPEG_SOS, scan)
+    codes: [JPEGCodes]{jpeg_codes(C_JPEG_DC_LUMA), jpeg_codes(C_JPEG_AC_LUMA), jpeg_codes(C_JPEG_DC_CHROMA), jpeg_codes(C_JPEG_AC_CHROMA)}
+    bits := JPEGWriter{out: out, pending: 0, count: 0}
+    predictors := zeros(3)
+    samples := zeros(64)
+    work := zeros(64)
+    coef := zeros(64)
+    loop block_y in 0..<((image.height + 7) /% 8) {
+        loop block_x in 0..<((image.width + 7) /% 8) {
+            loop component in 0..<count {
+                // Edge blocks repeat the last column and row.
+                loop index in 0..<64 {
+                    x: at_most(block_x * 8 + index.bit_and(7), image.width - 1)
+                    y: at_most(block_y * 8 + (index >> 3), image.height - 1)
+                    samples[index] = ycc[(y * image.width + x) * 3 + component] - 128
+                }
+                table: if component == 0 -> 0 else -> 2
+                predictor: predictors[component]
+                predictors[component] = jpeg_encode_block(samples, work, coef, if component == 0 -> luma_quant else -> chroma_quant, codes[table], codes[table + 1], predictor, bits)
+            }
+        }
+        if bits.out.len() > limits.max_output_bytes -> return Err(.TooLarge)
+    }
+    jpeg_flush(bits)
+    bits.out.push(U8{0xFF})
+    bits.out.push(U8{C_JPEG_EOI})
+    if bits.out.len() > limits.max_output_bytes -> return Err(.TooLarge)
+    Ok(bits.out)
+}
+
 C_TEST_LIMITS: Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 256}
 
 // A PNG of one zlib stream of already filtered scanlines.
@@ -1082,55 +1370,14 @@ decode_error: fn(data: [U8], limits: Limits) -> ImageError {
 
 C_TEST_JPEG_LIMITS: Limits{max_input_bytes: 8192, max_pixels: 256, max_output_bytes: 1024}
 
-// Test JPEG entropy coding: whole bytes with 0xFF stuffed, then the
-// pending bits and their count.
-TestBits: struct {
-    out: [U8]
-    pending: Int
-    count: Int
-}
-
-test_put: fn(bits: &TestBits, value: Int, size: Int) {
-    loop index in 0..<size {
-        bits.pending = (bits.pending << 1) + (value >> (size - 1 - index)).bit_and(1)
-        bits.count += 1
-        if bits.count == 8 {
-            bits.out.push(U8{bits.pending})
-            if bits.pending == 0xFF -> bits.out.push(U8{0})
-            bits.pending = 0
-            bits.count = 0
-        }
-    }
-}
-
-test_flush: fn(bits: &TestBits) {
-    loop bits.count > 0 -> test_put(bits, 1, 1)
-}
-
-// The bits a coefficient's magnitude needs.
-test_size: fn(value: Int) -> Int {
-    magnitude := value.abs()
-    size := 0
-    loop magnitude > 0 {
-        size += 1
-        magnitude = magnitude >> 1
-    }
-    size
-}
-
-test_amplitude: fn(bits: &TestBits, value: Int) {
-    size: test_size(value)
-    test_put(bits, if value < 0 -> value + (1 << size) - 1 else -> value, size)
-}
-
 // Codes one block's 64 zigzag coefficients after the DC `predictor` with
 // the test tables: DC size `s` is the 4-bit code `s`; AC symbols are 8-bit
 // codes, 0 for end-of-block, 1 for sixteen zeros and `2 + run * 10 + size
 // - 1` otherwise.
-test_block: fn(bits: &TestBits, zigzag: [Int], predictor: Int) {
+test_block: fn(bits: &JPEGWriter, zigzag: [Int], predictor: Int) {
     difference: zigzag[0] - predictor
-    test_put(bits, test_size(difference), 4)
-    test_amplitude(bits, difference)
+    jpeg_put(bits, bit_size(difference), 4)
+    jpeg_amplitude(bits, difference)
     last := 0
     loop index in 1..<64 {
         if zigzag[index] != 0 -> last = index
@@ -1141,16 +1388,16 @@ test_block: fn(bits: &TestBits, zigzag: [Int], predictor: Int) {
             zigzag[index] == 0 -> { run += 1 }
             else -> {
                 loop run > 15 {
-                    test_put(bits, 1, 8)
+                    jpeg_put(bits, 1, 8)
                     run -= 16
                 }
-                test_put(bits, 2 + run * 10 + test_size(zigzag[index]) - 1, 8)
-                test_amplitude(bits, zigzag[index])
+                jpeg_put(bits, 2 + run * 10 + bit_size(zigzag[index]) - 1, 8)
+                jpeg_amplitude(bits, zigzag[index])
                 run = 0
             }
         }
     }
-    if last < 63 -> test_put(bits, 0, 8)
+    if last < 63 -> jpeg_put(bits, 0, 8)
 }
 
 // 64 zigzag coefficients, zero but for the `index, value` pairs.
@@ -1218,12 +1465,12 @@ test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]
     push_segment(out, C_JPEG_SOS, scan)
     per_mcu := 0
     loop factors in sampling -> per_mcu += if sampling.len() == 1 -> 1 else -> (factors >> 4) * factors.bit_and(15)
-    bits := TestBits{out: out, pending: 0, count: 0}
+    bits := JPEGWriter{out: out, pending: 0, count: 0}
     predictors := zeros(sampling.len())
     loop (at, zigzag) in blocks {
         mcu: at /% per_mcu
         if interval > 0 && mcu > 0 && mcu % interval == 0 && at % per_mcu == 0 {
-            test_flush(bits)
+            jpeg_flush(bits)
             bits.out.push(U8{0xFF})
             bits.out.push(U8{0xD0 + (mcu /% interval - 1) % 8})
             loop index in 0..<sampling.len() -> predictors[index] = 0
@@ -1237,7 +1484,7 @@ test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]
         test_block(bits, zigzag, predictors[component])
         predictors[component] = zigzag[0]
     }
-    test_flush(bits)
+    jpeg_flush(bits)
     bits.out.push(U8{0xFF})
     bits.out.push(U8{C_JPEG_EOI})
     bits.out
@@ -1490,4 +1737,47 @@ encode_error: fn(image: Image, format: ImageFormat, limits: Limits) -> ImageErro
     assert(encode_error(test_image(9, 8, 255), .PNG, C_TEST_LIMITS) == .TooLarge)
     assert(encode_error(test_image(5, 3, 255), .PNG, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 20}) == .TooLarge)
     assert(encode_error(test_image(5, 3, 255), .GIF, C_TEST_LIMITS) == .Unsupported)
+}
+
+// A smooth `width` x `height` image with half-transparent alpha, gray when
+// `gray` is 1.
+smooth_image: fn(width: Int, height: Int, gray: Int) -> Image {
+    pixels := [U8]{}
+    loop y in 0..<height {
+        loop x in 0..<width {
+            red: (x * 9 + y * 3) % 256
+            loop value in ([Int]{red, if gray == 1 -> red else -> (y * 11) % 256, if gray == 1 -> red else -> ((x + y) * 5) % 256, 128}) -> pixels.push(U8{value})
+        }
+    }
+    Image{width: width, height: height, pixels: pixels}
+}
+
+// The squared differences of two same-size images' red, green and blue.
+squared_error: fn(left: Image, right: Image) -> Int {
+    total := 0
+    loop index in 0..<left.pixels.len() {
+        if index % 4 != 3 {
+            difference: byte_at(left.pixels, index) - byte_at(right.pixels, index)
+            total += difference * difference
+        }
+    }
+    total
+}
+
+#Test("jpeg encode decodes back within 35 dB of the source") {
+    limits: Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 8192}
+    loop gray in 0..<2 {
+        // 21 x 13 leaves partial blocks on the right and bottom edges.
+        original: smooth_image(21, 13, gray)
+        bytes: encode(original, .JPEG, limits) ?? panic("encode: {err:Debug}")
+        info: inspect(bytes, limits) ?? panic("inspect: {err:Debug}")
+        assert(info.format == .JPEG && info.width == 21 && info.height == 13)
+        assert(info.color == (if gray == 1 -> ImageColor.Gray else -> ImageColor.RGB))
+        back: decode(bytes, limits) ?? panic("decode: {err:Debug}")
+        // A PSNR of 35 dB is a mean squared error of at most 20.
+        assert(squared_error(original, back) <= 20 * 21 * 13 * 3)
+        // JPEG has no alpha: the decoded pixels are opaque.
+        assert_eq(back.pixels[3], U8{255})
+    }
+    assert(encode_error(smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
 }

@@ -1,0 +1,13 @@
+# core.image encodes baseline JPEG that decodes back within 35 dB PSNR of the source, color and gray, to the same pixels under jet run and a built binary.
+fixture: jpeg_encode_stays_within_psnr_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step default: jet run run.jet
+exit: 0
+stdout: = jpeg_encode_stays_within_psnr_on_all_tiers.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = jpeg_encode_stays_within_psnr_on_all_tiers.out
+stdout: == default # the built binary agrees with jet run
