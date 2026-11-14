@@ -1,0 +1,16 @@
+# A failure that passes up through calls with no `?` (the error contract
+# carries it) gets a Trail header in the program's own terms: how many calls
+# passed it up, never "via ?". Each call names its function and line, origin
+# first.
+fixture: trail_header_counts_calls_that_carry_no_question_mark.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 1
+stdout: = "4\n"
+stderr: ~ "failed here: load (main.jet:5)" # the origin
+stderr: ~ "Trail [E3002] (3 calls passed it up, origin first):" # the header counts calls
+stderr: !~ "via ?" # no call carries `?`
+stderr: ~ "  1. middle (main.jet:10)" # innermost call first
+stderr: ~ "  2. outer (main.jet:14)" # the next call out
+stderr: ~ "  3. run (main.jet:19)" # the entry call last
