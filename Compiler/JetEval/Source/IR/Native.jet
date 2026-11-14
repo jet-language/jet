@@ -21,12 +21,13 @@
 // the same addresses (each batch has its own, above the last one).
 use {
     math: core.math
-    jet_foundation.[CompilerThreads, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_find, name_intern, name_rows_set, name_rows_value, name_table_sized]
+    jet_foundation.[CompilerThreads, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_stop_parse, diagnostic_with_rights, name_find, name_index, name_intern, name_rows_set, name_rows_value, name_table_sized]
     jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_lint_module, ir_lint_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
     jet_backend.[
         X64BindResult,
         X64ComptimeChild,
         X64ComptimeCode,
+        X64ComptimeFunction,
         X64ComptimeSymbols,
         X64Executable,
         X64ImageFile,
@@ -60,6 +61,8 @@ use {
         x64_comptime_close,
         x64_comptime_code,
         x64_comptime_frame,
+        x64_comptime_function_at,
+        x64_comptime_functions,
         x64_comptime_load,
         x64_comptime_put_word,
         x64_comptime_reap,
@@ -160,6 +163,12 @@ JetEvalNativeProgram: struct {
     // toolchain has no runtime image.
     failure: String
     missing: Bool
+    // The bound batch's functions by start address, each with its symbol's
+    // id (x64_comptime_functions), and each id's function name: a stack
+    // overflow the child reports by address only, as its location table has
+    // no batch code, is named from them (jet_eval_native_overflow_name).
+    functions: [X64ComptimeFunction]{[X64ComptimeFunction]{}}
+    function_names: [String]{[String]{}}
 }
 
 // One call's state: the child (taken from the session for the call) and
@@ -204,6 +213,9 @@ JetEvalIRState: struct {
     host_layouts: Shared<[IRProgram]>?{None}
     host_adapter: JetEvalBuildHostAdapter?{None}
     host_values: [TComptimeValue]{[TComptimeValue]{}}
+    // The address an E3012 stop of the call names no function at (-1:
+    // none), named once the call ends (jet_eval_native_overflow_name).
+    overflow_at: Int{-1}
 }
 
 jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
@@ -467,6 +479,15 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         program.entries = entries.move()
         return program
     }
+    // The function names by the id of the object symbol each one's code
+    // goes by (JetIR X64Select.jet), for a fault's report.
+    symbols := name_table_sized(code.functions.len() * 2)
+    labels := [String]{}
+    loop function in code.functions {
+        id: name_index(name_intern(symbols, if function.symbol != "" -> function.symbol else if function.key != "" -> function.key else -> function.name))
+        loop labels.len() <= id -> labels.push("")
+        if labels[id] == "" -> labels[id] = function.name
+    }
     compiled := ir_x64_object(ir_x64_compile_module(code, threads), true)
     if compiled.errors.len() > 0 {
         program.failure = "the batch doesn't compile to x86-64: {compiled.errors.join("; ")}"
@@ -502,6 +523,8 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         program.failure = "the bound batch is not an image: {program.code.failure}"
         return program
     }
+    program.functions = x64_comptime_functions(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, symbols)
+    program.function_names = labels.move()
     permit.value.base = program.code.high
     loaded: x64_comptime_load(permit.value.child, program.code)
     if loaded != "" {
@@ -651,6 +674,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
     }
     s.child = permit.value.child.copy()
     value: jet_eval_native_call(s, program, item, args)
+    if s.overflow_at >= 0 -> jet_eval_native_overflow_name(s, program)
     x64_comptime_settle(s.child)
     s.stdout = "{s.stdout}{String.from_bytes_lossy(s.child.stdout)}"
     s.stderr = "{s.stderr}{String.from_bytes_lossy(s.child.stderr)}"
@@ -774,7 +798,59 @@ jet_eval_native_ended: fn(s: &JetEvalIRState) {
     }
     report: String.from_bytes_lossy(s.child.stderr).trim()
     s.child.stderr = [U8]{}
+    if jet_eval_native_overflow(s, report) -> return
     jet_eval_ir_source_fail(s, if report == "" -> "the runtime exited with status {code}" else -> report)
+}
+
+// The child's E3012 stop (JetRuntime FaultReport report.S) names the
+// overflowing function by its address alone when the child's location table
+// doesn't hold it, as for all batch code.
+JET_EVAL_NATIVE_UNNAMED_AT: "`??` at 0x"
+
+// A stack overflow in compile-time code: one E3012 at the comptime site,
+// without the address the child names its function by; the call's end
+// names it from the batch (jet_eval_native_overflow_name). False when
+// `report` is no E3012 stop.
+jet_eval_native_overflow: fn(s: &JetEvalIRState, report: String) -> Bool Never! {
+    lines: report.split("\n").to_list()
+    if lines.len() == 0 -> return false
+    stop: diagnostic_stop_parse(lines[0]) ?? return false
+    if stop.code != "E3012" -> return false
+    at: stop.what.find(JET_EVAL_NATIVE_UNNAMED_AT)
+    if at >= 0 {
+        digits: stop.what.bytes()
+        address := 0
+        loop index in at + JET_EVAL_NATIVE_UNNAMED_AT.bytes().len()..<digits.len() {
+            digit: Int{digits[index]}
+            if digit >= 48 && digit <= 57 {
+                address = address * 16 + digit - 48
+            } else if digit >= 97 && digit <= 102 {
+                address = address * 16 + digit - 87
+            } else {
+                break
+            }
+        }
+        s.overflow_at = address
+    }
+    if s.failure == None {
+        s.failure = Val(jet_eval_native_overflow_error(s.span, if at >= 0 -> "Stack overflow" else -> stop.what))
+    }
+    true
+}
+
+// The E3012 of compile-time code at `span`, its first line `what`.
+jet_eval_native_overflow_error: fn(span: Span, what: String) -> JetEvalError Never! {
+    why: "compile-time code kept calling deeper without returning until it ran out of stack, so the `#run` value has no result"
+    fix: "end the recursion or make each call progress toward a base case, or compute the value at run time"
+    JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3012", Val(span), what, why, fix)}
+}
+
+// A call's unnamed stack overflow (JetEvalIRState.overflow_at) names the
+// batch function whose code holds its address.
+jet_eval_native_overflow_name: fn(s: &JetEvalIRState, program: JetEvalNativeProgram) Never! {
+    id: x64_comptime_function_at(program.functions, s.overflow_at) ?? return
+    if id >= program.function_names.len() || program.function_names[id] == "" -> return
+    s.failure = Val(jet_eval_native_overflow_error(s.span, "Stack overflow in `{program.function_names[id]}`"))
 }
 
 // A runtime stop (JetRuntime Trap.jet) of kind `kind` and its words; the
