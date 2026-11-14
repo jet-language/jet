@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102194,
+    "rev": 102195,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48685,11 +48685,11 @@
         {
           "n": 6,
           "text": "The jet.runtime.term flush argument, now always false after G3Core2-stdout-buffer, is removed from the runtime registry, Core/Term.jet and every caller in one cutover once the seed accepts the 2-argument call. Proof: git grep finds no flush argument on jet.runtime.term, and the stdout cases pass at none, basic and full.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T06:40:42.941Z"
+          "evidence": "10acaaaa23 (batch 42, dev f365e457fc..348035e478): jet.runtime.term drops stdio_write and stdio_bytes (the writes with the always-false flush argument) from the runtime registry, Core/Term and every caller in one cutover. git grep `stdio_(write|bytes)(` finds only the 6 Stdout and Stderr wrappers in Core/Term/Term.jet:117-144, none with a flush argument. The terminal8_write_stdout and stderr flush flag is a different, live argument (true at every Core and Picker caller) and stays. On the gate-p48 jet: RuntimeGenerators --check rc 0; cases terminal/ 11/0, 2 KF; the stdout cases at --optimize=none, basic and full 11/0; ui runtime_interface/ 9/0; golden Basics/ 165/0.",
+          "at": "2026-11-14T05:02:22.799Z"
         }
       ],
       "refs": [
@@ -48708,7 +48708,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.718Z",
-      "updated": "2026-11-14T04:25:53.019Z",
+      "updated": "2026-11-14T05:02:22.799Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -204723,6 +204723,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:02:22.799Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8dr0e",
+      "note": "#6"
+    },
     {
       "at": "2026-11-14T04:57:07.779Z",
       "by": "Main",
