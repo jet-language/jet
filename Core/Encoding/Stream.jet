@@ -1071,11 +1071,10 @@ sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
     order
 }
 
+// `bytes` as text: the validated copy, or the UTF-8 error's message.
 text_from_bytes: fn(bytes: &&[U8]) -> String EncodingError! {
-    rt.utf8_validate(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err.message))
-    #Unsafe("the shared UTF-8 validator just accepted this owned allocation") {
-        return Ok(rt.bytes_into_text(bytes))
-    }
+    text: String.from_bytes(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err.message))
+    Ok(text)
 }
 
 byte_at: fn(text: String, index: Int) -> U8 Never! {
