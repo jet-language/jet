@@ -10752,16 +10752,16 @@ FailureTrail: struct {
         safety_reason: "The failure reached the top with no handler, so the program has no defined result."
         expert_path: "none: a caller handles the failure"
         stage: [.Runtime]
-        meaning: "The trail of `?` hops a failed value took, printed under the root failure with consecutive repeats collapsed (E2-M12)"
+        meaning: "The trail of calls a failed value passed up through, printed under the root failure with consecutive repeats collapsed (E2-M12)"
         detail: true
         no_fix: .Behavior
 
         what: fn(self) -> String {
-            "`Trail [E3002] (N hops via ?, origin first):` followed by one numbered `{self.fn_name} ({self.file}:{self.line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop's trimmed source line."
+            "`Trail [E3002] (N calls passed it up, origin first):` followed by one numbered `{self.fn_name} ({self.file}:{self.line})` line per hop, each with its note after an em dash and `×N` when the same hop repeats, and under it the hop's trimmed source line."
         }
 
         why: fn(self) -> String {
-            "Each failed `?` joins the failure's trail, so the report can show where the failure started and which callers forwarded it."
+            "Each call that passes a failure up joins the failure's trail, so the report can show where the failure started and which callers forwarded it."
         }
 
         fix: fn(self) -> String {
