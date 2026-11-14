@@ -6,17 +6,13 @@ fixture: web_js_try_reaches_typed_edge.fixture
 env: NO_COLOR=1
 step: jet build --target web main.jet
 exit: 0
-file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"target\": \"web\"" # the manifest names the web target
 file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
 file: .jet/build/app.wasm is-file
-file: .jet/build/app.js ~ "jet_web_try(" # original JavaScript/runtime predicate
-copy: harness.mjs .jet/build/harness.mjs
-step: node harness.mjs
+step: node app.js
 cwd: .jet/build
-exit: 0
-stdout: ~ "kind=JetError" # original contains predicate
-stdout: ~ "code=TRYFAIL" # original contains predicate
-stdout: ~ "read" # original contains predicate
-stdout: ~ "run" # original contains predicate
-stdout: ~ "Error [TRYFAIL]: try failed" # original contains predicate
-stderr: ~ "Error [TRYFAIL]: try failed" # original contains predicate
+exit: 1
+stderr: ~ "Error [TRYFAIL]: try failed" # the typed error reaches the program's edge
+stderr: ~ "failed here: load (main.jet:3)" # where the error was made
+stderr: ~ "1. read (main.jet:8)" # the try in read passed it up
+stderr: ~ "2. run (main.jet:14)" # and run's, to the edge
