@@ -20,7 +20,7 @@ import { gzipSync } from 'node:zlib';
 import { DOCS_DIR, UI, projectRoot, readLatestJSON } from './paths.mjs';
 import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
-import { readGauntletStandings, standingsLocation } from './gauntlet-standings.mjs';
+import { readGauntletStandings, standingsLocations } from './gauntlet-standings.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
 import * as docs from './docs.mjs';
@@ -422,10 +422,11 @@ export function serve(store, port = 7878, open = false) {
           return send(res, 500, { error: 'E_INVALID', message: `Gauntlet status is not valid JSON: ${file}` });
         }
       }
-      // #6834: the newest results file's standings section (config gauntletResults).
+      // #6834: the newest results file's standings section (config
+      // gauntletResults and the machine's shared results directory).
       if (req.method === 'GET' && url.pathname === '/api/gauntlet/standings') {
         const root = projectRoot(store.dataDir);
-        return send(res, 200, readGauntletStandings(root, standingsLocation(root, store.config.gauntletResults)));
+        return send(res, 200, readGauntletStandings(root, standingsLocations(root, store.config.gauntletResults)));
       }
       if (req.method === 'GET' && url.pathname === '/api/card') {
         const ref = url.searchParams.get('id') || url.searchParams.get('card');

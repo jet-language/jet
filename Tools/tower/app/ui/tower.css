@@ -999,33 +999,43 @@ button.queue__row:hover { border-color: var(--edge-hi); color: var(--blue); }
 }
 .gtip__foot span:first-child { color: var(--dim); }
 
-/* Standings (#6834): every entry × every peer and the asm ceiling × metric,
-   from the newest results file. Green passes the floor or meets the
-   ceiling, red fails or misses it; grey rows say why nothing was measured. */
+/* Standings (#6834): per entry, one bar chart per metric from the newest
+   results file. Grey bars are the peers Jet must beat, the frost bar is the
+   asm ceiling, the blue bar is Jet. Once Jet is measured a peer bar turns
+   green when Jet passes or meets it, red when Jet fails or misses it. */
 .standings { margin-bottom: 18px; }
 .standings__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 0 6px; }
 .standings__title { margin: 0; color: var(--ink); font: 700 12px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; }
-.standings__scroll { min-width: 0; overflow-x: auto; }
 .standings__pill--pass b { color: var(--ok); }
 .standings__pill--fail b { color: var(--red); }
-.standings__entry th { padding: 6px 10px; text-align: left; background: var(--raised); color: var(--frost);
-  font: 700 10.5px/1.2 var(--mono); border-top: 2px solid var(--edge-hi); }
-.standings__entry small { margin-left: 8px; color: var(--faint); font: 500 9.5px/1.2 var(--mono); }
-.standings__table .standings__cell { padding: 3px 5px; }
-.standings__cell b { display: block; font: 700 11px/1.2 var(--mono); }
-.standings__cell span { display: flex; justify-content: space-between; gap: 6px; font: 500 8.5px/1.2 var(--mono); color: var(--dim); }
-.standings__cell span i { font-style: normal; white-space: nowrap; }
-.standings__cell em { display: block; font: 500 8px/1.2 var(--mono); font-style: normal; color: var(--faint); white-space: nowrap; }
 .standings__basis strong { display: block; color: var(--dim); font-weight: 600; }
-.standings__cell--pass { background: var(--ok-soft); }
-.standings__cell--pass b { color: var(--ok); }
-.standings__cell--fail { background: var(--ember); }
-.standings__cell--fail b { color: var(--red); }
-.standings__cell--open b, .standings__cell--na b { color: var(--faint); font-weight: 500; }
-.standings__cell[colspan] { text-align: left; padding-left: 10px; }
-.standings__cell[colspan] span { display: inline; color: var(--faint); }
-.standings__row--na { opacity: .5; }
-.standings__row--ceiling th { box-shadow: inset 2px 0 0 var(--frost); }
+.standings__entry { margin: 12px 0 16px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; }
+.standings__entry h3 { margin: 0 0 8px; color: var(--ink); font: 700 12px/1.2 var(--mono); }
+.standings__entry small { margin-left: 8px; color: var(--faint); font: 500 10px/1.2 var(--mono); }
+.standings__panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 14px; }
+.standings__panel { margin: 0; min-width: 0; }
+.standings__panel figcaption { margin-bottom: 4px; color: var(--frost); font: 700 10.5px/1.2 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.standings__bars { margin: 0; padding: 0; list-style: none; }
+.standings__bar { display: grid; grid-template-columns: 76px minmax(40px, 1fr) auto; align-items: center; gap: 2px 6px; padding: 1px 0; font: 500 10px/1.3 var(--mono); color: var(--dim); }
+.standings__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.standings__track { height: 8px; background: var(--raised); border-radius: 2px; overflow: hidden; }
+.standings__fill { display: block; height: 100%; background: var(--slate); }
+.standings__value { white-space: nowrap; color: var(--ink); }
+.standings__value em { margin-left: 4px; font-style: normal; color: var(--faint); }
+.standings__ratio { grid-column: 2 / 4; justify-self: end; font: 700 9.5px/1.2 var(--mono); color: var(--faint); }
+.standings__bar--ceiling .standings__name { color: var(--frost); font-weight: 700; }
+.standings__bar--ceiling .standings__fill { background: repeating-linear-gradient(135deg, var(--frost) 0 4px, transparent 4px 6px); box-shadow: inset 0 0 0 1px var(--frost); }
+.standings__bar--jet .standings__name, .standings__bar--jet .standings__value { color: var(--blue); font-weight: 700; }
+.standings__bar--jet .standings__fill { background: var(--blue); }
+.standings__bar--pass .standings__fill { background: var(--ok-line); }
+.standings__bar--pass .standings__ratio { color: var(--ok); }
+.standings__bar--fail .standings__fill { background: var(--red-deep); }
+.standings__bar--fail .standings__ratio { color: var(--red); }
+.standings__note { grid-column: 2 / 4; color: var(--faint); }
+.standings__note b { color: var(--dim); font-weight: 600; }
+.standings__bar--pending .standings__name, .standings__bar--pending .standings__note { color: var(--amber); }
+.standings__blocked { margin: 8px 0 0; padding: 6px 0 0; list-style: none; border-top: 1px solid var(--edge); font: 500 10px/1.4 var(--mono); color: var(--faint); }
+.standings__blocked b { display: inline-block; min-width: 76px; color: var(--dim); }
 
 @media (max-width: 700px) {
   .viewhead--gauntlet .gauntlet__summary { margin-left: 0; width: 100%; }

@@ -20,7 +20,7 @@ import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
-import { readGauntletStandings, standingsLocation } from './gauntlet-standings.mjs';
+import { readGauntletStandings, standingsLocations } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
@@ -1451,14 +1451,15 @@ function cmdBoard(store, { pos, flags }) {
 
 // #6834: the standings table of the newest gauntlet results file, the same
 // projection the Gauntlet page renders. --results names a results file or a
-// directory of them; config `gauntletResults` is the default directory.
+// directory of them; by default config `gauntletResults` and the machine's
+// shared results directory ($JET_STATE_ROOT/gauntlet/results) are searched.
 function cmdGauntlet(store, { pos, flags }) {
   const [verb] = pos;
   if (verb !== 'standings') throw new TowerError('E_USAGE', `unknown gauntlet verb "${verb}" — standings`);
   if (flags.results === true) throw new TowerError('E_USAGE', 'gauntlet standings --results needs a PATH');
   const root = projectRoot(store.dataDir);
-  const location = standingsLocation(root, store.config.gauntletResults, flags.results === undefined ? undefined : resolve(String(flags.results)));
-  const view = projectGauntletStandings(readGauntletStandings(root, location));
+  const locations = standingsLocations(root, store.config.gauntletResults, flags.results === undefined ? undefined : String(flags.results));
+  const view = projectGauntletStandings(readGauntletStandings(root, locations));
   return out(flags, gauntletStandingsText(view), view);
 }
 

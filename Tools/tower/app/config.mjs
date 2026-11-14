@@ -45,7 +45,8 @@ export const DEFAULTS = {
   boardBranch: 'master',
   boardBatch: 25,
   // #6834: where the Gauntlet page and `tower gauntlet standings` find the
-  // harness's dated results files (relative to the project root, or absolute).
+  // harness's dated results files (relative to the project root, or absolute),
+  // searched with the shared $JET_STATE_ROOT/gauntlet/results.
   gauntletResults: 'Tools/gauntlet/results',
 };
 

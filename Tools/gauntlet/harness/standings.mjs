@@ -267,10 +267,12 @@ function sizeValue(entry, peer, row, runtimes) {
   };
 }
 
-// A measured row's standing: ok, or why its numbers do not count.
+// A measured row's standing: ok, or why its numbers do not count. A row a
+// --languages run left to an earlier run (and could not carry) is not_measured.
 function rowStatus(row) {
   if (!row) return { status: "failed", reason: "the harness recorded no row" };
   if (row.status === "ok") return { status: "ok", reason: null };
+  if (row.not_measured) return { status: "not_measured", reason: row.reason ?? "this run did not measure it" };
   if (row.status === "not_applicable") return { status: "not_applicable", reason: row.reason ?? "declared not applicable" };
   if (row.missing_toolchain) return { status: "unavailable", reason: row.reason ?? "toolchain missing" };
   const verification = row.verification;
@@ -280,8 +282,11 @@ function rowStatus(row) {
   return { status: "failed", reason: row.reason ?? "row failed" };
 }
 
+// Without Jet's value a cell keeps the peer's value (the bar Jet must beat);
+// when the peer has no value either, the peer's reason comes first.
 function judge(role, jet, peer) {
-  if (jet.value === null) return { jet: null, peer: peer.value ?? null, ratio: null, verdict: jet.status ?? "unmeasured", reason: `Jet: ${jet.reason}` };
+  if (jet.value === null && peer.value === null) return { jet: null, peer: null, ratio: null, verdict: peer.status ?? "unmeasured", reason: `${peer.reason}; Jet: ${jet.reason}` };
+  if (jet.value === null) return { jet: null, peer: peer.value, ratio: null, verdict: jet.status ?? "unmeasured", reason: `Jet: ${jet.reason}` };
   if (peer.value === null) return { jet: jet.value, peer: null, ratio: null, verdict: peer.status ?? "unmeasured", reason: peer.reason };
   const ratio = jet.value / peer.value;
   if (role === "ceiling") return { jet: jet.value, peer: peer.value, ratio, gap: ratio - 1, verdict: ratio <= 1 ? "meet" : "miss" };
@@ -317,7 +322,7 @@ export function entryStandings(plan, result, { runtimes = {} } = {}) {
       }
       const jet = jetStatus.status === "ok"
         ? metricValue(entry, "jet", jetRow, metric, runtimes)
-        : { value: null, reason: `${jetStatus.status}: ${jetStatus.reason}` };
+        : { value: null, reason: jetStatus.status === "not_measured" ? jetStatus.reason : `${jetStatus.status}: ${jetStatus.reason}` };
       const value = metricValue(entry, peer, row, metric, runtimes);
       const judged = judge(item.role, jet, value);
       metrics[metric] = {

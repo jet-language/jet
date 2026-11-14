@@ -4828,6 +4828,8 @@ async function main() {
   // run <date>-merged-<languages>.json beside the run it merged; partial and
   // axis runs carry their scope so a later partial run never overwrites the
   // day's full report (status.mjs merges every file in this directory).
+  // A run with standings is copied to the machine's shared results directory,
+  // where Tower's Gauntlet page finds a run made in any checkout.
   const resultDir = path.join(repoDir, "Tools/gauntlet/results");
   await fs.mkdir(resultDir, { recursive: true });
   const languagesTag = options.languages === null ? null : `languages-${options.languages.join("-")}`;
@@ -4837,7 +4839,13 @@ async function main() {
       ? `${dateStamp()}${mergeSource ? `-merged-${languagesTag}` : ""}.json`
       : `${dateStamp()}-${[options.entry, languagesTag].filter(Boolean).join("-")}.json`;
   const resultPath = path.join(resultDir, resultName);
-  await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
+  const reportText = `${JSON.stringify(report, null, 2)}\n`;
+  await fs.writeFile(resultPath, reportText);
+  if (standings) {
+    const sharedResultDir = path.join(stateRoot(), "gauntlet/results");
+    await fs.mkdir(sharedResultDir, { recursive: true });
+    await fs.writeFile(path.join(sharedResultDir, resultName), reportText);
+  }
   const statusPath = path.join(repoDir, "Tools/gauntlet/status.json");
   if (fullScope) {
     const status = projectStatus(report, resultPath);

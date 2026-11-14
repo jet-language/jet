@@ -9,6 +9,10 @@ import { writeJSON } from '../app/paths.mjs';
 import { serve } from '../app/server.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'tower-gauntlet-'));
+// The machine's shared results directory, kept inside the test root.
+const priorStateRoot = process.env.JET_STATE_ROOT;
+process.env.JET_STATE_ROOT = join(root, 'state');
+const sharedDir = join(root, 'state', 'gauntlet', 'results');
 const dir = join(root, '.tower');
 const statusPath = join(root, 'Tools', 'gauntlet', 'status.json');
 mkdirSync(dir, { recursive: true });
@@ -22,9 +26,12 @@ const get = () => fetch(`http://127.0.0.1:${port}/api/gauntlet`);
 const getStandings = () => fetch(`http://127.0.0.1:${port}/api/gauntlet/standings`);
 const resultsDir = join(root, 'Tools', 'gauntlet', 'results');
 const fixtureResults = new URL('./fixtures/gauntlet-results.json', import.meta.url);
+const peersResults = new URL('./fixtures/gauntlet-results-peers.json', import.meta.url);
 
 after(() => {
   server.close();
+  if (priorStateRoot === undefined) delete process.env.JET_STATE_ROOT;
+  else process.env.JET_STATE_ROOT = priorStateRoot;
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -50,7 +57,8 @@ test('Gauntlet route reports a clear 404 when status is absent', async () => {
 });
 
 // #6834: the standings route serves the newest results file under config
-// gauntletResults (default Tools/gauntlet/results), preferring a full run.
+// gauntletResults (default Tools/gauntlet/results) and the shared results
+// directory, preferring a full run.
 test('Standings route reports a clear 404 before any results exist', async () => {
   const response = await getStandings();
   assert.equal(response.status, 404);
@@ -77,4 +85,13 @@ test('Standings route serves the newest results file and prefers a full run', as
   body = await response.json();
   assert.equal(body.file, join('Tools', 'gauntlet', 'results', '2026-11-13.json'));
   assert.equal(body.scope, 'full_matrix');
+
+  const merged = JSON.parse(readFileSync(peersResults, 'utf8'));
+  merged.options = { scope: 'full_matrix' };
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, '2026-11-14-merged-languages-asm.json'), `${JSON.stringify(merged)}\n`);
+  response = await getStandings();
+  body = await response.json();
+  assert.equal(body.file, join('state', 'gauntlet', 'results', '2026-11-14-merged-languages-asm.json'));
+  assert.equal(body.standings.entries[0].jet.status, 'not_measured');
 });

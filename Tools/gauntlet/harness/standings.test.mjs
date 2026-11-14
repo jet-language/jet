@@ -202,6 +202,13 @@ test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.
   const unrecorded = entryStandings(plan, { ...result, rows: { ...result.rows, rust: ok(timed(2, 200)) } }, { runtimes });
   assert.equal(unrecorded.peers.rust.metrics.size.verdict, "unmeasured");
   assert.equal(unrecorded.peers.rust.metrics.size.reason, "deployed size was not recorded");
+
+  const peersOnly = entryStandings(plan, { ...result, rows: { ...result.rows, jet: { status: "unavailable", not_measured: true, reason: "not measured: this run measures rust, python only" } } }, { runtimes });
+  assert.deepEqual(peersOnly.jet, { status: "not_measured", reason: "not measured: this run measures rust, python only" });
+  assert.deepEqual(peersOnly.peers.rust.metrics.wall, { jet: null, peer: 2, ratio: null, verdict: "unmeasured", reason: "Jet: not measured: this run measures rust, python only", unit: "s", source: "runtime_wall_seconds" });
+  assert.equal(peersOnly.peers.asm.metrics.cycles.peer, 100);
+  assert.equal(peersOnly.peers.bun.metrics.size.peer, null);
+  assert.match(peersOnly.peers.bun.metrics.size.reason, /^bun runtime footprint unmeasured: ldd exit 1; Jet: not measured/);
 });
 
 test("the section lists every floor loss and ceiling miss, feeds the scoreboard's ceiling and renders one line per cell", () => {

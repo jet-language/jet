@@ -415,17 +415,26 @@ tower board check                 # exit 1 (E_BOARD_STALE) when the committed
 ## Gauntlet standings (#6834)
 
 The Gauntlet page opens with the standings from the newest gauntlet results
-file (`Tools/gauntlet/harness/run.mjs`; a full-matrix run is preferred over
-partial runs). Each entry gets a row for every peer and the hand-written asm
-ceiling, and each metric gets a column showing Jet/peer, the peer-floor
-verdict and the gap to the ceiling. Rows that are uncovered, not applicable,
-unavailable or failed keep their reason. The page and the text table state the
-size basis from the section's `size_basis` (static stripped, else stripped plus
-every shared library including libc; web artifact; bundle; script+runtime), and
-each size cell names Jet's and the peer's basis. The status matrix follows
-below them.
-`config.gauntletResults` (default `Tools/gauntlet/results`) is the results
-directory.
+file (`Tools/gauntlet/harness/run.mjs`; a full-matrix run, including a
+`--languages … --merge` run, is preferred over partial runs). Each entry gets
+one bar chart per metric (startup, run wall, run cycles, peak RSS, size). Every
+measured peer value is a bar Jet must beat, the hand-written asm ceiling is the
+marked bar, and Jet is a bar once a run measured it. Until then each chart
+says "Jet pending" and no ratio or verdict is shown. Once Jet is measured,
+each peer bar carries Jet/peer with the peer-floor verdict, and the ceiling bar
+carries the gap. Rows that are uncovered, not applicable, unavailable,
+mismatched or failed are listed under the charts with their reason. A
+measured peer with no value for one metric is listed in that chart with its
+reason. The page and the text table state the size basis from the section's
+`size_basis` (static stripped, else stripped plus every shared library
+including libc; web artifact; bundle; script+runtime), and each size bar names
+its basis. The status matrix follows below them.
+
+Tower searches `config.gauntletResults` (default `Tools/gauntlet/results`,
+relative to the project root) and the machine's shared results directory
+`$JET_STATE_ROOT/gauntlet/results`. The harness copies every run that has
+standings there, so a run in any worktree reaches the page served from any
+checkout. Reload the page to pick up a new run.
 
 ```
 tower gauntlet standings [--results PATH] [--json]   # same table as text;

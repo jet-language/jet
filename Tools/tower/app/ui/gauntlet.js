@@ -398,12 +398,16 @@ export { metricLabel, metricValue, ratioVerdict };
 // ---- standings --------------------------------------------------------------
 // A results file's `standings` section (Tools/gauntlet/harness/standings.mjs):
 // every comparison entry against every peer and the hand-written asm ceiling
-// on startup, run time and size. Jet/peer below 1.00 passes the peer floor;
-// Jet/asm at most 1.00 meets the ceiling, and the gap is ratio − 1. The
-// Gauntlet page and `tower gauntlet standings` render this one projection.
+// on startup, run wall, run cycles, peak RSS and size. Every peer's measured
+// value is a bar Jet must beat, the asm ceiling a marked bar, and Jet a bar
+// once a run measured it; until then the entry reads "Jet pending". Once Jet
+// is measured each peer bar carries Jet/peer: below 1.00 passes the peer
+// floor, at most 1.00 meets the ceiling, and the gap is ratio − 1. A row or
+// cell with no value keeps its status and reason. The Gauntlet page and
+// `tower gauntlet standings` render this one projection.
 export const STANDINGS_SCHEMA = 'jet.gauntlet.standings.v1';
 const STANDING_PEER_LABELS = Object.freeze({
-  rust: 'Rust', c: 'C', zig: 'Zig', go: 'Go', python: 'Python', bun: 'Bun', node: 'Node', vite: 'Vite', asm: 'asm ceiling',
+  rust: 'Rust', c: 'C', zig: 'Zig', go: 'Go', python: 'Python', bun: 'Bun', node: 'Node', vite: 'Vite', lua: 'Lua', luajit: 'LuaJIT', asm: 'asm ceiling',
 });
 const STANDING_UNIT_SCALES = Object.freeze({
   s: SCALES.seconds,
@@ -416,13 +420,16 @@ const standingPeerLabel = (peer) => STANDING_PEER_LABELS[peer] ?? String(peer);
 const standingWords = (value) => String(value).replaceAll('_', ' ');
 const count = (value) => finite(value) ? value : 0;
 
-function standingPair(unit, jet, peer) {
+// One unit for a set of values: the largest step that keeps the smallest
+// positive value at least 1.
+function standingFormatter(unit, values) {
   const scale = STANDING_UNIT_SCALES[unit] ?? SCALES.count;
-  const floor = Math.min(...[jet, peer].filter((value) => finite(value) && value > 0));
+  const floor = Math.min(...values.filter((value) => finite(value) && value > 0));
   const chosen = Number.isFinite(floor) ? scale.find(([, factor]) => floor / factor >= 1) ?? scale.at(-1) : scale.at(-1);
   const suffix = unit === 'cycles' ? `${chosen[0]} cycles`.trim() : chosen[0];
-  return { jet: formatIn(jet, [suffix, chosen[1]]), peer: formatIn(peer, [suffix, chosen[1]]) };
+  return (value) => formatIn(value, [suffix, chosen[1]]);
 }
+const standingValue = (unit, value) => standingFormatter(unit, [value])(value);
 
 // One side of a size cell's basis (#6834 c6); a dynamically linked binary
 // also names the shared libraries it is charged for.
@@ -430,35 +437,46 @@ function sizeBasisText(side, basis, detail) {
   const libraries = array(object(detail).libraries);
   if (!basis || libraries.length === 0) return `${side} ${basis ?? '?'}`;
   const bytes = libraries.reduce((total, library) => total + (finite(library?.bytes) ? library.bytes : 0), 0);
-  const size = (value) => standingPair('bytes', value, value).jet;
-  return `${side} ${basis}: ${size(object(detail).file_bytes)} binary + ${size(bytes)} in ${libraries.length} shared ${libraries.length === 1 ? 'library' : 'libraries'}`;
+  return `${side} ${basis}: ${standingValue('bytes', object(detail).file_bytes)} binary + ${standingValue('bytes', bytes)} in ${libraries.length} shared ${libraries.length === 1 ? 'library' : 'libraries'}`;
+}
+
+function standingRatioText(role, ratio, verdict) {
+  if (role !== 'ceiling') return `${ratio.toFixed(2)} ${verdict}`;
+  const gap = ratio - 1;
+  return `${ratio.toFixed(2)} ${verdict} ${gap > 0 ? '+' : gap < 0 ? '−' : '±'}${Math.round(Math.abs(gap) * 100)}%`;
 }
 
 function standingCell(role, metric, cell) {
   const source = object(cell);
   const verdict = typeof source.verdict === 'string' ? source.verdict : 'unmeasured';
   const ratio = finite(source.ratio) ? source.ratio : null;
-  const gap = role === 'ceiling' && ratio !== null ? ratio - 1 : null;
-  const gapText = gap === null ? null : `${gap > 0 ? '+' : gap < 0 ? '−' : '±'}${Math.round(Math.abs(gap) * 100)}%`;
-  const pair = standingPair(source.unit, source.jet, source.peer);
-  const measured = ratio !== null;
-  const basis = metric === 'size' && (source.jet_basis || source.peer_basis)
-    ? `${sizeBasisText('Jet', source.jet_basis, source.jet_detail)}, ${sizeBasisText('peer', source.peer_basis, source.detail)}` : null;
+  const jetValue = finite(source.jet) && source.jet > 0 ? source.jet : null;
+  const peerValue = finite(source.peer) && source.peer > 0 ? source.peer : null;
+  const format = standingFormatter(source.unit, [jetValue, peerValue]);
+  const jet = format(jetValue);
+  const peer = format(peerValue);
+  const jetBasis = metric === 'size' ? source.jet_basis ?? null : null;
+  const peerBasis = metric === 'size' ? source.peer_basis ?? null : null;
+  const basis = metric === 'size' && (jetBasis || peerBasis)
+    ? `${sizeBasisText('Jet', jetBasis, source.jet_detail)}, ${sizeBasisText('peer', peerBasis, source.detail)}` : null;
   return {
     metric,
     verdict,
     ratio,
-    gap,
-    jet: pair.jet,
-    peer: pair.peer,
+    gap: role === 'ceiling' && ratio !== null ? ratio - 1 : null,
+    unit: source.unit ?? null,
+    jetValue,
+    peerValue,
+    jet,
+    peer,
     reason: source.reason ?? null,
     basis,
-    jetBasis: metric === 'size' ? source.jet_basis ?? null : null,
-    peerBasis: metric === 'size' ? source.peer_basis ?? null : null,
-    text: measured ? `${ratio.toFixed(2)} ${verdict}${gapText ? ` ${gapText}` : ''}` : standingWords(verdict),
-    detail: measured
-      ? `Jet ${pair.jet} / ${pair.peer}${basis ? ` (${basis})` : ''}`
-      : source.reason ?? standingWords(verdict),
+    jetBasis,
+    peerBasis,
+    text: ratio !== null ? standingRatioText(role, ratio, verdict) : standingWords(verdict),
+    detail: ratio !== null
+      ? `Jet ${jet} / ${peer}${basis ? ` (${basis})` : ''}`
+      : peerValue !== null ? `${peer}${peerBasis ? ` (${peerBasis})` : ''}` : source.reason ?? standingWords(verdict),
   };
 }
 
@@ -478,6 +496,36 @@ function standingRow(peer, item, metrics) {
   };
 }
 
+// One metric's bars for an entry: every measured peer and the asm ceiling,
+// and Jet once measured, smallest (best) first. Bar length is log scale, so
+// a thousandfold spread between asm and an interpreter stays readable. A
+// measured row without this metric's value is listed with its reason.
+function standingPanel(metric, rows) {
+  const bars = [];
+  const missing = [];
+  let jet = null;
+  for (const row of rows) {
+    if (row.status !== 'ok') continue;
+    const cell = row.cells.find((item) => item.metric === metric.id);
+    if (jet === null && cell.jetValue !== null) jet = { value: cell.jetValue, unit: cell.unit, basis: cell.jetBasis };
+    if (cell.peerValue === null) {
+      missing.push({ peer: row.peer, label: row.label, role: row.role, status: cell.verdict, reason: cell.reason ?? 'no value recorded' });
+      continue;
+    }
+    bars.push({ peer: row.peer, label: row.label, role: row.role, value: cell.peerValue, unit: cell.unit, basis: cell.peerBasis, ratio: cell.ratio, verdict: cell.ratio !== null ? cell.verdict : null, text: cell.ratio !== null ? cell.text : null, detail: cell.detail });
+  }
+  if (jet) bars.push({ peer: 'jet', label: 'Jet', role: 'jet', value: jet.value, unit: jet.unit, basis: jet.basis, ratio: null, verdict: null, text: null, detail: null });
+  bars.sort((left, right) => left.value - right.value);
+  const logs = bars.map((bar) => Math.log(bar.value));
+  const low = Math.min(...logs);
+  const high = Math.max(...logs);
+  for (const bar of bars) {
+    bar.display = standingValue(bar.unit, bar.value);
+    bar.width = high > low ? Math.round((8 + 92 * (Math.log(bar.value) - low) / (high - low)) * 10) / 10 : 100;
+  }
+  return { metric: metric.id, label: metric.label, what: metric.what, jet: jet !== null, bars, missing };
+}
+
 // `payload` is { file, scope, standings } as the server and the CLI read it
 // from a results file; null when it holds no standings section.
 export function projectGauntletStandings(payload) {
@@ -485,12 +533,18 @@ export function projectGauntletStandings(payload) {
   if (section.schema !== STANDINGS_SCHEMA) return null;
   const metrics = array(section.metrics).filter(isObject).map((metric) => ({ id: metric.id, label: metric.label ?? standingWords(metric.id), what: metric.what ?? null }));
   const order = [...array(section.peers), ...(section.ceiling ? [section.ceiling] : [])];
-  const entries = array(section.entries).filter(isObject).map((entry) => ({
-    entry: entry.entry,
-    mode: entry.mode ?? null,
-    jet: object(entry.jet),
-    rows: order.map((peer) => standingRow(peer, object(entry.peers)[peer] ?? null, metrics)),
-  }));
+  const entries = array(section.entries).filter(isObject).map((entry) => {
+    const rows = order.map((peer) => standingRow(peer, object(entry.peers)[peer] ?? null, metrics));
+    const panels = metrics.map((metric) => standingPanel(metric, rows));
+    const jet = object(entry.jet);
+    return {
+      entry: entry.entry,
+      mode: entry.mode ?? null,
+      jet: { status: jet.status ?? null, reason: jet.reason ?? null, measured: panels.some((panel) => panel.jet) },
+      rows,
+      panels,
+    };
+  });
   const summary = object(section.summary);
   const floor = object(summary.floor);
   const ceiling = object(summary.ceiling);
@@ -501,6 +555,7 @@ export function projectGauntletStandings(payload) {
     peers: order.map((peer) => ({ peer, label: standingPeerLabel(peer) })),
     metrics,
     entries,
+    jetMeasured: entries.some((entry) => entry.jet.measured),
     summary: {
       floor: { pass: count(floor.pass), fail: count(floor.fail), other: count(floor.other) },
       ceiling: { meet: count(ceiling.meet), miss: count(ceiling.miss), other: count(ceiling.other) },
@@ -515,38 +570,55 @@ const standingHeading = (view) => [
   view.scope ? standingWords(view.scope) : null,
   view.generated ? `generated ${view.generated}` : null,
 ].filter(Boolean).join(' · ');
+const STANDING_BARS = 'every peer value is a bar Jet must beat (lower is better); the asm ceiling is the marked bar';
 const STANDING_RULE = 'ratio is Jet / peer: the peer floor passes below 1.00; the asm ceiling is met at 1.00 or below, gap = ratio − 1';
+const STANDING_PENDING = 'Jet pending: no Jet row is measured yet, so no ratio or verdict is shown';
+const standingRuleLines = (view) => [STANDING_BARS, view.jetMeasured ? STANDING_RULE : STANDING_PENDING];
 const standingSummary = ({ floor, ceiling }) =>
   `floor ${floor.pass} pass, ${floor.fail} fail, ${floor.other} other · ceiling ${ceiling.meet} meet, ${ceiling.miss} miss, ${ceiling.other} other (other = uncovered, not applicable, unavailable, failed, mismatched or unmeasured)`;
 const SIZE_BASIS_MISSING = 'size basis: not stated by this results file (it predates the #6834 c6 size basis)';
 const sizeBasisLines = (view) => view.sizeBasis.length
-  ? ['size basis (each size cell names the Jet and the peer basis):', ...view.sizeBasis.map((item) => `  ${item.basis}: ${item.what}`)]
+  ? ['size basis (each size value names its basis):', ...view.sizeBasis.map((item) => `  ${item.basis}: ${item.what}`)]
   : [SIZE_BASIS_MISSING];
+// Why an entry has no Jet bars: pending, plus the row's own status when Jet
+// was run and did not count. A results file written before not_measured
+// records a Jet row the run left out as failed, "not measured: …".
+const jetPendingText = (jet) => jet.status && jet.status !== 'ok' && jet.status !== 'not_measured' && !/^not measured/.test(jet.reason ?? '')
+  ? `Jet pending (${standingWords(jet.status)}: ${jet.reason ?? 'no reason recorded'})` : 'Jet pending';
 
 // The plain-text table `tower gauntlet standings` prints: one block per entry,
-// one line per peer, one column per metric. A row that measured nothing names
-// its status and reason once instead of five times.
+// a line for Jet and one per peer, one column per metric. A cell is the
+// value, and Jet/peer with its verdict once Jet is measured. A row that
+// measured nothing names its status and reason once instead of five times;
+// a measured row's missing value is a note with its reason.
 export function gauntletStandingsText(view) {
-  const lines = [`Gauntlet standings · ${standingHeading(view)}`, STANDING_RULE, standingSummary(view.summary), ...sizeBasisLines(view)];
+  const lines = [`Gauntlet standings · ${standingHeading(view)}`, ...standingRuleLines(view), ...(view.jetMeasured ? [standingSummary(view.summary)] : []), ...sizeBasisLines(view)];
   const labelWidth = Math.max(4, ...view.peers.map((peer) => peer.label.length));
-  const widths = view.metrics.map((metric) => Math.max(metric.label.length,
-    ...view.entries.flatMap((entry) => entry.rows.filter((row) => row.status === 'ok').map((row) => row.cells.find((cell) => cell.metric === metric.id).text.length))));
+  const cellText = (cell) => cell.peerValue === null ? '—' : `${standingValue(cell.unit, cell.peerValue)}${cell.ratio === null ? '' : ` ${cell.text}`}`;
+  const jetText = (panel) => panel.bars.find((bar) => bar.role === 'jet')?.display ?? '—';
+  const widths = view.metrics.map((metric, index) => Math.max(metric.label.length,
+    ...view.entries.flatMap((entry) => [
+      ...(entry.jet.measured ? [jetText(entry.panels[index]).length] : []),
+      ...entry.rows.filter((row) => row.status === 'ok').map((row) => cellText(row.cells[index]).length),
+    ])));
+  const line = (label, cells) => `  ${label.padEnd(labelWidth)}  ${cells.map((text, index) => text.padEnd(widths[index])).join('  ')}`.trimEnd();
   for (const entry of view.entries) {
-    lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})${entry.jet.status && entry.jet.status !== 'ok' ? ` · Jet ${entry.jet.status}: ${entry.jet.reason ?? ''}` : ''}`);
-    lines.push(`  ${'peer'.padEnd(labelWidth)}  ${view.metrics.map((metric, index) => metric.label.padEnd(widths[index])).join('  ')}`.trimEnd());
+    lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})${entry.jet.measured ? '' : ` · ${jetPendingText(entry.jet)}`}`);
+    lines.push(line('peer', view.metrics.map((metric) => metric.label)));
+    if (entry.jet.measured) lines.push(line('Jet', entry.panels.map(jetText)));
     const notes = [];
     for (const row of entry.rows) {
       if (row.status !== 'ok') {
         lines.push(`  ${row.label.padEnd(labelWidth)}  ${standingWords(row.status)}: ${row.reason ?? 'no reason recorded'}`);
         continue;
       }
-      lines.push(`  ${row.label.padEnd(labelWidth)}  ${row.cells.map((cell, index) => cell.text.padEnd(widths[index])).join('  ')}`.trimEnd());
+      lines.push(line(row.label, row.cells.map(cellText)));
       for (const cell of row.cells) {
-        if (cell.ratio === null) notes.push(`  · ${row.label} ${cell.metric}: ${cell.reason ?? standingWords(cell.verdict)}`);
+        if (cell.peerValue === null) notes.push(`  · ${row.label} ${cell.metric}: ${standingWords(cell.verdict)}: ${cell.reason ?? 'no value recorded'}`);
       }
     }
     const bases = entry.rows.filter((row) => row.status === 'ok').map((row) => [row.label, row.cells.find((cell) => cell.metric === 'size')?.peerBasis]).filter(([, basis]) => basis);
-    const jetBasis = entry.rows.flatMap((row) => row.cells).find((cell) => cell.jetBasis)?.jetBasis;
+    const jetBasis = entry.rows.flatMap((row) => row.cells).find((cell) => cell.jetBasis && cell.jetValue !== null)?.jetBasis;
     if (bases.length) lines.push(`  size basis: ${[jetBasis ? `Jet ${jetBasis}` : null, ...bases.map(([label, basis]) => `${label} ${basis}`)].filter(Boolean).join(' · ')}`);
     lines.push(...notes);
   }
@@ -555,32 +627,46 @@ export function gauntletStandingsText(view) {
 
 const standingTone = (verdict) => ({ pass: 'pass', meet: 'pass', fail: 'fail', miss: 'fail', not_applicable: 'na' }[verdict] ?? 'open');
 
-// The standings section of the Gauntlet page: the same projection as a table,
-// one body per entry, every peer and the asm ceiling a row, every metric a
-// column; a cell's title carries both values and any reason.
+function standingBar(entry, bar) {
+  const tone = bar.verdict ? ` standings__bar--${standingTone(bar.verdict)}` : '';
+  const title = bar.role === 'jet' ? `${entry} · Jet ${bar.display}${bar.basis ? ` (${bar.basis})` : ''}`
+    : `${entry} · ${bar.label} ${bar.detail ?? bar.display}${bar.text ? ` · ${bar.text}` : ''}`;
+  return `<li class="standings__bar standings__bar--${bar.role}${tone}" title="${esc(title)}"><span class="standings__name">${esc(bar.label)}</span>`
+    + `<span class="standings__track"><span class="standings__fill" style="width:${bar.width}%"></span></span>`
+    + `<span class="standings__value">${esc(bar.display)}${bar.basis && bar.role !== 'jet' ? `<em>${esc(bar.basis)}</em>` : ''}</span>`
+    + `${bar.text ? `<b class="standings__ratio">${esc(bar.text)}</b>` : ''}</li>`;
+}
+
+function standingPanelHtml(entry, panel) {
+  const pending = panel.jet ? '' : `<li class="standings__bar standings__bar--pending"><span class="standings__name">Jet</span><span class="standings__note">${esc(jetPendingText(entry.jet))}</span></li>`;
+  const missing = panel.missing.map((item) => `<li class="standings__bar standings__bar--missing"><span class="standings__name">${esc(item.label)}</span><span class="standings__note"><b>${esc(standingWords(item.status))}</b> ${esc(item.reason)}</span></li>`).join('');
+  return `<figure class="standings__panel"><figcaption title="${esc(panel.what ?? panel.label)}">${esc(panel.label)}</figcaption>`
+    + `<ol class="standings__bars">${panel.bars.map((bar) => standingBar(entry.entry, bar)).join('')}${pending}${missing}</ol></figure>`;
+}
+
+// The standings section of the Gauntlet page: one block per entry, one bar
+// chart per metric, and the rows that measured nothing listed with their
+// status and reason below the charts.
 export function renderGauntletStandings(view) {
-  const pills = [
-    ['floor pass', view.summary.floor.pass, 'pass'], ['floor fail', view.summary.floor.fail, 'fail'],
-    ['ceiling meet', view.summary.ceiling.meet, 'pass'], ['ceiling miss', view.summary.ceiling.miss, 'fail'],
-    ['other', view.summary.floor.other + view.summary.ceiling.other, 'open'],
-  ].map(([label, value, tone]) => `<span class="gauntlet__pill standings__pill--${tone}">${esc(label)} <b>${esc(value)}</b></span>`).join('');
-  const head = `<tr><th scope="col">entry · peer</th>${view.metrics.map((metric) => `<th scope="col" title="${esc(metric.what ?? metric.label)}">${esc(metric.label)}</th>`).join('')}</tr>`;
-  const bodies = view.entries.map((entry) => {
-    const jetNote = entry.jet.status && entry.jet.status !== 'ok' ? ` · Jet ${standingWords(entry.jet.status)}: ${entry.jet.reason ?? ''}` : '';
-    const rows = entry.rows.map((row) => {
-      const label = `<th scope="row"><div><strong>${esc(row.label)}</strong>${row.reference ? `<small>${esc(row.reference)}</small>` : ''}</div></th>`;
-      if (row.status !== 'ok') {
-        return `<tr class="standings__row standings__row--${standingTone(row.status)}">${label}<td colspan="${view.metrics.length}" class="standings__cell standings__cell--${standingTone(row.status)}"><b>${esc(standingWords(row.status))}</b> <span>${esc(row.reason ?? 'no reason recorded')}</span></td></tr>`;
-      }
-      return `<tr class="standings__row${row.role === 'ceiling' ? ' standings__row--ceiling' : ''}">${label}${row.cells.map((cell) =>
-        `<td class="standings__cell standings__cell--${standingTone(cell.verdict)}" title="${esc(`${entry.entry} vs ${row.label}, ${cell.metric}: ${cell.detail}`)}"><b>${esc(cell.text)}</b>${cell.ratio !== null ? `<span><i>${esc(cell.jet)}</i><i>${esc(cell.peer)}</i></span>` : ''}${cell.ratio !== null && cell.peerBasis ? `<em>${esc(cell.peerBasis)}</em>` : ''}</td>`).join('')}</tr>`;
-    }).join('');
-    return `<tbody><tr class="standings__entry"><th scope="rowgroup" colspan="${view.metrics.length + 1}">${esc(entry.entry)} <small>${esc(entry.mode ?? '')}${esc(jetNote)}</small></th></tr>${rows}</tbody>`;
+  const pills = view.jetMeasured
+    ? [
+      ['floor pass', view.summary.floor.pass, 'pass'], ['floor fail', view.summary.floor.fail, 'fail'],
+      ['ceiling meet', view.summary.ceiling.meet, 'pass'], ['ceiling miss', view.summary.ceiling.miss, 'fail'],
+      ['other', view.summary.floor.other + view.summary.ceiling.other, 'open'],
+    ].map(([label, value, tone]) => `<span class="gauntlet__pill standings__pill--${tone}">${esc(label)} <b>${esc(value)}</b></span>`).join('')
+    : `<span class="gauntlet__pill standings__pill--open">Jet <b>pending</b></span>`;
+  const entries = view.entries.map((entry) => {
+    const blocked = entry.rows.filter((row) => row.status !== 'ok');
+    const blockedList = blocked.length
+      ? `<ul class="standings__blocked">${blocked.map((row) => `<li class="standings__blocked--${standingTone(row.status)}"><b>${esc(row.label)}</b> <span>${esc(standingWords(row.status))}: ${esc(row.reason ?? 'no reason recorded')}</span></li>`).join('')}</ul>` : '';
+    const jetNote = entry.jet.measured ? '' : ` · ${jetPendingText(entry.jet)}`;
+    return `<article class="standings__entry"><h3>${esc(entry.entry)} <small>${esc(entry.mode ?? '')}${esc(jetNote)}</small></h3>`
+      + `<div class="standings__panels">${entry.panels.map((panel) => standingPanelHtml(entry, panel)).join('')}</div>${blockedList}</article>`;
   }).join('');
   return `<section class="standings" aria-label="Gauntlet standings">
-    <div class="standings__head"><h2 class="standings__title">Standings vs every peer and the asm ceiling</h2><div class="gauntlet__summary">${pills}</div></div>
-    <p class="gauntlet__policy">${esc(STANDING_RULE)}<span>${esc(standingHeading(view))}</span></p>
+    <div class="standings__head"><h2 class="standings__title">Standings: the bars Jet must beat</h2><div class="gauntlet__summary">${pills}</div></div>
+    <p class="gauntlet__policy">${standingRuleLines(view).map((line) => esc(line)).join(' · ')}<span>${esc(standingHeading(view))}</span></p>
     <p class="gauntlet__policy standings__basis">${sizeBasisLines(view).map((line, index) => index === 0 ? `<strong>${esc(line.trim())}</strong>` : `<span>${esc(line.trim())}</span>`).join('')}</p>
-    <div class="standings__scroll"><table class="gauntlet__table standings__table"><thead>${head}</thead>${bodies}</table></div>
+    ${entries || '<div class="empty">The results file has no standings entries.</div>'}
   </section>`;
 }
