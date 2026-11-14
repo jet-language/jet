@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6841,
-    "rev": 102443,
+    "nextNum": 6842,
+    "rev": 102450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98872,6 +98872,92 @@
       "updated": "2026-11-14T08:59:14.807Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0nwrfck",
+      "num": 6841,
+      "title": "Exceptional built-in debugging and profiling, built on Jet's reflection and metaprogramming (Jai-style)",
+      "body": "Owner goal (2026-11-14): Jet ships exceptional built-in debugging and profiling. As in Jai, much of it should come cheaply from the reflection and metaprogramming Jet already has: type facts drive value display and watch expressions, and compile-time code that sees every function can insert profiling spans or checks without a separate tool. Today: jet perf (run, test, attach, view, compare, export; source sampling, memory counters, .jettrace) works; jet debug (lldb and DAP) is weak on the self-hosted toolchain (#6730 has 24 open criteria, and Compiler/JetDebug no longer checks); no metaprogram instrumentation exists; whole-program compiler events are still being planned (#5009). Depends on #6730 and #5009.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated adversarial review in Docs/audits compares Jet's debugging and profiling, built and planned, with the best existing tools: Jai's metaprogram instrumentation (the compiler message loop and its profiling modules), Tracy, Superluminal, RemedyBG and the RAD Debugger, rr and Pernosco, Go's pprof, and the perf and Instruments tooling. Every claimed strength is attacked and every gap is put on this card or a ballot. Proof: the audit file and its verdict lines.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:11.857Z"
+        },
+        {
+          "n": 2,
+          "text": "Every new user surface this needs (an instrumentation hook, a #Profile-style marker, compiler-event APIs, debugger commands) is on a ratified Tower ballot before it is built. Proof: the ballot IDs, ratified.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:13.513Z"
+        },
+        {
+          "n": 3,
+          "text": "A user-written compile-time program instruments every function of a package with profiling spans through reflection and compiler events, with no change to the profiled source. It produces a jet perf view, and the instrumented program prints the same output on O0, O1 and O2. Proof: an Examples/Tooling/Performance example with golden output on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:15.188Z"
+        },
+        {
+          "n": 4,
+          "text": "Debugger display and watch expressions come from the compiler's type facts (reflection), so every Jet type shows as its Jet value in jet debug and over DAP, with no hand-written per-type formatter. Proof: a tests/cases debug row covering a struct, enum, list, map, String, Decimal and bignum Int on the native tier (with #6730 c2/c3 met).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:16.821Z"
+        },
+        {
+          "n": 5,
+          "text": "jet perf and jet debug both work on the self-hosted toolchain end to end: Compiler/JetDebug checks and builds, and the Examples/Tooling/Debugging and Performance examples pass their goldens on O0, O1 and O2. Proof: jet test Compiler --profile golden --filter Examples/Tooling, and jet check Compiler/JetDebug.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:18.450Z"
+        },
+        {
+          "n": 6,
+          "text": "Instrumentation costs nothing when it is off and stays within a measured budget when it is on, so a profiled build keeps Jet's performance gate. Proof: a paired two-program cell (instrumented and plain) in the canonical perf manifest showing the overhead.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T14:55:19.956Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T14:55:01.368Z",
+      "updated": "2026-11-14T14:55:19.956Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6
     }
   ],
   "decisions": [
@@ -205192,6 +205278,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T14:55:19.956Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#6 Instrumentation costs nothing when it is off and stays withi"
+    },
+    {
+      "at": "2026-11-14T14:55:18.450Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#5 jet perf and jet debug both work on the self-hosted toolchai"
+    },
+    {
+      "at": "2026-11-14T14:55:16.821Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#4 Debugger display and watch expressions come from the compile"
+    },
+    {
+      "at": "2026-11-14T14:55:15.189Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#3 A user-written compile-time program instruments every functi"
+    },
+    {
+      "at": "2026-11-14T14:55:13.513Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#2 Every new user surface this needs (an instrumentation hook, "
+    },
+    {
+      "at": "2026-11-14T14:55:11.857Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#1 A dated adversarial review in Docs/audits compares Jet's deb"
+    },
+    {
+      "at": "2026-11-14T14:55:01.368Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0nwrfck",
+      "note": "Exceptional built-in debugging and profiling, built on Jet's reflection and metaprogramming (Jai-style)"
+    },
     {
       "at": "2026-11-14T14:52:53.456Z",
       "by": "Main",
