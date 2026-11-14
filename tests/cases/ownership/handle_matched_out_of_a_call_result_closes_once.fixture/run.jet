@@ -1,12 +1,13 @@
 use files: core.files
 
-// A handle a pattern binds out of a call's Result or Option, then closes
-// with `close(name)` inside the arm, has exactly one owner: the arm's close
-// ends it and the matched carrier no longer does. The artifact store's lock
-// (`if files.create(path, if_exists: .Refuse) == { .Ok(writer) -> { ...;
-// close(writer) } }`) is this shape; a second close of the same handle
-// hung `jet self doctor`. Every round leaves no descriptor open, and the
-// file written in the arm holds exactly what the arm wrote.
+// A handle a pattern binds out of a call's Result or Option, moved into a
+// mutable binding (its `&self` reads and writes need one) and closed with
+// `close(name)` inside the arm, has exactly one owner: the arm's close ends
+// it and the matched carrier no longer does. The artifact store's lock
+// (`if files.create(path, if_exists: .Refuse) == { .Ok(created) -> { writer
+// := created; ...; close(writer) } }`) is this shape; a second close of the
+// same handle hung `jet self doctor`. Every round leaves no descriptor open,
+// and the file written in the arm holds exactly what the arm wrote.
 
 open_fds: fn() -> Int {
     entries: files.list_dir("/proc/self/fd") ?? panic("list fds")
@@ -24,7 +25,8 @@ maybe_reader: fn(path: String) -> FileReader? {
 write_in_arm: fn(path: String, round: Int) -> Bool {
     wrote := false
     if files.create(path, if_exists: .Refuse) == {
-        .Ok(writer) -> {
+        .Ok(created) -> {
+            writer := created
             writer.write_all("round {round}".bytes())
             close(writer)
             wrote = true
@@ -38,7 +40,8 @@ write_in_arm: fn(path: String, round: Int) -> Bool {
 write_and_return: fn(path: String) -> Int {
     loop {
         if files.create(path, if_exists: .Refuse) == {
-            .Ok(writer) -> {
+            .Ok(created) -> {
+                writer := created
                 writer.write_all("returned".bytes())
                 close(writer)
                 return 1
@@ -53,7 +56,8 @@ write_and_return: fn(path: String) -> Int {
 read_in_arm: fn(path: String) -> Int {
     count := 0
     if maybe_reader(path) == {
-        .Val(reader) -> {
+        .Val(opened) -> {
+            reader := opened
             count = reader.read(64).len()
             consume(reader)
         }
