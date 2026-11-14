@@ -2,10 +2,12 @@ use id_files: core.files
 
 // User-facing diagnostic text speaks plain words: no registry what, why, fix
 // or meaning string and no runtime trap text names a card (`#501`), an
-// invariant (`I9`), a decision (`D-SHAPE3a`) or a criterion (`c109`). The
-// registry rows are read from the generated DiagnosticRows.jet and the trap
-// texts from the generated TrapMessages.jet, so a source row that carries an
-// id fails here once it is generated.
+// invariant (`I9`), a decision (`D-SHAPE3a`) or a criterion (`c109`). No
+// registry what, why, fix or next string and no runtime stop text shows a
+// literal `\n`, a byte span (`@12..40`), a `source-root:` path or a raw
+// `(os error 2)`. The registry rows are read from the generated
+// DiagnosticRows.jet and the runtime texts from the generated *Messages.jet
+// files, so a source row that carries one fails here once it is generated.
 
 // The integer type widths, which follow `I` without naming an invariant.
 DT_TYPE_WIDTHS: [String]{"8", "16", "32", "64", "128"}
@@ -74,6 +76,48 @@ dt_ids: fn(text: String) -> [String] {
     found
 }
 
+// Does `needle` start at byte `at` of `bytes`.
+dt_has_at: fn(bytes: [U8], at: Int, needle: String) -> Bool {
+    wanted: needle.bytes()
+    if at + wanted.len() > bytes.len() -> return false
+    loop index in 0..<wanted.len() {
+        if bytes[at + index] != wanted[index] -> return false
+    }
+    true
+}
+
+// Every internal leak `text` (a source string body, escapes unexpanded)
+// shows: an escaped backslash before `n`, which renders a literal `\n`; `@`,
+// digits, `..` and digits; `source-root:`; `(os error ` and a digit.
+dt_leaks: fn(text: String) -> [String] {
+    bytes: text.bytes()
+    found := [String]{}
+    loop at in 0..<bytes.len() {
+        byte: bytes[at]
+        if byte == (U8{92}) && dt_has_at(bytes, at, "\\\\n") {
+            found.push("literal \\n")
+            next
+        }
+        if byte == (U8{64}) {
+            first: dt_digits_end(bytes, at + 1)
+            if first > at + 1 && dt_has_at(bytes, first, "..") {
+                end: dt_digits_end(bytes, first + 2)
+                if end > first + 2 -> found.push(s5_grammar_slice_bytes(text, at, end))
+            }
+            next
+        }
+        if byte == (U8{115}) && dt_has_at(bytes, at, "source-root:") {
+            found.push("source-root:")
+            next
+        }
+        if byte == (U8{40}) && dt_has_at(bytes, at, "(os error ") {
+            end: dt_digits_end(bytes, at + 10)
+            if end > at + 10 -> found.push(s5_grammar_slice_bytes(text, at, end))
+        }
+    }
+    found
+}
+
 // The quoted value of a `key: "…"` registry line, "" for any other line.
 dt_row_value: fn(line: String, keys: [String]) -> String {
     trimmed: line.trim()
@@ -84,9 +128,10 @@ dt_row_value: fn(line: String, keys: [String]) -> String {
     ""
 }
 
-// Every id in the text rows of the generated file at `path`: the `keys`
-// fields, or what follows `marker` on a line that is not a comment.
-dt_file_violations: fn(path: String, keys: [String], marker: String) -> [String] {
+// Every finding of `scan` (`dt_ids` or `dt_leaks`) in the text rows of the
+// generated file at `path`: the `keys` fields, or what follows `marker` on a
+// line that is not a comment.
+dt_file_violations: fn(path: String, keys: [String], marker: String, scan: fn(String) -> [String]) -> [String] {
     text: id_files.read(path) ?? panic("read {path}: {err}")
     violations := [String]{}
     loop (index, line) in text.split("\n").to_list() {
@@ -97,8 +142,8 @@ dt_file_violations: fn(path: String, keys: [String], marker: String) -> [String]
             if at >= 0 -> value = s5_grammar_slice_bytes(line, at + marker.bytes().len(), line.bytes().len())
         }
         if value == "" -> next
-        ids: dt_ids(value)
-        if ids.len() > 0 -> violations.push("{path}:{index + 1}: names {ids.join(", ")}")
+        found: scan(value)
+        if found.len() > 0 -> violations.push("{path}:{index + 1}: shows {found.join(", ")}")
     }
     violations
 }
@@ -111,7 +156,23 @@ dt_file_violations: fn(path: String, keys: [String], marker: String) -> [String]
 
 #Test("diagnostic_text_names_no_internal_ids") {
     guards_enter_root()
-    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"meaning", "what", "why", "fix", "next"}, "")
-    loop violation in dt_file_violations("Compiler/JetRuntime/Source/TrapMessages.jet", [String]{}, "rt_static_text(\"") -> violations.push(violation)
+    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"meaning", "what", "why", "fix", "next"}, "", dt_ids)
+    loop violation in dt_file_violations("Compiler/JetRuntime/Source/TrapMessages.jet", [String]{}, "rt_static_text(\"", dt_ids) -> violations.push(violation)
     assert(violations.len() == 0, "user-facing diagnostic text names internal ids; write it in plain words and regenerate (jet Tools/agent/DiagnosticRows.jet --write):\n{violations.join("\n")}")
+}
+
+#Test("diagnostic_text_leak_scanner_finds_every_kind") {
+    guards_enter_root()
+    found: dt_leaks("bad \\\\n here, span @12..40, source-root: x, (os error 2); keeps \\n, a@b, @3 and (os error)")
+    assert_eq(found, [String]{"literal \\n", "@12..40", "source-root:", "(os error 2"})
+}
+
+#Test("diagnostic_and_runtime_stop_text_shows_no_internal_leaks") {
+    guards_enter_root()
+    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"what", "why", "fix", "next"}, "", dt_leaks)
+    runtime_files: [String]{"Trap", "TrapDefect", "Services", "Observe", "Scheduler", "Test"}
+    loop file in runtime_files {
+        loop violation in dt_file_violations("Compiler/JetRuntime/Source/{file}Messages.jet", [String]{}, "rt_static_text(\"", dt_leaks) -> violations.push(violation)
+    }
+    assert(violations.len() == 0, "user-facing diagnostic text shows an internal leak; write the plain words and regenerate:\n{violations.join("\n")}")
 }
