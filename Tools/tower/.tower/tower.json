@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102213,
+    "rev": 102214,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -49213,6 +49213,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decision (Main, 2026-11-14): the asset-action program (G2) waits for the c4 ballot. A toolchain-shipped program run by b.jet() is lexed as user code, so it cannot call `__`-named core.web helpers (E0067, JetLexer Payload.jet:1056). The ways out are lexing it as a Core unit (a new loader rule), a public variant-bytes function (new API), or the CLI handing it to the action as compiler-generated text (lex_generated, as codemods do; G5DevX-2`s recommendation). Ballot option (b) of c4, encoding at compile time at the call site, would need no action program at all, so G1 and G2 are held until c4 is ratified to avoid building the wrong mechanism. G3 (a non-literal app.images setting is a check-time error with its snapshot) is independent and proceeds. c4`s ballot must state G2`s consequence for each option."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decisions (Main, 2026-11-14) on the build writer gaps G5DevX-2 found on tree 18334dc55f. G1 approved: a `jet build` entry that collects web.image sources makes a BuildPlanExecution (one asset-bundle target, one action per source) and runs it through jet_cli_build_run_graph. G2: no new `jet self` command (owner-gated); the asset action runs a toolchain-shipped Jet program through b.jet(), using core.image plus `__`-named core.web helpers. G3 approved: planning needs the app.images settings known at compile time; a non-literal setting is a check-time error with a registered code and ui snapshot, never a silent fallback to runtime encoding. G4 OWNER GATE: c1`s clause \"variants cached ... so only new or changed images encode\" needs the build action store, which BuildOptions.jet:810 keeps closed (BUILD_REUSE_SAVED_WORK = false) until a ballot ratifies how a run opts in. Until then every build re-encodes. G5: actions run only in the native sandbox (bubblewrap, Linux x86-64; BuildExecute.jet:124-175), so a web build with images inherits that limit; accepted under the existing sandbox contract and recorded as a gap. G6: the built app must find its variants without runtime encoding. Preferred: link the asset bundle`s variant bytes into the executable (no new API); G5DevX-2 checks the asset-bundle contract first."
         },
         {
@@ -49270,7 +49275,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-14T05:52:26.781Z",
+      "updated": "2026-11-14T05:55:55.271Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -204794,6 +204799,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:55:55.271Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q6gm05",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T05:53:31.554Z",
       "by": "Main",
