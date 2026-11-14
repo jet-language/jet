@@ -1,4 +1,4 @@
-// #1414 C++20 peer: direct USTAR inspection using the standard library only.
+// C++20 peer: direct USTAR inspection using the standard library only.
 // No libarchive code or linkage is claimed; this reader owns the same frozen
 // byte-level contract as the Jet adapter.
 #include <algorithm>

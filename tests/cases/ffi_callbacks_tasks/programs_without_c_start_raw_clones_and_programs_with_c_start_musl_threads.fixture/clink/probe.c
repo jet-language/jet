@@ -1,4 +1,4 @@
-// #6689 c1: where a C call runs, as C sees it. The initial thread marks its
+// Where a C call runs, as C sees it. The initial thread marks its
 // own thread-local and records its pthread_self; a thread musl started has
 // its own of both, and a raw clone shares the initial thread's (its FS).
 #include <pthread.h>

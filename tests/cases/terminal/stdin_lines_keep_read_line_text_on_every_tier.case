@@ -1,12 +1,12 @@
-# #6444/#6541: `loop line in io.stdin().lines()` over a fresh handle (the direct read)
+# `loop line in io.stdin().lines()` over a fresh handle (the direct read)
 # and over a kept handle (the borrowed line source) keeps every line's text on each
 # tier: a 70001-byte line, a `stop` break, and an invalid UTF-8 line, which
-# stops with the read error instead of growing without bound (#6541). The
+# stops with the read error instead of growing without bound. The
 # testkit feeds a `stdin:` file as its exact bytes, invalid UTF-8 included. A process
 # line source (`child.stdout.lines()`, the same lazy.line_next) stops on its
 # invalid UTF-8 line the same way, and so does a file line source
-# (`files.open(path).lines()`), which grew without bound before #6541. A kept
-# handle reads lazily (#6087 c2), so the line before the bad one runs the body.
+# (`files.open(path).lines()`), which once grew without bound. A kept
+# handle reads lazily, so the line before the bad one runs the body.
 requires: os:unix
 fixture: stdin_lines_keep_read_line_text_on_every_tier.fixture
 env: NO_COLOR=1

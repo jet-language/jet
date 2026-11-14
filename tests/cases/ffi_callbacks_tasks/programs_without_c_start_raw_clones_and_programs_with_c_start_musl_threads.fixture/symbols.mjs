@@ -1,4 +1,4 @@
-// #6689 c1: the link shape of a built program, from its ELF symbol table:
+// The link shape of a built program, from its ELF symbol table:
 // how many pthread functions it holds, whether musl's startup and the link's
 // C thread functions are in it, and its startup.
 import { readFileSync } from "node:fs";

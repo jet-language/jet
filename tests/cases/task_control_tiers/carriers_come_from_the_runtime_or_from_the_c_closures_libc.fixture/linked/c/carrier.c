@@ -1,4 +1,4 @@
-// #6689 c1, C-linking shape: the carriers come from the C closure's libc
+// C-linking shape: the carriers come from the C closure's libc
 // (musl pthread_create), so each carrier is a libc thread with its own
 // pthread_self. On a raw clone every thread would read the main thread's.
 #include <pthread.h>

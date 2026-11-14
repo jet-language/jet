@@ -1,4 +1,4 @@
-// #1414 peer adapter. This rail uses only Rust's standard library filesystem
+// Peer adapter. This rail uses only Rust's standard library filesystem
 // APIs and a local SHA-256 implementation.
 use std::{
     env, fs, io,

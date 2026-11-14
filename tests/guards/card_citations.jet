@@ -1,0 +1,89 @@
+use card_cite_files: core.files
+
+// Cards and their criteria live in Tower. A comment under tests/ states the
+// behavior it guards in plain words, never the card or criterion that asked
+// for it. known-failing.tsv rows name their owning card by design, so TSV
+// files are not read.
+CARD_CITE_ROOT: "tests"
+
+// Whether a line is a comment: after its indentation it starts with `//`,
+// `/*`, `* ` or `# `, or is a bare `#`. A `#Marker` line is code.
+card_cite_comment: fn(bytes: [U8]) -> Bool {
+    start := 0
+    loop {
+        if start >= bytes.len() -> return false
+        code: Int{bytes[start]}
+        if code != 32 && code != 9 -> break
+        start = start + 1
+    }
+    first: Int{bytes[start]}
+    after: if start + 1 < bytes.len() -> Int{bytes[start + 1]} else -> 32
+    (first == 47 && (after == 47 || after == 42)) || (first == 42 && after == 32) || (first == 35 && after == 32)
+}
+
+// Whether a card number starts at `start`: `#` and three to five digits, after
+// the line start, a space, `(`, `/` or `,` (`[U8#128]` is a type, not a card).
+card_cite_at: fn(bytes: [U8], start: Int) -> Bool {
+    if (Int{bytes[start]}) != 35 -> return false
+    if start > 0 {
+        before: Int{bytes[start - 1]}
+        if before != 32 && before != 9 && before != 40 && before != 47 && before != 44 -> return false
+    }
+    end := start + 1
+    loop {
+        if end >= bytes.len() || !s3_decision_is_digit(bytes[end]) -> break
+        end = end + 1
+    }
+    digits: end - start - 1
+    digits >= 3 && digits <= 5
+}
+
+card_cite_in_line: fn(line: String) -> Bool {
+    if !line.contains("#") -> return false
+    bytes: line.bytes()
+    if !card_cite_comment(bytes) -> return false
+    loop index in 0..<bytes.len() {
+        if card_cite_at(bytes, index) -> return true
+    }
+    false
+}
+
+// Every comment line under `path` that cites a card, as `path:line`. Symbolic
+// links (fixtures hold link cycles), hidden entries, installed node modules,
+// build output and TSV files are skipped.
+card_cite_lines: fn(path: String, out: &[String]) {
+    if card_cite_files.is_symlink(path) -> return
+    if card_cite_files.is_dir(path) {
+        loop child in (card_cite_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "node_modules" || child.name == "target" || child.name.ends_with(".tsv") -> next
+            card_cite_lines(child.path, out)
+        }
+        return
+    }
+    text: card_cite_files.read(path) ?? return
+    if !text.contains("#") -> return
+    loop (index, line) in text.lines() {
+        if card_cite_in_line(line) -> out.push("{path}:{index + 1}")
+    }
+}
+
+#Test("tests_comments_cite_no_cards") {
+    guards_enter_root()
+    assert(card_cite_files.is_dir(CARD_CITE_ROOT), "the root {CARD_CITE_ROOT} must exist")
+    found := [String]{}
+    card_cite_lines(CARD_CITE_ROOT, found)
+    assert_eq(found.join("\n"), "")
+    // The matcher sees a card in a `//`, `#`, `/*` and `*` comment, alone, in
+    // a parenthesis and after a slash, and not in code, a type, a short number
+    // or a color.
+    assert(card_cite_in_line("# Claim (#6614 c3): a run names the set"))
+    assert(card_cite_in_line("    // closes once (#4276 c49)."))
+    assert(card_cite_in_line("/* #6689 c1: where a C call runs */"))
+    assert(card_cite_in_line(" * lowered to 0 (#6777). */"))
+    assert(card_cite_in_line("// rows map to #1187/#1193"))
+    assert(!card_cite_in_line("#"), "a bare `#` holds no card")
+    assert(!card_cite_in_line("// a [U8#128] buffer, item #12 and color #0a0b0c"))
+    assert(!card_cite_in_line("    bytes := [U8#128]{{ uninit }}"))
+    assert(!card_cite_in_line("#Test(\"waits for its port (#5931)\") {{"))
+    assert(!card_cite_in_line("stdout: ~ \"#1234\""))
+}

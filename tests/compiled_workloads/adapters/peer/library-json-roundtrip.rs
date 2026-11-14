@@ -1,4 +1,4 @@
-// #1414 peer adapter: dependency-free Rust implementation of the frozen
+// Peer adapter: dependency-free Rust implementation of the frozen
 // public JSON roundtrip boundary. Serde JSON at the pinned revision below is
 // the lineage for the library task; this adapter does not invoke serde_json,
 // jq, a shell, or any installed incumbent.

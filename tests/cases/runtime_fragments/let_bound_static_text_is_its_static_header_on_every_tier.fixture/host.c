@@ -1,6 +1,5 @@
 /* Prints every static text header the unit's exports return: its byte
- * length and text, or "null header" where a let-bound call lowered to 0
- * (#6777). */
+ * length and text, or "null header" where a let-bound call lowered to 0. */
 #include <stdint.h>
 #include <stdio.h>
 

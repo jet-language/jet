@@ -1,10 +1,10 @@
 # A consumed owner closes its lock where its consumer ends it, never at the
-# source's scope end (#6584): a `^self` method's receiver, a member moved out
+# source's scope end: a `^self` method's receiver, a member moved out
 # with `^x.f` (as a receiver, an argument, a close, then reinitialized, and
 # on one branch), a `me := ^param` local, a whole handle, a Close owner
 # with no clone glue that shares a cell, closed and consumed out of its
-# holder (#6096), and a consumed receiver rebound to a local whose optional
-# Guard is cleared (#6649). Every lock descriptor closes once: no leak and no
+# holder, and a consumed receiver rebound to a local whose optional
+# Guard is cleared. Every lock descriptor closes once: no leak and no
 # second close.
 fixture: moved_lock_owners_close_at_their_consumer.fixture
 env: NO_COLOR=1

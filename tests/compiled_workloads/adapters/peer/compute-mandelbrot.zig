@@ -1,4 +1,4 @@
-// #1414 peer adapter: independent Zig stdlib Mandelbrot implementation.
+// Peer adapter: independent Zig stdlib Mandelbrot implementation.
 // Codeberg Zig d03a147ea0a590ca711b3db07106effc559b0fc6 identifies the
 // toolchain lineage; this source does not copy an incumbent implementation.
 const std = @import("std");

@@ -35,7 +35,7 @@ PolicyError: struct { message: String }
 policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
 
 // The same slice of an already indexed text: a scan over one text indexes it
-// once instead of copying it per slice (#6301).
+// once instead of copying it per slice.
 policy_slice_raw: fn(raw: [U8], start: Int, end: Int) -> String {
     assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
     if start == end -> return ""
@@ -476,7 +476,7 @@ policy_exception_failure: fn(manifest: PolicyManifest, path: String, candidates:
 policy_test_checked_findings_and_provenance: fn() {
     manifest: policy_manifest()
     assert_eq(policy_validate_manifest(manifest), [String]{})
-    // Keep Fdogjet-1..9 original proofs KNOWN-FAILING #4817 / no-subject:
+    // Keep Fdogjet-1..9 original proofs Known failing / no-subject:
     // dogfood/jetpack (1,2,5..9) was deleted in 6fc6f3862; dogfood/tower (3,4)
     // is also absent at HEAD. This checks metadata retention, not a passing
     // proof for either deleted subject.

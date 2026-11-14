@@ -1701,7 +1701,7 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
     guards_enter_root()
     policy_check_gate(policy_manifest(), ".", "docs") ?? panic("{err.message}")
 }
-// Known failing: #6220 (366 Jetpack sites break the dogfood json, path-containment
+// Known failing (366 Jetpack sites break the dogfood json, path-containment
 // and directory-setup rules; Jetpack grew while the Rust gate was not running).
 #Test("corpus policy dogfood gate") {
     guards_enter_root()
@@ -2196,7 +2196,7 @@ policy_ast_test_declared_config_exclusion: fn() PolicyError! {
     guards_enter_root()
     policy_ast_test_declared_config_exclusion() ?? panic("{err.message}")
 }
-// #3173: Examples teach without grouping parentheses that precedence already
+// Examples teach without grouping parentheses that precedence already
 // implies. The formatter's precedence table decides redundancy, so this guard
 // and `jet fmt` cannot disagree. Sources the formatter does not accept are
 // left to the corpus parse gates.
@@ -2227,7 +2227,7 @@ policy_redundant_grouping_sites: fn(root: String) -> [String] PolicyError! {
     sites: policy_redundant_grouping_sites("Examples") ?? panic("{err.message}")
     assert(sites.len() == 0, "redundant grouping parentheses in Examples:\n{sites.join("\n")}")
 }
-// #3704: an example that imports a Core module runs the API it teaches. A
+// An example that imports a Core module runs the API it teaches. A
 // printed literal with no interpolation that names two or more of the module's
 // functions documents the surface without observing it. The names are the
 // module's top-level functions and methods, read from its Core source AST

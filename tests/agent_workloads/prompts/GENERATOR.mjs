@@ -1,4 +1,4 @@
-// #1876 experiment: generate the frozen, model-facing prompt artifact.
+// experiment: generate the frozen, model-facing prompt artifact.
 // The prompt is derived MECHANICALLY from the frozen manifest so both arms
 // receive byte-identical task wording apart from the language and filename.
 // No reference adapter source is ever shown to the candidate.

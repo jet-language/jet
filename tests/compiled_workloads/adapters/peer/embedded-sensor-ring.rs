@@ -1,4 +1,4 @@
-// #1414 embedded sensor-ring peer adapter.
+// Embedded sensor-ring peer adapter.
 // Provenance: Embassy revision e6ac13bad5787f57fd76ee1e22e5cc15351105a7.
 // The host replay keeps the embedded queue's fixed storage and explicit
 // head/tail/count state. It does not call Embassy or another peer binary.

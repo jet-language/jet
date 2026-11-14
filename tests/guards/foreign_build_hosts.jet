@@ -6,7 +6,7 @@ s1_host_read: fn(path: String) -> String { s1_host_files.read(path) ?? panic("re
 s1_host_maintained_lines: fn(path: String) -> Int {
     count := 0
     loop line in s1_host_read(path).lines() {
-        // #4819: stored trim views ICE at String method calls; keep owned text.
+        // Stored trim views ICE at String method calls; keep owned text.
         trimmed: line.trim().copy()
         if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") -> count += 1
     }

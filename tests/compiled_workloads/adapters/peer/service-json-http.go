@@ -1,4 +1,4 @@
-// #1414 peer adapter: pinned Go standard-library implementation of the
+// Peer adapter: pinned Go standard-library implementation of the
 // frozen loopback service workload. The task shape is informed by the
 // TechEmpower HTTP definitions, but this file is a self-contained adapter.
 package main

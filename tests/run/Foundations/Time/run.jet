@@ -125,7 +125,7 @@ tai_minus_utc: fn(date: LocalDate) -> Int {
     return offset
 }
 
-// #2764 leaves direct LocalDate trait ABI on the compiler gate, so this
+// Leaves direct LocalDate trait ABI on the compiler gate, so this
 // package keeps the calendar trait path explicit and package-owned.
 utc_carrier: fn(dt: DateTime) -> AstroTime { normalize(dt.to_unix_s(), dt.nanosecond(), "UTC") }
 
@@ -259,7 +259,7 @@ run: fn() {
     print("tt_jd={tt_jd.day}+{tt_jd.nanoseconds}ns")
     print("ut1_jd={ut1_jd.day}+{ut1_jd.nanoseconds}ns")
 
-    // #2765 covers signed nanosecond extremes; this ordinary value proves the
+    // Covers signed nanosecond extremes; this ordinary value proves the
     // lossless path without pretending the boundary defect is solved.
     high: time.parse_rfc3339("2024-03-29T15:30:00.123456789Z") ?? panic("high")
     high_ns: high.nanosecond()

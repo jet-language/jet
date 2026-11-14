@@ -1,4 +1,4 @@
-// #1414 peer adapter. Existing authorized web incumbent:
+// Peer adapter. Existing authorized web incumbent:
 // TypeScript/ECMAScript, commit 5be33469d551655d878876faa9e30aa3b49f8ee9.
 // The implementation below is independent: the revision identifies the
 // selected web boundary, not copied adapter source.

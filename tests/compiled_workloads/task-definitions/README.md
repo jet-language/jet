@@ -1,4 +1,4 @@
-# Card #1414 task boundary
+# Task boundary
 
 Each task file freezes the complete-work contract. The `.expected` companion
 freezes the outcome shape. These are task definitions, not measurements. A

@@ -4,7 +4,7 @@ package: {
     authority: { allow: [FS, IO, Mem.Alloc] }
 }
 
-// #709 / #237 C4 / #706: hostile typed-data corpus — typed DataError or safe behavior.
+// Hostile typed-data corpus — typed DataError or safe behavior.
 use {
     data: core.data
     files: core.files
@@ -86,7 +86,7 @@ run: fn() {
     print("signed_zero_sum: {signed_sum}")
     print("signed_zero_mean: {signed_mean}")
 
-    // #1657: catastrophic cancellation. One compensated kernel answers on every
+    // Catastrophic cancellation. One compensated kernel answers on every
     // tier; a naive left-to-right sum would answer 0.0 for both of these.
     cancel_sum: data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("cancel_sum")
     cancel_mean: data.mean([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("cancel_mean")

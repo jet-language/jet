@@ -6,7 +6,7 @@ use {
 // In-repo sources, docs, examples, UI fixtures, Core and agent memory never
 // reintroduce retired syntax spellings. The lexer-backed `Dyn` surface check lives in
 // tests/guards/dyn_surface; lexical and registry oracles stay compiler unit tests.
-// Plain helpers make the author check cover assertion bodies (#4790).
+// Plain helpers make the author check cover assertion bodies.
 s2_syntax_paths: fn(root: String) -> [String] {
     out := [String]{}
     kind: s2_syntax_files_api.stat(root) ?? return out
@@ -236,8 +236,8 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
     s2_syntax_old_binding_migration_paths_stay_removed()
 }
 
-// #6281 c106: the syntax registry (Compiler/JetFoundation/Data/Syntax) is the
-// one table of foreign-word facts, and the loop words #1887 fixed sit in the
+// The syntax registry (Compiler/JetFoundation/Data/Syntax) is the
+// one table of foreign-word facts, and the fixed loop words sit in the
 // same block as the foreign loop words. No other source of the paths that
 // read or teach Jet syntax (lexer, parser, formatter, sema, LSP, fix engine)
 // defines a foreign-word fact or carries its own list of foreign words.
@@ -284,7 +284,7 @@ s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged: fn() {
         ids: s2_syntax_parse.split_once(suffix.tail, ")")
         if !ids.found -> next
         loop raw in ids.head.split("/") {
-            // #4819: map[key] = v with a trimmed view key ICEs; owned key here.
+            // map[key] = v with a trimmed view key ICEs; owned key here.
             id: raw.trim().copy()
             if id != "<id>" -> expected[id] = 1
         }

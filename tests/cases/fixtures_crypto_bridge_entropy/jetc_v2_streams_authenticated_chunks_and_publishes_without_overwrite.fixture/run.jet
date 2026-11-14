@@ -1,4 +1,4 @@
-// tests/fixtures/crypto_bridge_entropy.rs:798-860. KNOWN-FAILING #4821 #4841. Runtime UNRUN.
+// tests/fixtures/crypto_bridge_entropy.rs:798-860. Known failing. Runtime UNRUN.
 // CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
 use {
     crypto: core.crypto
@@ -63,7 +63,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     }
     assert(!files.exists("wrong.bin"))
     files.write_bytes("restored.bin", "do not replace".bytes()) ?? panic("sentinel")
-    // Ratified DestinationExists, not drift PublishFailed: #4821, Core crypto.jet54-58,531-535.
+    // Ratified DestinationExists, not drift PublishFailed: Core crypto.jet54-58,531-535.
     if crypto.file_open(recipient, Path.from("sealed.jetc"), Path.from("restored.bin")) == {
         .Ok(_) -> panic("file_open replaced an existing destination")
         .Err(error) -> assert_eq(error, crypto.FileCryptoError.DestinationExists)

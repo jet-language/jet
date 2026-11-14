@@ -1,4 +1,4 @@
-# Claim: a reassigned local whose value closes (`t: sub(x, n); x = t`, and an Option local `o = Val(...)`) closes its old value before its drop frees it, so the old list buffer is freed once and later lists of its size class get buffers of their own, on o0, o1, o2, with the checked allocator, and on web (#6707).
+# Claim: a reassigned local whose value closes (`t: sub(x, n); x = t`, and an Option local `o = Val(...)`) closes its old value before its drop frees it, so the old list buffer is freed once and later lists of its size class get buffers of their own, on o0, o1, o2, with the checked allocator, and on web.
 # Hand-derived: x closes at its reassignment (7 * 300 = 2100), then t (5 * 300) and n (2 * 300) latest first; the eight lists sum 300 * (0 + 1 + ... + 7) = 8400; o closes at its reassignment (3 * 6), then o2 (4 * 6). Before the fix every native tier faults at address 0x1 in the push loop, and the checked allocator faults reading the freed Option box.
 fixture: reassigned_close_local_frees_its_old_buffer_once.fixture
 env: NO_COLOR=1

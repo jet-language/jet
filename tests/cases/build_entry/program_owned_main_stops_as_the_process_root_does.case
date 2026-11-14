@@ -1,4 +1,4 @@
-# #6328: a program whose stops clean up nothing and whose runtime routes don't
+# A program whose stops clean up nothing and whose runtime routes don't
 # depend on the process root owns its main (JetIR EntryOwned.jet): no
 # jet_rt_main, no root, no stop points. Its stop still writes the same report
 # and exits with the same code on every tier. `owned` overflows a U8 with
@@ -6,7 +6,7 @@
 # must run on the way out, so it keeps the root and prints the close first.
 # `plain` owns its main too but never allocates, so its main thread gets no
 # thread block (JetRuntime Thread.jet jet_rt_thread_init's guards). `exact`
-# (#6498) grows an exact Int past the inline range and then divides by zero:
+# grows an exact Int past the inline range and then divides by zero:
 # the Int routes are root-free and its stop edges only drop a String and a
 # List of records (drop routines that only free memory) inside cleanup
 # scopes, so it owns its main and links no root, scheduler or deadline code.
