@@ -1,0 +1,22 @@
+# A `:=` counter started from a number takes the type of its first use.
+# `count := 250` first passes to a U8 parameter, so it is a U8 and
+# `count += 1` does U8 arithmetic: it prints 250 through 255 and stops with
+# E3010 at the addition past 255, not at the call. As an Int it would print
+# up to 260. Each tier stops at the same line.
+fixture: a_counter_first_used_as_u8_does_u8_arithmetic.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none run.jet
+exit: nonzero # the U8 addition stops
+stdout: = a_counter_first_used_as_u8_does_u8_arithmetic.out
+stderr: ~ "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`" # U8 arithmetic
+stderr: ~ "run.jet:7" # at the addition
+step: jet run --optimize=basic run.jet
+exit: nonzero # the U8 addition stops
+stdout: = a_counter_first_used_as_u8_does_u8_arithmetic.out
+stderr: ~ "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`" # U8 arithmetic
+stderr: ~ "run.jet:7" # at the addition
+step: jet run --optimize=full run.jet
+exit: nonzero # the U8 addition stops
+stdout: = a_counter_first_used_as_u8_does_u8_arithmetic.out
+stderr: ~ "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`" # U8 arithmetic
+stderr: ~ "run.jet:7" # at the addition
