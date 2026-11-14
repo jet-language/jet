@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102361,
+    "rev": 102363,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25103,7 +25103,7 @@
       "track": "sidequest",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree.run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden contracts/deep_checks_tree` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- A Jet test or case row proves deep-check selection: global, package, `pkg.fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `jet test Compiler --profile ui deep_check_` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
       "checkSteps": "After owner selection, implement and prove only that option. For A, prove default-off, global/package/function selection, repeated-union behavior, blocking empty/unmatched occurrences and copyable dotted method scopes, declaration ownership and same-name instances. Prove valid/corrupt outcomes, disabled type checks, no escaped facts, nonlocal-exit rejection and Panic denial. Check resolved-selection cache reuse, changed-unit rebuilds, independent resident-session selections and missing-source refusals. Exercise all applicable engines and CLI and embedded compiler-option entry points. Preserve required contracts and the strict performance policy.\n\nThis ballot is a design, not runtime evidence. Cover missing, unreadable and unsupported selection identity with and without admitted source, including the default-off request.",
@@ -25219,11 +25219,11 @@
         {
           "n": 2,
           "text": "#3043 is closed on its complete witness matrix. Required Pre/Post and safety remain unchanged; removed code supplies no live semantic facts or effect edges.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-11T02:47:52.900Z"
+          "evidence": "Holds on dev 26afb1a0e6 (GoalsA-1, gate-p62 jet, 2026-11-14): #3043 is archived done with all 6 criteria DURABLE in the closure audit (CLOSURE-AUDIT-v2.tsv:10433-10438, 97fe25181b). Witnesses: jet test Compiler --profile ui --filter erased_ -> 5/0 (effects/erased_scope_restores_refinement_and_effect_facts: an erased #Off scope supplies no refinement and no FS effect edge, the active one is E0740); --profile cases --filter erased_ -> 5 PASS + 1 KNOWN-FAILING (erased_authority_delegations_do_not_enter_effect_facts, fixture calls retired process.run, tracked #6419); --profile cases --filter deep_checks_grant_no_effect_and_leave_assertions_panicking -> 1/0; --profile golden --filter DeepChecksTree -> 1/0 (required Pre/Post stay on).",
+          "at": "2026-11-14T13:04:27.293Z"
         },
         {
           "n": 3,
@@ -25350,12 +25350,13 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:00.365Z",
-      "updated": "2026-11-14T08:09:59.517Z",
+      "updated": "2026-11-14T13:04:29.087Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 19
+      "criteriaLastN": 19,
+      "completedAt": "2026-11-14T13:04:29.087Z"
     },
     {
       "id": "c03habw5",
@@ -205358,6 +205359,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:04:29.087Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cshs43",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:04:27.293Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cshs43",
+      "note": "#2"
+    },
     {
       "at": "2026-11-14T13:02:54.545Z",
       "by": "Main",
