@@ -273,7 +273,9 @@ sema_app_remote_call: fn(receiver: Expr, service: Type, shown: String, declarati
         declared_return == .Result(ok, failure) -> sema_app_remote_fallible(remote, hidden, wire, ok, failure, raised_return, method_span)
         else -> sema_app_remote_method_call(remote, SEMA_APP_REMOTE_CALL_VALUE, [Type]{declared_return}, wire, method_span)
     }
-    checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+    // The lowered call keeps its Result carrier: the remote call is the call
+    // root, which its consumer (`??`, `?`) reads or auto-propagates.
+    checked: sema_check_expression_carrier(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
         sema_single_use_leave_scope(scopes, state, diagnostics)
         return None
     }
