@@ -4219,6 +4219,22 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
     }
 }
 
+// The CPU a Core record row's decode takes per row byte, in source bytes
+// parsed: a row is a dense tree a decode rebuilds node by node, so
+// one byte of it costs about as much as 64 bytes of the source it was
+// checked from. (A `jet run` of a script that imports core.files and
+// core.process decoded 340 KB of rows in 3.3 CPU-s; parsing the same
+// modules' 2.1 MB of source took under 0.33 CPU-s.)
+JET_DRIVER_RECORD_ROW_BYTE_WORK: 64
+
+// A parse job's work in source bytes parsed, which admits its wave's
+// threads: a source's own size, and a record row's `bytes` scaled to the
+// source parse its decode costs as much as.
+jet_driver_parse_job_work: fn(job: JetDriverParseJob, bytes: Int) -> Int Never! {
+    if job == .Record(_, _, _, _) -> return bytes * JET_DRIVER_RECORD_ROW_BYTE_WORK
+    bytes
+}
+
 // `threads` are the compiler threads a parse may split one unit across
 // (parse_lexed_with_source_threads); a wave that already runs its
 // units on several threads parses each unit on one.
@@ -4730,8 +4746,9 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
     loop position in first..<pending.len() {
         job: jet_driver_parse_job(request, source_units[pending[position]], pending[position] == runtime_entry, pending[position] == prelude_entry)
         bytes: jet_driver_parse_job_bytes(job)
-        weights.push(bytes)
-        total += bytes
+        work: jet_driver_parse_job_work(job, bytes)
+        weights.push(work)
+        total += work
         if bytes > largest -> largest = bytes
         // Loaded payloads selected for this wave, not lexer-consumed bytes:
         // inline-package errors can reject before lexing, and Core filtering
