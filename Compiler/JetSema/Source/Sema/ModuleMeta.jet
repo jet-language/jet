@@ -131,30 +131,27 @@ sema_module_meta_file_doc: fn(source: String) -> String Never! {
     lines.join("\n")
 }
 
-// The `///` comment directly above the line holding byte `at`; marker lines
-// (`#FX(…)`) between the comment and the binding are passed over.
-sema_module_meta_doc_above: fn(source: String, at: Int) -> String Never! {
-    bytes: source.bytes()
+// The `///` comment directly above the line holding byte `at` of the source
+// `bytes`; marker lines (`#FX(…)`) between the comment and the binding are
+// passed over. The lines are read back from the binding's line, so only the
+// comment is copied.
+sema_module_meta_doc_above: fn(bytes: [U8], at: Int) -> String Never! {
     limit: if at < bytes.len() -> at else -> bytes.len()
     line_start := limit
     loop line_start > 0 && bytes[line_start - 1] != (U8{10}) -> line_start -= 1
-    above: String.from_bytes(bytes[0..<line_start]) ?? return ""
-    lines: above.split("\n").to_list()
     collected := [String]{}
-    index := lines.len() - 1
-    // The text before the binding's line ends in a newline: its last part is empty.
-    if index >= 0 && lines[index] == "" -> index -= 1
-    loop index >= 0 {
-        line: lines[index]
+    // Each line above ends in the newline just before the start of the next.
+    loop line_start > 0 {
+        line_end: line_start - 1
+        start := line_end
+        loop start > 0 && bytes[start - 1] != (U8{10}) -> start -= 1
+        line: String.from_bytes(bytes[start..<line_end]) ?? break
+        line_start = start
         if sema_module_meta_doc_line(line) == .Val(text) {
             collected.push(text)
-            index -= 1
             next
         }
-        if collected.len() == 0 && line.trim().starts_with("#") {
-            index -= 1
-            next
-        }
+        if collected.len() == 0 && line.trim().starts_with("#") -> next
         break
     }
     collected.reverse()
@@ -247,15 +244,16 @@ sema_module_meta_carries: fn(items: [Item], declared_module: String, reads: [Str
 
 // Give each inline module body of `items` that carries a record, nested ones
 // included, its record. True when any record was added.
-sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) -> Bool {
+// `bytes` is the module's source text, as sema_module_meta_doc_above reads it.
+sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, bytes: [U8], diagnostics: &[Diagnostic]) -> Bool {
     added := false
     loop index in 0..<items.len() {
         updated := CodeModule?{None}
         if items[index] == .CodeModule(definition) {
             if !sema_module_meta_tree_has_record(definition, meta_source.reads) -> next
             body := definition.body ?? next
-            _ := sema_module_meta_inline(body, meta_source, text, diagnostics)
-            if sema_module_meta_has_record(body, definition.name, meta_source.reads) -> sema_module_meta_record(body, definition.name, sema_module_meta_doc_above(text, definition.span.start), meta_source, definition.name_span, diagnostics)
+            _ := sema_module_meta_inline(body, meta_source, bytes, diagnostics)
+            if sema_module_meta_has_record(body, definition.name, meta_source.reads) -> sema_module_meta_record(body, definition.name, sema_module_meta_doc_above(bytes, definition.span.start), meta_source, definition.name_span, diagnostics)
             // copy: the module is rebuilt around its lowered body.
             module_item := definition.copy()
             module_item.body = Val(body.move())
@@ -272,7 +270,7 @@ sema_module_meta_inline: fn(items: &[Item], meta_source: SemaModuleMetaSource, t
 // `text` is the module's source text; the caller passes no Core source.
 sema_module_meta_lower: fn(program: &Program, declared_module: String, meta_source: SemaModuleMetaSource, text: String, diagnostics: &[Diagnostic]) {
     if !sema_module_meta_wanted(program.items, declared_module) -> return
-    added := sema_module_meta_inline(program.items, meta_source, text, diagnostics)
+    added := sema_module_meta_inline(program.items, meta_source, text.bytes(), diagnostics)
     span: Span{start: 0, end: 0}
     if declared_module != "" {
         if sema_module_meta_has_record(program.items, sema_module_meta_leaf(declared_module), meta_source.reads) {
