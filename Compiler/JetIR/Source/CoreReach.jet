@@ -728,14 +728,14 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // lowering finds it by owner type (ir_core_reach_generated_codec), so it is
 // rooted.
 //
-// The roots' bodies, nearly every kept body, are read on the threads
-// `threads` admits (ir_core_reach_root_targets); the rows they
-// reach, and the rows those reach, are then read on the calling thread.
-// Reachability is a closure, so the flags are the same for any thread
-// count. `functions` and `symbols` (the run's table, its one row, which
-// names the methods and constants a body reaches) leave for the threads and
-// come back unchanged. `decls` is the run's declaration table the direct
-// calls name.
+// The bodies are read in waves on the threads `threads` admits
+// (ir_core_reach_root_targets): first the roots' bodies, nearly every kept
+// body, then the bodies of the rows the last wave reached first, until a
+// wave reaches no new row. Reachability is a closure, so the flags are the
+// same for any thread count. `functions` and `symbols` (the run's table, its
+// one row, which names the methods and constants a body reaches) leave for
+// the threads and come back unchanged. `decls` is the run's declaration
+// table the direct calls name.
 ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[SymbolTable], candidates: &&[Bool], core_module_identities: [ModuleID], rooted_keys: NameTable, threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     core_modules := [U32:Bool]{}
@@ -745,6 +745,8 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     reachable := [Bool]{}
     roots := [Int]{}
     weights := [Int]{}
+    // Each row's source bytes, a wave's weight per row.
+    sizes := [Int]{}
     // The Core source helpers a lowering calls by name, with no keyed call:
     // Fmt.jet selector helpers, Encoding.jet decode helpers and the Args.jet
     // `ArgsSpec` / `ParsedArgs` method helpers.
@@ -752,6 +754,7 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
     // A declaration's first candidate row by DeclID row (-1: none).
     decl_rows := (loop _ in 0..<decls.rows.len() -> -1)
     loop (index, function) in functions {
+        sizes.push(function.source_span.end - function.source_span.start)
         if !candidates[index] {
             reachable.push(false)
             next
@@ -766,30 +769,23 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, symbols: &[Sy
         reachable.push(rooted)
         if rooted {
             roots.push(index)
-            weights.push(function.source_span.end - function.source_span.start)
+            weights.push(sizes[index])
         }
     }
-    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), by_key: [NameRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move(), roots: roots.move()}}
-    pending := [Int]{}
-    loop target in ir_core_reach_root_targets(slot, weights, threads) {
-        if !reachable[target] {
-            reachable[target] = true
-            pending.push(target)
-        }
-    }
-    permit: slot.guard_edit()
-    loop pending.len() > 0 {
-        caller: pending.pop() ?? { break }
-        found := [Int]{}
-        // Passed straight through: a local binding of the guarded rows would copy them.
-        ir_core_reach_row_targets(permit.value.functions[0], permit.value.symbols[0], permit.value.by_key[0], permit.value.source_keys[0], permit.value.decl_rows, caller, found)
-        loop target in found {
+    slot: Shared{IRReachShared{functions: [[FnBody]]{compiler_take_rows<FnBody>(functions)}, symbols: compiler_take_rows<SymbolTable>(symbols), by_key: [NameRows]{by_key.move()}, source_keys: [IRReachSources]{source_keys.move()}, decl_rows: decl_rows.move()}}
+    loop {
+        reached := [Int]{}
+        loop target in ir_core_reach_root_targets(slot, roots, weights, threads) {
             if !reachable[target] {
                 reachable[target] = true
-                pending.push(target)
+                reached.push(target)
             }
         }
+        if reached.len() == 0 -> break
+        weights = (loop row in reached -> sizes[row])
+        roots = reached.move()
     }
+    permit: slot.guard_edit()
     back := permit.value.functions.pop() ?? panic("the checked functions left the reachability state")
     compiler_transfer_rows<FnBody>(functions, back)
     compiler_transfer_rows<SymbolTable>(symbols, permit.value.symbols)
@@ -833,44 +829,43 @@ ir_core_reach_has: fn(table: NameTable, text: String) -> Bool Never! {
 
 // What every reachability thread reads: the checked functions, the run's
 // symbol table, their rows by key and the by-name source helpers' keys, each
-// the one row of its list, the function rows by DeclID row, and the rooted
-// rows.
+// the one row of its list, and the function rows by DeclID row.
 IRReachShared: struct {
     functions: [[FnBody]]
     symbols: [SymbolTable]
     by_key: [NameRows]
     source_keys: [IRReachSources]
     decl_rows: [Int]
-    roots: [Int]
 }
 
-// The rows one part of the roots names: its number and the rows.
+// The rows one part of a wave names: its number and the rows.
 IRReachPart: struct {
     part: Int
     targets: [Int]
 }
 
-// Root source bytes per admitted reachability thread.
+// A wave's source bytes per admitted reachability thread.
 IR_REACH_MIN_BYTES_PER_THREAD: 65536
 // Parts per admitted reachability thread: a thread that drew light bodies
 // claims more while another reads a heavy one.
 IR_REACH_PARTS_PER_THREAD: 4
 
-// Every row a root's body names, the roots read on the threads `threads`
-// admits for their source bytes (`weights`, one per root), in consecutive
-// parts each thread claims until none is left, joined in part order.
-ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, weights: [Int], threads: CompilerThreads) -> [Int] {
+// Every row the bodies of rows `rows` (one wave) name, read on the threads
+// `threads` admits for their source bytes (`weights`, one per row), in
+// consecutive parts each thread claims until none is left, joined in part
+// order.
+ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, rows: [Int], weights: [Int], threads: CompilerThreads) -> [Int] {
     total := 0
     loop weight in weights -> total += weight
     workers: compiler_threads_admit(threads, weights.len(), total, IR_REACH_MIN_BYTES_PER_THREAD, 0, 0)
     count := workers * IR_REACH_PARTS_PER_THREAD
     if count > weights.len() -> count = weights.len()
-    if workers <= 1 || count <= 1 -> return ir_core_reach_part_targets(slot, 0, weights.len())
+    if workers <= 1 || count <= 1 -> return ir_core_reach_part_targets(slot, rows, 0, weights.len())
     bounds: compiler_threads_partition(weights, count)
     queue: Shared{IRPartQueue{next: 0}}
     parts := [[Int]]{}
     loop _ in 0..<count -> parts.push([Int]{})
-    ir_core_reach_claimers(slot, bounds, queue, 0, workers, parts)
+    ir_core_reach_claimers(slot, rows, bounds, queue, 0, workers, parts)
     targets := [Int]{}
     loop part in 0..<count -> targets.extend(compiler_take_rows<Int>(parts[part]))
     targets
@@ -878,11 +873,11 @@ ir_core_reach_root_targets: fn(slot: Shared<IRReachShared>, weights: [Int], thre
 
 // Runs claiming threads `from..<workers`, one task each, and moves every
 // part a thread returned into `parts`.
-ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, bounds: [Int], queue: Shared<IRPartQueue>, from: Int, workers: Int, parts: &[[Int]]) {
+ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: Shared<IRPartQueue>, from: Int, workers: Int, parts: &[[Int]]) {
     if from >= workers -> return
     task.group core_reach_threads {
-        head: task ir_core_reach_claimed(slot, bounds, queue)
-        ir_core_reach_claimers(slot, bounds, queue, from + 1, workers, parts)
+        head: task ir_core_reach_claimed(slot, rows, bounds, queue)
+        ir_core_reach_claimers(slot, rows, bounds, queue, from + 1, workers, parts)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
@@ -892,24 +887,24 @@ ir_core_reach_claimers: fn(slot: Shared<IRReachShared>, bounds: [Int], queue: Sh
 }
 
 // One thread: the rows named by the parts it claims until none is left.
-ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, bounds: [Int], queue: Shared<IRPartQueue>) -> [IRReachPart] {
+ir_core_reach_claimed: fn(slot: Shared<IRReachShared>, rows: [Int], bounds: [Int], queue: Shared<IRPartQueue>) -> [IRReachPart] {
     claimed := [IRReachPart]{}
     claims: queue.guard_read()
     loop {
         part: claims.value.next.add(1)
         if part >= bounds.len() - 1 -> break
-        claimed.push(IRReachPart{part: part, targets: ir_core_reach_part_targets(slot, bounds[part], bounds[part + 1])})
+        claimed.push(IRReachPart{part: part, targets: ir_core_reach_part_targets(slot, rows, bounds[part], bounds[part + 1])})
     }
     claimed
 }
 
-// The rows roots [first, last) name, in root order.
-ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, first: Int, last: Int) -> [Int] {
+// The rows that rows `rows[first..<last]` name, in row order.
+ir_core_reach_part_targets: fn(slot: Shared<IRReachShared>, rows: [Int], first: Int, last: Int) -> [Int] {
     inputs: slot.guard_read()
     targets := [Int]{}
     loop position in first..<last {
         // Passed straight through: a local binding of the guarded rows would copy them.
-        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.symbols[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.decl_rows, inputs.value.roots[position], targets)
+        ir_core_reach_row_targets(inputs.value.functions[0], inputs.value.symbols[0], inputs.value.by_key[0], inputs.value.source_keys[0], inputs.value.decl_rows, rows[position], targets)
     }
     targets
 }
