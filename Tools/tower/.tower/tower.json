@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102492,
+    "rev": 102494,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60868,6 +60868,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T11:16:35.071Z"
+        },
+        {
+          "n": 45,
+          "text": "A loop statement whose body holds an expression-position `?? break` (`sum += Int{r.read_u16_le() ?? break}`) keeps every statement after the loop: the program prints both lines at O0, O1 and O2 (today the names declared after the loop report UnknownName). Proof: a case in tests/cases with both loop spellings and exact stdout.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T21:35:47.455Z"
         }
       ],
       "refs": [],
@@ -60878,12 +60887,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-13T11:16:35.071Z",
+      "updated": "2026-11-14T21:35:47.455Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 44
+      "criteriaLastN": 45
     },
     {
       "id": "c0iuv3zr",
@@ -95752,6 +95761,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Gap found 2026-11-14 while landing: Docs/spec/compiler-data.md says a parallel phase lends read-only tables to its workers, but the compiler has no mechanism to do that. A task's read capture copies the value (BuildExpr ir_copy_value), a lent parameter is E1102, and every parallel phase in Compiler/ uses Shared in a file whose row already counts it. So a new parallel phase (record take, Core body decode, O2 pass threads) either adds a Shared cell, which the ratchet refuses, or copies the whole input per worker. Withdrawn for this reason: Speed-2 6759-c2-core-record-take-parallel and 6759-c9-core-bodies-decode-parallel-r2. GoalsA-1's o2-*-threads and PrecompiledCore's parallel encode/pack are being reworked against the same constraint. Closing this needs a read-only lend for tasks, which is a language or Core surface and so an owner ballot."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-14), compile speed (build.plan): the build-plan query (RootRun \"build\", running a package`s build.jet plan) loads only the sibling members the build entry reaches, through the existing jet_driver_namespace_reach scan, plus their imports. Measured by G11Speed-5 on seed-b17: Compiler/test.jet pulls in jet_testkit (164 modules, a 574-function comptime closure) that build.jet never uses; `jet inspect graph Compiler/build.jet` 7.8 s with it and 1.78 s without; `jet check Compiler/build.jet` 4.48 s and 0.61 s. Chosen over moving test.jet into its own package, because that would tailor only the measured package, while every user package with build.jet plus test.jet pays the same cost. `jet check` and `jet test` still check every member, and target compiles still check what they compile; only the build script`s plan run stops loading unreached siblings. Proof: a case where the plan runs while test.jet has a type error that `jet check` and `jet test` both report; the win on a second user package; the cold self-compile row."
         },
         {
@@ -95824,7 +95838,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:47:04.459Z",
-      "updated": "2026-11-14T04:54:51.300Z",
+      "updated": "2026-11-14T20:45:09.622Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -205402,6 +205416,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T21:35:47.455Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08s0ppt",
+      "note": "#45 A loop statement whose body holds an expression-position `??"
+    },
+    {
+      "at": "2026-11-14T20:45:09.623Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x3j5om",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T20:44:57.667Z",
       "by": "Main",
