@@ -9,7 +9,7 @@ Point: struct {
 
 bump: fn(n: &Int) { n += 1 }
 
-parse: fn(text: String) -> Int? { text.to_int() }
+parse: fn(text: String) -> Int? { text.to_int() ?? return None }
 
 run: fn() {
     assigned := 0
@@ -21,9 +21,9 @@ run: fn() {
     indexed := [Int]{1, 2}
     indexed[0] = 5
     passed := 0
-    bump(&passed)
+    bump(passed)
     receiver := Point{x: 0, y: 0}
-    &receiver.nudge()
+    receiver.nudge()
     in_lambda := 0
     add: fn() { in_lambda += 1 }
     add()
