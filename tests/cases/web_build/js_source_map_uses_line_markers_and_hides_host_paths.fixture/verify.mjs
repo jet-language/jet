@@ -21,9 +21,9 @@ assert.ok(!map.includes(process.cwd()));
 // The user's string that looks like a source-map marker stays verbatim data.
 assert.ok(wasm.includes('//# __jet_source_map line 999'));
 
-// Sections: the code section's bounds, and the last section is the
-// `sourceMappingURL` custom section whose payload is the length-prefixed
-// name of the map.
+// Sections: the code section's bounds, and exactly one `sourceMappingURL`
+// custom section whose payload is the length-prefixed name of the map. Other
+// custom sections (the program's `jet.command` record) may follow it.
 function leb(at) {
   let value = 0, shift = 0, byte;
   do {
@@ -33,21 +33,23 @@ function leb(at) {
   } while (byte & 128);
   return [value, at];
 }
-let at = 8, code = null, last = null;
+let at = 8, code = null;
+const maps = [];
 while (at < wasm.length) {
   const id = wasm[at];
   const [size, start] = leb(at + 1);
   if (id === 10) code = [start, start + size];
-  last = [id, start, start + size];
+  if (id === 0) {
+    const [nameLen, nameAt] = leb(start);
+    if (wasm.subarray(nameAt, nameAt + nameLen).toString() === 'sourceMappingURL') maps.push([nameAt + nameLen, start + size]);
+  }
   at = start + size;
 }
 assert.equal(at, wasm.length);
 assert.ok(code);
-assert.equal(last[0], 0);
-const [nameLen, nameAt] = leb(last[1]);
-assert.equal(wasm.subarray(nameAt, nameAt + nameLen).toString(), 'sourceMappingURL');
-const [urlLen, urlAt] = leb(nameAt + nameLen);
-assert.equal(urlAt + urlLen, last[2]);
+assert.equal(maps.length, 1);
+const [urlLen, urlAt] = leb(maps[0][0]);
+assert.equal(urlAt + urlLen, maps[0][1]);
 assert.equal(wasm.subarray(urlAt, urlAt + urlLen).toString(), 'app.wasm.map');
 
 // Mappings: one generated line whose columns are module byte offsets inside
