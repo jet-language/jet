@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102188,
+    "rev": 102189,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73227,6 +73227,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decision (Main, 2026-11-14), c22 r9c (record-time crossing summaries): taint walks inside a Core module are Core-closed. (1) Loose {owner}|{name} method and field lookups (Sema Taint.jet find_callable :675, find_field :744) no longer match user types inside a Core walk, since Core cannot name one. (2) User catalog tags` from: lists are not applied to Core`s internal flows (sema_taint_source_tags :840). A user from: tag still tags the value a Core call returns into user code when the call`s row carries the tagged effect, so every user-side flow and E0737 is unchanged. (3) The crossing cache takes standalone per-root results, which removes today`s walk-order and thread dependence for recursive Core cycles. Proof in the r9c SUB: a user from: [Net] tag on a Core net read`s result is E0737 at the user line; a user type shadowing a Core name leaves Core crossings unchanged; the taint and secret ui and cases rows are unchanged at --threads 1 and N."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "c22 size ladder: v10 (r11a typed shapes plus r11b packet keys, batch 31, dev d8c48b4381..3fbb97653f) is 61,311,610 B, under the 64 MB gate for the gauntlet rerun (v8 96.2 MB, v9 87.9 MB). Ceiling about 14.2 MB (Docs/audits/2026-11-13-core-record-size-ceiling.md). Next: r9b (usage rows, schema v11; Core bodies are no longer walked for usage), then the s3 embed, with no whole-part copy and lazy key and symbol sections. The c22 proof (strace of jet run hello showing no toolchain-tree reads) waits on the embed."
         },
         {
@@ -73810,7 +73815,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T04:26:23.112Z",
+      "updated": "2026-11-14T04:33:24.876Z",
       "updatedBy": "Main",
       "criteriaLastN": 36
     },
@@ -204708,6 +204713,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T04:33:24.876Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T04:31:44.445Z",
       "by": "Main",
