@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102473,
+    "rev": 102475,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89831,140 +89831,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0lscvc9",
-      "num": 6687,
-      "title": "Jet depends on no other language: port every C dependency (musl, libgcc, SQLite, mbedtls) to Jet",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCensus (Main, dev 9b21994eb3, seed a0_038): jet_runtime_jet.o has 55 undefined symbols, 54 from musl (33 math, 6 pthread, 4 DNS, 11 process, terminal and filesystem calls) plus jet_rt_fault_report. The source has 72 #Import(c) or #FFI(c) sites outside tests, fixtures, binders and examples: JetRuntime CompilerNeededMath.jet 29, RouteSys.jet 8, Thread.jet 6, HostNetResolver.jet 4, RouteTerm.jet 2, and TextFmt, Sync, ProcessSignal, NetRoutes and HostSpawn 1 each; JetDevserver WatchService.jet 7 and WebHost02.jet 4; JetCli Host.jet 2; JetTestKit RequireTool.jet and Assets/no_nix.jet 1 each; Tools/ci/CompiledWorkloadPeerLauncher.jet 1; and Tools/agent-eval/ffi-assurance 2 (a C-interop proof, which stays). The runtime pack links musl libc.a, libgcc.a and libgcc_eh.a (jet-runtime/foreign/platform). Vendored C: Core/Vendor/Sqlite3 (core.db) and Core/Vendor/Mbedtls (core.net TLS), together about 474k lines of C and headers. The clang C toolchain pack serves only users' C interop and `jet cc`, a feature that stays.\n\nOrder: first port the functions Jet uses today (math, threads, syscall wrappers, DNS, the compiler's and tools' own C imports), so the runtime pack drops musl and libgcc. Then port the vendored libraries in full: mbedtls, then SQLite. Each library port covers the whole library that the dependency provided, not only today's call sites. #6682 c4's fresh-clone C compiler requirement disappears once the runtime pack and every artifact jet build Compiler makes contain no C.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Every criterion met: no C dependency remains (musl, libgcc, SQLite and mbedtls are ported)."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Reopened by the G1/G8 fresh-context closeout review (Review1); see the reopened criteria."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "OWNER 2026-11-09 12:19: G1 is due by 16:00 today. G1 removes the C dependencies only. The full SQLite and mbedtls libraries move to G3 (#3550 and #6748 got the criteria), and #6693's size and startup measurement moves to G11 (#6736)."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner refinement 2026-11-09: G4 and G8, and possibly G6, can run in parallel with each other. G1 keeps first claim on slots until it is finished."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-09: goal order. Finish G1 first, then G4 (Best scripting language), then G8 (Effects on types), then G6 (Declarations as types and metaprogramming). The JetDevserver port (#5931, G5) is to be finished, not deleted, but not before these."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Audit 2026-11-09 (CFreeLead3, dev d4d45ded4b): what still links or calls C = (1) jet and jetpack through mbedtls (#6694); (2) the pack's vendored sqlite3 and mbedtls built with host cc/ar (#6694/#6695); (3) host nm in the pack build; (4) any program whose import graph reaches core.db or core.net.tls links musl, startup and pthreads even when it never calls C (ForeignDeps collects every checked module's providers). 21 of 25 gauntlet cells start at __jet_start with no musl."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Correction: #6735 folded into #6700 (G3); the debugger defects fold into #6730 (G5)."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-09: G1's No-C work only moves what Jet depends on from C libraries into native Jet so C leaves the dependencies; speed and size work (while speed is reasonable) belongs to G11 and building out full C-equivalent libraries to G3. New cards: #6735 (G3 math), #6736 (G11 speed), #6737 (G3 DTLS); #6700 moved to G3."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 ~14:10: a new public API does not need a ballot or owner approval for now. Agents follow best practices and idiomatic Jet, using Jet API-building features (typed records with defaults, traits and derives, typed config, Result errors), in the shape of existing Core modules. Other owner gates (syntax, commands, dependencies, invariant exceptions, scope) stay."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner Q8 ruling 2026-11-08: bwrap ships in the C toolchain pack as a stopgap; its removal (a Jet sandbox) is tracked on #6697, longer term."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner 2026-11-08: track full libc coverage too (\"We should already have a lot of what libc covers just need to fill the gaps\"), filed as #6696. Owner approved spawning leads for mbedtls (#6694) and SQLite (#6695)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Which artifacts need which C (SpeedLead, nm on the c4-built jet and on seed a0_038): jet links mbedtls (T mbedtls_ssl_setup, T jet_tls_new) through JetCli core.http.client (BuildHTTPTransport.jet, the HTTPS build fetch) and core.http.server tls (BuildWeb.jet), both reaching Core/Net/Tls.jet #Import c.mbedtls. jet links no sqlite (no sqlite3_* symbol, no core.db reached). jetpack links mbedtls and no sqlite. The runtime pack ships both foreign archives, which a user program links only when it reaches c.mbedtls or c.sqlite3 (ForeignLink.jet jet_cli_vendored_c_archive). So after #6693, mbedtls (#6694) is the only C that jet itself needs; SQLite (#6695) is needed only so the pack can serve user programs that use core.db. The fresh-clone criterion therefore needs #6693 and #6694 for jet, and #6695 for the pack."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "#6688, #6689, #6690, #6691, #6692, #6693, #6694 and #6695 are done. #6696 (full libc coverage) is G3 and does not gate this card.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "#6688, #6689, #6690, #6691, #6692, #6693, #6694 and #6695 are all done; #6694 closed with ctfix-d a800437c58 proved on batch compiler b3.",
-          "at": "2026-11-11T19:44:03.666Z"
-        },
-        {
-          "n": 2,
-          "text": "`jet build Compiler` on a fresh clone with no C compiler, no musl and no Nix builds jet, jetpack and the runtime pack (receipt on a clean HOME with PATH holding only the seed jet and coreutils).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Receipt 2026-11-10 on dev 00a2b37a42 (train t12c landed). git archive of 00a2b37a42 into a fresh directory, with a clean HOME and a PATH holding only the seed jet (built from the landed t12c tree, with Jet's pinned jet-bwrap-x86_64-linux beside it, sha256 0a0c6389…) and coreutils: no cc, gcc, clang, ld, musl-gcc, nix or bwrap. (1) jet build Compiler: rc 0 in 277 s; it writes jet, IDENTITY and jet-runtime (the runtime pack), and the pinned bubblewrap installed itself into the Hangar at tools/0a0c6389…. (2) In the same environment, with the jet just built: Jetpack/Bootstrap/Check.jet --hosted (the release hosted_stage) prints hosted-exit 0 and builds the jetpack engine (sha256 3be4f353…) in 73 s. Scripts: $JET_SCRATCH_ROOT/lanes/Main/runs/fresh-noc.sh and noc-jetpack.sh.",
-          "at": "2026-11-10T16:45:41.526Z"
-        },
-        {
-          "n": 3,
-          "text": "jet, jetpack and every runtime pack file contain no object compiled from C: a symbol and section census of each artifact names only Jet-produced objects, and the pack's foreign/platform directory is gone.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The compiler was built from the t2c tree that landed as dev c057ea659d; integ-land5 checked that tree against HEAD^{tree}. It was inspected with a Node ELF64 reader ($JET_STATE_ROOT/scratch/Main/elfinfo.mjs), since the host has no binutils. jet (32228 symbols) and jetpack (16071) are static EXECs entered at __jet_start, with no interpreter, no dynamic section and no .comment. The runtime pack files jet_runtime.pack.o (3232 symbols) and jet_runtime_jet.o (6502) are REL objects with no .comment, and none of the four has a C-object marker symbol. provenance.json gives backend jet-native, llvmObjects 0 and rustObjects 0, and names no foreign, platform, musl, clang or gcc input; there is no foreign/platform directory. jet-cc-pack-x86_64-linux.tar.zst, which carries clang and musl, is the jet cc C-interop toolchain (#6686), not the runtime pack.",
-          "at": "2026-11-10T02:53:16.949Z"
-        },
-        {
-          "n": 4,
-          "text": "No #Import(c), #FFI(c) or '#Import c.<lib>: module' import remains in Compiler, Core, Jetpack or Tools outside the C-interop feature itself, its tests and its proofs (census command and output in the receipt).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "194aa0de0b: the C-import census also counts attribute-list declarations, and guards c_imports passes on the landed tree. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
-          "at": "2026-11-10T03:58:21.312Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:46:43.606Z",
-      "updated": "2026-11-11T19:44:06.524Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-11T19:44:06.524Z"
-    },
-    {
       "id": "c0bnp1zw",
       "num": 6694,
       "title": "No C: port the mbedtls that Core uses to Jet (the pinned TLS 1.2 and 1.3 set, X.509, PSA crypto)",
@@ -94609,20 +94475,20 @@
         {
           "n": 1,
           "text": "A test step's limit judges the work, not the host's load: JetTestKit bounds each step by the CPU time of the step's process tree (unaffected by other load). The wall-clock limit stays only as a hang guard, set far enough out that a loaded host can't reach it on a working step. A hit on either limit reports TIMEOUT with the limit kind, the CPU and wall seconds used, and the step. A Core.jet #Test proves a CPU-bound step that exceeds the CPU limit is TIMEOUT (cpu) and that a step sleeping past its wall guard is TIMEOUT (wall).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:41:37.693Z"
+          "evidence": "f15ece1132 on dev. 2026-11-14 15:0x, gate-p66 jet on dev 6cd4312a1a: jet test Compiler/JetTestKit/Tests/Core.jet --filter 'past its CPU limit' gives 1 passed, 0 failed",
+          "at": "2026-11-14T20:01:16.313Z"
         },
         {
           "n": 2,
           "text": "Every helper inside a test step that has its own deadline reports a deadline miss with its reason, never as an ERROR with an empty message. This covers the free-port probe (kit_steps_free_ports, StepsTokens.jet) and any readiness or port wait in the case harness. A case forces the free-port probe past its deadline and checks the TIMEOUT reason.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:41:39.069Z"
+          "evidence": "f15ece1132 on dev. jet test Compiler/JetTestKit/Tests/StepsHost.jet --filter 'free-port probe past its deadline' gives 1/0, and --filter 'host-port cases hold' gives 1/0 (gate-p66, 2026-11-14)",
+          "at": "2026-11-14T20:01:17.618Z"
         },
         {
           "n": 3,
@@ -94660,7 +94526,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-12T13:19:03.957Z",
+      "updated": "2026-11-14T20:01:17.618Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -205459,6 +205325,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T20:01:17.618Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T20:01:16.314Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gy2j07",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T18:46:15.797Z",
       "by": "Main",
