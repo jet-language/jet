@@ -53,6 +53,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `#run use { … } / #run use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `#run { … }` block, a `#run fn` body, a compile-time argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
 | `#Pre(#run { … }, "…")` | required early answer: `#run` around a marker expression (a `#Pre` or `#Post` predicate, a `#Memo` bound, a `#Layout` alignment) evaluates it while building at the contract's instantiation point, after the call's checked argument facts are substituted; a false `#Pre` is a build error, and an answer that can't be computed while building is its own error, never deferred to run time |
 | `<N: Int>` | compile-time number parameter declaration: a parameter bounded by exactly the core `Int` is a number, not a type |
+| `Name<N: Int>: Bound #run { if … -> Type else -> Type }` | computed type alias: the alias chooses its type while building, the first choice whose condition holds, decided by its number parameters and the module's constants, then the required `else -> Type`; every choice implements the trait `Bound`, and the chosen type keeps its identity (`Storage<2>` is an `Inline<2>`) |
 | `$` | config-surface environment read `$NAME`; program source has no `$` words |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
 | `x.reflect().fact` | compiler fact read: `T.reflect().layout`, `f.reflect().effects`, `value.reflect().origin` |
@@ -1785,6 +1786,21 @@ a name that is both. `Name: distinct Base` still declares a new nominal type.
 with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date: LocalDate` is the prelude rename
 `pub use Date: core.time.LocalDate`.
+
+**D-COMPUTED-ALIAS1=A — Bounded computed aliases** *(ratified 2026-11-11,
+card #3505; amends D-TYPEALIAS1)*: an alias with number parameters may choose its
+type while building: `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N>
+else -> Heap }`. The type after `:` is the bound, a trait; one that is not is
+E0301. The `#run` body is a chain of `if cond -> Type` choices, any number of
+`else if cond -> Type` links, and the required `else -> Type`; a missing
+`else` is E0003. Each condition is a `Bool` decided by the number parameters
+and the module's constants alone, never by run-time or host state (E0391).
+Every choice, chosen or not, implements the bound (E0905). The first choice
+whose condition holds is the alias's type for those arguments, through the
+ordinary alias expansion: a `Storage<2>` is an `Inline<2>` and passes wherever
+one is wanted, and a `Storage<100>` is a `Heap`. No new nominal type, wrapper,
+allocation or run-time branch exists, and plain aliases are unchanged. The
+golden is `tests/run/Generics/ComputedAlias.jet`.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a
