@@ -4,7 +4,7 @@
   "cells": ["embedded.data"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "languages": ["jet", "rust", "python", "c", "zig", "go", "node"],
   "spec": {
     "behavior": "Read a deterministic EDB1 binary telemetry stream of fixed-size frames, checksum every input byte, retain fixed scalar state for four channels, and report valid-frame counts plus sample, energy, load, and tick aggregates.",
     "args": ["telemetry.bin"],
@@ -90,6 +90,13 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "Uses std-only bounded file loading and explicit little-endian readers; harness toolchain is Zig ReleaseFast."
+    },
+    "go": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Loads the blob with os.ReadFile, bounds-checks the frame table once, and reads each 12-byte frame with encoding/binary little-endian accessors into a fixed four-channel accumulator."
     },
     "node": {
       "author": "luna-max",
