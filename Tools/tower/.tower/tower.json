@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102335,
+    "rev": 102341,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79718,7 +79718,17 @@
           "text": "HELD by owner order 2026-11-11 (no small optimizations until the language is mostly stable; architecture and regression fixes go first, per #5479 c5-c8). These criteria stay open and unworked: c1 (owner order 2026-11-11 (no micro-optimization until the language is mostly stable; #5479 c)."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "The runtime routes that cannot publish a stop are known from a sound, generated source, and ir_route_can_stop's hand list is gone.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:14.491Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -79727,9 +79737,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T21:31:02.365Z",
-      "updated": "2026-11-13T02:02:18.464Z",
+      "updated": "2026-11-14T09:02:14.491Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c02qdoro",
@@ -86600,7 +86610,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "The standard library is compiled once and reused by every compilation instead of being recompiled from source.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:26.252Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -86609,9 +86629,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:12.152Z",
-      "updated": "2026-11-11T12:44:08.612Z",
+      "updated": "2026-11-14T09:02:26.252Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c04pj0wn",
@@ -91958,7 +91978,35 @@
           "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Speed or size card: moved from no goal to G11. Owner order 2026-11-09: all speed and size work is G11."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Stores through a &struct field place reach the O2 fill leaf the same as stores to a local: the renderer's fill through a field place runs within 1.2x of the local form. Proof: a paired timed row in the renderer's Micro.jet (field place against local), plus an IR case showing the fill leaf for the field-place loop.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:35.608Z"
+        },
+        {
+          "n": 2,
+          "text": "U64 arithmetic at O2 compiles to native 64-bit instructions with no per-operation call or check beyond Jet's overflow meaning: the Micro.jet U64 loop at O2 runs at least 5x faster than at O0. Proof: a timed row at O0 and O2, plus an IR case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:37.479Z"
+        },
+        {
+          "n": 3,
+          "text": "An O0 indexed store costs no more than the bounds check plus the store (target ≤1 ns per element on the renderer row), so per-pixel code can redraw 1080p in a few ms under jet run. Proof: the Micro.jet indexed-store row at O0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:39.265Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -91967,8 +92015,9 @@
       "parentId": "c0f9brds",
       "needsAcceptance": false,
       "created": "2026-11-09T13:21:28.909Z",
-      "updated": "2026-11-09T19:53:33.031Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T09:02:39.265Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0ov5fau",
@@ -95344,7 +95393,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: a case shows a call to a quiet runtime route (for example jet_time_sleep_until is not quiet, a pure scalar route is) followed by no stop poll in the lowered IR, and the cancellation and deadline cases pass at O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:02:24.058Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -95353,8 +95412,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T10:15:23.686Z",
-      "updated": "2026-11-13T10:15:23.686Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T09:02:24.058Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     },
     {
       "id": "c0c8uw1v",
@@ -205249,6 +205309,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T09:02:39.265Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qoe1b9",
+      "note": "#3 An O0 indexed store costs no more than the bounds check plus"
+    },
+    {
+      "at": "2026-11-14T09:02:37.480Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qoe1b9",
+      "note": "#2 U64 arithmetic at O2 compiles to native 64-bit instructions "
+    },
+    {
+      "at": "2026-11-14T09:02:35.608Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qoe1b9",
+      "note": "#1 Stores through a &struct field place reach the O2 fill leaf "
+    },
+    {
+      "at": "2026-11-14T09:02:26.252Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ms9n00",
+      "note": "#2 The standard library is compiled once and reused by every co"
+    },
+    {
+      "at": "2026-11-14T09:02:24.058Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0g4h3r9",
+      "note": "#1 ir_route_can_stop answers from a stops receipt built from th"
+    },
+    {
+      "at": "2026-11-14T09:02:14.491Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0u19cev",
+      "note": "#2 The runtime routes that cannot publish a stop are known from"
+    },
     {
       "at": "2026-11-14T08:59:14.807Z",
       "by": "Main",
