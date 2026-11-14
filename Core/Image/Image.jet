@@ -89,14 +89,14 @@ Image: struct {
 // The header of `data`: its size, format and color, checked against
 // `limits` the way `decode` checks it.
 inspect: fn(data: [U8], limits: Limits) -> ImageInfo ImageError! {
-    format: read_format(data, limits) ?? return Err(err)
+    format: __read_format(data, limits) ?? return Err(err)
     if format == {
         .PNG -> {
-            header: png_header(data, limits) ?? return Err(err)
-            Ok(ImageInfo{width: header.width, height: header.height, format: .PNG, color: png_color(header.color_type)})
+            header: __png_header(data, limits) ?? return Err(err)
+            Ok(ImageInfo{width: header.width, height: header.height, format: .PNG, color: __png_color(header.color_type)})
         }
         .JPEG -> {
-            frame: jpeg_frame(data, limits) ?? return Err(err)
+            frame: __jpeg_frame(data, limits) ?? return Err(err)
             color: if frame.ids.len() == 1 -> ImageColor.Gray else -> ImageColor.RGB
             Ok(ImageInfo{width: frame.width, height: frame.height, format: .JPEG, color: color})
         }
@@ -106,15 +106,15 @@ inspect: fn(data: [U8], limits: Limits) -> ImageInfo ImageError! {
 
 // The pixels of `data`, an encoded image, within `limits`.
 decode: fn(data: [U8], limits: Limits) -> Image ImageError! {
-    format: read_format(data, limits) ?? return Err(err)
+    format: __read_format(data, limits) ?? return Err(err)
     if format == {
         .PNG -> {
-            header: png_header(data, limits) ?? return Err(err)
-            png_decode(data, header)
+            header: __png_header(data, limits) ?? return Err(err)
+            __png_decode(data, header)
         }
         .JPEG -> {
-            frame: jpeg_frame(data, limits) ?? return Err(err)
-            jpeg_decode(data, frame, limits)
+            frame: __jpeg_frame(data, limits) ?? return Err(err)
+            __jpeg_decode(data, frame, limits)
         }
         .GIF -> Err(.Unsupported)
     }
@@ -130,8 +130,8 @@ encode: fn(image: Image, format: ImageFormat, limits: Limits) -> [U8] ImageError
     if image.width > limits.max_pixels /% image.height || image.width * image.height > limits.max_input_bytes /% 4 -> return Err(.TooLarge)
     if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
     if format == {
-        .PNG -> png_encode(image, limits)
-        .JPEG -> jpeg_encode(image, limits)
+        .PNG -> __png_encode(image, limits)
+        .JPEG -> __jpeg_encode(image, limits)
         .GIF -> Err(.Unsupported)
     }
 }
@@ -168,61 +168,61 @@ PNGHeader: struct {
     interlace: Int
 }
 
-byte_at: fn(data: [U8], at: Int) -> Int {
+__byte_at: fn(data: [U8], at: Int) -> Int {
     Int{data[at]}
 }
 
-be32: fn(data: [U8], at: Int) -> Int {
-    (byte_at(data, at) << 24) + (byte_at(data, at + 1) << 16) + (byte_at(data, at + 2) << 8) + byte_at(data, at + 3)
+__be32: fn(data: [U8], at: Int) -> Int {
+    (__byte_at(data, at) << 24) + (__byte_at(data, at + 1) << 16) + (__byte_at(data, at + 2) << 8) + __byte_at(data, at + 3)
 }
 
-starts_with_bytes: fn(data: [U8], prefix: [Int]) -> Bool {
+__starts_with_bytes: fn(data: [U8], prefix: [Int]) -> Bool {
     if data.len() < prefix.len() -> return false
     loop (at, byte) in prefix {
-        if byte_at(data, at) != byte -> return false
+        if __byte_at(data, at) != byte -> return false
     }
     true
 }
 
 // The format the first bytes of `data` name, if any.
-sniff: fn(data: [U8]) -> ImageFormat? {
-    if starts_with_bytes(data, C_PNG_SIGNATURE) -> return Val(.PNG)
-    if starts_with_bytes(data, [Int]{0xFF, 0xD8, 0xFF}) -> return Val(.JPEG)
-    if starts_with_bytes(data, [Int]{71, 73, 70, 56}) -> return Val(.GIF)
+__sniff: fn(data: [U8]) -> ImageFormat? {
+    if __starts_with_bytes(data, C_PNG_SIGNATURE) -> return Val(.PNG)
+    if __starts_with_bytes(data, [Int]{0xFF, 0xD8, 0xFF}) -> return Val(.JPEG)
+    if __starts_with_bytes(data, [Int]{71, 73, 70, 56}) -> return Val(.GIF)
     None
 }
 
 // Checks the budgets themselves and the input size, then names the format.
-read_format: fn(data: [U8], limits: Limits) -> ImageFormat ImageError! {
+__read_format: fn(data: [U8], limits: Limits) -> ImageFormat ImageError! {
     if limits.max_input_bytes < 1 || limits.max_pixels < 1 || limits.max_output_bytes < 1 -> return Err(.TooLarge)
     if data.len() > limits.max_input_bytes -> return Err(.TooLarge)
-    format: sniff(data) ?? return Err(.Malformed)
+    format: __sniff(data) ?? return Err(.Malformed)
     Ok(format)
 }
 
 // Whether `width` x `height` pixels, and that many RGBA8 bytes, exceed
 // `limits`.
-too_large: fn(width: Int, height: Int, limits: Limits) -> Bool {
+__too_large: fn(width: Int, height: Int, limits: Limits) -> Bool {
     width > limits.max_pixels /% height || width * height > limits.max_output_bytes /% 4
 }
 
 // Reads and checks the IHDR, the first chunk: a PNG's size against
 // `limits`.
-png_header: fn(data: [U8], limits: Limits) -> PNGHeader ImageError! {
-    if data.len() < 33 || be32(data, 8) != 13 || be32(data, 12) != C_PNG_IHDR -> return Err(.Malformed)
-    width: be32(data, 16)
-    height: be32(data, 20)
-    depth: byte_at(data, 24)
-    color_type: byte_at(data, 25)
-    interlace: byte_at(data, 28)
-    if width < 1 || height < 1 || byte_at(data, 26) != 0 || byte_at(data, 27) != 0 || interlace > 1 -> return Err(.Malformed)
-    channels: png_channels(color_type, depth)
+__png_header: fn(data: [U8], limits: Limits) -> PNGHeader ImageError! {
+    if data.len() < 33 || __be32(data, 8) != 13 || __be32(data, 12) != C_PNG_IHDR -> return Err(.Malformed)
+    width: __be32(data, 16)
+    height: __be32(data, 20)
+    depth: __byte_at(data, 24)
+    color_type: __byte_at(data, 25)
+    interlace: __byte_at(data, 28)
+    if width < 1 || height < 1 || __byte_at(data, 26) != 0 || __byte_at(data, 27) != 0 || interlace > 1 -> return Err(.Malformed)
+    channels: __png_channels(color_type, depth)
     if channels == 0 -> return Err(.Unsupported)
-    if too_large(width, height, limits) -> return Err(.TooLarge)
+    if __too_large(width, height, limits) -> return Err(.TooLarge)
     Ok(PNGHeader{width: width, height: height, color_type: color_type, depth: depth, channels: channels, interlace: interlace})
 }
 
-png_color: fn(color_type: Int) -> ImageColor {
+__png_color: fn(color_type: Int) -> ImageColor {
     if color_type == {
         2 -> ImageColor.RGB
         3 -> ImageColor.Indexed
@@ -233,7 +233,7 @@ png_color: fn(color_type: Int) -> ImageColor {
 }
 
 // Samples per pixel for a valid color type and bit depth, else 0.
-png_channels: fn(color_type: Int, depth: Int) -> Int {
+__png_channels: fn(color_type: Int, depth: Int) -> Int {
     low: depth == 1 || depth == 2 || depth == 4
     whole: depth == 8 || depth == 16
     if color_type == {
@@ -249,15 +249,15 @@ png_channels: fn(color_type: Int, depth: Int) -> Int {
 // The pixels of a PNG whose IHDR `header` has passed png_header: the chunks
 // after it, the inflated scanlines unfiltered pass by pass, each sample
 // expanded to RGBA.
-png_decode: fn(data: [U8], header: PNGHeader) -> Image ImageError! {
+__png_decode: fn(data: [U8], header: PNGHeader) -> Image ImageError! {
     palette := [U8]{}
     key := [U8]{}
     compressed := [U8]{}
     at := 33
     ended := false
     loop at + 8 <= data.len() {
-        length: be32(data, at)
-        kind: be32(data, at + 4)
+        length: __be32(data, at)
+        kind: __be32(data, at + 4)
         start: at + 8
         if length > data.len() - start - 4 || kind == C_PNG_IHDR -> return Err(.Malformed)
         if kind == C_PNG_IEND {
@@ -296,10 +296,10 @@ png_decode: fn(data: [U8], header: PNGHeader) -> Image ImageError! {
         loop _ in 0..<row_bytes -> previous.push(U8{0})
         loop row in 0..<pass_height {
             if offset + 1 + row_bytes > raw.len() -> return Err(.Malformed)
-            line: png_unfilter(raw, offset, row_bytes, step, previous) ?? return Err(.Malformed)
+            line: __png_unfilter(raw, offset, row_bytes, step, previous) ?? return Err(.Malformed)
             loop column in 0..<pass_width {
                 target: ((origin_y + row * step_y) * width + origin_x + column * step_x) * 4
-                put_rgba(pixels, target, png_sample(line, column, header, palette, key))
+                __put_rgba(pixels, target, __png_sample(line, column, header, palette, key))
             }
             previous = line
             offset += 1 + row_bytes
@@ -311,90 +311,90 @@ png_decode: fn(data: [U8], header: PNGHeader) -> Image ImageError! {
 // One reconstructed scanline: raw[offset] names the filter and the row's
 // bytes follow it; `previous` is the reconstructed row above, zeros first.
 // An unknown filter is no row.
-png_unfilter: fn(raw: [U8], offset: Int, row_bytes: Int, step: Int, previous: [U8]) -> [U8]? {
-    filter: byte_at(raw, offset)
+__png_unfilter: fn(raw: [U8], offset: Int, row_bytes: Int, step: Int, previous: [U8]) -> [U8]? {
+    filter: __byte_at(raw, offset)
     if filter > 4 -> return None
     line := [U8]{}
     loop i in 0..<row_bytes {
-        left: if i >= step -> byte_at(line, i - step) else -> 0
-        up: byte_at(previous, i)
-        corner: if i >= step -> byte_at(previous, i - step) else -> 0
+        left: if i >= step -> __byte_at(line, i - step) else -> 0
+        up: __byte_at(previous, i)
+        corner: if i >= step -> __byte_at(previous, i - step) else -> 0
         predictor: if filter == {
             1 -> left
             2 -> up
             3 -> (left + up) /% 2
-            4 -> paeth(left, up, corner)
+            4 -> __paeth(left, up, corner)
             else -> 0
         }
-        value: (byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
+        value: (__byte_at(raw, offset + 1 + i) + predictor).bit_and(255)
         line.push(U8{value})
     }
     Val(line)
 }
 
-distance: fn(a: Int, b: Int) -> Int {
+__distance: fn(a: Int, b: Int) -> Int {
     if a < b -> return b - a
     a - b
 }
 
-paeth: fn(left: Int, up: Int, corner: Int) -> Int {
+__paeth: fn(left: Int, up: Int, corner: Int) -> Int {
     estimate: left + up - corner
-    to_left: distance(estimate, left)
-    to_up: distance(estimate, up)
-    to_corner: distance(estimate, corner)
+    to_left: __distance(estimate, left)
+    to_up: __distance(estimate, up)
+    to_corner: __distance(estimate, corner)
     if to_left <= to_up && to_left <= to_corner -> return left
     if to_up <= to_corner -> return up
     corner
 }
 
-put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
+__put_rgba: fn(pixels: &[U8], at: Int, rgba: Int) {
     pixels[at] = U8{rgba >> 24}
     pixels[at + 1] = U8{(rgba >> 16).bit_and(255)}
     pixels[at + 2] = U8{(rgba >> 8).bit_and(255)}
     pixels[at + 3] = U8{rgba.bit_and(255)}
 }
 
-png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
+__png_rgba: fn(red: Int, green: Int, blue: Int, alpha: Int) -> Int {
     (red << 24) + (green << 16) + (blue << 8) + alpha
 }
 
-push_be32: fn(out: &[U8], value: Int) {
+__push_be32: fn(out: &[U8], value: Int) {
     loop shift in ([Int]{24, 16, 8, 0}) -> out.push(U8{(value >> shift).bit_and(255)})
 }
 
 // Appends a chunk: its length, its type and body, and their CRC-32.
-png_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
-    push_be32(out, body.len())
+__png_chunk: fn(out: &[U8], kind: Int, body: [U8]) {
+    __push_be32(out, body.len())
     typed := [U8]{}
-    push_be32(typed, kind)
+    __push_be32(typed, kind)
     loop byte in body -> typed.push(byte)
     checksum: core.archive.crc32(typed)
     loop byte in typed -> out.push(byte)
-    push_be32(out, checksum)
+    __push_be32(out, checksum)
 }
 
 // The byte at `at` of a scanline under PNG filter `filter`, given the
 // unfiltered scanline above (empty for the first).
-png_filtered: fn(line: [U8], previous: [U8], at: Int, channels: Int, filter: Int) -> Int {
-    left: if at >= channels -> byte_at(line, at - channels) else -> 0
-    up: if previous.len() > 0 -> byte_at(previous, at) else -> 0
-    corner: if at >= channels && previous.len() > 0 -> byte_at(previous, at - channels) else -> 0
+__png_filtered: fn(line: [U8], previous: [U8], at: Int, channels: Int, filter: Int) -> Int {
+    left: if at >= channels -> __byte_at(line, at - channels) else -> 0
+    up: if previous.len() > 0 -> __byte_at(previous, at) else -> 0
+    corner: if at >= channels && previous.len() > 0 -> __byte_at(previous, at - channels) else -> 0
     predicted: if filter == {
         0 -> 0
         1 -> left
         2 -> up
         3 -> (left + up) >> 1
-        else -> paeth(left, up, corner)
+        else -> __paeth(left, up, corner)
     }
-    (byte_at(line, at) - predicted).bit_and(255)
+    (__byte_at(line, at) - predicted).bit_and(255)
 }
 
 // A PNG of `image`, which `encode` has checked.
-png_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
+__png_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
     channels := 3
     at := 3
     loop at < image.pixels.len() {
-        if byte_at(image.pixels, at) != 255 {
+        if __byte_at(image.pixels, at) != 255 {
             channels = 4
             break
         }
@@ -412,7 +412,7 @@ png_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
         loop filter in 0..<5 {
             cost := 0
             loop index in 0..<line.len() {
-                value: png_filtered(line, previous, index, channels, filter)
+                value: __png_filtered(line, previous, index, channels, filter)
                 cost += if value < 128 -> value else -> 256 - value
             }
             if best_cost < 0 || cost < best_cost {
@@ -421,72 +421,72 @@ png_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
             }
         }
         raw.push(U8{best})
-        loop index in 0..<line.len() -> raw.push(U8{png_filtered(line, previous, index, channels, best)})
+        loop index in 0..<line.len() -> raw.push(U8{__png_filtered(line, previous, index, channels, best)})
         previous = line
     }
     stream: core.archive.compress(raw) ?? return Err(.TooLarge)
     header := [U8]{}
-    push_be32(header, image.width)
-    push_be32(header, image.height)
+    __push_be32(header, image.width)
+    __push_be32(header, image.height)
     loop value in ([Int]{8, if channels == 4 -> 6 else -> 2, 0, 0, 0}) -> header.push(U8{value})
     out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
-    png_chunk(out, C_PNG_IHDR, header)
-    png_chunk(out, C_PNG_IDAT, stream)
-    png_chunk(out, C_PNG_IEND, [U8]{})
+    __png_chunk(out, C_PNG_IHDR, header)
+    __png_chunk(out, C_PNG_IDAT, stream)
+    __png_chunk(out, C_PNG_IEND, [U8]{})
     if out.len() > limits.max_output_bytes -> return Err(.TooLarge)
     Ok(out)
 }
 
 // Whether tRNS's 16-bit key word at `index` equals the full sample value.
-png_key_match: fn(key: [U8], index: Int, value: Int) -> Bool {
-    (byte_at(key, index) << 8) + byte_at(key, index + 1) == value
+__png_key_match: fn(key: [U8], index: Int, value: Int) -> Bool {
+    (__byte_at(key, index) << 8) + __byte_at(key, index + 1) == value
 }
 
 // A palette entry with its tRNS alpha; an index past the palette is opaque
 // black, which the PNG specification permits decoders to show.
-png_palette: fn(palette: [U8], key: [U8], index: Int) -> Int {
+__png_palette: fn(palette: [U8], key: [U8], index: Int) -> Int {
     at: index * 3
-    if at + 3 > palette.len() -> return png_rgba(0, 0, 0, 255)
-    alpha: if index < key.len() -> byte_at(key, index) else -> 255
-    png_rgba(byte_at(palette, at), byte_at(palette, at + 1), byte_at(palette, at + 2), alpha)
+    if at + 3 > palette.len() -> return __png_rgba(0, 0, 0, 255)
+    alpha: if index < key.len() -> __byte_at(key, index) else -> 255
+    __png_rgba(__byte_at(palette, at), __byte_at(palette, at + 1), __byte_at(palette, at + 2), alpha)
 }
 
 // A whole sample: two big-endian bytes when `size` is 2, else one.
-png_word: fn(line: [U8], at: Int, size: Int) -> Int {
-    if size == 2 -> return (byte_at(line, at) << 8) + byte_at(line, at + 1)
-    byte_at(line, at)
+__png_word: fn(line: [U8], at: Int, size: Int) -> Int {
+    if size == 2 -> return (__byte_at(line, at) << 8) + __byte_at(line, at + 1)
+    __byte_at(line, at)
 }
 
 // The packed straight 0xRRGGBBAA of pixel `column` of a reconstructed
 // scanline.
-png_sample: fn(line: [U8], column: Int, header: PNGHeader, palette: [U8], key: [U8]) -> Int {
+__png_sample: fn(line: [U8], column: Int, header: PNGHeader, palette: [U8], key: [U8]) -> Int {
     depth: header.depth
     if depth < 8 {
         bit: column * depth
-        value: (byte_at(line, bit /% 8) >> (8 - depth - bit % 8)).bit_and((1 << depth) - 1)
-        if header.color_type == 3 -> return png_palette(palette, key, value)
+        value: (__byte_at(line, bit /% 8) >> (8 - depth - bit % 8)).bit_and((1 << depth) - 1)
+        if header.color_type == 3 -> return __png_palette(palette, key, value)
         gray: value * (255 /% ((1 << depth) - 1))
-        alpha: if key.len() == 2 && png_key_match(key, 0, value) -> 0 else -> 255
-        return png_rgba(gray, gray, gray, alpha)
+        alpha: if key.len() == 2 && __png_key_match(key, 0, value) -> 0 else -> 255
+        return __png_rgba(gray, gray, gray, alpha)
     }
-    if header.color_type == 3 -> return png_palette(palette, key, byte_at(line, column))
+    if header.color_type == 3 -> return __png_palette(palette, key, __byte_at(line, column))
     size: if depth == 16 -> 2 else -> 1
     base: column * header.channels * size
     if header.color_type == 0 {
-        gray: byte_at(line, base)
-        alpha: if key.len() == 2 && png_key_match(key, 0, png_word(line, base, size)) -> 0 else -> 255
-        return png_rgba(gray, gray, gray, alpha)
+        gray: __byte_at(line, base)
+        alpha: if key.len() == 2 && __png_key_match(key, 0, __png_word(line, base, size)) -> 0 else -> 255
+        return __png_rgba(gray, gray, gray, alpha)
     }
     if header.color_type == 4 {
-        gray: byte_at(line, base)
-        return png_rgba(gray, gray, gray, byte_at(line, base + size))
+        gray: __byte_at(line, base)
+        return __png_rgba(gray, gray, gray, __byte_at(line, base + size))
     }
-    red: byte_at(line, base)
-    green: byte_at(line, base + size)
-    blue: byte_at(line, base + 2 * size)
-    if header.color_type == 6 -> return png_rgba(red, green, blue, byte_at(line, base + 3 * size))
-    keyed: key.len() == 6 && png_key_match(key, 0, png_word(line, base, size)) && png_key_match(key, 2, png_word(line, base + size, size)) && png_key_match(key, 4, png_word(line, base + 2 * size, size))
-    png_rgba(red, green, blue, if keyed -> 0 else -> 255)
+    red: __byte_at(line, base)
+    green: __byte_at(line, base + size)
+    blue: __byte_at(line, base + 2 * size)
+    if header.color_type == 6 -> return __png_rgba(red, green, blue, __byte_at(line, base + 3 * size))
+    keyed: key.len() == 6 && __png_key_match(key, 0, __png_word(line, base, size)) && __png_key_match(key, 2, __png_word(line, base + size, size)) && __png_key_match(key, 4, __png_word(line, base + 2 * size, size))
+    __png_rgba(red, green, blue, if keyed -> 0 else -> 255)
 }
 
 C_JPEG_SOI: 0xD8
@@ -543,65 +543,65 @@ JPEGBits: struct {
     marker: Bool
 }
 
-be16: fn(data: [U8], at: Int) -> Int {
-    (byte_at(data, at) << 8) + byte_at(data, at + 1)
+__be16: fn(data: [U8], at: Int) -> Int {
+    (__byte_at(data, at) << 8) + __byte_at(data, at + 1)
 }
 
 // The segment at `at`, after any fill bytes.
-jpeg_segment: fn(data: [U8], at: Int) -> JPEGSegment ImageError! {
-    if at >= data.len() || byte_at(data, at) != 0xFF -> return Err(.Malformed)
+__jpeg_segment: fn(data: [U8], at: Int) -> JPEGSegment ImageError! {
+    if at >= data.len() || __byte_at(data, at) != 0xFF -> return Err(.Malformed)
     position := at
-    loop position < data.len() && byte_at(data, position) == 0xFF -> position += 1
+    loop position < data.len() && __byte_at(data, position) == 0xFF -> position += 1
     if position >= data.len() -> return Err(.Malformed)
-    marker: byte_at(data, position)
+    marker: __byte_at(data, position)
     if marker == 0x01 || marker == C_JPEG_SOI || marker == C_JPEG_EOI || (marker >= 0xD0 && marker <= 0xD7) -> return Ok(JPEGSegment{marker: marker, start: position + 1, end: position + 1})
     if position + 2 >= data.len() -> return Err(.Malformed)
-    length: be16(data, position + 1)
+    length: __be16(data, position + 1)
     if length < 2 || position + 1 + length > data.len() -> return Err(.Malformed)
     Ok(JPEGSegment{marker: marker, start: position + 3, end: position + 1 + length})
 }
 
 // Whether `marker` starts a frame this module does not decode: progressive,
 // lossless, hierarchical or arithmetic-coded.
-jpeg_other_frame: fn(marker: Int) -> Bool {
+__jpeg_other_frame: fn(marker: Int) -> Bool {
     marker >= 0xC2 && marker <= 0xCF && marker != C_JPEG_DHT && marker != 0xC8 && marker != 0xCC
 }
 
 // Walks the segments to the frame header and checks it: a sequential
 // Huffman frame of 8-bit samples in one or three components, within
 // `limits`.
-jpeg_frame: fn(data: [U8], limits: Limits) -> JPEGFrame ImageError! {
+__jpeg_frame: fn(data: [U8], limits: Limits) -> JPEGFrame ImageError! {
     at := 2
     loop at < data.len() {
-        segment: jpeg_segment(data, at) ?? return Err(err)
+        segment: __jpeg_segment(data, at) ?? return Err(err)
         marker: segment.marker
-        if marker == 0xC0 || marker == 0xC1 -> return jpeg_frame_header(data, segment, limits)
-        if jpeg_other_frame(marker) -> return Err(.Unsupported)
+        if marker == 0xC0 || marker == 0xC1 -> return __jpeg_frame_header(data, segment, limits)
+        if __jpeg_other_frame(marker) -> return Err(.Unsupported)
         if marker == C_JPEG_SOS || marker == C_JPEG_EOI -> return Err(.Malformed)
         at = segment.end
     }
     Err(.Malformed)
 }
 
-jpeg_frame_header: fn(data: [U8], segment: JPEGSegment, limits: Limits) -> JPEGFrame ImageError! {
+__jpeg_frame_header: fn(data: [U8], segment: JPEGSegment, limits: Limits) -> JPEGFrame ImageError! {
     start: segment.start
     if segment.end - start < 6 -> return Err(.Malformed)
-    if byte_at(data, start) != 8 -> return Err(.Unsupported)
-    height: be16(data, start + 1)
-    width: be16(data, start + 3)
-    count: byte_at(data, start + 5)
+    if __byte_at(data, start) != 8 -> return Err(.Unsupported)
+    height: __be16(data, start + 1)
+    width: __be16(data, start + 3)
+    count: __byte_at(data, start + 5)
     if count != 1 && count != 3 -> return Err(.Unsupported)
     if segment.end - start != 6 + count * 3 || width == 0 -> return Err(.Malformed)
     // A zero height defers to a DNL marker after the scan.
     if height == 0 -> return Err(.Unsupported)
-    if too_large(width, height, limits) -> return Err(.TooLarge)
+    if __too_large(width, height, limits) -> return Err(.TooLarge)
     frame := JPEGFrame{width: width, height: height, ids: [Int]{}, hs: [Int]{}, vs: [Int]{}, tables: [Int]{}}
     loop index in 0..<count {
         at: start + 6 + index * 3
-        sampling: byte_at(data, at + 1)
-        table: byte_at(data, at + 2)
+        sampling: __byte_at(data, at + 1)
+        table: __byte_at(data, at + 2)
         if sampling < 0x11 || sampling > 0x44 || sampling.bit_and(15) < 1 || sampling.bit_and(15) > 4 || table > 3 -> return Err(.Malformed)
-        frame.ids.push(byte_at(data, at))
+        frame.ids.push(__byte_at(data, at))
         frame.hs.push(if count == 1 -> 1 else -> sampling >> 4)
         frame.vs.push(if count == 1 -> 1 else -> sampling.bit_and(15))
         frame.tables.push(table)
@@ -609,18 +609,18 @@ jpeg_frame_header: fn(data: [U8], segment: JPEGSegment, limits: Limits) -> JPEGF
     Ok(frame)
 }
 
-no_huffman: fn() -> JPEGHuffman {
+__no_huffman: fn() -> JPEGHuffman {
     JPEGHuffman{maxcode: [Int]{}, mincode: [Int]{}, valptr: [Int]{}, values: [Int]{}}
 }
 
 // The table whose 16 code-length counts start at `at`, its `total` values
 // after them; codes that overflow their length make no table.
-jpeg_huffman: fn(data: [U8], at: Int, total: Int) -> JPEGHuffman? {
+__jpeg_huffman: fn(data: [U8], at: Int, total: Int) -> JPEGHuffman? {
     table := JPEGHuffman{maxcode: [Int]{-1}, mincode: [Int]{0}, valptr: [Int]{0}, values: [Int]{}}
     code := 0
     first := 0
     loop length in 1..<17 {
-        count: byte_at(data, at + length - 1)
+        count: __byte_at(data, at + length - 1)
         table.mincode.push(code)
         table.valptr.push(first)
         code += count
@@ -629,21 +629,21 @@ jpeg_huffman: fn(data: [U8], at: Int, total: Int) -> JPEGHuffman? {
         table.maxcode.push(if count > 0 -> code - 1 else -> -1)
         code = code << 1
     }
-    loop index in 0..<total -> table.values.push(byte_at(data, at + 16 + index))
+    loop index in 0..<total -> table.values.push(__byte_at(data, at + 16 + index))
     Val(table)
 }
 
 // Reads a DHT segment's tables into `tables`.
-jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
+__jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
     at := segment.start
     loop at < segment.end {
-        class: byte_at(data, at) >> 4
-        slot: byte_at(data, at).bit_and(15)
+        class: __byte_at(data, at) >> 4
+        slot: __byte_at(data, at).bit_and(15)
         if class > 1 || slot > 3 || at + 17 > segment.end -> return Err(.Malformed)
         total := 0
-        loop index in 0..<16 -> total += byte_at(data, at + 1 + index)
+        loop index in 0..<16 -> total += __byte_at(data, at + 1 + index)
         if at + 17 + total > segment.end -> return Err(.Malformed)
-        tables.huffman[class * 4 + slot] = jpeg_huffman(data, at + 1, total) ?? return Err(.Malformed)
+        tables.huffman[class * 4 + slot] = __jpeg_huffman(data, at + 1, total) ?? return Err(.Malformed)
         at += 17 + total
     }
     Ok()
@@ -651,15 +651,15 @@ jpeg_read_huffman: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) Ima
 
 // Reads a DQT segment's tables, 64 zigzag entries per slot, into `tables`
 // and marks their slots defined.
-jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
+__jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) ImageError! {
     at := segment.start
     loop at < segment.end {
-        wide: byte_at(data, at) >> 4
-        slot: byte_at(data, at).bit_and(15)
+        wide: __byte_at(data, at) >> 4
+        slot: __byte_at(data, at).bit_and(15)
         size: if wide == 1 -> 128 else -> 64
         if wide > 1 || slot > 3 || at + 1 + size > segment.end -> return Err(.Malformed)
         loop index in 0..<64 {
-            tables.quant[slot * 64 + index] = if wide == 1 -> be16(data, at + 1 + 2 * index) else -> byte_at(data, at + 1 + index)
+            tables.quant[slot * 64 + index] = if wide == 1 -> __be16(data, at + 1 + 2 * index) else -> __byte_at(data, at + 1 + index)
         }
         tables.defined[slot] = true
         at += 1 + size
@@ -667,14 +667,14 @@ jpeg_read_quant: fn(data: [U8], segment: JPEGSegment, tables: &JPEGTables) Image
     Ok()
 }
 
-jpeg_byte: fn(data: [U8], bits: &JPEGBits) -> Int {
+__jpeg_byte: fn(data: [U8], bits: &JPEGBits) -> Int {
     if bits.marker || bits.at >= data.len() -> return 0
-    byte: byte_at(data, bits.at)
+    byte: __byte_at(data, bits.at)
     if byte != 0xFF {
         bits.at += 1
         return byte
     }
-    if bits.at + 1 < data.len() && byte_at(data, bits.at + 1) == 0 {
+    if bits.at + 1 < data.len() && __byte_at(data, bits.at + 1) == 0 {
         bits.at += 2
         return 0xFF
     }
@@ -682,9 +682,9 @@ jpeg_byte: fn(data: [U8], bits: &JPEGBits) -> Int {
     0
 }
 
-jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
+__jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
     if bits.count == 0 {
-        bits.buffer = jpeg_byte(data, bits)
+        bits.buffer = __jpeg_byte(data, bits)
         bits.count = 8
     }
     bits.count -= 1
@@ -693,21 +693,21 @@ jpeg_bit: fn(data: [U8], bits: &JPEGBits) -> Int {
 
 // The next `size` bits as a signed coefficient: values below half the range
 // are negative.
-jpeg_receive: fn(data: [U8], bits: &JPEGBits, size: Int) -> Int {
+__jpeg_receive: fn(data: [U8], bits: &JPEGBits, size: Int) -> Int {
     value := 0
-    loop _ in 0..<size -> value = (value << 1) + jpeg_bit(data, bits)
+    loop _ in 0..<size -> value = (value << 1) + __jpeg_bit(data, bits)
     if value < (1 << (size - 1)) -> return value - (1 << size) + 1
     value
 }
 
-jpeg_symbol: fn(data: [U8], bits: &JPEGBits, table: JPEGHuffman) -> Int ImageError! {
+__jpeg_symbol: fn(data: [U8], bits: &JPEGBits, table: JPEGHuffman) -> Int ImageError! {
     if table.maxcode.len() == 0 -> return Err(.Malformed)
-    code := jpeg_bit(data, bits)
+    code := __jpeg_bit(data, bits)
     length := 1
     loop code > table.maxcode[length] {
         if length == 16 -> return Err(.Malformed)
         length += 1
-        code = (code << 1) + jpeg_bit(data, bits)
+        code = (code << 1) + __jpeg_bit(data, bits)
     }
     Ok(table.values[table.valptr[length] + code - table.mincode[length]])
 }
@@ -715,15 +715,15 @@ jpeg_symbol: fn(data: [U8], bits: &JPEGBits, table: JPEGHuffman) -> Int ImageErr
 // Decodes one block into `coef`, natural order and dequantized by the 64
 // zigzag entries of `quant` from `table`, and returns its DC value, the
 // next prediction.
-jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, quant: [Int], table: Int, predictor: Int, coef: &[Int]) -> Int ImageError! {
+__jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, quant: [Int], table: Int, predictor: Int, coef: &[Int]) -> Int ImageError! {
     loop index in 0..<64 -> coef[index] = 0
-    size: jpeg_symbol(data, bits, dc) ?? return Err(err)
+    size: __jpeg_symbol(data, bits, dc) ?? return Err(err)
     if size > 11 -> return Err(.Malformed)
-    value: predictor + (if size == 0 -> 0 else -> jpeg_receive(data, bits, size))
+    value: predictor + (if size == 0 -> 0 else -> __jpeg_receive(data, bits, size))
     coef[0] = value * quant[table * 64]
     at := 1
     loop at < 64 {
-        symbol: jpeg_symbol(data, bits, ac) ?? return Err(err)
+        symbol: __jpeg_symbol(data, bits, ac) ?? return Err(err)
         run: symbol >> 4
         bits_size: symbol.bit_and(15)
         if bits_size == 0 && run != 15 -> break
@@ -732,7 +732,7 @@ jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, qu
             else -> {
                 at += run
                 if at > 63 -> return Err(.Malformed)
-                coef[C_JPEG_NATURAL[at]] = jpeg_receive(data, bits, bits_size) * quant[table * 64 + at]
+                coef[C_JPEG_NATURAL[at]] = __jpeg_receive(data, bits, bits_size) * quant[table * 64 + at]
                 at += 1
             }
         }
@@ -741,13 +741,13 @@ jpeg_block: fn(data: [U8], bits: &JPEGBits, dc: JPEGHuffman, ac: JPEGHuffman, qu
     Ok(value)
 }
 
-descale: fn(value: Int, shift: Int) -> Int {
+__descale: fn(value: Int, shift: Int) -> Int {
     (value + (1 << (shift - 1))) >> shift
 }
 
 // One pass of libjpeg's integer inverse DCT: eight inputs `step` apart from
 // `from`, eight outputs `step` apart from `to`, descaled by `shift`.
-jpeg_idct_pass: fn(input: [Int], output: &[Int], from: Int, to: Int, step: Int, shift: Int) {
+__jpeg_idct_pass: fn(input: [Int], output: &[Int], from: Int, to: Int, step: Int, shift: Int) {
     even_one: input[from + 2 * step]
     even_three: input[from + 6 * step]
     rotation: (even_one + even_three) * 4433
@@ -772,17 +772,17 @@ jpeg_idct_pass: fn(input: [Int], output: &[Int], from: Int, to: Int, step: Int, 
     tmp1: odd5 * 16819 + z2 + z4
     tmp2: odd3 * 25172 + z2 + z3
     tmp3: odd1 * 12299 + z1 + z4
-    output[to] = descale(tmp10 + tmp3, shift)
-    output[to + step] = descale(tmp11 + tmp2, shift)
-    output[to + 2 * step] = descale(tmp12 + tmp1, shift)
-    output[to + 3 * step] = descale(tmp13 + tmp0, shift)
-    output[to + 4 * step] = descale(tmp13 - tmp0, shift)
-    output[to + 5 * step] = descale(tmp12 - tmp1, shift)
-    output[to + 6 * step] = descale(tmp11 - tmp2, shift)
-    output[to + 7 * step] = descale(tmp10 - tmp3, shift)
+    output[to] = __descale(tmp10 + tmp3, shift)
+    output[to + step] = __descale(tmp11 + tmp2, shift)
+    output[to + 2 * step] = __descale(tmp12 + tmp1, shift)
+    output[to + 3 * step] = __descale(tmp13 + tmp0, shift)
+    output[to + 4 * step] = __descale(tmp13 - tmp0, shift)
+    output[to + 5 * step] = __descale(tmp12 - tmp1, shift)
+    output[to + 6 * step] = __descale(tmp11 - tmp2, shift)
+    output[to + 7 * step] = __descale(tmp10 - tmp3, shift)
 }
 
-clamp_byte: fn(value: Int) -> U8 {
+__clamp_byte: fn(value: Int) -> U8 {
     if value < 0 -> return U8{0}
     if value > 255 -> return U8{255}
     U8{value}
@@ -790,29 +790,29 @@ clamp_byte: fn(value: Int) -> U8 {
 
 // The inverse DCT of `coef` into the 8 x 8 samples at `at`, rows `stride`
 // apart, through the scratch `work` and `rows`.
-jpeg_idct: fn(coef: [Int], work: &[Int], rows: &[Int], samples: &[U8], at: Int, stride: Int) {
-    loop column in 0..<8 -> jpeg_idct_pass(coef, work, column, column, 8, 11)
-    loop row in 0..<8 -> jpeg_idct_pass(work, rows, row * 8, row * 8, 1, 18)
-    loop index in 0..<64 -> samples[at + (index >> 3) * stride + index.bit_and(7)] = clamp_byte(rows[index] + 128)
+__jpeg_idct: fn(coef: [Int], work: &[Int], rows: &[Int], samples: &[U8], at: Int, stride: Int) {
+    loop column in 0..<8 -> __jpeg_idct_pass(coef, work, column, column, 8, 11)
+    loop row in 0..<8 -> __jpeg_idct_pass(work, rows, row * 8, row * 8, 1, 18)
+    loop index in 0..<64 -> samples[at + (index >> 3) * stride + index.bit_and(7)] = __clamp_byte(rows[index] + 128)
 }
 
 // Steps past a restart marker after its interval's last MCU; false when it
 // is missing.
-jpeg_restart: fn(data: [U8], bits: &JPEGBits) -> Bool {
+__jpeg_restart: fn(data: [U8], bits: &JPEGBits) -> Bool {
     bits.count = 0
     at: bits.at
-    if at + 1 >= data.len() || byte_at(data, at) != 0xFF || byte_at(data, at + 1) < 0xD0 || byte_at(data, at + 1) > 0xD7 -> return false
+    if at + 1 >= data.len() || __byte_at(data, at) != 0xFF || __byte_at(data, at + 1) < 0xD0 || __byte_at(data, at + 1) > 0xD7 -> return false
     bits.at = at + 2
     bits.marker = false
     true
 }
 
 // Where the marker after a scan's data starts.
-jpeg_scan_end: fn(data: [U8], at: Int) -> Int {
+__jpeg_scan_end: fn(data: [U8], at: Int) -> Int {
     position := at
     loop position + 1 < data.len() {
-        next: byte_at(data, position + 1)
-        if byte_at(data, position) == 0xFF && next != 0 && next != 0xFF && (next < 0xD0 || next > 0xD7) -> return position
+        next: __byte_at(data, position + 1)
+        if __byte_at(data, position) == 0xFF && next != 0 && next != 0xFF && (next < 0xD0 || next > 0xD7) -> return position
         position += 1
     }
     data.len()
@@ -821,15 +821,15 @@ jpeg_scan_end: fn(data: [U8], at: Int) -> Int {
 // A scan's components as frame indexes, in scan order, with their DC and AC
 // table slots in `dc` and `ac` by frame index. A scan must code every
 // component of the frame, sequentially and in full.
-jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc: &[Int], ac: &[Int]) -> [Int] ImageError! {
+__jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc: &[Int], ac: &[Int]) -> [Int] ImageError! {
     start: segment.start
     count: frame.ids.len()
-    if segment.end - start < 1 || byte_at(data, start) != count -> return Err(.Unsupported)
+    if segment.end - start < 1 || __byte_at(data, start) != count -> return Err(.Unsupported)
     if segment.end - start != 4 + count * 2 -> return Err(.Malformed)
     order := [Int]{}
     loop index in 0..<count {
-        id: byte_at(data, start + 1 + index * 2)
-        tables: byte_at(data, start + 2 + index * 2)
+        id: __byte_at(data, start + 1 + index * 2)
+        tables: __byte_at(data, start + 2 + index * 2)
         component := -1
         loop (position, frame_id) in frame.ids {
             if frame_id == id -> component = position
@@ -840,7 +840,7 @@ jpeg_scan_header: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, dc: &[I
         ac[component] = tables.bit_and(15)
     }
     tail: start + 1 + count * 2
-    if byte_at(data, tail) != 0 || byte_at(data, tail + 1) != 63 || byte_at(data, tail + 2) != 0 -> return Err(.Malformed)
+    if __byte_at(data, tail) != 0 || __byte_at(data, tail + 1) != 63 || __byte_at(data, tail + 2) != 0 -> return Err(.Malformed)
     Ok(order)
 }
 
@@ -867,14 +867,14 @@ JPEGPlanes: struct {
     mcus_y: Int
 }
 
-zeros: fn(count: Int) -> [Int] {
+__zeros: fn(count: Int) -> [Int] {
     values := [Int]{}
     loop _ in 0..<count -> values.push(0)
     values
 }
 
 // The plane layout of `frame`, with no samples yet.
-jpeg_planes: fn(frame: JPEGFrame) -> JPEGPlanes {
+__jpeg_planes: fn(frame: JPEGFrame) -> JPEGPlanes {
     h_max := 1
     v_max := 1
     loop index in 0..<frame.ids.len() {
@@ -895,58 +895,58 @@ jpeg_planes: fn(frame: JPEGFrame) -> JPEGPlanes {
 }
 
 // Decodes the frame's one scan into component planes, then converts them.
-jpeg_decode: fn(data: [U8], frame: JPEGFrame, limits: Limits) -> Image ImageError! {
-    planes := jpeg_planes(frame)
+__jpeg_decode: fn(data: [U8], frame: JPEGFrame, limits: Limits) -> Image ImageError! {
+    planes := __jpeg_planes(frame)
     // The padded planes are decoded bytes too.
     if planes.offsets[frame.ids.len()] > limits.max_output_bytes -> return Err(.TooLarge)
     huffman := [JPEGHuffman]{}
-    loop _ in 0..<8 -> huffman.push(no_huffman())
-    tables := JPEGTables{huffman: huffman, quant: zeros(256), defined: [Bool]{false, false, false, false}, interval: 0}
+    loop _ in 0..<8 -> huffman.push(__no_huffman())
+    tables := JPEGTables{huffman: huffman, quant: __zeros(256), defined: [Bool]{false, false, false, false}, interval: 0}
     scanned := false
     at := 2
     loop at < data.len() {
-        segment: jpeg_segment(data, at) ?? return Err(err)
+        segment: __jpeg_segment(data, at) ?? return Err(err)
         if segment.marker == C_JPEG_EOI -> break
         at = segment.end
         if segment.marker == {
-            C_JPEG_DHT -> { jpeg_read_huffman(data, segment, tables) ?? return Err(err) }
-            C_JPEG_DQT -> { jpeg_read_quant(data, segment, tables) ?? return Err(err) }
+            C_JPEG_DHT -> { __jpeg_read_huffman(data, segment, tables) ?? return Err(err) }
+            C_JPEG_DQT -> { __jpeg_read_quant(data, segment, tables) ?? return Err(err) }
             C_JPEG_DRI -> {
                 if segment.end - segment.start != 2 -> return Err(.Malformed)
-                tables.interval = be16(data, segment.start)
+                tables.interval = __be16(data, segment.start)
             }
             C_JPEG_SOS -> {
                 if scanned -> return Err(.Unsupported)
-                at = jpeg_scan(data, segment, frame, tables, planes) ?? return Err(err)
+                at = __jpeg_scan(data, segment, frame, tables, planes) ?? return Err(err)
                 scanned = true
             }
             else -> {}
         }
     }
     if !scanned -> return Err(.Malformed)
-    Ok(Image{width: frame.width, height: frame.height, pixels: jpeg_rgba(planes, frame)})
+    Ok(Image{width: frame.width, height: frame.height, pixels: __jpeg_rgba(planes, frame)})
 }
 
 // Decodes one interleaved scan into `planes` and returns where the marker
 // after its data starts.
-jpeg_scan: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, tables: JPEGTables, planes: &JPEGPlanes) -> Int ImageError! {
+__jpeg_scan: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, tables: JPEGTables, planes: &JPEGPlanes) -> Int ImageError! {
     loop table in frame.tables {
         if !tables.defined[table] -> return Err(.Malformed)
     }
     dc := [Int]{0, 0, 0}
     ac := [Int]{0, 0, 0}
-    order: jpeg_scan_header(data, segment, frame, dc, ac) ?? return Err(err)
+    order: __jpeg_scan_header(data, segment, frame, dc, ac) ?? return Err(err)
     loop _ in 0..<planes.offsets[frame.ids.len()] -> planes.samples.push(U8{0})
     bits := JPEGBits{at: segment.end, buffer: 0, count: 0, marker: false}
-    predictors := zeros(3)
-    coef := zeros(64)
-    work := zeros(64)
-    rows := zeros(64)
+    predictors := __zeros(3)
+    coef := __zeros(64)
+    work := __zeros(64)
+    rows := __zeros(64)
     left := tables.interval
     loop mcu in 0..<(planes.mcus_x * planes.mcus_y) {
         if tables.interval > 0 {
             if left == 0 {
-                if !jpeg_restart(data, bits) -> return Err(.Malformed)
+                if !__jpeg_restart(data, bits) -> return Err(.Malformed)
                 loop index in 0..<3 -> predictors[index] = 0
                 left = tables.interval
             }
@@ -958,31 +958,31 @@ jpeg_scan: fn(data: [U8], segment: JPEGSegment, frame: JPEGFrame, tables: JPEGTa
             stride: planes.strides[component]
             loop block in 0..<(h * v) {
                 predictor: predictors[component]
-                predictors[component] = jpeg_block(data, bits, tables.huffman[dc[component]], tables.huffman[4 + ac[component]], tables.quant, frame.tables[component], predictor, coef) ?? return Err(err)
+                predictors[component] = __jpeg_block(data, bits, tables.huffman[dc[component]], tables.huffman[4 + ac[component]], tables.quant, frame.tables[component], predictor, coef) ?? return Err(err)
                 x: ((mcu % planes.mcus_x) * h + block % h) * 8
                 y: ((mcu /% planes.mcus_x) * v + block /% h) * 8
-                jpeg_idct(coef, work, rows, planes.samples, planes.offsets[component] + y * stride + x, stride)
+                __jpeg_idct(coef, work, rows, planes.samples, planes.offsets[component] + y * stride + x, stride)
             }
         }
     }
-    Ok(jpeg_scan_end(data, bits.at))
+    Ok(__jpeg_scan_end(data, bits.at))
 }
 
 // The planes as RGBA8: gray repeats, YCbCr converts with libjpeg's
 // fixed-point coefficients, and chroma repeats over the pixels it covers.
-jpeg_rgba: fn(planes: JPEGPlanes, frame: JPEGFrame) -> [U8] {
+__jpeg_rgba: fn(planes: JPEGPlanes, frame: JPEGFrame) -> [U8] {
     pixels := [U8]{}
     loop y in 0..<frame.height {
         loop x in 0..<frame.width {
-            luma: jpeg_sample(planes, frame, 0, x, y)
+            luma: __jpeg_sample(planes, frame, 0, x, y)
             if {
                 frame.ids.len() == 1 -> { loop _ in 0..<3 -> pixels.push(U8{luma}) }
                 else -> {
-                    blue: jpeg_sample(planes, frame, 1, x, y) - 128
-                    red: jpeg_sample(planes, frame, 2, x, y) - 128
-                    pixels.push(clamp_byte(luma + ((91881 * red + 32768) >> 16)))
-                    pixels.push(clamp_byte(luma + ((32768 - 22554 * blue - 46802 * red) >> 16)))
-                    pixels.push(clamp_byte(luma + ((116130 * blue + 32768) >> 16)))
+                    blue: __jpeg_sample(planes, frame, 1, x, y) - 128
+                    red: __jpeg_sample(planes, frame, 2, x, y) - 128
+                    pixels.push(__clamp_byte(luma + ((91881 * red + 32768) >> 16)))
+                    pixels.push(__clamp_byte(luma + ((32768 - 22554 * blue - 46802 * red) >> 16)))
+                    pixels.push(__clamp_byte(luma + ((116130 * blue + 32768) >> 16)))
                 }
             }
             pixels.push(U8{255})
@@ -992,10 +992,10 @@ jpeg_rgba: fn(planes: JPEGPlanes, frame: JPEGFrame) -> [U8] {
 }
 
 // The sample of `component` that covers pixel `x`, `y`.
-jpeg_sample: fn(planes: JPEGPlanes, frame: JPEGFrame, component: Int, x: Int, y: Int) -> Int {
+__jpeg_sample: fn(planes: JPEGPlanes, frame: JPEGFrame, component: Int, x: Int, y: Int) -> Int {
     column: x * frame.hs[component] /% planes.h_max
     row: y * frame.vs[component] /% planes.v_max
-    byte_at(planes.samples, planes.offsets[component] + row * planes.strides[component] + column)
+    __byte_at(planes.samples, planes.offsets[component] + row * planes.strides[component] + column)
 }
 
 // The JPEG quality `encode` writes, on libjpeg's 1..100 scale.
@@ -1050,7 +1050,7 @@ JPEGCodes: struct {
     sizes: [Int]
 }
 
-jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
+__jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
     loop index in 0..<size {
         bits.pending = (bits.pending << 1) + (value >> (size - 1 - index)).bit_and(1)
         bits.count += 1
@@ -1064,12 +1064,12 @@ jpeg_put: fn(bits: &JPEGWriter, value: Int, size: Int) {
 }
 
 // Pads the last byte with one bits.
-jpeg_flush: fn(bits: &JPEGWriter) {
-    loop bits.count > 0 -> jpeg_put(bits, 1, 1)
+__jpeg_flush: fn(bits: &JPEGWriter) {
+    loop bits.count > 0 -> __jpeg_put(bits, 1, 1)
 }
 
 // The bits a coefficient's magnitude needs.
-bit_size: fn(value: Int) -> Int {
+__bit_size: fn(value: Int) -> Int {
     magnitude := value.abs()
     size := 0
     loop magnitude > 0 {
@@ -1081,14 +1081,14 @@ bit_size: fn(value: Int) -> Int {
 
 // A coefficient's bits after its size: negative values are one less, in
 // `size` bits.
-jpeg_amplitude: fn(bits: &JPEGWriter, value: Int) {
-    size: bit_size(value)
-    jpeg_put(bits, if value < 0 -> value + (1 << size) - 1 else -> value, size)
+__jpeg_amplitude: fn(bits: &JPEGWriter, value: Int) {
+    size: __bit_size(value)
+    __jpeg_put(bits, if value < 0 -> value + (1 << size) - 1 else -> value, size)
 }
 
 // The canonical codes of `table`: 16 code-length counts, then the symbols.
-jpeg_codes: fn(table: [Int]) -> JPEGCodes {
-    codes := JPEGCodes{codes: zeros(256), sizes: zeros(256)}
+__jpeg_codes: fn(table: [Int]) -> JPEGCodes {
+    codes := JPEGCodes{codes: __zeros(256), sizes: __zeros(256)}
     code := 0
     at := 16
     loop length in 1..<17 {
@@ -1105,7 +1105,7 @@ jpeg_codes: fn(table: [Int]) -> JPEGCodes {
 
 // A quantization table at `C_JPEG_QUALITY`, scaled the way libjpeg scales
 // qualities from 50 up. At 90 every entry stays within 1..255.
-jpeg_quant: fn(base: [Int]) -> [Int] {
+__jpeg_quant: fn(base: [Int]) -> [Int] {
     scale: 200 - C_JPEG_QUALITY * 2
     table := [Int]{}
     loop value in base -> table.push((value * scale + 50) /% 100)
@@ -1115,7 +1115,7 @@ jpeg_quant: fn(base: [Int]) -> [Int] {
 // One pass of libjpeg's integer forward DCT: eight inputs `step` apart from
 // `from`, eight outputs `step` apart. The first pass (`pass` 1) keeps two
 // fraction bits that the second descales away.
-jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int) {
+__jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int) {
     d0: input[from]
     d1: input[from + step]
     d2: input[from + 2 * step]
@@ -1129,11 +1129,11 @@ jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int
     tmp11: d1 + d6 + d2 + d5
     tmp12: d1 + d6 - d2 - d5
     shift: if pass == 1 -> 11 else -> 15
-    output[from] = if pass == 1 -> (tmp10 + tmp11) << 2 else -> descale(tmp10 + tmp11, 2)
-    output[from + 4 * step] = if pass == 1 -> (tmp10 - tmp11) << 2 else -> descale(tmp10 - tmp11, 2)
+    output[from] = if pass == 1 -> (tmp10 + tmp11) << 2 else -> __descale(tmp10 + tmp11, 2)
+    output[from + 4 * step] = if pass == 1 -> (tmp10 - tmp11) << 2 else -> __descale(tmp10 - tmp11, 2)
     rotation: (tmp12 + tmp13) * 4433
-    output[from + 2 * step] = descale(rotation + tmp13 * 6270, shift)
-    output[from + 6 * step] = descale(rotation - tmp12 * 15137, shift)
+    output[from + 2 * step] = __descale(rotation + tmp13 * 6270, shift)
+    output[from + 6 * step] = __descale(rotation - tmp12 * 15137, shift)
     tmp4: d3 - d4
     tmp5: d2 - d5
     tmp6: d1 - d6
@@ -1143,14 +1143,14 @@ jpeg_fdct_pass: fn(input: [Int], output: &[Int], from: Int, step: Int, pass: Int
     z2: (tmp5 + tmp6) * -20995
     z3: (tmp4 + tmp6) * -16069 + shared
     z4: (tmp5 + tmp7) * -3196 + shared
-    output[from + 7 * step] = descale(tmp4 * 2446 + z1 + z3, shift)
-    output[from + 5 * step] = descale(tmp5 * 16819 + z2 + z4, shift)
-    output[from + 3 * step] = descale(tmp6 * 25172 + z2 + z3, shift)
-    output[from + step] = descale(tmp7 * 12299 + z1 + z4, shift)
+    output[from + 7 * step] = __descale(tmp4 * 2446 + z1 + z3, shift)
+    output[from + 5 * step] = __descale(tmp5 * 16819 + z2 + z4, shift)
+    output[from + 3 * step] = __descale(tmp6 * 25172 + z2 + z3, shift)
+    output[from + step] = __descale(tmp7 * 12299 + z1 + z4, shift)
 }
 
 // `value` divided by `divisor`, rounded half away from zero.
-jpeg_divide: fn(value: Int, divisor: Int) -> Int {
+__jpeg_divide: fn(value: Int, divisor: Int) -> Int {
     if value < 0 -> return 0 - (0 - value + (divisor >> 1)) /% divisor
     (value + (divisor >> 1)) /% divisor
 }
@@ -1158,36 +1158,36 @@ jpeg_divide: fn(value: Int, divisor: Int) -> Int {
 // Codes one block of level-shifted samples: forward DCT, quantization by
 // the zigzag `quant`, then Huffman codes after the DC `predictor`. Returns
 // the quantized DC, the next prediction.
-jpeg_encode_block: fn(samples: [Int], work: &[Int], coef: &[Int], quant: [Int], dc: JPEGCodes, ac: JPEGCodes, predictor: Int, bits: &JPEGWriter) -> Int {
-    loop row in 0..<8 -> jpeg_fdct_pass(samples, work, row * 8, 1, 1)
-    loop column in 0..<8 -> jpeg_fdct_pass(work, coef, column, 8, 2)
-    value: jpeg_divide(coef[0], quant[0] * 8)
+__jpeg_encode_block: fn(samples: [Int], work: &[Int], coef: &[Int], quant: [Int], dc: JPEGCodes, ac: JPEGCodes, predictor: Int, bits: &JPEGWriter) -> Int {
+    loop row in 0..<8 -> __jpeg_fdct_pass(samples, work, row * 8, 1, 1)
+    loop column in 0..<8 -> __jpeg_fdct_pass(work, coef, column, 8, 2)
+    value: __jpeg_divide(coef[0], quant[0] * 8)
     difference: value - predictor
-    size: bit_size(difference)
-    jpeg_put(bits, dc.codes[size], dc.sizes[size])
-    jpeg_amplitude(bits, difference)
+    size: __bit_size(difference)
+    __jpeg_put(bits, dc.codes[size], dc.sizes[size])
+    __jpeg_amplitude(bits, difference)
     run := 0
     loop at in 1..<64 {
-        level: jpeg_divide(coef[C_JPEG_NATURAL[at]], quant[at] * 8)
+        level: __jpeg_divide(coef[C_JPEG_NATURAL[at]], quant[at] * 8)
         if {
             level == 0 -> { run += 1 }
             else -> {
                 loop run > 15 {
-                    jpeg_put(bits, ac.codes[0xF0], ac.sizes[0xF0])
+                    __jpeg_put(bits, ac.codes[0xF0], ac.sizes[0xF0])
                     run -= 16
                 }
-                symbol: (run << 4) + bit_size(level)
-                jpeg_put(bits, ac.codes[symbol], ac.sizes[symbol])
-                jpeg_amplitude(bits, level)
+                symbol: (run << 4) + __bit_size(level)
+                __jpeg_put(bits, ac.codes[symbol], ac.sizes[symbol])
+                __jpeg_amplitude(bits, level)
                 run = 0
             }
         }
     }
-    if run > 0 -> jpeg_put(bits, ac.codes[0], ac.sizes[0])
+    if run > 0 -> __jpeg_put(bits, ac.codes[0], ac.sizes[0])
     value
 }
 
-push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
+__push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
     out.push(U8{0xFF})
     out.push(U8{marker})
     out.push(U8{(body.len() + 2) >> 8})
@@ -1196,12 +1196,12 @@ push_marker: fn(out: &[U8], marker: Int, body: [U8]) {
 }
 
 // The nearer of `value` and `last`.
-at_most: fn(value: Int, last: Int) -> Int {
+__at_most: fn(value: Int, last: Int) -> Int {
     if value > last -> last else -> value
 }
 
 // A baseline JPEG of `image`, which `encode` has checked.
-jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
+__jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
     if image.width > 65535 || image.height > 65535 -> return Err(.Unsupported)
     gray := true
     at := 0
@@ -1216,34 +1216,34 @@ jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
     // Each pixel's Y, Cb and Cr, the way libjpeg converts them.
     ycc := [Int]{}
     loop index in 0..<(image.width * image.height) {
-        red: byte_at(image.pixels, index * 4)
-        green: byte_at(image.pixels, index * 4 + 1)
-        blue: byte_at(image.pixels, index * 4 + 2)
+        red: __byte_at(image.pixels, index * 4)
+        green: __byte_at(image.pixels, index * 4 + 1)
+        blue: __byte_at(image.pixels, index * 4 + 2)
         ycc.push((19595 * red + 38470 * green + 7471 * blue + 32768) >> 16)
         ycc.push((0 - 11059 * red - 21709 * green + 32768 * blue + 8421375) >> 16)
         ycc.push((32768 * red - 27439 * green - 5329 * blue + 8421375) >> 16)
     }
-    luma_quant: jpeg_quant(C_JPEG_LUMA_QUANT)
-    chroma_quant: jpeg_quant(C_JPEG_CHROMA_QUANT)
+    luma_quant: __jpeg_quant(C_JPEG_LUMA_QUANT)
+    chroma_quant: __jpeg_quant(C_JPEG_CHROMA_QUANT)
     out := [U8]{0xFF}
     out.push(U8{C_JPEG_SOI})
-    push_marker(out, 0xE0, [U8]{74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0})
+    __push_marker(out, 0xE0, [U8]{74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0})
     loop slot in 0..<count {
         body := [U8]{U8{slot}}
         loop value in (if slot == 0 -> luma_quant else -> chroma_quant) -> body.push(U8{value})
-        push_marker(out, C_JPEG_DQT, body)
+        __push_marker(out, C_JPEG_DQT, body)
     }
     frame := [U8]{8}
     loop value in ([Int]{image.height >> 8, image.height.bit_and(255), image.width >> 8, image.width.bit_and(255), count}) -> frame.push(U8{value})
     loop component in 0..<count {
         loop value in ([Int]{component + 1, 0x11, if component == 0 -> 0 else -> 1}) -> frame.push(U8{value})
     }
-    push_marker(out, 0xC0, frame)
+    __push_marker(out, 0xC0, frame)
     tables: [[Int]]{C_JPEG_DC_LUMA, C_JPEG_AC_LUMA, C_JPEG_DC_CHROMA, C_JPEG_AC_CHROMA}
     loop index in 0..<(if count == 1 -> 2 else -> 4) {
         body := [U8]{U8{(index % 2) * 16 + index /% 2}}
         loop value in tables[index] -> body.push(U8{value})
-        push_marker(out, C_JPEG_DHT, body)
+        __push_marker(out, C_JPEG_DHT, body)
     }
     scan := [U8]{U8{count}}
     loop component in 0..<count {
@@ -1251,30 +1251,30 @@ jpeg_encode: fn(image: Image, limits: Limits) -> [U8] ImageError! {
         scan.push(U8{if component == 0 -> 0 else -> 0x11})
     }
     loop value in ([Int]{0, 63, 0}) -> scan.push(U8{value})
-    push_marker(out, C_JPEG_SOS, scan)
-    codes: [JPEGCodes]{jpeg_codes(C_JPEG_DC_LUMA), jpeg_codes(C_JPEG_AC_LUMA), jpeg_codes(C_JPEG_DC_CHROMA), jpeg_codes(C_JPEG_AC_CHROMA)}
+    __push_marker(out, C_JPEG_SOS, scan)
+    codes: [JPEGCodes]{__jpeg_codes(C_JPEG_DC_LUMA), __jpeg_codes(C_JPEG_AC_LUMA), __jpeg_codes(C_JPEG_DC_CHROMA), __jpeg_codes(C_JPEG_AC_CHROMA)}
     bits := JPEGWriter{out: out, pending: 0, count: 0}
-    predictors := zeros(3)
-    samples := zeros(64)
-    work := zeros(64)
-    coef := zeros(64)
+    predictors := __zeros(3)
+    samples := __zeros(64)
+    work := __zeros(64)
+    coef := __zeros(64)
     loop block_y in 0..<((image.height + 7) /% 8) {
         loop block_x in 0..<((image.width + 7) /% 8) {
             loop component in 0..<count {
                 // Edge blocks repeat the last column and row.
                 loop index in 0..<64 {
-                    x: at_most(block_x * 8 + index.bit_and(7), image.width - 1)
-                    y: at_most(block_y * 8 + (index >> 3), image.height - 1)
+                    x: __at_most(block_x * 8 + index.bit_and(7), image.width - 1)
+                    y: __at_most(block_y * 8 + (index >> 3), image.height - 1)
                     samples[index] = ycc[(y * image.width + x) * 3 + component] - 128
                 }
                 table: if component == 0 -> 0 else -> 2
                 predictor: predictors[component]
-                predictors[component] = jpeg_encode_block(samples, work, coef, if component == 0 -> luma_quant else -> chroma_quant, codes[table], codes[table + 1], predictor, bits)
+                predictors[component] = __jpeg_encode_block(samples, work, coef, if component == 0 -> luma_quant else -> chroma_quant, codes[table], codes[table + 1], predictor, bits)
             }
         }
         if bits.out.len() > limits.max_output_bytes -> return Err(.TooLarge)
     }
-    jpeg_flush(bits)
+    __jpeg_flush(bits)
     bits.out.push(U8{0xFF})
     bits.out.push(U8{C_JPEG_EOI})
     if bits.out.len() > limits.max_output_bytes -> return Err(.TooLarge)
@@ -1301,12 +1301,12 @@ resize: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: 
     if image.pixels.len() != image.width * image.height * 4 -> return Err(.Malformed)
     if width > limits.max_pixels /% height || width > limits.max_output_bytes /% 4 /% height -> return Err(.TooLarge)
     if filter == {
-        .Nearest -> Ok(resize_nearest(image, width, height))
-        .Area -> Ok(resize_area(image, width, height))
+        .Nearest -> Ok(__resize_nearest(image, width, height))
+        .Area -> Ok(__resize_area(image, width, height))
     }
 }
 
-resize_nearest: fn(image: Image, width: Int, height: Int) -> Image {
+__resize_nearest: fn(image: Image, width: Int, height: Int) -> Image {
     pixels := [U8]{}
     loop y in 0..<height {
         row: ((2 * y + 1) * image.height) /% (2 * height)
@@ -1321,7 +1321,7 @@ resize_nearest: fn(image: Image, width: Int, height: Int) -> Image {
 // How much of source cell `index` (spanning `index * target` up to
 // `(index + 1) * target`) lies inside destination cell `cell` (spanning `cell
 // * source` up to `(cell + 1) * source`).
-cell_overlap: fn(index: Int, cell: Int, source: Int, target: Int) -> Int {
+__cell_overlap: fn(index: Int, cell: Int, source: Int, target: Int) -> Int {
     start: if index * target > cell * source -> index * target else -> cell * source
     end: if (index + 1) * target < (cell + 1) * source -> (index + 1) * target else -> (cell + 1) * source
     if end > start -> end - start else -> 0
@@ -1331,7 +1331,7 @@ cell_overlap: fn(index: Int, cell: Int, source: Int, target: Int) -> Int {
 // units where a destination pixel is `image.width * image.height`. Color
 // averages weighted by alpha so transparent pixels add no color; rounding
 // is to nearest.
-resize_area: fn(image: Image, width: Int, height: Int) -> Image {
+__resize_area: fn(image: Image, width: Int, height: Int) -> Image {
     total: image.width * image.height
     pixels := [U8]{}
     loop y in 0..<height {
@@ -1345,14 +1345,14 @@ resize_area: fn(image: Image, width: Int, height: Int) -> Image {
             blue := 0
             alpha := 0
             loop row in first_row..<(last_row + 1) {
-                weight_y: cell_overlap(row, y, image.height, height)
+                weight_y: __cell_overlap(row, y, image.height, height)
                 loop column in first_column..<(last_column + 1) {
-                    weight: weight_y * cell_overlap(column, x, image.width, width)
+                    weight: weight_y * __cell_overlap(column, x, image.width, width)
                     at: (row * image.width + column) * 4
-                    opacity: weight * byte_at(image.pixels, at + 3)
-                    red += opacity * byte_at(image.pixels, at)
-                    green += opacity * byte_at(image.pixels, at + 1)
-                    blue += opacity * byte_at(image.pixels, at + 2)
+                    opacity: weight * __byte_at(image.pixels, at + 3)
+                    red += opacity * __byte_at(image.pixels, at)
+                    green += opacity * __byte_at(image.pixels, at + 1)
+                    blue += opacity * __byte_at(image.pixels, at + 2)
                     alpha += opacity
                 }
             }
@@ -1366,40 +1366,40 @@ resize_area: fn(image: Image, width: Int, height: Int) -> Image {
 C_TEST_LIMITS: Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 256}
 
 // A PNG of one zlib stream of already filtered scanlines.
-png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
+__png_bytes: fn(width: Int, height: Int, depth: Int, color_type: Int, interlace: Int, palette: [U8], key: [U8], raw: [U8]) -> [U8] {
     out := [U8]{137, 80, 78, 71, 13, 10, 26, 10}
     header := [U8]{}
-    push_be32(header, width)
-    push_be32(header, height)
+    __push_be32(header, width)
+    __push_be32(header, height)
     loop value in ([Int]{depth, color_type, 0, 0, interlace}) -> header.push(U8{value})
-    png_chunk(out, C_PNG_IHDR, header)
-    if palette.len() > 0 -> png_chunk(out, C_PNG_PLTE, palette)
-    if key.len() > 0 -> png_chunk(out, C_PNG_TRNS, key)
-    png_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
-    png_chunk(out, C_PNG_IEND, [U8]{})
+    __png_chunk(out, C_PNG_IHDR, header)
+    if palette.len() > 0 -> __png_chunk(out, C_PNG_PLTE, palette)
+    if key.len() > 0 -> __png_chunk(out, C_PNG_TRNS, key)
+    __png_chunk(out, C_PNG_IDAT, core.archive.compress(raw) ?? panic("compress"))
+    __png_chunk(out, C_PNG_IEND, [U8]{})
     out
 }
 
 // The size, then each pixel as one packed straight 0xRRGGBBAA.
-image_words: fn(image: Image) -> [Int] {
+__image_words: fn(image: Image) -> [Int] {
     words := [Int]{image.width, image.height}
     at := 0
     loop at < image.pixels.len() {
-        words.push(png_rgba(byte_at(image.pixels, at), byte_at(image.pixels, at + 1), byte_at(image.pixels, at + 2), byte_at(image.pixels, at + 3)))
+        words.push(__png_rgba(__byte_at(image.pixels, at), __byte_at(image.pixels, at + 1), __byte_at(image.pixels, at + 2), __byte_at(image.pixels, at + 3)))
         at += 4
     }
     words
 }
 
-gray_word: fn(value: Int) -> Int {
-    png_rgba(value, value, value, 255)
+__gray_word: fn(value: Int) -> Int {
+    __png_rgba(value, value, value, 255)
 }
 
-decoded_words: fn(data: [U8]) -> [Int] {
-    image_words(decode(data, C_TEST_LIMITS) ?? panic("decode: {err:Debug}"))
+__decoded_words: fn(data: [U8]) -> [Int] {
+    __image_words(decode(data, C_TEST_LIMITS) ?? panic("decode: {err:Debug}"))
 }
 
-decode_error: fn(data: [U8], limits: Limits) -> ImageError {
+__decode_error: fn(data: [U8], limits: Limits) -> ImageError {
     if decode(data, limits) == {
         .Ok(_) -> panic("decoded")
         .Err(error) -> error
@@ -1408,48 +1408,48 @@ decode_error: fn(data: [U8], limits: Limits) -> ImageError {
 
 #Test("png rows reconstruct through every filter") {
     raw: [U8]{1, 10, 20, 2, 5, 15, 3, 13, 18, 4, 0, 0}
-    assert_eq(decoded_words(png_bytes(2, 4, 8, 0, 0, [U8]{}, [U8]{}, raw)), [Int]{2, 4, gray_word(10), gray_word(30), gray_word(15), gray_word(45), gray_word(20), gray_word(50), gray_word(20), gray_word(50)})
+    assert_eq(__decoded_words(__png_bytes(2, 4, 8, 0, 0, [U8]{}, [U8]{}, raw)), [Int]{2, 4, __gray_word(10), __gray_word(30), __gray_word(15), __gray_word(45), __gray_word(20), __gray_word(50), __gray_word(20), __gray_word(50)})
 }
 
 #Test("png palettes, low depths and tRNS keys decode straight") {
     palette: [U8]{255, 0, 0, 0, 255, 0, 0, 0, 255}
-    indexed: decoded_words(png_bytes(3, 1, 2, 3, 0, palette, [U8]{128}, [U8]{0, 0x18}))
+    indexed: __decoded_words(__png_bytes(3, 1, 2, 3, 0, palette, [U8]{128}, [U8]{0, 0x18}))
     assert_eq(indexed, [Int]{3, 1, 0xFF000080, 0x00FF00FF, 0x0000FFFF})
-    bits: decoded_words(png_bytes(3, 1, 1, 0, 0, [U8]{}, [U8]{0, 0}, [U8]{0, 0xA0}))
+    bits: __decoded_words(__png_bytes(3, 1, 1, 0, 0, [U8]{}, [U8]{0, 0}, [U8]{0, 0xA0}))
     assert_eq(bits, [Int]{3, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF})
-    keyed: decoded_words(png_bytes(1, 1, 16, 2, 0, [U8]{}, [U8]{0, 1, 0, 2, 0, 3}, [U8]{0, 0, 1, 0, 2, 0, 3}))
-    assert_eq(keyed, [Int]{1, 1, png_rgba(0, 0, 0, 0)})
+    keyed: __decoded_words(__png_bytes(1, 1, 16, 2, 0, [U8]{}, [U8]{0, 1, 0, 2, 0, 3}, [U8]{0, 0, 1, 0, 2, 0, 3}))
+    assert_eq(keyed, [Int]{1, 1, __png_rgba(0, 0, 0, 0)})
 }
 
 #Test("png sixteen-bit samples, gray alpha and Adam7") {
-    wide: decoded_words(png_bytes(1, 1, 16, 6, 0, [U8]{}, [U8]{}, [U8]{0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}))
+    wide: __decoded_words(__png_bytes(1, 1, 16, 6, 0, [U8]{}, [U8]{}, [U8]{0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0}))
     assert_eq(wide, [Int]{1, 1, 0x12569ADE})
-    alpha: decoded_words(png_bytes(1, 1, 8, 4, 0, [U8]{}, [U8]{}, [U8]{0, 77, 33}))
-    assert_eq(alpha, [Int]{1, 1, png_rgba(77, 77, 77, 33)})
-    interlaced: decoded_words(png_bytes(2, 2, 8, 0, 1, [U8]{}, [U8]{}, [U8]{0, 1, 0, 2, 0, 3, 4}))
-    assert_eq(interlaced, [Int]{2, 2, gray_word(1), gray_word(2), gray_word(3), gray_word(4)})
+    alpha: __decoded_words(__png_bytes(1, 1, 8, 4, 0, [U8]{}, [U8]{}, [U8]{0, 77, 33}))
+    assert_eq(alpha, [Int]{1, 1, __png_rgba(77, 77, 77, 33)})
+    interlaced: __decoded_words(__png_bytes(2, 2, 8, 0, 1, [U8]{}, [U8]{}, [U8]{0, 1, 0, 2, 0, 3, 4}))
+    assert_eq(interlaced, [Int]{2, 2, __gray_word(1), __gray_word(2), __gray_word(3), __gray_word(4)})
 }
 
 #Test("inspect reads the header without decoding") {
-    info: inspect(png_bytes(3, 2, 8, 6, 0, [U8]{}, [U8]{}, [U8]{}), C_TEST_LIMITS) ?? panic("inspect: {err:Debug}")
+    info: inspect(__png_bytes(3, 2, 8, 6, 0, [U8]{}, [U8]{}, [U8]{}), C_TEST_LIMITS) ?? panic("inspect: {err:Debug}")
     assert_eq("{info.width}x{info.height}", "3x2")
     assert(info.format == .PNG && info.color == .RGBA)
 }
 
 #Test("malformed input, other formats and budgets are typed errors") {
-    assert(decode_error([U8]{1, 2, 3}, C_TEST_LIMITS) == .Malformed)
-    assert(decode_error(png_bytes(2, 1, 8, 0, 0, [U8]{}, [U8]{}, [U8]{5, 1, 2}), C_TEST_LIMITS) == .Malformed)
-    assert(decode_error(png_bytes(1, 1, 8, 3, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Malformed)
-    assert(decode_error(png_bytes(2, 2, 8, 0, 0, [U8]{}, [U8]{}, [U8]{0, 1, 2}), C_TEST_LIMITS) == .Malformed)
-    assert(decode_error(png_bytes(1, 1, 3, 0, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Unsupported)
-    assert(decode_error([U8]{0xFF, 0xD8, 0xFF, 0xE0}, C_TEST_LIMITS) == .Malformed)
-    assert(decode_error([U8]{71, 73, 70, 56, 57, 97}, C_TEST_LIMITS) == .Unsupported)
+    assert(__decode_error([U8]{1, 2, 3}, C_TEST_LIMITS) == .Malformed)
+    assert(__decode_error(__png_bytes(2, 1, 8, 0, 0, [U8]{}, [U8]{}, [U8]{5, 1, 2}), C_TEST_LIMITS) == .Malformed)
+    assert(__decode_error(__png_bytes(1, 1, 8, 3, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Malformed)
+    assert(__decode_error(__png_bytes(2, 2, 8, 0, 0, [U8]{}, [U8]{}, [U8]{0, 1, 2}), C_TEST_LIMITS) == .Malformed)
+    assert(__decode_error(__png_bytes(1, 1, 3, 0, 0, [U8]{}, [U8]{}, [U8]{0, 0}), C_TEST_LIMITS) == .Unsupported)
+    assert(__decode_error([U8]{0xFF, 0xD8, 0xFF, 0xE0}, C_TEST_LIMITS) == .Malformed)
+    assert(__decode_error([U8]{71, 73, 70, 56, 57, 97}, C_TEST_LIMITS) == .Unsupported)
     // 9 x 8 is 72 pixels, above the 64 the limits allow.
-    big: png_bytes(9, 8, 8, 0, 0, [U8]{}, [U8]{}, [U8]{})
-    assert(decode_error(big, C_TEST_LIMITS) == .TooLarge)
-    assert(decode_error(big, Limits{max_input_bytes: 8, max_pixels: 1000, max_output_bytes: 4000}) == .TooLarge)
-    assert(decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 1000, max_output_bytes: 100}) == .TooLarge)
-    assert(decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 0, max_output_bytes: 4000}) == .TooLarge)
+    big: __png_bytes(9, 8, 8, 0, 0, [U8]{}, [U8]{}, [U8]{})
+    assert(__decode_error(big, C_TEST_LIMITS) == .TooLarge)
+    assert(__decode_error(big, Limits{max_input_bytes: 8, max_pixels: 1000, max_output_bytes: 4000}) == .TooLarge)
+    assert(__decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 1000, max_output_bytes: 100}) == .TooLarge)
+    assert(__decode_error(big, Limits{max_input_bytes: 4096, max_pixels: 0, max_output_bytes: 4000}) == .TooLarge)
 }
 
 C_TEST_JPEG_LIMITS: Limits{max_input_bytes: 8192, max_pixels: 256, max_output_bytes: 1024}
@@ -1458,10 +1458,10 @@ C_TEST_JPEG_LIMITS: Limits{max_input_bytes: 8192, max_pixels: 256, max_output_by
 // the test tables: DC size `s` is the 4-bit code `s`; AC symbols are 8-bit
 // codes, 0 for end-of-block, 1 for sixteen zeros and `2 + run * 10 + size
 // - 1` otherwise.
-test_block: fn(bits: &JPEGWriter, zigzag: [Int], predictor: Int) {
+__test_block: fn(bits: &JPEGWriter, zigzag: [Int], predictor: Int) {
     difference: zigzag[0] - predictor
-    jpeg_put(bits, bit_size(difference), 4)
-    jpeg_amplitude(bits, difference)
+    __jpeg_put(bits, __bit_size(difference), 4)
+    __jpeg_amplitude(bits, difference)
     last := 0
     loop index in 1..<64 {
         if zigzag[index] != 0 -> last = index
@@ -1472,21 +1472,21 @@ test_block: fn(bits: &JPEGWriter, zigzag: [Int], predictor: Int) {
             zigzag[index] == 0 -> { run += 1 }
             else -> {
                 loop run > 15 {
-                    jpeg_put(bits, 1, 8)
+                    __jpeg_put(bits, 1, 8)
                     run -= 16
                 }
-                jpeg_put(bits, 2 + run * 10 + bit_size(zigzag[index]) - 1, 8)
-                jpeg_amplitude(bits, zigzag[index])
+                __jpeg_put(bits, 2 + run * 10 + __bit_size(zigzag[index]) - 1, 8)
+                __jpeg_amplitude(bits, zigzag[index])
                 run = 0
             }
         }
     }
-    if last < 63 -> jpeg_put(bits, 0, 8)
+    if last < 63 -> __jpeg_put(bits, 0, 8)
 }
 
 // 64 zigzag coefficients, zero but for the `index, value` pairs.
-test_coefficients: fn(pairs: [Int]) -> [Int] {
-    zigzag := zeros(64)
+__test_coefficients: fn(pairs: [Int]) -> [Int] {
+    zigzag := __zeros(64)
     at := 0
     loop at < pairs.len() {
         zigzag[pairs[at]] = pairs[at + 1]
@@ -1495,15 +1495,15 @@ test_coefficients: fn(pairs: [Int]) -> [Int] {
     zigzag
 }
 
-push_be16: fn(out: &[U8], value: Int) {
+__push_be16: fn(out: &[U8], value: Int) {
     out.push(U8{value >> 8})
     out.push(U8{value.bit_and(255)})
 }
 
-push_segment: fn(out: &[U8], marker: Int, body: [U8]) {
+__push_segment: fn(out: &[U8], marker: Int, body: [U8]) {
     out.push(U8{0xFF})
     out.push(U8{marker})
-    push_be16(out, body.len() + 2)
+    __push_be16(out, body.len() + 2)
     loop byte in body -> out.push(byte)
 }
 
@@ -1511,19 +1511,19 @@ push_segment: fn(out: &[U8], marker: Int, body: [U8]) {
 // ones and component `c` (id `c + 1`) sampled `sampling[c]` (h << 4 | v).
 // `blocks` holds every block's zigzag coefficients in scan order: per MCU,
 // per component, its blocks. `interval` > 0 restarts every that many MCUs.
-test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]], interval: Int) -> [U8] {
+__test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]], interval: Int) -> [U8] {
     out := [U8]{0xFF, C_JPEG_SOI}
     quant := [U8]{0}
     loop _ in 0..<64 -> quant.push(U8{1})
-    push_segment(out, C_JPEG_DQT, quant)
+    __push_segment(out, C_JPEG_DQT, quant)
     frame := [U8]{8}
-    push_be16(frame, height)
-    push_be16(frame, width)
+    __push_be16(frame, height)
+    __push_be16(frame, width)
     frame.push(U8{sampling.len()})
     loop (index, factors) in sampling {
         loop value in ([Int]{index + 1, factors, 0}) -> frame.push(U8{value})
     }
-    push_segment(out, sof, frame)
+    __push_segment(out, sof, frame)
     tables := [U8]{0}
     loop length in 1..<17 -> tables.push(U8{if length == 4 -> 12 else -> 0})
     loop symbol in 0..<12 -> tables.push(U8{symbol})
@@ -1534,11 +1534,11 @@ test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]
     loop run in 0..<16 {
         loop size in 1..<11 -> tables.push(U8{(run << 4) + size})
     }
-    push_segment(out, C_JPEG_DHT, tables)
+    __push_segment(out, C_JPEG_DHT, tables)
     if interval > 0 {
         restart := [U8]{}
-        push_be16(restart, interval)
-        push_segment(out, C_JPEG_DRI, restart)
+        __push_be16(restart, interval)
+        __push_segment(out, C_JPEG_DRI, restart)
     }
     scan := [U8]{U8{sampling.len()}}
     loop index in 0..<sampling.len() {
@@ -1546,15 +1546,15 @@ test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]
         scan.push(U8{0})
     }
     loop value in ([Int]{0, 63, 0}) -> scan.push(U8{value})
-    push_segment(out, C_JPEG_SOS, scan)
+    __push_segment(out, C_JPEG_SOS, scan)
     per_mcu := 0
     loop factors in sampling -> per_mcu += if sampling.len() == 1 -> 1 else -> (factors >> 4) * factors.bit_and(15)
     bits := JPEGWriter{out: out, pending: 0, count: 0}
-    predictors := zeros(sampling.len())
+    predictors := __zeros(sampling.len())
     loop (at, zigzag) in blocks {
         mcu: at /% per_mcu
         if interval > 0 && mcu > 0 && mcu % interval == 0 && at % per_mcu == 0 {
-            jpeg_flush(bits)
+            __jpeg_flush(bits)
             bits.out.push(U8{0xFF})
             bits.out.push(U8{0xD0 + (mcu /% interval - 1) % 8})
             loop index in 0..<sampling.len() -> predictors[index] = 0
@@ -1565,79 +1565,79 @@ test_jpeg: fn(width: Int, height: Int, sof: Int, sampling: [Int], blocks: [[Int]
             offset -= if sampling.len() == 1 -> 1 else -> (sampling[component] >> 4) * sampling[component].bit_and(15)
             component += 1
         }
-        test_block(bits, zigzag, predictors[component])
+        __test_block(bits, zigzag, predictors[component])
         predictors[component] = zigzag[0]
     }
-    jpeg_flush(bits)
+    __jpeg_flush(bits)
     bits.out.push(U8{0xFF})
     bits.out.push(U8{C_JPEG_EOI})
     bits.out
 }
 
-jpeg_words: fn(data: [U8]) -> [Int] {
-    image_words(decode(data, C_TEST_JPEG_LIMITS) ?? panic("decode: {err:Debug}"))
+__jpeg_words: fn(data: [U8]) -> [Int] {
+    __image_words(decode(data, C_TEST_JPEG_LIMITS) ?? panic("decode: {err:Debug}"))
 }
 
 // `rows` rows of `width` gray words, `left` before column `split` and
 // `right` from it.
-gray_rows: fn(width: Int, rows: Int, split: Int, left: Int, right: Int) -> [Int] {
+__gray_rows: fn(width: Int, rows: Int, split: Int, left: Int, right: Int) -> [Int] {
     words := [Int]{width, rows}
     loop _ in 0..<rows {
-        loop column in 0..<width -> words.push(gray_word(if column < split -> left else -> right))
+        loop column in 0..<width -> words.push(__gray_word(if column < split -> left else -> right))
     }
     words
 }
 
 #Test("jpeg gray blocks decode through the integer inverse DCT") {
     // A DC of 80 over quantization 1 is a level of 128 + 80 / 8.
-    blocks: [[Int]]{test_coefficients([Int]{0, 80}), test_coefficients([Int]{0, -40})}
-    assert_eq(jpeg_words(test_jpeg(16, 8, 0xC0, [Int]{0x11}, blocks, 0)), gray_rows(16, 8, 8, 138, 123))
-    assert_eq(jpeg_words(test_jpeg(10, 3, 0xC1, [Int]{0x22}, blocks, 0)), gray_rows(10, 3, 8, 138, 123))
-    assert_eq(jpeg_words(test_jpeg(16, 8, 0xC0, [Int]{0x11}, blocks, 1)), gray_rows(16, 8, 8, 138, 123))
+    blocks: [[Int]]{__test_coefficients([Int]{0, 80}), __test_coefficients([Int]{0, -40})}
+    assert_eq(__jpeg_words(__test_jpeg(16, 8, 0xC0, [Int]{0x11}, blocks, 0)), __gray_rows(16, 8, 8, 138, 123))
+    assert_eq(__jpeg_words(__test_jpeg(10, 3, 0xC1, [Int]{0x22}, blocks, 0)), __gray_rows(10, 3, 8, 138, 123))
+    assert_eq(__jpeg_words(__test_jpeg(16, 8, 0xC0, [Int]{0x11}, blocks, 1)), __gray_rows(16, 8, 8, 138, 123))
 }
 
 #Test("jpeg ac coefficients match libjpeg's inverse DCT") {
-    block: test_coefficients([Int]{0, 40, 1, 100, 2, -60, 4, 25, 9, -12})
+    block: __test_coefficients([Int]{0, 40, 1, 100, 2, -60, 4, 25, 9, -12})
     expected: [Int]{144, 141, 134, 125, 116, 108, 101, 97, 147, 144, 137, 129, 120, 112, 106, 102, 150, 147, 141, 133, 125, 117, 112, 108, 151, 148, 143, 136, 128, 122, 116, 114, 150, 148, 143, 137, 131, 125, 120, 118, 151, 149, 145, 140, 134, 129, 125, 123, 154, 152, 148, 144, 139, 134, 131, 129, 156, 155, 152, 147, 143, 139, 136, 134}
     words := [Int]{8, 8}
-    loop level in expected -> words.push(gray_word(level))
-    assert_eq(jpeg_words(test_jpeg(8, 8, 0xC0, [Int]{0x11}, [[Int]]{block}, 0)), words)
+    loop level in expected -> words.push(__gray_word(level))
+    assert_eq(__jpeg_words(__test_jpeg(8, 8, 0xC0, [Int]{0x11}, [[Int]]{block}, 0)), words)
 }
 
 #Test("jpeg 4:2:0 chroma repeats and YCbCr converts like libjpeg") {
     // Luma levels 128, 138, 123 and 148 in the four quadrants; Cb 128, Cr 138.
     luma: [Int]{0, 80, -40, 160}
     blocks := [[Int]]{}
-    loop dc in luma -> blocks.push(test_coefficients([Int]{0, dc}))
-    blocks.push(test_coefficients([Int]{}))
-    blocks.push(test_coefficients([Int]{0, 80}))
-    words: jpeg_words(test_jpeg(16, 16, 0xC0, [Int]{0x22, 0x11, 0x11}, blocks, 0))
+    loop dc in luma -> blocks.push(__test_coefficients([Int]{0, dc}))
+    blocks.push(__test_coefficients([Int]{}))
+    blocks.push(__test_coefficients([Int]{0, 80}))
+    words: __jpeg_words(__test_jpeg(16, 16, 0xC0, [Int]{0x22, 0x11, 0x11}, blocks, 0))
     assert_eq(words.len(), 2 + 256)
-    assert_eq(words[2], png_rgba(142, 121, 128, 255))
-    assert_eq(words[2 + 8], png_rgba(152, 131, 138, 255))
-    assert_eq(words[2 + 8 * 16], png_rgba(137, 116, 123, 255))
-    assert_eq(words[2 + 255], png_rgba(162, 141, 148, 255))
-    info: inspect(test_jpeg(16, 16, 0xC0, [Int]{0x22, 0x11, 0x11}, blocks, 0), C_TEST_JPEG_LIMITS) ?? panic("inspect: {err:Debug}")
+    assert_eq(words[2], __png_rgba(142, 121, 128, 255))
+    assert_eq(words[2 + 8], __png_rgba(152, 131, 138, 255))
+    assert_eq(words[2 + 8 * 16], __png_rgba(137, 116, 123, 255))
+    assert_eq(words[2 + 255], __png_rgba(162, 141, 148, 255))
+    info: inspect(__test_jpeg(16, 16, 0xC0, [Int]{0x22, 0x11, 0x11}, blocks, 0), C_TEST_JPEG_LIMITS) ?? panic("inspect: {err:Debug}")
     assert(info.width == 16 && info.height == 16 && info.format == .JPEG && info.color == .RGB)
 }
 
 #Test("jpeg frames this module does not decode are typed errors") {
-    block: [[Int]]{test_coefficients([Int]{0, 8})}
-    assert(decode_error(test_jpeg(8, 8, 0xC2, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
-    assert(decode_error(test_jpeg(8, 8, 0xC9, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
-    assert(decode_error(test_jpeg(8, 8, 0xC0, [Int]{0x11, 0x11, 0x11, 0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
-    twelve := test_jpeg(8, 8, 0xC0, [Int]{0x11}, block, 0)
+    block: [[Int]]{__test_coefficients([Int]{0, 8})}
+    assert(__decode_error(__test_jpeg(8, 8, 0xC2, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
+    assert(__decode_error(__test_jpeg(8, 8, 0xC9, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
+    assert(__decode_error(__test_jpeg(8, 8, 0xC0, [Int]{0x11, 0x11, 0x11, 0x11}, block, 0), C_TEST_JPEG_LIMITS) == .Unsupported)
+    twelve := __test_jpeg(8, 8, 0xC0, [Int]{0x11}, block, 0)
     // The frame's sample precision follows SOI, the DQT segment and the SOF
     // marker and length.
     twelve[75] = U8{12}
-    assert(decode_error(twelve, C_TEST_JPEG_LIMITS) == .Unsupported)
+    assert(__decode_error(twelve, C_TEST_JPEG_LIMITS) == .Unsupported)
     // 17 x 16 pixels exceed the 256 the limits allow.
-    assert(decode_error(test_jpeg(17, 16, 0xC0, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .TooLarge)
-    whole: test_jpeg(8, 8, 0xC0, [Int]{0x11}, block, 0)
+    assert(__decode_error(__test_jpeg(17, 16, 0xC0, [Int]{0x11}, block, 0), C_TEST_JPEG_LIMITS) == .TooLarge)
+    whole: __test_jpeg(8, 8, 0xC0, [Int]{0x11}, block, 0)
     // Cut inside the frame header.
     truncated := [U8]{}
     loop index in 0..<80 -> truncated.push(whole[index])
-    assert(decode_error(truncated, C_TEST_JPEG_LIMITS) == .Malformed)
+    assert(__decode_error(truncated, C_TEST_JPEG_LIMITS) == .Malformed)
 }
 
 // cjpeg -quality 75 of a 16 x 16 gradient: YCbCr 4:2:0, standard tables.
@@ -1768,7 +1768,7 @@ C_TEST_JPEG_GRAY: [U8]{
 }
 
 // A rolling hash of decoded words, the one computed over libjpeg's output.
-word_hash: fn(words: [Int]) -> Int {
+__word_hash: fn(words: [Int]) -> Int {
     hash := 0
     loop word in words -> hash = (hash * 31 + word) % 1000000007
     hash
@@ -1777,14 +1777,14 @@ word_hash: fn(words: [Int]) -> Int {
 #Test("jpeg files from libjpeg decode to the bytes djpeg writes") {
     // djpeg -dct int -nosmooth: the integer inverse DCT and chroma
     // repeated, hashed the same way.
-    assert_eq(word_hash(jpeg_words(C_TEST_JPEG_420)), 988099183)
-    assert_eq(word_hash(jpeg_words(C_TEST_JPEG_444_RESTART)), 403664533)
-    assert_eq(word_hash(jpeg_words(C_TEST_JPEG_GRAY)), 458349796)
+    assert_eq(__word_hash(__jpeg_words(C_TEST_JPEG_420)), 988099183)
+    assert_eq(__word_hash(__jpeg_words(C_TEST_JPEG_444_RESTART)), 403664533)
+    assert_eq(__word_hash(__jpeg_words(C_TEST_JPEG_GRAY)), 458349796)
 }
 
 // A `width` x `height` image whose bytes run 0, 37, 74, ... mod 256, with
 // alpha `alpha` (or the running byte when `alpha` is negative).
-test_image: fn(width: Int, height: Int, alpha: Int) -> Image {
+__test_image: fn(width: Int, height: Int, alpha: Int) -> Image {
     pixels := [U8]{}
     loop index in 0..<(width * height * 4) {
         running: (index * 37) % 256
@@ -1793,7 +1793,7 @@ test_image: fn(width: Int, height: Int, alpha: Int) -> Image {
     Image{width: width, height: height, pixels: pixels}
 }
 
-encode_error: fn(image: Image, format: ImageFormat, limits: Limits) -> ImageError {
+__encode_error: fn(image: Image, format: ImageFormat, limits: Limits) -> ImageError {
     if encode(image, format, limits) == {
         .Ok(_) -> panic("encoded")
         .Err(error) -> error
@@ -1802,30 +1802,30 @@ encode_error: fn(image: Image, format: ImageFormat, limits: Limits) -> ImageErro
 
 #Test("png encode round-trips through decode") {
     loop alpha in ([Int]{255, -1}) {
-        original: test_image(5, 3, alpha)
+        original: __test_image(5, 3, alpha)
         bytes: encode(original, .PNG, C_TEST_LIMITS) ?? panic("encode: {err:Debug}")
         info: inspect(bytes, C_TEST_LIMITS) ?? panic("inspect: {err:Debug}")
         assert(info.format == .PNG && info.color == (if alpha < 0 -> ImageColor.RGBA else -> ImageColor.RGB))
-        assert_eq(decoded_words(bytes), image_words(original))
+        assert_eq(__decoded_words(bytes), __image_words(original))
         // Every chunk carries its CRC-32; IEND's is fixed.
         tail: bytes.len() - 4
-        assert_eq(be32(bytes, tail), 0xAE426082)
+        assert_eq(__be32(bytes, tail), 0xAE426082)
     }
 }
 
 #Test("png encode refuses bad images and budgets") {
     short: Image{width: 2, height: 2, pixels: [U8]{1, 2, 3}}
-    assert(encode_error(short, .PNG, C_TEST_LIMITS) == .Malformed)
-    assert(encode_error(Image{width: 0, height: 2, pixels: [U8]{}}, .PNG, C_TEST_LIMITS) == .Malformed)
+    assert(__encode_error(short, .PNG, C_TEST_LIMITS) == .Malformed)
+    assert(__encode_error(Image{width: 0, height: 2, pixels: [U8]{}}, .PNG, C_TEST_LIMITS) == .Malformed)
     // 9 x 8 is 72 pixels, above the 64 the limits allow.
-    assert(encode_error(test_image(9, 8, 255), .PNG, C_TEST_LIMITS) == .TooLarge)
-    assert(encode_error(test_image(5, 3, 255), .PNG, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 20}) == .TooLarge)
-    assert(encode_error(test_image(5, 3, 255), .GIF, C_TEST_LIMITS) == .Unsupported)
+    assert(__encode_error(__test_image(9, 8, 255), .PNG, C_TEST_LIMITS) == .TooLarge)
+    assert(__encode_error(__test_image(5, 3, 255), .PNG, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 20}) == .TooLarge)
+    assert(__encode_error(__test_image(5, 3, 255), .GIF, C_TEST_LIMITS) == .Unsupported)
 }
 
 // A smooth `width` x `height` image with half-transparent alpha, gray when
 // `gray` is 1.
-smooth_image: fn(width: Int, height: Int, gray: Int) -> Image {
+__smooth_image: fn(width: Int, height: Int, gray: Int) -> Image {
     pixels := [U8]{}
     loop y in 0..<height {
         loop x in 0..<width {
@@ -1837,11 +1837,11 @@ smooth_image: fn(width: Int, height: Int, gray: Int) -> Image {
 }
 
 // The squared differences of two same-size images' red, green and blue.
-squared_error: fn(left: Image, right: Image) -> Int {
+__squared_error: fn(left: Image, right: Image) -> Int {
     total := 0
     loop index in 0..<left.pixels.len() {
         if index % 4 != 3 {
-            difference: byte_at(left.pixels, index) - byte_at(right.pixels, index)
+            difference: __byte_at(left.pixels, index) - __byte_at(right.pixels, index)
             total += difference * difference
         }
     }
@@ -1852,28 +1852,28 @@ squared_error: fn(left: Image, right: Image) -> Int {
     limits: Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 8192}
     loop gray in 0..<2 {
         // 21 x 13 leaves partial blocks on the right and bottom edges.
-        original: smooth_image(21, 13, gray)
+        original: __smooth_image(21, 13, gray)
         bytes: encode(original, .JPEG, limits) ?? panic("encode: {err:Debug}")
         info: inspect(bytes, limits) ?? panic("inspect: {err:Debug}")
         assert(info.format == .JPEG && info.width == 21 && info.height == 13)
         assert(info.color == (if gray == 1 -> ImageColor.Gray else -> ImageColor.RGB))
         back: decode(bytes, limits) ?? panic("decode: {err:Debug}")
         // A PSNR of 35 dB is a mean squared error of at most 20.
-        assert(squared_error(original, back) <= 20 * 21 * 13 * 3)
+        assert(__squared_error(original, back) <= 20 * 21 * 13 * 3)
         // JPEG has no alpha: the decoded pixels are opaque.
         assert_eq(back.pixels[3], U8{255})
     }
-    assert(encode_error(smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
+    assert(__encode_error(__smooth_image(21, 13, 0), .JPEG, Limits{max_input_bytes: 8192, max_pixels: 1024, max_output_bytes: 300}) == .TooLarge)
 }
 
-resize_error: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: Limits) -> ImageError {
+__resize_error: fn(image: Image, width: Int, height: Int, filter: ResizeFilter, limits: Limits) -> ImageError {
     if resize(image, width, height, filter, limits) == {
         .Ok(_) -> panic("resized")
         .Err(error) -> error
     }
 }
 
-pixel_image: fn(width: Int, height: Int, words: [Int]) -> Image {
+__pixel_image: fn(width: Int, height: Int, words: [Int]) -> Image {
     pixels := [U8]{}
     loop word in words {
         loop shift in ([Int]{24, 16, 8, 0}) -> pixels.push(U8{(word >> shift).bit_and(255)})
@@ -1883,32 +1883,32 @@ pixel_image: fn(width: Int, height: Int, words: [Int]) -> Image {
 
 #Test("area resize averages covered pixels by area and alpha") {
     // 4 x 2 to 2 x 1: each destination pixel averages a 2 x 2 square.
-    source: pixel_image(4, 2, [Int]{0x000000FF, 0x646464FF, 0xFF0000FF, 0xFF0000FF, 0x0A0A0AFF, 0x1E1E1EFF, 0x0000FFFF, 0x0000FFFF})
+    source: __pixel_image(4, 2, [Int]{0x000000FF, 0x646464FF, 0xFF0000FF, 0xFF0000FF, 0x0A0A0AFF, 0x1E1E1EFF, 0x0000FFFF, 0x0000FFFF})
     halved: resize(source, 2, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
-    assert_eq(image_words(halved), [Int]{2, 1, 0x232323FF, 0x800080FF})
+    assert_eq(__image_words(halved), [Int]{2, 1, 0x232323FF, 0x800080FF})
     // 3 x 1 to 2 x 1: the middle pixel is split half to each side, so each
     // destination pixel is two parts its own end and one part the middle.
-    thirds: resize(pixel_image(3, 1, [Int]{0x000000FF, 0x606060FF, 0xC0C0C0FF}), 2, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
-    assert_eq(image_words(thirds), [Int]{2, 1, 0x202020FF, 0xA0A0A0FF})
+    thirds: resize(__pixel_image(3, 1, [Int]{0x000000FF, 0x606060FF, 0xC0C0C0FF}), 2, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(__image_words(thirds), [Int]{2, 1, 0x202020FF, 0xA0A0A0FF})
     // A transparent pixel adds no color, only transparency.
-    faded: resize(pixel_image(2, 1, [Int]{0xFF000000, 0x00FF00FF}), 1, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
-    assert_eq(image_words(faded), [Int]{1, 1, 0x00FF0080})
+    faded: resize(__pixel_image(2, 1, [Int]{0xFF000000, 0x00FF00FF}), 1, 1, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(__image_words(faded), [Int]{1, 1, 0x00FF0080})
     // Upscaling repeats a pixel over the cells it covers.
-    doubled: resize(pixel_image(1, 1, [Int]{0x12345678}), 2, 2, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
-    assert_eq(image_words(doubled), [Int]{2, 2, 0x12345678, 0x12345678, 0x12345678, 0x12345678})
+    doubled: resize(__pixel_image(1, 1, [Int]{0x12345678}), 2, 2, .Area, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")
+    assert_eq(__image_words(doubled), [Int]{2, 2, 0x12345678, 0x12345678, 0x12345678, 0x12345678})
 }
 
 #Test("nearest resize takes the pixel under each center") {
-    source: pixel_image(4, 1, [Int]{0x01, 0x02, 0x03, 0x04})
-    assert_eq(image_words(resize(source, 2, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{2, 1, 0x02, 0x04})
-    assert_eq(image_words(resize(source, 8, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{8, 1, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x04, 0x04})
+    source: __pixel_image(4, 1, [Int]{0x01, 0x02, 0x03, 0x04})
+    assert_eq(__image_words(resize(source, 2, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{2, 1, 0x02, 0x04})
+    assert_eq(__image_words(resize(source, 8, 1, .Nearest, C_TEST_LIMITS) ?? panic("resize: {err:Debug}")), [Int]{8, 1, 0x01, 0x01, 0x02, 0x02, 0x03, 0x03, 0x04, 0x04})
 }
 
 #Test("resize refuses bad sizes and budgets") {
-    source: pixel_image(2, 1, [Int]{0x01, 0x02})
-    assert(resize_error(source, 0, 1, .Area, C_TEST_LIMITS) == .Malformed)
-    assert(resize_error(Image{width: 2, height: 2, pixels: [U8]{1}}, 1, 1, .Nearest, C_TEST_LIMITS) == .Malformed)
+    source: __pixel_image(2, 1, [Int]{0x01, 0x02})
+    assert(__resize_error(source, 0, 1, .Area, C_TEST_LIMITS) == .Malformed)
+    assert(__resize_error(Image{width: 2, height: 2, pixels: [U8]{1}}, 1, 1, .Nearest, C_TEST_LIMITS) == .Malformed)
     // 9 x 8 is 72 pixels, above the 64 the limits allow.
-    assert(resize_error(source, 9, 8, .Area, C_TEST_LIMITS) == .TooLarge)
-    assert(resize_error(source, 5, 5, .Area, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 99}) == .TooLarge)
+    assert(__resize_error(source, 9, 8, .Area, C_TEST_LIMITS) == .TooLarge)
+    assert(__resize_error(source, 5, 5, .Area, Limits{max_input_bytes: 4096, max_pixels: 64, max_output_bytes: 99}) == .TooLarge)
 }
