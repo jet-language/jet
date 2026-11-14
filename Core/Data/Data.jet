@@ -2654,14 +2654,19 @@ snapshot_from_rows: fn<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
 // part of the data surface.
 priv quantile_select: module {
     // The interpolated quantile of nonempty, finite values within max_sort_rows.
+    // Input already in ascending order is read in place after one ordered pass
+    // (n - 1 comparisons, as an adaptive sort spends), with no copy and no
+    // selection.
     finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
-        work := [Float]{}
-        loop value in values -> work.push(value)
-        pos := q * Float{work.len() - 1}
-        lo := checked(Int{math.trunc(pos)}) ?? panic("quantile position must be finite")
+        pos: q * Float{values.len() - 1}
+        lo: checked(Int{math.trunc(pos)}) ?? panic("quantile position must be finite")
         hi := lo
         if (Float{lo}) < pos -> hi = lo + 1
-        if hi >= work.len() -> hi = work.len() - 1
+        if hi >= values.len() -> hi = values.len() - 1
+        frac: pos - Float{lo}
+        if ascending(values) -> return interpolated(values[lo], values[hi], frac)
+        work := [Float]{}
+        loop value in values -> work.push(value)
         low: select_rank(work, 0, work.len(), lo)
         if lo == hi -> return Ok(normalize_zero(low))
         // Selection leaves every value after rank `lo` at or above it, so the
@@ -2670,8 +2675,21 @@ priv quantile_select: module {
         loop index in hi..<work.len() {
             if work[index] < high -> high = work[index]
         }
-        frac := pos - Float{lo}
-        result := low * (Float{1.0} - frac) + high * frac
+        interpolated(low, high, frac)
+    }
+
+    // Whether each value is at or above the one before it.
+    ascending: fn(values: [Float]) -> Bool Never! {
+        loop index in 1..<values.len() {
+            if values[index] < values[index - 1] -> return false
+        }
+        true
+    }
+
+    // The value `frac` of the way from `low` to `high`.
+    interpolated: fn(low: Float, high: Float, frac: Float) -> Float DataError! {
+        if frac == (Float{0.0}) -> return Ok(normalize_zero(low))
+        result: low * (Float{1.0} - frac) + high * frac
         if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
         Ok(normalize_zero(result))
     }
@@ -2776,6 +2794,15 @@ priv quantile_select: module {
             assert_eq(select_rank(work, 0, work.len(), rank), sorted[rank])
         }
     }
+}
+
+#Test("a quantile of ascending input matches the one selection finds") {
+    ascending: [Float]{-3.0, -0.0, 0.0, 0.0, 1.5, 2.0, 2.0, 2.0, 7.25, 9.0, 11.0}
+    shuffled: [Float]{2.0, 11.0, -0.0, 7.25, 0.0, -3.0, 2.0, 9.0, 1.5, 0.0, 2.0}
+    loop q in ([Float]{0.0, 0.1, 0.25, 0.37, 0.5, 0.75, 0.9, 1.0}) {
+        assert_eq(quantile(ascending, q) ?? panic("ascending quantile"), quantile(shuffled, q) ?? panic("shuffled quantile"))
+    }
+    assert_eq(quantile([Float]{1.0, 2.0}, 0.5) ?? panic("median of two"), Float{1.5})
 }
 
 // rank_select_prototype (#3018): the private worst-case-linear selection with a
