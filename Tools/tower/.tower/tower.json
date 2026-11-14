@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102228,
+    "rev": 102230,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90540,7 +90540,7 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:54:55.014Z",
-      "updated": "2026-11-13T09:23:29.787Z",
+      "updated": "2026-11-14T06:29:36.154Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -201365,6 +201365,146 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T23:02:23.383Z"
+    },
+    {
+      "id": "D-LIBC-OMIT1",
+      "cardId": "c0cs6xlg",
+      "group": "library",
+      "title": "C library features Jet leaves out on purpose: floating-point flags, thread attributes, signal masks and message queues",
+      "situation": "The C standard library is the toolbox every C program on Linux uses. Jet is replacing it with its own Core library, and a census lists each C function and the Jet call that does its job. Thirteen groups still have no Jet counterpart, because C threads, signals and arithmetic work differently from Jet's. For example, C sets a hidden overflow flag after a multiplication, while Jet shows the overflow in the result itself. Someone porting a C program meets these gaps first. You are asked whether Jet should copy these thirteen groups or say plainly that Jet does not need them, naming the Jet way for each. We recommend naming the Jet way and not copying them.",
+      "gist": "Should Jet copy thirteen C library groups that clash with how Jet works, or say they are not needed and point to the Jet way?",
+      "lesson": "A new kitchen does not need a part for every gadget of the old one. If the new oven has a built-in timer, the old clip-on timer is not missing. Jet does many C jobs in another place: an overflow shows in the value itself, and a task is stopped by cancelling it. This vote decides whether those old parts are copied anyway.",
+      "explainer": "Words used here. libc is the C standard library. A census is a list of every libc function and its Jet counterpart. A task is Jet's unit of concurrent work, like a C thread. A signal is a message the operating system sends to a process, such as Ctrl-C. A mask blocks some signals for a while. A floating-point flag is a hidden note C keeps when arithmetic overflows or loses precision.",
+      "story": "Ravi ports a C tool that checks an overflow flag after a long calculation, and that stops a worker thread with pthread_kill. Under A the census row for fetestexcept says to check the result with math.is_inf or math.is_finite. The row for pthread_kill says to call cancel on the task. Ravi writes those two lines. Under B Ravi finds core.sys.fenv and a per-task kill call, which only some machines support, and the rest of Jet never sets or reads them.",
+      "inWild": "// Rust: std has no fenv, no thread attributes beyond a name and stack size,\n// and no signal masks; crates like libc expose the raw calls.\nlet handle = std::thread::Builder::new().stack_size(1 << 20).spawn(work)?;",
+      "detail": "What this ballot decides. The owner's 2026-11-08 rule (Q18) is parity coverage: each libc gap is either filled with idiomatic Jet, or carries an owner ruling that Jet does not need it. Tools/agent/LibcCensus.jet lists 277 families; 33 are GAP. This ballot covers the thirteen whose C shape clashes with a Jet rule. The other GAP families are being filled: complex and Bessel functions, run-once, task-local storage, semaphores, read-write locks, descriptor duplication, terminals, sockets, shared memory, fences and pthread_atfork.\n\nThe thirteen families follow, each with the Jet way its row would name.\n\n1. fenv.h exception flags (feclearexcept and six more). There are no sticky flags: the result carries the fact (math.is_inf, math.is_nan, math.is_finite), and checked integer arithmetic stops on overflow.\n\n2. fenv.h rounding and environment (fegetround, fesetround and eight more). Jet fixes round-to-nearest-even; directed rounding is math.floor, math.ceil, math.trunc and Decimal's rounding modes.\n\n3. pthread_attr_*. A task takes no attributes; stack and placement belong to the runtime.\n\n4. pthread_getschedparam, pthread_setschedparam and pthread_setschedprio. There is no per-task priority; the scheduler is fair.\n\n5. pthread_mutexattr_*, the prioceiling calls and pthread_mutex_consistent. Jet has one lock kind (tasks.lock), with no robust, priority-ceiling or process-shared locks.\n\n6. pthread_condattr_*. Deadlines use the monotonic clock, and conditions are not shared between processes.\n\n7. pthread_spin_*. Use tasks.lock; whether to spin is the runtime's choice.\n\n8. pthread_kill. A task handle's cancel() stops one task.\n\n9. sigprocmask and the sigset family (sigaddset through sigaltstack). Signals arrive as values through process.signals, so nothing needs blocking.\n\n10. posix_spawnattr_getsigmask and setsigmask. These follow item 9.\n\n11. mqueue.h. Use channels inside a process, and pipes or sockets between processes.\n\n12. fmtmsg. Use core.log.\n\n13. gethostid. core.sys.hostname and core.sys.uname name the machine; libc's 32-bit host id is neither stable nor unique.\n\npthread_atfork is not in this ballot, because core.sys.fork exists.\n\nUnder A each row becomes coverage NotNeeded, with a note citing the owner ruling on #6696 and naming the Jet way. LibcCensus.jet already checks that a NotNeeded note cites the ruling.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Say not needed, and name the Jet way",
+          "detail": "The thirteen groups stay out of Jet. Each census row says not needed and names the Jet call that does the job.",
+          "technical": "In Tools/agent/LibcCensus.jet, set coverage .NotNeeded on the thirteen GAP rows (fenv x2, pthread_attr, schedparam, mutexattr, condattr, spin, pthread_kill, sigset, spawnattr sigmask, mqueue, fmtmsg, gethostid). Each note cites 'owner ruling on #6696' and names the Jet API. No Core change.",
+          "code": "use math: core.math\n\nidle: fn() -> Int { 0 }\n\nrun: fn() {\n    big: Float{1.0e308} * 10.0\n    // A: the result carries the overflow; there is no hidden flag.\n    if math.is_inf(big) -> print(\"overflowed\")\n    worker: task idle()\n    // A: stopping one task is cancel, not a signal.\n    worker.cancel()\n    _: worker.join() ?? 0\n}"
+        },
+        {
+          "key": "B",
+          "name": "Copy them into Core",
+          "detail": "Core gets a floating-point flag module, thread attribute records, signal masks and message queues, with the C names translated.",
+          "technical": "Add core.sys.fenv (test, clear, raise, round mode), task attribute records, a per-task signal call, sigset values with process masks, and POSIX message queues as runtime rows on Linux. Every engine must save and restore the floating-point state around task switches, and the web engine has none of them.",
+          "code": "use fenv: core.sys.fenv\n\nidle: fn() -> Int { 0 }\n\nrun: fn() {\n    fenv.clear(.All)\n    big: Float{1.0e308} * 10.0\n    // B: read the hidden flag, as C does.\n    if fenv.test(.Overflow) -> print(\"overflowed\")\n    worker: task idle()\n    // B: send a signal to one task.\n    worker.kill(.Term)\n    _: worker.join() ?? 0\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "std has no fenv, no signal masks and no thread priorities; the libc crate exposes raw calls.",
+          "code": "let r = 1e308_f64 * 10.0;\nif r.is_infinite() { println!(\"overflowed\"); }"
+        },
+        {
+          "lang": "Go",
+          "note": "No floating-point flags, goroutines take no attributes, and os/signal delivers signals on a channel.",
+          "code": "c := make(chan os.Signal, 1)\nsignal.Notify(c, os.Interrupt)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Each of these jobs already has one Jet way, and copying the C shape would add a second mechanism that most engines cannot honour.",
+        "gains": [
+          "One mechanism per job: overflow in the value, cancel for tasks, signals as values.",
+          "Every census row still names where the job is done."
+        ],
+        "losses": [
+          {
+            "loss": "A C program ported line by line has no same-named call for these thirteen groups.",
+            "mitigation": "The census row for each C name prints the Jet call to use, so the porter finds it from the C name."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds hidden global state and second mechanisms, Linux-only rows the web engine cannot support, and task-switch costs for every program."
+          }
+        ],
+        "tradeoff": "No same-named C calls for thirteen groups, in exchange for one Jet way per job on every engine."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the Jet repository at 81b426cf46. Run JET=<jet> jet Tools/agent/LibcCensus.jet from the root and read its Gaps by area section. The thirteen families are the GAP rows at LibcCensus.jet lines 120, 121, 257, 281, 284, 296, 297, 301, 304, 306, 334, 359 and 376.\n\nCheck that Compiler/Prelude/Core.rows exports core.math is_inf, core.tasks lock, core.process signals, core.log, and core.sys hostname, uname and fork. A task handle's cancel() is used at tests/run/Concurrency/StopBoundaries.jet:82. Option A's program prints overflowed. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Should Jet copy thirteen C library groups that clash with Jet, or name the Jet way instead?",
+        "lesson": "C keeps hidden flags, thread settings and signal masks. Jet does those jobs elsewhere: an overflow shows in the value, and a task is stopped by cancelling it.",
+        "trio": {
+          "current": {
+            "note": "Today the census lists these groups as gaps with no answer.",
+            "code": "// fetestexcept: GAP\n// pthread_kill: GAP\n// sigprocmask: GAP"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Go has no float flags and delivers signals on a channel.",
+            "code": "signal.Notify(c, os.Interrupt)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Name the Jet way",
+            "gist": "Each group is marked not needed, with the Jet call to use.",
+            "gains": [
+              "One way per job.",
+              "Works on every engine."
+            ],
+            "losses": [
+              "No same-named C calls."
+            ],
+            "proposed": {
+              "code": "if math.is_inf(big) -> print(\"overflowed\")\nworker.cancel()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Copy them",
+            "gist": "Core gains flag, attribute, mask and queue calls.",
+            "gains": [
+              "C code ports name for name."
+            ],
+            "losses": [
+              "Hidden global state.",
+              "Linux-only calls."
+            ],
+            "proposed": {
+              "code": "fenv.clear(.All)\nif fenv.test(.Overflow) -> print(\"overflowed\")\nworker.kill(.Term)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Each job already has one Jet way, and the copies would be second mechanisms most engines cannot honour.",
+          "gains": [
+            "One way per job.",
+            "The census still names each answer."
+          ],
+          "losses": [
+            {
+              "loss": "No same-named C calls for these groups.",
+              "mitigation": "Each census row names the Jet call."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Hidden state, second mechanisms and Linux-only calls."
+            }
+          ],
+          "tradeoff": "No C names for thirteen groups, for one Jet way everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-14T06:29:35.173Z"
     }
   ],
   "questions": [
@@ -204811,6 +204951,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:29:36.154Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-LIBC-OMIT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-14T06:29:35.173Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-LIBC-OMIT1",
+      "note": "C library features Jet leaves out on purpose: floating-point flags, thread attributes, signal masks and message queues"
+    },
     {
       "at": "2026-11-14T06:24:30.898Z",
       "by": "Main",
