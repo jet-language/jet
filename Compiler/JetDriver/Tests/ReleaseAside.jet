@@ -1,0 +1,54 @@
+// Assemble with the Compiler source unit. A native build drops its compile
+// state on a detached task (JetDriverCompileRequest.release_state_aside,
+// Pipeline.jet jet_driver_release_aside): the compile stopped before lowering
+// returns the same result and lowering inputs as one that drops it in place.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode, JetDriverCoreSource, JetDriverLoweringInputsResult, jet_driver_lowering_inputs,
+    ]
+    jet_cli.[jet_cli_driver_request]
+    jet_sema.[SchemaSnapshot]
+}
+
+release_aside_front: fn(aside: Bool) -> JetDriverLoweringInputsResult {
+    source: "Shape: enum {{\n    Circle(radius: Int)\n    Square(side: Int)\n}}\narea: fn(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(radius) -> radius * radius * 3\n        .Square(side) -> side * side\n    }}\n}}\nlabel: fn(shape: Shape) -> String {{ \"area {{area(shape)}}\" }}\nrun: fn() {{\n    print(label(.Circle(radius: 2)))\n    print(label(.Square(side: 3)))\n}}\n"
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/release-aside",
+            identity: "release-aside-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/release-aside/main.jet", relative_path: "main.jet", identity: "release-aside-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "release-aside-root",
+        entry_path: "/release-aside/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Program)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.release_state_aside = aside
+    jet_driver_lowering_inputs(request, None)
+}
+
+// One line per fact the native route reads from the front end.
+release_aside_rows: fn(front: JetDriverLoweringInputsResult) -> [String] {
+    rows := [String]{"complete {front.compile.complete} internal {front.compile.internal_problem:Debug} held {front.compile.held != None}"}
+    loop diagnostic in front.compile.diagnostics -> rows.push("{diagnostic.code} {diagnostic.what}")
+    if front.inputs == .Val(checked) {
+        rows.push("entry {checked.entry_key:Debug} modules {checked.modules.len()} effects {front.compile.entry_effects:Debug}")
+        loop function in checked.functions -> rows.push("{function.key} {function.effects.solved:Debug} body {function.body.len()}")
+    } else {
+        rows.push("no lowering inputs")
+    }
+    rows
+}
+
+#Test("release_state_aside") {
+    in_place: release_aside_rows(release_aside_front(false))
+    // Several compiles in a row, each releasing its state on its own task
+    // while the next one runs.
+    loop _ in 0..<3 {
+        assert_eq(release_aside_rows(release_aside_front(true)), in_place)
+    }
+    if in_place.len() <= 4 || in_place[0] != "complete true internal None held false" -> panic("the fixture did not compile: {in_place:Debug}")
+}

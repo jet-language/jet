@@ -3871,14 +3871,6 @@ jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: Mod
     rows
 }
 
-// The Rust foreign facts of the registration graph a compile kept past IR
-// lowering; a compile that released it had no `extern rust` function, whose
-// facts are empty (jet_driver_rust_foreign_present).
-jet_driver_late_rust_foreign_facts: fn(graph: SemaRegistrationGraph?) -> JetDriverRustForeignFacts Never! {
-    if graph == .Val(registration) -> return jet_driver_rust_foreign_facts(registration)
-    jet_driver_rust_foreign_empty()
-}
-
 // The one native spelling of an exported C symbol (Rust
 // `Sema::Guest::guest_export_native_symbol`).
 jet_driver_c_symbol: fn(name: String) -> String Never! {
@@ -4345,14 +4337,16 @@ jet_driver_budget_facts_empty: fn() -> JetDriverBudgetFacts Never! {
     JetDriverBudgetFacts{public_api_items: 0, dependency_count: 0, effect_count: 0}
 }
 
-// A check's compile state, held by its result (JetDriverCompileResult.held)
-// under `hold_check_state` (JetCli Host.jet jet_cli_compile_check with
-// `finish`): the host ends the process with the result still held, so this
-// state is never dropped. Dropping it as jet_driver_compile_loaded_stages
-// returned walked every row of the graphs on one thread before the host
-// could print the outcome: about 3.3 s of the last 3.7 s of the self-check
-// (`jet check Compiler/JetCli`, gate-p45 perf).
-JetDriverHeldCheck: struct {
+// A compile's state once its result is built, which nothing reads again.
+// Dropping it as jet_driver_compile_loaded_stages returned walked every row
+// of the graphs on one thread: about 3.3 s of the last 3.7 s of the
+// self-check (`jet check Compiler/JetCli`, gate-p45 perf), and the 0.7 s
+// `driver.release` span of a hardening build. Under `hold_check_state`
+// (JetCli Host.jet jet_cli_compile_check with `finish`) the check's result
+// holds it (JetDriverCompileResult.held) and the host ends the process
+// with it still held, so it is never dropped; under `release_state_aside`
+// a build drops it on a detached task (jet_driver_release_aside).
+JetDriverHeldState: struct {
     load: JetDriverLoadResult
     registration: SemaRegistrationGraph
     checked: SemaGraphResult
@@ -5550,7 +5544,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
         if request.hold_check_state && !capture.stop_before_lowering {
-            result.held = Val(JetDriverHeldCheck{
+            result.held = Val(JetDriverHeldState{
                 load: load.move(),
                 registration: registration_graph.move(),
                 checked: checked_graph.move(),
@@ -5644,20 +5638,13 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         }
         prunable_modules = kept
     }
-    // copy: the graph may leave for late registration below; the entry and
-    // test plan still name modules through its table.
-    registered_modules: registration_graph.module_table.copy()
     decls := registration_graph.decls.move()
     registration_graph.decls = DeclTable{}
     // The symbol table moves on with the declarations, in a one-row list
-    // core reachability lends its threads: late registration reads only the
-    // modules' foreign rows.
+    // core reachability lends its threads: the Rust foreign facts below read
+    // only the modules' foreign rows.
     symbol_rows := [SymbolTable]{registration_graph.symbols.move()}
     registration_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
-    late_registration := SemaRegistrationGraph?{None}
-    if jet_driver_rust_foreign_present(registration_graph) {
-        late_registration = Val(registration_graph.move())
-    }
     jet_driver_trace_step_end(request.trace_sink, "driver.prelower.registration", c_export_rows.len())
 
     // #3980: lower only the Core source bodies the program reaches (Rust
@@ -5688,12 +5675,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     tests := [TTestFact]{}
     output_checks := [TOutputCheckFact]{}
     if request.mode == JetDriverCompileMode.Test {
-        jet_driver_test_plan(jet_driver_test_modules(load, request.core_tests), checked_graph, registered_modules, sema_functions, tests, output_checks, entry_diagnostics)
+        jet_driver_test_plan(jet_driver_test_modules(load, request.core_tests), checked_graph, registration_graph.module_table, sema_functions, tests, output_checks, entry_diagnostics)
     } else if request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun {
         // An evaluation runs the entry module's selected function, never
         // the package's executable entry.
         selected_name: request.selected_entry ?? "run"
-        key: symbol_key_text(SymbolKind.Function, module_text(registered_modules, load.entry_module_identity), "", selected_name)
+        key: symbol_key_text(SymbolKind.Function, module_text(registration_graph.module_table, load.entry_module_identity), "", selected_name)
         found := false
         loop function in sema_functions {
             if function.key == key -> found = true
@@ -5702,7 +5689,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             entry_diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the evaluation entry `{selected_name}` has no checked function", "evaluation executes the selected checked function", "declare the selected entry in the evaluation module"))
         }
     } else {
-        entry_key = jet_driver_resolve_entry_key(load, registered_modules, checked_graph, sema_functions, runtime_semantic_modules, entry_diagnostics)
+        entry_key = jet_driver_resolve_entry_key(load, registration_graph.module_table, checked_graph, sema_functions, runtime_semantic_modules, entry_diagnostics)
     }
     load.diagnostics = entry_diagnostics
     jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
@@ -5742,11 +5729,36 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = entry_effects.move()
     result.package_effects = package_effects.move()
-    result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
+    result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
     result.foreign_link = foreign_link
     result.command_record = command_record
     jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
+    if request.release_state_aside {
+        jet_driver_release_aside(JetDriverHeldState{
+            load: load.move(),
+            registration: registration_graph.move(),
+            checked: checked_graph.move(),
+            functions: unlowered_functions.move(),
+            // The lowering inputs took the checked modules.
+            modules: [SemaGraphModuleResult]{},
+            values: comptime_values.move(),
+            stage: comptime_stage.move(),
+            run: comptime_run.move(),
+            trail: trail.move(),
+            core_trail: core_trail.move(),
+        })
+    }
     result
+}
+
+// Drops `state` on a detached task, so the host's IR build runs while the
+// graphs drop instead of after (JetDriverCompileRequest.release_state_aside).
+// The task owns the state alone; a process that exits first hands its pages
+// back to the kernel.
+jet_driver_release_aside: fn(state: &&JetDriverHeldState) {
+    held: state.move()
+    released: task &&held { held.functions.len() }
+    released.detach()
 }
 
 // The effects the application requires: the direct effects of every function

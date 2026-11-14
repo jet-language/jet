@@ -1789,6 +1789,10 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // bodies; `keep` lowers them all, so the image can carry them
             // (Host.jet jet_cli_ir_checks).
             compiled_request.lower_reached_only = build_options_value(options, "dead_code") == "remove"
+            // The native route builds IR right after the front end, so the
+            // compile's state drops on its own task meanwhile
+            // (JetDriverCompileRequest.release_state_aside).
+            compiled_request.release_state_aside = true
             // A single program compile without a named start function is a
             // singular intent: sema selects its entry in the decided order
             // (explicit address, legacy `run: fn`, sole compatible Output,

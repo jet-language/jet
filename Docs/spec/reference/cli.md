@@ -871,7 +871,9 @@ line on stderr. The phases are the CLI's
 whose detail names the bodies the pass evaluates and whose index is the
 pass), `comptime.validate`, `lower`, `assemble`, `optimize`,
 `driver.result` holding `emit`, `driver.release` as the compile's
-intermediate state drops, and under `--keep-going` `keepgoing.final` and
+intermediate state drops (for an executable, the graphs drop on a detached
+task while `ir.build` runs, so the span holds only what stays), and under
+`--keep-going` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`), `jet build`'s `store.open` (the machine-wide artifact store,
 which a cold store lays out first; opened only while saved work is reused) and

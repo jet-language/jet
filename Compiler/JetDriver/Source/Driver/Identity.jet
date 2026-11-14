@@ -335,6 +335,11 @@ JetDriverCompileRequest: struct {
     // rather than dropping as the stages return, so the process exit hands
     // the state back to the kernel and nothing walks it.
     hold_check_state: Bool{false}
+    // A native build (JetCli Request.jet jet_cli_compile_executable): the
+    // compile state the lowering inputs leave behind drops on a detached
+    // task (Pipeline.jet jet_driver_release_aside) while the host builds IR,
+    // not on the compile's thread as the stages return.
+    release_state_aside: Bool{false}
     // `jet test` of a Core source: the Core row path (`Core/Encoding/Cbor.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),
@@ -891,8 +896,8 @@ JetDriverCompileResult: struct {
     // change test cover each, so editing one rebuilds.
     comptime_inputs: [JetDriverComptimeInputRecord]{[JetDriverComptimeInputRecord]{}}
     // The check's compile state under `hold_check_state`
-    // (Pipeline.jet JetDriverHeldCheck); None otherwise. Nothing reads it.
-    held: JetDriverHeldCheck?{None}
+    // (Pipeline.jet JetDriverHeldState); None otherwise. Nothing reads it.
+    held: JetDriverHeldState?{None}
 }
 
 // The `allocator:` policy of the entry package of `load`
