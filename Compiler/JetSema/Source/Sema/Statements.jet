@@ -6371,7 +6371,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     // `total += price`), so a plain write's value is checked on its own and
     // decides it (sema_expr_number_target_retype).
     number_target: sema_expr_number_target_open(index, scopes, context)
-    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
+    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, environment, program, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
     // The Rust `Stmt::Assign` feeds the place type into the RHS for compound
     // updates too, so `price *= 2.0` with `price: Float` reads the literal as
@@ -6526,14 +6526,15 @@ sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
 // field, or index read, and a typed literal with a written numeric head
 // (`F32{1.5}` into a `Float` parameter), has its own type whatever the hint,
 // so it checks without one and `sema_stmt_numeric_slot_value` fits it into
-// the slot. A number name whose own type the slot refuses has the type of
-// its use, so it reads with the slot type (Expressions/NumberNames.jet).
-sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type, scopes: SemaScopeTable) -> Bool Never! {
+// the slot. A number name, or a module constant bound to a number, whose own
+// type the slot refuses has the type of its use, so it reads with the slot
+// type (Expressions/NumberNames.jet).
+sema_stmt_numeric_slot_self_typed: fn(expr: Expr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
     if !sema_expr_is_numeric(required) -> return false
     if expr == {
-        .Ident(name, _, _) -> return !sema_expr_number_name_refused(name, required, scopes)
+        .Ident(name, _, _) -> return !sema_expr_number_name_refused(name, required, scopes) && !sema_expr_number_constant_refused(name, required, environment, program, scopes)
         .Field(_, _, _, _) | .Index(_, _, _, _, _) -> return true
-        .Paren(inner, _, _) -> return sema_stmt_numeric_slot_self_typed(inner, required, scopes)
+        .Paren(inner, _, _) -> return sema_stmt_numeric_slot_self_typed(inner, required, environment, program, scopes)
         .TypedLit(head, _, _, _) -> {
             if head == .Val(written) -> return sema_expr_is_numeric(written)
             return false
@@ -7721,7 +7722,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: &&TExpr, op:
         }
     }
     expected := Type?{None}
-    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty, scopes)
+    plain_self_typed: op == None && sema_stmt_numeric_slot_self_typed(expr, place.ty, environment, program, scopes)
     if op == None && !plain_self_typed -> expected = Val(place.ty)
     // Same compound contract as `sema_stmt_check_local_assignment`.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(place.ty)) -> expected = Val(place.ty)

@@ -63,7 +63,7 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         }
         open_slot = (required_ret == None || failure_open) && !is_lambda
     }
-    self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required, scopes)
+    self_typed: !callback && sema_stmt_numeric_slot_self_typed(argument.expr, required, environment, program, scopes)
     checked := if {
         open_slot || self_typed -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         callback -> {

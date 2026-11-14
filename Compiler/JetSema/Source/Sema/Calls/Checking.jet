@@ -589,7 +589,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         binder_keys := if binder_refs.len() > 0 && !default_in_owner -> sema_call_enter_binder_refs(binder_refs, args[index].flags.binder_site ?? span.start, environment, program, scopes, state, context, args[index].expr) else -> [SymbolID]{}
         // Rust `arg_expect`: a self-typed numeric read widens into the
         // parameter after it is checked on its own.
-        self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required, scopes)
+        self_typed: sema_stmt_numeric_slot_self_typed(args[index].expr, required, environment, program, scopes)
         trait_parameter: if required == {
             .TraitObject(_) -> true
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false

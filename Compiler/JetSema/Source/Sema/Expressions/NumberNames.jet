@@ -98,6 +98,15 @@ sema_expr_number_name_refused: fn(name: String, required: Type, scopes: SemaScop
     !type_identity_equal(own, required) && sema_expr_numeric_widening_to(own, required) != (Val(true))
 }
 
+// Whether `name` is a module constant of this module bound to a number
+// literal (sema_expr_number_constant_row) whose own type a numeric slot of
+// type `required` refuses, as sema_expr_number_name_refused asks of a name.
+sema_expr_number_constant_refused: fn(name: String, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    index: sema_expr_number_constant_row(name, environment, program, scopes) ?? return false
+    own: sema_scope_binding_type(environment, scopes, index) ?? return false
+    !type_identity_equal(own, required) && sema_expr_numeric_widening_to(own, required) != (Val(true))
+}
+
 // Reads the number name `name` (scope row `index`) at `span`, where `expected`
 // is asked for. Not handled when the name's own type serves the use or its
 // literal doesn't fit there either: the caller reads the name as usual and
