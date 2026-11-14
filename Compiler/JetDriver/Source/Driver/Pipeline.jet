@@ -2161,10 +2161,24 @@ jet_driver_comptime_flush: fn(
             flushed.progressed = true
             next
         }
+        if jet_driver_comptime_discriminant_range(program, source, value) == .Val(refusal) {
+            diagnostics.push(refusal)
+            if graph.keep_going -> next
+            flushed.stop = Val(jet_driver_comptime_run_result(values, checked_functions, trace, false, false))
+            return flushed
+        }
         values.push(jet_driver_comptime_item_value(source, value, comptime_request.expression))
         flushed.progressed = true
     }
     flushed
+}
+
+// An enum case number is a signed 64-bit word of its type's layout, so an
+// exact Int computed past that range (a BigInt) is E0035 at the number.
+jet_driver_comptime_discriminant_range: fn(program: SemaProgramTables, source: SemaComptimeItemSource, value: TComptimeValue) -> Diagnostic? {
+    if source.kind != SemaComptimeItemKind.TypeLevel -> return None
+    if value == .BigInt(_) -> return Val(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0035", source.span, "an enum discriminant is outside the signed integer range", "the enum number is stored as a signed 64-bit integer in the type layout", "use a number from -9223372036854775808 to 9223372036854775807"))
+    None
 }
 
 // The reason a CheckedText `check` gave for rejecting a body: its error when
@@ -2618,6 +2632,12 @@ jet_driver_comptime_run: fn(
                 if source.kind != SemaComptimeItemKind.CheckedText && (comptime_request.calls.len() == 0 || folded != None) {
                     if folded == None -> folded = sema_comptime_fold_in(programs[0], comptime_request.expression.tree, comptime_request.expression.root, values)
                     if folded == .Val(plain) {
+                        if jet_driver_comptime_discriminant_range(programs[0], source, plain) == .Val(refusal) {
+                            diagnostics.push(refusal)
+                            if keep_going -> next
+                            sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
+                            return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
+                        }
                         values.push(jet_driver_comptime_item_value(source, plain, comptime_request.expression))
                         made_progress = true
                         next
