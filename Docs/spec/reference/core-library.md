@@ -1266,6 +1266,10 @@ D-CORE-FILELOCK1):
   `list()` returns `DirectoryEntry`: `raw_name` preserves the native basename
   exactly, and `name_is_unicode` says whether `name` is lossless UTF-8. For an
   invalid UTF-8 name, `name` and `path` are display text, not an identity.
+  `open_raw(name)`, `create_raw(name, if_exists:, mode:)` and `remove_raw(name)`
+  take one entry's exact bytes, such as a `raw_name`, so a name that is not
+  UTF-8 can be opened, created and removed. An empty name, `.`, `..`, and a
+  name holding `/` or a zero byte are `IOError.InvalidInput`.
 - `directory.lock()` acquires a nonblocking exclusive advisory flock on the
   held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
   descriptor, so renaming the directory or closing the original `Directory`

@@ -19,6 +19,7 @@ use {
     host_path: __core_files_path_components
     core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
     access_codes.[access_check, advice_code, map_advice_code]
+    raw_names.[raw_held_name]
     scope_reads.[scope_roots, scope_has_parent, scope_part_name, scope_input_error, scope_read_at]
 }
 // core.files — one filesystem surface.
@@ -518,6 +519,22 @@ Directory: struct {
         core.files.__open_writer(self.handle, name, false, create_code(if_exists), mode ?? -1, 1)
     }
 
+    /// Open the regular file whose name is exactly the bytes `name`, such as
+    /// a `DirectoryEntry.raw_name` that is not valid UTF-8. `name` is one
+    /// entry of this directory: empty, `.`, `..`, and names holding `/` or a
+    /// zero byte are `IOError.InvalidInput`. A final link is refused.
+    open_raw: fn(self, name: [U8]) -[FS.Read]> FileReader IOError! {
+        raw_held_name(self.path, name, false)
+        core.files.__open_reader_raw(self.handle, name)
+    }
+
+    /// Create the file whose name is exactly the bytes `name`, with the same
+    /// labels as `create`; `open_raw` says which names are refused.
+    create_raw: fn(self, name: [U8], if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
+        raw_held_name(self.path, name, true)
+        core.files.__open_writer_raw(self.handle, name, create_code(if_exists), mode ?? -1)
+    }
+
     /// Hold the directory `name` inside this one.
     open_directory: fn(self, name: String) -[FS.Read]> Directory IOError! {
         held_name(self.path, name, false)
@@ -603,6 +620,13 @@ Directory: struct {
     remove: fn(self, name: String) IOError! -[FS.Write]> {
         held_name(self.path, name, true)
         core.files.__remove_at(self.handle, name, false)
+    }
+
+    /// Remove the non-directory entry whose name is exactly the bytes `name`;
+    /// `open_raw` says which names are refused.
+    remove_raw: fn(self, name: [U8]) IOError! -[FS.Write]> {
+        raw_held_name(self.path, name, true)
+        core.files.__remove_at_raw(self.handle, name)
     }
 
     /// Remove the empty directory `name`.
@@ -843,6 +867,22 @@ held_name: fn(base: String, name: String, write: Bool) IOError! {
             start = i + 1
         }
         i = i + 1
+    }
+}
+
+
+// The name check behind the raw-name Directory methods, not part of the
+// files surface.
+priv raw_names: module {
+    // A raw held-directory name is the exact bytes of one entry, so it holds
+    // no `/` and, being a native string, no zero byte.
+    raw_held_name: fn(base: String, name: [U8], write: Bool) IOError! {
+        shown: join(base, unicode_basename(name) ?? replacement_name(name))
+        if name.len() == 0 -> return Err(held_name_error(shown, write, "the name is empty; pass the bytes of one entry name"))
+        if name == ([U8]{46}) || name == ([U8]{46, 46}) -> return Err(held_name_error(shown, write, "the name `.` or `..` is refused; a held directory takes only plain names, so open the parent directory instead"))
+        loop byte in name {
+            if byte == (U8{47}) || byte == (U8{0}) -> return Err(held_name_error(shown, write, "a raw name is one entry, so it holds no `/` and no zero byte"))
+        }
     }
 }
 

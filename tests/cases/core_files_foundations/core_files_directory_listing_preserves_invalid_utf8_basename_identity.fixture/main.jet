@@ -1,9 +1,18 @@
-
 use files: core.files
 
+// Creates the two raw names a\x80 and a\xff, each holding its own last byte.
+make_names: fn() {
+    files.create_dir_all("names") ?? panic("cannot create names/")
+    directory: files.open_directory("names") ?? panic("cannot hold names/")
+    loop raw in ([[U8]]{[U8]{97, 255}, [U8]{97, 128}}) {
+        writer := directory.create_raw(raw) ?? panic("cannot create a raw name")
+        writer.write_all([U8]{raw[1]}) ?? panic("cannot write a raw name")
+    }
+}
+
 verify_names: fn() {
-    directory: files.open_directory("names")
-    entries: directory.list()
+    directory: files.open_directory("names") ?? panic("cannot hold names/")
+    entries: directory.list() ?? panic("cannot list names/")
     assert(entries.len() == 2)
     first: entries[0]
     second: entries[1]
@@ -14,14 +23,37 @@ verify_names: fn() {
     assert(first.path == second.path)
     assert(first.raw_name != second.raw_name)
     assert(!first.is_dir && !second.is_dir)
-    assert(directory.list().len() == 2)
+    assert((directory.list() ?? panic("cannot list names/")).len() == 2)
+    loop entry in entries {
+        reader := directory.open_raw(entry.raw_name) ?? panic("cannot open a raw name")
+        assert((reader.read(16) ?? panic("cannot read a raw name")) == [U8]{entry.raw_name[1]})
+    }
+}
+
+// A third raw name is created, listed, removed, and gone again.
+verify_remove: fn() {
+    directory: files.open_directory("names") ?? panic("cannot hold names/")
+    extra: [U8]{97, 254}
+    _: directory.create_raw(extra) ?? panic("cannot create a raw name")
+    assert((directory.list() ?? panic("cannot list names/")).len() == 3)
+    directory.remove_raw(extra) ?? panic("cannot remove a raw name")
+    assert((directory.list() ?? panic("cannot list names/")).len() == 2)
+    assert(directory.open_raw(extra) == .Err(.NotFound(_)))
+    assert(directory.remove_raw([U8]{97, 47, 98}) == .Err(.InvalidInput(_)))
+    assert(directory.open_raw([U8]{46, 46}) == .Err(.InvalidInput(_)))
 }
 
 #Test("non-Unicode native basenames retain distinct raw identities") {
+    make_names()
     verify_names()
+    verify_remove()
+    directory: files.open_directory("names") ?? panic("cannot hold names/")
+    assert((directory.list() ?? panic("cannot list names/")).len() == 2)
 }
 
 run: fn() {
+    make_names()
     verify_names()
+    verify_remove()
     print("distinct raw identities, equal display names: true")
 }
