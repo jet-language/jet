@@ -20,7 +20,7 @@ move: fn(crew: app.Remote<logic.Crew>, id: Int) -> String {
     "{moved}"
 }
 
-run: fn() (NetError | TaskFailure)! {
+run: fn() (NetError | HTTPError | TaskFailure)! {
     served: web.app().mount("/api", logic.Crew{name: "crew"})
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
