@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102197,
+    "rev": 102200,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48625,7 +48625,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "1. Matched programs: one million short print lines, and one million single-character stdout.write calls, each to a file and to a pipe, cold and warm, under the strict performance gate; record binary identity, backend level, wall and CPU time and write-syscall counts. 2. Compare with one String printed once and with C stdio and Python (block-buffered when piped). 3. Fixtures for the interleavings the current rule protects (2>&1 to one file, child inheriting stdout, runtime stop report). 4. If the cost is material, raise an owner ballot on piped-output timing; otherwise record the numbers and delete the dead flush path so the contract matches behavior.",
       "checkSteps": null,
@@ -48634,6 +48634,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "All criteria met (c3 decision with 3e02c94923 and 10acaaaa23; c4 c7e3b4eec3; c5 585db1bd73; c6 10acaaaa23)."
+        },
         {
           "at": "2026-10-07",
           "by": "Pip",
@@ -48661,8 +48666,9 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): tower.json decisions: D-STDOUT-BUFFER1 \"When printed text leaves the program\" (cardId = #4634) status=ratified outcome=A ratifiedAt=2026-10-07; the ballot for buffered piped output exists",
-          "at": "2026-10-31T14:51:25.422Z"
+          "evidence": "D-STDOUT-BUFFER1 is ratified (outcome A, 2026-10-07) as the ballot for buffered piped output, and the dead flush path is removed by 3e02c94923 and 10acaaaa23; the buffer policy is c7e3b4eec3.",
+          "at": "2026-11-14T05:05:12.801Z",
+          "closure": "decision"
         },
         {
           "n": 4,
@@ -48670,8 +48676,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): the flush policy lives in the Jet-owned runtime: Compiler/JetRuntime/Source/HostStdio.jet:25 jet_std_io_stdout_flush and :71-77 host_stdio_flush_failure (stderr drains stdout first). There is no Rust Prelude left to extend: rg --files -g '*.rs' finds only Tools/gauntlet, Tools/perf, tests/compiled_workloads/adapters, Examples/ffi and editor files, and no crates/ dir",
-          "at": "2026-10-31T15:17:14.954Z"
+          "evidence": "The flush policy lives in the Jet-owned runtime: c7e3b4eec3 (the one buffer policy) and 10acaaaa23 (jet.runtime.term), Compiler/JetRuntime/Source/HostStdio.jet. There is no Rust Prelude to extend.",
+          "at": "2026-11-14T05:05:14.634Z"
         },
         {
           "n": 5,
@@ -48708,12 +48714,13 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.718Z",
-      "updated": "2026-11-14T05:04:36.805Z",
+      "updated": "2026-11-14T05:05:16.920Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T05:05:16.920Z"
     },
     {
       "id": "c04es5yq",
@@ -204728,6 +204735,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T05:05:16.920Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j8dr0e",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-14T05:05:14.634Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8dr0e",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-14T05:05:12.801Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0j8dr0e",
+      "note": "#3"
+    },
     {
       "at": "2026-11-14T05:04:58.466Z",
       "by": "Main",
