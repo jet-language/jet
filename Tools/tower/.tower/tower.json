@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102375,
+    "rev": 102383,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2709,7 +2709,7 @@
       "title": "M08 · Deferred dogfood and platform closeout",
       "goal": "Tier-1 platform, scale, clean-machine, offline, store, registry, and environment acceptance remain recorded as one explicit closeout surface; its package-manager dogfood work is intentionally deferred by owner direction. The epoch gate is complete only when durable evidence and independent review show no hidden dependency, false-green skip, or unverified delivery claim.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:06:09.032Z"
     },
     {
@@ -18222,7 +18222,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": "e5-m08-platform-acceptance",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal**\nClose Epoch 5 (Jetpack) with durable evidence: integrated clean-machine, offline, platform, store, registry, environment and dogfood workflows, the single epoch-wide full-suite run, and an independent closeout. This card implements no product scope.\n\n**Current state**\n- Census 2026-09-01: every Epoch 5 card is done except this one; criteria 1 and 3 are met (no stub, skip ledger, hidden Nix shell-out or compatibility path supports a claim). #955 is done.\n- Remaining: criterion 2 (integrated workflows), criterion 4 (full suite), criterion 5 (evidence record). The criterion text names `scripts/agent/jet-env full scripts/agent/verify-full.sh`; the scripts now live at Tools/agent/jet-env and Tools/agent/verify-full.sh, which needs the milestone token (AGENTS.md \"Environment and proof\").\n- The Jetpack port to Jet (Jetpack/, #3590) is in flight; this gate proves the shipped Epoch 5 surface, not the port.\n\n**Changes**\n1. Re-run the Epoch 5 acceptance paths on the integrated tree through production components: clean machine, offline install, supported platform, store, registry, environment and dogfood workflows. Record commands, platform, artifacts and failures.\n2. Run `Tools/agent/jet-env full Tools/agent/verify-full.sh` once with the milestone token. Investigate failures; do not waive failures caused by Epoch 5 work, and card any other failure to its owner.\n3. Independent fresh-context review of the evidence; record in Tower and a dated Docs/audits/ epoch-5 closeout note.\n\n**Proof**\n- `Tools/agent/jet-env full Tools/agent/verify-full.sh` exits 0 on the integrated tree.\n- The closeout note and card log list each workflow command with exit status, platform and artifact identity, plus the reviewer's artifact id.\n\n**Batch**\nbatch-measure: milestone evidence run; no code change.\n\n**Dependencies**\nNone open (#955 done). Needs the owner's milestone token for verify-full.\n",
       "blockedBy": [],
@@ -18284,11 +18284,12 @@
         {
           "n": 6,
           "text": "Superseded: the Epoch 5 gate is replaced by the goal-model closure rule, and examples and goldens are a standing gate.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T13:08:22.021Z"
+          "evidence": "Obsolete (CardCloser-1, verified by Main 2026-11-14): the Epoch 5 gate is superseded by the goal-model closure rule (owner overnight orders, rule 21) and the standing examples/goldens gate (ruling 11); its criteria were removed 2026-11-13.",
+          "at": "2026-11-14T13:08:41.811Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -18299,7 +18300,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:08.533Z",
-      "updated": "2026-11-14T13:08:22.021Z",
+      "updated": "2026-11-14T13:08:43.314Z",
       "updatedBy": "Main",
       "tags": [
         "p0-proof",
@@ -18310,7 +18311,8 @@
       "probe": null,
       "visualMedia": [],
       "goals": [],
-      "criteriaLastN": 6
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T13:08:43.314Z"
     },
     {
       "id": "c0x2g69u",
@@ -58231,7 +58233,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -58257,10 +58259,11 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:39.884Z",
-      "updated": "2026-11-14T13:08:33.925Z",
+      "updated": "2026-11-14T13:08:35.872Z",
       "updatedBy": "Main",
       "goals": [],
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:35.872Z"
     },
     {
       "id": "c0he880u",
@@ -91832,7 +91835,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -91841,15 +91844,36 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The census preflight checks and builds the compiler with the admitted seed, and a launch without a clean receipt from that seed is refused. Proof: jet test Tools/agent/Land.jet --filter 'a receipt admits only the source identity'.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (CardCloser-1, gate-p62 jet, 2026-11-14): jet test Tools/agent/Land.jet --filter 'a receipt admits only the source identity' -> 1 passed. Land.jet census phase A runs check Compiler/JetCli and build Compiler with seed_dir(); Chain.jet and the release tools refuse without the receipt (landed 82813834b7, 6e90d19243).",
+          "at": "2026-11-14T13:08:54.706Z"
+        },
+        {
+          "n": 2,
+          "text": "The landing refuses a submission whose touched files carry a seed check row (Land.jet prebuild_gate, rule 1) unless its meta declares a seed: split, and intake.md tells workers to stage such uses behind the next seed (part a / part b). Proof: Tools/agent/Land.jet prebuild_gate and seed_split; .agents/skills/orchestration/references/intake.md.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6: Tools/agent/Land.jet prebuild_gate (rule 1) and seed_split (Land.jet:2477, used at :2645), landed by 82813834b7 (Land batch train rules) and 6e90d19243 (rule 1 durable); intake.md lines 53-58 (part a / part b, seed: split) and 115-120 (gate before the build), landed by 8ef5415943. Checked by Main.",
+          "at": "2026-11-14T13:08:55.747Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T11:36:13.235Z",
-      "updated": "2026-11-09T11:36:13.235Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T13:08:57.438Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T13:08:57.438Z"
     },
     {
       "id": "c0qyk2os",
@@ -205410,6 +205434,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:08:57.438Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0cyzxlq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:08:55.747Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cyzxlq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T13:08:54.706Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0cyzxlq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T13:08:45.127Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cyzxlq",
+      "note": "#2 The landing refuses a submission whose touched files carry a"
+    },
+    {
+      "at": "2026-11-14T13:08:44.191Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0cyzxlq",
+      "note": "#1 The census preflight checks and builds the compiler with the"
+    },
+    {
+      "at": "2026-11-14T13:08:43.315Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00de14z",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:08:41.812Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00de14z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-14T13:08:35.872Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pqgjqc",
+      "note": "phase"
+    },
     {
       "at": "2026-11-14T13:08:33.925Z",
       "by": "Main",
