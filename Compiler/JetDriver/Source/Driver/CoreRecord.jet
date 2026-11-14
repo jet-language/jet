@@ -457,8 +457,8 @@ jet_driver_core_record_registration: fn(record: JetDriverCoreRecord, index: Int)
     Ok(registration)
 }
 
-// The tree of the registration row of the record's module `index`, read on
-// the load thread so a parse thread decodes it without the record.
+// The tree of the registration row of the record's module `index`, read by
+// the parse job that decodes it (Loader.jet JetDriverParseJob.Record).
 jet_driver_core_record_registration_tree: fn(record: JetDriverCoreRecord, index: Int) -> Dyn Err! {
     tree: jet_driver_core_record_tree(record, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
     Ok(tree)

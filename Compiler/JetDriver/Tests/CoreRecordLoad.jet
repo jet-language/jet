@@ -1,7 +1,8 @@
 // Loading a Core module from the precompiled Core record (Loader.jet
-// JetDriverParseJob.Record): its registration row decodes into the unit's
-// program and line table with no source lexed or scanned, and the loaded
-// rows seed the graph (CoreRecordRebase.jet jet_driver_core_record_seeds).
+// JetDriverParseJob.Record, jet_driver_core_record_parsed_unit): its
+// registration row decodes into the unit's program and line table with no
+// source lexed or scanned, and the loaded rows seed the graph
+// (CoreRecordRebase.jet jet_driver_core_record_seeds).
 use {
     jet_parser.[parse_source, parser_line_starts]
     jet_sema.[
@@ -10,7 +11,7 @@ use {
         SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment,
         sema_registration_prepare_graph,
     ]
-    jet_driver.[JetDriverLoadedModule, JetDriverParseJob, jet_driver_canonical_effect_module, jet_driver_core_record_seeds, jet_driver_parse_one]
+    jet_driver.[JetDriverLoadedModule, jet_driver_canonical_effect_module, jet_driver_core_record_parsed_unit, jet_driver_core_record_seeds]
     jet_foundation.[Span, SymbolKeys, ast_program, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
@@ -50,7 +51,7 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     row := core_record_load_row()
     items: row.program.items.len()
     assert(items > 0)
-    unit := jet_driver_parse_one(JetDriverParseJob.Record{row: row.encode(), bytes: 0, module_name: "main", index: 3}, compiler_threads_single())
+    unit := jet_driver_core_record_parsed_unit(row.encode(), "main", 3)
     assert_eq(unit.parsed.diagnostics.len(), 0)
     assert_eq(unit.parsed.program.items.len(), items)
     assert_eq(unit.tokens, 0)

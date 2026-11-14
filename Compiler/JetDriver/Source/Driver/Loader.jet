@@ -4007,11 +4007,13 @@ JetDriverParseJob: enum {
     // `tested` unit is the Core source a `jet test` of that file runs
     // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
-    // A Core module the Core record holds: the tree of its registration row,
-    // the bytes the row takes in the record (its parse weight), the module's
-    // name, and its module key position. Decoding it replaces the lex and the
-    // parse: the row's tree is the program the record checked.
-    Record(row: Dyn, bytes: Int, module_name: String, index: Int)
+    // A Core module the Core record holds: the record, the bytes its
+    // registration row takes there (its parse weight), the module's name and
+    // its module key position. Decoding the row replaces the lex and the
+    // parse: its tree is the program the record checked. The row is read
+    // only when the job runs, so a wave holds one row's tree per parse
+    // thread, never every row's at once.
+    Record(record: JetDriverCoreRecord, bytes: Int, module_name: String, index: Int)
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -4077,8 +4079,7 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     if request.core_record == .Val(record) {
         if jet_driver_core_record_loads(request, record) && module_find(record.module_table, jet_driver_unit_module_identity(unit)) == .Val(recorded) {
             if record.module_rows.get(recorded.id) == .Val(index) {
-                tree: jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}")
-                return JetDriverParseJob.Record{row: tree, bytes: jet_driver_core_record_registration_size(record, index), module_name: row.module_name, index: index}
+                return JetDriverParseJob.Record{record: record, bytes: jet_driver_core_record_registration_size(record, index), module_name: row.module_name, index: index}
             }
         }
     }
@@ -4112,7 +4113,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
-        .Record(row, _, module_name, index) -> jet_driver_core_record_parsed_unit(row, module_name, index)
+        .Record(record, _, module_name, index) -> jet_driver_core_record_parsed_unit(jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}"), module_name, index)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
