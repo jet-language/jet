@@ -1352,8 +1352,8 @@ sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEn
         diagnostics.push(sema_error("E0915", value.span, "the function `{written}` has no `Display` implementation", "a hole shows a value, and a function is code to run, not text", "call it in the hole: `{{{written}()}}`"))
         return false
     }
-    shown: sema_type_show(ty)
-    diagnostics.push(sema_error("E0915", value.span, "`{shown}` has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {shown}.Display {{ display: fn(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
+    // sema_type_show quotes a nominal name itself; the impl head is bare code.
+    diagnostics.push(sema_error("E0915", value.span, "{sema_type_show(ty)} has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
     false
 }
 
