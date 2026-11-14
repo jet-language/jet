@@ -4,7 +4,7 @@
   "cells": ["netserv.service"],
   "mode": "service",
   "perf": true,
-  "languages": ["jet", "go", "rust", "python", "node", "lua", "luajit"],
+  "languages": ["jet", "go", "rust", "python", "node", "lua", "luajit", "c", "zig"],
   "spec": {
     "behavior": "Serve a tiny single-process JSON key-value HTTP service. GET /health returns health, PUT /kv/<key> stores the raw request body, GET /kv/<key> reads it or returns a 404 JSON error, and GET /shutdown returns a goodbye response then exits cleanly. Every response uses Content-Type application/json.",
     "args": ["18080"],
@@ -51,7 +51,9 @@
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses http.server.HTTPServer subclass."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in node:http server with the same JSON bodies, status codes, and clean GET /shutdown path."},
     "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "LuaSocket TCP listener and hand-written HTTP/1.1, as in the Rust rail (LuaSocket has no HTTP server); lua-cjson encodes the JSON bodies. Both modules come from the dev shell's withPackages Lua, since Lua's standard library has no sockets or JSON."},
-    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: POSIX sockets and a hand-written HTTP/1.1 request reader. C has no HTTP server library; like the Rust rail it parses the request line, headers and Content-Length body itself. No vendored library."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: std.Io.net listener, std.http.Server for request parsing and responses, StringHashMap store."}
   },
   "rewrite_provenance": {
     "worker": "CorpusHttpService",

@@ -4,7 +4,7 @@
   "cells": ["concurrency.app"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "go", "node", "lua", "luajit"],
+  "languages": ["jet", "rust", "python", "go", "node", "lua", "luajit", "c", "zig"],
   "spec": {
     "behavior": "Recursively scan every regular .txt file under the given directory with bounded concurrency, count non-overlapping substring occurrences of the needle per line, print matching paths sorted lexicographically, then print files matched/scanned and the total occurrence count.",
     "args": ["files", "needle-7f"],
@@ -46,7 +46,9 @@
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses filepath.WalkDir and a bounded GOMAXPROCS worker pool for the same tree and output contract."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses recursive fs/promises discovery and a bounded availableParallelism worker pool for the same tree and output contract."},
     "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Walks the tree with LuaFileSystem (lfs, provisioned by the dev shell's withPackages Lua), since Lua's standard library cannot list a directory. Lua has no threads, so the scan is sequential on one interpreter thread: a plain string.find count per file, same sorted output."},
-    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: nftw discovery, then one pthread per online CPU (sysconf) claiming files from an atomic index; qsort orders the matches."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: std.Io.Dir walk, then std.Thread workers claiming files from an atomic index; std.mem.sort orders the matches."}
   },
   "rewrite_provenance": {
     "worker": "CorpusParallelGrep",

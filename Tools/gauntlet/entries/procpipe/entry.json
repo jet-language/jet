@@ -4,7 +4,7 @@
   "cells": ["files.orchestration"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "go", "node", "lua", "luajit"],
+  "languages": ["jet", "rust", "python", "go", "node", "lua", "luajit", "c", "zig"],
   "spec": {
     "behavior": "Run four deterministic child-process orchestration steps: capture Python arithmetic, pipeline generated lines through sort, time out a sleeping Python child after 300ms, and use checked execution to observe exit code 3. Print one transcript line per step.",
     "args": [],
@@ -40,7 +40,9 @@
     "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": [], "notes": "Initial run blocked because producer was not started; added source.Start()."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node child_process rail with capture, sort pipeline, timeout, and exit-code observation."},
     "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses luaposix (provisioned by the dev shell's withPackages Lua) for fork/execp/pipe/dup2/wait, since Lua's standard library starts children only through a shell and has no argv pipelines or timeouts; the 300ms timeout polls waitpid with WNOHANG, then sends SIGKILL."},
-    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: posix_spawnp with file actions for capture and the pipe into sort; the timeout polls a pidfd for 300ms, then SIGKILLs."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: std.process.run for captures and for the slow child with a 300ms std.Io.Timeout, and std.process.spawn for the pipe into sort."}
   },
   "rewrite_provenance": {
     "worker": "CorpusProcpipe",

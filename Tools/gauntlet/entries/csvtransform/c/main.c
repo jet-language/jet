@@ -4,6 +4,7 @@
 
 typedef struct {
     char name[64];
+    size_t length;
     size_t count;
     double sum;
 } Group;
@@ -40,40 +41,84 @@ static int by_name(const void *left, const void *right) {
     return strcmp(((const Group *)left)->name, ((const Group *)right)->name);
 }
 
+/* The amount in [start, stop) as a double; returns 0 when the text isn't a number.
+   Plain decimals with at most 15 significant digits take the exact fast path
+   (an exact integer divided by an exact power of ten rounds once, as strtod
+   would); anything else goes to strtod. */
+static int parse_amount(const char *start, const char *stop, double *out) {
+    static const double powers[] = {1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15};
+    const char *p = start;
+    int negative = p < stop && (*p == '-' || *p == '+') ? *p++ == '-' : 0;
+    long long mantissa = 0;
+    int digits = 0, fraction = -1;
+    for (; p < stop; p++) {
+        if (*p == '.' && fraction < 0) {
+            fraction = 0;
+        } else if (*p >= '0' && *p <= '9' && digits < 15) {
+            mantissa = mantissa * 10 + (*p - '0');
+            digits++;
+            if (fraction >= 0) fraction++;
+        } else {
+            break;
+        }
+    }
+    if (p == stop && digits > 0) {
+        double value = (double)mantissa / powers[fraction < 0 ? 0 : fraction];
+        *out = negative ? -value : value;
+        return 1;
+    }
+    char text[64];
+    size_t length = (size_t)(stop - start);
+    if (length == 0 || length >= sizeof text) return 0;
+    memcpy(text, start, length);
+    text[length] = '\0';
+    char *parsed_end;
+    *out = strtod(text, &parsed_end);
+    return *parsed_end == '\0';
+}
+
 int main(int argc, char **argv) {
     const char *path = argc > 1 ? argv[1] : "sales.csv";
-    FILE *input = fopen(path, "r");
-    if (!input) {
+    FILE *input = fopen(path, "rb");
+    if (!input || fseek(input, 0, SEEK_END) != 0) {
         perror(path);
         return 1;
     }
+    long size = ftell(input);
+    rewind(input);
+    char *text = malloc((size_t)size + 1);
+    if (!text || fread(text, 1, (size_t)size, input) != (size_t)size) {
+        perror(path);
+        return 1;
+    }
+    fclose(input);
+    const char *const text_end = text + size;
+
     Group groups[64];
     size_t group_count = 0, total_count = 0;
     double total_sum = 0.0;
-    char line[1024];
-    if (!fgets(line, sizeof line, input)) return 1; /* header */
-    while (fgets(line, sizeof line, input)) {
-        const char *end = line + strcspn(line, "\r\n");
-        if (end == line) continue;
+    const char *line = memchr(text, '\n', (size_t)size); /* skip the header */
+    line = line ? line + 1 : text_end;
+    while (line < text_end) {
+        const char *newline = memchr(line, '\n', (size_t)(text_end - line));
+        const char *end = newline ? newline : text_end;
+        const char *next = newline ? newline + 1 : text_end;
+        if (end > line && end[-1] == '\r') end--;
         const char *at = line, *start, *stop, *region, *region_end, *amount, *amount_end;
+        line = next;
+        if (end == at) continue;
         if (!next_field(end, &at, &start, &stop)) continue; /* id */
         if (!next_field(end, &at, &region, &region_end)) continue;
         if (!next_field(end, &at, &start, &stop)) continue; /* category */
         if (!next_field(end, &at, &amount, &amount_end)) continue;
-        char amount_text[64];
-        size_t amount_len = (size_t)(amount_end - amount);
-        if (amount_len == 0 || amount_len >= sizeof amount_text) continue;
-        memcpy(amount_text, amount, amount_len);
-        amount_text[amount_len] = '\0';
-        char *parsed_end;
-        double value = strtod(amount_text, &parsed_end);
-        if (*parsed_end != '\0' || !(value > 0.0)) continue;
+        double value;
+        if (!parse_amount(amount, amount_end, &value) || !(value > 0.0)) continue;
 
         size_t region_len = (size_t)(region_end - region);
         if (region_len >= sizeof groups[0].name) continue;
         Group *group = NULL;
         for (size_t i = 0; i < group_count; i++) {
-            if (strlen(groups[i].name) == region_len && memcmp(groups[i].name, region, region_len) == 0) {
+            if (groups[i].length == region_len && memcmp(groups[i].name, region, region_len) == 0) {
                 group = &groups[i];
                 break;
             }
@@ -86,6 +131,7 @@ int main(int argc, char **argv) {
             group = &groups[group_count++];
             memcpy(group->name, region, region_len);
             group->name[region_len] = '\0';
+            group->length = region_len;
             group->count = 0;
             group->sum = 0.0;
         }
@@ -94,7 +140,6 @@ int main(int argc, char **argv) {
         total_count++;
         total_sum += value;
     }
-    fclose(input);
     qsort(groups, group_count, sizeof *groups, by_name);
     for (size_t i = 0; i < group_count; i++) printf("%s n=%zu sum=%.2f\n", groups[i].name, groups[i].count, groups[i].sum);
     printf("total n=%zu sum=%.2f\n", total_count, total_sum);

@@ -4,7 +4,7 @@
   "cells": ["text.report-cli"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "go", "zig", "node", "lua", "luajit"],
+  "languages": ["jet", "rust", "python", "go", "zig", "node", "lua", "luajit", "c"],
   "spec": {
     "behavior": "Stream a deterministic application log line by line, parse each RFC3339 UTC timestamp, count all levels in fixed order, rank the three components with the most ERROR records by count descending and name ascending, and print the first timestamp, last timestamp, and elapsed span in seconds.",
     "args": ["app.log"],
@@ -97,6 +97,13 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "Runs lua/main.lua."
+    },
+    "c": {
+      "author": "CardCloser-2",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "libc only: streams the log through one 64 KiB fread buffer, splits records with memchr, and reads the RFC3339 UTC fields at fixed offsets with civil-date arithmetic, as the Zig rail does (fgets plus sscanf/timegm per line was 5x slower); qsort ranks the ERROR components."
     }
   },
   "rewrite_provenance": {
