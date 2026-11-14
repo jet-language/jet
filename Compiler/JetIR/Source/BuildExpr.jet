@@ -9216,6 +9216,8 @@ ir_frame_stop_locals: fn(m: &IRModule, b: IRBuilder) -> [Int] Never! {
         at: ir_frame_name_at(b, rows, name)
         hidden_at: ir_frame_name_at(b, hidden, name)
         if at < 0 || hidden_at < 0 -> next
+        // A binding with no slot (and no write address) holds no value to report.
+        if b.bindings[row].indirect < 0 && b.bindings[row].slot < 0 -> next
         // A write parameter's slot holds its address; `indirect` is the value's row.
         value_row: if b.bindings[row].indirect >= 0 -> b.bindings[row].indirect else -> b.f.slot_type[b.bindings[row].slot]
         ty: m.types[value_row].ty
