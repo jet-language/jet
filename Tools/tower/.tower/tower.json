@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6840,
-    "rev": 102331,
+    "nextNum": 6841,
+    "rev": 102335,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -35,7 +35,7 @@
         "radar:e14"
       ]
     },
-    "completionCursor": "2026-11-14T08:35:57.890Z"
+    "completionCursor": "2026-11-14T08:58:22.534Z"
   },
   "epochs": [
     {
@@ -98903,6 +98903,56 @@
       "updated": "2026-11-14T04:08:04.411Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
+    },
+    {
+      "id": "c0c3gh6u",
+      "num": 6840,
+      "title": "Optimization levels are spelled O0, O1 and O2: the -O0/-O1/-O2 flags replace --optimize=none|basic|full",
+      "body": "Owner order (2026-11-14): \"The flags for o0 o1 o2 should be o0 o1 o2 not optimize=basic.\"\n\nToday the optimize build option (Compiler/JetFoundation/Source/Registry/BuildOptions.jet:48) has the values none, basic and full, spelled --optimize=basic on the command line, optimize: basic in a build profile and b.optimize(.Basic) in a build fn, with -O<n> accepted as a second spelling of the same flag. The levels are named O0, O1 and O2 everywhere else (AGENTS.md I9, the specs, traces and reports).\n\nDecision (Main, within the owner order): one spelling of a level everywhere, with no alias (greenfield cutover). The flag is -O0, -O1 or -O2. The option's values are O0, O1 and O2, so a profile writes optimize: O2 and a build fn writes b.optimize(.O2). --optimize=<word> and the words none, basic and full are removed. Every in-repository caller moves in one cutover.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The optimize option's values are O0, O1 and O2 in the BuildOptions registry. `jet build -O0|-O1|-O2`, `jet run`, `jet test` and every command that takes the option accept only these flags. `--optimize=none|basic|full` and `--optimize` with any value fail as ordinary unknown flags, with no teaching error, alias or jet fix rule. A build profile writes `optimize: O1` and a build fn `b.optimize(.O1)`. Help text and `jet explain` name the levels O0, O1 and O2. Proof: a cases row runs `jet build -O0`, `-O1` and `-O2` on one program, checks the level each traces, and shows that `--optimize=basic` is refused.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T08:59:12.954Z"
+        },
+        {
+          "n": 2,
+          "text": "Every in-repository caller moves in the same cutover: Compiler, Core, Jetpack, Tools (agent, release, ci, perf, gauntlet, tower), tests cases and UI snapshots, Examples, package.jet profiles, Docs/spec and the website source. Proof: `git grep -n -e '--optimize' -e 'optimize: \\(none\\|basic\\|full\\)' -e 'optimize(\\.\\(None\\|Basic\\|Full\\))' -- Compiler Core Jetpack Tools tests Examples Docs/spec` prints nothing, and the touched cases and goldens pass on the batch jet.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T08:59:14.807Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T08:59:10.868Z",
+      "updated": "2026-11-14T08:59:14.807Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -205199,6 +205249,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T08:59:14.807Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c3gh6u",
+      "note": "#2 Every in-repository caller moves in the same cutover: Compil"
+    },
+    {
+      "at": "2026-11-14T08:59:12.954Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c3gh6u",
+      "note": "#1 The optimize option's values are O0, O1 and O2 in the BuildO"
+    },
+    {
+      "at": "2026-11-14T08:59:10.869Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0c3gh6u",
+      "note": "Optimization levels are spelled O0, O1 and O2: the -O0/-O1/-O2 flags replace --optimize=none|basic|full"
+    },
+    {
+      "at": "2026-11-14T08:58:22.534Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-14T08:58:22.534Z"
+    },
     {
       "at": "2026-11-14T08:56:37.382Z",
       "by": "Main",
