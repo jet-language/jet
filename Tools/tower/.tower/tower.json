@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102385,
+    "rev": 102390,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -32174,7 +32174,7 @@
       "track": "sidequest",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "**Goal**\nThe real Jet LSP server implements the complete applicable stable LSP 3.18 protocol and lifecycle contract. It advertises capabilities truthfully, negotiates client support, and ships an executable applicability inventory. Any N/A needs a concrete reason; unknown or unimplemented behavior never counts as inapplicable. Real VS Code, Zed and Neovim acceptance is also required. There is no notebook visual or Canvas-node redesign. The server stays in the Rust CLI host, since LSP is part of the retained host boundary.\n\n**Current state**\n- The server is `Source/LSP/Server.rs`. The old path `crates/jet-codegen/src/Source/LSP` is stale. Other LSP modules: `Check.rs`, `Features.rs`, `Completion.rs`, `Position.rs`, `SymbolDB.rs`, `Adapter.rs`, `EnvironmentResources.rs`.\n- Dispatch: `Server.rs:354-357` handles `initialize` by calling `configure_workspace_roots` and then `initialize_response(id)`. The response ignores the client capabilities.\n- The static capability JSON near :551 carries the MCP-shaped `\"protocolVersion\": \"2025-11-25\"` mixed into LSP initialize.\n- There is no `positionEncoding` negotiation anywhere (`Position.rs` fixes one encoding).\n- Cancellation returns -32800 before and after running (`Server.rs:253-258`).\n- `tests/lsp.rs:765` `lsp_initialize_capabilities_have_named_test_coverage` is a source-marker test. The card says to delete it rather than re-pin it.\n- #3196 owns overlapping-edit freshness and cancellation release (`tests/lsp.rs:3188`).\n\n**Changes**\n1. Add `Tools/lsp/lsp-3.18-inventory.json`, pinned to the official 3.18 spec. It lists every request, notification, capability, option and lifecycle rule, each marked applicable, client-dependent or N/A with a reason and a witness test name. Add `Tools/lsp/check-inventory.mjs` to validate it.\n2. `Server.rs`:\n   - Parse client capabilities on `initialize`, and advertise only complete handlers.\n   - Negotiate `positionEncoding` (utf-16 default, utf-8/utf-32 when offered) through `Position.rs`.\n   - Separate the LSP initialize result from MCP initialization data without breaking a distinct MCP consumer.\n   - Add dynamic registration where the client supports it, `$/progress` and workDoneProgress, `$/setTrace`/`$/logTrace`, `shutdown`→`exit` ordering (requests after shutdown get InvalidRequest), and correct partial-frame and ContentModified/RequestFailed errors.\n3. `tests/lsp.rs`:\n   - Delete `lsp_initialize_capabilities_have_named_test_coverage`.\n   - Add the `lsp318_*` fixtures: UTF-8/UTF-16 positions over non-BMP text, partial messages, request/notification errors, cancellation races, versioned edits, disconnect, and client-feature negotiation.\n4. Update the client-facing 3.17 wording to the exercised 3.18 contract.\n\n**Proof**\n- `Tools/agent/jet-env cargo test --test lsp -- lsp318_` → pass.\n- `node Tools/lsp/check-inventory.mjs` → no unknown or unwitnessed row.\n- Real-editor acceptance: VS Code, Zed and Neovim session transcripts attached to the card.\n\n**Batch**\nbatch-host-cli: Source/LSP.\n\n**Dependencies**\n#3196 (freshness and cancellation proof, criterion 4).",
       "checkSteps": "After rebuilding, launch the actual LSP process through a framed protocol harness. Exercise initialize/initialized, negotiated encodings, didOpen/didChange/didClose, errors, cancellation, progress, shutdown/exit, and malformed framing. Run only the focused conformance matrix plus #3196 witnesses; capture requests, responses, source versions, and exit behavior.\n\nExisting focused starting commands, not yet run and not substitutes for the full criterion witness:\nscripts/agent/jet-env cargo test --test lsp lsp_json_transcripts\nscripts/agent/jet-env cargo test --test lsp lsp_incremental_sync_rejects_stale_and_malformed_edits",
@@ -32229,7 +32229,18 @@
           "text": "Phase 0 triage 2026-09-28 (toolwebmem1a, Opus 5.5): G_BLOCKED. LSP protocol/lifecycle completion is still open: Source/LSP/Server.rs dispatches handlers, but there is no positionEncoding negotiation or 3.18 applicability inventory. The card is blocked on #3196 (freshness/cancellation proof, planning). The server is Rust in the CLI host, and the new direction does not say whether it stays there. Evidence: Source/LSP/Server.rs:383-387 (dispatch); no `positionEncoding` anywhere in Source/, crates/, or Compiler/; tower #3196 phase=planning"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 11,
+          "text": "Duplicate of #4917, which carries this card's c2 and c3 (merged) and the LSP 3.18 inventory criterion.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): #4917 carries '(merged from #3410 c2)', '(merged from #3410 c3)' and the LSP 3.18 inventory criterion; #3410's plan names the deleted Rust Source/LSP/Server.rs.",
+          "at": "2026-11-14T13:12:21.042Z",
+          "closure": "duplicate"
+        }
+      ],
       "refs": [
         "https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/",
         "Source/LSP/Server.rs",
@@ -32248,12 +32259,13 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-09-15T00:25:00.352Z",
-      "updated": "2026-11-13T01:57:04.679Z",
+      "updated": "2026-11-14T13:12:22.631Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 10
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-14T13:12:22.630Z"
     },
     {
       "id": "c05efrmn",
@@ -94955,7 +94967,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": null,
       "checkSteps": null,
@@ -94968,11 +94980,11 @@
         {
           "n": 1,
           "text": "The root is fixed in the Core load closure (compiler-owned records load the Core structs their fields hold; G12Docs-53b), with no TypeInfo special case. b.program.types() and functions() list only the program's own modules, never Core-source modules loaded for layout. The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, and a second build fn that loops over functions() and a type's fields builds and prints its generated module at O0.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:29:57.958Z"
+          "evidence": "Holds on dev 26afb1a0e6 (CardCloser-1, gate-p62 jet, 2026-11-14): root fix in the Core load closure by 2368741c9b (CORE_RECORD_SOURCE_DEMANDS over layout dependencies, no TypeInfo special case). jet test Compiler --profile cases --filter run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web -> PASS 1; second build fn case build_entry/build_reads_functions_and_type_fields_as_record_lists (9d07cd3da7) -> PASS 1, exact stdout scale/run/Point.x/Point.y/6 shows functions() and types() list only the program's own declarations.",
+          "at": "2026-11-14T13:12:17.246Z"
         }
       ],
       "refs": [],
@@ -94981,9 +94993,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:25:18.575Z",
-      "updated": "2026-11-12T10:29:57.958Z",
+      "updated": "2026-11-14T13:12:18.780Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:12:18.780Z"
     },
     {
       "id": "c0gy2j07",
@@ -205434,6 +205447,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:12:22.631Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09ok528",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:12:21.042Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09ok528",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-14T13:12:19.627Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09ok528",
+      "note": "#11 Duplicate of #4917, which carries this card's c2 and c3 (mer"
+    },
+    {
+      "at": "2026-11-14T13:12:18.780Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04gcx43",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:12:17.246Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c04gcx43",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T13:11:40.776Z",
       "by": "Main",
