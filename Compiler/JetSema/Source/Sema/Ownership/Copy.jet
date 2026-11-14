@@ -26,6 +26,12 @@ use jet_foundation.[
     ir_host_value_name,
     ir_runtime_handle_row,
     module_is_core,
+    NameTable,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table_sized,
 ]
 
 SemaCopyIntent: enum {
@@ -140,16 +146,19 @@ sema_copy_facts_holding: fn(facts: SemaCopyTypeFacts, parts_hold: Bool) -> SemaC
 // generic on the path still taints.
 SemaCopyWalk: struct {
     active: [String]
-    finished: [String:SemaCopyWalkRow]
+    // The walk keys (sema_copy_walk_key) of the instantiations reached, each
+    // id a row of `finished` and `pending` (-1: not pending).
+    keys: NameTable
+    finished: [SemaCopyWalkRow?]
     tainted: Bool
     table: Bool
     visits: Int
     low: Int
     path_ids: [String]
-    path_keys: [String]
+    path_keys: [Int]
     path_index: [Int]
     path_self: [Bool]
-    pending: [String:Int]
+    pending: [Int]
     scc: [SemaCopySccMember]
 }
 
@@ -158,10 +167,10 @@ SemaCopyWalkRow: struct {
     tainted: Bool
 }
 
-// One instantiation of an unfinished component: its walk key and number, and
-// what sema_copy_nominal_combine needs to combine its facts again.
+// One instantiation of an unfinished component: its walk key's id and number,
+// and what sema_copy_nominal_combine needs to combine its facts again.
 SemaCopySccMember: struct {
-    key: String
+    key: Int
     index: Int
     actual: Type
     declared: [Type]
@@ -170,21 +179,35 @@ SemaCopySccMember: struct {
     complete: Bool
 }
 
+// NameTable id 0 is the empty key, which no instantiation has, so each column
+// starts with its row.
 sema_copy_walk: fn() -> SemaCopyWalk Never! {
     SemaCopyWalk{
         active: [String]{},
-        finished: [String:SemaCopyWalkRow]{},
+        keys: name_table_sized(16),
+        finished: [SemaCopyWalkRow?]{None},
         tainted: false,
         table: false,
         visits: 0,
         low: 0,
         path_ids: [String]{},
-        path_keys: [String]{},
+        path_keys: [Int]{},
         path_index: [Int]{},
         path_self: [Bool]{},
-        pending: [String:Int]{},
+        pending: [Int]{-1},
         scc: [SemaCopySccMember]{},
     }
+}
+
+// The id of walk key `key` in `walk.keys`, its `finished` and `pending` rows
+// grown to it.
+sema_copy_walk_key_id: fn(walk: &SemaCopyWalk, key: String) -> Int Never! {
+    id: name_index(name_intern(walk.keys, key))
+    loop walk.finished.len() <= id {
+        walk.finished.push(None)
+        walk.pending.push(-1)
+    }
+    id
 }
 
 // The untainted copy facts of every non-generic, non-trait nominal, by
@@ -704,14 +727,11 @@ sema_copy_nominal_facts: fn(
             .SourceAST(_) | .CompilerBuiltinTrait(_) -> return sema_copy_type_facts_known(false, false, false, false, false, false, false)
         }
     }
-    finished_key: sema_copy_walk_key(key, actual)
-    if walk.finished.get(finished_key) == .Val(known) {
+    finished_key: sema_copy_walk_key_id(walk, sema_copy_walk_key(key, actual))
+    if walk.finished[finished_key] == .Val(known) {
         if known.tainted -> walk.tainted = true
-        if walk.table {
-            if walk.pending.get(finished_key) == .Val(pending_index) {
-                if pending_index < walk.low -> walk.low = pending_index
-            }
-        }
+        pending_index: walk.pending[finished_key]
+        if walk.table && pending_index >= 0 && pending_index < walk.low -> walk.low = pending_index
         return known.facts
     }
     outer_tainted: walk.tainted
@@ -723,7 +743,7 @@ sema_copy_nominal_facts: fn(
         walk.visits += 1
         walk.low = index
         walk.path_ids.push(key.copy())
-        walk.path_keys.push(finished_key.copy())
+        walk.path_keys.push(finished_key)
         walk.path_index.push(index)
         walk.path_self.push(false)
     }
@@ -746,7 +766,7 @@ sema_copy_nominal_facts: fn(
         member := SemaCopySccMember{key: finished_key, index: index, actual: actual, declared: declared_types.move(), distinct: distinct, resource: resource, complete: complete}
         return sema_copy_scc_finish(member, result, self_loop, outer_tainted, outer_low, graph, table, caller, generic_params, walk)
     }
-    walk.finished[finished_key] = SemaCopyWalkRow{facts: result, tainted: walk.tainted}
+    walk.finished[finished_key] = Val(SemaCopyWalkRow{facts: result, tainted: walk.tainted})
     walk.tainted = outer_tainted || walk.tainted
     result
 }
@@ -797,7 +817,10 @@ sema_copy_nominal_combine: fn(
 // cycle, which lowers `low` to that instantiation's number; another
 // instantiation of the same generic is not, and taints as in a query.
 sema_copy_walk_back_edge: fn(walk: &SemaCopyWalk, key: String, actual: Type) -> Bool Never! {
-    finished_key: sema_copy_walk_key(key, actual)
+    // An instantiation on the path has its key interned, so a key the walk
+    // never reached is another instantiation.
+    found: name_find(walk.keys, sema_copy_walk_key(key, actual)) ?? return false
+    finished_key: name_index(found)
     position := walk.path_ids.len() - 1
     loop position >= 0 {
         if walk.path_ids[position] == key {
@@ -837,7 +860,7 @@ sema_copy_scc_finish: fn(
 ) -> SemaCopyTypeFacts Never! {
     tainted: walk.tainted
     low: walk.low
-    walk.finished[member.key] = SemaCopyWalkRow{facts: result, tainted: tainted}
+    walk.finished[member.key] = Val(SemaCopyWalkRow{facts: result, tainted: tainted})
     walk.tainted = outer_tainted || tainted
     if low < member.index {
         walk.pending[member.key] = member.index
@@ -851,10 +874,10 @@ sema_copy_scc_finish: fn(
     members := [SemaCopySccMember]{}
     loop walk.scc.len() > 0 && walk.scc[walk.scc.len() - 1].index > root_index {
         open := walk.scc.pop() ?? break
-        _ := walk.pending.remove(open.key)
+        walk.pending[open.key] = -1
         // Every member reaches the root, so a tainted root taints them all.
         if tainted {
-            if walk.finished.get(open.key) == .Val(provisional) -> walk.finished[open.key] = SemaCopyWalkRow{facts: provisional.facts, tainted: true}
+            if walk.finished[open.key] == .Val(provisional) -> walk.finished[open.key] = Val(SemaCopyWalkRow{facts: provisional.facts, tainted: true})
         }
         members.push(open)
     }
@@ -865,9 +888,9 @@ sema_copy_scc_finish: fn(
         changed = false
         loop member_index in 0..<members.len() {
             facts: sema_copy_nominal_combine(members[member_index].actual, members[member_index].declared, members[member_index].distinct, members[member_index].resource, members[member_index].complete, graph, table, caller, generic_params, walk)
-            if walk.finished.get(members[member_index].key) == .Val(previous) {
+            if walk.finished[members[member_index].key] == .Val(previous) {
                 if !sema_copy_facts_same(previous.facts, facts) {
-                    walk.finished[members[member_index].key] = SemaCopyWalkRow{facts: facts, tainted: false}
+                    walk.finished[members[member_index].key] = Val(SemaCopyWalkRow{facts: facts, tainted: false})
                     changed = true
                 }
             }
@@ -875,7 +898,7 @@ sema_copy_scc_finish: fn(
     }
     walk.low = outer_low
     walk.tainted = outer_tainted
-    if walk.finished.get(root_key) == .Val(settled) -> return settled.facts
+    if walk.finished[root_key] == .Val(settled) -> return settled.facts
     result
 }
 
@@ -1045,7 +1068,7 @@ sema_copy_holds_fork: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgr
     // observable Clock forks only through a deterministic one it names.
     if !sema_copy_observable_clock(ty, env, program, generic_params) && !sema_copy_names_deterministic_clock(ty) -> return false
     caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
-    seen := [String:Bool]{}
+    seen := name_table_sized(16)
     sema_copy_holds_fork_walk(ty, program.registration_graph, caller, generic_params, seen)
 }
 
@@ -1083,7 +1106,7 @@ sema_copy_names_deterministic_clock: fn(ty: Type) -> Bool Never! {
     }
 }
 
-sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &[String:Bool]) -> Bool Never! {
+sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
     if sema_call_is_clock_type(ty) -> return true
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) | .Measure(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) -> false
@@ -1118,12 +1141,13 @@ sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: I
 
 // Each instance of a nominal is walked once: a walk that found a Clock has
 // already answered, so an instance seen before adds nothing.
-sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &[String:Bool]) -> Bool Never! {
+sema_copy_holds_fork_nominal: fn(ty: Type, graph: SemaRegistrationGraph?, caller: Int, generic_params: [TGenericParam], seen: &NameTable) -> Bool Never! {
     if graph == .Val(registered) {
         row: sema_copy_fork_row_at(ty, registered, caller) ?? return false
         instance: "{registered.modules[row.module_index].nominals[row.row].identity_key}<{type_name(ty)}>"
-        if seen.get(instance) != None -> return false
-        seen[instance] = true
+        known: name_count(seen)
+        _ := name_intern(seen, instance)
+        if name_count(seen) == known -> return false
         loop part in sema_copy_fork_parts(registered.modules[row.module_index].nominals[row.row], ty, graph) {
             if sema_copy_holds_fork_walk(part, graph, caller, generic_params, seen) -> return true
         }

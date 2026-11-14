@@ -15,6 +15,10 @@ use jet_foundation.[
     core_type_modules,
     type_name,
     module_text,
+    NameTable,
+    name_find,
+    name_intern,
+    name_table_sized,
 ]
 
 SemaSendCrossing: enum {
@@ -62,13 +66,14 @@ sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSe
 // one nominal by many paths. `active` holds the nominals on the current path,
 // by identity alone so a generic that recurses with growing arguments still
 // terminates; a type still being decided is assumed sendable (coinduction).
-// `finished` holds every instantiation this query already walked: each walk
-// stops at its first problem, so one that finished found none, and a revisit
-// adds nothing. Each instantiation is walked once per query (#3661); a walk
-// that re-entered every path took minutes on the compiler's own parser.
+// `finished` holds the walk key of every instantiation this query already
+// walked: each walk stops at its first problem, so one that finished found
+// none, and a revisit adds nothing. Each instantiation is walked once per
+// query (#3661); a walk that re-entered every path took minutes on the
+// compiler's own parser.
 SemaCrossingWalk: struct {
     active: [String]
-    finished: [String:Bool]
+    finished: NameTable
     // The checked function's own type parameters the walk reached: what
     // crosses there is decided by each call's type argument
     // (Ownership/GenericCrossings.jet).
@@ -179,11 +184,11 @@ sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, cr
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     key: sema_ownership_crossing_walk_key(nominal.identity_key, type_args)
-    if walk.active.contains(nominal.identity_key) || walk.finished.get(key) != None -> return None
+    if walk.active.contains(nominal.identity_key) || name_find(walk.finished, key) != None -> return None
     walk.active.push(nominal.identity_key)
     found: sema_ownership_crossing_members(nominal, type_args, crossing, strict_callable, cell_only, environment, program, context, walk)
     _ := walk.active.pop()
-    walk.finished[key] = true
+    _ := name_intern(walk.finished, key)
     found
 }
 
@@ -262,7 +267,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
     }
     parts: sema_ownership_crossing_core_row_parts(name) ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
     key: "<core-row>::{name}"
-    if walk.active.contains(key) || walk.finished.get(key) != None -> return None
+    if walk.active.contains(key) || name_find(walk.finished, key) != None -> return None
     walk.active.push(key.copy())
     found := SemaSendabilityProblem?{None}
     loop part in parts {
@@ -271,7 +276,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
         break
     }
     _ := walk.active.pop()
-    walk.finished[key] = true
+    _ := name_intern(walk.finished, key)
     found
 }
 
@@ -401,7 +406,7 @@ sema_ownership_crossing_note_generic: fn(walk: &SemaCrossingWalk, param: String,
 sema_ownership_crossing_problem: fn(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
     strict_callable: sema_ownership_crossing_strict_callable(crossing)
     cell_only := crossing == SemaSendCrossing.SharedStorage
-    walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
+    walk := SemaCrossingWalk{active: [String]{}, finished: name_table_sized(16)}
     sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, program, context, walk)
 }
 
@@ -410,7 +415,7 @@ sema_ownership_crossing_problem: fn(ty: Type, crossing: SemaSendCrossing, closur
 // itself.
 sema_ownership_crossing_generic_reach: fn(ty: Type, crossing: SemaSendCrossing, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> [SemaCrossingGenericReach] {
     if context.generic_params.len() == 0 || !sema_ownership_type_mentions_generic(ty, context.generic_params) -> return [SemaCrossingGenericReach]{}
-    walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
+    walk := SemaCrossingWalk{active: [String]{}, finished: name_table_sized(16)}
     _ := sema_ownership_crossing_type_inner(ty, crossing, false, sema_ownership_crossing_strict_callable(crossing), crossing == SemaSendCrossing.SharedStorage, environment, program, context, walk)
     walk.generic.move()
 }
