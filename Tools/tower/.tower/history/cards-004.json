@@ -97249,6 +97249,459 @@
       "completedAt": "2026-11-11T03:24:26.804Z",
       "questions": [],
       "retiredAt": "2026-11-14T03:24:46.581Z"
+    },
+    {
+      "id": "c0scf8mn",
+      "num": 6206,
+      "title": "One hand-written home per closed list (OS, HTTP methods, foreign languages, targets, typed heads, structure rows, providers, diagnostics), each with a drift check",
+      "body": "Found by ExtResearch's closed-list census (#6202), 2026-10-29, dev e23bd7f503. Compiler/Prelude/Effects.jet:13-58 is the canonical list. Core/Compiler/Lang.jet:25-38 has Crypto/Random/Proc and lacks Rand/Log/GPU/FFI/Panic/Mem. Registry/CoreCalls.jet:9 is a hand copy. EffectsSurface.jet:45-75 leaf copy lacks Mem.Alloc/Mem.Rc. This violates I8 (one mechanism) and makes effect checking depend on which copy a path reads. Evidence: $JET_SCRATCH_ROOT/lanes/ExtResearch/out/followups.md (DEFECT 1).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Make Prelude Effects.jet the single source. Generate every other view from it (or delete it), with a generator check that fails on drift. Migrate the callers of the removed copies.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "All criteria met (verified by Main from landed dev commits; the last was #6129 c60 in t23, dev 9755703c76, 2026-11-11). Card closed; the G8 milestone sweep is the a0.0.44 admit's full suites."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Ruling on the owner comment on D-ROUTE-METHOD1 (\"also accept a path type\"): the route path argument accepts Core`s `Path` (core.files, the type the checked `Path{…}` literal produces) as well as a String, on every route verb and on #Server.Custom, through one shared conversion into the route table. The method token stays a String. c35`s proof adds a Path case."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "D-ROUTE-METHOD1 ratified A (owner, 2026-11-10). c35 now states the A surface. G8Fix builds it first, ahead of its G6 restages, so that G8 can close by 20:00."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t14a landed G8Fix-2 + G8Fix-2fix (c37 partly: Method.custom and the message statics are Core source functions) and G6LeadC-9a1 (c21 part 1 of 2, the compiler half; 9a2 rides t15) (53805444ba..01b86931e7). c36 and c38 are met."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c21 lands in two SUBs. SUB-9a moves SQL, HTML, Sh, URL and DateTime to CheckedText impls, leaving only Path in TypedHeadKind. SUB-9b adds one registration rule for Core-source impls on runtime-handle types (no Path special case, in line with D-HOST-LEAF1=E), writes impl Path.CheckedText and deletes TypedHeadKind. c21 is met only after 9b. c22 (SUB-8): golden CheckedText passes 21/21 on O0, O1 and O2, including the new CheckedTextBoundHoles."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c28: the registry and drift-check half landed in ecf04d985a (G8Lead2-26): PROVIDER_ROWS is the one provider registry, with a drift check. The rest, where every provider resolves through ref spec, federation and facts, is G8Lead2-27 (train 6)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "G8Lead2 (2026-11-10, ~00:05): c21 is parked until the c22 bound-hole ballot rules on the lowering shape. CheckedText (check plus encode_hole) cannot express SQL parameter binding, and the SQL, Sh, URL and DateTime heads are structs."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Correction to the earlier c28 split log (Main). The owner ruled on 2026-11-06 that there is one provider table holding every source any list names, and that each source must resolve through ref spec, federation and facts, or it is a bug. So the surface gaps are defects that G8Lead2 fixes after G8Lead2-26 (the table and drift check). They are not a ballot, and D-PROVIDER-SET1 is withdrawn. On c24, the ruling that Atomic64, Hardware, Memory and Panic become declared, checked capabilities stands: G8Lead2-25 is pulled and -25r replaces it."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c28 split (Main, 2026-11-09 23:05). G8Lead2 builds one PROVIDER_ROWS table with today's membership: ProviderKind (14), ProviderFamily (15) and pkg_provider_is_external (17) are derived from it, with a drift test, and each row names the surfaces that own it. Which providers exist on which surface changes product behavior, and goes to a later ballot (D-PROVIDER-SET1). Today ProviderKind has cran, luarocks, ruby, perl and php; ProviderFamily has maven, nuget, conan, vcpkg, homebrew, binary, github and path; external is the union. Options: build RefSpec and federation for every provider, delete the providers one side lacks, or keep the per-surface split with honest errors."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-06), replacing the guard-policy note above: the closed-list guard stays as written. Payload sum types migrate like any other closed list, through declaration rows plus a --check generator; PortsLead is doing this for the 37 JetDevserver enums."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Guard-policy question (Main, 2026-11-06): tests/guards/closed_lists.jet counts every top-level enum with 3+ members in Compiler, Core and Jetpack, including payload sum types such as JetDevserver's TerminalAction, TerminalDiffOperation, CanvasPreviewInput and CanvasPreviewError. Those are data types with one consumer, not shared vocabularies, so moving them to a declaration TSV plus generator (the guard's prescribed form, which PortsLead is building for 37 JetDevserver enums) adds ceremony without a second view to keep in sync. Whether the guard should exempt payload sum types needs a decision before the 1006-row migration baseline is worked down."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c21/c22: typed text keeps its ratified spelling (SQL{\"...\"}, HTML{\"...\"}, D-UNIFYLIT1=A); the work is internal: heads dispatch through the ratified CheckedText members (D-TEXTHEAD-HOLES1=A) instead of a by-name table, so a user type can use the same Head{\"...\"} form. The rows stay on #6206."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c28: one provider table holding every source any list names; each must resolve through ref spec, federation and facts, or it is a bug."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c24: one target capability list, the union of both: Atomic64, Hardware, Memory and Panic all become declared, checked capabilities."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c19: one foreign-language list with every language from both lists: Asm, Rust, JS and Swift each get an FFI effect leaf and a binder entry."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, second cut questions): c4: web, Wasm and bare-metal targets become arms of $build.os (the OS list gains them; a dispatch must cover them or have an else), instead of folding to the host OS."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F27 (Docs/audits/2026-11-05-single-source-census.md): Target triples. Already owned by #6206 c24-c25 (#6209); this is the drift evidence those criteria must clear. One hand-written home: One target table in `JetFoundation/Source/Target`. Fix: derive. Drift check: Guard on triple literals outside the table. Drifted on 2026-11-05: Not drifted. host_triple can produce `windows-msvc` and `apple-darwin` triples, but the backend writes only Linux ELF (`BuildOptions.jet:99-101`) Effort S."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F6 (Docs/audits/2026-11-05-single-source-census.md): Target OS vocabulary. Already owned by #6206 c4-c5 (#6210); this is the drift evidence those criteria must clear. One hand-written home: One OS enum in Core/Prelude, projected into BuildOptions values. Fix: gen BuildOptions `os` values and TTargetOS; derive the parser, sema and driver mappings. Drift check: Generator `--check`, plus a guard on literal `\"macos\"`/`\"OS.MacOS\"` outside the registry. Drifted on 2026-11-05: Yes. BuildOptions = linux macos windows web freestanding. TTargetOS = Linux MacOS Windows. Lang.Target = Native Web Wasm JS Freestanding OS. Checked.jet:2902 also accepts the alias `\"mac_os\"`; Pipeline.jet:602 accepts 9 spellings (`macos`, `MacOS`, `OS.MacOS` ×3 OSes); Request.jet:744 accepts `wasi` Effort M."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F2 (Docs/audits/2026-11-05-single-source-census.md): The effect vocabulary (roots and leaves). Already owned by #6206 c1-c3; this is the drift evidence those criteria must clear. One hand-written home: `Prelude/Effects.jet`. Fix: gen `Lang.jet` Effect and `BUILTIN_EFFECT_LEAVES` (the generated `Registry/EffectVocabulary.jet` already exists); derive every leaf literal from EffectVocabulary. Drift check: CoreSourceRows `--check` also compares `Lang.jet` Effect and EffectsSurface with the Prelude; add a guard that fails on effect-leaf string literals outside the registry. Drifted on 2026-11-05: Yes. Lang.jet = FS Net Crypto Time Random Env Proc IO DB Exec Browser Secret. It has Crypto, Random and Proc, which the Prelude lacks, and lacks Rand, Log, GPU, FFI, Panic and Mem. `BUILTIN_EFFECT_LEAVES` lacks Mem.Alloc and Mem.Rc. CoreCalls.jet:9 matches the Prelude today Effort M."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6188 \"Marker-name string literals live in the parser and formatter instead of the syntax registry\" into this card (one source of truth for each vocabulary); its 2 open item(s) are carried as \"(was #6188)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6187 \"Diagnostic registry drift: JetDebug emits unregistered E2231–E2239, 236 registered codes are never emitted, Core/Http/Server.jet panics with a code string\" into this card (one source of truth for each vocabulary (drift)); its 3 open item(s) are carried as \"(was #6187)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6217 \"Jetpack has four disagreeing package-source provider lists (14/15/15/17)\" into this card (one source of truth for each vocabulary (drift)); its 2 open item(s) are carried as \"(was #6217)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6211 \"JetCli StructureRegistry.jet is a hand-written fourth copy of the Core module ledger, and 4 modules have drifted\" into this card (one source of truth for each vocabulary (drift)); its 2 open item(s) are carried as \"(was #6211)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6209 \"Target capability vocabularies disagree: TargetCapability (TargetMachine.jet) vs Target.* facts (Facts.jet)\" into this card (one source of truth for each vocabulary (drift)); its 2 open item(s) are carried as \"(was #6209)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6208 \"Checked text has two mechanisms: the CheckedText trait and a hard-coded TypedHeadKind {SQL HTML Sh URL Path DateTime}\" into this card (one source of truth for each vocabulary (drift)); its 3 open item(s) are carried as \"(was #6208)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6207 \"Foreign-language lists disagree in four places, and FFI effect leaves are built from raw lowercase names\" into this card (one source of truth for each vocabulary (drift)); its 3 open item(s) are carried as \"(was #6207)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6223 into this card (one card per stream). Its title: Generate the hand-kept mirror tables from their declared sources. Body: These are copies of a declared source, kept by hand. From the extensibility research on #6202 (Docs/research/2026-10-29-extensibility-every-layer.md) and ballot D-EXTEND-ARCH1. Census row IDs (CLnnnnn) are rows of the census at dev 496e49a853. Plan: Generate each from its source, with a drift guard (D-OPENTABLE1). - `IR_RUNTIME_ROUTES` and its parallel tables (`JetIR/Source/RuntimeRoutes.jet:49`, CL01031, 1,618 rows, hand-sorted). - `JET_CLI_SYNTAX_ROWS` (`Cli/SyntaxDictionaryData.jet:32`, CL00231, 298 rows) from the syntax registry. - The two 99-entry acronym lists (`Data/Syntax/Acronyms.jet:10` CL00432, `Sema/Casing.jet:66` CL01321). - The two doc-kind rankings (`JetSemIndex/Source/Docs/Graph.jet:283` CL01099, `JetCli/Source/Cli/Docs.jet:284` CL00053). - `format_row` (`Prelude/Core.jet:274`) from `EncodingFormat` (`Core/Encoding/Encoding.jet:77`)."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6222 into this card (one card per stream). Its title: Guard: fail CI on new closed lists, with a kernel ledger and a shrinking baseline. Body: Nothing stops a new hand list today. 1,996 of 2,039 census findings are hand-written. From the extensibility research on #6202 (Docs/research/2026-10-29-extensibility-every-layer.md) and ballot D-EXTEND-ARCH1. Census row IDs (CLnnnnn) are rows of the census at dev 496e49a853. Plan: Check the census script in under `Tools/`, run it from the guard harness, and add two ledger files: a kernel ledger (file, name, reason class, way out) and a migration baseline. Rows carry no decision IDs (I7)."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6216 into this card (one card per stream). Its title: Jetpack GeneratedNames.jet hand-copies the compiler's reserved type list and has drifted (has Build/Solver, lacks BuildContext/Unit). Body: Found by ExtResearch (#6202). Jetpack/Foundation/Source/GeneratedNames.jet:32 copies Compiler/JetFoundation/Source/Collections.jet:673 SEMA_RESERVED_TYPES. The copy has Build and Solver and lacks BuildContext and Unit, so the generator may emit a name the compiler rejects with E0106 (inference; probe). Near-defects of the same kind, which agree today: the built-in type list exists 4 times (Spellings.jet:40 is home; InspectB.jet:132, Jetpack Syntax.jet:144, GeneratedNames.jet:23), and doc kind rank (JetCli Docs.jet:284 vs JetSemIndex Docs/Graph.jet:283), foreign boundary obligations (BinderDescriptor.jet:931 vs BridgeIdentity.jet:14) and live decode (LiveSnapshot.jet:92 vs Perf/LiveCapture.jet:108) each exist twice. Evidence: $JET_SCRATCH_ROOT/lanes/ExtResearch/out/followups.md DEFECT 11 and near-defects. Plan: Make the compiler registries the single source and have Jetpack import or generate from them. Do the same for the four near-defect pairs, each with a drift check."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6212 into this card (one card per stream). Its title: HTTP method list in sema (7) disagrees with core.http HTTPRouteMethod (9 + Custom). Body: Found by ExtResearch (#6202). Facts/Checked.jet:88 hard-codes 7 methods; Core/Http/Http.jet:55-66 declares 9 plus Custom. Evidence: followups.md DEFECT 7. Plan: Read the method set from the Core enum (or its generated row), not a sema list. Add a probe that uses each method."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6210 into this card (one card per stream). Its title: OS lists disagree in three places, and the 3-arm $build.os dispatch is called exhaustive (web/freestanding may select no arm). Body: Found by ExtResearch (#6202). BuildOptions.jet:87 has 5 values, TTargetOS is at Declarations.jet:248, and Statements.jet:7109 has an inline list of 3. The $build.os dispatch at :7127-7136 is treated as exhaustive with 3 arms. A web or freestanding build may select no arm (probe first). Evidence: followups.md DEFECT 5. Plan: Probe a web/freestanding build through the $build.os dispatch. Make one OS list the source, and make exhaustiveness use it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One effect source; every other list is generated or removed, and a check fails on drift",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1dbb66fa3f. Main on dev 912fae1170, seed a0_029: `jet Tools/agent/CoreSourceRows.jet --check` prints \"core source rows are current (169 rows, 46 effects, ...)\", rc 0. The check regenerates lang.Effect (Core/Compiler/Lang.jet), Core.jet's Effect type and Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet from Compiler/Prelude/Effects.jet and fails on drift. Data/Syntax/EffectsSurface.jet keeps only syntax tokens (-[ ]>, the effect keyword, two leaf names), not a copy of the effect list.",
+          "at": "2026-11-06T22:59:40.676Z"
+        },
+        {
+          "n": 2,
+          "text": "A probe using each effect leaf type-checks the same through every path",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: f883a257c6 (every leaf, through every path) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:15.781Z"
+        },
+        {
+          "n": 4,
+          "text": "(from #6210 OS lists disagree in three places, and the 3-arm $build.os d) The probe result is recorded; exhaustiveness over $build.os uses the one OS list, so a missing arm is a registered diagnostic",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G8Lead2-23r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). cases cross/build_os_folds_on_web_wasm_and_freestanding PASS; TargetMachine.jet test PASS.",
+          "at": "2026-11-10T05:06:34.394Z"
+        },
+        {
+          "n": 6,
+          "text": "(from #6212 HTTP method list in sema (7) disagrees with core.http HTTPRo) Sema uses the Core method set, and a route with each of the 9 Core methods checks.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev 63944380ec (t3c jet): sema_http_route_verbs reads core_enum_variants(\"Method\"). jet test Compiler --profile cases --filter route_verbs_follow_the_core_method_cases: PASS 1 FAIL 0. The case registers all 9 methods.",
+          "at": "2026-11-10T05:00:44.607Z"
+        },
+        {
+          "n": 8,
+          "text": "(from #6216 Jetpack GeneratedNames.jet hand-copies the compiler's reserv) Reserved and built-in type names have one source, and the Jetpack copies are generated or removed, with a drift check",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1dbb66fa3f. Main on dev 912fae1170, seed a0_029: `jet test Jetpack/Foundation/Tests/GeneratedNames.jet \"--filter=generated names refuse\"`: \"generated names refuse every compiler built-in and reserved type name: pass\" (1 passed). The test reads JET_TYPE_NAMES and SEMA_RESERVED_TYPES directly; git grep finds 0 JET_TYPE_LIST in Jetpack.",
+          "at": "2026-11-06T22:59:41.762Z"
+        },
+        {
+          "n": 9,
+          "text": "(from #6216 Jetpack GeneratedNames.jet hand-copies the compiler's reserv) The four near-defect pairs each have one source or a drift check",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "1dbb66fa3f. Main on dev 912fae1170: the generated-name pair is covered by the GeneratedNames drift test (c8); git grep over Compiler, Core and Jetpack finds doc_kind_rank only as jet_driver_doc_kind_rank (Compiler/JetDriver/Source/Driver/Identity.jet:163), 0 files with FFI_BOUNDARY_OBLIGATIONS and FOREIGN_BOUNDARY_OBLIGATIONS once (Jetpack/PackageModel/Source/Foreign/Bridge/BridgeIdentity.jet:14), and 0 Jetpack files with JET_TYPE_LIST (the binders read JET_TYPE_NAMES).",
+          "at": "2026-11-06T22:59:42.924Z"
+        },
+        {
+          "n": 11,
+          "text": "(from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) A new domain list fails unless it is generated from a declared twin.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "912fae1170 (tests/guards/closed_lists.jet). Main on dev 912fae1170, seed a0_029, `JET_TEST_CAPTURE=all jet test tests/guards \"--filter=closed list\"`: the guard caught a real new list live. With SyntaxOwner's in-flight #6611 patch applied in the worktree, it failed with \"Compiler/JetFoundation/Source/Collections.jet COLLECTION_STORING_ROWS: a new hand-written closed list (14 members)\" (closed_lists.jet:407). A new list that is not generated, kernel-ledgered or in the baseline fails.",
+          "at": "2026-11-06T22:59:44.404Z"
+        },
+        {
+          "n": 12,
+          "text": "(from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) The baseline can only shrink, and its count prints every run.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "912fae1170 (tests/guards/closed_lists.jet). Main on dev 912fae1170, seed a0_029, `JET_TEST_CAPTURE=all jet test tests/guards \"--filter=closed list\"`: prints \"closed-list migration baseline: 1017 lists (ceiling 1017)\" and \"closed-list duplicate baseline: 379 pairs (ceiling 379)\" on every run. A ceiling below the count fails as grown, and one above it fails until it is lowered (MechA-2 mutation runs).",
+          "at": "2026-11-06T22:59:45.442Z"
+        },
+        {
+          "n": 13,
+          "text": "(from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) A new kernel list needs a ledger row with a reason class.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "912fae1170 (tests/guards/closed_lists.jet). Main on dev 912fae1170, seed a0_029, `JET_TEST_CAPTURE=all jet test tests/guards \"--filter=closed list\"`: tests/guards/closed_lists/kernel.tsv holds 5 rows, each with a reason class from the fixed set (grammar, soundness, ir, kernel, protocol, fixed-standard) and an expert way out: X64Alu, X64Cond, X64Shift fixed-standard; BinOp grammar; IROp ir. \"the closed list scanner reads enums, string lists and generated headers: pass\"; a row missing its way out, or with an unknown class, fails (MechA-2 mutation runs).",
+          "at": "2026-11-06T22:59:46.444Z"
+        },
+        {
+          "n": 14,
+          "text": "(from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) Two lists sharing 80% of members in different files fail.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "912fae1170 (tests/guards/closed_lists.jet). Main on dev 912fae1170, seed a0_029, `JET_TEST_CAPTURE=all jet test tests/guards \"--filter=closed list\"`: \"the closed list scanner reads enums, string lists and generated headers: pass\", which asserts that cross-file pairs sharing 80% of members fail and that same-file and under-80% pairs pass; MechA-2's probe ProbeAlu failed as sharing 80% with X64Alu.",
+          "at": "2026-11-06T22:59:47.472Z"
+        },
+        {
+          "n": 15,
+          "text": "(from #6222 Guard: fail CI on new closed lists, with a kernel ledger and) The failure message names the declaration form to use.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "912fae1170 (tests/guards/closed_lists.jet). Main on dev 912fae1170, seed a0_029, `JET_TEST_CAPTURE=all jet test tests/guards \"--filter=closed list\"`: the live failure message reads \"Either declare the vocabulary once as a Core trait with one `impl` per member (or ...\", naming the declaration form and the --check generator, and the kernel ledger path.",
+          "at": "2026-11-06T22:59:48.802Z"
+        },
+        {
+          "n": 17,
+          "text": "(from #6223 Generate the hand-kept mirror tables from their declared sou) Each list has one hand-written home; editing a copy fails the guard.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6LeadB-1 (56b1585acd) landed on dev c460ba91e5 (train t9d, 1e1492c924..c460ba91e5), run with the t9d-built compiler: PASS jet test tests/guards/closed_lists.jet (the syntax dictionary token column is checked against the Data/Syntax spelling it names, with self-tests for a drifted token and an unknown name).",
+          "at": "2026-11-10T12:18:39.723Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #6207) Every FFI effect leaf a program can reach is registered, proven by a probe per language",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "on dev 6a06b917cb: acc351e025 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
+          "at": "2026-11-09T17:18:16.728Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #6207) The foreign-language list (the languages FFI.<language> effects, driver tables and Jetpack binders name; four disagreeing copies on 2026-10-29, e.g. Registration/Items.jet:989-996) has one hand-written home, every other copy is generated from it or removed, and a generator --check fails on drift.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G8Lead2-29. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). The FFI effect in Compiler/Prelude/Effects.jet is the one hand-written foreign-language list; case every_effect_leaf_checks_through_every_path PASS.",
+          "at": "2026-11-10T10:26:14.871Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #6208) TypedHeadKind is gone and the six heads are CheckedText implementations",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 8327f5ae47 (train t15a, 01b86931e7..8327f5ae47), SUB G6LeadC-9a2 + G6LeadC-9a2fix + G6LeadC-9a2cov (part 2 of 2, after G6LeadC-9a1 in t14a). Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t15a/REPORT.md: recensus3 rc=0 on every pass after the integration fixes G6LeadC-9a2fix, TlsLead-67fix, TlsLead-66rfix and G6LeadC-9a2cov). Core's SQL, HTML, Sh, URL, DateTime and Path are CheckedText impls with check/encode_hole/build in their own modules, every typed head lowers through the CheckedText path, and TypedHeadKind is gone; tests/checked_text_hooks.jet covers all 20 hooks and CoreCoverage --check passes.",
+          "at": "2026-11-10T21:29:05.903Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #6208) A user-defined checked text type gets bound-hole lowering, proven by a golden",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 53805444ba (train t13b, 00a2b37a42..53805444ba), SUB G6LeadC-8. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t13b/REPORT.md: census rc=0; reruns with the train's integration fixes G6LeadD-5fix, 5fix2, G6Lead-4276bfix and G6LeadC-7fix noted there). golden CheckedTextBoundHoles PASS on O0/O1/O2.",
+          "at": "2026-11-10T17:36:10.135Z"
+        },
+        {
+          "n": 24,
+          "text": "(was #6209) One target capability vocabulary with a drift check",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G8Lead2-25r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). TargetMachine.jet and RegistryCoverage tests, RegistrationExplain, cases fact_declaration_tiers and tests/guards PASS.",
+          "at": "2026-11-10T06:06:46.253Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #6211) StructureRegistry is generated or removed; the ledger check fails on drift",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G8Lead2-28. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). StructureRegistry is removed and its rows come from the one registry.",
+          "at": "2026-11-10T10:26:13.936Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #6217) One provider registry with a drift check; every provider resolves through ref spec, federation and facts consistently",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB G8Lead2-27r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). With G8Lead2-26: every provider resolves through its ref spec; ProviderRows.jet and ProviderFederation.jet tests PASS.",
+          "at": "2026-11-10T10:26:13.028Z"
+        },
+        {
+          "n": 35,
+          "text": "(split from c6) D-ROUTE-METHOD1=A: a route with a Custom HTTP method checks and serves through `mux.custom(token, path, handler)`, `router.custom(token, path, handler)` and the `#Server.Custom(token, path)` member mark, all lowered through the existing route table from Method.Custom. Static tokens are checked while building and dynamic mux tokens at registration, by one shared token validator; the exact case is kept, and only exact standard tokens are refused, each refusal with a registered code and a UI snapshot. Extension methods and CONNECT render under OpenAPI 3.2 additionalOperations. Proof: the ballot's example (GET and PURGE on /cache/:key, by mux and by #Server.Custom) runs with golden output on o0, o1 and o2, and its tests cover the refused standard token, an invalid token and case preservation.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB G8Fix-10. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). mux.custom, router.custom and #Server.Custom(token, path) serve custom methods through the route table. One token validator gives E2808 jet.RouteMethodTokenRefused (UI snapshots). Route paths accept String or Path through one conversion. Examples/Network/HTTP/HTTPCustomMethods passes on o0/o1/o2.",
+          "at": "2026-11-11T01:09:39.505Z"
+        },
+        {
+          "n": 36,
+          "text": "web.openapi on a mux with a CONNECT route reports \"unsupported OpenAPI HTTP method\" as a registered user-facing error or emits the operation. It never exits 101 with the message hidden (Core/Web/Web.jet:1104, Compiler/JetRuntime/Source/RouteWeb.jet:3-15). Found by the D-ROUTE-METHOD1 probe r05.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-3. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). web.openapi on a mux with a CONNECT route renders it under OpenAPI 3.2 additionalOperations.CONNECT and no longer exits 101.",
+          "at": "2026-11-10T19:44:58.767Z"
+        },
+        {
+          "n": 37,
+          "text": "`http.Method.custom(token)` compiles and runs at O0, O1 and O2 without a backend ICE (today ir.build fails with unlowered IR, probe r06). Its case passes and leaves the known-failing list.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB G8Fix-9. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). http.Body.reader(reader), Body.reader(reader, length) and Body.multipart(fields) run instead of the E2104 refusal; core_http_nominal_message_and_body_surface_is_executable passes on o0/o1/o2 and left known-failing.tsv.",
+          "at": "2026-11-10T23:56:29.520Z"
+        },
+        {
+          "n": 38,
+          "text": "E2805 and the router agree on paths: either a module String constant is accepted as a router path, as the E2805 fix text promises, or the fix text is corrected. A UI snapshot proves the result (probe r07).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-1. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). UI snapshot tests/ui/http_route_constant_path: a module String constant (or a chain of them) is accepted as an HTTPRouter route path.",
+          "at": "2026-11-10T19:44:57.376Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G8"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-29T19:13:30.568Z",
+      "updated": "2026-11-11T14:10:31.886Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 38,
+      "completedAt": "2026-11-11T01:09:57.070Z",
+      "questions": [],
+      "retiredAt": "2026-11-14T14:22:20.512Z"
+    },
+    {
+      "id": "c0esm6za",
+      "num": 6723,
+      "title": "jet build -A refuses a program whose required effects include Mem and Time.Wait",
+      "body": "Found on the core.ui Showcase (2026-11-09): `jet build -A Showcase.jet` fails with 'required effects: Env, IO, Mem, Net, Time.Wait; granted effects: Browser, DB, Env, Exec, Exec.Args, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time'. `jet run` of the same file compiles. Either -A must grant every effect (Mem, Time.Wait) or the lattice must make Time cover Time.Wait and Mem.Alloc relate to Mem; the build and run paths must agree (I9). core.ui declares Env/Net/Time.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "All criteria met (verified by Main from landed dev commits; the last was #6129 c60 in t23, dev 9755703c76, 2026-11-11). Card closed; the G8 milestone sweep is the a0.0.44 admit's full suites."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Every criterion is met: dev c057ea659d (train 2, t2c). Closed by Main."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet build -A and jet run accept and refuse the same programs for the same effect rows; a cases row covers a program requiring Mem and Time.Wait under -A on both paths.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "16b1593319: tests/cases/authority/allow_all_build_and_run_agree_on_mem_and_time_wait.case PASS. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:29.876Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G8"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:13:16.636Z",
+      "updated": "2026-11-11T14:10:39.642Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-10T02:37:04.287Z",
+      "questions": [],
+      "retiredAt": "2026-11-14T14:22:20.512Z"
     }
   ]
 }
