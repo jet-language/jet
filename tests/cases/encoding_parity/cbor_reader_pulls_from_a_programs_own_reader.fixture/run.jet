@@ -69,8 +69,9 @@ run: fn() EncodingError! {
     reader: cbor.reader(events) ?? return Err(err)
     loop event in reader -> print(event_name(event))
     short := cbor.reader(Chunks{data: [U8]{130, 1}, at: 0, step: 1}) ?? return Err(err)
-    _: short.next() ?? return Err(err)
-    _: short.next() ?? return Err(err)
+    loop _ in 0..<2 {
+        if short.next() == .Err(error) -> return Err(error)
+    }
     if short.next() == {
         .Ok(_) -> print("read past the end of a short source")
         .Err(error) -> print("truncated {error.kind == .Truncated} {error.byte_offset} {error.reason}")

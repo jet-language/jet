@@ -52,7 +52,11 @@ field_text: fn(event: Dyn, name: String) -> String {
 
 event_line: fn(event: Dyn) -> String {
     kind: field_text(event, "$xml_event")
-    if kind == "element_start" || kind == "element_end" {
+    if kind == "element_start" {
+        name: event.field("name") ?? return kind
+        return "{kind} {field_text(name, "local")} {field_text(event, "empty_style")}"
+    }
+    if kind == "element_end" {
         name: event.field("name") ?? return kind
         return "{kind} {field_text(name, "local")}"
     }
