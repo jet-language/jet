@@ -5,7 +5,7 @@
 # which reads the record the build added to this jet. The record holds each
 # Core module's checked and registration rows, its checked bodies, its
 # comptime values and the check's declaration table, and every row reads
-# back to the same bytes.
+# back and encodes to the same tree.
 env: NO_COLOR=1
 step: jet self devtools core-record
 exit: 2
@@ -25,7 +25,7 @@ exit: 2
 stderr: = "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
 step: jet self devtools core-record --embedded
 exit: 0
-stdout: ~ "every row read back and encoded to the same bytes" # the line also carries row counts, a sha256 and the wall time, which change with Core
+stdout: ~ "every row read back and encoded to the same tree" # the line also carries row counts, a sha256 and the wall time, which change with Core
 stdout: ~ " registration rows, " # section 6 is counted; the count follows Core
 stdout: ~ " declaration rows, " # section 7 is counted; the count follows Core
 stdout: ~ " comptime values, " # section 8 is counted; the count follows Core

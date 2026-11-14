@@ -5568,7 +5568,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             crossing_rows := [SemaCoreCrossingResult]{}
             effect_rows := [SemaCoreEffectResult]{}
             if request.every_core_body {
-                crossing_rows = sema_taint_core_crossings(registration_graph)
+                registration_graph = sema_taint_core_crossings(registration_graph, request.compiler_threads, crossing_rows)
                 effect_rows = sema_core_effect_rows(registration_graph)
             }
             sources := [String:String]{}

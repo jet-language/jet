@@ -15,7 +15,7 @@ use {
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[ModuleID, symbol_keys, symbol_keys_intern]
+    jet_foundation.[ModuleID, compiler_threads_single, symbol_keys, symbol_keys_intern]
     jet_sema.[sema_registration_reserved_symbols]
 }
 
@@ -55,7 +55,7 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     }
     assert(landed > 0)
     bytes: jet_driver_core_record_write(inputs, "fixture", "x86_64-unknown-linux-gnu") ?? panic("the record can't be written: {err}")
-    counts: jet_driver_core_record_round_trip(bytes) ?? panic("the record doesn't read back: {err}")
+    counts: jet_driver_core_record_round_trip(bytes, compiler_threads_single()) ?? panic("the record doesn't read back: {err}")
     assert(counts.modules > 0)
     assert(counts.bodies > 0)
     assert_eq(counts.values, landed)
