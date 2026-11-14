@@ -4,9 +4,9 @@ use env: core.sys
 run: fn() {
     raw: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
     value: checked(U8{raw}) ?? U8{0}
-    #Policy(arithmetic: .Wrapping) {
+    #Overflow(.Wrapping) {
         print(value + U8{100})
-        #Policy(arithmetic: .Checked) {
+        #Overflow(.Stop) {
             print(value + U8{100})
         }
     }

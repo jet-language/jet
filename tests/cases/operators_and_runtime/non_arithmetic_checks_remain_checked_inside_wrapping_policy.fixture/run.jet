@@ -5,9 +5,9 @@ run: fn() {
     case: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
     raw: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
     value: checked(U8{raw}) ?? U8{0}
-    #Policy(arithmetic: .Wrapping) {
+    #Overflow(.Wrapping) {
         if case == 0 {
-            #Policy(arithmetic: .Checked) {
+            #Overflow(.Stop) {
                 print(value + U8{100})
             }
         }

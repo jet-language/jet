@@ -154,7 +154,7 @@ zeroize_if: fn(c: CtCond, buf: &[#Secret U8], off: Int, len: Int) Never! {
 /// and zero the vacated tail, touching every byte the same way whatever the
 /// offset: total passes, each a whole-window one-byte shift that the first
 /// total - offset passes discard.
-#Policy(arithmetic: .Wrapping)
+#Overflow(.Wrapping)
 memmove_left: fn(buf: &[#Secret U8], start: Int, total: Int, offset: #Secret U64) Never! {
     if total == 0 -> return
     last: start + total - 1
@@ -229,7 +229,7 @@ memcmp_partial: fn(a: [#Secret U8], b: [#Secret U8], n: Int, skip_head: Int, ski
 /// with masks, so no address or branch depends on x. The S-box lookups of
 /// the table-driven ciphers (DES, ARIA, Camellia) run through it; per_log is
 /// 3 for byte entries and 1 for 32-bit ones.
-#Policy(arithmetic: .Wrapping)
+#Overflow(.Wrapping)
 table_entry: fn(packed: [U64], per_log: Int, x: #Secret U64) -> U64 Never! {
     per: 1 << per_log
     width: 64 >> per_log

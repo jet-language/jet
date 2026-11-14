@@ -732,7 +732,7 @@ fault_check_passes: fn(check: bn.Mpi, t: bn.Mpi, limbs: Int) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // PKCS#1 v2.1 helpers.
 
-#Policy(arithmetic: .Wrapping)
+#Overflow(.Wrapping)
 next_byte: fn(b: U8) -> U8 Never! { b + U8{1} }
 
 /// dst[off..<off + len] ^= MGF1(src) over md (mgf_mask). The counter
@@ -972,7 +972,7 @@ V15Unpadded: struct {
 /// overwritten. plaintext_max_size is min(output_max_len, ilen - 11). The
 /// counts that depend on the padding are U64 words, which wrap instead of
 /// branching on an overflow as an Int does.
-#Policy(arithmetic: .Wrapping)
+#Overflow(.Wrapping)
 rsaes_pkcs1_v15_unpadding: fn(input: &[U8], output_max_len: Int) -> V15Unpadded Never! {
     ilen: input.len()
     plaintext_max_size: if output_max_len > ilen - 11 -> ilen - 11 else -> output_max_len

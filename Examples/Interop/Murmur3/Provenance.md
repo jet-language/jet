@@ -28,9 +28,10 @@ cross-file compiler seam.
 - Input is an owned `[U8]` byte list.
 - Seed and result are `U32`.
 - Block loads are little-endian.
-- One visible `#Policy(arithmetic: .Wrapping)` region marks every fixed-width add,
-  subtract, multiply, and power operation that can overflow. Division,
-  remainder, shifts, indexing, and conversions keep their checked rules.
+- One visible `#Overflow(.Wrapping)` region marks every fixed-width add,
+  subtract, multiply, and power operation that can overflow, and every
+  narrowing conversion in it wraps too. Division, remainder, shifts, and
+  indexing keep their checked rules.
 - `Reader.read_u32_le` supplies the block load, and fixed-width
   `rotate_left` supplies the standard rotation operation.
 - The pilot excludes the upstream 128-bit APIs, platform-specific unaligned
