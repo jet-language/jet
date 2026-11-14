@@ -270,7 +270,7 @@ sema_call_never_type_args_valid: fn(signature: Type, generic_params: [SemaInfere
 // further out.
 sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest: sema_scope_resolve_index(scopes, name) ?? {
-        owners: sema_call_method_owners(environment, name)
+        owners: sema_call_method_owners(environment, program, name)
         if owners.len() > 0 {
             diagnostics.push(sema_call_method_called_as_function(name, owners, span))
             return None

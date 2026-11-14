@@ -13,6 +13,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Func,
+    Item,
     Lambda,
     LambdaBody,
     LambdaParam,
@@ -1678,27 +1679,38 @@ sema_call_push_instance_method_names: fn(names: &[String], methods: [Func]) Neve
 
 // The types this module declares with an instance method `name`, each quoted
 // as E0311 names it: in the type body, in an `impl`, or as a top-level
-// `Type.name: fn(self)`.
-sema_call_method_owners: fn(environment: SemaScopeEnvironment, name: String) -> [String] Never! {
+// `Type.name: fn(self)`. A registered module's items live on its graph row;
+// the environment holds declarations only outside the graph.
+sema_call_method_owners: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> [String] {
     owners := [String]{}
     loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].item == {
-            .Struct(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
-            }
-            .Enum(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
-            }
-            .Impl(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.type_name)
-            }
-            .Func(value) -> {
-                if value.external_type == .Val(owner) && value.name == name && value.params.len() > 0 && value.params[0].name == "self" -> sema_call_push_method_owner(owners, owner.name)
-            }
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        sema_call_item_method_owner(environment.declarations[declaration_index].item, name, owners)
+    }
+    if program.registration_graph == .Val(graph) {
+        row: sema_app_module_row(environment, graph)
+        if row >= 0 {
+            loop item in graph.modules[row].program.items -> sema_call_item_method_owner(item, name, owners)
         }
     }
     owners
+}
+
+sema_call_item_method_owner: fn(item: Item, name: String, owners: &[String]) Never! {
+    if item == {
+        .Struct(value) -> {
+            if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
+        }
+        .Enum(value) -> {
+            if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
+        }
+        .Impl(value) -> {
+            if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.type_name)
+        }
+        .Func(value) -> {
+            if value.external_type == .Val(owner) && value.name == name && value.params.len() > 0 && value.params[0].name == "self" -> sema_call_push_method_owner(owners, owner.name)
+        }
+        .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
 }
 
 // Adds `owner` to `owners` once, quoted.
@@ -1716,15 +1728,23 @@ sema_call_methods_have_instance: fn(methods: [Func], name: String) -> Bool Never
 
 // The free function `name` this module declares: whether its first parameter
 // is `#Root`; None when the module declares no such function.
-sema_call_free_function_root: fn(environment: SemaScopeEnvironment, name: String) -> Bool? Never! {
+sema_call_free_function_root: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> Bool? {
     loop declaration_index in 0..<environment.declarations.len() {
-        if environment.declarations[declaration_index].item == {
-            .Func(value) -> {
-                if value.external_type == None && value.name == name -> return Val(value.params.len() > 0 && value.params[0].root)
-            }
-            .Struct(_) | .Enum(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
-        }
+        root: sema_call_item_free_function_root(environment.declarations[declaration_index].item, name)
+        if root != None -> return root
     }
+    graph: program.registration_graph ?? return None
+    row: sema_app_module_row(environment, graph)
+    if row < 0 -> return None
+    loop item in graph.modules[row].program.items {
+        root: sema_call_item_free_function_root(item, name)
+        if root != None -> return root
+    }
+    None
+}
+
+sema_call_item_free_function_root: fn(item: Item, name: String) -> Bool? Never! {
+    if item == .Func(value) && value.external_type == None && value.name == name -> return Val(value.params.len() > 0 && value.params[0].root)
     None
 }
 
@@ -1809,7 +1829,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     // A free function without `#Root` has one spelling, `f(value, …)`.
-    if sema_call_builtin_method_arities(ty, method).len() == 0 && !sema_call_declared_method_names(ty, environment, program).contains(method) && sema_call_free_function_root(environment, method) == (Val(false)) {
+    if sema_call_builtin_method_arities(ty, method).len() == 0 && !sema_call_declared_method_names(ty, environment, program).contains(method) && sema_call_free_function_root(environment, program, method) == (Val(false)) {
         return sema_error("E0311", span, "`{method}` is a function, not a method", "a free function is called as `{method}(value, …)`; only a method, or a free function whose first parameter is `#Root`, is called after a value and a dot", "write `{method}(value, …)`, or mark the first parameter of `{method}` `#Root` so it takes both spellings")
     }
     if sema_call_builtin_method_names(ty).len() > 0 && !source_owned && !sema_call_is_iter_receiver(ty) {

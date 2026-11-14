@@ -41,6 +41,7 @@ use jet_foundation.[
     Type,
     ast_empty_call_arg_flags,
     expr_span,
+    failure_contract_of_function,
     symbol_is_local,
     symbol_key_text,
     checked_generated_local,
@@ -1067,7 +1068,11 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         sema_contract_required_unanswered("#Post", func.name, "only a call by name is computed again while building, and this call goes through a method or a function value", call_span, diagnostics)
         return false
     }
-    if sema_contract_result_mode(sema_effective_return_type(func.return_type), sema_contract_success_type(func.return_type)) != TContractResultMode.Direct {
+    // An unannotated callee keeps the default `Err!` until the bundle failure
+    // solve settles it, so before the solve its call is computed like any
+    // other and a failure while building is reported below as one.
+    unsettled: failure_contract_of_function(func.return_type, func.return_type_span) == .Default(_, _) && !sema_failure_solved(program)
+    if !unsettled && sema_contract_result_mode(sema_effective_return_type(func.return_type), sema_contract_success_type(func.return_type)) != TContractResultMode.Direct {
         sema_contract_required_unanswered("#Post", func.name, "`result` names the success value of a call that can fail, which building does not compute", call_span, diagnostics)
         return false
     }
