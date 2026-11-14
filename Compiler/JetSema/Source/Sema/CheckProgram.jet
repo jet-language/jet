@@ -11171,6 +11171,20 @@ sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:
     survived
 }
 
+// Takes the union solve's pending line (sema_failure_union_pending_mark) off
+// each report in `diagnostics` that carries it: the solve's recheck replaced
+// every report of a body it projected, so one left stands as it was made.
+sema_failure_union_settle_reports: fn(diagnostics: &[Diagnostic]) Never! {
+    mark: sema_failure_union_pending_mark()
+    loop index in 0..<diagnostics.len() {
+        detail: diagnostics[index].detail ?? ""
+        if !detail.starts_with(mark) -> next
+        rest: detail.replace("{mark}\n", "")
+        diagnostics[index].detail = None
+        if rest != "" -> diagnostics[index].detail = Val(rest)
+    }
+}
+
 // E2404 repeated sites: every call of one callee whose failure domain has no
 // route into the same caller domain is one root, reported once at its first
 // site. `seen` carries the reported domains across the bundle's report lists.
@@ -12322,6 +12336,8 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
             modules[settle_index].complete = false
         }
     }
+    sema_failure_union_settle_reports(diagnostics)
+    loop settle_index in 0..<modules.len() -> sema_failure_union_settle_reports(modules[settle_index].diagnostics)
     // The bundle list and the per-module lists each keep one report per
     // failure domain.
     bundle_domains := [String:Bool]{}

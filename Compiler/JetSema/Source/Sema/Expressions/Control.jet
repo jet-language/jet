@@ -885,6 +885,16 @@ sema_failure_obligation_mark: fn() -> String Never! {
     "inferred-failure-obligation:"
 }
 
+// The first detail line of a report the union solve replaces: a typed failure
+// that meets the default `Err` route of a body that solve projects onto a
+// typed contract and checks again (sema_failure_union_infer). A body comptime
+// pass may land before that solve (sema_local_values_blocked), as it may
+// before the obligations are settled; the solve's half takes the line off a
+// report it leaves (sema_failure_union_settle_reports).
+sema_failure_union_pending_mark: fn() -> String Never! {
+    "inferred-failure-union:pending"
+}
+
 // #3708: the diagnostic just reported against an unannotated callee becomes
 // an obligation of the bundle failure solve. The call checks as the `T Never!`
 // plain return it has when the solve discharges the obligation; otherwise the
@@ -1099,7 +1109,12 @@ sema_expression_propagation_conversion: fn(operand_ty: Type, source_expr: Expr?,
                 // failures and Core calls; otherwise the projected contract
                 // misses them (E2404 on the recheck, or an unchecked Core body
                 // at ir.build).
-                if context.failure_union_inferable -> return Val(TTryConvert.NoConversion)
+                if context.failure_union_inferable {
+                    last: diagnostics.len() - 1
+                    detail: diagnostics[last].detail ?? ""
+                    diagnostics[last].detail = Val("{sema_failure_union_pending_mark()}\n{detail}")
+                    return Val(TTryConvert.NoConversion)
+                }
                 return None
             }
             // D9: a `_` hole domain already has its one E0119 at the

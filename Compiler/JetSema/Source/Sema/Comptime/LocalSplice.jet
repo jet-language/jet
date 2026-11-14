@@ -629,11 +629,16 @@ sema_local_value_splice: fn(
 // Whether `diagnostics` hold an error that keeps a body comptime pass from
 // landing before the whole-program half of a finalization: any error but a
 // failure-domain obligation (sema_failure_defer_obligation), which waits on
-// that half's failure solve to be discharged or emitted either way.
+// that half's failure solve to be discharged or emitted either way, and a
+// report the union solve replaces (sema_failure_union_pending_mark), whose
+// body that half checks again, against every landed value.
 sema_local_values_blocked: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     mark: sema_failure_obligation_mark()
+    union_mark: sema_failure_union_pending_mark()
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR && !(diagnostic.detail ?? "").starts_with(mark) -> return true
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        detail: diagnostic.detail ?? ""
+        if !detail.starts_with(mark) && !detail.starts_with(union_mark) -> return true
     }
     false
 }
