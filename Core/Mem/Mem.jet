@@ -77,9 +77,11 @@ Pin: struct<T> {}
 // stops the run (a read with the Index hook's miss, a write with a panic)
 // before any byte is touched. Each access is a raw access under the
 // window's own gate, so the sentry still checks liveness and alignment.
+// The fields are private, so a Window comes only from `window`, whose
+// caller vouches for the `count` Ts at `start`.
 Window: struct<T> {
-    start: *T
-    count: Int
+    priv start: *T
+    priv count: Int
 
     len: fn(self) -> Int { self.count }
 
