@@ -5804,7 +5804,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
     module_identity: graph.modules[module_index].module_identity
     raw: graph.modules[module_index].source.bytes()
     segments: graph.modules[module_index].source_segments
-    reads := [SemaModuleValueRead]{}
+    candidates := [SemaModuleValueRead]{}
     skipped := 0
     loop (index, reference) in module_result.name_references {
         loop skipped < generated_references.len() && generated_references[skipped].end <= index -> skipped += 1
@@ -5812,8 +5812,15 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         if reference.kind != "const" -> next
         owner: reference.symbol.module_identity
         if !module_is_none(owner) && owner != module_identity -> next
-        consumer: sema_module_value_consumer(graph.modules[module_index].declarations, reference.span) ?? next
-        reads.push(SemaModuleValueRead{key: reference.symbol.id, name: reference.symbol.name.copy(), consumer: consumer, span: reference.span})
+        candidates.push(SemaModuleValueRead{key: reference.symbol.id, name: reference.symbol.name.copy(), consumer: "", span: reference.span})
+    }
+    // A read's consumer is looked up only when some error may fail a read.
+    if candidates.len() < 2 || !sema_module_value_reads_failed(candidates, raw, module_result.diagnostics) -> return
+    bodies: sema_module_value_bodies(graph.modules[module_index].declarations)
+    reads := [SemaModuleValueRead]{}
+    loop candidate in candidates {
+        consumer: sema_module_value_consumer(bodies, candidate.span) ?? next
+        reads.push(SemaModuleValueRead{key: candidate.key, name: candidate.name.copy(), consumer: consumer, span: candidate.span})
     }
     if reads.len() < 2 -> return
     moved := [(position: Int, diagnostic: Diagnostic)]{}
@@ -5861,26 +5868,50 @@ sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: Symbo
     None
 }
 
-// The function or method of `declarations` whose text holds `span`.
-sema_module_value_consumer: fn(declarations: [Item], span: Span) -> String? {
+// A function or method of a module's declarations and its text's span.
+SemaModuleValueBody: struct {
+    name: String
+    span: Span
+}
+
+// The functions and methods of `declarations`, in declaration order.
+sema_module_value_bodies: fn(declarations: [Item]) -> [SemaModuleValueBody] {
+    bodies := [SemaModuleValueBody]{}
     loop item in declarations {
-        found: if item == {
-            .Func(function) -> sema_module_value_function_consumer([function], span)
-            .Impl(implementation) -> sema_module_value_function_consumer(implementation.methods, span)
-            .Struct(definition) -> sema_module_value_function_consumer(definition.methods, span)
-            .Enum(definition) -> sema_module_value_function_consumer(definition.methods, span)
-            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
+        if item == {
+            .Func(function) -> bodies.push(SemaModuleValueBody{name: function.name.copy(), span: function.span})
+            .Impl(implementation) -> loop method in implementation.methods -> bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+            .Struct(definition) -> loop method in definition.methods -> bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+            .Enum(definition) -> loop method in definition.methods -> bodies.push(SemaModuleValueBody{name: method.name.copy(), span: method.span})
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
-        if found != None -> return found
+    }
+    bodies
+}
+
+// The first function or method of `bodies` whose text holds `span`.
+sema_module_value_consumer: fn(bodies: [SemaModuleValueBody], span: Span) -> String? {
+    loop body in bodies {
+        if body.span.start <= span.start && span.end <= body.span.end -> return Val(body.name.copy())
     }
     None
 }
 
-sema_module_value_function_consumer: fn(functions: [Func], span: Span) -> String? {
-    loop function in functions {
-        if function.span.start <= span.start && span.end <= function.span.end -> return Val(function.name.copy())
+// Whether an error of `diagnostics` may fail one of `reads`: one that starts
+// at a read, or just past the `.` after one (sema_module_value_failed_read,
+// before its location checks). Most modules' errors fail none.
+sema_module_value_reads_failed: fn(reads: [SemaModuleValueRead], raw: [U8], diagnostics: [Diagnostic]) -> Bool {
+    starts := [Int:Bool]{}
+    loop read in reads {
+        starts[read.span.start] = true
+        if read.span.end < raw.len() && (Int{raw[read.span.end]}) == 46 -> starts[read.span.end + 1] = true
     }
-    None
+    loop diagnostic in diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        at: diagnostic.span ?? next
+        if starts.has_key(at.start) -> return true
+    }
+    false
 }
 
 // The row in `reads` that an error of this module's text fails: an error at
