@@ -1,0 +1,119 @@
+// The quantile partition cells: core.data.quantile (rank selection, with
+// ascending input read in place) against a sort-then-index baseline in the
+// same program, on each input kind (random, sorted, reverse, equal, few
+// distinct values) at n = 1001, 10001 and 100001, for q = 0.5 and for
+// q = 0.1234567, whose position falls between two ranks.
+//
+//   jet run --release -A Tools/perf/quantile-partitions/run.jet -- [--tsv PATH]
+//
+// stdout is one checked line per cell: the quantile both methods agree on,
+// bit for bit, so it is a golden (run.out beside this file). A cell whose
+// methods disagree stops the run. Each method runs 8 times per cell, the
+// two alternating which goes first; its time is the lower median (the 4th
+// of the 8 sorted). The timings go to the tsv (default
+// quantile-partitions.tsv in the current directory), one row per cell with
+// its verdict: PASS when selection takes no longer than the baseline. The
+// last line on stderr counts the passing cells.
+use core.[data, files, math, process, time]
+
+KINDS: ["random", "sorted", "reverse", "equal", "few"]
+SIZES: [1001, 10001, 100001]
+LEVELS: [Float]{0.5, 0.1234567}
+RUNS: 8
+
+run: fn() {
+    tsv := "quantile-partitions.tsv"
+    args: process.args()
+    loop index in 0..<args.len() {
+        if args[index] == "--tsv" && index + 1 < args.len() -> tsv = args[index + 1]
+    }
+    rows := ["kind\tn\tq\tselection_ns\tbaseline_ns\tratio\tverdict"]
+    passed := 0
+    cells := 0
+    loop kind in KINDS {
+        loop n in SIZES {
+            values: inputs(kind, n)
+            loop q in LEVELS {
+                selected: data.quantile(values, q) ?? panic("quantile {kind} n={n} q={q}: {err}")
+                indexed: sorted_quantile(values, q)
+                if selected != indexed -> panic("{kind} n={n} q={q}: selection gives {selected}, the sorted baseline {indexed}")
+                print("{kind} n={n} q={q}: {selected}")
+                selection_times := [Int]{}
+                baseline_times := [Int]{}
+                loop trial in 0..<RUNS {
+                    if trial %% 2 == 0 {
+                        selection_times.push(time_selection(values, q))
+                        baseline_times.push(time_baseline(values, q))
+                    } else {
+                        baseline_times.push(time_baseline(values, q))
+                        selection_times.push(time_selection(values, q))
+                    }
+                }
+                selection: lower_median(selection_times)
+                baseline: lower_median(baseline_times)
+                verdict: if selection <= baseline -> "PASS" else -> "FAIL"
+                if selection <= baseline -> passed += 1
+                cells += 1
+                divisor: if baseline > 0 -> baseline else -> 1
+                ratio: Float{selection} / Float{divisor}
+                rows.push("{kind}\t{n}\t{q}\t{selection}\t{baseline}\t{ratio}\t{verdict}")
+            }
+        }
+    }
+    files.write(tsv, "{rows.join("\n")}\n") ?? panic("write {tsv}: {err}")
+    eprint("{passed} of {cells} cells pass (selection <= baseline); timings in {tsv}")
+}
+
+// `n` values of `kind`: a fixed pseudo-random sequence, ascending, descending,
+// one repeated value, or seven values cycling.
+inputs: fn(kind: String, n: Int) -> [Float] {
+    values := [Float]{}
+    seed := 41
+    loop index in 0..<n {
+        if kind == {
+            "random" -> {
+                seed = (seed * 1103515245 + 12345) %% 2147483648
+                values.push(Float{seed})
+            }
+            "sorted" -> values.push(Float{index})
+            "reverse" -> values.push(Float{n - index})
+            "equal" -> values.push(Float{7.0})
+            else -> values.push(Float{index %% 7})
+        }
+    }
+    values
+}
+
+// The baseline: sort a copy, then interpolate between the two ranks around
+// q * (n - 1), as core.data.quantile defines its result.
+sorted_quantile: fn(values: [Float], q: Float) -> Float {
+    sorted := values.copy()  // copy: the caller's values stay in input order
+    sorted.sort()
+    position: q * Float{sorted.len() - 1}
+    lo: checked(Int{math.trunc(position)}) ?? panic("quantile position {position}")
+    hi: if (Float{lo}) < position && lo + 1 < sorted.len() -> lo + 1 else -> lo
+    fraction: position - Float{lo}
+    if fraction == (Float{0.0}) -> return sorted[lo]
+    sorted[lo] * (Float{1.0} - fraction) + sorted[hi] * fraction
+}
+
+// The wall time in nanoseconds of one core.data.quantile call.
+time_selection: fn(values: [Float], q: Float) -> Int {
+    started: time.instant()
+    _: data.quantile(values, q) ?? panic("quantile: {err}")
+    started.elapsed().ns
+}
+
+// The wall time in nanoseconds of one sort-then-index baseline.
+time_baseline: fn(values: [Float], q: Float) -> Int {
+    started: time.instant()
+    _: sorted_quantile(values, q)
+    started.elapsed().ns
+}
+
+// The 4th smallest of 8 timings: the lower median.
+lower_median: fn(times: [Int]) -> Int {
+    sorted := times.copy()  // copy: the trials keep their run order
+    sorted.sort()
+    sorted[(sorted.len() - 1) /% 2]
+}
