@@ -96,10 +96,12 @@ jet_cli_build_side_key: fn(key: String, side: String) -> String Never! {
     sha256_hex("{key}:{side}")
 }
 
-// Restore the executable of `key` to `binary`, with its side debug file and
-// its copy in the symbol store of the package at `root`. A side entry the
-// store no longer holds makes the whole build a miss; the error is why the
-// store couldn't be read or the restored files written.
+// Restore the executable of `key` to `binary`, with its side debug file: in
+// the symbol store of the package at `root` with its name beside `binary` a
+// link to it, as jet_cli_symbols_file files it, or beside `binary` alone for
+// an image without a build id. A side entry the store no longer holds makes
+// the whole build a miss; the error is why the store couldn't be read or the
+// restored files written.
 jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, root: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore Err! {
     id := ""
     debug := [U8]{}
@@ -120,13 +122,20 @@ jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, roo
         .Hit(_, _) -> {}
         .Missing | .Corrupt -> return Ok(restored)
     }
-    if debug.len() > 0 {
-        cli_files.write_bytes("{binary}.debug", debug) ?? return Err("couldn't write {binary}.debug: {err}")
-    }
-    if id != "" {
-        dir: "{root}/.jet/symbols/.build-id/{id.slice(0, 2)}"
-        cli_files.create_dir_all(dir) ?? return Err("couldn't create the symbol store {dir}: {err}")
-        cli_files.write_bytes("{dir}/{id.slice(2, id.len())}.debug", debug) ?? return Err("couldn't write the symbol store {dir}: {err}")
+    beside: "{binary}.debug"
+    if {
+        id != "" -> {
+            dir: "{jet_cli_symbols_store(root)}/{id.slice(0, 2)}"
+            cli_files.create_dir_all(dir) ?? return Err("couldn't create the symbol store {dir}: {err}")
+            file: "{dir}/{id.slice(2, id.len())}.debug"
+            cli_files.write_bytes(file, debug) ?? return Err("couldn't write the symbol store {dir}: {err}")
+            cli_files.symlink(file, beside, replace: true) ?? return Err("couldn't link {beside} to {file}: {err}")
+        }
+        debug.len() > 0 -> {
+            cli_files.remove(beside).drop("a missing side file is the first build's")
+            cli_files.write_bytes(beside, debug) ?? return Err("couldn't write {beside}: {err}")
+        }
+        else -> {}
     }
     Ok(restored)
 }

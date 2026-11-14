@@ -2,8 +2,8 @@
 # written `true`/`false` in a profile, a flag and `build: fn`; a bare Bool flag
 # is `true`. `debug_info: false` leaves the DWARF sections out, so the crash
 # report prints addresses; `small: true` keeps inlining to the O1 limits.
-# `debug_info: split` (the stock `release` profile's) has `jet build` write
-# the debug info to `<image>.debug` and the package's `.jet/symbols` store;
+# `debug_info: split` (the stock `release` profile's) has `jet build` file
+# the debug info in the package's `.jet/symbols` store, linked as `<image>.debug`;
 # `jet run` keeps it in the image. A split image that links no unwinder moves
 # its call frame information to the side file too, as `.debug_frame`, instead
 # of a loaded `.eh_frame`.
@@ -44,8 +44,8 @@ step: jet build --debug-info=split main.jet
 cwd: open
 exit: 0
 file: open/.jet/build/main size < {cap:debug_size}
-file: open/.jet/build/main.debug is-file # the side file beside the image
-file: open/.jet/symbols/.build-id is-dir # and its copy in the symbol store
+file: open/.jet/build/main.debug is-file # the side file's name beside the image
+file: open/.jet/symbols/.build-id is-dir # leads into the symbol store
 file: open/.jet/build/main.debug ~ ".debug_frame" # the side file holds the frame information
 file: open/.jet/build/main.debug !~ ".eh_frame" # and the image loads no unwind table
 step: {work}/open/.jet/build/main

@@ -5458,14 +5458,17 @@ frames instead of function names and lines.
 `debug_info` also takes `split`, the value of the stock `release` profile
 (`--release` is `optimize: O2` and `debug_info: split`; a `release` profile
 in `package.jet` replaces both). Under `split`, `jet build` writes the DWARF,
-the location table, the symbol table and the section headers to a side file,
-`<image>.debug` beside the image, and files the same bytes in the package's
-symbol store as
-`.jet/symbols/.build-id/<first two hex digits>/<rest>.debug`. The image keeps
-its loaded segments and a GNU build-id note under one `PT_NOTE` header, with
-section headers naming only that note; the build id hashes both files, so
-debuggers and profilers given the store (`gdb`'s
-`debug-file-directory`, `perf`'s build-id lookup) find the side file. An
+the location table, the symbol table and the section headers to a side file
+filed in the package's symbol store as
+`.jet/symbols/.build-id/<first two hex digits>/<rest>.debug`, and
+`<image>.debug` beside the image is a link to it. The image keeps its loaded
+segments and a GNU build-id note under one `PT_NOTE` header, with section
+headers naming that note and a `.gnu_debuglink` that gives the side file's
+name, `<image>.debug`, and its CRC-32; it names no directory, so the image is
+the same bytes wherever the package is built. The build id hashes both
+files: a debugger given only the image (`lldb`, `gdb`) follows the debug
+link into the store, and debuggers and profilers given the store (`gdb`'s
+`debug-file-directory`, `perf`'s build-id lookup) find the side file by id. An
 image that links no unwinder (no code of it unwinds the stack; a crash report
 walks frame pointers) moves its call frame information to the side file too,
 as `.debug_frame`, so its loaded segments hold no `.eh_frame`; with an

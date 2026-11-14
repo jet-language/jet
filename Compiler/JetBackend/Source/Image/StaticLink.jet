@@ -43,8 +43,10 @@
 // 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
 //    of the directly linked objects (none without `debug_info`), a `.symtab`
 //    and section headers. A split link (x64_link_executable_split) writes
-//    them to a side debug file instead and gives the image a build-id note,
-//    the one section its own headers name. When nothing reads the unwind
+//    them to a side debug file instead; the image's own headers name its
+//    build-id note and a `.gnu_debuglink` naming the side file by file name
+//    (and `.debug_jetline` when the program reads its trace,
+//    link_trace_lines). When nothing reads the unwind
 //    tables at run time (no unwinder is linked; link_eh_unloaded), a split
 //    link moves them from the read-only segment to the side file as
 //    `.debug_frame` (link_debug_frame).
@@ -55,6 +57,7 @@
 // rows. See "In-process linking" in Docs/research/jet-backend-design-2026-10-01.md.
 
 use jet_foundation.[CompilerThreads, NameTable, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_count, name_find, name_index, name_intern, name_table, name_table_sized, sha256_bytes]
+use link_hex: core.encoding.hex
 
 LINK_BASE: 0x400000
 LINK_RUN_BASE: 0x200000000000
@@ -2878,9 +2881,13 @@ link_build_id_note: fn(out: &[U8]) Never! {
 
 // A split image's section headers, appended to it: the build-id note's
 // (and the name table's), where debuggers read the id that finds the side
-// debug file, and the linked `.debug_jetline` in `lines` when it is not
-// empty (link_trace_lines), unloaded, before the headers.
-link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8]) Never! {
+// debug file, the linked `.debug_jetline` in `lines` when it is not empty
+// (link_trace_lines), unloaded, and the `.gnu_debuglink` naming the side
+// file `debug_link` (a file name, which debuggers look for beside the
+// image), before the headers. The link's CRC is zero until
+// link_debug_link_crc, as the note's id is until link_build_id: the side
+// file it covers holds that id. Returns the CRC's file offset.
+link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8], debug_link: String) -> Int Never! {
     headers := [LinkSectionHeader]{LinkSectionHeader{name: ".note.gnu.build-id", kind: LINK_SHT_NOTE, flags: 2, addr: l.note_at, offset: l.note_at - base, size: LINK_BUILD_ID_NOTE_SIZE, link: 0, info: 0, align: 4, entry_size: 0}}
     if lines.len() > 0 {
         at: image.len()
@@ -2888,8 +2895,25 @@ link_image_note_section: fn(image: &[U8], l: LinkLayout, base: Int, lines: &&[U8
         image.extend(lines.move())
         headers.push(LinkSectionHeader{name: ".debug_jetline", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: at, size: size, link: 0, info: 0, align: 1, entry_size: 0})
     }
+    elf64_pad(image, 4)
+    at: image.len()
+    // The name, its NUL, padding to 4 bytes, then the side file's CRC-32.
+    loop byte in debug_link.bytes() -> image.push(byte)
+    image.push(U8{0})
+    elf64_pad(image, 4)
+    crc: image.len()
+    loop _ in 0..<4 -> image.push(U8{0})
+    headers.push(LinkSectionHeader{name: ".gnu_debuglink", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: at, size: image.len() - at, link: 0, info: 0, align: 4, entry_size: 0})
     shoff: link_write_section_headers(image, 0, headers)
     link_elf_sections(image, shoff, headers.len() + 2)
+    crc
+}
+
+// The CRC-32 of the side debug file `side` that debuggers check a
+// `.gnu_debuglink` by, at the image's file offset `at`
+// (link_image_note_section).
+link_debug_link_crc: fn(image: &[U8], at: Int, side: [U8]) Never! {
+    link_put32(image, at, link_hex.crc32(side))
 }
 
 // The linked `.debug_jetline` a split image keeps: its program reads
@@ -3126,7 +3150,7 @@ link_resident_failure: fn(errors: &&[String]) -> X64ResidentLinkResult Never! {
 // The ELF header is loaded at `base` (LINK_BASE, or LINK_RUN_BASE for
 // Image/Loader.jet).
 x64_link_executable: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, bufs, base, None, threads, debug_info, false)
+    linked := link_executable_image(names, bufs, base, None, threads, debug_info, None)
     linked.image.move()
 }
 
@@ -3163,8 +3187,9 @@ x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined
 // A static executable whose debug information is in a side file.
 X64SplitExecutableResult: struct {
     // The executable: its loaded segments, a PT_NOTE naming its GNU build-id
-    // note, section headers naming only that note (debuggers read the id
-    // from it), and no symbol table or debug section.
+    // note, section headers naming that note (debuggers read the id from it)
+    // and the `.gnu_debuglink` naming the side file, and no symbol table or
+    // debug section.
     bytes: [U8]
     // The side debug file: an ELF file of the build-id note, the debug
     // sections, the symbol table and the section headers, the loaded ones
@@ -3178,18 +3203,21 @@ X64SplitExecutableResult: struct {
 }
 
 // x64_link_executable with the DWARF, `.symtab` and section headers in a
-// side debug file instead of the executable's tail.
-x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads) -> X64SplitExecutableResult Never! {
-    linked := link_executable_image(names, bufs, base, None, threads, true, true)
+// side debug file instead of the executable's tail. `debug_link` is the side
+// file's name, which the image's `.gnu_debuglink` gives with its CRC-32
+// (link_image_note_section): a debugger looks for it beside the image.
+x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, threads: CompilerThreads, debug_link: String) -> X64SplitExecutableResult Never! {
+    linked := link_executable_image(names, bufs, base, None, threads, true, Val(debug_link))
     X64SplitExecutableResult{bytes: linked.image.bytes.move(), debug_file: linked.debug_file.move(), build_id: linked.build_id.move(), errors: linked.image.errors.move(), undefined: linked.image.undefined.move()}
 }
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-// `split` writes the debug tail to a side file (x64_link_executable_split),
-// and the image's fault report gives addresses under the build id that names
-// it.
-link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, split: Bool) -> X64ResidentLinkResult Never! {
+// A split link (`debug_link` the side file's name, x64_link_executable_split)
+// writes the debug tail to a side file, and the image's fault report gives
+// addresses under the build id that names it.
+link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?) -> X64ResidentLinkResult Never! {
+    split: debug_link != None
     c := link_context(bufs, base)
     if split -> c.fault_report = LinkFaultReport.Addresses
     if request == .Val(wanted) {
@@ -3258,12 +3286,13 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
     image := link_write(c, layout, entry, emitted.pieces)
     debug_file := [U8]{}
     build_id := [U8]{}
-    if split {
+    if debug_link == .Val(name) {
         lines := link_trace_lines(c, debug, emitted.pieces, layout)
         debug_file = link_debug_file(c, image, layout, debug, emitted.pieces)
-        link_image_note_section(image, layout, c.base, lines.move())
+        crc: link_image_note_section(image, layout, c.base, lines.move(), name)
         link_write_code(c, image, layout, emitted.pieces)
         build_id = link_build_id(image, debug_file, layout.note_at - c.base)
+        link_debug_link_crc(image, crc, debug_file)
     } else {
         link_write_sections(c, image, layout, debug, emitted.pieces, false)
         link_write_code(c, image, layout, emitted.pieces)
