@@ -31,6 +31,12 @@ record_tree_test_rows: fn() -> [Dyn] Never! {
         }),
         Dyn.Text("push"),
         Dyn.Int(0),
+        // Past i64: a u64 at i64's maximum plus one and at its own maximum
+        // (an all-ones mask), i64's minimum minus one, and 2^128 + 1.
+        Dyn.Array([Dyn]{
+            Dyn.Int(9223372036854775808), Dyn.Int(18446744073709551615),
+            Dyn.Int(0 - 9223372036854775807 - 2), Dyn.Int(340282366920938463463374607431768211457),
+        }),
     }
 }
 
@@ -81,10 +87,12 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     assert(again.nodes == tables.nodes && again.rows == tables.rows && again.strings == tables.strings && again.shapes == tables.shapes)
 }
 
-#Test("a record tree refuses a value with no tree form and a malformed row") {
+#Test("a record tree writes an int past i64 as a wide int and refuses a malformed row") {
     writer := record_tree_writer()
-    _: record_tree_add(writer, Dyn.Int(9223372036854775808))
-    assert_eq(record_tree_tables(writer.move(), [[[U8]]]{}).problem, Val("record tree integer 9223372036854775808 is outside i64"))
+    row: record_tree_add(writer, Dyn.Int(18446744073709551615))
+    assert_eq(row, [U8]{10, 0, 8, 255, 255, 255, 255, 255, 255, 255, 255})
+    assert_eq(record_tree_add(writer, Dyn.Int(0 - 9223372036854775807 - 2)), [U8]{10, 1, 8, 128, 0, 0, 0, 0, 0, 0, 0})
+    assert_eq(record_tree_tables(writer.move(), [[[U8]]]{}).problem, None)
     tables := record_tree_test_tables(record_tree_test_rows())
     reader: record_tree_test_reader(tables.move(), true)
     view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")

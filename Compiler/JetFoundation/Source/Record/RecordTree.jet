@@ -17,13 +17,17 @@
 // every integer an unsigned LEB128 `uvarint` in its minimal form:
 //
 //   0 null, 1 false, 2 true
-//   3 int: zigzag uvarint (i64)
+//   3 int: zigzag uvarint, for an int in the i64 range
 //   4 float: zigzag uvarint of its IEEE 754 binary64 bits
 //   5 text: uvarint string id
 //   6 bytes: uvarint length, the bytes
 //   7 array: uvarint count, count items
 //   8 object: uvarint shape id, one item per key of the shape
 //   9 node: uvarint node id
+//   10 wide int: an int past the i64 range (a u64 above i64's maximum, or
+//      a wider Int), as core.encoding.cbor's bignum: 0 for n >= 0 and 1
+//      below, the uvarint length of the magnitude (n, or -1 - n below zero)
+//      and its big-endian bytes with no leading zero
 //
 // Each of the three tables is two `Bytes` elements of one record section:
 // the end of each entry as a little-endian u32 (entry `n` starts where entry
@@ -45,6 +49,7 @@ RECORD_TREE_BYTES: 6
 RECORD_TREE_ARRAY: 7
 RECORD_TREE_OBJECT: 8
 RECORD_TREE_NODE: 9
+RECORD_TREE_WIDE_INT: 10
 
 // A row nests at most this deep: a checked row nests as deep as its source
 // does (core.encoding.cbor's own depth ceiling).
@@ -153,12 +158,20 @@ record_tree_put: fn(writer: &RecordTreeWriter, value: Dyn, out: &[U8]) -> Int Ne
         .Bool(flag) -> out.push(if flag -> U8{RECORD_TREE_TRUE} else -> U8{RECORD_TREE_FALSE})
         .Int(number) -> {
             if number < 0 - RECORD_MAX_I64 - 1 || number > RECORD_MAX_I64 {
-                if writer.problem == None -> writer.problem = Val("record tree integer {number} is outside i64")
-                out.push(U8{RECORD_TREE_NULL})
-                return -1
+                out.push(U8{RECORD_TREE_WIDE_INT})
+                out.push(if number >= 0 -> U8{0} else -> U8{1})
+                reversed := [U8]{}
+                rest := if number >= 0 -> number else -> 0 - (number + 1)
+                loop rest > 0 {
+                    reversed.push(U8{rest.bit_and(255)})
+                    rest = rest >> 8
+                }
+                record_put_uvarint(out, reversed.len())
+                loop index in 0..<reversed.len() -> out.push(reversed[reversed.len() - 1 - index])
+            } else {
+                out.push(U8{RECORD_TREE_INT})
+                record_put_uvarint(out, record_zigzag(number))
             }
-            out.push(U8{RECORD_TREE_INT})
-            record_put_uvarint(out, record_zigzag(number))
         }
         .Float(number) -> {
             out.push(U8{RECORD_TREE_FLOAT})
@@ -326,7 +339,8 @@ record_tree_node_item_bytes: fn(id: Int) -> Int Never! {
 // Past one scalar item (any item but an array, object or node).
 record_tree_skip_scalar: fn(bytes: [U8], cursor: &RecordCursor) Never! {
     kind: record_read_byte(bytes, cursor)
-    if kind == RECORD_TREE_BYTES {
+    if kind == RECORD_TREE_WIDE_INT -> _: record_read_byte(bytes, cursor)
+    if kind == RECORD_TREE_BYTES || kind == RECORD_TREE_WIDE_INT {
         len: record_read_len(bytes, cursor)
         return record_skip(cursor, len)
     }
@@ -526,6 +540,24 @@ record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, d
             if inner.problem == None && inner.at != inner.end -> record_malformed(inner, "tree node has trailing bytes")
             if cursor.problem == None && inner.problem != None -> cursor.problem = inner.problem.move()
             value
+        }
+        RECORD_TREE_WIDE_INT -> {
+            sign: record_read_byte(bytes, cursor)
+            len: record_read_len(bytes, cursor)
+            magnitude_bytes: record_take(bytes, cursor, len)
+            if cursor.problem != None -> return Dyn.Null
+            if sign > 1 || len == 0 || magnitude_bytes[0] == 0 {
+                record_malformed(cursor, "tree wide int is not minimal")
+                return Dyn.Null
+            }
+            magnitude := 0
+            loop byte in magnitude_bytes -> magnitude = magnitude * 256 + (Int{byte})
+            number: if sign == 1 -> 0 - magnitude - 1 else -> magnitude
+            if number >= 0 - RECORD_MAX_I64 - 1 && number <= RECORD_MAX_I64 {
+                record_malformed(cursor, "tree wide int {number} fits an int item")
+                return Dyn.Null
+            }
+            Dyn.Int(number)
         }
         else -> {
             record_malformed(cursor, "unknown tree tag {kind}")
