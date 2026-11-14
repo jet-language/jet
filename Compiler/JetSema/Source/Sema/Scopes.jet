@@ -2265,6 +2265,15 @@ sema_scope_counted: fn(table: SemaScopeTable, compares: Int, found: &&Int?) -> I
     found
 }
 
+// Whether the body being checked runs only while the program builds: a
+// compile-time execution (a `#run` operand, a prepared value, a comptime
+// function) or the body of `build: fn`. `function_name` names the function
+// whose body this is; a body checked on a compiler thread keeps its name in
+// `location_function` instead.
+sema_scope_build_time: fn(table: SemaScopeTable, function_name: String) -> Bool Never! {
+    table.comptime_execution_depth > 0 || (table.location_function ?? function_name) == "build"
+}
+
 sema_scope_resolve_index: fn(table: SemaScopeTable, name: String) -> Int? {
     slot: sema_scope_name_slot(table, name) ?? return sema_scope_counted(table, 0, None)
     compares := 0

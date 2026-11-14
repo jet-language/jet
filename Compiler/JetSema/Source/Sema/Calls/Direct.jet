@@ -1067,8 +1067,7 @@ sema_call_try_core_direct_record: fn(record: CoreCallRecord, args: [CallArg], ty
     // Both compiler facts and active build-plan graphs use the checked
     // compile-time service path. Receipt diff remains ordinary Core source.
     if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
-        // A body checked on a compiler thread keeps its name in location_function (Control.jet).
-        compiler_allowed := scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build"
+        compiler_allowed := sema_scope_build_time(scopes, environment.function_name)
         check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, scopes, state, tail_store, context, diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete {
