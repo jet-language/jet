@@ -1834,7 +1834,9 @@ sema_checked_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
     }
 }
 
-sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction, diagnostics: &[Diagnostic]) -> SemaCheckedForeignFunction? {
+// `source` holds the bytes of the module's text once an assembly body needs
+// them, and is empty until then: a module's rows share one copy.
+sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction, source: &[U8], diagnostics: &[Diagnostic]) -> SemaCheckedForeignFunction? {
     if !registered.abi.is_extern -> return None
     inline: registered.declaration.inline_foreign ?? return None
     if !sema_checked_inline_validation(module_row, registered, diagnostics) -> return None
@@ -1843,7 +1845,8 @@ sema_checked_inline_foreign_row: fn(graph: SemaRegistrationGraph, module_row: Se
     // the selected target, kept on the checked row for the wrapper generator,
     // and on x86-64 the mnemonics its template assembler encodes (E3221).
     language: sema_checked_ascii_lower(inline.lang)
-    asm_contract: if language == "asm" -> sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, module_row.source, diagnostics) else -> None
+    if language == "asm" && source.len() == 0 -> source = module_row.source.bytes()
+    asm_contract: if language == "asm" -> sema_inline_assembly_contract(registered.declaration, graph.target_machine.triple, source, diagnostics) else -> None
     if language == "asm" && asm_contract == None -> return None
     wrapper: "jet_ffi_{registered.declaration.name}"
     module_identity: module_row.module_identity
@@ -1956,12 +1959,13 @@ sema_checked_inline_foreign_gate: fn(module_row: SemaRegistrationModule, func: F
 // never reads ExternFn/Func payloads to reconstruct an ABI decision.
 sema_checked_foreign_functions: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, providers: [SemaCheckedForeignProvider], diagnostics: &[Diagnostic]) -> [SemaCheckedForeignFunction] Never! {
     result := [SemaCheckedForeignFunction]{}
+    source := [U8]{}
     loop registered_index in 0..<module_row.foreign_functions.len() {
         row_value: sema_checked_foreign_row(graph, module_row, module_row.foreign_functions[registered_index], providers, diagnostics) ?? next
         result.push(row_value)
     }
     loop registered_index in 0..<module_row.functions.len() {
-        if sema_checked_inline_foreign_row(graph, module_row, module_row.functions[registered_index], diagnostics) == .Val(inline_row) {
+        if sema_checked_inline_foreign_row(graph, module_row, module_row.functions[registered_index], source, diagnostics) == .Val(inline_row) {
             result.push(inline_row)
             next
         }

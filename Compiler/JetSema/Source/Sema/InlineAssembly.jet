@@ -11,8 +11,8 @@ use jet_foundation.[
     inline_assembly_x64_unencoded,
 ]
 
-// `source` is the module's text, which holds the body at its span.
-sema_inline_assembly_contract: fn(function: Func, target: String, source: String, diagnostics: &[Diagnostic]) -> InlineAsmContract? {
+// `source` is the bytes of the module's text, which holds the body at its span.
+sema_inline_assembly_contract: fn(function: Func, target: String, source: [U8], diagnostics: &[Diagnostic]) -> InlineAsmContract? {
     inline: function.inline_foreign ?? return None
     contract := InlineAsmContract?{None}
     if inline_assembly_contract(function, target) == {
@@ -28,14 +28,14 @@ sema_inline_assembly_contract: fn(function: Func, target: String, source: String
 
 // Whether every instruction of an x86-64 body names a mnemonic Jet's template
 // assembler encodes. E3221 lands on each word that doesn't, read from the
-// body's own text between its triple quotes in `source`, the bytes the
-// backend assembles; at the body string where that text is not at hand.
+// body's own text between its triple quotes in `bytes`, the module's text,
+// which the backend assembles; at the body string where that text is not at
+// hand.
 // Only x86-64 has the template assembler.
-sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, source: String, diagnostics: &[Diagnostic]) -> Bool {
+sema_inline_assembly_encoded: fn(inline: InlineForeign, target: String, bytes: [U8], diagnostics: &[Diagnostic]) -> Bool {
     if target != "x86_64" && !target.starts_with("x86_64-") -> return true
     body := inline.source
     offset := -1
-    bytes: source.bytes()
     span: inline.source_span
     if span.start >= 0 && span.end >= span.start && span.end <= bytes.len() {
         open := -1
