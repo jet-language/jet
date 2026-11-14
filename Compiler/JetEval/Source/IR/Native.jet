@@ -1295,14 +1295,20 @@ jet_eval_ir_int_value: fn(s: &JetEvalIRState, word: Int) -> Int? {
 
 jet_eval_ir_float: fn(word: Int) -> Float Never! { math.from_bits(word) }
 
-// The Float of binary32 `bits` (exact: every binary32 is a binary64).
+// The Float of binary32 `bits` (exact: every binary32 is a binary64). A NaN
+// keeps its sign, quiet bit and payload, the fraction 29 bits up, so a
+// signaling NaN folded at compile time reads back with the same bits
+// (ir_float_constant_bits).
 jet_eval_ir_float32: fn(bits: Int) -> Float Never! {
     sign: bits.bit_and(2147483648) != 0
     exponent: (bits >> 23).bit_and(255)
     fraction: bits.bit_and(8388607)
     magnitude := math.from_bits(0)
     if exponent == 255 {
-        if fraction != 0 -> return math.from_bits(9221120237041090560)
+        if fraction != 0 {
+            nan: 9218868437227405312.bit_or(fraction << 29)
+            return math.from_bits(if sign -> nan - 9223372036854775807 - 1 else -> nan)
+        }
         magnitude = math.from_bits(9218868437227405312)
     } else if exponent == 0 {
         // Subnormal: fraction * 2^-149.
