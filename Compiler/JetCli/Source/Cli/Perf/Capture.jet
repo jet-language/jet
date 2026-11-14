@@ -125,13 +125,17 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
 }
 // A run that published no observation still records its source identity and
 // map, with no samples and no run window (`capture_from_source` with no
-// snapshot). `wall_ns` is jet_cli_perf_capture_observations'.
-jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], target: String, wall_ns: U64?) -> JetCLIPerfCapture JetCLIReadError! {
+// snapshot). `wall_ns` is jet_cli_perf_capture_observations'. The profile
+// rows are the program's CPU-time `samples` (`jet perf run`) where any landed
+// in the source, else the observations of its `run`.
+jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], samples: JetCLIPerfSamples?, target: String, wall_ns: U64?) -> JetCLIPerfCapture JetCLIReadError! {
     if observations.len() > 4096 -> return Err(jet_cli_read_error("source sampling exceeds its observation bound"))
     source: jet_cli_perf_source(path, text)
+    sampled := TraceProfile?{None}
+    if samples == .Val(found) -> sampled = jet_cli_perf_samples_profile(source, found)
     cpu_samples := U64{0}
     loop observed in observations { if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1} }
-    profile: jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
+    profile: sampled ?? jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
     capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
     // copy: the run symbol below keeps the path; the source map owns its own.
     capture.source_maps.push(trace_source_map_jet_with_source(path.copy(), text) ?? return Err(jet_cli_read_error(err.message)))

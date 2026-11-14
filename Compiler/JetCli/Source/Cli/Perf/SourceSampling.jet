@@ -1,11 +1,140 @@
 // The canonical parser supplies byte spans. Observation counts are not function
-// invocation counts.
+// invocation counts. A `jet perf run` program's CPU-time samples (the
+// runtime's PerfSamples.jet) are program counters, which its image's location
+// table names by function and source line.
 use {
+    perf_files: core.files
+    jet_backend.[X64Jetline, link_debug_addr, x64_jetline_find, x64_jetline_line, x64_jetline_read]
     jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
     jet_foundation.[
         Span, TraceProfile, TraceProfileRow, TraceProfileSource, trace_profile_unsupported,
         SourceIdentity, sha256_hex, JetSymbolRef,
     ]
+}
+
+// The runtime's sampling interval (PerfSamples.jet PERF_SAMPLES_INTERVAL_US).
+JET_CLI_PERF_SAMPLE_US: 1000
+
+// The samples of one function and source line: `function` indexes the
+// table's functions, and `own` says whether its file is the checked source.
+JetCLIPerfSampledLine: struct { function: Int, line: Int, count: U64, own: Bool }
+// A program's samples by function and line, hottest first; `outside` counts
+// the ones at addresses the table names no Jet function for, such as the
+// runtime's own code.
+JetCLIPerfSamples: struct { table: X64Jetline, lines: [JetCLIPerfSampledLine], total: U64, outside: U64 }
+
+// The samples file `path` (one little-endian link-time address per sample)
+// and the image `jet run` wrote beside it (Host.jet
+// jet_cli_perf_samples_image), named by the image's location table; each
+// line marked `own` when its function's file is `source`. Both files are
+// removed once read. None when either is missing or the image has no table.
+jet_cli_perf_samples_read: fn(path: String, source: String) -[FS, Env]> JetCLIPerfSamples? Never! {
+    image_path: "{path}.image"
+    // A file that can't be read reads as empty: no samples, or no table.
+    words: perf_files.read_bytes(path) ?? [U8]{}
+    image: perf_files.read_bytes(image_path) ?? [U8]{}
+    perf_files.remove(path).drop("the session reads its samples once")
+    perf_files.remove(image_path).drop("the session reads its samples' image once")
+    if words.len() == 0 -> return None
+    table: x64_jetline_read(image) ?? return None
+    sampled := jet_cli_perf_samples_count(table, words)
+    real: perf_files.realpath(source) ?? return Val(sampled)
+    own := [Int:Bool]{}
+    loop index in 0..<sampled.lines.len() {
+        function: sampled.lines[index].function
+        if !own.has_key(function) {
+            file: perf_files.join(sampled.table.functions[function].dir, sampled.table.functions[function].file)
+            matched := false
+            if perf_files.realpath(file) == .Ok(resolved) -> matched = resolved == real
+            own[function] = matched
+        }
+        sampled.lines[index].own = own[function]
+    }
+    Val(sampled)
+}
+
+// The samples of `words`, each 8 bytes, by the function and line of `table`
+// that holds its address, hottest first.
+jet_cli_perf_samples_count: fn(table: &&X64Jetline, words: [U8]) -> JetCLIPerfSamples Never! {
+    counts := [Int:U64]{}
+    addresses := [Int]{}
+    at := 0
+    loop at + 8 <= words.len() {
+        address: link_debug_addr(words, at)
+        at += 8
+        if !counts.has_key(address) {
+            counts[address] = U64{0}
+            addresses.push(address)
+        }
+        counts[address] = counts[address] + U64{1}
+    }
+    sampled := JetCLIPerfSamples{table: table, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}}
+    // One key per function and line; a line number stays below 2^32.
+    places := [Int:Int]{}
+    loop address in addresses {
+        count: counts[address]
+        sampled.total += count
+        found: if address < 0 -> -1 else -> x64_jetline_find(sampled.table, address)
+        if found < 0 {
+            sampled.outside += count
+            next
+        }
+        line: x64_jetline_line(sampled.table, sampled.table.functions[found], address) ?? sampled.table.functions[found].decl
+        key: found * 4294967296 + line
+        if !places.has_key(key) {
+            places[key] = sampled.lines.len()
+            sampled.lines.push(JetCLIPerfSampledLine{function: found, line: line, count: U64{0}, own: false})
+        }
+        place: places[key]
+        sampled.lines[place].count += count
+    }
+    sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(left.function <=> right.function).then(left.line <=> right.line) })
+    sampled
+}
+
+// The CPU-time profile `sampled` gives the checked `source`: one row per
+// function and line in it, hottest first. None when no sample landed in it.
+jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples) -> TraceProfile? Never! {
+    rows := [TraceProfileRow]{}
+    elsewhere := sampled.outside
+    truncated := false
+    loop place in sampled.lines {
+        end: if place.own -> jet_cli_perf_line_end(source.text, place.line) else -> U64?{None}
+        column: end ?? {
+            elsewhere += place.count
+            next
+        }
+        if rows.len() >= 4096 {
+            truncated = true
+            elsewhere += place.count
+            next
+        }
+        location: TraceProfileSource{path: source.identity.path, sha256: source.identity.sha256, start_line: U64{place.line}, start_column: U64{1}, end_line: U64{place.line}, end_column: column}
+        symbol: JetSymbolRef{path: source.identity.path, name: sampled.table.functions[place.function].name}
+        rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: place.count, sample_weight: place.count, source: location, symbol: symbol})
+    }
+    if rows.len() == 0 -> return None
+    status: if truncated -> "truncated" else -> "captured"
+    coverage: if elsewhere == (U64{0}) -> "complete" else -> "partial"
+    reason: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of process CPU, each at the function and source line its program counter is in; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
+    Val(TraceProfile{method: "sampling", status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
+}
+
+// The first column past the last character of line `line` of `text`
+// (columns count characters from 1); None past its last line.
+jet_cli_perf_line_end: fn(text: String, line: Int) -> U64? Never! {
+    if line < 1 -> return None
+    at := 1
+    column := U64{1}
+    loop byte in text.bytes() {
+        if at != line {
+            if byte == (U8{10}) -> at += 1
+            next
+        }
+        if byte == (U8{10}) -> return Val(column)
+        if byte < (U8{128}) || byte >= (U8{192}) -> column += U64{1}
+    }
+    if at == line -> Val(column) else -> None
 }
 
 JetCLIPerfSource: struct { identity: SourceIdentity, run_span: Span?, text: String }

@@ -100,6 +100,7 @@ use {
         ENV_JET_ICE_SELF_TEST,
         ENV_JET_OBSERVE,
         ENV_JET_PERF_MAP,
+        ENV_JET_PERF_SAMPLES,
         ENV_JET_PROJECT_ROOT,
         ENV_JET_PROP_SEED,
         ENV_JET_READ_SCOPE,
@@ -2063,6 +2064,17 @@ jet_cli_perf_map: fn(executable: X64Executable, pid: Int) {
     if failure != "" -> cli_term.eprint("jet: no perf map for the program: {failure}")
 }
 
+// JET_PERF_SAMPLES (`jet perf run`, Perf/Session.jet): the image of the
+// program about to run goes beside the samples file, as `<path>.image`,
+// whose location table names the function and line of each sampled address
+// (Compiler/JetRuntime/Source/PerfSamples.jet). Unset, nothing is written.
+jet_cli_perf_samples_image: fn(executable: X64Executable) {
+    samples: cli_sys.get(ENV_JET_PERF_SAMPLES) ?? return
+    if samples == "" -> return
+    failure: x64_executable_write(executable, "{samples}.image")
+    if failure != "" -> cli_term.eprint("jet: no image for the perf samples: {failure}")
+}
+
 // What a compiling verb's worker (jet_cli_compile_on_worker) hands the main
 // thread: its output, or the program `jet run` linked, which runs on the main
 // thread because only a single-threaded jet may run it in its own place
@@ -2100,6 +2112,7 @@ jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
 // must report or exit itself.
 jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, read_scope: [String], vars: [JetCLIEnvVar], verbose: Bool, color: Bool) -> JetDriverVerbOutput {
     launch: jet_cli_launch_plan(file, program_args, options, invocation, read_scope, vars)
+    jet_cli_perf_samples_image(executable)
     loaded: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {

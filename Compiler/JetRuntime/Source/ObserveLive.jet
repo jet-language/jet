@@ -437,7 +437,8 @@ observe_env_key: fn(index: I64) -> I64 {
 }
 
 // Read the ONE logical Env cell, not startup environ. All five supplied
-// components must be present, nonempty, <=16KiB and Cc-free.
+// components must be present, nonempty, <=16KiB and Cc-free. An observed
+// run under `jet perf run` also samples its CPU time (PerfSamples.jet).
 #Export(c) jet_rt_observe_runtime_start_from_env: fn() {
     key: jet_rt_string_builder_new()
     observe_msg_env_observe(key)
@@ -447,6 +448,7 @@ observe_env_key: fn(index: I64) -> I64 {
     live: rt_text_len(enabled) == I64{1} && trap_byte(rt_text_data(enabled)) == I64{49}
     jet_rt_string_drop(enabled)
     if !live -> return
+    perf_samples_start()
     inputs: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(inputs, I64{56})
     at := I64{0}

@@ -61,9 +61,22 @@ starts in a child process is reaped by jet first, so its window is the last
 periodic one (`live`). A program that links no task, channel, live value or
 event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
-Rows attribute to the parsed `run: fn` declaration (`fn` through its closing
-brace). The observe snapshot has no current-function or stack sample, so rows
-do not yet separate the functions that `run` calls.
+`jet perf run` samples the program's CPU time: the runtime arms the process's
+profiling timer (`setitimer` `ITIMER_PROF`, one sample per millisecond of
+CPU) and records the program counter each `SIGPROF` interrupted, and `jet run`
+writes the program's image beside the samples. The session names each
+sample's Jet function and source line from that image's `.debug_jetline`
+location table, as Linux perf names the same image's samples from its line
+tables, so `-O2` code inlined into a caller counts at that caller, at the line
+the table gives the code. The rows are `cpu` rows, one per function and line of
+the checked source, hottest first; `coverage` is `complete` when every sample
+landed in that source and `partial` when some ran in the runtime or another
+file, which the `reason` counts. `jet perf view` sums them per function with
+its share of the samples, then its hottest lines. A run whose samples never
+reach the checked source (a short program, `jet perf test`, `jet perf
+attach`) keeps the observation rows, which attribute to the parsed `run: fn`
+declaration (`fn` through its closing brace) and do not separate the
+functions that `run` calls.
 
 ## Canonical devtools protocol
 
