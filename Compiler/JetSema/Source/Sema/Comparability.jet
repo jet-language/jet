@@ -595,7 +595,7 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
                 valid = false
             }
             if !sema_type_map_key_eligible(environment, program, key) {
-                diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type", key_span ?? span))
+                diagnostics.push(sema_type_map_key_refusal(environment, program, key, "`{type_name(key)}` can't be a map key type", key_span ?? span))
                 valid = false
             }
             valid
@@ -676,6 +676,7 @@ sema_comparability_definition_map_key: fn(environment: SemaScopeEnvironment, pro
     if sema_comparability_key_type(program, definition) == .Val(key) {
         return sema_comparability_map_key(environment, program, definition.module_identity, key, query)
     }
+    if sema_comparability_written_order(program, definition) != None -> return false
     if definition.kind == {
         .Struct(fields, _) -> {
             loop field in fields {
@@ -738,6 +739,64 @@ sema_comparability_nominal_key: fn(graph: SemaRegistrationGraph, nominal: SemaRe
                 }
             }
         }
+    }
+    None
+}
+
+// The trait of a written `impl Equatable` or `impl Comparable` of
+// `definition`, which has no KeyBy: the type's own `==` or order can call two
+// values the same that a field walk keeps apart, so it is no Map key or Set
+// element. None when every such impl is derived.
+sema_comparability_written_order: fn(program: SemaProgramTables, definition: TTypeDef) -> String? Never! {
+    if program.registration_graph == .Val(graph) {
+        caller: sema_type_module_row(graph, definition.module_identity)
+        row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: definition.name}, caller) ?? return None
+        return sema_comparability_nominal_written_order(graph, graph.modules[row.module_index].nominals[row.row])
+    }
+    None
+}
+
+sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal) -> String? Never! {
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].compiler_generated -> next
+            written: graph.modules[module_index].impls[impl_index].declaration.trait_name ?? next
+            if written == "KeyBy" || !owned_trait_implies("KeyBy", written) -> next
+            target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
+            if target_matches -> return Val(sema_comparability_order_trait(written))
+        }
+    }
+    if nominal.source == .SourceAST(item) {
+        loop block in sema_registration_item_trait_blocks(item) {
+            if block.compiler_generated || block.trait_name == "KeyBy" || !owned_trait_implies("KeyBy", block.trait_name) {
+                next
+            }
+            return Val(sema_comparability_order_trait(block.trait_name))
+        }
+    }
+    None
+}
+
+// The written order trait `written` names: Comparable, or Equatable, the
+// traits KeyBy derives.
+sema_comparability_order_trait: fn(written: String) -> String Never! {
+    if written == "Comparable" -> "Comparable" else -> "Equatable"
+}
+
+// E0502 for a Map key type `key` that isn't key-eligible. A type that writes
+// its own `equal` or `compare` is told to name its key with KeyBy.
+sema_type_map_key_refusal: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, key: Type, what: String, span: Span) -> Diagnostic {
+    written: sema_comparability_written_order_of(environment, program, key) ?? return sema_map_key_error(what, span)
+    sema_error("E0502", span, what, "`{type_name(key)}` writes its own `{written}`, so values its `==` calls the same could still be separate keys", "implement `KeyBy` with the value `{type_name(key)}` compares, and remove the written `{written}`")
+}
+
+// The written Equatable or Comparable of the nominal `ty` names, when it has
+// no KeyBy (sema_comparability_written_order).
+sema_comparability_written_order_of: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type) -> String? Never! {
+    if ty == .Named(name) {
+        definition: sema_comparability_definition(environment, program, environment.module_identity, name) ?? return None
+        if sema_comparability_key_type(program, definition) != None -> return None
+        return sema_comparability_written_order(program, definition)
     }
     None
 }
@@ -807,6 +866,7 @@ sema_comparability_definition_hashable: fn(environment: SemaScopeEnvironment, pr
     if sema_comparability_key_type(program, definition) == .Val(key) {
         return sema_comparability_hashable(environment, program, owner, key, query)
     }
+    if sema_comparability_written_order(program, definition) != None -> return false
     if definition.kind == {
         .Distinct(base, _) -> sema_type_equatable(environment, program, ty) && sema_comparability_hashable(environment, program, owner, sema_inference_substitute_type_bindings(base, bindings), query)
         .Alias(target) -> {

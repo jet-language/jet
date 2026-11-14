@@ -1,0 +1,34 @@
+# A type that writes its own Equatable or Comparable and has no KeyBy is no
+# Map key and no Set element: its `==` can call two values the same that a
+# field walk files apart. The refusal names the written trait and points at
+# KeyBy. A derived equality still keys, a written one still compares away
+# from Map and Set, and the KeyBy spelling keys. Every tier prints the same.
+fixture: d_key_traits1_written_equal.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = d_key_traits1_written_equal.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = d_key_traits1_written_equal.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = d_key_traits1_written_equal.stdout.expected
+stderr: empty
+step map: jet check map/main.jet
+exit: 1
+stderr: ~ "`Celsius` can't be a map key type" # a written Equatable
+stderr: ~ "`Celsius` writes its own `Equatable`" # names the written trait
+stderr: ~ "implement `KeyBy` with the value `Celsius` compares" # points at KeyBy
+stderr: ~ "jet-lang.dev/e/E0502" # the Map-key code
+step set: jet check set/main.jet
+exit: 1
+stderr: ~ "`Standing` is not hashable" # a written Comparable
+stderr: ~ "`Standing` writes its own `Comparable`" # names the written trait
+stderr: ~ "implement `KeyBy` with the value `Standing` compares" # points at KeyBy
+stderr: ~ "jet-lang.dev/e/E0506" # the Set-element code

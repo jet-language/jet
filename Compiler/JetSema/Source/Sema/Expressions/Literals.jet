@@ -688,7 +688,7 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
                 expected_value = Val(value)
                 result_ty = Val(normalized)
                 if entries.len() == 0 && !sema_type_map_key_eligible(environment, program, key) {
-                    diagnostics.push(sema_map_key_error("`{type_name(key)}` can't be a map key type", key_span ?? span))
+                    diagnostics.push(sema_type_map_key_refusal(environment, program, key, "`{type_name(key)}` can't be a map key type", key_span ?? span))
                 }
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
@@ -719,7 +719,7 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
             return None
         }
         if !sema_type_map_key_eligible(environment, program, checked_key.ty) {
-            diagnostics.push(sema_map_key_error("`{type_name(checked_key.ty)}` can't be a map key", expr_span(entry.key)))
+            diagnostics.push(sema_type_map_key_refusal(environment, program, checked_key.ty, "`{type_name(checked_key.ty)}` can't be a map key", expr_span(entry.key)))
         }
         if expected_key == .Val(key_ty) {
             compatible_key: sema_expr_expected_assignable(key_ty, checked_key.ty, environment, program) ?? return None

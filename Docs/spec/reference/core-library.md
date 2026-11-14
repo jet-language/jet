@@ -669,6 +669,11 @@ value at any depth (E0502), so a stored key never changes. Re-inserting an
 equal key replaces the value and keeps the first stored key, and iteration
 follows key order.
 
+A type that writes its own `Equatable` or `Comparable` and has no `KeyBy` is
+not a Map key (E0502), a Set element (E0506) or a `#Memo` argument: its `==`
+can call two values the same that a field walk would file apart. Name the
+value it compares with `KeyBy` instead.
+
 A finite `loop ... -> value` evaluates immediately to a list. An expected type
 does not change collection choice or evaluation time. The naming law in
 [`stdlib-api-laws.md`](../stdlib-api-laws.md) owns verb choices; this table

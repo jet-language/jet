@@ -1,0 +1,37 @@
+// A derived equality still keys a Map and a Set.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+// A written equality away from Map and Set checks and runs as before.
+Celsius: struct {
+    degrees: Int
+
+    impl Equatable {
+        equal: fn(self, rhs: Celsius) -> Bool { self.degrees == rhs.degrees }
+    }
+}
+
+// The KeyBy spelling of the same rule keys a Map.
+Kelvin: struct {
+    degrees: Int
+
+    impl KeyBy {
+        Key: Int
+
+        key: fn(self) -> Int { self.degrees }
+    }
+}
+
+run: fn() {
+    labels := [Point: String]{}
+    labels[Point{x: 1, y: 2}] = "a"
+    labels[Point{x: 1, y: 2}] = "b"
+    points: Set.from([Point{x: 1, y: 2}, Point{x: 3, y: 4}])
+    print("point: {labels.len()} {labels.get(Point{x: 1, y: 2}) ?? "none"} {points.len()}")
+    print("celsius: {Celsius{degrees: 20} == Celsius{degrees: 20}}")
+    readings := [Kelvin: String]{}
+    readings[Kelvin{degrees: 300}] = "warm"
+    print("kelvin: {readings.get(Kelvin{degrees: 300}) ?? "none"}")
+}
