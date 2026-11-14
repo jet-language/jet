@@ -1492,7 +1492,11 @@ jet_driver_comptime_function_closure: fn(
                 if module_value && impurity == None {
                     impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value)
                 }
-                loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
+                // A module value keeps these reports when they refuse it, so
+                // each names the file of the function it is in.
+                loop diagnostic in checked.diagnostics {
+                    diagnostics.push(jet_driver_attach_registration_source_location(diagnostic, graph, current.module_identity))
+                }
                 if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) {
                     incomplete.push(SemaTotalityRow{owner: module_text(graph.module_table, current.module_identity), function: current.function_key.copy(), reason: "incomplete with no recorded cause"})
                 }
@@ -3082,16 +3086,24 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 if source.module_value {
-                    closure_failed: jet_driver_has_errors_since(diagnostics, closure_diagnostic_start) || (!closure.complete && closure.waiting_dependencies.len() == 0)
-                    failure: jet_driver_first_error_since(diagnostics, closure_diagnostic_start) ?? "a function it calls does not check completely"
-                    // The closure's reports are withdrawn: a failed closure
-                    // refuses the item, and a waiting one reports again at
-                    // its next check.
+                    closure_errors: jet_driver_has_errors_since(diagnostics, closure_diagnostic_start)
+                    // A finished closure whose functions fail their own
+                    // checks keeps those reports: they are the item's real
+                    // errors, and it is refused with nothing more.
+                    if closure_errors && closure.impurity == None && closure.waiting_dependencies.len() == 0 {
+                        refused_any = true
+                        stop_mark = diagnostics.len()
+                        next
+                    }
+                    closure_failed: closure_errors || (!closure.complete && closure.waiting_dependencies.len() == 0)
+                    // Any other closure's reports are withdrawn: an impure
+                    // or incomplete closure refuses the item, and a waiting
+                    // one reports again at its next check.
                     if closure_failed || closure.waiting_dependencies.len() > 0 {
                         loop diagnostics.len() > closure_diagnostic_start -> _ := diagnostics.pop()
                     }
                     if closure.waiting_dependencies.len() == 0 && (closure_failed || closure.impurity != None) {
-                        reason: closure.impurity ?? "a function it calls fails its compile-time check ({failure})"
+                        reason: closure.impurity ?? "a function it calls does not check completely"
                         jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, true, reason, diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
