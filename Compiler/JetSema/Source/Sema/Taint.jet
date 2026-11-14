@@ -327,8 +327,7 @@ sema_taint_core_effect: fn(module_name: String, method: String) -> String? Never
             else -> Val("Net")
         }
     }
-    if ["core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml"].contains(module_name) && method == "writer" -> return Val("FS")
-    if module_name == "core.encoding.cbor" && (method == "reader" || method == "writer") -> return Val("FS")
+    if ["core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"].contains(module_name) && method == "writer" -> return Val("FS")
     if module_name == "core.compute" && method != "device_cpu" -> return Val("GPU")
     if module_name == "core.crypto" && method.starts_with("__jetc_") -> return Val("FS")
     if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish"].contains(method) -> return Val("DB")

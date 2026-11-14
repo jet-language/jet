@@ -5,7 +5,7 @@ use {
     files: core.files
 }
 
-reader_terminal: fn(reader: &cbor.CBORReader, reason: String) -> Bool {
+reader_terminal: fn(reader: &cbor.CBORReader<files.FileReader>, reason: String) -> Bool {
     if reader.next() == {
         .Err(error) -> return error.reason == reason
         .Val(_) | .None -> return false

@@ -185,12 +185,14 @@ finish: fn(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
-handle in a changeable binding. Constructors consume file handles with `&&`:
+handle in a changeable binding. Constructors consume their byte source or
+file handle with `&&`. A reader takes any Prelude `Reader` (a `FileReader`, a
+socket, or a program's own type); a writer takes a `FileWriter`:
 
 ```jet
-reader(input: &&files.FileReader,
+reader<R: Reader>(input: &&R,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
-    -> Reader encoding.EncodingError!
+    -> Reader<R> encoding.EncodingError!
 writer(output: &&files.FileWriter,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Writer encoding.EncodingError!
@@ -246,10 +248,9 @@ already-reserved frame storage to preserve its path.
   evidence belongs only to the XML fields below.
   XML parsing, projection, rendering, canonicalization, and reader policy are
   authored in Jet and share compiler-private `xml_engine` / `xml_kernel`
-  source parts. The reader's only input operation is the `priv` `read_into`
-  binding of `jet.runtime.encoding`: one read through the owned FileReader
-  buffer into already-reserved
-  capacity, with no growth or retry; EOF and IO errors retain zero buffer length.
+  source parts. The reader's only input operation is its `Reader`'s
+  `read_into`: one read into the reader's buffer, with no retry; EOF and IO
+  errors add nothing to the buffer.
   XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
 use {
@@ -597,10 +598,10 @@ retaining the item, allocating, or truncating. (D-ENCXML1=A)
 Use these reader and writer constructors:
 
 ```jet
-xml.reader(input: &&files.FileReader,
+xml.reader<R: Reader>(input: &&R,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
-    -> xml.XMLReader encoding.EncodingError!
+    -> xml.XMLReader<R> encoding.EncodingError!
 xml.writer(output: &&files.FileWriter,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
@@ -1355,14 +1356,17 @@ unexercised native carrier or runtime receipt.
 | Registered provider | Source policy consumer | Provider boundary |
 | --- | --- | --- |
 | `core.encoding.__edition` | `base32.jet` and `base64.jet` decode entry points | Resolved package edition intrinsic; source selects strict/legacy rules |
-| `jet.runtime.encoding.read_byte` (`priv`) | `CborStream.jet` reader | One byte from the owned FileReader (None at EOF); the OS failure is the EncodingCause error |
-| `jet.runtime.encoding.read_into` (`priv`) | `stream.jet` JSON pull, `csv.jet` and the XML reader | Existing file read into reserved capacity; source handles parsing, limits and lifecycle |
 | `jet.runtime.encoding.write_bytes` (`priv`) | `stream.jet` JSON push, `csv.jet`, the CBOR and XML writers | Existing file write-all of a borrowed byte window; source owns encoding and limits |
 | `jet.runtime.encoding.write_text` (`priv`) | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
 | `jet.runtime.encoding.flush` (`priv`) | `stream.jet` JSON push, `csv.jet` and the XML writer | Existing file flush; source owns sticky terminal failure |
 | `jet.runtime.encoding.utf8_validate` (`priv`) | `CborParse.jet` text chunks, `CborStream.jet`, `csv.jet` queries and `stream.jet` text conversion | Existing strict validator; its Err message is the UTF-8 error text, and source chooses the validation point and maps errors |
 | `jet.runtime.encoding.bytes_into_text` (`priv`) | `stream.jet`, `csv.jet`, the CBOR and XML engines and `core.testing` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
 | `jet.runtime.encoding.string_byte` (`priv`) | `stream.jet`, the XML engine and `core.testing` checked string-byte accessors | Borrow byte only after source bounds proof |
+
+The codec readers need no provider: the JSON, JSONL, CSV, XML and CBOR
+readers are generic over `R: Reader` and pull bytes through
+`Reader.read_into`, so a `FileReader`'s hostile-I/O hooks and OS failures
+reach them through `FileReader.read_into`.
 
 Object construction and views, typed-text retention and text-to-bytes
 conversion need no provider: `Dyn.Object(entries)` moves the ordered entries
@@ -1420,8 +1424,10 @@ first record; and `skip_blank` drops each record whose fields are all empty.
 Ragged records stay physical in `rows` and the reader, and are errors wherever
 cells map to a header (`dict_rows`, `decode`, the data loader).
 
-CBOR file streams retain the existing `CBORReader`/`CBORWriter` names,
-consuming file factories, optional pull events and IO method effects.
+CBOR streams retain the existing `CBORReader`/`CBORWriter` names, consuming
+factories, optional pull events and IO method effects. `CBORReader<R>` pulls
+from any `Reader`, one byte per read so an IO failure lands at the exact
+offset it interrupts.
 The private `cbor_stream.jet` part of `core.encoding` owns the native
 `EncodingStream.rs` reader policy (`raw`, `arg`, `payload`, `string`,
 `retain_key`, `close_event`, `next_event`) and writer policy (`scalar`,
@@ -1429,7 +1435,7 @@ The private `cbor_stream.jet` part of `core.encoding` owns the native
 `flush_output`, `finish_output`). Definite and indefinite input, chunked
 strings, duplicate keys, preferred float widths, retained-item/heap bounds,
 error paths and sticky terminal state stay in Jet. Only the already
-registered byte read, byte write, flush, UTF-8 and allocation leaves remain.
+registered byte write, flush, UTF-8 and allocation leaves remain.
 Whole-value float kernels are shared, not reimplemented.
 
 The writer buffers nested encoded items and sorts encoded map keys in

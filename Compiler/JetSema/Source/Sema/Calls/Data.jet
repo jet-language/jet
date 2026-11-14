@@ -1515,22 +1515,18 @@ sema_data_core_try_decode: fn(module_name: String, member: String, args: [CallAr
 }
 
 sema_data_core_reader_writer_params: fn(module_name: String, member: String, record: CoreCallRecord, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallParam]? {
-    reader := member == "reader"
-    if !reader && member != "writer" -> return None
-    file_type := if reader -> Type.Named{name: "FileReader"} else -> Type.Named{name: "FileWriter"}
+    if member != "writer" -> return None
     handle_type := if {
-        module_name == "core.encoding.json" && !reader -> "JSONWriter"
-        module_name == "core.encoding.jsonl" && !reader -> "JSONLWriter"
-        module_name == "core.encoding.csv" && !reader -> "CSVWriter"
-        module_name == "core.encoding.cbor" && reader -> "CBORReader"
+        module_name == "core.encoding.json" -> "JSONWriter"
+        module_name == "core.encoding.jsonl" -> "JSONLWriter"
+        module_name == "core.encoding.csv" -> "CSVWriter"
         module_name == "core.encoding.cbor" -> "CBORWriter"
-        module_name == "core.encoding.xml" && !reader -> "XMLWriter"
+        module_name == "core.encoding.xml" -> "XMLWriter"
         else -> ""
     }
     if handle_type == "" -> return None
-    argument_types := [Type]{file_type}
-    labels := [String]{}
-    labels.push(if reader -> "source" else -> "target")
+    argument_types := [Type]{Type.Named{name: "FileWriter"}}
+    labels := [String]{"target"}
     defaults := [Expr?]{None}
     argument_types.push(Type.Named{name: "EncodingLimits"})
     labels.push("limits")
@@ -1556,14 +1552,13 @@ sema_data_core_reader_writer_params: fn(module_name: String, member: String, rec
     Val(params)
 }
 
-// The FileReader/FileWriter-bound codec constructors. The JSON, JSONL, CSV
-// and XML readers are generic over `R: Reader` (D-CORE-FILE-ADAPTERS1=A) and
-// check as ordinary Core source calls.
+// The FileWriter-bound codec constructors. Every codec reader is generic over
+// `R: Reader` (D-CORE-FILE-ADAPTERS1=A) and checks as an ordinary Core source
+// call.
 sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if module_name != "core.encoding.json" && module_name != "core.encoding.jsonl" && module_name != "core.encoding.csv" && module_name != "core.encoding.cbor" && module_name != "core.encoding.xml" -> return None
-    if member != "reader" && member != "writer" -> return None
-    if member == "reader" && module_name != "core.encoding.cbor" -> return None
+    if member != "writer" -> return None
     if !sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, diagnostics) {
         sema_data_check_discarded_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         return Val(SemaDirectSpecialCheck{handled: true, value: None})
@@ -1593,7 +1588,6 @@ sema_data_core_try_reader_writer: fn(module_name: String, member: String, args: 
         module_name == "core.encoding.json" -> "JSONWriter"
         module_name == "core.encoding.jsonl" -> "JSONLWriter"
         module_name == "core.encoding.csv" -> "CSVWriter"
-        module_name == "core.encoding.cbor" && member == "reader" -> "CBORReader"
         module_name == "core.encoding.cbor" -> "CBORWriter"
         else -> "XMLWriter"
     }

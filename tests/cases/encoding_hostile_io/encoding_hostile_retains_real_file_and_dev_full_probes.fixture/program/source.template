@@ -5,7 +5,7 @@ use {
     files: core.files
 }
 
-reader_io: fn(reader: &cbor.CBORReader) -[IO]> Bool {
+reader_io: fn(reader: &cbor.CBORReader<files.FileReader>) -[IO]> Bool {
     if reader.next() == {
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Val(_) | .None -> return false

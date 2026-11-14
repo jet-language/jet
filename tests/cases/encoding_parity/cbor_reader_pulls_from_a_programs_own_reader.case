@@ -1,0 +1,20 @@
+# #6759 c11 (D-CORE-FILE-ADAPTERS1=A): cbor.reader is generic over the
+# Prelude `Reader`. A program's own byte source, handing out one or two bytes
+# per read, feeds it, and `loop .. in` walks the generic reader; a source that
+# ends inside an array is a Truncated error at the byte it stopped, and a
+# source whose reads fail surfaces as an IO EncodingError whose cause keeps the
+# IOError's OS code and its errno kind. Each tier prints the same lines.
+fixture: cbor_reader_pulls_from_a_programs_own_reader.fixture
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = cbor_reader_pulls_from_a_programs_own_reader.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = cbor_reader_pulls_from_a_programs_own_reader.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = cbor_reader_pulls_from_a_programs_own_reader.out

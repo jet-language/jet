@@ -1,12 +1,13 @@
 // Private core.encoding part. Native authority:
 // CBORReader::{read_byte,arg,payload,string,retain_key,close_event,next_event}
 // CBORWriter::{scalar,accept,write_key,close_array,close_object,write_event,
-// flush_output,finish_output}. Only existing file and allocation leaves cross
-// the host boundary. The old byte-array cbor.jet reader is not this contract.
+// flush_output,finish_output}. The reader pulls from any Prelude `Reader`;
+// only the writer's file and the allocation leaves cross the host boundary.
+// The old byte-array cbor.jet reader is not this contract.
 use {
     core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
     encoding: core.encoding
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     mem: core.mem
     math: core.math
     stream: __core_encoding_stream
@@ -66,8 +67,13 @@ ReadFrame: struct {
     keys_heap: U64
 }
 
-CBORPull: struct {
-    input: FileReader
+// `byte` holds the Reader's last read: one byte is asked for at a time, so a
+// failure surfaces at the exact offset it interrupts, and `at` steps through
+// whatever the read returned.
+CBORPull: struct<R: Reader> {
+    input: R
+    byte: [U8]
+    at: Int
     limits: EncodingLimits
     total: Int
     terminal: EncodingError?
@@ -107,17 +113,24 @@ CBORPull: struct {
             self.lookahead = None
             return Ok(Val(byte))
         }
-        byte := U8?{None}
-        if rt.read_byte(self.input) == {
-            .Ok(value) -> { byte = value }
-            .Err(cause) -> { return Err(io_error(self.total, self.path(), cause)) }
+        if self.at == self.byte.len() {
+            self.byte.clear()
+            self.at = 0
+            // A Reader may grow the buffer (FileReader keeps its error words
+            // there); the growth is charged like any other.
+            capacity: mem.__list_capacity<U8>(self.byte)
+            _: self.input.read_into(self.byte, 1) ?? return Err(io_error(self.total, self.path(), stream.io_cause(err)))
+            grown: mem.__list_capacity<U8>(self.byte) - capacity
+            if grown > 0 && !self.allocation.charge(grown) -> return Err(error(.Limit, self.total, self.path(), "CBOR stream heap exceeded the bounded codec heap ceiling"))
+            if self.byte.len() == 0 -> return Ok(None)
         }
-        if byte == None -> return Ok(None)
         if self.limits.max_total_bytes == .Val(maximum) {
             if self.total >= maximum -> return Err(error(.Limit, self.total, self.path(), "max_total_bytes {maximum} exceeded"))
         }
+        byte: self.byte[self.at]
+        self.at += 1
         self.total += 1
-        Ok(byte)
+        Ok(Val(byte))
     }
 
     required: fn(&self, start: Int, reason: String) -[IO, Time.Wait]> U8 EncodingError! {
@@ -369,9 +382,9 @@ CBORPull: struct {
     }
 }
 
-reader: fn(input: &&FileReader, limits: EncodingLimits) -[FS]> CBORPull EncodingError! {
+reader: fn<R: Reader>(input: &&R, limits: EncodingLimits) -> CBORPull<R> EncodingError! {
     limits_checked(limits) ?? return Err(err)
-    Ok(CBORPull{input: input.move(), limits: limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: [ReadFrame]{}, retained: 0, allocation: stream.budget(limits)})
+    Ok(CBORPull<R>{input: input.move(), byte: [U8]{}, at: 0, limits: limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: [ReadFrame]{}, retained: 0, allocation: stream.budget(limits)})
 }
 
 WriteFrame: struct {

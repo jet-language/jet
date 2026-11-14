@@ -6,12 +6,12 @@ use {
     math: core.math
     parser: __core_encoding_cbor_parse
     codec: __core_encoding_cbor_stream
-    core.files.[FileReader, FileWriter]
+    core.files.[FileWriter]
     typed_errors.[typed_parse_error]
 }
 
-CBORReader: struct {
-    input: codec.CBORPull
+CBORReader: struct<R: Reader> {
+    input: codec.CBORPull<R>
 
     next: fn(&self) -[IO, Time.Wait]> DataEvent? EncodingError! { self.input.next() }
 }
@@ -24,9 +24,11 @@ CBORWriter: struct {
     finish: fn(&self) EncodingError! -[IO, Time.Wait]> { self.output.finish() }
 }
 
-reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORReader EncodingError! {
-    source: codec.reader(input, limits) ?? return Err(err)
-    Ok(CBORReader{input: source.move()})
+// A bounded CBOR event stream over any byte source: a FileReader, a socket,
+// or a program's own `Reader` type.
+reader: fn<R: Reader>(input: &&R, limits: EncodingLimits{EncodingLimits.safe()}) -> CBORReader<R> EncodingError! {
+    source: codec.reader<R>(input, limits) ?? return Err(err)
+    Ok(CBORReader<R>{input: source.move()})
 }
 
 writer: fn(output: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CBORWriter EncodingError! {

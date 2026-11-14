@@ -4170,8 +4170,9 @@ part; its helper functions are not exports of the public CBOR module.
 | --- | --- | --- |
 | `cbor.parse(bytes, options)` | `Dyn !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
 | `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(input, limits)` / `writer(output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
-| `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
+| `cbor.reader<R: Reader>(input, limits)` | `CBORReader<R> !EncodingError` | Construct a bounded event stream over any byte source: a `FileReader`, a socket, or a program's own `Reader` type. |
+| `cbor.writer(output, limits)` | `CBORWriter !EncodingError` | Construct a bounded file-backed event writer. |
+| `CBORReader<R>.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
 ### `core.encoding.hex` — hexadecimal bytes

@@ -354,22 +354,9 @@ encoding_hostile_read_cap: fn(state: I64, length: I64) -> I64 {
     if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK
 }
 
-// One read on the reader's FD72 (no EINTR retry, as BufReader::read): the
-// count, or -1 with the EncodingCause stored at `cause`.
-encoding_fd_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
-    scratch: jet_rt_alloc(I64{32}, I64{8})
-    count: jet_fd_read_raw(reader, bytes, length, scratch)
-    code: rt_text_word(wrapping(scratch + I64{8}))
-    jet_rt_free(scratch, I64{32}, I64{8})
-    if (count >= I64{0}) -> return count
-    // fd_read_error's only custom fact is a failed flush of pending output.
-    rt_text_store(cause, if (code == I64{0}) -> encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data")) else -> encoding_cause_errno(code))
-    I64{-1}
-}
-
 // The hostile read plan before one read: 0 to read, 1 for a pending
 // interrupt, 2 when the JET_ENC_HOSTILE_FAIL_READ_AFTER budget is spent.
-// FileReader.read_into (CompilerFS.jet) and encoding_file_read share it.
+// FileReader.read_into (CompilerFS.jet) uses it, so every codec reader meets it.
 encoding_hostile_read_gate: fn(state: I64) -> I64 {
     rt_text_store(wrapping(state + I64{72}), rt_text_word(wrapping(state + I64{72})) + I64{1})
     pending: rt_text_word(wrapping(state + I64{24}))
@@ -390,72 +377,6 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
     rt_text_store(wrapping(state + I64{120}), total)
     rt_text_store(wrapping(state + I64{96}), rt_text_word(wrapping(state + I64{96})) + count)
     rt_text_word(wrapping(state + I64{40})) != I64{0} && alloc_unsigned_less(rt_text_word(wrapping(state + I64{48})), total)
-}
-
-// jet_encoding_file_read: the count, or -1 with the EncodingCause stored at
-// `cause`.
-encoding_file_read: fn(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
-    if jet_fault_should_fail(rt_static_text("FS.Read")) {
-        rt_text_store(cause, encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Read")))
-        return I64{-1}
-    }
-    state: encoding_hostile_state()
-    if (state == I64{0}) -> return encoding_fd_read(reader, bytes, if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK, cause)
-    gate: encoding_hostile_read_gate(state)
-    if (gate != I64{0}) {
-        rt_text_store(cause, if (gate == I64{1}) -> encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted")) else -> encoding_hostile_fail_cause())
-        return I64{-1}
-    }
-    count: encoding_fd_read(reader, bytes, encoding_hostile_read_cap(state, length), cause)
-    if (count <= I64{0}) -> return count
-    if encoding_hostile_read_done(state, count) {
-        rt_text_store(cause, encoding_hostile_fail_cause())
-        return I64{-1}
-    }
-    count
-}
-
-// One byte, None at end of input.
-#Export(c) jet_raw_encoding_read_byte: fn(reader: I64, some: I64, value: I64, error: I64) -> I64 {
-    scratch: jet_rt_alloc(I64{16}, I64{8})
-    count: encoding_file_read(reader, scratch, I64{1}, wrapping(scratch + I64{8}))
-    byte: rt_text_byte(scratch)
-    cause: rt_text_word(wrapping(scratch + I64{8}))
-    jet_rt_free(scratch, I64{16}, I64{8})
-    if (count < I64{0}) -> return encoding_fail(cause, error)
-    rt_text_store(some, if (count == I64{0}) -> I64{0} else -> I64{1})
-    if (count != I64{0}) -> rt_text_store(value, byte)
-    I64{1}
-}
-
-// One read on the reader's own stream into the empty [U8] at `header` (len,
-// capacity, data), at most `max` bytes, without growing it. The List's length
-// becomes the count; an error leaves it empty.
-#Export(c) jet_raw_encoding_read_into: fn(reader: I64, header: I64, max: I64, value: I64, error: I64) -> I64 {
-    limit: jet_int_owned_to_i64(max)
-    capacity: rt_text_word(wrapping(header + I64{8}))
-    if (rt_text_word(header) != I64{0} || limit < I64{0} || limit > capacity) {
-        return encoding_fail(encoding_cause_custom(rt_static_text("InvalidInput"), rt_static_text("read_into requires len == 0 and 0 <= max <= capacity")), error)
-    }
-    data: rt_text_word(wrapping(header + I64{16}))
-    temporary: RT_HOST_U8_STRIDE != I64{1} && limit != I64{0}
-    packed: if temporary -> jet_rt_alloc(limit, I64{8}) else -> data
-    scratch: jet_rt_alloc(I64{8}, I64{8})
-    count: encoding_fd_read(reader, packed, limit, scratch)
-    cause: rt_text_word(scratch)
-    jet_rt_free(scratch, I64{8}, I64{8})
-    if temporary {
-        at := I64{0}
-        loop at < count {
-            host_u8_put(data, at, rt_text_byte(wrapping(packed + at)))
-            at += I64{1}
-        }
-        jet_rt_free(packed, limit, I64{8})
-    }
-    if (count < I64{0}) -> return encoding_fail(cause, error)
-    rt_text_store(header, count)
-    rt_text_store(value, jet_int_owned_from_i64(count))
-    I64{1}
 }
 
 // std::fs::metadata (stat, following links) of the raw path bytes; a NUL is

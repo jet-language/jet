@@ -1,0 +1,88 @@
+// cbor.reader takes any Prelude `Reader`, not only a FileReader. `Chunks`
+// hands out a few bytes per read, so heads, keys and byte strings cross read
+// boundaries; a source that ends inside an array is a Truncated error at the
+// byte it stopped; `Reset` fails every read, and its IOError reaches the
+// reader's EncodingError as the cause, keeping its kind and OS code.
+use {
+    encoding: core.encoding
+    cbor: core.encoding.cbor
+}
+
+Chunks: struct {
+    data: [U8]
+    at: Int
+    step: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            out := [U8]{}
+            _: self.read_into(out, limit) ?? return Err(err)
+            Ok(out)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            count := 0
+            loop count < limit && count < self.step && self.at < self.data.len() {
+                buffer.push(self.data[self.at])
+                self.at += 1
+                count += 1
+            }
+            Ok(count)
+        }
+    }
+}
+
+Reset: struct {
+    peer: String
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.peer.copy()), os_code: Val(104), cause: Val("peer reset")}))
+        }
+    }
+}
+
+event_name: fn(event: encoding.DataEvent) -> String {
+    if event == {
+        .Null -> "null"
+        .Bool(value) -> "bool:{value}"
+        .Int(value) -> "int:{value}"
+        .Float(value) -> "float:{value}"
+        .Number(text) -> "number:{text}"
+        .Text(text) -> "text:{text}"
+        .Bytes(bytes) -> "bytes:{bytes.len()}"
+        .ArrayStart -> "["
+        .ArrayEnd -> "]"
+        .ObjectStart -> "{{"
+        .Key(key) -> "key:{key}"
+        .ObjectEnd -> "}}"
+    }
+}
+
+run: fn() EncodingError! {
+    // {"a": [1, true], "b": h'0102'}
+    events: Chunks{data: [U8]{162, 97, 97, 130, 1, 245, 97, 98, 66, 1, 2}, at: 0, step: 2}
+    reader: cbor.reader(events) ?? return Err(err)
+    loop event in reader -> print(event_name(event))
+    short := cbor.reader(Chunks{data: [U8]{130, 1}, at: 0, step: 1}) ?? return Err(err)
+    _: short.next() ?? return Err(err)
+    _: short.next() ?? return Err(err)
+    if short.next() == {
+        .Ok(_) -> print("read past the end of a short source")
+        .Err(error) -> print("truncated {error.kind == .Truncated} {error.byte_offset} {error.reason}")
+    }
+    broken := cbor.reader(Reset{peer: "socket"}) ?? return Err(err)
+    if broken.next() == {
+        .Ok(_) -> print("read past a failed source")
+        .Err(error) -> {
+            if error.cause() == {
+                .Val(cause) -> print("io {error.kind == .IO} {cause.kind} {cause.os_code ?? 0} {cause.message}")
+                None -> print("no cause")
+            }
+        }
+    }
+}
