@@ -1,12 +1,16 @@
 use time: core.time
 
+// The deadline passes while the parent waits in the selection. An elapsed
+// `#Deadline(0ms)` would be taken by the spawns' own stop checks first. The
+// children inherit the deadline and stop at the same instant; the parent's
+// selection checks its deadline before it reads their results.
 slow: fn(value: Int) -> Int {
-    time.sleep(1ms)
+    time.sleep(2000ms)
     return value
 }
 
 run: fn() {
-    #Deadline(0ms) {
+    #Deadline(30ms) {
         task.group workers {
             if (task.all { slow(1), slow(2) }) == {
                 .Ok(results) -> {

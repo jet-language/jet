@@ -1,6 +1,8 @@
+// The task starts before the deadline: inside an elapsed `#Deadline(0ms)`,
+// the spawn's own stop check would take the deadline before the join waits.
 run: fn() {
+    handle: task 10
     #Deadline(0ms) {
-        handle: task 10
         handle.join() ?? 0
     }
     print("unreachable")
