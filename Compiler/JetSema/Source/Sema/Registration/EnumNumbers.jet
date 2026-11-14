@@ -159,7 +159,10 @@ sema_enum_numbers_literal: fn(expression: Expr) -> Int? {
 }
 
 // The generated `to_int` and `from_int`, omitting a method the enum declares
-// itself.
+// itself. `to_int` is written `Never!`: a generated method is no candidate
+// of the failure solve (sema_failure_inference_candidate), so an unwritten
+// route would stay the default `Err!` and every caller would have to handle
+// a failure a case number can't have.
 sema_enum_numbers_methods: fn(definition: EnumDef, numbers: [Int], diagnostics: &[Diagnostic]) -> [Func]? {
     has_to_int: loop method in definition.methods {
         if method.name == "to_int" -> break true
@@ -172,7 +175,7 @@ sema_enum_numbers_methods: fn(definition: EnumDef, numbers: [Int], diagnostics: 
     out := [String]{}
     out.push("impl {name} {{\n")
     if !has_to_int {
-        out.push("    to_int: fn(self) -> Int {{\n        if self == {{\n")
+        out.push("    to_int: fn(self) -> Int Never! {{\n        if self == {{\n")
         loop index in 0..<numbers.len() -> out.push("            .{definition.variants[index].name} -> {numbers[index]}\n")
         out.push("        }}\n    }}\n")
     }
