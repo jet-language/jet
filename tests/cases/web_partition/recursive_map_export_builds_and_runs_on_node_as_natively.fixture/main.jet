@@ -1,0 +1,12 @@
+#Export(wasm)
+echo: fn(values: [String: [Int]]) -> [String: [Int]] { return values.copy() }
+
+#Target(JS)
+run: fn() {
+    values: [String: [Int]]{"empty": [Int]{}, "one": [1], "wide": [Int.MIN, -1, 0, Int.MAX]}
+    back: echo(values)
+    print(back.len())
+    print(back["empty"].len())
+    print(back["one"])
+    print(back["wide"])
+}

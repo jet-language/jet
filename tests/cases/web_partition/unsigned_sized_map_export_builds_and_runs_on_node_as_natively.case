@@ -1,0 +1,17 @@
+# Claim: a `#Export(wasm)` taking and returning `[String:U64]` is ABI-safe (a String-keyed map of an unsigned scalar), so the web build accepts it, and the built app prints under node what native `jet run` prints, U64.MAX and a value above 2^53 included
+requires: tool:node
+fixture: unsigned_sized_map_export_builds_and_runs_on_node_as_natively.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web main.jet
+exit: 0 # the web build accepts the program
+stderr: !~ "E-WEB-" # no web refusal
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = unsigned_sized_map_export_builds_and_runs_on_node_as_natively.stdout.expected # the web build prints what the native build prints
+step: jet run main.jet
+exit: 0
+stdout: = unsigned_sized_map_export_builds_and_runs_on_node_as_natively.stdout.expected # the native output

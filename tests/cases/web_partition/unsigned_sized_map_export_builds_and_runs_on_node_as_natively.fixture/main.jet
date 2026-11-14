@@ -1,0 +1,12 @@
+#Export(wasm)
+echo: fn(values: [String:U64]) -> [String:U64] { return values.copy() }
+
+#Target(JS)
+run: fn() {
+    values: [String:U64]{"zero": 0, "above-safe": 9007199254740993, "max": U64.MAX}
+    back: echo(values)
+    print(back.len())
+    print(back["zero"])
+    print(back["above-safe"])
+    print(back["max"])
+}
