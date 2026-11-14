@@ -1,0 +1,18 @@
+# The web leg of Examples/Network/Browser/BrowserLockedProvision: the example's
+# golden covers O0, O1 and O2; here its web build runs under node against the
+# same lock and prints the same golden.
+requires: os:unix
+requires: tool:node
+env: NO_COLOR=1
+env: JET_PROJECT_ROOT={work}
+env: JET_STORE_DIR={work}/cache
+copy: {root}/Examples/Network/Browser/BrowserLockedProvision.jet main.jet
+append: chromium "#!/bin/sh\necho Chromium 140.0\n"
+chmod: chromium 0755
+step: jetpack browser lock chromium --binary {work}/chromium --version 140.0 --protocol bidi-2025.5
+exit: 0
+step: jet build --target web main.jet
+exit: 0
+step: node .jet/build/app.js
+exit: 0
+stdout: = ../../../Examples/Network/Browser/BrowserLockedProvision.out
