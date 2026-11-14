@@ -4,7 +4,7 @@
   "cells": ["games.frame"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "languages": ["jet", "rust", "python", "c", "zig", "go", "node"],
   "spec": {
     "behavior": "Render 1200 frames of a 2D game scene on a 320x200 RGBA8 software canvas and print the frame, tile, sprite and glyph counts. Each frame clears to (16,20,32,255); draws the visible tiles of a scrolling 21x12 map of opaque 15x15 tiles; draws 48 moving 12x12 sprites at alpha 180; draws a 320x12 HUD bar at alpha 160; and draws two lines of 5x7 bitmap-font text, a white HUD line at scale 1 and a gold title at scale 2 and alpha 200.",
     "canvas": "320x200 RGBA8, premultiplied as core.ui's canvas is, row-major, cleared by an opaque full-canvas replace each frame",
@@ -12,7 +12,7 @@
     "sprites": "for i in 0..48: rect ((i * 41 + f * (1 + i % 4)) % 344 - 12, (i * 29 + f * (1 + i % 3)) % 224 - 12, 12, 12) in ((i * 53) % 256, (i * 97) % 256, (i * 31 + f) % 256, 180)",
     "text": "\"SCORE {(f * 7) % 100000} FRAME {f}\" at (4, 2) size 10 in white; \"JET RASTER\" at (196, 176) size 20 in (255,220,120,200). Scale is max((size + 5) / 10, 1), advance 6 * scale; each glyph column draws one rectangle per vertical run of set bits of the 95-glyph 5x7 font",
     "blend": "core.ui's one blend rule: every rectangle clips to the canvas; a color premultiplies on entry, each of red, green and blue (c * a + 127) / 255; opaque colors copy; alpha 0 skips; otherwise every channel, alpha included, becomes s + (d * (255 - a) + 127) / 255 with s the premultiplied source byte (a for alpha)",
-    "capture": "with JET_FRAME_CAPTURE set, the frame is written to that path as a P7 RGB_ALPHA PAM (the Jet rail writes the final frame once, the other rails every presented frame); all six rails leave the same final-frame bytes",
+    "capture": "with JET_FRAME_CAPTURE set, the frame is written to that path as a P7 RGB_ALPHA PAM (the Jet rail writes the final frame once, the other rails every presented frame); all seven rails leave the same final-frame bytes",
     "args": [],
     "fixtureGen": null,
     "expected": "expected.out"
@@ -35,6 +35,7 @@
     "python": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Pure Python over a bytearray canvas: opaque fills use slice assignment, translucent fills use per-(source, alpha) bytes.translate tables over strided channel slices. NumPy is not available in the host toolchain."},
     "c": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The matched peer is a hand-written C rasterizer with the same algorithm: GPU-backed C game libraries have no headless software path."},
     "zig": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
+    "go": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a fixed [256000]byte canvas with the same clip, blend, font and vertical glyph runs; the HUD line is appended into one reused buffer, and capture via os.Getenv and os.Create leaves the final-frame sha256 6b545f46…69e3."},
     "node": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
   },
   "rewrite_provenance": {
