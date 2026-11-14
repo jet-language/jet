@@ -181,7 +181,9 @@ jet_cli_core_checked: fn(color: Bool, json: Bool, trace_sink: JetCLITraceSink?) 
             compiler: selected.host_facts.compiler_identity ?? ""
             target: selected.host_facts.target_triple ?? ""
             front := jet_driver_lowering_inputs(selected, None)
+            if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
+            if trace_sink == .Val(sink) -> sink.end("core_check.diagnostics", diagnostics.len())
             if jet_cli_errors(diagnostics).len() > 0 -> return JetCLICoreChecked.Stopped{output: jet_driver_check_outcome("Core", source, diagnostics, color, false)}
             if front.compile.internal_problem == .Val(problem) -> return JetCLICoreChecked.Stopped{output: jet_cli_ice(problem)}
             inputs: front.inputs.move() ?? return JetCLICoreChecked.Stopped{output: jet_cli_ice("the Core check stopped before lowering without a diagnostic")}

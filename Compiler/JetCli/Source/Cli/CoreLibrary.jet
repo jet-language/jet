@@ -20,7 +20,8 @@ use {
 // lint or object finding is a row of `{prefix}.issues`. The roots left out
 // of the library (JetIR BuildCore.jet ir_core_library_from) are the rows of
 // `{prefix}.skipped`, one per failure that left its root out. The Core
-// check's phases go to `trace_sink`.
+// check's phases and the library's `ir.build`, `ir.lint`, `ir.opt`,
+// `ir.x64` and `ir.object` go to `trace_sink`, as the runtime library's do.
 JetCLICoreLibrary: struct { bytes: [U8], problem: String }
 
 jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
@@ -30,25 +31,37 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
         .Checked(found, _, _) -> found
     }
     declarations := jet_driver_checked_declarations(inputs)
+    if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     library := ir_build_core_library(inputs.functions.move(), inputs.decls, inputs.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), inputs.sources.move(), declarations.constants.move(), declarations.foreign.move(), inputs.entry_module_identity, compiler_threads)
+    if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
     loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     // The memory term is read now: the front end before this holds most of it.
     threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if issues.len() == 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
+        if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
         _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.opt", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
+        if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
         compiled := ir_x64_compile_module(library.program.move(), threads)
+        if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+        if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
         // One shared section per kind: Core's functions outnumber the section
         // indices an object without extended numbering has, and the image
         // links the object whole.
         object := ir_x64_library_object(compiled, library.exports, library.data, true, false)
+        if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
         if object.errors.len() == 0 {
             core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
             core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
