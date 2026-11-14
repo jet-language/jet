@@ -68,9 +68,10 @@ SemaComptimeUseReference: struct {
 
 // Checks every user module, then records the build-only modules and, per
 // module, the modules it imports only with `#run use`. Each module's scan
-// reads the graph and writes only its own findings, so the scans run on
-// compiler threads, claimed largest source first, and join in module order:
-// the diagnostics and runtime names are the same for any thread count.
+// reads the graph and writes only its own findings, so the scans run as a
+// graph scan (sema_graph_scan), claimed largest source first, and join in
+// module order: the diagnostics and runtime names are the same for any
+// thread count.
 sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
     owned := graph.move()
     count: owned.modules.len()
@@ -86,20 +87,12 @@ sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThr
         weights.push(bytes)
         work += bytes
     }
-    found := [SemaComptimeUseScanned?]{}
-    loop _ in 0..<rows.len() -> found.push(None)
     workers: compiler_threads_admit(threads, rows.len(), work, SEMA_COMPTIME_USE_MIN_BYTES_PER_THREAD, 0, 0)
-    if workers <= 1 {
-        loop position in 0..<rows.len() -> found[position] = Val(sema_comptime_use_scan_module(owned, rows[position], own_callees))
-    } else {
-        jobs: Shared{SemaComptimeUseJobs{own_callees: own_callees.move(), rows: rows.move(), order: compiler_threads_heaviest_first(weights)}}
-        shared_state: Shared{SemaFinalizeSideShared{graphs: [SemaRegistrationGraph]{}, modules: [SemaGraphModuleResult]{}}}
-        no_modules := [SemaGraphModuleResult]{}
-        sema_finalize_side_fill(shared_state, owned, no_modules)
-        queue: Shared{SemaFinalizeCoreQueue{next: 0}}
-        sema_comptime_use_scanners(shared_state, jobs, queue, 0, workers, found)
-        owned = sema_finalize_side_take(shared_state, no_modules)
-    }
+    scan := sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights))
+    scan.own_callees = Val(own_callees.move())
+    done := sema_graph_scan(scan, workers)
+    owned = done.graph.move()
+    found := done.found.move()
     runtime_names := [[String:Bool]]{}
     scanned := [Bool]{}
     loop _ in 0..<count {
@@ -109,7 +102,8 @@ sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThr
     found.reverse()
     loop found.len() > 0 {
         slot := found.pop() ?? break
-        module_found := slot.move() ?? panic("a module's #run use scan left its slot")
+        row := slot.move() ?? panic("a module's #run use scan left its slot")
+        module_found := row.comptime.move() ?? panic("a #run use scan found no module scan")
         loop diagnostic in module_found.diagnostics -> sema_registration_push_graph_diagnostic(owned, module_found.module_index, diagnostic)
         runtime_names[module_found.module_index] = module_found.runtime_names.move()
         scanned[module_found.module_index] = true
@@ -123,30 +117,96 @@ sema_comptime_use_check: fn(graph: &&SemaRegistrationGraph, threads: CompilerThr
 // thread.
 SEMA_COMPTIME_USE_MIN_BYTES_PER_THREAD: 262144
 
-// What every scan thread reads besides the graph: each module's own `#run
-// fn` callees, the user modules to scan (by graph module), and their claim
-// order, largest source first (positions in `rows`).
-SemaComptimeUseJobs: struct {
-    own_callees: [[String:Bool]]
-    rows: [Int]
-    order: [Int]
-}
-
 // One module's scan results.
 SemaComptimeUseScanned: struct {
-    position: Int
     module_index: Int
     runtime_names: [String:Bool]
     diagnostics: [Diagnostic]
 }
 
-// Runs scan threads `from..<workers`, one task each, and moves each module's
-// results a thread returned into its slot of `found`.
-sema_comptime_use_scanners: fn(shared_state: Shared<SemaFinalizeSideShared>, jobs: Shared<SemaComptimeUseJobs>, queue: Shared<SemaFinalizeCoreQueue>, from: Int, workers: Int, found: &[SemaComptimeUseScanned?]) {
+// One graph scan: the graph (a list of one, so it moves back out), the
+// checked modules, the rows it scans (a graph module or a checked module
+// each) and their claim order, heaviest first (positions in `rows`), the
+// next claim, and the inputs the scan reads besides the graph, which name
+// the scan (sema_graph_scan_row). Every such scan reads the graph and the
+// checked modules and writes only its own findings.
+SemaGraphScan: struct {
+    graphs: [SemaRegistrationGraph]
+    modules: [SemaGraphModuleResult]
+    rows: [Int]
+    order: [Int]
+    queue: SemaFinalizeCoreQueue
+    // Each graph module's own `#run fn` callees.
+    own_callees: [[String:Bool]]?
+    // The program's state table.
+    table: SemaStateTable?
+    // Every graph module's qualified keys, once found.
+    qualified: SemaQualifiedJobs?
+}
+
+// A graph scan's results: the graph, the checked modules, the rows, their
+// order, and each row's findings by position.
+SemaGraphScanDone: struct {
+    graph: SemaRegistrationGraph
+    modules: [SemaGraphModuleResult]
+    rows: [Int]
+    order: [Int]
+    found: [SemaGraphScanFound?]
+}
+
+// One row's findings, by the scan that found them.
+SemaGraphScanFound: struct {
+    position: Int
+    comptime: SemaComptimeUseScanned?
+    diagnostics: [Diagnostic]
+    qualified: SemaQualifiedFound?
+}
+
+// A scan over `rows`, claimed in `order`, with no inputs yet.
+sema_graph_scan_new: fn(graph: &&SemaRegistrationGraph, modules: &&[SemaGraphModuleResult], rows: &&[Int], order: &&[Int]) -> SemaGraphScan Never! {
+    SemaGraphScan{graphs: [SemaRegistrationGraph]{graph}, modules: modules, rows: rows, order: order, queue: SemaFinalizeCoreQueue{next: 0}, own_callees: None, table: None, qualified: None}
+}
+
+// Runs `scan` over its rows on `workers` threads, the calling thread alone
+// for one. Every row's scan reads the graph, the checked modules and the
+// scan's inputs and writes only its own findings, so the findings are the
+// same for any thread count.
+sema_graph_scan: fn(scan: &&SemaGraphScan, workers: Int) -> SemaGraphScanDone {
+    owned := scan.move()
+    found := [SemaGraphScanFound?]{}
+    loop _ in 0..<owned.rows.len() -> found.push(None)
+    if workers <= 1 {
+        loop position in 0..<owned.rows.len() -> found[position] = Val(sema_graph_scan_row(owned, position))
+        graph := owned.graphs.pop() ?? panic("the scanned graph left its scan")
+        return SemaGraphScanDone{graph: graph, modules: owned.modules.move(), rows: owned.rows.move(), order: owned.order.move(), found: found}
+    }
+    shared_state: Shared{owned.move()}
+    sema_graph_scan_threads(shared_state, 0, workers, found)
+    sema_graph_scan_take(shared_state, found)
+}
+
+// One row's scan, by the input its scan reads: the `#run fn` callees for a
+// `#run use` scan, the state table for a typestate scan, and else the
+// qualified-type scan, which finds each module's keys before it has any
+// (`qualified` None) and then rewrites with every module's.
+sema_graph_scan_row: fn(scan: SemaGraphScan, position: Int) -> SemaGraphScanFound {
+    row: scan.rows[position]
+    found := SemaGraphScanFound{position: position, comptime: None, diagnostics: [Diagnostic]{}, qualified: None}
+    if {
+        scan.own_callees == .Val(callees) -> found.comptime = Val(sema_comptime_use_scan_module(scan.graphs[0], row, callees))
+        scan.table == .Val(table) -> found.diagnostics = sema_typestate_check_module(scan.graphs[0], table, scan.modules[row])
+        else -> found.qualified = Val(sema_registration_qualified_scan(scan.graphs[0], row, scan.qualified))
+    }
+    found
+}
+
+// Runs scan threads `from..<workers`, one task each, and moves each row's
+// findings a thread returned into its slot of `found`.
+sema_graph_scan_threads: fn(shared_state: Shared<SemaGraphScan>, from: Int, workers: Int, found: &[SemaGraphScanFound?]) {
     if from >= workers -> return
-    task.group sema_comptime_use_threads {
-        head: task sema_comptime_use_claimed(shared_state, jobs, queue)
-        sema_comptime_use_scanners(shared_state, jobs, queue, from + 1, workers, found)
+    task.group sema_graph_scan_group {
+        head: task sema_graph_scan_claimed(shared_state)
+        sema_graph_scan_threads(shared_state, from + 1, workers, found)
         claimed := head.join() ?? panic(compiler_threads_failure_text(err))
         loop claimed.len() > 0 {
             done := claimed.pop() ?? break
@@ -156,22 +216,25 @@ sema_comptime_use_scanners: fn(shared_state: Shared<SemaFinalizeSideShared>, job
     }
 }
 
-// One thread: scans the modules it claims.
-sema_comptime_use_claimed: fn(shared_state: Shared<SemaFinalizeSideShared>, jobs: Shared<SemaComptimeUseJobs>, queue: Shared<SemaFinalizeCoreQueue>) -> [SemaComptimeUseScanned] {
-    inputs: shared_state.guard_read()
-    rows: jobs.guard_read()
-    claimed := [SemaComptimeUseScanned]{}
-    ranks: queue.guard_read()
+// One thread: scans the rows it claims.
+sema_graph_scan_claimed: fn(shared_state: Shared<SemaGraphScan>) -> [SemaGraphScanFound] {
+    scan: shared_state.guard_read()
+    claimed := [SemaGraphScanFound]{}
     loop {
-        rank: sema_finalize_core_claim(ranks.value)
-        if rank >= rows.value.order.len() -> break
-        position: rows.value.order[rank]
+        rank: sema_finalize_core_claim(scan.value.queue)
+        if rank >= scan.value.order.len() -> break
         // Passed straight through: a local binding of a guarded row would copy it.
-        scanned := sema_comptime_use_scan_module(inputs.value.graphs[0], rows.value.rows[position], rows.value.own_callees)
-        scanned.position = position
-        claimed.push(scanned)
+        claimed.push(sema_graph_scan_row(scan.value, scan.value.order[rank]))
     }
     claimed
+}
+
+// Moves the graph, the checked modules, the rows and their order back out of
+// the threads' cell.
+sema_graph_scan_take: fn(shared_state: Shared<SemaGraphScan>, found: &&[SemaGraphScanFound?]) -> SemaGraphScanDone {
+    permit: shared_state.guard_edit()
+    graph := permit.value.graphs.pop() ?? panic("the scanned graph left its scan")
+    SemaGraphScanDone{graph: graph, modules: compiler_take_rows<SemaGraphModuleResult>(permit.value.modules), rows: compiler_take_rows<Int>(permit.value.rows), order: compiler_take_rows<Int>(permit.value.order), found: found}
 }
 
 // One user module's scan: its items and script body.
@@ -180,7 +243,7 @@ sema_comptime_use_scan_module: fn(graph: SemaRegistrationGraph, module_index: In
     sema_comptime_use_items(graph.modules[module_index].program.items, scan)
     sema_comptime_use_body(graph.modules[module_index].program.script_body, scan)
     sema_comptime_use_flush(scan)
-    SemaComptimeUseScanned{position: 0, module_index: module_index, runtime_names: scan.runtime_names.move(), diagnostics: scan.diagnostics.move()}
+    SemaComptimeUseScanned{module_index: module_index, runtime_names: scan.runtime_names.move(), diagnostics: scan.diagnostics.move()}
 }
 
 sema_comptime_use_scan_for: fn(graph: SemaRegistrationGraph, module_index: Int, own_callees: [[String:Bool]]) -> SemaComptimeUseScan {

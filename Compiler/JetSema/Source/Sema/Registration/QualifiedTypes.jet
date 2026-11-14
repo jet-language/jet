@@ -8,9 +8,12 @@
 // symbol (an import binding, a package name) carries types that resolve in
 // whichever module checks a use of it.
 use jet_foundation.[
+    CompilerThreads,
     Symbol,
     Type,
     TypeTupleField,
+    compiler_threads_admit,
+    compiler_threads_heaviest_first,
     type_identity_equal,
     ModuleID,
     module_is_core,
@@ -18,34 +21,152 @@ use jet_foundation.[
 
 // A seeded module was canonicalized when it was finalized: its declarations
 // and its import bindings' symbols already carry canonical keys, so it takes
-// no keys and no pass.
-sema_registration_canonicalize_qualified_types: fn(graph: &SemaRegistrationGraph) Never! {
-    module_keys := [[String:Type]]{}
-    loop module_index in 0..<graph.modules.len() {
-        if module_index < graph.seeded {
-            module_keys.push([String:Type]{})
-        } else {
-            module_keys.push(sema_registration_module_qualified_keys(graph, module_index))
-        }
+// no keys and no pass. Every other module's keys, then its rewritten types,
+// are read off the graph alone, each module's by itself, so both run as graph
+// scans (sema_graph_scan), claimed largest source first; each module's
+// rewritten types then move into its rows, the same for any thread count.
+sema_registration_canonicalize_qualified_types: fn(graph: &&SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
+    owned := graph.move()
+    count: owned.modules.len()
+    rows := [Int]{}
+    weights := [Int]{}
+    work := 0
+    loop module_index in owned.seeded..<count {
+        bytes: owned.modules[module_index].source.count_bytes()
+        rows.push(module_index)
+        weights.push(bytes)
+        work += bytes
     }
-    loop module_index in graph.seeded..<graph.modules.len() {
-        keys: module_keys[module_index]
-        if keys.len() > 0 {
-            sema_registration_canonical_functions(graph.modules[module_index].functions, keys)
-            loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_canonical_functions(graph.modules[module_index].nominals[nominal].methods, keys)
-            loop implementation in 0..<graph.modules[module_index].impls.len() -> sema_registration_canonical_functions(graph.modules[module_index].impls[implementation].methods, keys)
-            loop position in 0..<graph.modules[module_index].symbols.len() -> sema_registration_canonical_symbol(graph.modules[module_index].symbols[position], keys)
-        }
-        // An import binding copies its declaring module's symbol, written
-        // in that module's names.
-        loop import_index in 0..<graph.modules[module_index].imports.len() {
-            loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
-                source_index: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_identity) ?? next
-                if module_keys[source_index].len() == 0 -> next
-                sema_registration_canonical_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, module_keys[source_index])
+    workers: compiler_threads_admit(threads, rows.len(), work, SEMA_QUALIFIED_MIN_BYTES_PER_THREAD, 0, 0)
+    keyed := sema_graph_scan(sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, rows, compiler_threads_heaviest_first(weights)), workers)
+    jobs := SemaQualifiedJobs{keys: [[String:Type]]{}}
+    loop _ in 0..<count -> jobs.keys.push([String:Type]{})
+    found_keys := sema_registration_qualified_take(keyed.found)
+    loop found_keys.len() > 0 {
+        found := found_keys.pop() ?? break
+        jobs.keys[keyed.rows[found_keys.len()]] = found.keys.move() ?? panic("a module's qualified scan found no keys")
+    }
+    scan := sema_graph_scan_new(keyed.graph.move(), [SemaGraphModuleResult]{}, keyed.rows.move(), keyed.order.move())
+    scan.qualified = Val(jobs.move())
+    rewritten := sema_graph_scan(scan, workers)
+    owned = rewritten.graph.move()
+    rewrites := sema_registration_qualified_take(rewritten.found)
+    loop rewrites.len() > 0 {
+        found := rewrites.pop() ?? break
+        sema_registration_qualified_apply(owned, rewritten.rows[rewrites.len()], found.types.move())
+    }
+    owned
+}
+
+// A program with less source per admitted thread finds its keys and types on
+// the calling thread.
+SEMA_QUALIFIED_MIN_BYTES_PER_THREAD: 262144
+
+// What a module's qualified scan reads besides the graph: every graph
+// module's keys, empty for a seeded one.
+SemaQualifiedJobs: struct {
+    keys: [[String:Type]]
+}
+
+// One module's qualified scan: its keys, or its rewritten types, one slot
+// per type the rewrite reads (None keeps the slot's own type).
+SemaQualifiedFound: struct {
+    keys: [String:Type]?
+    types: [Type?]
+}
+
+// With no keys yet, a module's scan finds its keys; with every module's
+// keys, its rewritten types.
+sema_registration_qualified_scan: fn(graph: SemaRegistrationGraph, module_index: Int, jobs: SemaQualifiedJobs?) -> SemaQualifiedFound Never! {
+    if jobs == .Val(keyed) -> return SemaQualifiedFound{keys: None, types: sema_registration_qualified_types(graph, module_index, keyed)}
+    SemaQualifiedFound{keys: Val(sema_registration_module_qualified_keys(graph, module_index)), types: [Type?]{}}
+}
+
+// A graph scan's qualified findings, by position.
+sema_registration_qualified_take: fn(found: &&[SemaGraphScanFound?]) -> [SemaQualifiedFound] {
+    slots := found.move()
+    slots.reverse()
+    taken := [SemaQualifiedFound]{}
+    loop slots.len() > 0 {
+        slot := slots.pop() ?? break
+        row := slot.move() ?? panic("a module's qualified scan left its slot")
+        taken.push(row.qualified.move() ?? panic("a qualified scan found nothing"))
+    }
+    taken
+}
+
+// The module's rewritten types: per function row of its functions, then of
+// its nominals' and its impls' methods, the signature, the symbol's type
+// and each parameter's type and symbol type; then its symbols' types; then
+// its import bindings' symbol types, an import binding being a copy of its
+// declaring module's symbol, written in that module's names.
+sema_registration_qualified_types: fn(graph: SemaRegistrationGraph, module_index: Int, jobs: SemaQualifiedJobs) -> [Type?] Never! {
+    slots := [Type?]{}
+    sema_registration_qualified_function_types(graph.modules[module_index].functions, jobs, module_index, slots)
+    loop nominal in graph.modules[module_index].nominals -> sema_registration_qualified_function_types(nominal.methods, jobs, module_index, slots)
+    loop implementation in graph.modules[module_index].impls -> sema_registration_qualified_function_types(implementation.methods, jobs, module_index, slots)
+    loop symbol in graph.modules[module_index].symbols -> slots.push(sema_registration_qualified_symbol_type(symbol, jobs, module_index))
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            if sema_registration_module_index(graph, binding.symbol.module_identity) == .Val(source) {
+                slots.push(sema_registration_qualified_symbol_type(binding.symbol, jobs, source))
+            } else {
+                slots.push(None)
             }
         }
     }
+    slots
+}
+
+sema_registration_qualified_function_types: fn(functions: [SemaRegistrationFunction], jobs: SemaQualifiedJobs, source: Int, slots: &[Type?]) Never! {
+    loop function in functions {
+        slots.push(sema_registration_canonical_type(function.signature, jobs.keys[source]))
+        slots.push(sema_registration_qualified_symbol_type(function.symbol, jobs, source))
+        loop parameter in function.parameters {
+            slots.push(sema_registration_canonical_type(parameter.ty, jobs.keys[source]))
+            slots.push(sema_registration_qualified_symbol_type(parameter.symbol, jobs, source))
+        }
+    }
+}
+
+// The symbol's type with module `source`'s keys, if it has one they change.
+sema_registration_qualified_symbol_type: fn(symbol: Symbol, jobs: SemaQualifiedJobs, source: Int) -> Type? Never! {
+    if symbol.ty == .Val(ty) -> return sema_registration_canonical_type(ty, jobs.keys[source])
+    None
+}
+
+// Moves a module's rewritten types (sema_registration_qualified_types) into
+// its rows, slot by slot in the same order.
+sema_registration_qualified_apply: fn(graph: &SemaRegistrationGraph, module_index: Int, types: &&[Type?]) {
+    slots := types.move()
+    slots.reverse()
+    sema_registration_qualified_apply_functions(graph.modules[module_index].functions, slots)
+    loop nominal in 0..<graph.modules[module_index].nominals.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].nominals[nominal].methods, slots)
+    loop implementation in 0..<graph.modules[module_index].impls.len() -> sema_registration_qualified_apply_functions(graph.modules[module_index].impls[implementation].methods, slots)
+    loop position in 0..<graph.modules[module_index].symbols.len() -> sema_registration_qualified_apply_symbol(graph.modules[module_index].symbols[position], slots)
+    loop import_index in 0..<graph.modules[module_index].imports.len() {
+        loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() -> sema_registration_qualified_apply_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, slots)
+    }
+}
+
+sema_registration_qualified_apply_functions: fn(functions: &[SemaRegistrationFunction], slots: &[Type?]) {
+    loop row in 0..<functions.len() {
+        if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].signature = ty
+        sema_registration_qualified_apply_symbol(functions[row].symbol, slots)
+        loop parameter in 0..<functions[row].parameters.len() {
+            if sema_registration_qualified_next(slots) == .Val(ty) -> functions[row].parameters[parameter].ty = ty
+            sema_registration_qualified_apply_symbol(functions[row].parameters[parameter].symbol, slots)
+        }
+    }
+}
+
+sema_registration_qualified_apply_symbol: fn(symbol: &Symbol, slots: &[Type?]) {
+    if sema_registration_qualified_next(slots) == .Val(ty) -> symbol.ty = Val(ty)
+}
+
+// The next slot's rewritten type, None to keep the row's own.
+sema_registration_qualified_next: fn(slots: &[Type?]) -> Type? {
+    slots.pop() ?? panic("a module's rewritten types ran out before its rows")
 }
 
 // Each alias-qualified or imported type name the module's declarations
@@ -88,22 +209,9 @@ sema_registration_function_qualified_names: fn(function: SemaRegistrationFunctio
     loop parameter in function.parameters -> sema_registration_type_qualified_names(parameter.ty, names)
 }
 
-sema_registration_canonical_functions: fn(functions: &[SemaRegistrationFunction], keys: [String:Type]) Never! {
-    loop row in 0..<functions.len() {
-        functions[row].signature = sema_registration_canonical_type(functions[row].signature, keys)
-        sema_registration_canonical_symbol(functions[row].symbol, keys)
-        loop parameter in 0..<functions[row].parameters.len() {
-            functions[row].parameters[parameter].ty = sema_registration_canonical_type(functions[row].parameters[parameter].ty, keys)
-            sema_registration_canonical_symbol(functions[row].parameters[parameter].symbol, keys)
-        }
-    }
-}
-
-sema_registration_canonical_symbol: fn(symbol: &Symbol, keys: [String:Type]) Never! {
-    if symbol.ty == .Val(ty) -> symbol.ty = Val(sema_registration_canonical_type(ty, keys))
-}
-
-sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type Never! {
+// `ty` with `keys`, or None when it writes no name they key.
+sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type? Never! {
+    if keys.len() == 0 -> return None
     names := [String]{}
     sema_registration_type_qualified_names(ty, names)
     found := [String]{}
@@ -113,8 +221,8 @@ sema_registration_canonical_type: fn(ty: Type, keys: [String:Type]) -> Type Neve
         found.push(name)
         actuals.push(resolved)
     }
-    if found.len() == 0 -> return ty.copy()
-    sema_registration_canonical_heads(sema_inference_substitute_type(ty, found, actuals), keys)
+    if found.len() == 0 -> return None
+    Val(sema_registration_canonical_heads(sema_inference_substitute_type(ty, found, actuals), keys))
 }
 
 // `ty` with each alias-qualified generic head (`alias.Name<T>`, #6410)
