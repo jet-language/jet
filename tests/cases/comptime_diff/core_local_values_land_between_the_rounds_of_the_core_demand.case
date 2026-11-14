@@ -1,0 +1,23 @@
+# Card #6759 c12: in a compile that lowers, the local values of the Core
+# bodies the finalization's Core demand checks land at their owners like a
+# program body's (JetDriver BodyComptime.jet jet_driver_land_local_values).
+# The Path literal reaches core.files `path_component_encode`, whose `hex`
+# is one of those sites; the program reaches the `s`, `digits` and `style`
+# sites of other Core bodies too. The demand runs in rounds (JetSema
+# CoreDemand.jet sema_core_demand_waves): the driver lands each round's Core
+# sites before the next round, which demands what the landed closures name
+# (`demand_round`), so no pass is refused and the program is not checked
+# again after finalization. JET_RECHECK_VERIFY=1 finalizes the program again
+# with every value from the start, its demand in the same rounds, and stops
+# the compile on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "run: fn() {\n    name: \"a b/c\"\n    path: Path{\"/tmp/{name}\"}\n    print(\"{path}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "/tmp/a%20b%2Fc\n"
+stderr: ~ "# sema.local_values_spliced = " # the Core sites land in their owners
+stderr: !~ "# sema.local_values_refused" # no pass is refused after a round of the Core demand
+stderr: !~ "> comptime.body.recheck" # no pass falls back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

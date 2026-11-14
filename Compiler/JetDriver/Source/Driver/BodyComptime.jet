@@ -672,21 +672,24 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
 // the modules of the first finalization (`bodies`) before its whole-program
 // half (sema_finalize_program), so that half runs once, over every value,
 // instead of once before the pass and again after it
-// (sema_local_value_land). The driver lands twice (`into`): first after the
-// body half (sema_finalize_bodies, `Undemanded`), where the Core demand
-// (sema_finalize_demand) that follows reads the landed bodies and every
-// comptime function, as the full recheck's does, so a pass may name any Core
-// body; then after that demand (`Unstamped`), for the sites of the Core
-// bodies it checked, where only a pass whose values change no Core demand
-// lands. A pass that cannot land cleanly (an error other than a failure
-// obligation or an incomplete check so far, a site that is not a local value
-// or that an earlier pass already took, a run that reports anything, stops,
-// does not complete or adds no value, or a splice that does not hold) is
-// dropped, and the body passes after finalization
-// (jet_driver_orchestrate_comptime_bodies) take its sites as before. A clean
-// run whose splice does not hold goes to `landing.refused`, so the first of
-// those passes takes its results instead of running it again, unless its
-// closures demand a generated body (jet_driver_run_demands_generated). A
+// (sema_local_value_land). The driver lands before the Core demand and after
+// each of its rounds (`into`): first after the body half
+// (sema_finalize_bodies, `Undemanded`), where the demand's first round
+// (sema_finalize_demand) reads the landed bodies and demands what every
+// comptime function names, as the full recheck's does, so a pass may name
+// any Core body; then after each round (`Unstamped`), for the sites of the
+// Core bodies it checked. The comptime functions such a landing adds get
+// the next round (`demand_round`), which the full recheck gives them too, so
+// they may name any Core body as well. A pass that cannot land cleanly (an
+// error other than a failure obligation or an incomplete check so far, a
+// site that is not a local value or that an earlier pass already took, a run
+// that reports anything, stops, does not complete or adds no value, or a
+// splice that does not hold) is dropped, and the body passes after
+// finalization (jet_driver_orchestrate_comptime_bodies) take its sites as
+// before. A clean run whose splice does not hold goes to `landing.refused`,
+// so the first of those passes takes its results instead of running it
+// again, unless its closures demand a generated body
+// (jet_driver_run_demands_generated). A
 // landing that ends with a site pending stops `landing`, and a stopped
 // landing runs no pass: the later landing's pass would hold the earlier's
 // sites again. A taken seeded module's sites (sema_finalize_seeded_taken)
@@ -770,6 +773,9 @@ jet_driver_land_local_values: fn(
             }
             break
         }
+        // The closures the pass adds are demanded in the next round of the
+        // Core demand, after the bodies whose sites they serve.
+        loop index in functions.len()..<run.functions.len() -> run.functions[index].demand_round = bodies.core_tally.rounds
         values = run.values.move()
         functions = run.functions.move()
         jet_driver_comptime_trace_append(trace, run.trace)

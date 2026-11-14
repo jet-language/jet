@@ -3,12 +3,13 @@
 # jet_driver_land_local_values, JetSema Comptime/LocalSplice.jet
 # SemaLocalSpliceInto.Undemanded). `parts`, checked to run while compiling,
 # names core.text.parse `split`, a Core body that waits for demand. The
-# demand runs after the landing, reads the landed body and seeds from the
-# pass's comptime functions, as the full recheck's does, so the pass lands
-# and is not checked again after finalization. A Core body's local value
-# that demand reaches (core.math `s`) still lands only after the demand, and
-# its pass may fall back to the full recheck. JET_RECHECK_VERIFY=1 checks the
-# whole program again anyway and stops the compile on any difference.
+# demand runs after the landing, reads the landed body and demands what the
+# pass's comptime functions name in its first round, as the full recheck's
+# does, so the pass lands and is not checked again after finalization. The
+# demand that `split` starts reaches a Core body's local value (core.math
+# `s`), which lands after that round (#6759 c12), so no pass falls back to
+# the full recheck. JET_RECHECK_VERIFY=1 checks the whole program again
+# anyway and stops the compile on any difference.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
@@ -17,5 +18,6 @@ step: jet run --trace main.jet
 exit: 0
 stdout: = "3\n"
 stderr: ~ "# sema.local_values_spliced = " # `count` lands in `run`
-stderr: !~ "> comptime.body.recheck count" # the program's pass does not fall back to the full recheck
+stderr: !~ "# sema.local_values_refused" # no pass is refused, the Core one included
+stderr: !~ "> comptime.body.recheck" # no pass falls back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

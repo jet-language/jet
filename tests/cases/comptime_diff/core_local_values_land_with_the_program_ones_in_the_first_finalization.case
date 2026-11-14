@@ -5,10 +5,9 @@
 # checked again. `count` is the program's; the Path literal reaches
 # core.files `path_component_encode`, whose `hex` is Core's. The step checks
 # without lowering, so no Core body waits for demand and both land in one
-# pass. A compile that lowers lands the Core bodies' sites after its Core
-# demand and refuses such a pass when its comptime functions name a Core body
-# that waits for demand, as
-# a_local_value_that_cannot_land_keeps_its_run_for_the_body_pass shows.
+# pass. A compile that lowers lands the Core bodies' sites after the round
+# of its Core demand that checks them, as
+# core_local_values_land_between_the_rounds_of_the_core_demand shows.
 # JET_RECHECK_VERIFY=1 checks the whole program again anyway and stops the
 # compile on any difference.
 env: NO_COLOR=1

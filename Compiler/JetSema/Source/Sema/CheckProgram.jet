@@ -519,6 +519,11 @@ SemaComptimeFunctionResult: struct {
     // demand, checked under its module (sema_check_comptime_function); a
     // closure that builds the body builds them too.
     conversions: [FnBody]{[FnBody]{}}
+    // The round of the Core demand (sema_core_demand_waves) whose first wave
+    // demands what this function names: 0, but for the closures of a body
+    // comptime pass the driver lands between two rounds
+    // (jet_driver_land_local_values), which get the next one.
+    demand_round: Int{0}
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
@@ -10823,15 +10828,17 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
 }
 
 // What the body half of a finalization (sema_finalize_bodies) hands its
-// Core demand (sema_finalize_demand) and its whole-program half
-// (sema_finalize_program): the checked modules, the pass facts the Core
-// demand waves read while the graph rows stay unchanged, the stage's checked
-// types, whether the graph and the stage were complete, and whether the
-// whole-program half builds the bundle's name facts (sema_finalize_graph's
-// `build_names`).
+// Core demand (sema_finalize_demand) and its
+// whole-program half (sema_finalize_program): the checked modules, the pass
+// facts the Core demand waves read while the graph rows stay unchanged, how
+// far the demand waves have read the modules (`core_tally`), the stage's
+// checked types, whether the graph and the stage were complete, and whether
+// the whole-program half builds the bundle's name facts
+// (sema_finalize_graph's `build_names`).
 SemaFinalizeBodies: struct {
     modules: [SemaGraphModuleResult]
     carried: [SemaPassFacts]
+    core_tally: SemaCoreDemandTally
     checked_types: [TTypeDef]
     complete: Bool
     build_names: Bool
@@ -10839,7 +10846,7 @@ SemaFinalizeBodies: struct {
 
 // Bodies for sema_finalize_bodies to fill, with no name facts built.
 sema_finalize_bodies_empty: fn() -> SemaFinalizeBodies {
-    SemaFinalizeBodies{modules: [SemaGraphModuleResult]{}, carried: [SemaPassFacts]{}, checked_types: [TTypeDef]{}, complete: false, build_names: false}
+    SemaFinalizeBodies{modules: [SemaGraphModuleResult]{}, carried: [SemaPassFacts]{}, core_tally: sema_core_demand_tally_new(), checked_types: [TTypeDef]{}, complete: false, build_names: false}
 }
 
 // How many leading modules of `graph` a finalization takes as they are: the
@@ -10901,31 +10908,36 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     sema_derive_waves(after_codec_graph, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
 }
 
-// The Core demand of a finalization over the `bodies` of
-// sema_finalize_bodies (sema_core_demand_waves), checked against `values`
-// and `comptime_functions`. A caller may land body comptime values in those
-// bodies before it, which it then reads as the full recheck's does, and
-// after it, before the whole-program half, when the landing demands nothing
-// new (the driver's jet_driver_land_local_values, sema_local_value_land).
-// The graph moves in and comes back with its edits on `trail`.
+// The rounds of the Core demand of a finalization over the `bodies` of
+// sema_finalize_bodies (sema_core_demand_waves) that are left, through the
+// last `demand_round` of `comptime_functions`, checked against `values` and
+// `comptime_functions`; a finalization runs at least one. A caller may land
+// body comptime values in those bodies before the first round, which then
+// reads them as the full recheck's does, and after each call, for the sites
+// of the Core bodies the rounds checked (the driver's
+// jet_driver_land_local_values, sema_local_value_land), giving the comptime
+// functions it adds the next round, which the next call runs. The graph
+// moves in and comes back with its edits on `trail`.
 sema_finalize_demand: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &SemaFinalizeBodies) -> SemaRegistrationGraph {
     graph := owned.move()
     hook_access: sema_host_hook_access(host_hooks)
-    demanded := sema_core_demand_waves(graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
-    // The whole-program half reads rows the waves may have changed.
-    bodies.carried = [SemaPassFacts]{}
-    demanded
+    last: sema_core_demand_last_round(comptime_functions)
+    loop bodies.core_tally.rounds <= last {
+        graph = sema_core_demand_waves(graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.core_tally, bodies.carried, bodies.modules)
+    }
+    graph.move()
 }
 
 // The whole-program half of sema_finalize_graph over the `bodies` of
-// sema_finalize_bodies after their Core demand (sema_finalize_demand): the
-// failure solve and recheck, and every whole-program pass after them. The
-// graph moves in and comes back as the result's `registration_graph`, with
-// its edits on `trail`. `values` and `comptime_functions` are the ones the
-// bodies were checked against.
+// sema_finalize_bodies after the rounds of their Core demand
+// (sema_finalize_demand): the failure solve and recheck, and every
+// whole-program pass after them. The graph moves in and comes back as the
+// result's `registration_graph`, with its edits on `trail`. `values` and
+// `comptime_functions` are the ones the bodies were checked against.
 sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &&SemaFinalizeBodies) -> SemaGraphResult {
     after_body_graph := owned.move()
     held := bodies.move()
+    sema_core_demand_counters(after_body_graph, held.core_tally, trace_sink)
     modules := held.modules.move()
     checked_types: held.checked_types.move()
     complete := held.complete

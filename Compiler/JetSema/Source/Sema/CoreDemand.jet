@@ -170,41 +170,60 @@ sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, p
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// What the demand waves of one finalization have read and checked: per
-// module, how many of its functions and call-site facts were read, and how
-// many bodies and waves were checked.
+// What the demand rounds of one finalization have read and checked: per
+// module, how many of its functions and call-site facts were read, how many
+// bodies and waves were checked, how many rounds ran
+// (sema_core_demand_waves), and whether any round found a Core body that
+// waits for demand.
 SemaCoreDemandTally: struct {
     read_functions: [Int]
     read_facts: [Int]
     checked: Int
     waves: Int
+    rounds: Int
+    demanded: Bool
 }
 
-// Demand: after the body pass and the codec and derive waves, every deferred
-// Core body a checked body names is checked into its module's result. A
-// wave's bodies may name more, and may reach generated codecs and derived
-// methods; waves repeat until no body names a new deferred one, and the
-// codec and derive waves follow each pass of demand waves
-// (sema_core_demand_pass). A program that names no Core body runs none. A
-// compile that lowers also lowers what the driver joins to the checked
-// modules after finalization, the comptime closures
-// (jet_driver_merge_checked_text_functions), so the first wave demands what
-// those name too.
-sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+sema_core_demand_tally_new: fn() -> SemaCoreDemandTally Never! {
+    SemaCoreDemandTally{read_functions: [Int]{}, read_facts: [Int]{}, checked: 0, waves: 0, rounds: 0, demanded: false}
+}
+
+// One round of the Core demand. After the body pass and the codec and
+// derive waves, every deferred Core body a checked body names is checked
+// into its module's result. A wave's bodies may name more, and may reach
+// generated codecs and derived methods; waves repeat until no body names a
+// new deferred one, and the codec and derive waves follow each pass of
+// demand waves (sema_core_demand_pass). A program that names no Core body
+// runs none. A compile that lowers also lowers what the driver joins to the
+// checked modules after finalization, the comptime closures
+// (jet_driver_merge_checked_text_functions), so the first wave of a round
+// demands what the comptime functions of its round name too: those whose
+// `demand_round` is the number of rounds before it (`tally.rounds`). A
+// finalization runs rounds until none is left (sema_finalize_demand);
+// the driver lands the local values of the Core bodies each round checks
+// before the next one and gives the comptime functions the landing adds that
+// next round (jet_driver_land_local_values), so the full recheck, which reads
+// every value and function from the start, demands in the same order.
+sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, tally: &SemaCoreDemandTally, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
+    round: tally.rounds
+    tally.rounds += 1
     // The taken modules' bodies that stay checked up front come first.
-    _: sema_core_body_take_eager(graph, modules)
+    if round == 0 {
+        _: sema_core_body_take_eager(graph, modules)
+    }
     if graph.core_demand_rows.len() == 0 && !sema_core_body_pending(graph) -> return graph.move()
+    tally.demanded = true
     seeds := [String]{}
     if graph.core_lowering_roots != None {
         loop result in comptime_functions {
+            if result.demand_round != round -> next
             if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, graph.symbols, seeds)
             loop fact in result.call_facts {
                 if fact.callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, seeds)
             }
         }
     }
-    tally := SemaCoreDemandTally{read_functions: [Int]{}, read_facts: [Int]{}, checked: 0, waves: 0}
     loop {
         wave := [String:Bool]{}
         affected := [Int]{}
@@ -217,13 +236,29 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         after_codec_graph := sema_codec_waves(checked_graph, trail, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, carried, modules)
         graph = sema_derive_waves(after_codec_graph, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, carried, modules)
     }
-    if trace_sink == .Val(sink) {
+    graph.move()
+}
+
+// The last round a finalization's Core demand runs over `comptime_functions`
+// (sema_core_demand_waves): the one that demands what the functions of the
+// latest `demand_round` name.
+sema_core_demand_last_round: fn(comptime_functions: [SemaComptimeFunctionResult]) -> Int Never! {
+    last := 0
+    loop result in comptime_functions {
+        if result.demand_round > last -> last = result.demand_round
+    }
+    last
+}
+
+// Traces what the rounds of a finalization's Core demand (`tally`) did, once
+// they all ran, if any found a Core body that waits for demand.
+sema_core_demand_counters: fn(graph: SemaRegistrationGraph, tally: SemaCoreDemandTally, trace_sink: CompilerTraceSink?) Never! {
+    if tally.demanded && trace_sink == .Val(sink) {
         sink.progress("counters.sema.core_deferred", graph.core_demand_rows.len(), -1)
         sink.progress("counters.sema.core_checked", tally.checked, -1)
         sink.progress("counters.sema.core_waves", tally.waves, -1)
         sink.progress("counters.sema.core_taken", sema_core_body_taken_count(graph), -1)
     }
-    graph.move()
 }
 
 // Consecutive demand waves in one body pass (sema_finalize_pass_open): the

@@ -4757,9 +4757,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // of local values land in its modules before its whole-program half
     // (jet_driver_land_local_values), so that half runs once: the user
     // bodies' sites before its Core demand, which then reads them as the full
-    // recheck's does, and the sites of the Core bodies that demand checks
-    // after it. JET_RECHECK_VERIFY finalizes the landed values again, from
-    // the codec and derive demand this finalization starts from.
+    // recheck's does, and the sites of the Core bodies each round of that
+    // demand checks before the next round, which demands what the landed
+    // closures name, as the full recheck's same round does
+    // (sema_core_demand_waves). JET_RECHECK_VERIFY finalizes the landed
+    // values again, from the codec and derive demand this finalization
+    // starts from.
     verify_start := SemaLocalSpliceDemand?{None}
     if request.recheck_verify -> verify_start = Val(sema_local_splice_demand_snapshot(finalize_graph))
     bodies := sema_finalize_bodies_empty()
@@ -4768,9 +4771,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     landing := JetDriverLanding{stopped: false, refused: None}
     early_graph := jet_driver_land_local_values(body_graph, bodies, SemaLocalSpliceInto.Undemanded, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, landing)
     demand_graph := sema_finalize_demand(early_graph, trail, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
-    landed_graph := jet_driver_land_local_values(demand_graph, bodies, SemaLocalSpliceInto.Unstamped, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, landing)
+    loop {
+        held_functions: comptime_run.functions.len()
+        demand_graph = jet_driver_land_local_values(demand_graph, bodies, SemaLocalSpliceInto.Unstamped, comptime_stage, comptime_run.values, comptime_run.functions, trace, request, landing)
+        demand_graph = sema_finalize_demand(demand_graph, trail, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+        if comptime_run.functions.len() == held_functions -> break
+    }
     refused_pass := landing.refused.move()
-    checked_graph := sema_finalize_program(landed_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
+    checked_graph := sema_finalize_program(demand_graph, trail, comptime_stage, comptime_run.values, comptime_run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink, bodies)
     if request.trace_sink == .Val(sink) -> sink.end("sema.finalize", checked_graph.modules.len())
     if checked_graph.modules.len() != registration_module_count {
         loop diagnostic in checked_graph.diagnostics -> load.diagnostics.push(diagnostic)

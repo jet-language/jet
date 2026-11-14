@@ -3,9 +3,10 @@
 # That is not an error yet: the whole-program half of the first finalization
 # discharges it, so the pass still lands `data` before that half (JetDriver
 # BodyComptime.jet jet_driver_land_local_values) instead of checking the whole
-# program again. The step checks without lowering: a compile that lowers
-# refuses a pass whose comptime functions name a Core body that waits for
-# demand (`sha256` does), as a_local_value_that_cannot_land_keeps_its_run_for_the_body_pass
+# program again. The step checks without lowering; a compile that lowers
+# lands the pass before its Core demand, though its comptime functions name a
+# Core body that waits for demand (`sha256` does), as
+# a_local_value_whose_closure_names_a_waiting_core_body_lands_before_the_demand
 # shows. JET_RECHECK_VERIFY=1 checks it again anyway and stops the compile
 # on any difference.
 env: NO_COLOR=1
