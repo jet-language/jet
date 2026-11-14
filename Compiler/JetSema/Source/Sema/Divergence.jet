@@ -41,32 +41,65 @@ SemaDivergenceFlow: struct {
 }
 
 // Where a body's calls resolve: its module's row and the names its
-// parameters bind, which shadow a module function of the same name.
+// parameters bind, which shadow a module function of the same name. The
+// walk records in `consulted` each callee it found not yet diverging.
 SemaDivergenceScope: struct {
     module_index: Int
     locals: [String]
+    consulted: [U32]
 }
 
+// One user function to walk: its graph module and function row.
+SemaDivergenceRow: struct {
+    module_index: Int
+    row: Int
+}
+
+// Every user function is walked once, then again only when a callee its
+// walk found not yet diverging joins the set. The set only grows, and a
+// callee that joins only ends more of a caller's paths, so walking in this
+// order reaches the fixed point that rounds over the whole graph reached,
+// without walking every body again each round.
 sema_divergence_solve: fn(graph: &SemaRegistrationGraph) Never! {
     loop module_index in 0..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].functions.len() {
             if sema_function_promises_never(graph.modules[module_index].functions[row].declaration) -> sema_divergence_mark(graph, module_index, row)
         }
     }
-    changed := true
-    loop changed {
-        changed = false
-        loop module_index in 0..<graph.modules.len() {
-            if module_is_core(graph.modules[module_index].module_identity) -> next
-            loop row in 0..<graph.modules[module_index].functions.len() {
-                if graph.modules[module_index].functions[row].declaration.diverges -> next
-                scope: SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params)}
-                flow: sema_divergence_body(graph, scope, graph.modules[module_index].functions[row].declaration.body)
-                if !sema_divergence_definitely(flow) -> next
-                sema_divergence_mark(graph, module_index, row)
-                changed = true
+    rows := [SemaDivergenceRow]{}
+    loop module_index in 0..<graph.modules.len() {
+        if module_is_core(graph.modules[module_index].module_identity) -> next
+        loop row in 0..<graph.modules[module_index].functions.len() -> rows.push(SemaDivergenceRow{module_index: module_index, row: row})
+    }
+    // The rows (by index into `rows`) waiting on each callee symbol.
+    waiting_by_callee := [U32:Int]{}
+    waiting := [[Int]]{}
+    queue := (loop slot in 0..<rows.len() -> slot)
+    queued := 0
+    loop queued < queue.len() {
+        slot: queue[queued]
+        queued += 1
+        module_index: rows[slot].module_index
+        row: rows[slot].row
+        if graph.modules[module_index].functions[row].declaration.diverges -> next
+        scope := SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
+        flow: sema_divergence_body(graph, scope, graph.modules[module_index].functions[row].declaration.body)
+        if !sema_divergence_definitely(flow) {
+            loop callee in scope.consulted {
+                if waiting_by_callee.get(callee) == None {
+                    waiting_by_callee[callee] = waiting.len()
+                    waiting.push([Int]{})
+                }
+                group: waiting_by_callee.get(callee) ?? next
+                // A body that calls one function twice waits on it once.
+                if waiting[group].len() > 0 && waiting[group][waiting[group].len() - 1] == slot -> next
+                waiting[group].push(slot)
             }
+            next
         }
+        sema_divergence_mark(graph, module_index, row)
+        group: waiting_by_callee.get(graph.modules[module_index].functions[row].symbol.id.id) ?? next
+        loop caller in waiting[group] -> queue.push(caller)
     }
 }
 
@@ -135,7 +168,7 @@ sema_divergence_infinite_loop: fn(body: SemaDivergenceFlow) -> SemaDivergenceFlo
     SemaDivergenceFlow{normal: body.broke, returned: body.returned, diverged: body.diverged || body.normal || body.continued, broke: false, continued: false}
 }
 
-sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, body: [Stmt]) -> SemaDivergenceFlow Never! {
+sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, body: [Stmt]) -> SemaDivergenceFlow Never! {
     flow := sema_divergence_normal()
     loop statement in body {
         if !flow.normal -> return flow
@@ -144,24 +177,24 @@ sema_divergence_body: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScop
     flow
 }
 
-sema_divergence_exprs: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, values: [Expr]) -> SemaDivergenceFlow Never! {
+sema_divergence_exprs: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, values: [Expr]) -> SemaDivergenceFlow Never! {
     flow := sema_divergence_normal()
     loop value in values -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, value))
     flow
 }
 
-sema_divergence_args: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, args: [CallArg]) -> SemaDivergenceFlow Never! {
+sema_divergence_args: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, args: [CallArg]) -> SemaDivergenceFlow Never! {
     flow := sema_divergence_normal()
     loop arg in args -> flow = sema_divergence_then(flow, sema_divergence_expr(graph, scope, arg.expr))
     flow
 }
 
-sema_divergence_optional: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, value: Expr?) -> SemaDivergenceFlow Never! {
+sema_divergence_optional: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, value: Expr?) -> SemaDivergenceFlow Never! {
     present: value ?? return sema_divergence_normal()
     sema_divergence_expr(graph, scope, present)
 }
 
-sema_divergence_optional_body: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, body: [Stmt]?) -> SemaDivergenceFlow Never! {
+sema_divergence_optional_body: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, body: [Stmt]?) -> SemaDivergenceFlow Never! {
     present: body ?? return sema_divergence_normal()
     sema_divergence_body(graph, scope, present)
 }
@@ -181,14 +214,14 @@ sema_divergence_conditional_loop: fn(cond: Expr, body: SemaDivergenceFlow) -> Se
     sema_divergence_finite_loop(body)
 }
 
-sema_divergence_for_kind: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, kind: ForKind) -> SemaDivergenceFlow Never! {
+sema_divergence_for_kind: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, kind: ForKind) -> SemaDivergenceFlow Never! {
     if kind == {
         .Range(start, end, step, _) -> sema_divergence_then(sema_divergence_then(sema_divergence_expr(graph, scope, start), sema_divergence_expr(graph, scope, end)), sema_divergence_optional(graph, scope, step))
         .In(collection, step) -> sema_divergence_then(sema_divergence_expr(graph, scope, collection), sema_divergence_optional(graph, scope, step))
     }
 }
 
-sema_divergence_lvalue: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, target: LValue) -> SemaDivergenceFlow Never! {
+sema_divergence_lvalue: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, target: LValue) -> SemaDivergenceFlow Never! {
     if target == {
         .Local(_, _) -> sema_divergence_normal()
         .Index(base, index, _, _) -> sema_divergence_then(sema_divergence_expr(graph, scope, base), sema_divergence_expr(graph, scope, index))
@@ -198,7 +231,7 @@ sema_divergence_lvalue: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceSc
 
 // A table: each arm's head then its body; with no `else` an exhaustive
 // table has no miss path, while a guard table (no subject) may match no arm.
-sema_divergence_switch: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> SemaDivergenceFlow Never! {
+sema_divergence_switch: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span) -> SemaDivergenceFlow Never! {
     head: sema_divergence_expr(graph, scope, subject)
     if arms.len() == 0 -> return sema_divergence_then(head, sema_divergence_optional_body(graph, scope, else_body))
     branches := sema_divergence_none()
@@ -214,7 +247,7 @@ sema_divergence_switch: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceSc
     sema_divergence_then(head, sema_divergence_union(branches, fallback))
 }
 
-sema_divergence_or_fallback: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, fallback: OrFallback) -> SemaDivergenceFlow Never! {
+sema_divergence_or_fallback: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, fallback: OrFallback) -> SemaDivergenceFlow Never! {
     if fallback == {
         .Value(value) -> sema_divergence_expr(graph, scope, value)
         .Block(body, value, _) -> sema_divergence_then(sema_divergence_body(graph, scope, body), sema_divergence_optional(graph, scope, value))
@@ -225,7 +258,7 @@ sema_divergence_or_fallback: fn(graph: SemaRegistrationGraph, scope: SemaDiverge
     }
 }
 
-sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, statement: Stmt) -> SemaDivergenceFlow Never! {
+sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, statement: Stmt) -> SemaDivergenceFlow Never! {
     if statement == {
         .Expr(value) -> sema_divergence_expr(graph, scope, value)
         .Val(binding) -> {
@@ -273,7 +306,7 @@ sema_divergence_stmt: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScop
     }
 }
 
-sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, body: TypedLitBody) -> SemaDivergenceFlow Never! {
+sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, body: TypedLitBody) -> SemaDivergenceFlow Never! {
     if body == {
         .Fields(fields) -> {
             flow := sema_divergence_normal()
@@ -294,7 +327,7 @@ sema_divergence_typed_lit: fn(graph: SemaRegistrationGraph, scope: SemaDivergenc
     }
 }
 
-sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, value: Expr) -> SemaDivergenceFlow Never! {
+sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, value: Expr) -> SemaDivergenceFlow Never! {
     if value == {
         .Str(parts, _, _) -> {
             flow := sema_divergence_normal()
@@ -397,21 +430,21 @@ sema_divergence_expr: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScop
 // Whether `name(…)` in the scope's module calls a function in the set: the
 // module's own function, or one a `use` brings in by name. A parameter of
 // that name is a value, not the function.
-sema_divergence_call_diverges: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, name: String) -> Bool Never! {
+sema_divergence_call_diverges: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, name: String) -> Bool Never! {
     loop local in scope.locals {
         if local == name -> return false
     }
     id: sema_divergence_callee(graph, scope.module_index, name) ?? return false
-    sema_divergence_function_diverges(graph, id)
+    sema_divergence_consult(graph, scope, id)
 }
 
 // `alias.member(…)` through a module the scope's module imports.
-sema_divergence_member_call_diverges: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, receiver: Expr, member: String) -> Bool Never! {
+sema_divergence_member_call_diverges: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, receiver: Expr, member: String) -> Bool Never! {
     if receiver == .Ident(alias, _, _) -> return sema_divergence_alias_call_diverges(graph, scope, alias, member)
     false
 }
 
-sema_divergence_alias_call_diverges: fn(graph: SemaRegistrationGraph, scope: SemaDivergenceScope, alias: String, member: String) -> Bool Never! {
+sema_divergence_alias_call_diverges: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, alias: String, member: String) -> Bool Never! {
     loop local in scope.locals {
         if local == alias -> return false
     }
@@ -421,7 +454,15 @@ sema_divergence_alias_call_diverges: fn(graph: SemaRegistrationGraph, scope: Sem
     if binding.symbol.kind == SymbolKind.Function -> return false
     target: binding.target_module_index ?? return false
     id: sema_divergence_module_function(graph, target, member) ?? return false
-    sema_divergence_function_diverges(graph, id)
+    sema_divergence_consult(graph, scope, id)
+}
+
+// Whether the callee `id` is in the set; one that is not yet is recorded,
+// since its joining can end this body's paths.
+sema_divergence_consult: fn(graph: SemaRegistrationGraph, scope: &SemaDivergenceScope, id: SymbolID) -> Bool Never! {
+    if sema_divergence_function_diverges(graph, id) -> return true
+    scope.consulted.push(id.id)
+    false
 }
 
 sema_divergence_callee: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> SymbolID? Never! {

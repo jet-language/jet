@@ -1,0 +1,19 @@
+# The divergence fixed point (Sema/Divergence.jet) walks each function once
+# and walks a caller again only when a callee it found not yet diverging
+# joins the set. Here every caller comes before the function it calls, so
+# `first`, `second` and `third` join only after `last` does, one after the
+# other. `maybe` waits on `second` but can return first. `ring_a` and
+# `ring_b` only stop through each other on one path, so neither joins.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "first: fn() {\n    print(\"first\")\n    second(1)\n}\n\nsecond: fn(code: Int) {\n    third(code)\n}\n\nthird: fn(code: Int) {\n    if code == 0 {\n        last(\"zero\")\n    } else {\n        last(\"other\")\n    }\n}\n\nmaybe: fn(code: Int) {\n    if code == 0 -> return\n    second(code)\n}\n\nring_a: fn(n: Int) {\n    ring_b(n)\n}\n\nring_b: fn(n: Int) {\n    if n > 0 {\n        ring_a(n - 1)\n    } else {\n        last(\"ring\")\n    }\n}\n\nlast: fn(message: String) {\n    panic(message)\n}\n\nrun: fn() {\n    maybe(0)\n    ring_a(0)\n}\n"
+step: jet check --verbose main.jet
+exit: 0
+stderr: ~ "Public function `last` always diverges but does not declare `Never`" # it panics on its one path
+stderr: ~ "Public function `third` always diverges but does not declare `Never`" # both arms call `last`
+stderr: ~ "Public function `second` always diverges but does not declare `Never`" # it only calls `third`
+stderr: ~ "Public function `first` always diverges but does not declare `Never`" # it ends calling `second`
+stderr: !~ "Public function `maybe` always diverges" # it can return before calling `second`
+stderr: !~ "Public function `ring_a` always diverges" # its only stop runs through `ring_b`
+stderr: !~ "Public function `ring_b` always diverges" # its other arm calls `ring_a`, which never proves a stop
+stderr: !~ "Public function `run` always diverges" # `maybe` and `ring_a` return
