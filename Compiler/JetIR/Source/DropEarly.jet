@@ -28,7 +28,7 @@
 // So a String whose address `mem.address_of` or a string-data leaf takes
 // lives until its block ends.
 
-use jet_foundation.[name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, name_rows_value]
 
 // One function's moved Drops: per Drop the slot, the instruction it now goes
 // before and its line; and per instruction whether it goes (a moved Drop at
@@ -40,15 +40,78 @@ IRDropPlan: struct {
     kill: [Bool]
 }
 
-ir_drop_early: fn(m: &IRModule) Never! {
+// Each function's plan and rewrite read only its own body and the module's
+// types and names, so the functions split into consecutive parts
+// (compiler_threads_partition by size), one thread each, as many as
+// `threads` admits for the module's instructions. Every thread reads the
+// module's other rows, which none writes, and owns its part; the parts come
+// back in order, so every body is the same for any thread count.
+ir_drop_early: fn(m: &IRModule, threads: CompilerThreads) Never! {
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
-    loop id in 0..<m.functions.len() {
-        if m.functions[id].asm != None -> next
-        plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
-        if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
+    count: m.functions.len()
+    weights := [Int]{}
+    total := 0
+    loop f in m.functions {
+        weights.push(1 + f.op.len())
+        total += 1 + f.op.len()
     }
+    workers: compiler_threads_admit(threads, count, total, IR_X64_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop id in 0..<count {
+            if m.functions[id].asm != None -> next
+            plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
+            if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
+        }
+        return
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    // Parts leave the list last-first: part `workers - 1` pops first.
+    parts := [[IRFunction]]{}
+    part := workers - 1
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        loop m.functions.len() > bounds[part] {
+            row: m.functions.pop() ?? panic("drop early lost a function")
+            rows.push(row)
+        }
+        rows.reverse()
+        parts.push(rows.move())
+        part -= 1
+    }
+    parts.reverse()
+    done: ir_drop_early_parts(m, parts, poll, trap, turn, 0)
+    loop rows in done.move() -> m.functions.extend(rows)
+}
+
+// Parts `at` on, in part order, each rewritten on its own thread and the
+// last on this one (ir_drop_early_part).
+ir_drop_early_parts: fn(m: IRModule, parts: &[[IRFunction]], poll: Int, trap: Int, turn: Int, at: Int) -> [[IRFunction]] Never! {
+    done := [[IRFunction]]{}
+    if at >= parts.len() -> return done
+    if at == parts.len() - 1 {
+        done.push(ir_drop_early_part(m, compiler_take_rows<IRFunction>(parts[at]), poll, trap, turn))
+        return done
+    }
+    task.group ir_drop_early_group {
+        head: task ir_drop_early_part(m, compiler_take_rows<IRFunction>(parts[at]), poll, trap, turn)
+        rest: ir_drop_early_parts(m, parts, poll, trap, turn, at + 1)
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+        loop rows in rest.move() -> done.push(rows)
+    }
+    done
+}
+
+// One part's functions, each planned and rewritten on its own.
+ir_drop_early_part: fn(m: IRModule, functions: &&[IRFunction], poll: Int, trap: Int, turn: Int) -> [IRFunction] Never! {
+    rows := functions.move()
+    loop row in 0..<rows.len() {
+        if rows[row].asm != None -> next
+        plan: ir_drop_plan(m, rows[row], poll, trap, turn)
+        if plan.slots.len() > 0 -> ir_drop_apply(rows[row], plan)
+    }
+    rows
 }
 
 ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) -> IRDropPlan Never! {
