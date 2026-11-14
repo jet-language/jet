@@ -4,7 +4,7 @@
   "cells": ["numerics.fft"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig", "node"],
+  "languages": ["jet", "rust", "python", "c", "zig", "go", "node"],
   "spec": {
     "behavior": "Prepare a real length-4096 impulse with one followed by 4095 zeros, compute its forward unnormalized FFT, materialize the interleaved real/imaginary spectrum as 8192 scalars, check every complex output against 1+0i within absolute tolerance 1e-9, and print the validation receipt.",
     "input": "4096 Float64 values: values[0] = 1.0 and values[1..4095] = 0.0",
@@ -33,6 +33,7 @@
     "python": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses preinstalled NumPy np.fft.fft as the Python incumbent, then materializes an 8192-scalar interleaved output and checks every pair. NumPy availability was not probed in this source-only phase; no dependency was installed."},
     "c": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."},
     "zig": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT with fixed input, complex spectrum, and interleaved output arrays; checks every pair. Validation commands were intentionally not run."},
+    "go": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib-only iterative radix-2 FFT over complex128, with a bits.Reverse64 permutation; allocates the input, spectrum and 8192-scalar interleaved output, then checks every pair."},
     "node": {"author": "FftCell", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node iterative radix-2 FFT with explicit input, complex spectrum, and interleaved output allocations; checks every pair. Validation commands were intentionally not run."}
   },
   "rewrite_provenance": {
