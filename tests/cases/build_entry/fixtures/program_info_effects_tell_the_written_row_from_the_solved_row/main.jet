@@ -1,6 +1,14 @@
-fetch: fn() -[Net]> Int { 1 }
+use http: core.http
 
-relay: fn() -> Int { fetch() }
+// A written row is a ceiling, so fetch's solved row holds Net because its
+// body reaches the network. The URL is a parameter, so the row names Net
+// itself, not a host it is scoped to.
+fetch: fn(url: String) -[Net]> Int {
+    got: http.get(url) ?? return 0
+    got.status
+}
+
+relay: fn(url: String) -> Int { fetch(url) }
 
 add: fn(a: Int, b: Int) -> Int { a + b }
 
@@ -20,5 +28,5 @@ build: fn(b: Build) {
 }
 
 run: fn() {
-    print(relay() + add(1, 2))
+    print(relay("http://127.0.0.1:9/") + add(1, 2))
 }
