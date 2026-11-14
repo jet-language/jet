@@ -75,7 +75,7 @@ record_views_test_sample: fn() -> [RecordSection] Never! {
     name: record_value_field(element, "name").value ?? panic("name field")
     assert_eq(record_value_as_str(name).value, Val("core.text"))
     assert_eq(record_open_schema_trusted(bytes, "jet.other/v1").problem, Val("record schema is `jet.test/v1`, expected `jet.other/v1`"))
-    assert_eq(record_open_schema_trusted(bytes[0..<3].copy(), "jet.test/v1").problem, Val("record is truncated"))
+    assert_eq(record_open_schema_trusted([U8]{bytes[0], bytes[1], bytes[2]}, "jet.test/v1").problem, Val("record is truncated"))
 }
 
 #Test("record JSON renders the decoded tree") {
