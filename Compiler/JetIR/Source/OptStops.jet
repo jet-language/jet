@@ -14,7 +14,7 @@
 // a stop), and only into an edge E that never comes back
 // (OptUnique.jet ir_opt_dead_end), so each path drops once.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_transfer_rows, name_rows_value]
 
 ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
     count: f.op.len()
@@ -95,9 +95,12 @@ ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Ne
 // none (ir_opt_stops_starts), whose calls of bodies all reach bodies that
 // report none either, never reports one: the stop points right after calls
 // of it go, so its callers neither test edx there nor lay out the edge.
-// Once the reports are known a body's removals read only its own
-// instructions, so the functions split into consecutive parts
-// (compiler_threads_partition by size) for them, one thread each.
+// Each body's scan (the bodies it calls, whether it starts a stop) and,
+// once the reports are known, its removals read only its own instructions,
+// so the functions split into consecutive parts (compiler_threads_partition
+// by size) for both, one thread each, that read the keys, bodies and reports
+// and own their part; the reports are found between the two walks on the
+// calling thread, over the scans in function order.
 ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerThreads) Never! {
     count: functions.len()
     keys := [String]{}
@@ -110,36 +113,11 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerTh
         weights.push(1 + f.op.len())
         total += 1 + f.op.len()
     }
-    // Per body the bodies that call it, and whether it reports a stop.
-    callers := [[Int]]{}
-    reports := [Bool]{}
-    loop _ in 0..<count {
-        callers.push([Int]{})
-        reports.push(false)
-    }
-    work := [Int]{}
-    loop id in 0..<count {
-        if !bodies[id] -> next
-        loop at in 0..<functions[id].op.len() {
-            if functions[id].op[at] != .Call -> next
-            callee: functions[id].a[at]
-            if callee >= 0 && callee < count && bodies[callee] -> callers[callee].push(id)
-        }
-        if ir_opt_stops_starts(m, functions[id], keys, bodies) {
-            reports[id] = true
-            work.push(id)
-        }
-    }
-    loop work.len() > 0 {
-        callee := work.pop() ?? { break }
-        loop caller in callers[callee] {
-            if reports[caller] -> next
-            reports[caller] = true
-            work.push(caller)
-        }
-    }
     workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
     if workers <= 1 {
+        scan := ir_opt_stops_scan_new()
+        loop id in 0..<count -> ir_opt_stops_scan(m, functions[id], id, keys, bodies, scan)
+        reports: ir_opt_stops_reports(scan)
         loop id in 0..<count {
             if bodies[id] -> ir_opt_stops_unreported(functions[id], keys, bodies, reports)
         }
@@ -147,7 +125,7 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerTh
     }
     bounds: compiler_threads_partition(weights, workers)
     // Parts leave the list last-first: part `workers - 1` pops first.
-    slots := [Shared<IROptStopsPart>]{}
+    parts := [IROptStopsPart]{}
     part := workers - 1
     loop part >= 0 {
         rows := [IRFunction]{}
@@ -156,55 +134,131 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction], threads: CompilerTh
             rows.push(row)
         }
         rows.reverse()
-        slots.push(Shared{IROptStopsPart{functions: rows.move(), start: bounds[part]}})
+        parts.push(IROptStopsPart{functions: rows.move(), start: bounds[part], scan: ir_opt_stops_scan_new()})
         part -= 1
     }
-    slots.reverse()
-    shared: Shared{IROptStopsView{keys: keys.move(), bodies: bodies.move(), reports: reports.move()}}
-    _: ir_opt_stop_removers(slots, shared, 0) ?? panic("the IR stop facts threads failed")
-    loop slot in slots {
-        held := slot.guard_edit()
-        functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
+    parts.reverse()
+    // The scans, then the removals.
+    parts = ir_opt_stops_walks(m, keys, bodies, [Bool]{}, parts.move())
+    reports: ir_opt_stops_reported(parts)
+    parts = ir_opt_stops_walks(m, keys, bodies, reports, parts.move())
+    loop at in 0..<parts.len() -> functions.extend(compiler_take_rows<IRFunction>(parts[at].functions))
+}
+
+// Per function in order, whether it starts a stop and the bodies it calls
+// (calls[ends[id - 1]..<ends[id]], from 0 for the first).
+IROptStopsScan: struct {
+    starts: [Bool]
+    calls: [Int]
+    ends: [Int]
+}
+
+ir_opt_stops_scan_new: fn() -> IROptStopsScan Never! {
+    IROptStopsScan{starts: [Bool]{}, calls: [Int]{}, ends: [Int]{}}
+}
+
+// Appends function `f`, function `id`, to `scan`.
+ir_opt_stops_scan: fn(m: IRModule, f: IRFunction, id: Int, keys: [String], bodies: [Bool], scan: &IROptStopsScan) Never! {
+    body: bodies[id]
+    if body {
+        loop at in 0..<f.op.len() {
+            if f.op[at] != .Call -> next
+            callee: f.a[at]
+            if callee >= 0 && callee < bodies.len() && bodies[callee] -> scan.calls.push(callee)
+        }
     }
+    scan.starts.push(body && ir_opt_stops_starts(m, f, keys, bodies))
+    scan.ends.push(scan.calls.len())
+}
+
+// Per function whether it reports a stop: it starts one, or it calls a
+// body that reports one.
+ir_opt_stops_reports: fn(scan: IROptStopsScan) -> [Bool] Never! {
+    count: scan.starts.len()
+    // Per body the bodies that call it.
+    callers := [[Int]]{}
+    reports := [Bool]{}
+    loop _ in 0..<count {
+        callers.push([Int]{})
+        reports.push(false)
+    }
+    work := [Int]{}
+    from := 0
+    loop id in 0..<count {
+        loop k in from..<scan.ends[id] -> callers[scan.calls[k]].push(id)
+        from = scan.ends[id]
+        if scan.starts[id] {
+            reports[id] = true
+            work.push(id)
+        }
+    }
+    loop work.len() > 0 {
+        callee: work.pop() ?? { break }
+        loop caller in callers[callee] {
+            if reports[caller] -> next
+            reports[caller] = true
+            work.push(caller)
+        }
+    }
+    reports
 }
 
 // The functions of one thread of ir_opt_stop_facts, in order, from
-// function `start`.
+// function `start`, and their scan.
 IROptStopsPart: struct {
     functions: [IRFunction]
     start: Int
+    scan: IROptStopsScan
 }
 
-// What every thread of ir_opt_stop_facts reads: per function its key,
-// whether it is a body, and whether it reports a stop.
-IROptStopsView: struct {
-    keys: [String]
-    bodies: [Bool]
-    reports: [Bool]
-}
-
-// Runs a stop facts thread per slot from `at`; returns the functions they
-// read.
-ir_opt_stop_removers: fn(slots: [Shared<IROptStopsPart>], shared: Shared<IROptStopsView>, at: Int) -> Int {
-    if at >= slots.len() -> return 0
-    rows := 0
+// Walks `parts` (ir_opt_stops_part), in part order: the last part on its
+// own thread, the ones before it the same way, and the first on this one.
+ir_opt_stops_walks: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], parts: &&[IROptStopsPart]) -> [IROptStopsPart] Never! {
+    rest := parts.move()
+    last: rest.pop() ?? return rest
+    if rest.len() == 0 {
+        rest.push(ir_opt_stops_part(m, keys, bodies, reports, last.move()))
+        return rest
+    }
+    done := [IROptStopsPart]{}
     task.group ir_opt_stops_threads {
-        head: task ir_opt_stops_part(slots[at], shared)
-        rows = ir_opt_stop_removers(slots, shared, at + 1)
-        rows += head.join() ?? ir_opt_prepare_stopped(err)
+        head: task ir_opt_stops_part(m, keys, bodies, reports, last.move())
+        done = ir_opt_stops_walks(m, keys, bodies, reports, rest.move())
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
     }
-    rows
+    done
 }
 
-ir_opt_stops_part: fn(slot: Shared<IROptStopsPart>, shared: Shared<IROptStopsView>) -> Int {
-    reads: shared.guard_read()
-    held := slot.guard_edit()
-    start: held.value.start
-    count: held.value.functions.len()
-    loop row in 0..<count {
-        if reads.value.bodies[start + row] -> ir_opt_stops_unreported(held.value.functions[row], reads.value.keys, reads.value.bodies, reads.value.reports)
+// One part's walk: its functions' scan while there are no reports, else
+// their removals.
+ir_opt_stops_part: fn(m: IRModule, keys: [String], bodies: [Bool], reports: [Bool], part: &&IROptStopsPart) -> IROptStopsPart Never! {
+    walked := part.move()
+    start: walked.start
+    scanning: reports.len() == 0
+    loop row in 0..<walked.functions.len() {
+        if {
+            scanning -> ir_opt_stops_scan(m, walked.functions[row], start + row, keys, bodies, walked.scan)
+            bodies[start + row] -> ir_opt_stops_unreported(walked.functions[row], keys, bodies, reports)
+            else -> {}
+        }
     }
-    count
+    walked
+}
+
+// The reports of every function, from the parts' scans in function order.
+ir_opt_stops_reported: fn(parts: &[IROptStopsPart]) -> [Bool] Never! {
+    scan := ir_opt_stops_scan_new()
+    loop at in 0..<parts.len() -> ir_opt_stops_scan_take(scan, parts[at].scan)
+    ir_opt_stops_reports(scan)
+}
+
+// Appends `part`'s scan to `scan`, its call ends shifted past the calls
+// already there.
+ir_opt_stops_scan_take: fn(scan: &IROptStopsScan, part: &IROptStopsScan) Never! {
+    base: scan.calls.len()
+    compiler_transfer_rows<Bool>(scan.starts, part.starts)
+    compiler_transfer_rows<Int>(scan.calls, part.calls)
+    loop end in part.ends -> scan.ends.push(base + end)
 }
 
 // Whether body `f` can start a stop: an instruction whose selection can
