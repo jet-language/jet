@@ -16,7 +16,9 @@
     "jet-expert",
     "c-expert",
     "rust-expert",
-    "node"
+    "node",
+    "lua",
+    "luajit"
   ],
   "spec": {
     "behavior": "Simulate the classic five-body solar system for N symplectic-Euler steps with dt 0.01, after offsetting the Sun's momentum, and print initial and final system energy with nine decimal places.",
@@ -63,6 +65,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -126,6 +138,20 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "Added a built-in Node numeric rail with the same five-body constants, update order, and nine-decimal energy output."
+    },
+    "lua": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Plain-table Lua rail with the same constants, update order and nine-decimal energy output; each body is a record of named fields, and a body's position steps once its last pair is done, which leaves every operation in the same order."
+    },
+    "luajit": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Runs lua/main.lua."
     }
   },
   "expert": {
