@@ -24,6 +24,7 @@ use {
     jet_foundation.[CompilerThreads, Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_find, name_intern, name_rows_set, name_rows_value, name_table_sized]
     jet_ir.[IRFunction, IRModule, IROp, IRProgram, IRSlotKind, IRType, ir_align8, ir_args, ir_emit, ir_function_new, ir_intern_name, ir_intern_text, ir_lint_module, ir_lint_text, ir_module_new, ir_pointer_row, ir_slot, ir_string_row, ir_word_row, ir_x64_compile_module, ir_x64_object]
     jet_backend.[
+        X64BindResult,
         X64ComptimeChild,
         X64ComptimeCode,
         X64ComptimeSymbols,
@@ -51,6 +52,7 @@ use {
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
         os_page_round,
+        x64_bind_runtime_image_at,
         x64_comptime_admit,
         x64_comptime_close,
         x64_comptime_code,
@@ -67,9 +69,9 @@ use {
         x64_comptime_symbols,
         x64_comptime_symbols_none,
         x64_comptime_word,
+        x64_executable_header,
         x64_image_segments,
         x64_link_with_runtime_image,
-        x64_link_with_runtime_image_at,
     ]
 }
 
@@ -98,13 +100,14 @@ JetEvalNativeSession: struct {
 }
 
 // The runtime image file, read when a batch first needs it, so a compile
-// without compile-time code never reads it: `bytes` once read, `read` once
-// tried (`bytes` stays None when the file can't be read).
+// without compile-time code never reads it: `bytes` holds it once read
+// (nothing when the file can't be read), `read` once tried. A batch's bind
+// takes it out and puts it back (jet_eval_native_bind).
 JetEvalNativeImage: struct {
     file: String
     reader: JetEvalNativeImageReader
     read: Bool
-    bytes: [U8]?
+    bytes: [[U8]]
 }
 
 // The host's read of the runtime image file; `None` when it can't be read.
@@ -190,7 +193,7 @@ JetEvalIRState: struct {
 }
 
 jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
-    image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: None}}
+    image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: [[U8]]{}}}
     Shared{JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}}
 }
 
@@ -198,7 +201,8 @@ jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) ->
 jet_eval_native_image_read: fn(image: &JetEvalNativeImage) Never! {
     if image.read -> return
     image.read = true
-    image.bytes = image.reader.read(image.file)
+    found: image.reader.read(image.file) ?? return
+    image.bytes.push(found)
 }
 
 // A copy of the session's runtime image, read on the first call; None when
@@ -207,7 +211,8 @@ jet_eval_native_image_read: fn(image: &JetEvalNativeImage) Never! {
 jet_eval_native_image: fn(session: JetEvalNativeSession) -> [U8]? Never! {
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
-    if permit.value.bytes == .Val(bytes) -> return Val(bytes.copy())
+    // copy: the stub's link consumes its image; the cell keeps it for every batch.
+    if permit.value.bytes.len() > 0 -> return Val(permit.value.bytes[0].copy())
     None
 }
 
@@ -215,7 +220,23 @@ jet_eval_native_image: fn(session: JetEvalNativeSession) -> [U8]? Never! {
 jet_eval_native_image_present: fn(session: JetEvalNativeSession) -> Bool Never! {
     permit := session.image.guard_edit()
     jet_eval_native_image_read(permit.value)
-    permit.value.bytes != None
+    permit.value.bytes.len() > 0
+}
+
+// Binds the batch object `object` with its program part at `base` to the
+// session's runtime image (MemoryLink.jet x64_bind_runtime_image_at), which
+// the bind takes out of the image cell instead of a copy and which goes back
+// unchanged whether the batch bound or not; the executable has no image
+// part. None when the image can't be read. The cell stays locked for the
+// bind, so a bind of the other child waits for it.
+jet_eval_native_bind: fn(session: JetEvalNativeSession, object: &&[U8], base: Int) -> X64BindResult? Never! {
+    permit := session.image.guard_edit()
+    jet_eval_native_image_read(permit.value)
+    runtime: permit.value.bytes.remove(0, .Slot) ?? return None
+    bound := x64_bind_runtime_image_at("jet-comptime", object.move(), runtime, base)
+    permit.value.bytes.push(bound.executable.image.move())
+    bound.executable.image = [U8]{}
+    Val(bound.move())
 }
 
 jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
@@ -259,7 +280,7 @@ jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession,
         }
         high: os_page_round(plan.high)
         if high > c.base -> c.base = high
-        c.defined = x64_comptime_symbols(bound.bytes, "", true)
+        c.defined = x64_comptime_symbols(bound.bytes, bound.bytes, 0, "", true)
         c.stub = bound.bytes.move()
     }
     x64_comptime_close(c.child)
@@ -420,19 +441,20 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         program.entries = entries.move()
         return program
     }
-    runtime := jet_eval_native_image(session.value) ?? {
+    // The batch binds to the session's image itself, not a copy, and only
+    // its program part is put together: the child runs the image already.
+    bound: jet_eval_native_bind(session.value, compiled.bytes.move(), permit.value.base) ?? {
         program.failure = "no runtime image"
         program.missing = true
         program.entries = entries.move()
         return program
     }
-    bound := x64_link_with_runtime_image_at("jet-comptime", compiled.bytes.move(), runtime, permit.value.base)
     if bound.errors.len() > 0 {
         program.failure = "the batch doesn't bind to the runtime image: {bound.errors.join("; ")}"
         program.entries = entries.move()
         return program
     }
-    addresses: x64_comptime_symbols(bound.bytes, JET_EVAL_NATIVE_PREFIX, false)
+    addresses: x64_comptime_symbols(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, JET_EVAL_NATIVE_PREFIX, false)
     loop (index, name) in names {
         if name == "" -> next
         entries[index] = x64_comptime_symbol_address(addresses, name) ?? 0
@@ -443,7 +465,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
         }
     }
     program.entries = entries.move()
-    program.code = x64_comptime_code(bound.bytes, permit.value.base)
+    program.code = x64_comptime_code(bound.executable, permit.value.base)
     if program.code.failure != "" {
         program.failure = "the bound batch is not an image: {program.code.failure}"
         return program

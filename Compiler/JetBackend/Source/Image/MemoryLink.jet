@@ -449,6 +449,19 @@ x64_executable_split: fn(linked: &&X64SplitExecutableResult) -> X64Executable Ne
     exe
 }
 
+// The ELF header of `exe` as patched, its file's first 64 bytes: the
+// image's own, else zeros, under the patches. A bound executable's patches
+// rewrite all of it (link_bind_write), so one whose image part its caller
+// took back (Native.jet jet_eval_native_bind) has its header too.
+x64_executable_header: fn(exe: X64Executable) -> [U8] Never! {
+    header := if exe.image.len() >= 64 -> exe.image[0..<64] else -> [U8]{}
+    loop header.len() < 64 -> header.push(U8{0})
+    loop (k, at) in exe.patch_at {
+        loop (j, byte) in exe.patch_bytes[k] { if at + j < 64 -> header[at + j] = byte }
+    }
+    header
+}
+
 // The file of `exe`, whose image part is whole (x64_executable_complete).
 x64_executable_bytes: fn(exe: &&X64Executable) -> [U8] Never! {
     if exe.image_end == 0 -> return exe.tail.move()
@@ -491,13 +504,16 @@ x64_link_with_runtime_image: fn(name: String, program: &&[U8], image: &&[U8]) ->
     link_bind_bytes(link_bind_image(name, program, image, 0, 0, None, true))
 }
 
-// The same with the program's part at `program_base`, a page boundary at or
-// above the image's own: for code loaded into a process already running the
-// image (compile-time batches), which maps only the loads from
-// `program_base` up. File offsets stay address - image base, so the bytes
-// grow with `program_base`.
-x64_link_with_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], program_base: Int) -> X64ExecutableResult Never! {
-    link_bind_bytes(link_bind_image(name, program, image, 0, 0, Val(program_base), true))
+// Bind the program object `program` (named `name` in reports) with its part
+// at `program_base`, a page boundary at or above the image's own, for code
+// loaded into a process already running the runtime image `image`
+// (compile-time batches, SessionHost.jet x64_comptime_code), which maps only
+// the loads from `program_base` up. The executable's image part is `image`
+// itself, unchanged, whether or not the program binds, so a caller binding
+// batch after batch keeps one image. It has no `.debug_*` section: none
+// lies in a load, so the process would never map one.
+x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], program_base: Int) -> X64BindResult Never! {
+    link_bind_image(name, program, image, 0, 0, Val(program_base), false)
 }
 
 link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
@@ -505,8 +521,13 @@ link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {
     X64ExecutableResult{bytes: x64_executable_bytes(bound.executable.move()), errors: [String]{}}
 }
 
-link_bind_failure: fn(c: LinkContext) -> X64BindResult Never! {
-    X64BindResult{executable: x64_executable_whole([U8]{}), errors: c.errors.copy()}
+// A bind that failed: its errors, and the image (input 1) as the
+// executable's image part, as a bound one has it.
+link_bind_failure: fn(c: &LinkContext) -> X64BindResult Never! {
+    exe := x64_executable_whole([U8]{})
+    exe.image = c.bufs.remove(1, .Slot) ?? [U8]{}
+    // copy: a few report lines; the context drops its own with it.
+    X64BindResult{executable: exe, errors: c.errors.copy()}
 }
 
 link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {

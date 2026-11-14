@@ -411,11 +411,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
         return x64_image_load(x64_executable_bytes(whole))
     }
     // The ELF header as patched: the image's own names the image's program headers.
-    header := exe.image[0..<64]
-    loop (k, at) in exe.patch_at {
-        loop (j, byte) in exe.patch_bytes[k] { if at + j < 64 -> header[at + j] = byte }
-    }
-    plan: loader_segments(header, exe.tail, exe.tail_at, exe.tail_at + exe.tail.len())
+    plan: loader_segments(x64_executable_header(exe), exe.tail, exe.tail_at, exe.tail_at + exe.tail.len())
     failure := plan.failure
     if failure == "" -> failure = loader_reserve(plan)
     if failure != "" {
