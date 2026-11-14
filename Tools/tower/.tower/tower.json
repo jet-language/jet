@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102258,
+    "rev": 102259,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90517,6 +90517,15 @@
           "verifiedBy": null,
           "evidence": "TlsLead-6694ct1-d 740d40800c, ctb-d 76515fd6d2, ctc-d 3d21f3cb5d, s2-d 9b0dd64148, s3-d 9eb08a0831, s4-d faded48ebd, s5-d 0edce592a1 (8/8 proved), ctfix-d a800437c58 (5/5 proved on b3). Taint.jet resolves callables by resolved symbol, not by bare name; negative cases for a local select and a same-named #Scrub pass on batch compiler b3.",
           "at": "2026-11-11T19:43:59.004Z"
+        },
+        {
+          "n": 22,
+          "text": "Regression from 0a13861243 (the fixed-timing instruction check): a web build that reaches Core/Crypto/Bignum.jet is an internal compiler error (exit 101, I2), reporting \"115 compiler faults: web select: core_bits_above instruction 129 (shr) at Bignum.jet:161: fixed timing: a fixed operand meets `if` (and `unreachable`), which the wasm32 table has no row for\", and the same at core_exp_mod Bignum.jet:515. Seen in tests/cases/web_build/forms_table_web_lowering_preserves_typed_form_contract on gate-p56 (and in b29proofs and b33proofs). Web select lowers a checked shift of a fixed operand to a branch and trap. Fix: lower it branch-free on wasm32 (mask the count, or prove it in range), so the table check passes, or have sema refuse the program with a registered diagnostic. Proof: that case passes `jet build --target=web`, and a web case that calls the fixed-timing Bignum shift path builds and runs on node.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T07:05:05.333Z"
         }
       ],
       "refs": [],
@@ -90532,9 +90541,9 @@
       "parentId": "c0lscvc9",
       "needsAcceptance": false,
       "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-11T19:44:02.334Z",
+      "updated": "2026-11-14T07:05:05.333Z",
       "updatedBy": "Main",
-      "criteriaLastN": 21,
+      "criteriaLastN": 22,
       "completedAt": "2026-11-11T19:44:02.334Z"
     },
     {
@@ -205066,6 +205075,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T07:05:05.333Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bnp1zw",
+      "note": "#22 Regression from 0a13861243 (the fixed-timing instruction che"
+    },
     {
       "at": "2026-11-14T06:46:26.081Z",
       "by": "Main",
