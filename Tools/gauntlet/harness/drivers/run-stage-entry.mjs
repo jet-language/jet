@@ -3,12 +3,14 @@
 // Tools/gauntlet/entries/run-stage-entry/driver/run.jet is the twin on the
 // kit's Stage module.
 //
-//   node run-stage-entry.mjs stage DIR RUNS DEV
+//   node run-stage-entry.mjs stage DIR RUNS DEV [MEASURE]
 //
 // `stage` stages the comparison entry in DIR (its entry.json) under run/ and
 // measures it, RUNS samples to each measurement ("default" for the entry's
 // own count) and the dev tier only when DEV is "dev", with ./jet as the
-// `jet` it builds and runs with: fake-jet.txt, made executable. Every
+// `jet` it builds and runs with: fake-jet.txt, made executable. MEASURE, a
+// comma-separated list of rows, makes it a --languages run that measures
+// only those rows and records every other one unmeasured. Every
 // measured command runs through the launcher, built into ./launch from
 // Tools/gauntlet/harness/launch.c. It shows the result as JSON indented by
 // two spaces, or the error that stopped it. A measurement (a time, a peak, a
@@ -24,8 +26,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stageEntry } from '../run.mjs';
 
-const usage = 'usage: node run-stage-entry.mjs stage DIR RUNS DEV';
-const [command, dir, runs, dev] = process.argv.slice(2);
+const usage = 'usage: node run-stage-entry.mjs stage DIR RUNS DEV [MEASURE]';
+const [command, dir, runs, dev, measure] = process.argv.slice(2);
 const cwd = process.cwd();
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
@@ -68,7 +70,8 @@ if (command === 'stage' && dir && runs && dev) {
     process.env.JET_GAUNTLET_LAUNCHER = launcher;
     const entryDir = path.resolve(dir);
     const entry = JSON.parse(fs.readFileSync(path.join(entryDir, 'entry.json'), 'utf8'));
-    const result = await stageEntry(entryDir, entry, path.join(cwd, 'run'), jet, runs === 'default' ? null : Number(runs), dev === 'dev');
+    const measured = measure === undefined ? null : new Set(measure.split(','));
+    const result = await stageEntry(entryDir, entry, path.join(cwd, 'run'), jet, runs === 'default' ? null : Number(runs), dev === 'dev', null, measured);
     console.log(withoutNotes(JSON.stringify(masked(result, '', false), null, 2).replaceAll(cwd, '<cwd>').replaceAll(repo, '<repo>')));
   } catch (error) {
     console.log(`error: ${error.message.replaceAll(cwd, '<cwd>').replaceAll(repo, '<repo>')}`);

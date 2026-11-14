@@ -55,12 +55,16 @@ WEB_ASSET_URL: Regex{"\bnew\s+URL\(\s*[\x22']([^\x22']+)[\x22']\s*,\s*import\.me
 
 // How an entry is staged: the `jet` it builds and runs with, the runs each
 // measurement takes (None for the entry's default), whether the dev tier
-// runs, and the launcher every measured command runs through ("" for none).
+// runs, the launcher every measured command runs through ("" for none), and
+// on a --languages run the rows it measures (None for every row): every
+// other row with a program is recorded unmeasured, with its program's tree
+// hash, and so are Jet's tiers when "jet" is not among them.
 StageOptions: struct {
     jet_bin: String
     runs: Int?
     dev: Bool
     launcher: String
+    measure: [String]?
 }
 
 // The JetEnv shell a command runs in: the plain one, or the full one an
@@ -87,7 +91,8 @@ Stager: struct {
     tier_timeout_ms: Int
 }
 
-// One entry as its rows are staged.
+// One entry as its rows are staged, and the reason an unmeasured row gives
+// ("" when the run measures every row).
 Staging: struct {
     s: Stager
     entry: Dyn
@@ -100,6 +105,13 @@ Staging: struct {
     common_fixtures: String
     generated: String
     runs: Int
+    measure: [String]?
+    not_measured: String
+}
+
+// Whether the run `st` stages measures `language`'s row.
+measures: fn(st: Staging, language: String) -> Bool {
+    if st.measure == .Val(list) -> list.contains(language) else -> true
 }
 
 // What restores a staged directory before a run: its state from its
@@ -199,7 +211,8 @@ stage_entry: fn(repo_dir: String, entry_dir: String, entry: Dyn, run_dir: String
         provenance["fixture_sha256"] = Dyn.Text(path_sha256(generated))
     }
     runs: options.runs ?? (if truthy_at(entry, "perf") -> 7 else -> 3)
-    st: Staging{s: s, entry: entry.copy(), entry_dir: entry_dir.copy(), entry_stage: entry_stage.copy(), mode: mode.copy(), expected: expected, expected_path: expected_path, fixture_out: fixture_out, common_fixtures: common_fixtures, generated: generated, runs: runs}
+    not_measured: if options.measure == .Val(list) -> "not measured: this run measures {list.join(", ")} only" else -> ""
+    st: Staging{s: s, entry: entry.copy(), entry_dir: entry_dir.copy(), entry_stage: entry_stage.copy(), mode: mode.copy(), expected: expected, expected_path: expected_path, fixture_out: fixture_out, common_fixtures: common_fixtures, generated: generated, runs: runs, measure: options.measure.copy(), not_measured: not_measured}
     rows := Dyn.object()
     jet_reset := no_reset()
     loop language in languages -> rows[language] = stage_row(st, language, jet_reset)
@@ -338,6 +351,16 @@ stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! 
     if source_file == "" -> return Ok(disqualified(row, "unsupported language"))
     if !files.exists(path_joined(source_dir, source_file)) -> return Ok(disqualified(row, "missing {language}/{source_file}"))
     source_tree_sha256: tree_sha256(source_dir)
+    if !measures(st, language) {
+        row["status"] = Dyn.Text("unavailable")
+        row["reason"] = Dyn.Text(st.not_measured.copy())
+        row["not_measured"] = Dyn.Bool(true)
+        provenance := Dyn.object()
+        provenance["source_tree_sha256"] = Dyn.Text(source_tree_sha256.copy())
+        provenance["base_language"] = Dyn.Text(base.copy())
+        row["provenance"] = provenance
+        return Ok(row)
+    }
     staged: path_joined(st.entry_stage, language)
     copy_path(source_dir, staged)
     fixture_state: path_joined(staged, "fixture-state")
@@ -616,6 +639,7 @@ jet_tiers: fn(st: Staging, rows: Dyn, jet_reset: Reset, options: StageOptions) -
     tiers := Dyn.object()
     loop rule in tier_policy(st.mode) {
         tiers[rule.tier] = if {
+            !measures(st, "jet") -> not_measured_tier(rule, st.not_measured)
             rule.tier == "dev" && !options.dev -> unavailable_tier(rule, "jet dev is unavailable")
             rule.tier == "aot" -> aot_tier(rule, jet_row)
             !jet_source -> unavailable_tier(rule, "Jet source was not staged")
@@ -626,6 +650,13 @@ jet_tiers: fn(st: Staging, rows: Dyn, jet_reset: Reset, options: StageOptions) -
     }
     stop_peer(peer_service)
     Ok(tiers)
+}
+
+// A tier a --languages run without Jet leaves unmeasured for `reason`.
+not_measured_tier: fn(rule: TierRule, reason: String) -> Dyn {
+    out := unavailable_tier(rule, reason)
+    out["not_measured"] = Dyn.Bool(true)
+    out
 }
 
 // The AOT tier: the Jet row as it stands.
