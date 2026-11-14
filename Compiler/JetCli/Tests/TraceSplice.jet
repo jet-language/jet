@@ -1,0 +1,82 @@
+// A package build's file trace takes the trace of each jet process its steps
+// start as one more process of its own (Request.jet jet_cli_trace_splice):
+// named by the step and the process, on the build trace's clock, its lanes
+// apart from every other process's.
+use {
+    splice_files: core.files
+    splice_process: core.process
+    splice_sys: core.sys
+    jet_cli.[JetCLITraceSink, JetCLITraceSpan, JetCLITraceState, JetCLITraceUsage, jet_cli_trace_moved, jet_cli_trace_opening_lanes, jet_cli_trace_splice]
+}
+
+// A file sink whose trace opened at uptime 1000 ms as process 500, holding
+// only its `[` header.
+splice_test_sink: fn(path: String) -> JetCLITraceSink {
+    splice_files.write(path, "[\n") ?? panic("write the trace header: {err}")
+    JetCLITraceSink{
+        target: path,
+        human: false,
+        start_ms: 1000,
+        pid: 500,
+        functions: false,
+        phase_counters: false,
+        state: Shared{JetCLITraceState{
+            writing: true,
+            writer: splice_files.append(path) ?? panic("open the trace: {err}"),
+            stacks: [Int:[JetCLITraceSpan]]{},
+            lanes: jet_cli_trace_opening_lanes(),
+            progress_at: [String:Int]{},
+            progress_calls: [String:Int]{},
+            process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
+            memory: None,
+            process_ms: -1,
+            spliced: 0,
+        }},
+    }
+}
+
+// The trace a step's jet process writes: its header, process name and start
+// (at uptime `uptime` ms, or none), a lane name, and one phase.
+splice_test_child: fn(name: String, uptime: Int?) -> String Never! {
+    started: if uptime == .Val(ms) -> ",\"uptime_ms\":{ms}" else -> ""
+    lines: [String]{
+        "[",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":2,\"tid\":0,\"args\":{{\"name\":\"{name}\"}}}},",
+        "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":2,\"tid\":0,\"args\":{{\"unix_ms\":5,\"functions\":false{started}}}}},",
+        "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":2,\"tid\":1,\"args\":{{\"name\":\"task 1\"}}}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"B\",\"ts\":250000,\"pid\":2,\"tid\":1}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"E\",\"ts\":900000,\"pid\":2,\"tid\":1,\"args\":{{\"items\":7}}}},",
+    }
+    "{lines.join("\n")}\n"
+}
+
+#Test("an event moves to its process, its lanes and the trace's clock") {
+    assert_eq(jet_cli_trace_moved("{{\"name\":\"a\",\"ph\":\"B\",\"ts\":250000,\"pid\":2,\"tid\":3}},", 501, 1000000, 2500000) ?? "", "{{\"name\":\"a\",\"ph\":\"B\",\"ts\":2750000,\"pid\":501,\"tid\":1000003}},\n")
+    // A metadata event has no time; it keeps the rest.
+    assert_eq(jet_cli_trace_moved("{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":2,\"tid\":1,\"args\":{{\"name\":\"task 1\"}}}},", 501, 1000000, 9) ?? "", "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":501,\"tid\":1000001,\"args\":{{\"name\":\"task 1\"}}}},\n")
+    // A label holding the text of a field is escaped, so it is never taken for one.
+    assert_eq(jet_cli_trace_moved("{{\"name\":\"x\\\"ts\\\":7\",\"ph\":\"B\",\"ts\":1,\"pid\":2,\"tid\":1}},", 501, 0, 10) ?? "", "{{\"name\":\"x\\\"ts\\\":7\",\"ph\":\"B\",\"ts\":11,\"pid\":501,\"tid\":1}},\n")
+    assert(jet_cli_trace_moved("[", 501, 0, 0) == None)
+}
+
+#Test("each spliced trace is its own named process, and one with no clock origin adds nothing") {
+    path: "{splice_sys.temp_dir()}/jet-trace-splice-{splice_process.current_pid()}.json"
+    sink: splice_test_sink(path)
+    jet_cli_trace_splice(sink, "core-record", splice_test_child("jet-bare", Val(3500)))
+    jet_cli_trace_splice(sink, "prelude-sources", splice_test_child("jet", None))
+    jet_cli_trace_splice(sink, "runtime", splice_test_child("jet", Val(1200)))
+    written: splice_files.read(path) ?? panic("read the trace: {err}")
+    splice_files.remove(path).drop("the test's trace file")
+    expected: [String]{
+        "[",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":501,\"tid\":0,\"args\":{{\"name\":\"core-record: jet-bare\"}}}},",
+        "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":501,\"tid\":1000001,\"args\":{{\"name\":\"task 1\"}}}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"B\",\"ts\":2750000,\"pid\":501,\"tid\":1000001}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"E\",\"ts\":3400000,\"pid\":501,\"tid\":1000001,\"args\":{{\"items\":7}}}},",
+        "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":502,\"tid\":0,\"args\":{{\"name\":\"runtime: jet\"}}}},",
+        "{{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":502,\"tid\":2000001,\"args\":{{\"name\":\"task 1\"}}}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"B\",\"ts\":450000,\"pid\":502,\"tid\":2000001}},",
+        "{{\"name\":\"sema.check\",\"cat\":\"sema.check\",\"ph\":\"E\",\"ts\":1100000,\"pid\":502,\"tid\":2000001,\"args\":{{\"items\":7}}}},",
+    }
+    assert_eq(written, "{expected.join("\n")}\n")
+}

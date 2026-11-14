@@ -19,11 +19,12 @@ use {
 // The Core object's bytes, else the problem that stopped it; each build,
 // lint or object finding is a row of `{prefix}.issues`. The roots left out
 // of the library (JetIR BuildCore.jet ir_core_library_from) are the rows of
-// `{prefix}.skipped`, one per failure that left its root out.
+// `{prefix}.skipped`, one per failure that left its root out. The Core
+// check's phases go to `trace_sink`.
 JetCLICoreLibrary: struct { bytes: [U8], problem: String }
 
-jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads) -> JetCLICoreLibrary {
-    checked := jet_cli_core_checked(false, false)
+jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
+    checked := jet_cli_core_checked(false, false, trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> return JetCLICoreLibrary{bytes: [U8]{}, problem: "the Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
         .Checked(found, _, _) -> found

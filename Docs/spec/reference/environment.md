@@ -99,7 +99,7 @@ object. A URL's user and password never appear in that list.
 | `--keep-going` | `JET_KEEP_GOING` | build, run, check, test, emit | boolean | Goes on past the first failure through every phase, and reports every failure. |
 | `--keep-going-report=PATH` | `JET_KEEP_GOING_REPORT` | build, run, check, test, emit | path | Writes the `--keep-going` failure census, one TSV row per failure, to PATH. |
 | `--keep-going-skip=ITEM` | `JET_KEEP_GOING_SKIP` | build, run, check, test, emit | list | Leaves ITEM out of the `--keep-going` collector. |
-| `--trace[=FILE]` | `JET_TRACE_FILE` | build, run, check, test, emit | bare, `off`, or a path | Streams the compiler's phases and progress to stderr, or to FILE; `off` streams nothing. |
+| `--trace[=FILE]` | `JET_TRACE_FILE` | build, run, check, test, emit | bare, `off`, or a path | Streams the compiler's phases and progress to stderr, or to FILE (each `%p` in it this process's id); `off` streams nothing. |
 | `--trace-detail=DETAIL` | `JET_TRACE_DETAIL` | build, run, check, test, emit | `phases` or `functions` | Says what the trace shows: the phases, or each function as well. |
 | `--phase-counters` | `JET_PHASE_COUNTERS` | build, run, check, test, emit | boolean | Also prints each trace counter on stderr. |
 | `--opt-dump=FUNCTION` | `JET_OPT_DUMP` | build, run, test, inspect decisions | list of function names | Prints the slot IR of each named function before and after the optimizer's passes, at O0 (the inline Int facts only), O1 and O2. |

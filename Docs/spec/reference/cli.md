@@ -858,9 +858,12 @@ scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
 trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
 (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
 follows a running compile; Perfetto loads the file); timestamps have
-millisecond resolution. `--trace=off` traces nothing. `--trace` is a compiler
+millisecond resolution. Each `%p` in FILE is the jet process's id, so every
+jet that a traced process starts with the same variable writes its own file.
+`--trace=off` traces nothing. `--trace` is a compiler
 control: `JET_TRACE_FILE=FILE` is its environment form for the same five
-commands (`-` or `stderr` selects the readable stream), and the flag takes
+commands and for `jet self devtools core-record` (`-` or `stderr` selects
+the readable stream), and the flag takes
 precedence over it, as for every control (`jet env vars` shows which one
 won); `--phase-counters` also prints each counter as a `JET_PHASE_COUNTERS`
 line on stderr. The phases are the CLI's
@@ -891,8 +894,14 @@ symbol collection and the realization of the providers it reaches),
 `native.link`; one `native.build` around
 them for a test harness). A package build (`jet build` of a `build: fn`)
 also traces `build.plan`, the check of its build entry and the plan's query,
-and one `build.step` per batch of its steps, named by the steps; a step's own
-process is not traced, so the span's `proc_cpu_ns` is jet's alone. The
+and one `build.step` per batch of its steps, named by the steps. A step's
+own processes are not jet's, so the span's `proc_cpu_ns` is jet's alone;
+with `--trace=FILE` each step runs with `JET_TRACE_FILE` naming `%p.json`
+in its sandbox, and when its batch ends the trace of every jet process it
+started (a `jet run` of a script and the jets that script runs, the
+compiler build's `core-record` with its Core check, record write, read-back
+and embed) is added to FILE as its own process, named by the step, on
+FILE's clock. The readable stream shows only jet's own events. The
 readable stream is written through `/dev/stderr`, so redirect stderr to a
 file with `2>>`, or use `--trace=FILE`. A trace that cannot be written
 stops; the compile does not.

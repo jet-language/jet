@@ -199,9 +199,11 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made
 // happened. Then the run records `receipt` and `made`, with each step's
 // reuse, the digest of each kept output (`last_kept` the last build's), and
 // the time of every node that ran (jet_cli_build_record). Without `store` no
-// step is reused and nothing is stored.
+// step is reused and nothing is stored. A file trace also takes the trace of
+// every jet process a step starts (jet_cli_build_splice_traces).
 jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, made: [BuildSessionGeneratedModule], selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String: String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     jobs: threads ?? cli_sys.cpu_count()
+    traces: jet_cli_build_step_traces(root, trace_sink)
     // Per node: 0 waiting, 1 done, 2 failed, 3 never started.
     states := [Int]{}
     loop _ in nodes -> states.push(0)
@@ -234,9 +236,12 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
                 names: loop id in batch -> graph.actions[id].name.copy()
                 if trace_sink == .Val(sink) -> sink.begin("build.step", names.join(" "), -1, -1)
                 watch: cli_time.start()
-                results: build_execute_actions(executor, batch, root, store, grants, probes, jobs)
-                if trace_sink == .Val(sink) -> sink.end("build.step", batch.len())
+                results: build_execute_actions(executor, batch, root, store, grants, probes, jobs, traces)
                 wall: watch.elapsed_millis()
+                if trace_sink == .Val(sink) {
+                    sink.end("build.step", batch.len())
+                    if traces == .Val(folder) -> jet_cli_build_splice_traces(sink, folder, graph)
+                }
                 loop index in 0..<batch.len() {
                     node: jet_cli_build_step_node(nodes, batch[index])
                     restored := false
@@ -268,6 +273,46 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
     kept: jet_cli_build_kept(root, graph, reused, last_kept)
     if jet_cli_build_record(root, receipt, made, reused, kept, times, color) == .Val(unrecorded) -> failures.push(unrecorded)
     jet_cli_build_failures(failures)
+}
+
+// Where a build traced to a file (`--trace=FILE`) gathers the traces of its
+// steps' processes: every step runs with `JET_TRACE_FILE` in its sandbox, so
+// each jet it starts (`jet run` of a script, the `jet doc` that script runs,
+// a made jet's `core-record`) writes its own trace (Jetpack Executor.jet
+// build_execute_actions), and the files come here as the step ends. None for
+// no trace, the readable stream, or a folder that can't be made (said on
+// stderr; the build goes on untraced there).
+JET_CLI_BUILD_STEP_TRACES: ".jet/build/step-traces"
+
+jet_cli_build_step_traces: fn(root: String, trace_sink: JetCLITraceSink?) -[FS]> String? Never! {
+    sink: trace_sink ?? return None
+    if sink.human -> return None
+    folder: jet_cli_entry_join(root, JET_CLI_BUILD_STEP_TRACES)
+    // An earlier build's leftovers are no part of this one.
+    cli_files.remove_all(folder).drop("a folder that isn't there has nothing to clear; one that can't be cleared fails the create below")
+    if cli_files.create_dir_all(folder) == .Err(error) {
+        _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the build's trace can't take its steps' processes: couldn't create `{folder}`: {error}\n")
+        return None
+    }
+    Val(folder)
+}
+
+// Splices each trace a step of the batch that just ran left in `folder`
+// (`<action id>-<file>`) into the build's trace as its own process, named by
+// its step (Request.jet jet_cli_trace_splice), and removes the file.
+jet_cli_build_splice_traces: fn(sink: JetCLITraceSink, folder: String, graph: BuildPlanExecution) -[FS]> Never! {
+    entries := cli_files.list_dir(folder) ?? return
+    entries.sort_by(fn(left, right) { left.name <=> right.name })
+    loop entry in entries {
+        path: jet_cli_entry_join(folder, entry.name)
+        if entry.name.split_once("-") == .Val(pair) {
+            id: Int.parse(pair.before) ?? -1
+            if id >= 0 && id < graph.actions.len() {
+                if cli_files.read(path) == .Ok(text) -> jet_cli_trace_splice(sink, graph.actions[id].name, text)
+            }
+        }
+        cli_files.remove(path).drop("a spliced trace left behind is cleared by the next traced build")
+    }
 }
 
 // The `kind` a node's BuildTime row names.

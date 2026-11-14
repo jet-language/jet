@@ -130,7 +130,7 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
     outcomes := [BuildActionOutcomeRow]{}
     loop stage in model.stages {
         loop batch in build_execution_batches(plan, stage.actions) {
-            results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len())
+            results: build_execute_actions(plan, batch, project_root, artifact_store, grants, probes, batch.len(), None)
             completed := [BuildActionOutcomeRow]{}
             loop index in 0..<batch.len() {
                 if results[index] == {
@@ -275,20 +275,30 @@ build_folder_mount: fn(path: String) -> String Never! {
     if path == "." -> BUILD_WORK_MOUNT else -> "{BUILD_WORK_MOUNT}/{path}"
 }
 
+// The folder of a traced action's work tree (build_execute_actions `traces`)
+// its jet processes write their traces in, one file per process: the
+// `JET_TRACE_FILE` it is given names `%p.json` there, which each jet makes
+// its own process id.
+BUILD_STEP_TRACE_FOLDER: ".jet-trace"
+
 // Rust `execute_one_action` on the local path, for many actions at once:
 // each of `ids` (their prerequisites already done) is keyed and, with
 // `artifact_store`, restored from a cached record, else staged in a fresh
 // private work tree; the staged ones run together under the native sandbox,
 // at most `jobs` at a time, and each publishes only its declared outputs. One
 // slot per action, in `ids` order: one action's failure never stops the
-// others.
-build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
+// others. With `traces`, a host folder, each staged child also runs with
+// `JET_TRACE_FILE` in its work tree's BUILD_STEP_TRACE_FOLDER (outside its
+// key: a trace changes no output), and every trace file a process of it wrote
+// there is moved to `traces` as `<action id>-<file>` once it exits, whether it
+// succeeded or not.
+build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], jobs: Int, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [Result<ActionOutcome, BuildExecutionError>] Never! {
     results := [Result<ActionOutcome, BuildExecutionError>]{}
     runs := [BuildActionRun]{}
     slots := [Int]{}
     stamps := StampTable.load(project_root)
     loop action_id in ids {
-        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps) == {
+        if build_start_action(plan, plan.actions[action_id], project_root, artifact_store, grants, probe_facts, stamps, traces) == {
             .Ok(start) -> if start == {
                 .Restored -> results.push(Ok(ActionOutcome.RestoredFromCache))
                 .Ready(run) -> {
@@ -305,6 +315,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     outcomes := build_run_actions(runs, if jobs < 1 -> 1 else -> jobs)
     loop index in 0..<runs.len() {
         slot: slots[index]
+        if traces == .Val(folder) -> build_keep_step_traces(runs[index], folder)
         if outcomes[index] == {
             .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root) == {
                 .Ok(outcome) -> results[slot] = Ok(outcome)
@@ -314,6 +325,18 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
         }
     }
     results
+}
+
+// Moves each trace file the processes of a traced action wrote in its work
+// tree (BUILD_STEP_TRACE_FOLDER) to `traces` as `<action id>-<file>`. A
+// trace is only a record of the run: one that can't be moved is left out of
+// the build's trace, and the build goes on.
+build_keep_step_traces: fn(run: BuildActionRun, traces: String) Never! -[FS]> {
+    folder: files.join(run.sandbox, BUILD_STEP_TRACE_FOLDER)
+    entries: files.list_dir(folder) ?? return
+    loop entry in entries {
+        files.rename(files.join(folder, entry.name), files.join(traces, "{run.action.id}-{entry.name}")).drop("a step's trace that can't be kept is left out of the build's trace")
+    }
 }
 
 // Runs the staged actions' children, at most `jobs` at once: one receipt or
@@ -407,8 +430,9 @@ build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActi
 // in a fresh private work tree that receives exactly the input bytes the key
 // hashed, runnable where the input is, with each folder bound read-only at
 // its path and each found program it is passed named by the path it runs at
-// there.
-build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
+// there; with `traces` (build_execute_actions) it also gets its trace folder
+// and `JET_TRACE_FILE`.
+build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, project_root: String, artifact_store: BuildArtifactStoreHandle?, grants: [BuildEffect], probe_facts: [BuildProbeFact], stamps: &StampTable, traces: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> BuildActionStart BuildExecutionError! {
     loop cap in declared.caps {
         if !grants.contains(cap) -> return Err(BuildExecutionError.MissingGrant{action: declared.name, capability: cap})
     }
@@ -490,7 +514,14 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
     }
 
     runtime_args := build_runtime_toolchain_arguments(plan, action.toolchain, action.argv.slice(1, action.argv.len()))
-    runtime_env: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
+    runtime_env := build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
+    if traces != None {
+        files.create_dir_all(files.join(sandbox, BUILD_STEP_TRACE_FOLDER)) ?? return Err(build_io_action(action, BuildIOError.from(err)))
+        // The child's own path to its work tree: the Linux sandbox binds it
+        // at BUILD_WORK_MOUNT; Seatbelt runs it where it is.
+        work: if sys.is_linux() -> BUILD_WORK_MOUNT else -> sandbox
+        runtime_env["JET_TRACE_FILE"] = "{work}/{BUILD_STEP_TRACE_FOLDER}/%p.json"
+    }
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
         loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})

@@ -251,7 +251,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             core := [U8]?{None}
             if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
                 if trace_sink == .Val(sink) -> sink.begin("runtime.core", "", -1, -1)
-                built := jet_cli_core_library(core_prefix, thread_exports, threads)
+                built := jet_cli_core_library(core_prefix, thread_exports, threads, trace_sink)
                 if trace_sink == .Val(sink) -> sink.end("runtime.core", built.bytes.len())
                 if built.problem != "" -> return jet_driver_compile_escaped_failure(built.problem)
                 core = Val(built.bytes.move())
@@ -2117,7 +2117,8 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // The native `jet` implements the driver's CompilerTraceSink
 // (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
 // Chrome trace-event lines the Rust host's writer produces: the `[` header,
-// `process_name`, `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per
+// `process_name`, `trace.start` (`unix_ms`, `functions`, and `uptime_ms`, the
+// trace's clock origin, this writer only), one `B`/`E` event per
 // span, with `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time
 // (`cpu_ns` of its task, `proc_cpu_ns` of every thread, `majflt` major
 // faults; this writer only) on every phase close and a `memory` counter after a
@@ -2132,7 +2133,10 @@ jet_cli_overlaid_path: fn(path: String, overlays: [JetCLIOverlay]) -[FS, Env]> S
 // running compile can be followed. A failed write stops the trace, never the
 // compile. The sink's calls stay inside the trait's FS row: monotonic time is
 // `/proc/uptime` (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as
-// `/dev/stderr`.
+// `/dev/stderr`. `%p` in FILE is this process's id, so every jet a traced
+// process starts with the same `JET_TRACE_FILE` writes its own file; a
+// package build splices its steps' files into its own
+// (jet_cli_trace_splice).
 JET_CLI_TRACE_STDERR: "/dev/stderr"
 // Minimum spacing of the progress events of one kind; the last item is always
 // written.
@@ -2145,6 +2149,9 @@ JET_CLI_TRACE_PROGRESS_STRIDE: 16
 // and memory read this recently (ms), so steps that repeat per item (a
 // comptime item's `comptime.apply`) share one `/proc/self` read.
 JET_CLI_TRACE_PROCESS_MS: 50
+// A process spliced into the trace (jet_cli_trace_splice) has its lanes
+// numbered from this many times its place, apart from jet's own.
+JET_CLI_TRACE_SPLICE_LANES: 1000000
 
 // One open span: its kind, the label it shows, when it began (µs), the CPU
 // clocks and fault count when it began, and whether it is one item's
@@ -2189,6 +2196,8 @@ JetCLITraceState: struct {
     process: JetCLITraceUsage
     memory: JetCLITraceMemory?
     process_ms: Int
+    // How many other processes' traces were spliced in (jet_cli_trace_splice).
+    spliced: Int
 }
 
 JetCLITraceSink: struct {
@@ -2315,8 +2324,8 @@ JetCLITraceMemory: struct {
 // stderr, else the file); `None` when it asks for no trace or the target
 // cannot be written (the reason goes to stderr, the compile goes on).
 // `--trace-detail=functions` traces each function, `--phase-counters` also
-// prints the counters. A file target is truncated and starts with the trace
-// header.
+// prints the counters. A file target, with each `%p` in its name this
+// process's id, is truncated and starts with the trace header.
 jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     chosen: if jet_cli_control("trace").value == {
         .Bool(on) -> if on -> "-" else -> ""
@@ -2325,9 +2334,9 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     }
     if chosen == "" -> return None
     human: chosen == "-" || chosen == "stderr"
-    target: if human -> JET_CLI_TRACE_STDERR else -> chosen
-    start_ms: jet_cli_trace_uptime_ms()
     pid: cli_sys.pid()
+    target: if human -> JET_CLI_TRACE_STDERR else -> chosen.replace("%p", "{pid}")
+    start_ms: jet_cli_trace_uptime_ms()
     executable: cli_sys.executable().split("/").to_list()
     process := "jet"
     if executable.len() > 0 && executable[executable.len() - 1] != "" -> process = executable[executable.len() - 1]
@@ -2341,9 +2350,11 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
     }
     if !human {
         // The wall-clock anchor readers align the trace with: the
-        // modification time the header write just set (no clock read).
+        // modification time the header write just set (no clock read); and
+        // the uptime its timestamps count from, which places it on the
+        // clock of a trace it is spliced into (jet_cli_trace_splice).
         unix_ms: if cli_files.stat(target) == .Ok(info) -> info.modified.to_unix_ms() else -> 0
-        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail}}}}},\n")
+        started: jet_cli_trace_append(target, "{{\"name\":\"trace.start\",\"ph\":\"i\",\"s\":\"g\",\"ts\":0,\"pid\":{pid},\"tid\":0,\"args\":{{\"unix_ms\":{unix_ms},\"functions\":{detail},\"uptime_ms\":{start_ms}}}}},\n")
         if started == .Val(problem) {
             _: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {problem}\n")
             return None
@@ -2371,6 +2382,7 @@ jet_cli_trace_sink: fn() -> JetCLITraceSink? {
             process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
             memory: None,
             process_ms: -1,
+            spliced: 0,
         }},
     })
 }
@@ -2388,6 +2400,79 @@ jet_cli_trace_boxed: fn(sink: JetCLITraceSink?) -> CompilerTraceSink? Never! {
 
 jet_cli_trace_object: fn(sink: &&JetCLITraceSink) -> CompilerTraceSink Never! {
     sink.move()
+}
+
+// Adds `text`, the trace file another jet process wrote (`--trace=FILE`; a
+// package build's step, BuildExecute.jet jet_cli_build_splice_traces), to
+// this file trace as one more process, named `label` and the process name the
+// file gives. Each event moves onto this trace's clock by the `uptime_ms` the
+// file's `trace.start` names (both clocks are `/proc/uptime`), and its lanes
+// are numbered from JET_CLI_TRACE_SPLICE_LANES times its place, so a reader
+// that pairs spans by lane (Tools/perf/jetc-trace) never pairs them with
+// another process's. The file's header, process name and `trace.start` are
+// left out; a file whose `trace.start` names no uptime has no place on this
+// clock and adds nothing. The readable stream takes no other process's trace.
+jet_cli_trace_splice: fn(sink: JetCLITraceSink, label: String, text: String) Never! {
+    if sink.human -> return
+    permit := sink.state.guard_edit()
+    if !permit.value.writing -> return
+    process: sink.pid + permit.value.spliced + 1
+    lanes: (permit.value.spliced + 1) * JET_CLI_TRACE_SPLICE_LANES
+    name := "\"jet\""
+    shift := Int?{None}
+    events := [String]{}
+    loop line in text.lines() {
+        if line.starts_with("{{\"name\":\"process_name\",") {
+            at: line.find(JET_CLI_TRACE_NAME_ARG)
+            if at >= 0 && line.ends_with("}}}},") -> name = line.slice(at + JET_CLI_TRACE_NAME_ARG.len(), line.len() - 3)
+            next
+        }
+        if line.starts_with("{{\"name\":\"trace.start\",") {
+            started: jet_cli_trace_field(line, "uptime_ms") ?? next
+            shift = Val((started.value - sink.start_ms) * 1000)
+            next
+        }
+        moved_by: shift ?? next
+        if jet_cli_trace_moved(line, process, lanes, moved_by) == .Val(moved) -> events.push(moved)
+    }
+    if shift == None -> return
+    permit.value.spliced += 1
+    quoted: foundation_json_quote("{label}: ")
+    opening: "{{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{process},\"tid\":0,\"args\":{{\"name\":{quoted.slice(0, quoted.len() - 1)}{name.slice(1, name.len())}}}}},\n"
+    jet_cli_trace_write(sink.target, permit.value, "{opening}{events.join("")}")
+}
+
+// The process-name event's args, ahead of its quoted name.
+JET_CLI_TRACE_NAME_ARG: "\"args\":{{\"name\":"
+
+// The first `"key":` integer in the event `line` (a JSON string can't hold
+// that text, whose quotes it escapes): where its digits are and its value.
+jet_cli_trace_field: fn(line: String, key: String) -> (from: Int, to: Int, value: Int)? Never! {
+    label: "\"{key}\":"
+    at: line.find(label)
+    if at < 0 -> return None
+    from: at + label.len()
+    bytes: line.bytes()
+    to := from
+    loop to < bytes.len() && bytes[to] >= (U8{48}) && bytes[to] <= (U8{57}) -> to += 1
+    value: jet_cli_trace_number(bytes, from, to)
+    if value < 0 -> return None
+    Val((from: from, to: to, value: value))
+}
+
+// The event `line` (`"ts"`, when it has one, then `"pid"` and `"tid"`, as
+// this writer puts them) as one of process `process`, its lane moved up by
+// `lanes` and its time by `shift` µs, with its line end; None for a line
+// that is no event.
+jet_cli_trace_moved: fn(line: String, process: Int, lanes: Int, shift: Int) -> String? Never! {
+    pid: jet_cli_trace_field(line, "pid") ?? return None
+    tid: jet_cli_trace_field(line, "tid") ?? return None
+    if tid.from < pid.to -> return None
+    lead := line.slice(0, pid.from)
+    if jet_cli_trace_field(line, "ts") == .Val(ts) {
+        if ts.to <= pid.from -> lead = "{line.slice(0, ts.from)}{ts.value + shift}{line.slice(ts.to, pid.from)}"
+    }
+    Val("{lead}{process}{line.slice(pid.to, tid.from)}{lanes + tid.value}{line.slice(tid.to, line.len())}\n")
 }
 
 // Counts one report of progress kind `name`: true on its first call, every

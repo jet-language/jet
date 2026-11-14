@@ -25,7 +25,11 @@
 // file for a jet without one, such as jet-bare); Tools/release Release.jet
 // identity_digest checks it the same way. `--embedded` reads the record part
 // from the running jet's mapped image, with no file read, and checks it as
-// `--write` checks the file.
+// `--write` checks the file. `JET_TRACE_FILE` traces the check's phases,
+// then the record's `core_record.write`, `core_record.read_back` and
+// `core_record.embed` (Request.jet jet_cli_trace_sink), so the build's
+// `core-record` step shows in the build's trace (BuildExecute.jet
+// jet_cli_build_step_traces).
 use {
     record_files: core.files
     record_sys: core.sys
@@ -54,14 +58,17 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
     embedding: args.len() == 5 && args[0] == "--embed" && jet_cli_core_record_operand(args[1]) && jet_cli_core_record_operand(args[2]) && jet_cli_core_record_operand(args[3]) && jet_cli_core_record_operand(args[4])
     if !checking && !writing && !embedding -> return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_CORE_RECORD_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
     watch: record_time.start()
-    checked := jet_cli_core_checked(color, json)
+    trace_sink: jet_cli_trace_sink()
+    checked := jet_cli_core_checked(color, json, trace_sink)
     if checked.move() == {
         .Stopped(output) -> output
         .Checked(inputs, compiler, target) -> {
             summary: jet_cli_core_record_summary(inputs, watch.elapsed_millis())
             if checking -> return JetDriverVerbOutput{stdout: summary, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+            if trace_sink == .Val(sink) -> sink.begin("core_record.write", "", -1, -1)
             bytes: jet_driver_core_record_write(inputs, compiler, target) ?? return jet_cli_ice("the Core record can't be written: {err}")
             sizes: jet_driver_core_record_sizes(bytes) ?? return jet_cli_ice("the Core record this jet wrote doesn't open: {err}")
+            if trace_sink == .Val(sink) -> sink.end("core_record.write", bytes.len())
             // Out before the read-back, which takes longer than the write:
             // a read-back that fails or is stopped still leaves the sizes.
             jet_cli_core_record_out("{summary}core-record written: {bytes.len()} bytes, {watch.elapsed_millis()} ms\n{jet_cli_core_record_sections(sizes)}")
@@ -71,7 +78,10 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
                 out: args[3]
                 identity_file: args[4]
                 image: record_files.read_bytes(image_file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the executable `{image_file}`: {jet_cli_io_error_text(err)}", None, color, json)
+                if trace_sink == .Val(sink) -> sink.begin("core_record.read_back", "", -1, -1)
                 counts: jet_driver_core_record_round_trip(bytes, jet_cli_core_record_threads()) ?? return jet_cli_ice("the Core record doesn't read back: {err}")
+                if trace_sink == .Val(sink) -> sink.end("core_record.read_back", counts.bodies)
+                if trace_sink == .Val(sink) -> sink.begin("core_record.embed", "", -1, -1)
                 digest: jet_cli_core_record_digest(bytes)
                 names := [String]{JET_CLI_CORE_RECORD_PART}
                 payloads := [[U8]]{bytes}
@@ -103,12 +113,15 @@ jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> Jet
                 record_files.write_bytes(out, shipped) ?? return jet_cli_maintenance_error("E2105", "couldn't write the executable `{out}`: {jet_cli_io_error_text(err)}", None, color, json)
                 record_files.set_mode(out, JET_CLI_CORE_RECORD_IMAGE_MODE) ?? return jet_cli_maintenance_error("E2105", "couldn't make `{out}` executable: {jet_cli_io_error_text(err)}", None, color, json)
                 record_files.write(identity_file, "{identity}\n") ?? return jet_cli_maintenance_error("E2105", "couldn't write the identity `{identity_file}`: {jet_cli_io_error_text(err)}", None, color, json)
+                if trace_sink == .Val(sink) -> sink.end("core_record.embed", shipped.len())
                 return JetDriverVerbOutput{stdout: "core-record embed: {out}: {jet_cli_core_record_counts(counts)} as part `{JET_CLI_CORE_RECORD_PART}`, sha256 {digest}, {JET_CLI_RUNTIME_PART_FILES.len()} runtime parts from {runtime_dir}, identity {identity}, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
             }
             file: args[1]
             record_files.write_bytes(file, bytes) ?? return jet_cli_maintenance_error("E2105", "couldn't write the Core record `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
             stored: record_files.read_bytes(file) ?? return jet_cli_maintenance_error("E2105", "couldn't read the Core record `{file}` back: {jet_cli_io_error_text(err)}", None, color, json)
+            if trace_sink == .Val(sink) -> sink.begin("core_record.read_back", "", -1, -1)
             counts: jet_driver_core_record_round_trip(stored, jet_cli_core_record_threads()) ?? return jet_cli_ice("the Core record `{file}` doesn't read back: {err}")
+            if trace_sink == .Val(sink) -> sink.end("core_record.read_back", counts.bodies)
             JetDriverVerbOutput{stdout: "core-record write: {file}: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(stored)}, every row read back and encoded to the same tree, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         }
     }
@@ -124,15 +137,15 @@ jet_cli_core_record_threads: fn() -> CompilerThreads {
 // code library (CoreLibrary.jet jet_cli_core_library) start from: the Core
 // entry (jet_cli_core_check_source) written to a scratch directory and
 // compiled with every Core body checked, stopped right before lowering,
-// with the compiler identity and target the record names; else the output
-// that ends the route (the diagnostics that keep Core from checking clean,
-// a refusal, an internal problem).
+// with the compiler identity and target the record names, its phases traced
+// to `trace_sink`; else the output that ends the route (the diagnostics that
+// keep Core from checking clean, a refusal, an internal problem).
 JetCLICoreChecked: enum {
     Checked(inputs: JetDriverLoweringInputs, compiler: String, target: String)
     Stopped(output: JetDriverVerbOutput)
 }
 
-jet_cli_core_checked: fn(color: Bool, json: Bool) -> JetCLICoreChecked {
+jet_cli_core_checked: fn(color: Bool, json: Bool, trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
     // The compiler build's `core-record` step runs the `jet-bare` it just
     // linked, which is given no `JET_COMPILER_IDENTITY` (a made tool's step
     // is given none). Unset, this jet is named by its identity part, else
@@ -164,6 +177,7 @@ jet_cli_core_checked: fn(color: Bool, json: Bool) -> JetCLICoreChecked {
         .Prepared(request, snapshot) -> {
             selected := request
             selected.every_core_body = true
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             compiler: selected.host_facts.compiler_identity ?? ""
             target: selected.host_facts.target_triple ?? ""
             front := jet_driver_lowering_inputs(selected, None)
