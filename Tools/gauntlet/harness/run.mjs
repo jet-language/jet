@@ -4701,7 +4701,13 @@ async function dryRun(options, matrix, entriesDir) {
   const counts = {};
   for (const cell of cells) counts[cell.status] = (counts[cell.status] ?? 0) + 1;
   console.log(`dry-run\tentries ${loaded.length}\tpeers ${policy.peers.length}+${policy.ceiling}\tmetrics 5\tcells ${cells.length}\t${Object.entries(counts).map(([status, count]) => `${status} ${count}`).join(", ")}\ttool entries ${tools.length} (judged by PortBars, not standings)`);
-  if (policy.issues.length) process.exitCode = 1;
+  // A dry run is the proof a program or manifest change reads: an invalid
+  // entry.json, or a named entry that does not exist, fails it.
+  const invalid = skipped.filter((item) => item.reason?.startsWith("invalid entry.json"));
+  for (const item of invalid) console.error(`dry-run: ${item.name}: ${item.reason}`);
+  const missing = options.entry && loaded.length === 0 && tools.length === 0 && skipped.length === 0;
+  if (missing) console.error(`dry-run: no entry named ${options.entry} under ${entriesDir}`);
+  if (policy.issues.length || invalid.length || missing) process.exitCode = 1;
 }
 
 async function main() {
