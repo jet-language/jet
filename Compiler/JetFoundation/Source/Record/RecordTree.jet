@@ -32,7 +32,11 @@
 // Each of the three tables is two `Bytes` elements of one record section:
 // the end of each entry as a little-endian u32 (entry `n` starts where entry
 // `n - 1` ends), then the entries back to back. A shape entry is its key
-// string ids (uvarints) and a node entry one item. The string table's entry
+// string ids (uvarints). The node table's entry is a block of
+// RECORD_TREE_NODE_BLOCK nodes (the last block may hold fewer), node `n` the
+// `n % RECORD_TREE_NODE_BLOCK`th of block `n / RECORD_TREE_NODE_BLOCK`, each
+// node its item's uvarint length and its item, so a reader steps over the
+// nodes before it by their lengths. The string table's entry
 // is a block of RECORD_TREE_STRING_BLOCK strings (the last block may hold
 // fewer), string `n` the `n % RECORD_TREE_STRING_BLOCK`th of block
 // `n / RECORD_TREE_STRING_BLOCK`: the block's first string as its uvarint
@@ -66,6 +70,10 @@ RECORD_TREE_INITIAL_SLOTS: 1024
 // A string block's size, 1 << RECORD_TREE_STRING_BLOCK_BITS.
 RECORD_TREE_STRING_BLOCK: 16
 RECORD_TREE_STRING_BLOCK_BITS: 4
+// A node block's size, 1 << RECORD_TREE_NODE_BLOCK_BITS: the node table
+// keeps one u32 end per block instead of one per node.
+RECORD_TREE_NODE_BLOCK: 32
+RECORD_TREE_NODE_BLOCK_BITS: 5
 RECORD_TREE_HOT_STRINGS: 16384
 
 // Interned byte strings: each distinct one stored once, back to back, and
@@ -272,10 +280,14 @@ record_tree_tables: fn(writer: &&RecordTreeWriter, sections: [[[U8]]]) -> Record
     layout: record_tree_layout(writer, sections)
     node_ends := [Int]{}
     node_data := [U8]{}
-    loop id in layout.order {
-        record_tree_emit_node(writer, layout, id, node_data)
-        node_ends.push(node_data.len())
+    loop (position, id) in layout.order {
+        if position > 0 && position % RECORD_TREE_NODE_BLOCK == 0 -> node_ends.push(node_data.len())
+        entry := [U8]{}
+        record_tree_emit_node(writer, layout, id, entry)
+        record_put_uvarint(node_data, entry.len())
+        node_data.extend(entry)
     }
+    if layout.order.len() > 0 -> node_ends.push(node_data.len())
     rows := [[RecordValue]]{}
     loop section in sections {
         written := [RecordValue]{}
@@ -599,6 +611,26 @@ record_tree_entry: fn(bytes: [U8], column: RecordTreeColumn, id: Int, cursor: &R
     RecordCursor{at: column.data + start, end: column.data + end, problem: None}
 }
 
+// A cursor over node `id`'s item: its block, past the nodes before it in
+// the block; a bad id or block is a problem of `cursor`.
+record_tree_node: fn(bytes: [U8], column: RecordTreeColumn, id: Int, cursor: &RecordCursor) -> RecordCursor Never! {
+    block := record_tree_entry(bytes, column, id >> RECORD_TREE_NODE_BLOCK_BITS, cursor)
+    if cursor.problem != None -> return block
+    loop _ in 0..<id.bit_and(RECORD_TREE_NODE_BLOCK - 1) {
+        if block.at >= block.end -> break
+        len: record_read_len(bytes, block)
+        if block.problem != None -> break
+        block.at += len
+    }
+    if block.problem == None && block.at >= block.end -> record_malformed(block, "tree node {id} is out of range")
+    len: if block.problem == None -> record_read_len(bytes, block) else -> 0
+    if block.problem != None {
+        cursor.problem = block.problem.move()
+        return RecordCursor{at: 0, end: 0, problem: cursor.problem}
+    }
+    RecordCursor{at: block.at, end: block.at + len, problem: None}
+}
+
 // String `id`: the first string of its block, then each later one in turn
 // from the bytes it shares with the one before it.
 record_tree_string: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &RecordCursor) -> String Never! {
@@ -671,7 +703,7 @@ record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, d
             Dyn.Object(entries)
         }
         RECORD_TREE_NODE -> {
-            inner := record_tree_entry(bytes, view.nodes, record_read_uvarint(bytes, cursor), cursor)
+            inner := record_tree_node(bytes, view.nodes, record_read_uvarint(bytes, cursor), cursor)
             if cursor.problem != None -> return Dyn.Null
             value: record_tree_read(bytes, view, inner, depth + 1)
             if inner.problem == None && inner.at != inner.end -> record_malformed(inner, "tree node has trailing bytes")

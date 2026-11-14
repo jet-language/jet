@@ -1,16 +1,20 @@
 // Assemble with the Compiler source unit. A Core record written from a real
 // check (every Core body of the Prelude, as `jet self devtools core-record`
 // checks it) decodes: each row reads back from its record tree (JetFoundation
-// RecordTree.jet) and encodes to the tree it was read from, and it holds
-// every comptime value the check landed on a Core module.
+// RecordTree.jet) and encodes to the tree it was read from, it holds every
+// comptime value the check landed on a Core module, and each symbol range
+// reads back with the keys the check reserved.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_module,
-        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_values, jet_driver_core_record_write,
+        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
+        jet_driver_core_record_symbol_rows, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
+    jet_foundation.[ModuleID, symbol_keys, symbol_keys_intern]
+    jet_sema.[sema_registration_reserved_symbols]
 }
 
 core_record_rows_request: fn() -> JetDriverCompileRequest {
@@ -36,9 +40,13 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     assert(!jet_driver_has_errors(front.compile.diagnostics))
     inputs := front.inputs.move() ?? panic("the check stopped before lowering")
     core_modules := [U32:Bool]{}
+    recorded := [ModuleID]{}
     loop module_row in inputs.modules {
-        if module_row.module_identity != inputs.entry_module_identity -> core_modules[module_row.module_identity.id] = true
+        if module_row.module_identity == inputs.entry_module_identity -> next
+        core_modules[module_row.module_identity.id] = true
+        recorded.push(module_row.module_identity)
     }
+    reserved: sema_registration_reserved_symbols(inputs.symbols, recorded)
     landed := 0
     loop value in inputs.comptime_values {
         if core_modules.get(value.module_identity.id) != None -> landed += 1
@@ -61,4 +69,30 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
         held += values.len()
     }
     assert_eq(held, landed)
+    assert_eq(record.symbols.len(), reserved.len())
+    loop (index, keys) in reserved {
+        assert_eq(record.symbols[index].base, keys.base)
+        assert(record.symbols[index].keys.texts == keys.keys.texts)
+    }
+}
+
+#Test("symbol keys read back from their parts") {
+    keys := symbol_keys(100, 120)
+    texts: [String]{
+        "type:<corelib>/app::AppError",
+        "impl:<corelib>/app:type:<corelib>/app::AppError:AppError::Equatable<AppError>",
+        "function:<corelib>/app:impl:<corelib>/app:type:<corelib>/app::AppError:AppError::Equatable<AppError>:equal",
+        "parameter:<corelib>/app:function:<corelib>/app:impl:<corelib>/app:type:<corelib>/app::AppError:AppError::Equatable<AppError>:equal:self",
+        "function::Display:display",
+        "trait:::Add",
+        "module:<corelib>/text::",
+    }
+    loop text in texts -> _: symbol_keys_intern(keys, text)
+    rows: jet_driver_core_record_symbol_rows(keys) ?? panic("the keys don't split: {err}")
+    assert_eq(rows.owners, [String]{"Display"})
+    assert_eq(rows.names[3], "self")
+    read := symbol_keys(100, 120)
+    count: jet_driver_core_record_symbol_keys(read, rows, 100) ?? panic("the keys don't read back: {err}")
+    assert_eq(count, texts.len())
+    assert(read.keys.texts == keys.keys.texts)
 }

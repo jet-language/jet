@@ -101,13 +101,34 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
 #Test("a record tree stores a repeated subtree once and writes a single use in place") {
     tables: record_tree_test_tables(record_tree_test_rows())
     // The `push` symbol (three uses) and the span both symbols share are
-    // stored; the `pop` symbol and every scalar are written in place.
-    if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 8) else -> panic("the node end column is bytes")
+    // stored, in one node block; the `pop` symbol and every scalar are
+    // written in place.
+    if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 4) else -> panic("the node end column is bytes")
     // The most named node takes the first id: the `push` symbol (three node
     // items) before its span (two), though the span was interned first.
     if tables.rows[0][0] == .Bytes(row) -> assert_eq(row.slice(0, 6), [U8]{7, 3, 9, 0, 9, 0}) else -> panic("a tree row is bytes")
     again: record_tree_test_tables(record_tree_test_rows())
     assert(again.nodes == tables.nodes && again.rows == tables.rows && again.strings == tables.strings && again.shapes == tables.shapes)
+}
+
+#Test("a record tree reads back each stored node of a full node block and the blocks after it") {
+    // 70 distinct subtrees, each named twice: three node blocks, the last
+    // one part full.
+    pairs := [Dyn]{}
+    loop index in 0..<70 {
+        pair: Dyn.Array([Dyn]{Dyn.Int(index), Dyn.Text("node/{index}")})
+        pairs.push(pair.copy())
+        pairs.push(pair)
+    }
+    rows: [Dyn]{Dyn.Array(pairs)}
+    tables := record_tree_test_tables(rows)
+    assert_eq(tables.problem, None)
+    if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 12) else -> panic("the node end column is bytes")
+    reader: record_tree_test_reader(tables.move(), false)
+    view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
+    read: record_tree_row(reader, view, 1, 0)
+    assert_eq(read.problem, None)
+    assert_eq(record_tree_difference(read.value ?? panic("the row reads"), rows[0]), None)
 }
 
 #Test("a record tree difference names the first path where two trees differ") {

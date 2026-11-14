@@ -1,4 +1,4 @@
-// The precompiled Core record, schema `jet.core/v8`: Core and the Prelude
+// The precompiled Core record, schema `jet.core/v9`: Core and the Prelude
 // checked alone as one closed program (`jet self devtools core-record`), in
 // the compiler's one record format (JetFoundation RecordCodec.jet). Each row
 // element is a record tree row (JetFoundation RecordTree.jet) of a checked
@@ -48,20 +48,22 @@
 //     other module's bare): its ModuleID (0 for a serial range), base and
 //     bound, in base order
 //  11 symbol keys: the keys of each range of section 10, row 1 onward, so
-//     each SymbolID a row names is the compile's id for the same key
+//     each SymbolID a row names is the compile's id for the same key; one
+//     tree row per range (JetDriverCoreRecordSymbolRows), each key as its
+//     parts, an owner that is an earlier key of the range named by its row
 //  12 tree strings, 13 tree shapes, 14 tree nodes: the tables the rows of
-//     sections 3 and 5 to 8 name (RecordTree.jet)
+//     sections 3, 5 to 8 and 11 name (RecordTree.jet)
 // A row names another module by its module key position (section 2), not by
 // the check's graph index, and a body names declarations by section 7's
 // rows; a graph that takes a row rebases its module indexes
 // (CoreRecordRebase.jet), and sema rebases a taken body's DeclIDs (JetSema
 // CoreRecordBodies.jet).
 use {
-    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordReaderResult, RecordSection, RecordTreeView, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_open_schema_trusted, record_section_elements, record_section_index, record_tree_add, record_tree_difference, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer, record_value_as_bool, record_value_as_int, record_value_as_list, record_value_as_str, record_value_field, symbol_keys, symbol_keys_intern]
+    jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordReaderResult, RecordSection, RecordTreeView, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_open_schema_trusted, record_section_elements, record_section_index, record_tree_add, record_tree_difference, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer, record_value_as_bool, record_value_as_int, record_value_as_str, record_value_field, symbol_keys, symbol_keys_find, symbol_keys_intern]
     jet_sema.[SemaComptimeFunctionResult, SemaComptimeItemValue, SemaGraphModuleResult, SemaRegistrationExport, SemaRegistrationModule, sema_core_body_packet_stored, sema_core_body_packets, sema_core_record_field_errors, sema_incremental_optional_item_header, sema_registration_reserved_symbols]
 }
 
-JET_CORE_RECORD_SCHEMA: "jet.core/v8"
+JET_CORE_RECORD_SCHEMA: "jet.core/v9"
 JET_CORE_RECORD_HEADER: 1
 JET_CORE_RECORD_MODULE_KEYS: 2
 JET_CORE_RECORD_MODULE_ROWS: 3
@@ -118,6 +120,123 @@ JetDriverCoreRecordSectionSize: struct {
     elements: Int
     bytes: Int
     largest: Int
+}
+
+// The keys of one symbol range (section 11), in row order. A key is
+// `kind:module:owner:name` (Types.jet symbol_key_text), and its owner is most
+// often an earlier key of its own range (a parameter's function, a method's
+// impl, an impl's type), so a key names that key's row instead of spelling
+// it again; each text the parts hold is the tree string table's.
+JetDriverCoreRecordSymbolRows: struct {
+    // The distinct kind and module texts of the range's keys.
+    kinds: [String]
+    modules: [String]
+    kind_bits: Int
+    module_bits: Int
+    // Each key's owner, module and kind, packed as
+    // `owner << (module_bits + kind_bits) + module << kind_bits + kind`: its
+    // owner is 0 for none, 1 for the next text of `owners`, and `r + 2` for
+    // the key of row `r`, an earlier row.
+    codes: [Int]
+    owners: [String]
+    names: [String]
+}
+
+// The bits an index below `count` takes.
+jet_driver_core_record_bits: fn(count: Int) -> Int Never! {
+    bits := 0
+    loop count > 1 << bits -> bits += 1
+    bits
+}
+
+// The position of `text` in `texts`, appended when it is new.
+jet_driver_core_record_text_slot: fn(texts: &[String], text: String) -> Int Never! {
+    loop (index, known) in texts {
+        if known == text -> return index
+    }
+    texts.push(text.copy())
+    texts.len() - 1
+}
+
+// The keys of `keys`, row 1 onward, as their parts. A key's owner is the
+// longest earlier key of the range that, with a `:`, begins the text after
+// its module; a key with none spells its owner, or has none.
+jet_driver_core_record_symbol_rows: fn(keys: SymbolKeys) -> JetDriverCoreRecordSymbolRows Err! {
+    rows := JetDriverCoreRecordSymbolRows{kinds: [String]{}, modules: [String]{}, kind_bits: 0, module_bits: 0, codes: [Int]{}, owners: [String]{}, names: [String]{}}
+    kind_at := [Int]{}
+    module_at := [Int]{}
+    owner_at := [Int]{}
+    loop row in 1..<keys.keys.texts.len() {
+        text: keys.keys.texts[row]
+        kind: text.split_once(":") ?? return Err("the symbol key `{text}` has no kind")
+        place: kind.after.split_once(":") ?? return Err("the symbol key `{text}` has no module")
+        rest: place.after
+        kind_at.push(jet_driver_core_record_text_slot(rows.kinds, kind.before))
+        module_at.push(jet_driver_core_record_text_slot(rows.modules, place.before))
+        if rest.starts_with(":") {
+            owner_at.push(0)
+            rows.names.push(rest.slice(1, rest.len()))
+            next
+        }
+        owner := -1
+        name := ""
+        prefix := ""
+        remainder := rest
+        loop {
+            parts: remainder.split_once(":") ?? break
+            prefix = if prefix == "" -> parts.before else -> "{prefix}:{parts.before}"
+            remainder = parts.after
+            found: symbol_keys_find(keys, prefix) ?? next
+            at: Int{found.id} - keys.base
+            if at >= 1 && at < row {
+                owner = at - 1
+                name = remainder
+            }
+        }
+        if owner >= 0 {
+            owner_at.push(owner + 2)
+            rows.names.push(name)
+            next
+        }
+        spelled: rest.split_once(":") ?? return Err("the symbol key `{text}` has no owner")
+        owner_at.push(1)
+        rows.owners.push(spelled.before)
+        rows.names.push(spelled.after)
+    }
+    rows.kind_bits = jet_driver_core_record_bits(rows.kinds.len())
+    rows.module_bits = jet_driver_core_record_bits(rows.modules.len())
+    loop (row, owner) in owner_at -> rows.codes.push((owner << (rows.module_bits + rows.kind_bits)) + (module_at[row] << rows.kind_bits) + kind_at[row])
+    Ok(rows)
+}
+
+// Interns the keys `rows` spells into `keys`, row 1 onward; `base` names the
+// range in a problem.
+jet_driver_core_record_symbol_keys: fn(keys: &SymbolKeys, rows: JetDriverCoreRecordSymbolRows, base: Int) -> Int Err! {
+    if rows.codes.len() != rows.names.len() -> return Err("the Core record's symbol range at {base} has {rows.codes.len()} key codes but {rows.names.len()} names")
+    if rows.codes.len() >= keys.bound -> return Err("the Core record's symbol range at {base} holds {rows.codes.len()} keys, past its bound {keys.bound}")
+    kind_mask: (1 << rows.kind_bits) - 1
+    module_mask: (1 << rows.module_bits) - 1
+    owner_shift: rows.module_bits + rows.kind_bits
+    spelled := 0
+    loop (row, code) in rows.codes {
+        kind: code.bit_and(kind_mask)
+        place: (code >> rows.kind_bits).bit_and(module_mask)
+        owner: code >> owner_shift
+        if code < 0 || kind >= rows.kinds.len() || place >= rows.modules.len() || owner >= row + 2 || (owner == 1 && spelled >= rows.owners.len()) -> return Err("the Core record's symbol key {row} of the range at {base} has a code ({code}) its parts don't hold")
+        owner_text := ""
+        if {
+            owner == 1 -> {
+                owner_text = rows.owners[spelled]
+                spelled += 1
+            }
+            owner >= 2 -> owner_text = keys.keys.texts[owner - 1]
+            else -> {}
+        }
+        symbol: "{rows.kinds[kind]}:{rows.modules[place]}:{owner_text}:{rows.names[row]}"
+        if (Int{symbol_keys_intern(keys, symbol).id}) != base + row + 1 -> return Err("the Core record's symbol range at {base} holds `{symbol}` twice")
+    }
+    if spelled != rows.owners.len() -> return Err("the Core record's symbol range at {base} spells {rows.owners.len()} owners but its keys name {spelled}")
+    Ok(rows.codes.len())
 }
 
 // `exports` with each declaration as its header: callable bodies left out,
@@ -275,15 +394,15 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
     // each with its keys (sections 10 and 11).
     recorded: loop index in module_order -> inputs.modules[index].module_identity
     symbol_ranges := [RecordValue]{}
-    symbol_keys := [RecordValue]{}
+    symbol_rows := [[U8]]{}
     loop range in sema_registration_reserved_symbols(inputs.symbols, recorded) {
         symbol_ranges.push(RecordValue.Map{fields: [RecordField]{
             RecordField{name: "module", value: RecordValue.Int{value: Int{range.module_identity.id}}},
             RecordField{name: "base", value: RecordValue.Int{value: range.base}},
             RecordField{name: "bound", value: RecordValue.Int{value: range.bound}},
         }})
-        keys: loop row in 1..<range.keys.texts.len() -> RecordValue.Str{value: range.keys.texts[row].copy()}
-        symbol_keys.push(RecordValue.List{values: keys})
+        rows: jet_driver_core_record_symbol_rows(range) ?? return Err(err)
+        symbol_rows.push(record_tree_add(writer, rows.encode()))
     }
     decls: decl_rows.len()
     header: RecordValue.Map{fields: [RecordField]{
@@ -295,9 +414,10 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordField{name: "decls", value: RecordValue.Int{value: decls}},
         RecordField{name: "values", value: RecordValue.Int{value: core_values}},
     }}
-    tables := record_tree_tables(writer.move(), [[[U8]]]{module_rows.move(), body_rows.move(), registration_rows.move(), decl_rows.move(), value_rows.move()})
+    tables := record_tree_tables(writer.move(), [[[U8]]]{module_rows.move(), body_rows.move(), registration_rows.move(), decl_rows.move(), value_rows.move(), symbol_rows.move()})
     if tables.problem == .Val(problem) -> return Err("the Core record's rows have no tree form: {problem}")
     // Taken back in the reverse of the order they went in.
+    symbol_elements: tables.rows.pop() ?? [RecordValue]{}
     value_elements: tables.rows.pop() ?? [RecordValue]{}
     decl_elements: tables.rows.pop() ?? [RecordValue]{}
     registration_elements: tables.rows.pop() ?? [RecordValue]{}
@@ -314,7 +434,7 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordSection{id: JET_CORE_RECORD_VALUE_ROWS, elements: value_elements.move()},
         RecordSection{id: JET_CORE_RECORD_MODULE_TABLE, elements: table_rows},
         RecordSection{id: JET_CORE_RECORD_SYMBOL_RANGES, elements: symbol_ranges.move()},
-        RecordSection{id: JET_CORE_RECORD_SYMBOL_KEYS, elements: symbol_keys.move()},
+        RecordSection{id: JET_CORE_RECORD_SYMBOL_KEYS, elements: symbol_elements.move()},
         RecordSection{id: JET_CORE_RECORD_TREE_STRINGS, elements: tables.strings.move()},
         RecordSection{id: JET_CORE_RECORD_TREE_SHAPES, elements: tables.shapes.move()},
         RecordSection{id: JET_CORE_RECORD_TREE_NODES, elements: tables.nodes.move()},
@@ -349,9 +469,9 @@ jet_driver_core_record_digest: fn(inputs: JetDriverLoweringInputs, entry_file: S
     record_key_digest(fields)
 }
 
-// Opens a `jet.core/v8` record: the format and checksum are verified, and
-// the header, both key sections, the module table and the symbol ranges are
-// read, and the tree tables placed. No row is decoded.
+// Opens a `jet.core/v9` record: the format and checksum are verified, and
+// the header, both key sections, the module table, the symbol ranges and
+// their keys are read, and the tree tables placed. No other row is decoded.
 jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
     jet_driver_core_record_read(record_open_schema(bytes, JET_CORE_RECORD_SCHEMA))
 }
@@ -415,15 +535,9 @@ jet_driver_core_record_read: fn(opened: RecordReaderResult) -> JetDriverCoreReco
         bound: jet_driver_core_record_int(range, "bound") ?? return Err(err)
         keys := symbol_keys(base, bound)
         keys.module_identity = ModuleID{id: checked(U32{owner}) ?? return Err("the Core record's symbol range at {base} names no module id ({owner})")}
-        listed: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_SYMBOL_KEYS, index) ?? return Err(err)
-        list: record_value_as_list(listed)
-        texts: list.value ?? return Err(list.problem ?? "the Core record's symbol keys of the range at {base} are not a list")
-        if texts.len() >= bound -> return Err("the Core record's symbol range at {base} holds {texts.len()} keys, past its bound {bound}")
-        loop (row, value) in texts {
-            text: record_value_as_str(value)
-            symbol: text.value ?? return Err(text.problem ?? "the Core record's symbol key {row} of the range at {base} is not text")
-            if (Int{symbol_keys_intern(keys, symbol).id}) != base + row + 1 -> return Err("the Core record's symbol range at {base} holds `{symbol}` twice")
-        }
+        listed: jet_driver_core_record_tree(record, JET_CORE_RECORD_SYMBOL_KEYS, index) ?? return Err(err)
+        rows: listed.decode<JetDriverCoreRecordSymbolRows>() ?? return Err("the Core record's symbol keys of the range at {base} don't decode: {sema_core_record_field_errors(err)}")
+        _: jet_driver_core_record_symbol_keys(keys, rows, base) ?? return Err(err)
         record.symbols.push(keys)
     }
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of module rows")
@@ -557,6 +671,11 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
         values += module_values.len()
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_VALUE_ROWS, index) ?? return Err(err)
         if record_tree_difference(module_values.encode(), stored) == .Val(difference) -> return Err("Core module `{record.module_names[index]}`'s value rows encode to another tree after a read, at rows{difference}")
+    }
+    loop index in 0..<record.symbols.len() {
+        stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_SYMBOL_KEYS, index) ?? return Err(err)
+        rows: stored.decode<JetDriverCoreRecordSymbolRows>() ?? return Err("the Core record's symbol keys of range {index} don't decode: {sema_core_record_field_errors(err)}")
+        if record_tree_difference(rows.encode(), stored) == .Val(difference) -> return Err("the Core record's symbol keys of range {index} encode to another tree after a read, at rows{difference}")
     }
     Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), registrations: record.module_names.len(), decls: decls, values: values, bytes: bytes.len(), sections: jet_driver_core_record_section_sizes(record.reader)})
 }
