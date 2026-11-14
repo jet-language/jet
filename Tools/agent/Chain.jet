@@ -1067,12 +1067,11 @@ Chain: struct {
     started: Int
 }
 
-// Free GB of the file system holding `path`, 0 when unknown.
-free_gb: fn(path: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
-    receipt: process.cmd([String]{"df", "--output=avail", "-BG", path.copy()}).run() ?? return 0
-    lines: receipt.output.trim().split("\n").to_list()
-    if lines.len() < 2 -> return 0
-    Int.parse(lines[1].trim().removesuffix("G")) ?? 0
+// Whole GiB a program may still fill on the file system holding `path`; 0
+// when it cannot be read.
+free_gb: fn(path: String) -[FS]> Int Never! {
+    room: files.space(path) ?? return 0
+    room.available /% (1024 * 1024 * 1024)
 }
 
 // `TREE LEVEL|--auto ...`, or `seed-published INSTALL_DIR` when `seedpub`
