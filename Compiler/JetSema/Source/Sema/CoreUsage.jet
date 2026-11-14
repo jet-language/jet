@@ -51,6 +51,13 @@ use jet_foundation.[
     ModuleTable,
     module_is_core,
     module_text,
+    NameTable,
+    name_count,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
+    name_table_sized,
 ]
 
 SemaCoreImport: struct {
@@ -167,23 +174,23 @@ sema_core_generated_shadow_marker: fn(name: String) -> String Never! {
 // Generated-context markers share the module's registered-name set: every
 // marker starts with `__core_generated::`, which no source type name can, so
 // one set answers both the type-name and the marker questions.
-sema_core_generated_marker_add: fn(markers: &[String:Bool], marker: String) Never! {
-    markers[marker] = true
+sema_core_generated_marker_add: fn(markers: &NameTable, marker: String) Never! {
+    _ := name_intern(markers, marker)
 }
 
-sema_core_generated_marker_has: fn(markers: [String:Bool], marker: String) -> Bool Never! {
-    markers.get(marker) != None
+sema_core_generated_marker_has: fn(markers: NameTable, marker: String) -> Bool Never! {
+    sema_core_set_has(markers, marker)
 }
 
-sema_core_generated_type_marked: fn(markers: [String:Bool], source_name: String, module_name: String, type_name: String) -> Bool Never! {
+sema_core_generated_type_marked: fn(markers: NameTable, source_name: String, module_name: String, type_name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_type_marker(source_name, module_name, type_name))
 }
 
-sema_core_generated_constructor_marked: fn(markers: [String:Bool], source_name: String) -> Bool Never! {
+sema_core_generated_constructor_marked: fn(markers: NameTable, source_name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_constructor_marker(source_name))
 }
 
-sema_core_generated_shadowed: fn(markers: [String:Bool], name: String) -> Bool Never! {
+sema_core_generated_shadowed: fn(markers: NameTable, name: String) -> Bool Never! {
     sema_core_generated_marker_has(markers, sema_core_generated_shadow_marker(name))
 }
 
@@ -202,13 +209,13 @@ sema_core_generated_core_type: fn(module_name: String, type_name: String) -> Boo
     }
 }
 
-sema_core_generated_register_core_name: fn(markers: &[String:Bool], source_name: String, module_name: String, type_name: String) Never! {
+sema_core_generated_register_core_name: fn(markers: &NameTable, source_name: String, module_name: String, type_name: String) Never! {
     if !sema_core_generated_core_type(module_name, type_name) -> return
     sema_core_generated_marker_add(markers, sema_core_generated_type_marker(source_name, module_name, type_name))
     if type_name == "Cell" -> sema_core_generated_marker_add(markers, sema_core_generated_constructor_marker(source_name))
 }
 
-sema_core_generated_register_core_alias: fn(markers: &[String:Bool], alias: String, module_name: String) Never! {
+sema_core_generated_register_core_alias: fn(markers: &NameTable, alias: String, module_name: String) Never! {
     if !sema_core_generated_core_module(module_name) -> return
     loop type_name in ([String]{"Pool", "Cell", "ID", "Vec", "Matrix"}) {
         if sema_core_generated_core_type(module_name, type_name) {
@@ -218,12 +225,12 @@ sema_core_generated_register_core_alias: fn(markers: &[String:Bool], alias: Stri
     }
 }
 
-sema_core_generated_register_core_qualified: fn(markers: &[String:Bool], module_name: String, type_name: String) Never! {
+sema_core_generated_register_core_qualified: fn(markers: &NameTable, module_name: String, type_name: String) Never! {
     sema_core_generated_register_core_name(markers, "{module_name}.{type_name}", module_name, type_name)
     sema_core_generated_register_core_name(markers, "{module_name}::{type_name}", module_name, type_name)
 }
 
-sema_core_generated_register_unqualified: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String:Bool], module_name: String, type_name: String) Never! {
+sema_core_generated_register_unqualified: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &NameTable, module_name: String, type_name: String) Never! {
     resolved := sema_registration_lookup_name(graph, registration_module.module_identity, type_name)
     if resolved != None {
         row: resolved ?? return
@@ -244,7 +251,7 @@ sema_core_generated_register_unqualified: fn(graph: SemaRegistrationGraph, regis
     sema_core_generated_register_core_name(markers, type_name, module_name, type_name)
 }
 
-sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegistrationImport, table: ModuleTable) Never! {
+sema_core_generated_register_import: fn(markers: &NameTable, row: SemaRegistrationImport, table: ModuleTable) Never! {
     target := module_text(table, row.target_module_identity)
     if target == "" {
         if row.declaration.kind == {
@@ -279,7 +286,7 @@ sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegist
     }
 }
 
-sema_core_generated_context_markers: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &[String:Bool]) Never! {
+sema_core_generated_context_markers: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, markers: &NameTable) Never! {
     sema_core_generated_marker_add(markers, sema_core_generated_context_marker("shared"))
     loop nominal in registration_module.nominals -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(nominal.symbol.name))
     if !sema_core_generated_shadowed(markers, "Shared") -> sema_core_generated_marker_add(markers, sema_core_generated_constructor_marker("Shared"))
@@ -293,7 +300,7 @@ sema_core_generated_context_markers: fn(graph: SemaRegistrationGraph, registrati
     loop owner in registration_module.namespace_bindings -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(graph.modules[owner.module_index].symbols[owner.row].name))
 }
 
-sema_core_generated_scope_shadow_items: fn(items: [Item], markers: &[String:Bool]) Never! {
+sema_core_generated_scope_shadow_items: fn(items: [Item], markers: &NameTable) Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(definition.name))
@@ -306,7 +313,7 @@ sema_core_generated_scope_shadow_items: fn(items: [Item], markers: &[String:Bool
     }
 }
 
-sema_core_generated_scope_import_markers: fn(declarations: [ImportDecl], markers: &[String:Bool]) Never! {
+sema_core_generated_scope_import_markers: fn(declarations: [ImportDecl], markers: &NameTable) Never! {
     loop declaration in declarations {
         if declaration.kind == {
             .Module(name, _) -> {
@@ -392,8 +399,14 @@ sema_core_import_find: fn(imports: [SemaCoreImport], alias: String) -> SemaCoreI
     None
 }
 
-sema_core_registered_type: fn(types: [String:Bool], name: String) -> Bool Never! {
-    types.get(name) != None
+sema_core_registered_type: fn(types: NameTable, name: String) -> Bool Never! {
+    sema_core_set_has(types, name)
+}
+
+// Whether `set` holds `text`: a set is a NameTable whose members are its
+// interned spellings. Id 0, the empty spelling, is never a member.
+sema_core_set_has: fn(set: NameTable, text: String) -> Bool Never! {
+    name_index(name_find(set, text) ?? return false) > 0
 }
 
 sema_core_note_usage: fn(used: &[String], spans: &[SemaCoreUsageSpan], usage: String, span: Span?) Never! {
@@ -525,7 +538,7 @@ sema_expand_core_reachable_closure: fn(roots: [String], layer: &RuntimeLayer) ->
     used
 }
 
-sema_core_note_builtin_math_type: fn(name: String, registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+sema_core_note_builtin_math_type: fn(name: String, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if sema_core_registered_type(registered, name) -> return
     if sema_core_is_math_type(name) || sema_core_is_geometry_type(name) {
         sema_core_note_usage(used, spans, "core.math::__mathtypes__", span)
@@ -583,7 +596,7 @@ sema_core_is_data_type: fn(name: String) -> Bool Never! {
     }
 }
 
-sema_core_note_type_modules: fn(name: String, registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+sema_core_note_type_modules: fn(name: String, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if sema_core_registered_type(registered, name) -> return
     loop module_name in core_type_modules(name) {
         sema_core_note_usage(used, spans, "{module_name}::__type__", span)
@@ -594,7 +607,7 @@ sema_core_note_type_modules: fn(name: String, registered: [String:Bool], used: &
     if leaf == "Ptr" -> sema_core_note_usage(used, spans, "core.mem::__type__", span)
 }
 
-sema_core_collect_type: fn(ty: Type, registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
+sema_core_collect_type: fn(ty: Type, registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], span: Span?) Never! {
     if ty == {
         .Named(name) -> {
             sema_core_note_type_modules(name, registered, used, spans, span)
@@ -668,14 +681,14 @@ sema_core_is_internal_task_key: fn(name: String, suffix: String) -> Bool Never! 
     true
 }
 
-sema_core_collect_params: fn(params: [Param], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_params: fn(params: [Param], imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop parameter in params {
         sema_core_collect_type(parameter.ty, registered, used, spans, Val(parameter.ty_span))
         if parameter.default != None -> sema_core_collect_expr(parameter.default ?? Expr.Unit{span: parameter.name_span, id: AST_NODE_GENERATED}, imports, registered, used, spans, callbacks)
     }
 }
 
-sema_core_collect_func_signature: fn(function: Func, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_func_signature: fn(function: Func, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop marker in function.markers {
         if marker.name == MARKER_SCALAR -> sema_core_note_usage(used, spans, "core.math::__mathtypes__", Val(function.name_span))
     }
@@ -683,7 +696,7 @@ sema_core_collect_func_signature: fn(function: Func, imports: [SemaCoreImport], 
     if function.return_type != None -> sema_core_collect_type(function.return_type ?? Type.Named{name: "Unit"}, registered, used, spans, function.return_type_span)
 }
 
-sema_core_collect_func: fn(function: Func, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_func: fn(function: Func, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_func_signature(function, imports, registered, used, spans, callbacks)
     sema_core_collect_stmts(function.body, imports, registered, used, spans, callbacks)
 }
@@ -694,7 +707,7 @@ sema_core_collect_func: fn(function: Func, imports: [SemaCoreImport], registered
 // this module) already notes `owner::name`. Counting the wrapper's own body
 // would select the row's runtime part for every program that imports the
 // module, though only the wrapper's callers need it.
-sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     own := [String]{}
     own_spans := [SemaCoreUsageSpan]{}
     sema_core_collect_func(function, imports, registered, own, own_spans, callbacks)
@@ -732,25 +745,25 @@ sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationMod
     unshared
 }
 
-sema_core_collect_field: fn(field: Field, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_field: fn(field: Field, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_type(field.ty, registered, used, spans, Val(field.ty_span))
     if field.computed != None -> sema_core_collect_expr(field.computed ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}, imports, registered, used, spans, callbacks)
     if field.default != None -> sema_core_collect_expr(field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}, imports, registered, used, spans, callbacks)
 }
 
-sema_core_collect_trait_method: fn(method: TraitMethodSig, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_trait_method: fn(method: TraitMethodSig, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_params(method.params, imports, registered, used, spans, callbacks)
     if method.return_type != None -> sema_core_collect_type(method.return_type ?? Type.Named{name: "Unit"}, registered, used, spans, Val(method.name_span))
     if method.default_body != None -> sema_core_collect_stmts(method.default_body ?? [Stmt]{}, imports, registered, used, spans, callbacks)
 }
 
-sema_core_collect_trait_impl: fn(block: TraitImplBlock, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_trait_impl: fn(block: TraitImplBlock, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop method in block.methods -> sema_core_collect_func(method, imports, registered, used, spans, callbacks)
     loop associated in block.assoc_type_impls -> sema_core_collect_type(associated.ty, registered, used, spans, Val(associated.span))
     loop constant in block.constants -> sema_core_collect_expr(constant.value, imports, registered, used, spans, callbacks)
 }
 
-sema_core_collect_extern: fn(function: ExternFn, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_extern: fn(function: ExternFn, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     sema_core_collect_params(function.params, imports, registered, used, spans, callbacks)
     if function.return_type != None -> sema_core_collect_type(function.return_type ?? Type.Named{name: "Unit"}, registered, used, spans, function.return_type_span)
 }
@@ -776,7 +789,7 @@ sema_core_collect_ast_import: fn(imports: &[SemaCoreImport], declaration: Import
 // `owner` names a Core source module (empty otherwise); its top-level
 // functions listed in `unshared` are collected as wrappers
 // (sema_core_collect_source_wrapper).
-sema_core_collect_items: fn(items: [Item], owner: String, unshared: [String], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_items: fn(items: [Item], owner: String, unshared: [String], imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop item in items -> sema_core_collect_item(item, owner, unshared, imports, registered, used, spans, callbacks)
 }
 
@@ -787,7 +800,7 @@ sema_core_collect_item_range: fn(items: [Item], first: Int, last: Int, context: 
     loop index in first..<last -> sema_core_collect_item(items[index], context.owner, context.unshared, context.imports, context.registered, collected.used, collected.spans, collected.callbacks)
 }
 
-sema_core_collect_item: fn(item: Item, owner: String, unshared: [String], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_item: fn(item: Item, owner: String, unshared: [String], imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if item == {
         .Func(function) -> {
             if owner != "" && sema_core_string_contains(unshared, function.name) {
@@ -855,7 +868,7 @@ sema_core_collect_item: fn(item: Item, owner: String, unshared: [String], import
     }
 }
 
-sema_core_collect_lvalue: fn(value: LValue, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_lvalue: fn(value: LValue, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if value == {
         .Index(base, index, _, _) -> {
             sema_core_collect_expr(base, imports, registered, used, spans, callbacks)
@@ -888,7 +901,7 @@ sema_core_import_usage: fn(row: SemaCoreImport, fallback: String) -> String Neve
     }
 }
 
-sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if body == {
         .Fields(fields) -> loop field in fields -> sema_core_collect_expr(field.value, imports, registered, used, spans, callbacks)
         .Elements(elements) -> loop element in elements -> sema_core_collect_expr(element, imports, registered, used, spans, callbacks)
@@ -901,7 +914,7 @@ sema_core_collect_typed_literal_body: fn(body: TypedLitBody, imports: [SemaCoreI
     }
 }
 
-sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     if expr == {
         .Call(call, _) -> {
             if call.name == "Decimal" || call.name == "Fraction" || call.name == "Complex" -> sema_core_note_usage(used, spans, "core.math::__precise__", Val(call.name_span))
@@ -1184,7 +1197,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
     }
 }
 
-sema_core_collect_stmts: fn(statements: [Stmt], imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
+sema_core_collect_stmts: fn(statements: [Stmt], imports: [SemaCoreImport], registered: NameTable, used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop statement in statements {
         if statement == {
             .Expr(value) | .Yield(value, _) | .DeferClose(value, _) -> {
@@ -1308,7 +1321,7 @@ SemaCoreModuleContext: struct {
     owner: String
     unshared: [String]
     imports: [SemaCoreImport]
-    registered: [String:Bool]
+    registered: NameTable
 }
 
 sema_core_module_context: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> SemaCoreModuleContext {
@@ -1406,34 +1419,38 @@ sema_core_registration_imports: fn(registration_module: SemaRegistrationModule, 
     imports
 }
 
-sema_core_registration_type_names: fn(registration_module: SemaRegistrationModule) -> [String:Bool] Never! {
-    registered := [String:Bool]{}
+sema_core_registration_type_names: fn(registration_module: SemaRegistrationModule) -> NameTable Never! {
+    registered := name_table_sized(256)
+    // The empty name is id 0, which is never a member.
     loop nominal in registration_module.nominals {
-        if nominal.symbol.name != "" -> registered[nominal.symbol.name] = true
+        _ := name_intern(registered, nominal.symbol.name)
     }
     registered
 }
 
 // Adds `value` to the sorted, duplicate-free `values`, with `seen` holding
-// the same members so the membership test does not scan the list.
-sema_core_sorted_set_add: fn(values: &[String], seen: &[String:Bool], value: String) Never! {
-    if value == "" || seen.get(value) != None -> return
-    seen[value] = true
+// the same members so the membership test does not scan the list. The
+// empty value is never added.
+sema_core_sorted_set_add: fn(values: &[String], seen: &NameTable, value: String) Never! {
+    known: name_count(seen)
+    _ := name_intern(seen, value)
+    if name_count(seen) == known -> return
     sema_core_string_insert_sorted(values, value)
 }
 
 sema_core_combine_module_usage: fn(modules: [SemaCoreModuleUsageResult]) -> SemaCoreUsageResult {
     used := [String]{}
-    used_seen := [String:Bool]{}
+    used_seen := name_table()
     spans := [SemaCoreUsageSpan]{}
-    span_seen := [String:Bool]{}
+    span_seen := name_table()
     callbacks := [String]{}
-    callback_seen := [String:Bool]{}
+    callback_seen := name_table()
     loop module_row in modules {
         loop usage in module_row.used_core -> sema_core_sorted_set_add(used, used_seen, usage)
         loop row in module_row.usage_spans {
-            if span_seen.get(row.usage) != None -> next
-            span_seen[row.usage] = true
+            known: name_count(span_seen)
+            _ := name_intern(span_seen, row.usage)
+            if name_count(span_seen) == known -> next
             spans.push(row.copy())
         }
         loop key in module_row.ffi_callback_keys -> sema_core_sorted_set_add(callbacks, callback_seen, key)
@@ -1447,7 +1464,7 @@ sema_core_combine_module_usage: fn(modules: [SemaCoreModuleUsageResult]) -> Sema
 // environment), so only the program's modules decide what a target supplies.
 sema_core_program_usage: fn(usage: SemaCoreUsageResult) -> [String] Never! {
     used := [String]{}
-    used_seen := [String:Bool]{}
+    used_seen := name_table()
     loop module_row in usage.modules {
         if module_is_core(module_row.module_identity) -> next
         loop name in module_row.used_core -> sema_core_sorted_set_add(used, used_seen, name)
