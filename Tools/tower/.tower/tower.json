@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102215,
+    "rev": 102219,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -33113,11 +33113,11 @@
         {
           "n": 18,
           "text": "[#4164] Bounded computed type aliases from prep. A golden selects a type from a prep condition, and a UI snapshot covers a failing bound.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:59:04.428Z"
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): the ComputedAlias golden selects a type from a compile-time condition (6/0 at none, basic and full), and ui computed_alias 4/0 covers a failing bound.",
+          "at": "2026-11-14T06:09:06.631Z"
         },
         {
           "n": 19,
@@ -33131,20 +33131,20 @@
         {
           "n": 20,
           "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (D-COMPUTED-ALIAS1 bounded computed aliases). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T02:09:22.700Z"
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): c2182c976a adds the Spellings row and the syntax-decisions ledger entry; `jet self devtools grammars` rc 0 with `git status --short Tools/editors` empty; `jet test tests/guards --filter grammar` 13/0 and `--filter syntax_reconciliation` 15/0; LexicalLedger --check and SurfaceBudget --check rc 0.",
+          "at": "2026-11-14T06:09:07.633Z"
         },
         {
           "n": 24,
           "text": "D-COMPUTED-ALIAS1=A is built (owner ratified 2026-11-11): a bounded alias body chooses a type while building, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch must satisfy the bound (Store), and the chosen types keep their identities. The ballot program prints 2 then 3, and a branch that fails the bound is refused with a UI snapshot. Owner: G6Meta. Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T12:41:36.734Z"
+          "evidence": "Built by 194d343898 (calias1) and c2182c976a (calias2), batch 44. On the gate-p51 jet (b44proofs): golden Generics/ComputedAlias and ComputedAliasKeepsChosenTypes at --optimize=none, basic and full 6/0 (the ballot program prints 2 then 3, and the chosen types keep their identities); ui --filter computed_alias 4/0, including the branch that fails the Store bound; ui type_alias 7/0.",
+          "at": "2026-11-14T06:09:05.604Z"
         }
       ],
       "refs": [
@@ -33175,7 +33175,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-14T04:34:27.013Z",
+      "updated": "2026-11-14T06:09:07.633Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -88136,11 +88136,11 @@
         {
           "n": 2,
           "text": "(moved from #4717 c108) D-CORE-COVERAGE-RATCHET1=A: core-coverage-ratchet.json version 2 lists each module's untested public functions by name and signature; --check fails on any untested function not listed (new code needs a test, example or doc example); --write only removes names; moves keep their entry; the local full gate (`JET=<jet> jet Tools/agent/VerifyFull.jet`, which runs `jet Tools/agent/CoreCoverage.jet --check`) is green on the reset list",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T07:39:22.124Z"
+          "evidence": "9623399213 (batch 46b, Lander-coverage-ratchet-gate-p55): `jet Tools/agent/CoreCoverage.jet --write` ran clean on the gated tree with the p55 jet (it refuses while any untested public function is unlisted, so --check is rc 0 with 0 unlisted) and only removed names: the 155 stale rows are gone from core-coverage-ratchet.json, the version-2 by-name list. The untested functions were cleared by `__` names and tests in G3Core2-coverage-dunder, -term-mem and -zero (batch 45) and G5DevX2-core-image-internal-names ded6669a79 (batch 46b); `jet test Tools/agent/CoreCoverage.jet` 26/0. VerifyFull runs exactly this --check.",
+          "at": "2026-11-14T06:09:11.014Z"
         }
       ],
       "refs": [],
@@ -88151,7 +88151,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:40:55.176Z",
-      "updated": "2026-11-14T05:36:38.473Z",
+      "updated": "2026-11-14T06:09:11.014Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -204799,6 +204799,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:09:11.014Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0axja0l",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T06:09:07.633Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tsbf3w",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-14T06:09:06.631Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tsbf3w",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-14T06:09:05.604Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tsbf3w",
+      "note": "#24"
+    },
     {
       "at": "2026-11-14T05:59:16.144Z",
       "by": "Main",
