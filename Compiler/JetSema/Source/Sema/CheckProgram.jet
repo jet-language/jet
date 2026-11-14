@@ -9378,9 +9378,15 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // records only under an owner) and its purity can be read.
         if source.module_value || source.runtime_check -> _ := sema_scope_enter(probe.slots[at].table, state, "{source.key}#init")
         if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), program, context, probe.slots[at].table, state)
+        // The prepared locals stand for bindings visible where the site was
+        // captured, but its expression may be written elsewhere (a contract
+        // condition above its function), so they resolve without the
+        // declared-before-use position rule.
+        probe.slots[at].table.position_free = source.prepared.len() > 0
         probe.slots[at].table.comptime_runtime_locals = source.runtime_locals.copy()
         checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, probe.slots[at].table, state, tail_store, context, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, probe.slots[at].table, state, tail_store, context, diagnostics)
         probe.slots[at].table.comptime_runtime_locals = [String]{}
+        probe.slots[at].table.position_free = false
         sema_scope_rollback(probe.slots[at].table, mark)
         // A compile-time value never reads the clock or randomness, and
         // reaches the network only through a pinned `fetch`; a module value

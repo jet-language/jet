@@ -1772,7 +1772,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: candidate.type_args, args: lowered}, call.name_span)
     }
     contracted: if {
-        contract_nodes.len() > 0 -> {
+        contract_nodes.len() > 0 || contract_bindings.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> wrapped.push(TStmt.Contract{contract: contract})
             wrapped.push(TStmt.ExprStmt{value: call_value, span: call.name_span})

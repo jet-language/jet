@@ -4296,7 +4296,9 @@ argument facts it depends on. A known literal or a pure early expression
 discharges it at an outer call, and a runtime wrapper cannot hide it.
 Interfaces, methods, defaults and generic instances keep the same
 obligation, and a plain callable or foreign callback cannot erase one. Use
-`comptime` number parameters only when a value must shape types. Card #5024
+`comptime` number parameters only when a value must shape types. The other
+per-call generic controls of Jai (`#modify`, `#bake_constants`,
+`#bake_arguments`, `$$` auto-bake and duck typing) are not adopted. Card #5024
 tracks the build of this decision and of D-PRE-COMPILE1.
 
 

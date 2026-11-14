@@ -879,7 +879,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         call_value = sema_tree_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
     contracted: if {
-        contract_nodes.len() > 0 -> {
+        contract_nodes.len() > 0 || contract_bindings.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> wrapped.push(TStmt.Contract{contract: contract})
             wrapped.push(TStmt.ExprStmt{value: call_value, span: span})

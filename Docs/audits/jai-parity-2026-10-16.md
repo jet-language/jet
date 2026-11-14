@@ -25,6 +25,7 @@ This report merges the 2026-10-15 mining report (formerly `Docs/research/mine-fo
 | card | approved work is tracked on the card |
 | by design | Jet reaches the same result through a different mechanism, and no power is lost |
 | not proposed | deliberately not proposed, with the reason given; the owner may add it |
+| not adopted | the owner decided against it; the decision named closes it |
 
 Evidence for each Jet claim comes from six read-only census lanes over `crates/`, `Compiler/`, `Core/`, `Examples/features/`, `tests/ui` and `Docs/spec/` (2026-10-16), plus Tower decisions. Jai evidence locators are in [How Jai works](#how-jai-works-reconstructed-from-public-sources).
 
@@ -142,7 +143,7 @@ retention that is explicit and inspectable. The coverage summary below counts C0
 | A21 | compile-time string work | `prep { a + b }` | shipped | — |
 | A22 | `jai f.jai -run "expr"` | `jet eval` | shipped | — |
 | A23 | `jai f.jai -add "decl"` | none | ballot | D-JAI-BUILDOPT1 (`--add`) |
-| A24 | per-callee compile-time checks (2014 "check call") | `#On(compiler.declared)` hooks; per-instance `#Check prep` | ratified / ballot | #4760, D-JAI-GENERIC1 |
+| A24 | per-callee compile-time checks (2014 "check call") | `#On(compiler.declared)` hooks; a `#Pre(#run { … })` condition decided for each call while building | ratified / shipped | #4760, D-JAI-GENERIC1=F |
 
 ## B. Code values, insertion, macros, specialization
 
@@ -162,12 +163,12 @@ retention that is explicit and inspectable. The coverage summary below counts C0
 | B12 | `#run` once per expansion | prep inside derive templates runs per expansion | shipped / ballot | D-JAI-CODE1 |
 | B13 | `for_expansion` | `Iterable` + `Iterator` (`Examples/features/collections/iter_hook.jet`) | shipped / ballot | D-JAI-CODE1 (trailing-block macros) |
 | B14 | named break across nested loops | named loops, `next(rows)` (`Examples/features/basics/labeled_loops.jet`) | shipped | — |
-| B15 | `#modify` | bounds checked at the definition | ballot | D-JAI-GENERIC1 (`#Check prep`) |
-| B16 | duck-typed `$T` bodies | refused by D-GENERIC-TYPEFN1 | ballot | D-JAI-GENERIC1 (`#Open`, `open_generics`) |
+| B15 | `#modify` | bounds checked at the definition | not adopted | D-JAI-GENERIC1=F |
+| B16 | duck-typed `$T` bodies | refused by D-GENERIC-TYPEFN1 | not adopted | D-JAI-GENERIC1=F |
 | B17 | `$T/Vector`, `$T/interface Foo` | trait bounds | shipped | — |
-| B18 | `#bake_constants` | `prep T` parameters (`<prep N: Int>`) | ratified / ballot | #3505, D-JAI-GENERIC1 (`bake`) |
-| B19 | `#bake_arguments` | none | ballot | D-JAI-GENERIC1 (`bake`) |
-| B20 | `$` / `$$` auto-bake | `prep` parameters require a known value | ballot | D-JAI-GENERIC1 (`prep?`) |
+| B18 | `#bake_constants` | `prep T` parameters (`<prep N: Int>`) | ratified / not adopted | #3505, D-JAI-GENERIC1=F |
+| B19 | `#bake_arguments` | none | not adopted | D-JAI-GENERIC1=F |
+| B20 | `$` / `$$` auto-bake | `prep` parameters require a known value | not adopted | D-JAI-GENERIC1=F |
 | B21 | body text (string bodies) | typed `derive` and `b.generate` templates | by design / ballot | D-JAI-CODE1 (`parse`) |
 | B22 | `#placeholder` | `compiler.generate` publishes names before checking (D-META-PUBLISH2) | ratified | #3520 |
 | B23 | `#string END … END` | `"""…"""`, raw backtick strings (`Examples/features/basics/multiline_string.jet`) | shipped | — |
