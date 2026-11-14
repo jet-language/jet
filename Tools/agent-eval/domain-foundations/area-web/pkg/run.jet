@@ -26,7 +26,13 @@ Login: struct {
     password: String
 }
 
-list_orders: fn(path: String, _cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
+// The order list's version, bumped after each insert. The HTTP handlers run
+// on server workers, so it is one `Shared` cell they all edit.
+CacheVersion: struct {
+    value: Int
+}
+
+list_orders: fn(path: String, _cache_version: Shared<CacheVersion>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     conn: db.open(path)
     policy: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
     scope: conn.with_policy(policy, "web")
@@ -36,8 +42,7 @@ list_orders: fn(path: String, _cache_version: Cell<Int>, req: HTTPRequest) -> HT
     return Ok(server.response(200, body))
 }
 
-detail_order: fn(path: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
-    id_text: req.param("id") ?? return Ok(server.response(404, "missing order"))
+detail_order: fn(path: String, id_text: String) -> HTTPResponse HTTPError! {
     id: id_text.to_int() ?? return Ok(server.response(400, "bad order id"))
     conn: db.open(path)
     policy: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
@@ -70,14 +75,14 @@ parse_order_form: fn(body: String) -> NewOrder? {
     return Val(NewOrder{item: item_text, quantity: quantity_value})
 }
 
-create_order: fn(path: String, cache_version: Cell<Int>, req: HTTPRequest) -> HTTPResponse HTTPError! {
+create_order: fn(path: String, cache_version: Shared<CacheVersion>, req: HTTPRequest) -> HTTPResponse HTTPError! {
     body: req.text() ?? return Ok(server.response(400, "invalid body"))
     order: parse_order_form(body) ?? return Ok(server.response(422, "item and quantity are required"))
     conn: db.open(path)
     policy: db.policy("orders", "true") ?? return Ok(server.response(500, "db policy failed"))
     scope: conn.with_policy(policy, "web")
     inserted: scope.execute(SQL{"INSERT INTO orders (item, quantity) VALUES ({order.item}, {order.quantity})"}) ?? 0
-    cache_version.set(cache_version.get() + 1)
+    cache_version.value += 1
     scope.close()
     return Ok(server.response(201, "created order rows={inserted}"))
 }
@@ -114,7 +119,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     seed_session: auth.password_login("alice", "argon2id:demo", 1_700_000_000_000, 3_600_000) ?? return
     session_id: auth.session_id(seed_session)
 
-    cache_version := Cell.new(0)
+    cache_version: Shared{CacheVersion{value: 0}}
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     mux: web.app()
@@ -123,7 +128,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         return Ok(server.response(200, "<h1>Orders</h1><a href=\"/orders\">list</a>"))
     })
     mux.get("/orders", fn(req: HTTPRequest) { list_orders(db_path, cache_version, req) })
-    mux.get("/orders/:id", fn(req: HTTPRequest) { detail_order(db_path, req) })
+    mux.get("/orders/:id", fn(id: String) { detail_order(db_path, id) })
     mux.post("/orders", fn(req: HTTPRequest) { create_order(db_path, cache_version, req) })
     mux.post("/login", fn(req: HTTPRequest) { login(req) })
     mux.get("/protected", fn(req: HTTPRequest) { protected(session_id, req) })
