@@ -111,6 +111,18 @@ shown: fn(value: Dyn) -> String {
 // A language without its `-expert` suffix.
 base_language: fn(language: String) -> String { language.removesuffix("-expert") }
 
+// The entry directory holding a language's program (the twin of run.mjs's
+// LANGUAGE_SOURCE_DIRS): LuaJIT runs the Lua program, Bun the Node program
+// and Vite bundles the web (js) program; every other language has its own.
+language_source_dir: fn(language: String) -> String {
+    if base_language(language) == {
+        "luajit" -> "lua"
+        "bun" -> "node"
+        "vite" -> "js"
+        else -> language.copy()
+    }
+}
+
 // The entry mode of a matrix cell.
 matrix_cell_mode: fn(cell: Dyn) -> String {
     id: text_at(cell, "id") ?? ""
@@ -331,6 +343,10 @@ ratio_verdict: fn(ratio: Float?) -> String? {
     assert_eq(ratio_verdict(Val(1.0)), Val("loss"))
     assert_eq(ratio_verdict(Val(0.0)), None)
     assert_eq(ratio_verdict(None), None)
+}
+
+#Test("LuaJIT, Bun and Vite run another language's program; every other language has its own directory") {
+    assert_eq(["luajit", "bun", "vite", "lua", "rust-expert"].map(fn(language) { language_source_dir(language) }), ["lua", "node", "js", "lua", "rust-expert"])
 }
 
 #Test("a cell's peers are the rails and its incumbent, and the run rail joins a cell with a run tier") {

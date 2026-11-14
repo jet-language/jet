@@ -307,7 +307,7 @@ unavailable_tier: fn(rule: TierRule, reason: String) -> Dyn {
 // Jet row leaves its state reset in `jet_reset`.
 stage_row: fn(st: Staging, language: String, jet_reset: &Reset) -> Dyn IOError! {
     base: base_language(language)
-    source_dir: path_joined(st.entry_dir, if base == "luajit" -> "lua" else -> language.copy())
+    source_dir: path_joined(st.entry_dir, language_source_dir(language))
     source_file: language_file(base)
     row := Dyn.object()
     row["language"] = Dyn.Text(language.copy())

@@ -22,7 +22,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LOSS_OWNER_CATEGORY_BY_METRIC } from "./run.mjs";
+import { LANGUAGE_SOURCE_DIRS, LOSS_OWNER_CATEGORY_BY_METRIC } from "./run.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const MINIMUM_PROGRAMS = 30;
@@ -32,7 +32,8 @@ const SCRIPTBENCH_TIER = "jet-bin";
 const SCRIPTBENCH_METRICS = Object.freeze({ wall: "runtime_wall_seconds", rss: MEMORY_METRIC });
 
 // The corpus under `repo`: one row per program with its matched peers, the
-// directory holding each peer's twin, and its loss owners.
+// directory holding each peer's twin (run.mjs's: LuaJIT runs the Lua twin),
+// and its loss owners.
 async function loadCorpus(repo = repoDir) {
   const manifest = JSON.parse(await fs.readFile(path.join(repo, "Tools/gauntlet/measurement-manifest.json"), "utf8"));
   const bench = JSON.parse(await fs.readFile(path.join(repo, "Tools/perf/scriptbench/manifest.json"), "utf8"));
@@ -47,7 +48,7 @@ async function loadCorpus(repo = repoDir) {
       key: name,
       cells: entry.cells ?? [],
       peers,
-      twins: Object.fromEntries(peers.map((peer) => [peer, path.join(dir, peer)])),
+      twins: Object.fromEntries(peers.map((peer) => [peer, path.join(dir, LANGUAGE_SOURCE_DIRS[peer] ?? peer)])),
       owners: manifest.loss_owners?.[name] ?? {},
     });
   }

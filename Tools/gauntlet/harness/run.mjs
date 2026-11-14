@@ -288,8 +288,9 @@ const LANGUAGE_FILES = {
 };
 // LuaJIT runs the entry's Lua program, Bun the Node program and Vite bundles
 // the web (js) program; the asm ceiling's directory is its asm-parity
-// reference. Every other language has its own directory.
-const LANGUAGE_SOURCE_DIRS = { luajit: "lua", bun: "node", vite: "js" };
+// reference. Every other language has its own directory (coverage.mjs finds
+// each peer's twin the same way).
+export const LANGUAGE_SOURCE_DIRS = Object.freeze({ luajit: "lua", bun: "node", vite: "js" });
 
 function baseLanguage(language) {
   return language.endsWith("-expert") ? language.slice(0, -"-expert".length) : language;
