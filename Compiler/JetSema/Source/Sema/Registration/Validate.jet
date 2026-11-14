@@ -132,9 +132,10 @@ sema_validate_build: fn(definition: StructDef, rules: [SemaValidateRule], span: 
     body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
     has_errors: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
     body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
-    // `Ok(value)` is the body's tail value, as a written body ends; a final
-    // `return` would be reported (L0530) at the user's `validate {`.
-    body.push(Stmt.Expr{expr: Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}})
+    // A synthesized final `return`: L0530 skips a return of a generated value
+    // (sema_stmt_value_block_tail_lints), so nothing is reported at the
+    // user's `validate {`.
+    body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
     target: Type.Named{name: definition.name}
     function := ast_func("validate", span, span)
     function.is_pub = definition.is_pub

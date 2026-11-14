@@ -80,6 +80,7 @@ use jet_foundation.[
     ast_visit_expr,
     ast_empty_lambda_meta,
     diagnostic_registry_row,
+    expr_node_id,
     expr_source_span,
     expr_source_start,
     expr_span,
@@ -863,7 +864,9 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
     if statements[count - 1] == {
         .Return(value, span) -> {
             if !lint -> return
-            if value == .Val(returned) {
+            // A generated value (a synthesized body's own `return`, as a
+            // `validate {` block's rules end) has no source to fix.
+            if value == .Val(returned) && expr_node_id(returned) != AST_NODE_GENERATED {
                 // The fix deletes `return` and the blank run after it, so the
                 // value is left as the block tail.
                 tail_lint: sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail")
