@@ -61,36 +61,43 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     }
     if metas.len() == 0 -> return
     active: sema_web_partition_active(graph)
+    buckets := [WebBucket]{}
+    reasons := [String]{}
+    any_js := false
+    loop meta in metas {
+        solved: sema_web_solved(modules, meta)
+        bucket: sema_web_bucket(meta, solved)
+        if bucket == .JS -> any_js = true
+        buckets.push(bucket)
+        reasons.push(sema_web_bucket_reason(meta, solved))
+    }
     // The metas by function key (a later one of a key wins), and each
     // caller's call edges as metas, resolved once for the closure and the
     // crossing check: callees[callee_first[at]..<callee_first[at + 1]].
-    keys := name_table_sized(64)
-    meta_of := [Int]{-1}
-    loop at in 0..<metas.len() {
-        if metas[at].row < 0 -> next
-        id: name_index(name_intern(keys, modules[metas[at].slot].functions[metas[at].row].key))
-        if id == meta_of.len() -> meta_of.push(at) else -> meta_of[id] = at
-    }
+    // Only a JS bucket moves another along an edge, so a program with none
+    // that doesn't opt in to the checks resolves no edge.
     callee_first := [Int]{}
     callees := [Int]{}
-    loop meta in metas {
-        callee_first.push(callees.len())
-        if meta.row < 0 -> next
-        loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
-            found: name_find(keys, edge) ?? next
-            if meta_of[name_index(found)] >= 0 -> callees.push(meta_of[name_index(found)])
+    if any_js || active {
+        keys := name_table_sized(64)
+        meta_of := [Int]{-1}
+        loop at in 0..<metas.len() {
+            if metas[at].row < 0 -> next
+            id: name_index(name_intern(keys, modules[metas[at].slot].functions[metas[at].row].key))
+            if id == meta_of.len() -> meta_of.push(at) else -> meta_of[id] = at
         }
-    }
-    callee_first.push(callees.len())
-    buckets := [WebBucket]{}
-    reasons := [String]{}
-    loop meta in metas {
-        solved: sema_web_solved(modules, meta)
-        buckets.push(sema_web_bucket(meta, solved))
-        reasons.push(sema_web_bucket_reason(meta, solved))
+        loop meta in metas {
+            callee_first.push(callees.len())
+            if meta.row < 0 -> next
+            loop edge in modules[meta.slot].functions[meta.row].effects.call_edges {
+                found: name_find(keys, edge) ?? next
+                if meta_of[name_index(found)] >= 0 -> callees.push(meta_of[name_index(found)])
+            }
+        }
+        callee_first.push(callees.len())
     }
     // Close the partition over the call edges.
-    changed := true
+    changed := any_js
     loop changed {
         changed = false
         loop caller in 0..<metas.len() {
