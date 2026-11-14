@@ -15,10 +15,20 @@
 // store, a Shared site) are global data symbols too (ir_core_cell), so a
 // program that names one can name the very cell the library's code uses:
 // one copy per process.
+//
+// A function that holds a trait value, or reaches one that does, is built
+// but not exported (ir_core_open): its dynamic calls and drops select among
+// the implementations the library knows, which a program's own types are
+// not among, so a program builds it itself.
+//
+// A program bound to the image (#6328 c22 S7b-1, IRChecks.core) calls each
+// exported Core function its code calls directly by that symbol, at the
+// call's own layouts, and builds no body for it (ir_core_bound); its Core
+// cells are the image's (ir_core_cells_bind).
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, Span, SymbolTable, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, name_rows_value, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -155,6 +165,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: 
         return ir_core_library_from(kept.program.move(), entry_module, more, threads)
     }
     m := built.program.move()
+    open: ir_core_open(m)
     exports := [IRLibraryExport]{}
     rows := [IRCoreExport]{}
     errors := [String]{}
@@ -163,6 +174,7 @@ ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: 
             errors.push("Core function {key} was rooted but not built")
             next
         }
+        if open[id] -> next
         symbol: ir_core_symbol(key)
         exports.push(IRLibraryExport{function: id, symbol: symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
         rows.push(IRCoreExport{symbol: symbol, key: key, signature: ir_core_signature(m, id)})
@@ -188,6 +200,161 @@ ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
     lines.join("\n")
 }
 
+// Per function of the built library module `m`: whether it holds a trait
+// value (a slot of a trait object type: its dynamic calls and drops select
+// among the implementations the library knows, BuildTraits.jet), or calls,
+// takes the address of or drops through (a type's drop glue) a function
+// that does. Such a function is not exported: a program's trait values can
+// reach it, whose implementations the library lacks.
+ir_core_open: fn(m: IRModule) -> [Bool] Never! {
+    count: m.functions.len()
+    callers := [[Int]]{}
+    loop _ in 0..<count -> callers.push([Int]{})
+    open := [Bool]{}
+    work := [Int]{}
+    loop (id, f) in m.functions {
+        holds := false
+        loop row in f.slot_type {
+            if row >= 0 && row < m.types.len() && (ir_trait_row(m, row) || ir_untag(m.types[row].ty) == .TraitObject(_)) {
+                holds = true
+                break
+            }
+        }
+        loop (at, op) in f.op {
+            callee := -1
+            if op == .Call || op == .FunctionAddress -> callee = f.a[at]
+            if op == .Drop && f.a[at] >= 0 && f.a[at] < f.slot_type.len() {
+                glue: m.types[f.slot_type[f.a[at]]].drop
+                if glue != "" -> callee = name_rows_value(m.function_rows, glue) ?? -1
+            }
+            if callee >= 0 && callee < count -> callers[callee].push(id)
+        }
+        open.push(holds)
+        if holds -> work.push(id)
+    }
+    head := 0
+    loop head < work.len() {
+        id: work[head]
+        head += 1
+        loop caller in callers[id] {
+            if open[caller] -> next
+            open[caller] = true
+            work.push(caller)
+        }
+    }
+    open
+}
+
+// The Core exports of the runtime image a program binds to (IRChecks.core):
+// the image's export list as the toolchain build wrote it
+// (ir_core_exports_text, JetCli Host.jet JET_CLI_CORE_EXPORTS_FILE).
+IRCoreImage: struct { exports: [U8] }
+
+// The key and signature columns of one export row.
+IRCoreImageRow: struct { key: String, signature: String }
+
+// The row of `symbol` in `exports` (sorted by symbol), found by a binary
+// search over its lines in place; None when no row names it.
+ir_core_image_row: fn(exports: [U8], symbol: String) -> IRCoreImageRow? Never! {
+    wanted: symbol.bytes()
+    low := 0
+    high := exports.len()
+    // The found row's bounds: its first tab and its end.
+    tab := -1
+    end := -1
+    loop low < high && tab < 0 {
+        start := low + (high - low).div_euclid(2)
+        loop start > low && exports[start - 1] != (U8{10}) -> start -= 1
+        line_end := start
+        loop line_end < high && exports[line_end] != (U8{10}) -> line_end += 1
+        first := start
+        loop first < line_end && exports[first] != (U8{9}) -> first += 1
+        order: ir_core_image_order(exports, start, first, wanted)
+        if {
+            order == 0 -> {
+                tab = first
+                end = line_end
+            }
+            order < 0 -> low = line_end + 1
+            else -> high = start
+        }
+    }
+    if tab < 0 -> return None
+    second := tab + 1
+    loop second < end && exports[second] != (U8{9}) -> second += 1
+    if second >= end -> return None
+    key: String.from_bytes(exports[(tab + 1)..<second]) ?? return None
+    signature: String.from_bytes(exports[(second + 1)..<end]) ?? return None
+    Val(IRCoreImageRow{key: key, signature: signature})
+}
+
+// The byte order of exports[start..<end] against `wanted`: -1, 0 or 1.
+ir_core_image_order: fn(exports: [U8], start: Int, end: Int, wanted: [U8]) -> Int Never! {
+    at := 0
+    loop start + at < end && at < wanted.len() {
+        if exports[start + at] != wanted[at] -> return if exports[start + at] < wanted[at] -> -1 else -> 1
+        at += 1
+    }
+    if {
+        start + at < end -> 1
+        at < wanted.len() -> -1
+        else -> 0
+    }
+}
+
+// Whether program `p`'s functions build as the Core library's do
+// (ir_build_core_library), so the image's code of a Core function is the
+// code `p` would build for it: with runtime sentries and stop points, and
+// no release, deep-check, coverage, contract-record, compile-time or build
+// invocation variant. Otherwise `p` binds nothing to the image.
+ir_core_image_fits: fn(p: IRProgram) -> Bool Never! {
+    p.sentries && p.stop_points && !p.asm_rails && !p.contract_records && !p.comptime_values && !p.invocation && p.coverage.len() == 0 && !p.checks.release && p.checks.deep.len() == 0
+}
+
+// The image symbol a direct call of function row `row` at `type_args`,
+// passing `slots`, calls instead of building the function, else "": under
+// IRChecks.core, a non-generic call of a function with the library's stock
+// bounds checks (ir_bounds_mode) that the image exports (its key on the row
+// of its ir_core_symbol) at the IR signature the call passes and returns
+// (ir_core_call_signature).
+ir_core_bound: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], span: Span) -> String Never! {
+    if p.checks.core == None || type_args.len() > 0 || ir_bounds_mode(p, row) != .Fatal -> return ""
+    if p.checks.core == .Val(image) {
+        symbol: ir_core_symbol(p.functions[row].key)
+        found: ir_core_image_row(image.exports, symbol) ?? return ""
+        if found.key != p.functions[row].key || found.signature != ir_core_call_signature(m, p, b, row, slots, span) -> return ""
+        return symbol
+    }
+    ""
+}
+
+// The IR signature (ir_core_signature) of a call of non-generic function
+// row `row` passing `slots`: their layouts, then its result's; "" when the
+// result has no value type.
+ir_core_call_signature: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, slots: [Int], span: Span) -> String Never! {
+    words: loop slot in slots -> ir_core_layout(ir_export_layout(m.types[b.f.slot_type[slot]]))
+    declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, [Type]{}, written, span)) else -> Type?{None}
+    returned: ir_executable_return_in(p.functions[row], declared) ?? Type.Named{name: "Unit"}
+    result := "void"
+    if !ir_unit_type(returned) {
+        result_row: ir_value_type(m, p, returned) ?? return ""
+        if m.types[result_row].kind != .Unit -> result = ir_core_layout(ir_export_layout(m.types[result_row]))
+    }
+    "({words.join(",")})->{result}"
+}
+
+// Names the image's Core cells for the program's own (IRModule.core_cells):
+// each writable Core cell (ir_core_cell_key) the image exports under its
+// key, so the code the program builds and the image's code share one.
+ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
+    loop cell in name_rows_sorted(m.constant_rows) {
+        if cell.local < 0 || !ir_core_cell_key(cell.key) -> next
+        symbol: ir_core_cell_symbol(cell.key)
+        found: ir_core_image_row(image.exports, symbol) ?? next
+        if found.key == cell.key && found.signature == IR_CORE_DATA -> m.core_cells[cell.local] = symbol
+    }
+}
+
 #Test("a Core symbol is a C identifier of its key that the key's hash tells apart") {
     one: ir_core_symbol("core.text.split")
     assert(one.starts_with("jet_core_fn_core_text_split_"), "the symbol spells the key: {one}")
@@ -195,4 +362,22 @@ ir_core_exports_text: fn(rows: [IRCoreExport]) -> String Never! {
     assert(ir_core_symbol("core.text::split") != ir_core_symbol("core.text.split"), "keys that spell the same identifier get different symbols")
     assert_eq(ir_core_symbol("core.text.split"), one)
     assert(ir_core_cell_symbol("storage:core.log.level").starts_with("jet_core_cell_storage_core_log_level_"), "a cell's symbol spells its key")
+}
+
+#Test("a bound program finds each Core export row by its symbol in the sorted list") {
+    keys: [String]{"<corelib>/core.text::split", "<corelib>/core.text::join", "<corelib>/core.math::abs", "<corelib>/core.files::read"}
+    rows := loop key in keys -> IRCoreExport{symbol: ir_core_symbol(key), key: key.copy(), signature: "(8/8/Integer)->8/8/Integer"}
+    cell: "storage:<corelib>/core.log::level"
+    rows.push(IRCoreExport{symbol: ir_core_cell_symbol(cell), key: cell, signature: IR_CORE_DATA})
+    rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
+    exports: ir_core_exports_text(rows).bytes()
+    loop key in keys {
+        found: ir_core_image_row(exports, ir_core_symbol(key)) ?? panic("no row for {key}")
+        assert_eq(found.key, key)
+        assert_eq(found.signature, "(8/8/Integer)->8/8/Integer")
+    }
+    data: ir_core_image_row(exports, ir_core_cell_symbol(cell)) ?? panic("no row for the cell")
+    assert_eq(data.signature, IR_CORE_DATA)
+    assert(ir_core_image_row(exports, ir_core_symbol("<corelib>/core.text::trim")) == None, "a key the image lacks has no row")
+    assert(ir_core_image_row([U8]{}, ir_core_symbol("<corelib>/core.text::split")) == None, "an empty list has no row")
 }

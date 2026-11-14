@@ -191,8 +191,7 @@ over `pthread_create`, then `pthread_join` and `pthread_detach`), so every
 runtime thread of such a program is a musl thread that the linked C can run
 on; a program without C starts its threads as raw clones. Only that
 synthesized startup names musl's thread functions: the runtime object asks
-libc for none. With `CORE_LIBRARY` (`Toolchain/RuntimePack.jet`) the same
-`jet doc` run also builds the Core library
+libc for none. The same `jet doc` run also builds the Core library
 (`JetCli/Cli/CoreLibrary.jet`, `JetIR/BuildCore.jet`): the Core check the
 Core record is made from, every non-generic Core and Prelude function built
 as a program's code is (stock checks, runtime sentries and stop points, O1,
@@ -204,15 +203,20 @@ of each. `core.exports` lists each symbol with its key and IR signature (the
 slot layouts of its parameters and result); `core.threads` is its thread
 receipt, read over the runtime's receipt, since Core starts threads through
 the runtime. A Core build failure fails the step with `core.issues`. The
-library is off until #5479 S7b binds programs to it: until then no program
-calls a Core symbol, and building it would cost the step a second front end
-over every Core body. The step installs `jet-runtime/` beside
-the compiler: `native.key`, `jet_runtime.pack.o`, with the library
-`jet_core.o` and its two lists, and `jet_runtime.image`, the runtime object
-(and the Core object, with the library) linked
+step installs `jet-runtime/` beside the compiler: `native.key`,
+`jet_runtime.pack.o`, the library `jet_core.o` and its two lists, and
+`jet_runtime.image`, the runtime object and the Core object linked
 once at the run base (`LINK_RUN_BASE`), with its symbol table, a
 `.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
-index of its defined global symbols. The pack, which a full program link
+index of its defined global symbols. jet carries the two lists as parts. A
+`jet run` whose Core is jet's record (a compile outside a toolchain tree)
+and that binds to the image (no C closure) binds its Core calls there
+(`JetCli/Cli/Host.jet` `jet_cli_native_executable`, `IRChecks.core`): a
+call of a non-generic Core function whose bounds checks are the stock ones
+calls the image's `jet_core_fn_*` symbol when the export list's signature
+is the call's, and the program's Core cells are the image's. Such a callee
+is opaque at every level. `jet build` and `jet test` bind none, so a built
+program carries the Core code it calls. The pack, which a full program link
 reads whole, holds the runtime alone. Binding a program object to that image
 (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
 runtime and looks up only the program's imports in that index; the bound

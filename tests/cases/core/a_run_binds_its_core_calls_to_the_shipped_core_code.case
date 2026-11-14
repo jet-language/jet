@@ -1,0 +1,18 @@
+# #6328 c22: Core ships as machine code in jet. Outside the tree, `jet run`
+# takes Core from jet's Core record and binds the program's Core calls to the
+# Core code in jet's runtime image (JetCli Host.jet jet_cli_native_executable):
+# the trace counter `ir.build.core_calls` counts the Core symbols the program
+# calls there. `jet build` binds none, so a built program carries the Core
+# code it calls.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_PHASE_COUNTERS=1
+write: main.jet = "use base64: core.encoding.base64\n\nrun: fn() {\n    print(base64.encode(\"jet\".bytes()))\n}\n"
+step: jet run --trace=run.json main.jet
+exit: 0
+stdout: = "amV0\n"
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.build\",\"core_calls\":" # the run counts its bound Core calls
+stderr: !~ "\"core_calls\":0}" # and binds at least one
+step: jet build --trace=build.json main.jet
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"ir.build\",\"core_calls\":0}" # a build binds none

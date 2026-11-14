@@ -3283,7 +3283,15 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
         }
         .DataAddress -> {
             reg: ir_x64_home_reg(m, f, al, dst, X64_RAX)
-            ir_x64_lea_data(e, reg, f.a[at])
+            // A Core cell of the runtime image the program binds to is the
+            // image's (IRModule.core_cells), not the row's own copy.
+            if {
+                m.core_cells.get(f.a[at]) == .Val(symbol) -> {
+                    reloc_at: x64_lea_rip(e.code, reg)
+                    e.relocs.push(X64Reloc{at: reloc_at, target: X64RelocTarget.RuntimeData{symbol: symbol}})
+                }
+                else -> ir_x64_lea_data(e, reg, f.a[at])
+            }
             ir_x64_store(e, m, f, al, dst, reg)
         }
         .Load | .Store | .StreamStore -> ir_x64_memory(e, m, f, al, at)

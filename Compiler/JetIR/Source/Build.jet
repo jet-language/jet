@@ -391,6 +391,14 @@ IRChecks: struct {
     // `--deep-checks`: the checked functions, by key, whose `#On(.Deep)`
     // bodies emit code (ir_deep_checks_on); every other one emits none.
     deep: [String:Bool]{[String:Bool]{}}
+    // A program bound to the prelinked runtime image that carries Core's
+    // code (#6328 c22 S7b-1, JetCli Host.jet jet_cli_native_executable):
+    // the image's Core exports. Its direct calls of an exported Core
+    // function call the image's code (ir_core_bound) and its Core cells are
+    // the image's (ir_core_cells_bind), when its functions build as the
+    // library's (ir_core_image_fits). None builds every Core function it
+    // calls.
+    core: IRCoreImage?{None}
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1471,6 +1479,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
     p.checks = checks
     p.sentries = ir_checks_sentries(checks)
+    if !ir_core_image_fits(p) -> p.checks.core = None
     ir_foreign_index(p, foreign, decls)
     row: ir_function_row(p, entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
@@ -1490,11 +1499,13 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             kept_keys.push(function.key.copy())
         }
     }
-    built := ir_build_waves(p, roots, true, threads)
+    waves: ir_build_waves_kept(p, roots, true, threads)
+    built := waves.result.move()
     loop key in kept_keys {
         at: name_rows_get_text(built.program.function_rows, key) ?? next
         built.program.kept.push(at)
     }
+    if waves.program.checks.core == .Val(image) -> ir_core_cells_bind(built.program, image)
     built
 }
 

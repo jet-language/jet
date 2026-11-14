@@ -1834,7 +1834,11 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             if compiled_request.selected_entry == None -> compiled_request.output_intent = SemaOutputIntent.Run
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: compiled_request.compiler_threads.copy()
+            // Core comes from this jet's record, which the runtime image's
+            // Core code was built from (Host.jet jet_cli_native_executable).
+            recorded: compiled_request.core_record != None
             front := jet_cli_lowering_inputs(compiled_request, trace_sink)
+            front.compile.core_record = recorded
             // The native route traces through the same sink and builds on the
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)

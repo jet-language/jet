@@ -4230,7 +4230,11 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
             return value
         }
     }
-    callee: ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
+    // #6328 c22 S7b-1: a Core function the runtime image carries is called
+    // there by its symbol, and not built (ir_core_bound).
+    bound: ir_core_bound(m, p, b, row, type_args, slots, span)
+    callee := -1
+    if bound == "" -> callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")
     dst := -1
     declared: if p.functions[row].ret == .Val(written) -> Val(ir_callee_fact(p, b, row, type_args, written, span)) else -> Type?{None}
     if ir_failed(b) -> return -1
@@ -4248,7 +4252,10 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
     bracketed: p.invocation && b.impure > 0
     if bracketed -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.enter", [Int]{}, span)
     start: ir_args(b.f, slots)
-    ir_emit(b.f, IROp.Call, dst, callee, start, slots.len(), b.line)
+    if {
+        bound != "" -> ir_emit(b.f, IROp.CallRuntime, dst, ir_intern_name(m, bound), start, slots.len(), b.line)
+        else -> ir_emit(b.f, IROp.Call, dst, callee, start, slots.len(), b.line)
+    }
     if bracketed -> _: ir_host_method_words(m, p, b, Type.Bool, "Impure.leave", [Int]{}, span)
     ir_write_backs(m, p, b, backs, span)
     loop bridge in bridges -> ir_fixed_store_back(m, p, b, bridge.slot, bridge.cell)

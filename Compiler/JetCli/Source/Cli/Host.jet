@@ -165,6 +165,8 @@ use {
         IROp,
         IROutputCheck,
         IRChecks,
+        IRCoreImage,
+        IR_CORE_FUNCTION_PREFIX,
         IRJob,
         IRModule,
         IR_PLUGIN_GUEST_PREFIX,
@@ -639,12 +641,12 @@ JET_CLI_RUNTIME_PACK_FILE: "jet_runtime.pack.o"
 // The Jet-only runtime object the pack was linked from, beside it. A program
 // with a foreign closure links it with that closure's platform archives once.
 JET_CLI_RUNTIME_OBJECT_FILE: "jet_runtime_jet.o"
-// The runtime object, and the Core library (jet_core.o, CoreLibrary.jet)
-// when the toolchain build makes it (Toolchain/RuntimePack.jet CORE_LIBRARY),
+// The runtime object and the Core library (jet_core.o, CoreLibrary.jet),
 // prelinked at LINK_RUN_BASE (Image/RuntimePack.jet x64_link_runtime_image),
 // beside the pack: `jet run` binds a program with no C closure to it instead
-// of linking the pack, and compile-time code runs bound to it in the
-// comptime child (JetEval Native.jet).
+// of linking the pack, its Core calls to the Core code there when its Core
+// is this jet's record (jet_cli_native_executable), and compile-time code
+// runs bound to it in the comptime child (JetEval Native.jet).
 JET_CLI_RUNTIME_IMAGE_FILE: "jet_runtime.image"
 // Written by the toolchain build: the native runtime's key for every profile.
 JET_CLI_RUNTIME_KEY_FILE: "native.key"
@@ -655,6 +657,15 @@ JET_CLI_RUNTIME_EXPORTS_FILE: "runtime.exports"
 // second thread, one per line, or `*` when every program can
 // (Request.jet, JetIR BuildLibrary.jet ir_thread_exports).
 JET_CLI_RUNTIME_THREADS_FILE: "runtime.threads"
+// Written by the toolchain build beside the pack (Toolchain/RuntimePack.jet):
+// the Core library's globals, one `symbol<TAB>key<TAB>IR signature` row
+// each, sorted by symbol (JetIR BuildCore.jet ir_core_exports_text), which a
+// program binds its Core calls to (IRChecks.core).
+JET_CLI_CORE_EXPORTS_FILE: "core.exports"
+// Written beside them: the Core exports whose call can start a second
+// thread, one per line, or `*` (CoreLibrary.jet), read over the runtime's
+// receipt for a program bound to Core (jet_cli_single_thread).
+JET_CLI_CORE_THREADS_FILE: "core.threads"
 // The C library functions a program's foreign calls may name and still run
 // on one thread only (jet_cli_single_thread): leaves that start no thread,
 // install no handler and call nothing back.
@@ -673,6 +684,7 @@ JET_CLI_HOT_TEXT_FILE: "hot-text.list"
 // holds the runtime's provenance to (Tools/release Gate.jet).
 JET_CLI_RUNTIME_PART_FILES: [String]{
     JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_EXPORTS_FILE, JET_CLI_RUNTIME_THREADS_FILE,
+    JET_CLI_CORE_EXPORTS_FILE, JET_CLI_CORE_THREADS_FILE,
     JET_CLI_RUNTIME_IMAGE_FILE, JET_CLI_RUNTIME_PACK_FILE, JET_CLI_RUNTIME_OBJECT_FILE,
     JET_CLI_RUNTIME_WEB_FILE, JET_CLI_RUNTIME_WEB_RECEIPT_FILE, JET_CLI_IDENTITY_FILE,
 }
@@ -871,7 +883,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // The runtime's key and export list are read before either thread
     // starts: queued behind the closure thread's archive reads, these small
     // reads would stall the object between ir.build and ir.opt.
-    runtime_exports: jet_cli_runtime_exports(runtime_dir)
+    runtime_exports := jet_cli_runtime_exports(runtime_dir)
     runtime_key: if runtime_exports.failure == None -> Val(runtime_exports.key.copy()) else -> None
     // The program object holds DWARF unless `debug_info: false`; the link
     // drops every other input's too (the runtime pack's, a C closure's).
@@ -898,7 +910,16 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // thread realizes it while the object builds.
     if {
         bind && !jet_cli_native_c_linked(first_facts) && first_facts.inline_c.len() == 0 && rust_helper == None && sources.libs.len() == 0 && sources.link_args.len() == 0 -> {
-            closures.push(jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind))
+            realizing: jet_cli_native_foreign_realize(first_facts, rust_helper, sources, runtime_dir, runtime_key, bind)
+            // A program whose Core is this jet's record binds its Core calls
+            // to the image's Core code, which was built from that record's
+            // Core; one built from Core source builds every Core function it
+            // calls.
+            if result.core_record && realizing.bound {
+                runtime_exports.core = Val(IRCoreImage{exports: jet_cli_runtime_part(JET_CLI_CORE_EXPORTS_FILE)})
+                runtime_exports.core_threads = Val(jet_cli_runtime_part(JET_CLI_CORE_THREADS_FILE))
+            }
+            closures.push(realizing)
             object := jet_cli_native_object(result, checked, harness, options, runtime_exports, census, file, root, hot)
             if object.failure == None && trace_sink == .Val(sink) -> sink.begin("native.foreign", "", -1, -1)
             objects.push(object)
@@ -941,7 +962,11 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if realized.bound {
         // A program with no C closure binds to the prelinked runtime image
         // (Image/MemoryLink.jet); one it can't bind (thread-local data,
-        // init/fini arrays, an import the image lacks) links the pack in full.
+        // init/fini arrays, an import the image lacks) links the pack in full,
+        // unless its Core calls name the image's Core code, which the pack
+        // lacks: the program object makes no thread-local data or init/fini
+        // arrays, so that refusal is a compiler fault.
+        core_bound: runtime_exports.core != None
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
         bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)
@@ -949,6 +974,10 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
             return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
+        }
+        if core_bound {
+            loop error in bound.errors -> jet_driver_ice_record(census, "-", "native.link", "core-bind", error)
+            return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Faulted}
         }
         // The image moved into the bind; the full link reads the pack.
         runtime_path = jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_PACK_FILE)
@@ -1149,12 +1178,16 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
 // The runtime's key, its exports file's bytes (one exported symbol per
 // line) and its thread receipt's (JET_CLI_RUNTIME_THREADS_FILE; None when
 // it can't be read), else the failure jet_cli_native_object reports where
-// it reads them.
+// it reads them. When the program binds its Core calls to the runtime
+// image (jet_cli_native_executable), `core` holds the Core exports
+// (JET_CLI_CORE_EXPORTS_FILE) and `core_threads` the Core thread receipt.
 JetCLIRuntimeExports: struct {
     key: String
     exports: [U8]
     threads: [U8]?
     failure: JetCLINativeFailure?
+    core: IRCoreImage?{None}
+    core_threads: [U8]?{None}
 }
 
 jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExports Never! {
@@ -1168,7 +1201,8 @@ jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExport
 // emits its RC updates without the lock prefix (IRModule.single_thread):
 // the runtime's thread receipt was read and has no `*`, neither the program
 // nor its `main` (JET_CLI_MAIN_ROUTES) calls a runtime export the receipt
-// names, each foreign C call it makes (a symbol of `foreign`) is a
+// names, nor a Core export (IR_CORE_FUNCTION_PREFIX) the Core receipt names
+// or any without one, each foreign C call it makes (a symbol of `foreign`) is a
 // JET_CLI_SINGLE_THREAD_FOREIGN leaf, and it has no foreign assembly (an
 // `#FFI(asm)` leaf: the compiler's own leaves, a stop poll or a reduction,
 // have no source file) and no plugin. Anything else keeps the locked forms.
@@ -1185,16 +1219,22 @@ jet_cli_single_thread: fn(m: IRModule, runtime: JetCLIRuntimeExports, foreign: [
     starts := [String:Bool]{}
     starts["*"] = false
     loop route in JET_CLI_MAIN_ROUTES -> starts[route.copy()] = false
+    core_calls := false
     loop (row, calls) in called {
         if !calls -> next
         name: m.names[row]
         if foreign.get(name) == None {
             starts[name.copy()] = false
+            if name.starts_with(IR_CORE_FUNCTION_PREFIX) -> core_calls = true
         } else if !JET_CLI_SINGLE_THREAD_FOREIGN.contains(name) {
             return false
         }
     }
     jet_cli_runtime_exports_mark(receipt, starts)
+    if core_calls {
+        core_receipt: runtime.core_threads ?? return false
+        jet_cli_runtime_exports_mark(core_receipt, starts)
+    }
     loop start in starts.values() {
         if start -> return false
     }
@@ -1303,6 +1343,9 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     // The `hardened` profile sets the same hardening fact as the entry
     // package's `policy.harden`: the release build keeps the memory sentry.
     checks.harden = result.harden || options.profile == "hardened"
+    // A program bound to the runtime image calls the Core code there
+    // (jet_cli_native_executable): its Core calls build as calls of it.
+    checks.core = runtime.core
     declarations := jet_driver_checked_declarations(checked)
     // The program's C closure defines its foreign functions' symbols. An
     // `extern rust` function is called through the slot descriptor its helper
@@ -1362,10 +1405,20 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
             if op == .CallRuntime -> called[built.program.functions[index].a[at]] = true
         }
     }
+    // A Core call bound to the image names a symbol the builder found among
+    // the image's Core exports (JetIR BuildCore.jet ir_core_bound); `--trace`
+    // counts the distinct ones (`ir.build.core_calls`).
     exported := [String:Bool]{}
+    core_calls := 0
     loop (row, calls) in called {
-        if calls && closure_symbols.get(built.program.names[row]) == None -> exported[built.program.names[row].copy()] = false
+        if !calls -> next
+        name: built.program.names[row]
+        if {
+            runtime.core != None && name.starts_with(IR_CORE_FUNCTION_PREFIX) -> core_calls += 1
+            closure_symbols.get(name) == None -> exported[name.copy()] = false
+        }
     }
+    if trace_sink == .Val(sink) -> sink.progress("counters.ir.build.core_calls", core_calls, -1)
     if exported.len() > 0 -> jet_cli_runtime_exports_mark(runtime.exports, exported)
     // Per name row: a runtime call of it fails its function.
     unexported := [Bool]{}

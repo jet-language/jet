@@ -897,6 +897,11 @@ JetDriverCompileResult: struct {
     // The check's compile state under `hold_check_state`
     // (Pipeline.jet JetDriverHeldState); None otherwise. Nothing reads it.
     held: JetDriverHeldState?{None}
+    // Whether the compile took Core from this jet's Core record, not from
+    // Core source (JetCli Request.jet jet_cli_compile_executable): only then
+    // is its Core the code the runtime image carries, so only then does the
+    // native route bind its Core calls there (JetCli Host.jet).
+    core_record: Bool{false}
 }
 
 // The `allocator:` policy of the entry package of `load`

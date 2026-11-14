@@ -4,7 +4,7 @@
 // second thread.
 use {
     jet_cli.[JetCLIRuntimeExports, jet_cli_single_thread]
-    jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IR_PLUGIN_GUEST_PREFIX, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_thread_exports]
+    jet_ir.[IRAsmLeaf, IRFunction, IRLibraryExport, IRModule, IROp, IR_CORE_FUNCTION_PREFIX, IR_PLUGIN_GUEST_PREFIX, ir_emit, ir_function_new, ir_intern_name, ir_module_new, ir_thread_exports]
 }
 
 single_thread_test_fn: fn(m: &IRModule, name: String, runtime: [String], calls: [Int], addresses: [Int]) -> IRFunction {
@@ -90,6 +90,18 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
     m: single_thread_test_program(["jet_rt_alloc"])
     assert(!jet_cli_single_thread(m, single_thread_test_runtime(None), [String:Bool]{}))
     assert(jet_cli_single_thread(m, single_thread_test_runtime(Val("jet_rt_native_task_spawn")), [String:Bool]{}))
+}
+
+#Test("a bound Core call is read over the Core receipt, and keeps the locked RC forms without one") {
+    core: "{IR_CORE_FUNCTION_PREFIX}core_tasks_spawn_0"
+    plain: "{IR_CORE_FUNCTION_PREFIX}core_encoding_base64_encode_0"
+    runtime := single_thread_test_runtime(Val("jet_rt_native_task_spawn"))
+    assert(!jet_cli_single_thread(single_thread_test_program([plain]), runtime, [String:Bool]{}))
+    runtime.core_threads = Val(core.bytes())
+    assert(jet_cli_single_thread(single_thread_test_program([plain]), runtime, [String:Bool]{}))
+    assert(!jet_cli_single_thread(single_thread_test_program([plain, core]), runtime, [String:Bool]{}))
+    runtime.core_threads = Val("*".bytes())
+    assert(!jet_cli_single_thread(single_thread_test_program([plain]), runtime, [String:Bool]{}))
 }
 
 #Test("a call of an export the receipt names, its main's or any under `*` keeps the locked RC forms") {
