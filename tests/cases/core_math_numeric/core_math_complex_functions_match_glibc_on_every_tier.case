@@ -1,0 +1,34 @@
+# Complex's elementary methods (arg, proj, exp, ln, pow, sqrt, sin, cos, tan,
+# asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh) are C23's complex.h
+# functions: on every corpus call (each pair of binary64 special values,
+# signed zeros, infinities and NaNs of both signs, points around the unit
+# circle and the branch points, values whose exponential overflows before
+# its sine, subnormal parts, and seeded random operands), each part matches
+# glibc 2.42's: a NaN where glibc gives a NaN, the same infinity or signed
+# zero, else within 8 units in the last place. O0, O1, O2 and the web build
+# print the same lines.
+fixture: core_math_complex_functions_match_glibc_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = core_math_complex_functions_match_glibc_on_every_tier.1.out
+stderr: = ""
+step o1: jet run --optimize=basic main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = core_math_complex_functions_match_glibc_on_every_tier.1.out
+stderr: = ""
+step o2: jet run --optimize=full main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = core_math_complex_functions_match_glibc_on_every_tier.1.out
+stderr: = ""
+step: jet build --target web main.jet
+env: JET_STORE_DIR={work}/cache/web
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = core_math_complex_functions_match_glibc_on_every_tier.1.out
+stderr: = ""

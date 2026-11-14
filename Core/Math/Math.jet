@@ -16483,6 +16483,59 @@ Complex: struct {
     // magnitude are source methods like Fraction's and Decimal's.
     abs: fn(self) -> Float Never! { __complex_abs(self) }
 
+    // The elementary functions follow C23 Annex G: each signed zero,
+    // infinity and NaN gives the value the Annex lists, and a zero part's
+    // sign picks the side of a branch cut.
+
+    /// The angle from the positive real axis, in [-π, π].
+    arg: fn(self) -> Float Never! { __complex_arg(self) }
+
+    /// The value itself, or +∞ (keeping the imaginary part's sign on a zero)
+    /// when a part is infinite, as the Riemann sphere's one point at infinity.
+    proj: fn(self) -> Complex Never! { __complex_proj(self) }
+
+    /// e raised to this value.
+    exp: fn(self) -> Complex Never! { __complex_exp(self) }
+
+    /// The natural logarithm, with imaginary part in [-π, π]; the cut runs
+    /// along the negative real axis.
+    ln: fn(self) -> Complex Never! { __complex_ln(self) }
+
+    /// This value raised to `power`, as exp(power * ln(self)).
+    pow: fn(self, power: Complex) -> Complex Never! { __complex_pow(self, power) }
+
+    /// The principal square root, with a real part >= 0.
+    sqrt: fn(self) -> Complex Never! { __complex_sqrt(self) }
+
+    sin: fn(self) -> Complex Never! { __complex_sin(self) }
+    cos: fn(self) -> Complex Never! { __complex_cos(self) }
+    tan: fn(self) -> Complex Never! { __complex_tan(self) }
+
+    /// The principal arcsine; the cuts run along the real axis outside [-1, 1].
+    asin: fn(self) -> Complex Never! { __complex_asin(self) }
+
+    /// The principal arccosine; the cuts run along the real axis outside [-1, 1].
+    acos: fn(self) -> Complex Never! { __complex_acos(self) }
+
+    /// The principal arctangent; the cuts run along the imaginary axis outside [-i, i].
+    atan: fn(self) -> Complex Never! { __complex_atan(self) }
+
+    sinh: fn(self) -> Complex Never! { __complex_sinh(self) }
+    cosh: fn(self) -> Complex Never! { __complex_cosh(self) }
+    tanh: fn(self) -> Complex Never! { __complex_tanh(self) }
+
+    /// The principal inverse hyperbolic sine; the cuts run along the
+    /// imaginary axis outside [-i, i].
+    asinh: fn(self) -> Complex Never! { __complex_asinh(self) }
+
+    /// The principal inverse hyperbolic cosine; the cut runs along the real
+    /// axis below 1.
+    acosh: fn(self) -> Complex Never! { __complex_acosh(self) }
+
+    /// The principal inverse hyperbolic tangent; the cuts run along the real
+    /// axis outside [-1, 1].
+    atanh: fn(self) -> Complex Never! { __complex_atanh(self) }
+
     impl Add {
         add: fn(self, rhs: Complex) -> Complex Never! { __complex_add(self, rhs) }
     }
@@ -16589,6 +16642,29 @@ F64x4: struct {
     assert_eq(__decimal_to_float(__decimal_from_str("1.25")), 1.25)
     assert_eq(__complex_abs(Complex{real: 3.0, imaginary: 4.0}), 5.0)
     assert_eq(F64x4.from_array(F64x4.splat(F64{2.0}).to_array()).lane(3), F64{2.0})
+}
+#Test("Complex elementary functions give exact values at exact points") {
+    zero: Complex{real: 0.0, imaginary: 0.0}
+    one: Complex{real: 1.0, imaginary: 0.0}
+    i: Complex{real: 0.0, imaginary: 1.0}
+    assert_eq(i.arg(), PI / 2.0)
+    assert_eq(Complex{real: 2.0, imaginary: INFINITY}.proj().real, INFINITY)
+    assert_eq(zero.exp().real, 1.0)
+    assert_eq(one.ln().real, 0.0)
+    assert_eq(one.pow(i).real, 1.0)
+    assert_eq(Complex{real: -4.0, imaginary: 0.0}.sqrt().imaginary, 2.0)
+    assert_eq(zero.sin().real, 0.0)
+    assert_eq(zero.cos().real, 1.0)
+    assert_eq(zero.tan().imaginary, 0.0)
+    assert_eq(zero.asin().real, 0.0)
+    assert_eq(one.acos().real, 0.0)
+    assert_eq(zero.atan().imaginary, 0.0)
+    assert_eq(zero.sinh().real, 0.0)
+    assert_eq(zero.cosh().real, 1.0)
+    assert_eq(zero.tanh().imaginary, 0.0)
+    assert_eq(zero.asinh().real, 0.0)
+    assert_eq(one.acosh().real, 0.0)
+    assert_eq(zero.atanh().imaginary, 0.0)
 }
 #Test("Mat4 source products preserve column-major order and fold from zero") {
     matrix: Mat4.new(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0)
@@ -18775,6 +18851,329 @@ __complex_to_string: fn(value: Complex) -> String Never! {
     sign: if sign_bit(value.imaginary) -> "-" else -> "+"
     "{__complex_part_text(value.real)} {sign} {__complex_part_text(abs_float(value.imaginary))}i"
 }
+
+// The complex elementary functions. Each special value (signed zeros,
+// infinities, NaNs) is the one C23 Annex G lists. The exponential,
+// hyperbolic and square-root bodies follow FreeBSD's msun (as musl carries
+// them); the logarithm sums |z|^2 - 1 exactly near the unit circle; the
+// inverse functions use Kahan's formulas over principal square roots, whose
+// signed zeros pick the side of each branch cut.
+__COMPLEX_LN2: Float{0.693147180559945309417232121458176568}
+__COMPLEX_THREE_QUARTER_PI: Float{2.356194490192344928846982537459627163}
+
+__complex_arg: fn(z: Complex) -> Float Never! { atan2(z.imaginary, z.real) }
+
+__complex_proj: fn(z: Complex) -> Complex Never! {
+    if is_inf(z.real) || is_inf(z.imaginary) -> return __complex_from_parts(INFINITY, copysign(0.0, z.imaginary))
+    __complex_from_parts(z.real, z.imaginary)
+}
+
+// e^x (cos y + i sin y) * 2^extra for an x past ln of the largest Float:
+// e^x is e^(x - k ln 2) * 2^k with k = 1799, and the power of 2 lands in two
+// halves, so a small cos or sin stays finite and a subnormal one keeps its
+// digits.
+__complex_exp_scaled: fn(x: Float, y: Float, extra: Int) -> Complex Never! {
+    split: frexp(exp(x - 1246.97177782734161156))
+    shift: 1799 + split.exp + extra
+    half: shift /% 2
+    scaled: ldexp(split.frac, half)
+    __complex_from_parts(ldexp(cos(y) * scaled, shift - half), ldexp(sin(y) * scaled, shift - half))
+}
+
+__complex_exp: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if y == 0.0 -> return __complex_from_parts(exp(x), y)
+    if x == 0.0 -> return __complex_from_parts(cos(y), sin(y))
+    if !is_finite(y) {
+        if !is_inf(x) -> return __complex_from_parts(y - y, y - y)
+        if x < 0.0 -> return __complex_from_parts(0.0, copysign(0.0, y))
+        return __complex_from_parts(x, y - y)
+    }
+    if x >= from_bits(0x4086_2E42_0000_0000) && x <= from_bits(0x4096_B8E4_0000_0000) -> return __complex_exp_scaled(x, y, 0)
+    scale: exp(x)
+    __complex_from_parts(scale * cos(y), scale * sin(y))
+}
+
+// ln|z| for finite a >= b >= 0 with a > 0. Near the unit circle
+// a^2 + b^2 - 1 is summed exactly, so the logarithm keeps its digits.
+__complex_ln_abs: fn(a: Float, b: Float) -> Float Never! {
+    if a > from_bits(0x7E30_0000_0000_0000) -> return ln(hypot(a * 0.25, b * 0.25)) + Float{2.0} * __COMPLEX_LN2
+    if a < from_bits(0x0390_0000_0000_0000) -> return ln(hypot(ldexp(a, 1000), ldexp(b, 1000))) - Float{1000.0} * __COMPLEX_LN2
+    h: hypot(a, b)
+    if h < 0.7 || h > 1.4 -> return ln(h)
+    a2: a * a
+    b2: b * b
+    first: __two_sum(a2, -1.0)
+    second: __two_sum(first.hi, b2)
+    0.5 * ln_1p(second.hi + (first.lo + second.lo + fma(a, a, -a2) + fma(b, b, -b2)))
+}
+
+__complex_ln: fn(z: Complex) -> Complex Never! {
+    a: fabs(z.real)
+    b: fabs(z.imaginary)
+    angle: atan2(z.imaginary, z.real)
+    if is_inf(a) || is_inf(b) -> return __complex_from_parts(INFINITY, angle)
+    if is_nan(a) || is_nan(b) -> return __complex_from_parts(NAN, angle)
+    if a == 0.0 && b == 0.0 -> return __complex_from_parts(-INFINITY, angle)
+    magnitude: if a >= b -> __complex_ln_abs(a, b) else -> __complex_ln_abs(b, a)
+    __complex_from_parts(magnitude, angle)
+}
+
+__complex_pow: fn(base: Complex, power: Complex) -> Complex Never! {
+    __complex_exp(__complex_mul(power, __complex_ln(base)))
+}
+
+// Algorithm 312 (CACM, October 1967), with both parts quartered when one
+// is near the largest Float and both raised by 2^600 when they are near
+// the smallest normal one.
+__complex_sqrt: fn(z: Complex) -> Complex Never! {
+    a := z.real
+    b := z.imaginary
+    if a == 0.0 && b == 0.0 -> return __complex_from_parts(0.0, b)
+    if is_inf(b) -> return __complex_from_parts(INFINITY, b)
+    if is_nan(a) -> return __complex_from_parts(a, (b - b) / (b - b))
+    if is_inf(a) {
+        if sign_bit(a) -> return __complex_from_parts(fabs(b - b), copysign(a, b))
+        return __complex_from_parts(a, copysign(b - b, b))
+    }
+    tiny: from_bits(0x0030_0000_0000_0000)
+    if fabs(a) < tiny && fabs(b) < tiny {
+        raised: __complex_sqrt(__complex_from_parts(ldexp(a, 600), ldexp(b, 600)))
+        return __complex_from_parts(ldexp(raised.real, -300), ldexp(raised.imaginary, -300))
+    }
+    limit: from_bits(0x7FDA_8279_99FC_EF32)
+    scaled: fabs(a) >= limit || fabs(b) >= limit
+    if scaled {
+        a = a * 0.25
+        b = b * 0.25
+    }
+    root := Float{0.0}
+    other := Float{0.0}
+    if a >= 0.0 {
+        root = sqrt((a + hypot(a, b)) * 0.5)
+        other = b / (root * 2.0)
+        if scaled -> return __complex_from_parts(root * 2.0, other * 2.0)
+        return __complex_from_parts(root, other)
+    }
+    root = sqrt((-a + hypot(a, b)) * 0.5)
+    other = fabs(b) / (root * 2.0)
+    if scaled -> return __complex_from_parts(other * 2.0, copysign(root, b) * 2.0)
+    __complex_from_parts(other, copysign(root, b))
+}
+
+__complex_sinh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_finite(x) && is_finite(y) {
+        if y == 0.0 -> return __complex_from_parts(sinh(x), y)
+        ax: fabs(x)
+        if ax < 22.0 -> return __complex_from_parts(sinh(x) * cos(y), cosh(x) * sin(y))
+        if ax < from_bits(0x4086_2E42_0000_0000) {
+            half: exp(ax) * 0.5
+            return __complex_from_parts(copysign(half, x) * cos(y), half * sin(y))
+        }
+        if ax < from_bits(0x4096_BBAA_0000_0000) {
+            scaled: __complex_exp_scaled(ax, y, -1)
+            return __complex_from_parts(scaled.real * copysign(1.0, x), scaled.imaginary)
+        }
+        huge: from_bits(0x7FE0_0000_0000_0000) * x
+        return __complex_from_parts(huge * cos(y), huge * huge * sin(y))
+    }
+    if x == 0.0 -> return __complex_from_parts(x, y - y)
+    if y == 0.0 {
+        if is_inf(x) -> return __complex_from_parts(x, y)
+        return __complex_from_parts(x, copysign(0.0, y))
+    }
+    if is_finite(x) -> return __complex_from_parts(y - y, x * (y - y))
+    if is_inf(x) {
+        if !is_finite(y) -> return __complex_from_parts(x * x, x * (y - y))
+        return __complex_from_parts(x * cos(y), INFINITY * sin(y))
+    }
+    __complex_from_parts((x * x) * (y - y), (x + x) * (y - y))
+}
+
+__complex_cosh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_finite(x) && is_finite(y) {
+        if y == 0.0 -> return __complex_from_parts(cosh(x), x * y)
+        ax: fabs(x)
+        if ax < 22.0 -> return __complex_from_parts(cosh(x) * cos(y), sinh(x) * sin(y))
+        if ax < from_bits(0x4086_2E42_0000_0000) {
+            half: exp(ax) * 0.5
+            return __complex_from_parts(half * cos(y), copysign(half, x) * sin(y))
+        }
+        if ax < from_bits(0x4096_BBAA_0000_0000) {
+            scaled: __complex_exp_scaled(ax, y, -1)
+            return __complex_from_parts(scaled.real, scaled.imaginary * copysign(1.0, x))
+        }
+        huge: from_bits(0x7FE0_0000_0000_0000) * x
+        return __complex_from_parts(huge * huge * cos(y), huge * sin(y))
+    }
+    if x == 0.0 -> return __complex_from_parts(y - y, 0.0)
+    if y == 0.0 {
+        if is_inf(x) -> return __complex_from_parts(x * x, copysign(0.0, x) * y)
+        return __complex_from_parts(x * x, y)
+    }
+    if is_finite(x) -> return __complex_from_parts(y - y, x * (y - y))
+    if is_inf(x) {
+        if !is_finite(y) -> return __complex_from_parts(x * x, x * (y - y))
+        return __complex_from_parts((x * x) * cos(y), x * sin(y))
+    }
+    __complex_from_parts((x * x) * (y - y), (x + x) * (y - y))
+}
+
+// tanh(x + iy) is (sinh x cosh x + i sin y cos y) / (sinh^2 x + cos^2 y);
+// past |x| = 22, where tanh x rounds to ±1, the imaginary part is
+// 4 sin y cos y e^(-2|x|), written so nothing overflows.
+__complex_tanh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if !is_finite(x) {
+        if is_nan(x) -> return __complex_from_parts(x, if y == 0.0 -> y else -> x * y)
+        return __complex_from_parts(copysign(1.0, x), copysign(0.0, if is_finite(y) -> sin(y) * cos(y) else -> y))
+    }
+    if !is_finite(y) -> return __complex_from_parts(if x != 0.0 -> y - y else -> x, y - y)
+    if fabs(x) >= 22.0 {
+        small: exp(-fabs(x))
+        return __complex_from_parts(copysign(1.0, x), 4.0 * sin(y) * cos(y) * small * small)
+    }
+    s: sinh(x)
+    c: cos(y)
+    denominator: s * s + c * c
+    __complex_from_parts(s * cosh(x) / denominator, sin(y) * c / denominator)
+}
+
+// sin z = -i sinh(iz), cos z = cosh(iz), tan z = -i tanh(iz). An infinite
+// imaginary part over a non-finite real one gives NaN + i∞, the sign Annex
+// G leaves open taken as +, as glibc takes it.
+__complex_sin: fn(z: Complex) -> Complex Never! {
+    if is_inf(z.imaginary) && !is_finite(z.real) -> return __complex_from_parts(NAN, INFINITY)
+    w: __complex_sinh(__complex_from_parts(-z.imaginary, z.real))
+    __complex_from_parts(w.imaginary, -w.real)
+}
+
+__complex_cos: fn(z: Complex) -> Complex Never! { __complex_cosh(__complex_from_parts(-z.imaginary, z.real)) }
+
+__complex_tan: fn(z: Complex) -> Complex Never! {
+    w: __complex_tanh(__complex_from_parts(-z.imaginary, z.real))
+    __complex_from_parts(w.imaginary, -w.real)
+}
+
+// Kahan's arcsine of finite x + iy over the principal roots of 1 - z and
+// 1 + z.
+__complex_asin_finite: fn(x: Float, y: Float) -> Complex Never! {
+    below: __complex_sqrt(__complex_from_parts(1.0 - x, -y))
+    above: __complex_sqrt(__complex_from_parts(1.0 + x, y))
+    real: atan2(x, below.real * above.real - below.imaginary * above.imaginary)
+    __complex_from_parts(real, asinh(below.real * above.imaginary - below.imaginary * above.real))
+}
+
+__complex_asinh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_inf(x) {
+        if is_nan(y) -> return __complex_from_parts(x, y)
+        if is_inf(y) -> return __complex_from_parts(x, copysign(PI * 0.25, y))
+        return __complex_from_parts(x, copysign(0.0, y))
+    }
+    if is_inf(y) {
+        if is_nan(x) -> return __complex_from_parts(copysign(INFINITY, x), x)
+        return __complex_from_parts(copysign(INFINITY, x), copysign(PI * 0.5, y))
+    }
+    if is_nan(x) {
+        if y == 0.0 -> return __complex_from_parts(x, y)
+        return __complex_from_parts(x, x)
+    }
+    if is_nan(y) -> return __complex_from_parts(y, y)
+    // asinh z = -i asin(iz)
+    w: __complex_asin_finite(-y, x)
+    __complex_from_parts(w.imaginary, -w.real)
+}
+
+__complex_asin: fn(z: Complex) -> Complex Never! {
+    w: __complex_asinh(__complex_from_parts(-z.imaginary, z.real))
+    __complex_from_parts(w.imaginary, -w.real)
+}
+
+__complex_acos: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_inf(x) {
+        if is_nan(y) -> return __complex_from_parts(y, copysign(INFINITY, -y))
+        if is_inf(y) -> return __complex_from_parts(if x < 0.0 -> __COMPLEX_THREE_QUARTER_PI else -> PI * 0.25, -y)
+        return __complex_from_parts(if x < 0.0 -> PI else -> 0.0, copysign(INFINITY, -y))
+    }
+    if is_inf(y) -> return __complex_from_parts(if is_nan(x) -> x else -> PI * 0.5, -y)
+    if is_nan(x) -> return __complex_from_parts(x, x)
+    if is_nan(y) {
+        if x == 0.0 -> return __complex_from_parts(PI * 0.5, y)
+        return __complex_from_parts(y, y)
+    }
+    below: __complex_sqrt(__complex_from_parts(1.0 - x, -y))
+    above: __complex_sqrt(__complex_from_parts(1.0 + x, y))
+    __complex_from_parts(2.0 * atan2(below.real, above.real), asinh(above.real * below.imaginary - above.imaginary * below.real))
+}
+
+__complex_acosh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_inf(x) {
+        if is_nan(y) -> return __complex_from_parts(INFINITY, y)
+        if is_inf(y) -> return __complex_from_parts(INFINITY, copysign(if x < 0.0 -> __COMPLEX_THREE_QUARTER_PI else -> PI * 0.25, y))
+        return __complex_from_parts(INFINITY, copysign(if x < 0.0 -> PI else -> 0.0, y))
+    }
+    if is_inf(y) -> return __complex_from_parts(INFINITY, if is_nan(x) -> x else -> copysign(PI * 0.5, y))
+    if is_nan(y) && x == 0.0 -> return __complex_from_parts(y, PI * 0.5)
+    if is_nan(x) || is_nan(y) -> return __complex_from_parts(NAN, NAN)
+    below: __complex_sqrt(__complex_from_parts(x - 1.0, y))
+    above: __complex_sqrt(__complex_from_parts(x + 1.0, y))
+    __complex_from_parts(asinh(below.real * above.real + below.imaginary * above.imaginary), 2.0 * atan2(below.imaginary, above.real))
+}
+
+__complex_atanh: fn(z: Complex) -> Complex Never! {
+    x: z.real
+    y: z.imaginary
+    if is_inf(y) -> return __complex_from_parts(copysign(0.0, x), copysign(PI * 0.5, y))
+    if is_inf(x) {
+        if is_nan(y) -> return __complex_from_parts(copysign(0.0, x), y)
+        return __complex_from_parts(copysign(0.0, x), copysign(PI * 0.5, y))
+    }
+    if is_nan(x) || is_nan(y) {
+        if x == 0.0 -> return __complex_from_parts(x, y)
+        return __complex_from_parts(NAN, NAN)
+    }
+    ax: fabs(x)
+    ay: fabs(y)
+    if ax > 1.0e150 || ay > 1.0e150 {
+        // atanh z is 1/z plus iπ/2 to within rounding.
+        scale: if ax > ay -> ax else -> ay
+        sx: x / scale
+        sy: y / scale
+        return __complex_from_parts(sx / (scale * (sx * sx + sy * sy)), copysign(PI * 0.5, y))
+    }
+    gap: Float{1.0} - ax
+    near: gap * gap + y * y
+    // Near ±1 with both gaps below 2^-511 the quotient overflows; ln of
+    // 4|x| / |1 - |x| + iy|^2 is then taken as a difference.
+    real: if near >= from_bits(0x0010_0000_0000_0000) -> Float{0.25} * ln_1p(4.0 * ax / near) else -> __complex_atanh_near_one(ax, gap, ay)
+    __complex_from_parts(copysign(real, x), 0.5 * atan2(2.0 * y, gap * (ax + 1.0) - y * y))
+}
+
+// A quarter of ln(4a / (g^2 + b^2)) for a tiny g and b, not both zero.
+__complex_atanh_near_one: fn(a: Float, g: Float, b: Float) -> Float Never! {
+    if g == 0.0 && b == 0.0 -> return INFINITY
+    gm: fabs(g)
+    magnitude: if gm >= b -> __complex_ln_abs(gm, b) else -> __complex_ln_abs(b, gm)
+    0.25 * (ln(4.0 * a) - magnitude * 2.0)
+}
+
+__complex_atan: fn(z: Complex) -> Complex Never! {
+    w: __complex_atanh(__complex_from_parts(-z.imaginary, z.real))
+    __complex_from_parts(w.imaginary, -w.real)
+}
+
 #Test("Source exact rendering preserves decimal scale and quotient form") {
     assert_eq(__decimal_to_string(__decimal_from_str("-0.00")), "0.00")
     assert_eq(__decimal_to_string(__decimal_from_str("-123.4500")), "-123.4500")

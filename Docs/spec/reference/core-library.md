@@ -3264,6 +3264,17 @@ compiler builtin records: only the canonical loaded Core module may declare them
 Their `Display` implementations use the canonical `display: fn(self) -> String`
 contract: rendering borrows the value and keeps the exact text policy above.
 
+`Complex` carries C23's complex elementary functions as methods: `arg`,
+`proj`, `exp`, `ln`, `pow(power)`, `sqrt`, `sin`, `cos`, `tan`, `asin`,
+`acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, and `atanh`. Each
+returns the principal value, and each special value (signed zeros,
+infinities, NaNs) is the one C23 Annex G lists. A zero part's sign picks
+the side of a branch cut, so `Complex{real: -4.0, imaginary: -0.0}.sqrt()`
+is `0 - 2i`. Where the Annex leaves a sign open, the result takes glibc's.
+Finite results are within a few units in the last place, not correctly
+rounded. `pow` is `exp(power * ln(self))`, so its error grows with
+`|power * ln(self)|`.
+
 Float math wrappers widen `F32` with `Float.from_f32`, not a typed literal.
 Typed transforms retain phantom scalar/space parameters with Float storage;
 their source affine constructor accepts the widened Float coefficients, like

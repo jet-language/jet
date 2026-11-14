@@ -1,0 +1,154 @@
+// Every corpus row is one call of a Complex method: the argument's real and
+// imaginary words (the base's, then the power's, for pow), then the real and
+// imaginary words glibc's C function returned, computed offline. A word is
+// the 16 hex digit binary64 bit pattern. The program prints one line per
+// method with the rows it checked and how many differ, plus the first
+// differing rows. A part matches when both are NaN (an arithmetic NaN's bits
+// are not the method's to choose), when both are the same infinity or the
+// same signed zero, or when they are otherwise at most 8 units in the last
+// place apart: each library is a few ulps from the true value, not
+// correctly rounded.
+use {
+    math: core.math
+}
+
+EXP: #run embed_file("corpus/exp.txt")
+LN: #run embed_file("corpus/ln.txt")
+POW: #run embed_file("corpus/pow.txt")
+SQRT: #run embed_file("corpus/sqrt.txt")
+SIN: #run embed_file("corpus/sin.txt")
+COS: #run embed_file("corpus/cos.txt")
+TAN: #run embed_file("corpus/tan.txt")
+ASIN: #run embed_file("corpus/asin.txt")
+ACOS: #run embed_file("corpus/acos.txt")
+ATAN: #run embed_file("corpus/atan.txt")
+SINH: #run embed_file("corpus/sinh.txt")
+COSH: #run embed_file("corpus/cosh.txt")
+TANH: #run embed_file("corpus/tanh.txt")
+ASINH: #run embed_file("corpus/asinh.txt")
+ACOSH: #run embed_file("corpus/acosh.txt")
+ATANH: #run embed_file("corpus/atanh.txt")
+PROJ: #run embed_file("corpus/proj.txt")
+ARG: #run embed_file("corpus/arg.txt")
+
+ULPS: 8
+
+hex_value: fn(b: U8) -> Int {
+    n: Int{b}
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The binary64 value of the 16 hex digit word at `at`.
+float_at: fn(raw: [U8], at: Int) -> Float {
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n >= 0x8000_0000_0000_0000 -> return math.from_bits(n - 0x1_0000_0000_0000_0000)
+    math.from_bits(n)
+}
+
+hex_word: fn(value: Float) -> String {
+    digits: "0123456789abcdef".bytes()
+    n := math.to_bits(value)
+    if n < 0 -> n = n + 0x1_0000_0000_0000_0000
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+// The value's place on the number line counted in binary64 steps.
+ordinal: fn(value: Float) -> Int {
+    bits: math.to_bits(value)
+    magnitude: bits.bit_and(0x7FFF_FFFF_FFFF_FFFF)
+    if bits < 0 -> return -magnitude
+    magnitude
+}
+
+part_matches: fn(got: Float, want: Float) -> Bool {
+    if math.is_nan(got) || math.is_nan(want) -> return math.is_nan(got) && math.is_nan(want)
+    if math.is_inf(got) || math.is_inf(want) -> return got == want
+    if got == 0.0 && want == 0.0 -> return math.to_bits(got) == math.to_bits(want)
+    gap: ordinal(got) - ordinal(want)
+    gap <= ULPS && gap >= -ULPS
+}
+
+apply: fn(name: String, z: math.Complex) -> math.Complex {
+    if name == "exp" -> return z.exp()
+    if name == "ln" -> return z.ln()
+    if name == "sqrt" -> return z.sqrt()
+    if name == "sin" -> return z.sin()
+    if name == "cos" -> return z.cos()
+    if name == "tan" -> return z.tan()
+    if name == "asin" -> return z.asin()
+    if name == "acos" -> return z.acos()
+    if name == "atan" -> return z.atan()
+    if name == "sinh" -> return z.sinh()
+    if name == "cosh" -> return z.cosh()
+    if name == "tanh" -> return z.tanh()
+    if name == "asinh" -> return z.asinh()
+    if name == "acosh" -> return z.acosh()
+    if name == "atanh" -> return z.atanh()
+    if name == "proj" -> return z.proj()
+    if name == "arg" -> return math.Complex{real: z.arg(), imaginary: 0.0}
+    panic("no corpus method {name}")
+}
+
+check: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        // The row's words: its arguments, then the result.
+        words := [Float]{}
+        loop {
+            words.push(float_at(raw, at))
+            at = at + 17
+            if raw[at - 1] == (U8{10}) -> break
+        }
+        z: math.Complex{real: words[0], imaginary: words[1]}
+        got: if words.len() == 6 -> z.pow(math.Complex{real: words[2], imaginary: words[3]}) else -> apply(name, z)
+        want_real: words[words.len() - 2]
+        want_imaginary: words[words.len() - 1]
+        rows = rows + 1
+        if !part_matches(got.real, want_real) || !part_matches(got.imaginary, want_imaginary) {
+            wrong = wrong + 1
+            if wrong <= 3 {
+                shown := [String]{}
+                loop i in 0..<(words.len() - 2) -> shown.push(hex_word(words[i]))
+                print("{name}({shown.join(", ")}) = {hex_word(got.real)} {hex_word(got.imaginary)}, glibc {hex_word(want_real)} {hex_word(want_imaginary)}")
+            }
+        }
+    }
+    print("{name}: {rows} rows, {wrong} differ")
+}
+
+run: fn() {
+    check("exp", EXP)
+    check("ln", LN)
+    check("pow", POW)
+    check("sqrt", SQRT)
+    check("sin", SIN)
+    check("cos", COS)
+    check("tan", TAN)
+    check("asin", ASIN)
+    check("acos", ACOS)
+    check("atan", ATAN)
+    check("sinh", SINH)
+    check("cosh", COSH)
+    check("tanh", TANH)
+    check("asinh", ASINH)
+    check("acosh", ACOSH)
+    check("atanh", ATANH)
+    check("proj", PROJ)
+    check("arg", ARG)
+}
