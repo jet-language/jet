@@ -1477,9 +1477,11 @@ scheduler_carrier_idle: fn(root: I64) {
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
 // and, idle, fires their timers. The record is its Carrier72; runs turns odd
-// while it runs a job and even again after, for the monitor. A fiber that
-// just yielded here waits behind a queued job, so a turn it gave reaches a
-// job that has no fiber yet.
+// while it runs a job and even again after, for the monitor. A carrier whose
+// fiber just yielded starts a queued job before it takes a ready fiber, so a
+// turn it gave reaches a job that has no fiber yet: with more busy fibers
+// than carriers the ready queue never empties, and a job taken only once it
+// had would never start.
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
@@ -1495,13 +1497,9 @@ scheduler_carrier_idle: fn(root: I64) {
             sync_thread_unlock(root)
             return I64{0}
         }
-        fiber := fiber_ready_pop(root)
-        task := I64{0}
-        if (fiber == I64{0} || fiber == yielded) -> task = scheduler_pop(root)
-        if (task != I64{0} && fiber != I64{0}) {
-            fiber_ready_push(root, fiber)
-            fiber = I64{0}
-        }
+        task := if (yielded != I64{0}) -> scheduler_pop(root) else -> I64{0}
+        fiber := if (task == I64{0}) -> fiber_ready_pop(root) else -> I64{0}
+        if (task == I64{0} && fiber == I64{0}) -> task = scheduler_pop(root)
         if (fiber == I64{0} && task == I64{0}) {
             if scheduler_carrier_excess(root) {
                 scheduler_carrier_retire(root, record)
