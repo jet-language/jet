@@ -422,17 +422,19 @@ An O2 pass may build an SSA form of one function, use it and discard it
 
 **IR Lint** ([`Lint.jet`](../../Compiler/JetIR/Source/Lint.jet)) checks a
 module against the IR's contract. It shares no code with the builder or the
-passes. Per function it checks the arena, each instruction's operands against
-its opcode's row in `IR_LINT_OPS` (roles, slot kinds, typing), every `Call`
-against the callee's parameter and result rows, every `CallIndirect` through
-a function value's code word (a row of `#code` over the function type)
-against that signature, every `CallRuntime` against its route's carriers,
-each `Drop`/`Close` against its slot and drop routine, each
-`Load`/`Store`/`Offset`/`CopyBytes`/`StackAddress` against the bounds of an
-Aggregate base and the 32-bit displacement, each `ConstText` and
-`ConstBigInt` against its data or name row, the structured-control nesting,
-and `Return` against the result; only `Nop` and `Unreachable` have nothing
-to type. Per module it checks each type row's kind and layout against its
+passes. Per function it checks the arena, the structured-control nesting
+and each instruction against its opcode's row in `IR_LINT_OPS`: the role of
+each operand (`IRLintRole`), the slot kinds `dst` and `a` admit, and one
+typing row. A typing row is the rule beyond roles and kinds: which operands
+share one layout (or one register class, or raw words), which immediates are
+in range (an overflow policy, a 32-bit displacement, a frame alignment, an
+inline Int), which data or name row a constant reads, and which signature a
+call, runtime route, indirect call, drop or `Return` is checked against. The
+typing rows, each with what it checks, are the `IRLintTyping` enum in
+[`Lint.jet`](../../Compiler/JetIR/Source/Lint.jet), their one home; every
+opcode has one, and only `Nop` and `Unreachable` have nothing to type.
+
+Per module it checks each type row's kind and layout against its
 checked `Type`. `ir_lint_core_routes` checks each Core call registry row
 with a runtime route against that route's arity. The route lint,
 `ir_lint_route_gaps`, lists in one run every gap a runtime leaves: each Core
@@ -448,19 +450,28 @@ the stop edge. A runtime route's Word carrier takes an `Int` or a word. A
 `ConstText` may yield the raw static-text address the runtime library's
 `rt_static_text` reads as a Word.
 
-It runs once per build, over the module x86-64 selection reads: after the IR
-build (`ir.build`) at O0, after the optimizer (`ir.opt`) at O1 and O2. `jet
-emit --ir` lints the module it prints (`ir.build`), and each comptime batch
-and the comptime entry program are linted before they compile (`eval.batch`,
-`eval.entry`; a finding fails the batch). The functions split across the
-compiler threads. With `IROptOptions.verify` (tests, CI,
-`JET_OPT_VERIFY=1`) it also runs after each optimizer pass
-(`ir.opt.<pass>`) and verifies each SSA form (`ssa.form`). A finding is a
-compiler bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE
-census row naming the function, the pass and the rule. The build collects
-every row, traps each function that has one, and exits 101. The runtime
-library build (`Request.jet` `jet_cli_runtime_library`) runs the same two
-checks, and each finding is one of its issue rows.
+Every path that builds IR lints it before the next step reads it. Each lint
+point is the pass name its findings carry:
+
+- `ir.build` and `ir.opt`: a build lints the module x86-64 selection reads,
+  after the IR build at O0 and after the optimizer at O1 and O2.
+- `ir.build` under `jet emit --ir`: the module it prints, after the dump.
+- `eval.batch` and `eval.entry`: each comptime batch and the comptime entry
+  program, before they compile; a finding fails the batch.
+- `ir.opt.prepare`, `ir.opt.<pass>` and `ssa.form`: with
+  `IROptOptions.verify` (tests, CI, `JET_OPT_VERIFY=1`, `--opt-verify`),
+  each body as the passes get it, after each optimizer pass, and each SSA
+  form.
+- `ir.build` and `ir.opt` in the runtime library build (`Request.jet`
+  `jet_cli_runtime_library`) and the Core code library
+  (`CoreLibrary.jet` `jet_cli_core_library`), after the build and after
+  the O1 optimizer; each finding is one of their issue rows.
+
+The functions split across the compiler threads. A finding is a compiler
+bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE census
+row naming the function, the pass and the rule. The build collects every
+row, traps each function that has one, and exits 101; `jet emit --ir`
+exits 101 after the dump.
 
 | Consumer | Reads |
 |---|---|
