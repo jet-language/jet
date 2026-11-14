@@ -32,19 +32,25 @@
 // more as a checked one does.
 use jet_foundation.[
     BodyCallArg,
-    BodyTree,
+    BodyNode,
     CompilerThreads,
     CompilerTraceSink,
     DeclID,
     DeclTable,
     Diagnostic,
     FnBody,
+    SymbolID,
     SymbolKind,
     TTryConvert,
     TTypeDef,
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
+    compiler_take_rows,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
+    compiler_transfer_rows,
     symbol_find,
     symbol_is_local,
     symbol_key_text,
@@ -253,7 +259,7 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         affected := [Int]{}
         loop key in tally.names.keys -> sema_core_demand_key(graph, modules, key, wave, affected)
         tally.names.keys = [String]{}
-        sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected)
+        sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
         if trace_sink == .Val(sink) -> sink.end("sema.core_demand.name", wave.len())
         if wave.len() == 0 -> break
         graph.core_wave_rows = wave.move()
@@ -313,7 +319,7 @@ sema_core_demand_pass: fn(owned: &&SemaRegistrationGraph, first_affected: &&[Int
         held := program.registration_graph.move()
         program.registration_graph = None
         pass_graph := held.move() ?? panic("a Core demand pass lost its registration graph")
-        sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected)
+        sema_core_demand_named(pass_graph, modules, tally.read_functions, tally.read_facts, tally.names, wave, affected, threads)
         size = wave.len()
         pass_graph.core_wave_rows = wave.move()
         program.registration_graph = Val(pass_graph.move())
@@ -401,22 +407,167 @@ sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, 
 // modules in `affected`; a key `names` holds from before was demanded then.
 // A named body of a taken module is taken into `modules` at once
 // (sema_core_body_take), and what it names is read in turn, until a read
-// takes none.
-sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int]) {
+// takes none. The functions are read on up to `threads` threads
+// (sema_core_demand_read), and their names demanded here in module order,
+// each module's functions before its call-site facts, as one thread would.
+sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], names: &SemaCoreDemandNames, wave: &[String:Bool], affected: &[Int], threads: CompilerThreads) {
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
     loop {
-        loop module_index in 0..<modules.len() {
-            loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, graph.symbols, names)
-            read_functions[module_index] = modules[module_index].functions.len()
-            loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
-                if modules[module_index].call_facts[position].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+        parts := sema_core_demand_read(modules, read_functions, threads)
+        loop part_index in 0..<parts.len() {
+            first: parts[part_index].first
+            loop at in 0..<parts[part_index].from.len() {
+                module_index: first + at
+                sema_core_demand_apply(parts[part_index].reads, if at == 0 -> 0 else -> parts[part_index].ends[at - 1], parts[part_index].ends[at], graph.decls, graph.symbols, names)
+                read_functions[module_index] = parts[part_index].from[at] + parts[part_index].counts[at]
+                loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
+                    if modules[module_index].call_facts[position].callee == .Val(callee) -> sema_core_demand_symbol_key(graph.symbols, callee, names)
+                }
+                read_facts[module_index] = modules[module_index].call_facts.len()
             }
-            read_facts[module_index] = modules[module_index].call_facts.len()
         }
         if names.keys.len() == 0 -> return
         loop key in names.keys -> sema_core_demand_key(graph, modules, key, wave, affected)
         names.keys = [String]{}
+    }
+}
+
+// The fewest body nodes a demand read gives a thread: walking a body costs
+// about as much per node as starting a thread costs per few thousand.
+SEMA_CORE_DEMAND_READ_NODES_PER_THREAD: 32768
+
+// One thread's demand read: the unread functions of modules `first` on, one
+// list per module (`functions`, moved out of the module and back), each
+// module's first unread function (`from`) and how many it read (`counts`),
+// and the names the functions hold in walk order (`reads`), each module's
+// ending at `ends`.
+SemaCoreDemandPart: struct {
+    first: Int
+    functions: [[FnBody]]
+    from: [Int]
+    counts: [Int]
+    reads: SemaCoreDemandReads
+    ends: [Int]
+}
+
+// The names read bodies hold, in walk order (sema_core_demand_body_reads),
+// each declaration row and run-wide symbol at its first site in the read.
+// The declared error conversions' keys wait in `conversions`, last first
+// once the read ends (sema_core_demand_reads_end), so demanding them in
+// walk order pops each.
+SemaCoreDemandReads: struct {
+    names: [SemaCoreDemandRead]
+    conversions: [String]
+    decls: [Int:Bool]
+    symbols: [U32:Bool]
+}
+
+// One name a body holds: a declaration row, a run-wide symbol, or the next
+// key of a declared error conversion.
+SemaCoreDemandRead: struct {
+    decl: DeclID?
+    symbol: SymbolID?
+    conversion: Bool
+}
+
+sema_core_demand_reads_new: fn() -> SemaCoreDemandReads Never! {
+    SemaCoreDemandReads{names: [SemaCoreDemandRead]{}, conversions: [String]{}, decls: [Int:Bool]{}, symbols: [U32:Bool]{}}
+}
+
+sema_core_demand_reads_end: fn(reads: &SemaCoreDemandReads) Never! {
+    reads.conversions.reverse()
+}
+
+// Reads the functions of `modules` from `read_functions` on, in consecutive
+// module parts, one per admitted thread, weighed by their body nodes. A
+// part's functions move to its thread and back, so none is copied and its
+// thread reads no table. Returns the parts in module order, every module
+// in one.
+sema_core_demand_read: fn(modules: &[SemaGraphModuleResult], read_functions: [Int], threads: CompilerThreads) -> [SemaCoreDemandPart] {
+    weights := [Int]{}
+    work := 0
+    loop module_index in 0..<modules.len() {
+        nodes := 0
+        loop position in read_functions[module_index]..<modules[module_index].functions.len() -> nodes += modules[module_index].functions[position].tree.nodes.len()
+        weights.push(nodes)
+        work += nodes
+    }
+    workers: compiler_threads_admit(threads, modules.len(), work, SEMA_CORE_DEMAND_READ_NODES_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        whole := sema_core_demand_part_new(0)
+        loop module_index in 0..<modules.len() {
+            from: read_functions[module_index]
+            count: modules[module_index].functions.len() - from
+            loop position in from..<from + count -> sema_core_demand_body_reads(modules[module_index].functions[position], whole.reads)
+            whole.from.push(from)
+            whole.counts.push(count)
+            whole.ends.push(whole.reads.names.len())
+        }
+        sema_core_demand_reads_end(whole.reads)
+        return [SemaCoreDemandPart]{whole.move()}
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    parts := [SemaCoreDemandPart]{}
+    loop part_index in 0..<workers {
+        part := sema_core_demand_part_new(bounds[part_index])
+        loop module_index in bounds[part_index]..<bounds[part_index + 1] {
+            part.functions.push(compiler_take_rows<FnBody>(modules[module_index].functions))
+            part.from.push(read_functions[module_index])
+        }
+        parts.push(part.move())
+    }
+    done := sema_core_demand_read_parts(parts)
+    loop part_index in 0..<done.len() {
+        first: done[part_index].first
+        loop at in 0..<done[part_index].functions.len() -> compiler_transfer_rows<FnBody>(modules[first + at].functions, done[part_index].functions[at])
+    }
+    done
+}
+
+sema_core_demand_part_new: fn(first: Int) -> SemaCoreDemandPart Never! {
+    SemaCoreDemandPart{first: first, functions: [[FnBody]]{}, from: [Int]{}, counts: [Int]{}, reads: sema_core_demand_reads_new(), ends: [Int]{}}
+}
+
+// Reads `parts` (sema_core_demand_read_part), in part order: the last part
+// on its own thread, the ones before it the same way, and the first on
+// this one.
+sema_core_demand_read_parts: fn(parts: &&[SemaCoreDemandPart]) -> [SemaCoreDemandPart] Never! {
+    rest := parts.move()
+    last: rest.pop() ?? return rest
+    if rest.len() == 0 {
+        rest.push(sema_core_demand_read_part(last.move()))
+        return rest
+    }
+    done := [SemaCoreDemandPart]{}
+    task.group sema_core_demand_read_threads {
+        head: task sema_core_demand_read_part(last.move())
+        done = sema_core_demand_read_parts(rest.move())
+        done.push(head.join() ?? panic(compiler_threads_failure_text(err)))
+    }
+    done
+}
+
+// One part's read: each module's functions from its first unread one.
+sema_core_demand_read_part: fn(part: &&SemaCoreDemandPart) -> SemaCoreDemandPart Never! {
+    read := part.move()
+    loop at in 0..<read.functions.len() {
+        count: read.functions[at].len() - read.from[at]
+        loop position in read.from[at]..<read.functions[at].len() -> sema_core_demand_body_reads(read.functions[at][position], read.reads)
+        read.counts.push(count)
+        read.ends.push(read.reads.names.len())
+    }
+    sema_core_demand_reads_end(read.reads)
+    read
+}
+
+// Demands the names `reads` holds from `start` to `end`, in order, each
+// conversion key moved out of the read.
+sema_core_demand_apply: fn(reads: &SemaCoreDemandReads, start: Int, end: Int, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
+    loop at in start..<end {
+        if reads.names[at].decl == .Val(id) -> sema_core_demand_decl_key(decls, id, names)
+        if reads.names[at].symbol == .Val(id) -> sema_core_demand_symbol_key(symbols, id, names)
+        if reads.names[at].conversion -> names.keys.push(reads.conversions.pop() ?? panic("a Core demand read lost a conversion key"))
     }
 }
 
@@ -460,9 +611,19 @@ sema_core_demand_template_key: fn(key: String) -> String Never! {
 // Every function key checked body `function` names, into `names`: its
 // direct and method calls, index hooks, functions named as values, shared
 // globals' initializers and declared error conversions, in its parameter
-// defaults and body. The expressions are walked from a work list. A body's
-// own id names no Core body, so it adds no key.
+// defaults and body (sema_core_demand_body_reads).
 sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
+    reads := sema_core_demand_reads_new()
+    sema_core_demand_body_reads(function, reads)
+    sema_core_demand_reads_end(reads)
+    count: reads.names.len()
+    sema_core_demand_apply(reads, 0, count, decls, symbols, names)
+}
+
+// The names checked body `function` holds that may name a function, into
+// `reads` in walk order. The expressions are walked from a work list. A
+// body's own id names no Core body, so it adds no name.
+sema_core_demand_body_reads: fn(function: FnBody, reads: &SemaCoreDemandReads) Never! {
     pending := [Int]{}
     loop parameter in function.params {
         if parameter.default == .Val(value) -> pending.push(value)
@@ -472,38 +633,39 @@ sema_core_demand_body_keys: fn(function: FnBody, decls: DeclTable, symbols: Symb
     }
     loop pending.len() > 0 {
         expression: pending.pop() ?? break
-        sema_core_demand_expr_keys(function.tree, expression, decls, symbols, names)
-        body_each_expr_child(function.tree, body_node(function.tree, expression), fn(child: Int) { pending.push(child) })
+        node: body_node(function.tree, expression)
+        sema_core_demand_expr_reads(node, reads)
+        body_each_expr_child(function.tree, node, fn(child: Int) { pending.push(child) })
     }
 }
 
-// The function keys one checked expression names directly.
-sema_core_demand_expr_keys: fn(tree: BodyTree, expression: Int, decls: DeclTable, symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
-    if body_node(tree, expression).kind == {
+// The names one checked expression holds directly.
+sema_core_demand_expr_reads: fn(node: BodyNode, reads: &SemaCoreDemandReads) Never! {
+    if node.kind == {
         .Call(callee, _, args) -> {
-            sema_core_demand_decl_key(decls, callee, names)
-            sema_core_demand_template_items(args, symbols, names)
+            sema_core_demand_read_decl(callee, reads)
+            sema_core_demand_read_items(args, reads)
         }
         .MethodCall(_, method, _, args) -> {
-            sema_core_demand_symbol_key(symbols, method.symbol, names)
-            sema_core_demand_template_items(args, symbols, names)
+            sema_core_demand_read_symbol(method.symbol, reads)
+            sema_core_demand_read_items(args, reads)
         }
         .StaticCall(_, _, method, _, args) -> {
-            sema_core_demand_symbol_key(symbols, method.symbol, names)
-            sema_core_demand_template_items(args, symbols, names)
+            sema_core_demand_read_symbol(method.symbol, reads)
+            sema_core_demand_read_items(args, reads)
         }
         .Index(_, _, _, _, checked_call, _) -> {
-            if checked_call == .Val(symbol) -> sema_core_demand_symbol_key(symbols, symbol, names)
+            if checked_call == .Val(symbol) -> sema_core_demand_read_symbol(symbol, reads)
         }
         .FnValue(kind) -> {
             if kind == .NamedFn(function, _) {
-                if function == .Val(id) -> sema_core_demand_decl_key(decls, id, names)
+                if function == .Val(id) -> sema_core_demand_read_decl(id, reads)
             }
         }
-        .ConstRef(symbol) -> sema_core_demand_symbol_key(symbols, symbol, names)
-        .GlobalShared(initializer, _) -> sema_core_demand_decl_key(decls, initializer, names)
-        .Try(_, conversion, _) -> sema_core_demand_conversion_key(conversion, names)
-        .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_conversion_key(conversion, names)
+        .ConstRef(symbol) -> sema_core_demand_read_symbol(symbol, reads)
+        .GlobalShared(initializer, _) -> sema_core_demand_read_decl(initializer, reads)
+        .Try(_, conversion, _) -> sema_core_demand_read_conversion(conversion, reads)
+        .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_read_conversion(conversion, reads)
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .TraitConst(_, _, _) | .IndirectCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .Never(_, _) | .TypeTest(_, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> {}
     }
 }
@@ -524,12 +686,31 @@ sema_core_demand_symbol_key: fn(symbols: SymbolTable, id: SymbolID, names: &Sema
     names.keys.push(symbol_table_key(symbols, id))
 }
 
-sema_core_demand_template_items: fn(args: [BodyCallArg], symbols: SymbolTable, names: &SemaCoreDemandNames) Never! {
+// Declaration row `id`, unless read before.
+sema_core_demand_read_decl: fn(id: DeclID, reads: &SemaCoreDemandReads) Never! {
+    index: id.row.index()
+    if reads.decls.get(index) != None -> return
+    reads.decls[index] = true
+    reads.names.push(SemaCoreDemandRead{decl: Val(id), symbol: None, conversion: false})
+}
+
+// Run-wide symbol `id`, unless read before; a body's own id names no Core
+// body.
+sema_core_demand_read_symbol: fn(id: SymbolID, reads: &SemaCoreDemandReads) Never! {
+    if symbol_is_local(id) || reads.symbols.get(id.id) != None -> return
+    reads.symbols[id.id] = true
+    reads.names.push(SemaCoreDemandRead{decl: None, symbol: Val(id), conversion: false})
+}
+
+sema_core_demand_read_items: fn(args: [BodyCallArg], reads: &SemaCoreDemandReads) Never! {
     loop argument in args {
-        loop item in argument.template_items -> sema_core_demand_symbol_key(symbols, item, names)
+        loop item in argument.template_items -> sema_core_demand_read_symbol(item, reads)
     }
 }
 
-sema_core_demand_conversion_key: fn(conversion: TTryConvert, names: &SemaCoreDemandNames) Never! {
-    if conversion == .Typed(key, _, _) -> names.keys.push(key.copy())
+sema_core_demand_read_conversion: fn(conversion: TTryConvert, reads: &SemaCoreDemandReads) Never! {
+    if conversion == .Typed(key, _, _) {
+        reads.conversions.push(key.copy())
+        reads.names.push(SemaCoreDemandRead{decl: None, symbol: None, conversion: true})
+    }
 }
