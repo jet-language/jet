@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102472,
+    "rev": 102473,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73024,6 +73024,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Tried and dropped: making Core's __DecodeTree move instead of copy (no API change). It passes jet test Core/Encoding. On a typed decode of a 2.1 MB nested JSON decoded 48 times it went from 2.16 s / 72.5 MB to 2.14 s / 72.0 MB with identical output, so no gain: a Dyn copy is a refcount retain, not a deep copy. Reverted. The record path's real root is reach (fft-4096 jet check, p66): BARE loads 32 units in 6 waves (load 3670 ms) against ROOT's 6 units (190 ms), because a record unit keeps every declaration, so jet_driver_reach_recorded_words merges every routed type's and method's spellings into the always-reached set. Owner of the end-to-end fix: PrecompiledCore-2 (record units drop unreached declarations from their finalized registration rows, so reach matches the source path)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "2026-11-14 jet run traces on the p66 jet (Speed-2, one run each, nice 19, fresh cache). The embedded Core record (BARE, the gauntlet's path) is 10x slower than parsing reached Core sources (ROOT, JET_TOOLCHAIN_ROOT). fft-4096: BARE wall 6688 ms, 1.66 GB (load 3960, register 1370, sema.finalize 820); ROOT wall 693 ms, 121 MB (load 180). datasummary: BARE wall 29504 ms, 4.76 GB (load 10130, sema.finalize 7130, comptime.bodies 7120, register 3540); ROOT wall 4940 ms, 1.21 GB. Cause: the record path loads, registers, finalizes and comptime-evaluates every record module level (4/13/71/26 files) whatever the program reaches. Plan: PrecompiledCore-2 makes record load and decode reach-limited (modules, then declarations lazily); Speed-2 makes register, finalize/core_demand and comptime.bodies demand-driven over record modules. Bar: BARE at or below ROOT in wall time and peak RSS on both entries, with the same output."
         },
         {
@@ -73675,7 +73680,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T18:37:42.373Z",
+      "updated": "2026-11-14T18:46:15.797Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -205454,6 +205459,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T18:46:15.797Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T18:37:42.374Z",
       "by": "Main",
