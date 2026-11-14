@@ -4,7 +4,7 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeDebugError, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_parse_frame, native_debug_parse_locals, native_debug_parse_stop]
+    jet_debug.[NativeDebugError, NativeMemory, NativeRead, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_locals_of, native_debug_parse_frame, native_debug_parse_memory, native_debug_parse_stop, native_debug_parse_values]
     jet_foundation.[DeepChecks]
     jet_testkit.[kit_require_tool]
 }
@@ -47,16 +47,82 @@ use {
 }
 
 #Test("locals_keep_only_values_the_image_describes") {
-    locals: native_debug_parse_locals("(long) count = 3\n(bool) ok = true\n(String) name = <extracting data from value failed>\n\n(void *) f = 0x00007ffff7f216d8")
-    assert_eq(locals.len(), 4)
+    memory := NativeMemory{}
+    locals: native_debug_locals_of(native_debug_parse_values("(Int) count = 3\n(bool) ok = true\n(long) word = -7\n(Aggregate) table = <extracting data from value failed>\n\n(void *) f = 0x00007ffff7f216d8"), memory)
+    assert_eq(locals.len(), 5)
     assert_eq(locals[0].name, "count")
     assert_eq(locals[0].type_name, "Int")
     assert_eq(locals[0].value, "3")
     assert_eq(locals[1].type_name, "Bool")
     assert_eq(locals[1].value, "true")
-    assert_eq(locals[2].type_name, "String")
-    assert_eq(locals[2].value, "<Unavailable>")
+    assert_eq(locals[2].type_name, "I64")
+    assert_eq(locals[2].value, "-7")
     assert_eq(locals[3].value, "<Unavailable>")
+    assert_eq(locals[4].value, "<Unavailable>")
+    assert_eq(memory.missing.len(), 0)
+}
+
+#Test("locals_not_yet_bound_are_not_shown") {
+    memory := NativeMemory{}
+    locals: native_debug_locals_of(native_debug_parse_values("(Int) first = 1\n(Int) second = <variable not available>\n\n(Int) third = <variable not available>\n"), memory)
+    assert_eq(locals.len(), 1)
+    assert_eq(locals[0].name, "first")
+}
+
+// The rows `frame variable -T -P 1` prints for a big Int, a String, a list,
+// a struct and a Decimal of an image whose DWARF types them.
+NATIVE_TEST_FRAME: "(Int) big = 4611686018431706648\n(String) name = 0x0000000000000010 {{\n  (unsigned char *) data = 0x0000000000000020 \"hello world\"\n  (long) len = 11\n  (long) cap = 0\n}}\n([Int]) xs = {{\n  (long) len = 3\n  (long) cap = 3\n  (Int *) data = 0x0000000000000040 {{\n    (Int) *data = 1\n  }}\n}}\n(Point) p = {{\n  (Int) x = 3\n  (Int) y = 4\n}}\n(Decimal) d = 0x0000000000000050 {{\n  (Int) coefficient = 1250\n  (long) scale = 2\n}}"
+
+#Test("frame_rows_nest_as_lldb_prints_them") {
+    rows: native_debug_parse_values(NATIVE_TEST_FRAME)
+    assert_eq(rows.len(), 5)
+    assert_eq(rows[1].native_type, "String")
+    assert_eq(rows[1].raw, "0x0000000000000010")
+    assert_eq(rows[1].children.len(), 3)
+    assert_eq(rows[2].native_type, "[Int]")
+    assert_eq(rows[2].children[2].name, "data")
+    assert_eq(rows[2].children[2].children[0].name, "*data")
+    assert_eq(rows[3].children[1].raw, "4")
+    assert_eq(rows[4].name, "d")
+}
+
+#Test("pointer_values_render_after_their_memory_is_read") {
+    rows: native_debug_parse_values(NATIVE_TEST_FRAME)
+    memory := NativeMemory{}
+    first: native_debug_locals_of(rows, memory)
+    assert_eq(first[0].value, "<Unavailable>")
+    assert_eq(first[3].value, "Point{{x: 3, y: 4}}")
+    // The first round asks for the big Int's carrier, the String's header,
+    // the list's elements and the Decimal's handle.
+    assert_eq(memory.missing.len(), 4)
+    reads: [NativeRead]{NativeRead{address: 4318744, size: 8, count: 5}, NativeRead{address: 16, size: 8, count: 2}, NativeRead{address: 64, size: 8, count: 3}, NativeRead{address: 80, size: 8, count: 2}}
+    loop (index, read) in reads {
+        assert_eq(memory.missing[index].address, read.address)
+        assert_eq(memory.missing[index].size, read.size)
+        assert_eq(memory.missing[index].count, read.count)
+    }
+    memory.reads = reads
+    memory.values = [[Int]?]{Val([Int]{1, 0, 0, 4096, 4}), Val([Int]{32, 11}), Val([Int]{1, 2, 3}), Val([Int]{1250, 2})}
+    second: native_debug_locals_of(rows, memory)
+    assert_eq(second[2].value, "[1, 2, 3]")
+    assert_eq(second[4].value, "12.50")
+    // Then the big Int's limbs and the String's bytes.
+    assert_eq(memory.missing.len(), 2)
+    memory.reads.push(NativeRead{address: 4096, size: 4, count: 4})
+    memory.values.push(Val([Int]{234567890, 345678901, 456789012, 123}))
+    memory.reads.push(NativeRead{address: 32, size: 1, count: 11})
+    memory.values.push(Val(loop byte in "hello world".bytes() -> Int{byte}))
+    third: native_debug_locals_of(rows, memory)
+    assert_eq(memory.missing.len(), 0)
+    assert_eq(third[0].type_name, "Int")
+    assert_eq(third[0].value, "123456789012345678901234567890")
+    assert_eq(third[1].value, "\"hello world\"")
+}
+
+#Test("memory_reads_parse_their_values") {
+    assert_eq(native_debug_parse_memory("(lldb) memory read --size 8 --format d --count 2 --force 4096\n0x001000: 1250\n0x001008: -2", 2), Val([Int]{1250, -2}))
+    assert(native_debug_parse_memory("error: memory read failed for 0x0", 1) == None)
+    assert(native_debug_parse_memory("0x001000: 1", 2) == None)
 }
 
 #Test("an_unavailable_debugger_is_e2203") {

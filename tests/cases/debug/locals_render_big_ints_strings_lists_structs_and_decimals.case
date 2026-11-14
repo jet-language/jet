@@ -1,0 +1,19 @@
+# The native O0 image's DWARF types each local as what it is: an exact Int
+# (decoded from its tagged carrier when it is big), a String, a list, a
+# struct and a Decimal. `print` shows each as its Jet value, never a tagged
+# pointer word, an opaque aggregate or a bare address.
+requires: tool:lldb
+fixture: locals_render_big_ints_strings_lists_structs_and_decimals.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: locals_render_big_ints_strings_lists_structs_and_decimals.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:13  in run()" # every local is bound by the print line
+stdout: ~ "(Jet) print big\nbig = 123456789012345678901234567890\n" # the big Int's limbs, not its tagged word
+stdout: ~ "(Jet) print small\nsmall = 42\n" # an inline Int
+stdout: ~ "(Jet) print name\nname = \"hello world\"\n" # the String's bytes, quoted
+stdout: ~ "(Jet) print xs\nxs = [1, 2, 3]\n" # the list's elements
+stdout: ~ "(Jet) print p\np = Point{x: 3, y: 4}\n" # the struct's members
+stdout: ~ "(Jet) print d\nd = 12.50\n" # the Decimal's coefficient at its scale
+stdout: !~ "<Unavailable>" # every local is shown
+stdout: ~ "123456789012345678901234567890 42 hello world [1, 2, 3] 3 12.50\nProgram finished\n" # the program's own output is unchanged

@@ -3973,32 +3973,38 @@ ir_x64_same_key: fn(a: [Int], b: [Int]) -> Bool Never! {
 // ---------------------------------------------------------------------------
 // One function.
 
-// Debug variables and their locations: a register slot over its live range,
-// a frame slot over the whole body, and a frame address (IRX64Allocation
-// .frames) as the rbp-relative address it is over the whole body.
+// Debug variables and their locations, each from its binding on: a
+// parameter's from the body's start, a local's from just after the
+// instruction that first writes it, so a debugger never shows a local
+// before its binding runs. A register slot is located over its live range,
+// a frame slot to the body's end, and a frame address (IRX64Allocation
+// .frames) as the rbp-relative address it is to the body's end. An
+// aggregate's slot carries the address of its bytes, so its variable is
+// `indirect`: the debugger reads the bytes there.
 ir_x64_variables: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, positions: [Int], body: Int, end: Int, variables: &[X64DebugVariable], ranges: &[X64VariableRange]) Never! {
     loop slot in 0..<f.slot_type.len() {
         name: f.slot_name[slot]
         if name < 0 || name >= m.names.len() -> next
         ty: ir_x64_type(m, f, slot)
         variable: variables.len()
-        variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: false})
+        indirect: m.types[f.slot_type[slot]].kind == .Aggregate
+        variables.push(X64DebugVariable{name: m.names[name], ty: tables.type_debug[f.slot_type[slot]], line: f.slot_line[slot], parameter: f.slot_kind[slot] == .Param, indirect: indirect})
         if al.starts[slot] > al.ends[slot] || ir_x64_class(ty) == .Empty || al.consts[slot] -> next
+        // From the body on: the frame-free prefix keeps its values in
+        // registers of its own (ir_x64_wrap).
+        bound: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot] + 1]
+        start: if bound < body -> body else -> bound
         if al.frames[slot] != 0 {
-            if end > body -> ranges.push(X64VariableRange{variable: variable, start: body, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[slot]}})
+            if end > start -> ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.FrameAddress{offset: al.frames[slot]}})
             next
         }
         if al.regs[slot] >= 0 || al.xmms[slot] >= 0 {
-            // From the body on: the frame-free prefix keeps its values in
-            // registers of its own (ir_x64_wrap).
-            first: if al.starts[slot] < 0 -> body else -> positions[al.starts[slot]]
-            start: if first < body -> body else -> first
             stop: positions[al.ends[slot] + 1]
             // An xmm register is 16 + n (x64_dwarf_register).
             reg: if al.regs[slot] >= 0 -> al.regs[slot] else -> 16 + al.xmms[slot]
             if stop > start -> ranges.push(X64VariableRange{variable: variable, start: start, end: stop, location: X64DebugLocation.Register{reg: reg}})
         } else {
-            if end > body -> ranges.push(X64VariableRange{variable: variable, start: body, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
+            if end > start -> ranges.push(X64VariableRange{variable: variable, start: start, end: end, location: X64DebugLocation.Frame{offset: al.homes[slot]}})
         }
     }
 }

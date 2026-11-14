@@ -194,10 +194,29 @@ NativeSession: struct {
         Ok(frames)
     }
 
-    // The selected frame's parameters and locals.
+    // The selected frame's parameters and locals, rendered as Jet values.
+    // A String, a list, a big Int or a Decimal lives behind a pointer: each
+    // round reads the memory the last one needed (NativeMemory), until a
+    // round needs none; what is still unread after the last round shows as
+    // unavailable.
     locals: fn(&self) -> [NativeLocal] NativeDebugError! {
-        output: self.run_commands([String]{"frame variable"}) ?? return Err(err)
-        Ok(native_debug_parse_locals(output))
+        output: self.run_commands([String]{"frame variable -T -P 1"}) ?? return Err(err)
+        rows: native_debug_parse_values(output)
+        memory := NativeMemory{}
+        locals := native_debug_locals_of(rows, memory)
+        loop _ in 0..<NATIVE_DEBUG_READ_ROUNDS {
+            if memory.missing.len() == 0 -> return Ok(locals)
+            wanted: memory.missing.move()
+            memory.missing = [NativeRead]{}
+            loop read in wanted {
+                format: if read.size == 8 -> "d" else -> "u"
+                found: self.run_commands([String]{"memory read --size {read.size} --format {format} --count {read.count} --force {read.address}"}) ?? return Err(err)
+                memory.values.push(native_debug_parse_memory(found, read.count))
+                memory.reads.push(read)
+            }
+            locals = native_debug_locals_of(rows, memory)
+        }
+        Ok(locals)
     }
 
     // Select frame `index` of the current thread (0 is innermost).
@@ -392,9 +411,20 @@ NATIVE_DEBUG_BREAKPOINT_HIT: "Breakpoint hit"
 // The value shown for a local the image's debug information cannot show.
 NATIVE_DEBUG_UNAVAILABLE: "<Unavailable>"
 
+// What LLDB prints for a local whose DWARF range does not cover the stop.
+NATIVE_DEBUG_NOT_LIVE: "<variable not available>"
+
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
 NATIVE_DEBUG_RUNTIME_DEPTH: 16
+
+// The most rounds of memory reads one locals readout makes (a String in a
+// list in a struct is three pointers deep, its bytes a fourth).
+NATIVE_DEBUG_READ_ROUNDS: 8
+
+// The most list elements and String bytes a readout shows.
+NATIVE_DEBUG_SHOWN_ITEMS: 16
+NATIVE_DEBUG_SHOWN_BYTES: 256
 
 // What one console command printed, and where it left the program.
 NativeDebugStep: struct {
@@ -529,42 +559,269 @@ native_debug_parse_frame: fn(line: String) -> NativeFrame? Never! {
     Val(NativeFrame{function: function.trim().copy(), file: location.before(":").trim().copy(), line: line_number})
 }
 
-// `(type) name = value` rows of `frame variable`, in Jet terms.
-native_debug_parse_locals: fn(output: String) -> [NativeLocal] Never! {
-    locals := [NativeLocal]{}
-    loop line in output.lines() {
-        trimmed: line.trim()
+// One row of `frame variable -T -P 1`: `(type) name = value`, with the rows
+// LLDB nests under it in braces (a struct's members, a pointee's).
+NativeValue: struct {
+    native_type: String
+    name: String
+    raw: String
+    children: [NativeValue]
+}
+
+// `count` units of `size` bytes LLDB reads from `address`.
+NativeRead: struct {
+    address: Int
+    size: Int
+    count: Int
+}
+
+// The memory a locals readout has read (`values[i]` for `reads[i]`; None
+// when LLDB could not read it) and the reads its last render missed.
+NativeMemory: struct {
+    reads: [NativeRead]{[NativeRead]{}}
+    values: [[Int]?]{[[Int]?]{}}
+    missing: [NativeRead]{[NativeRead]{}}
+}
+
+// The rows of `frame variable -T -P 1`, nested as LLDB prints them.
+native_debug_parse_values: fn(output: String) -> [NativeValue] Never! {
+    lines: output.split("\n").to_list()
+    at := 0
+    native_debug_parse_rows(lines, at)
+}
+
+// The rows from line `at` to the `}` that closes them (or the end).
+native_debug_parse_rows: fn(lines: [String], at: &Int) -> [NativeValue] Never! {
+    rows := [NativeValue]{}
+    loop at < lines.len() {
+        trimmed: lines[at].trim()
+        at += 1
+        if trimmed == "}}" -> return rows
         if !trimmed.starts_with("(") || !trimmed.contains(") ") || !trimmed.contains(" = ") -> next
-        native_type: trimmed.after("(").before(") ")
+        native_type: trimmed.after("(").before(") ").trim()
         rest: trimmed.after(") ")
         name: rest.before(" = ").trim()
-        raw: rest.after(" = ").trim()
+        value: rest.after(" = ").trim()
+        // A row LLDB opens with `{` (bare for a struct, after the address
+        // for a pointer) nests the rows up to its `}`.
+        opens: value == "{{" || value.ends_with(" {{")
+        raw: value.removesuffix(" {{").removesuffix("{{")
+        children: if opens -> native_debug_parse_rows(lines, at) else -> [NativeValue]{}
         if name == "" -> next
-        type_name: native_debug_jet_type(native_type)
-        locals.push(NativeLocal{name: name.copy(), type_name: type_name, value: native_debug_jet_value(type_name, raw)})
+        rows.push(NativeValue{native_type: native_type.copy(), name: name.copy(), raw: raw, children: children})
+    }
+    rows
+}
+
+// The locals `rows` show, rendered from what `memory` holds; the reads a
+// value still needs go to memory.missing. A local whose DWARF range does
+// not cover the stop (its binding has not run yet) is not shown.
+native_debug_locals_of: fn(rows: [NativeValue], memory: &NativeMemory) -> [NativeLocal] Never! {
+    memory.missing = [NativeRead]{}
+    locals := [NativeLocal]{}
+    loop row in rows {
+        if row.raw == NATIVE_DEBUG_NOT_LIVE -> next
+        locals.push(NativeLocal{name: row.name.copy(), type_name: native_debug_jet_type(row.native_type), value: native_debug_render(row, memory) ?? NATIVE_DEBUG_UNAVAILABLE})
     }
     locals
 }
 
-// The Jet type a DWARF base type spells: `long` is Int, `bool` is Bool; a
-// named Jet type keeps its name.
+// The Jet type LLDB's type name spells: a DWARF base type is the C name of
+// its width (`long` is I64, `bool` Bool, `double` Float); a Jet type the
+// image names (Int, String, `[Int]`, a struct) keeps its name.
 native_debug_jet_type: fn(native_type: String) -> String Never! {
-    if native_type == "long" || native_type == "long long" || native_type == "int64_t" -> return "Int"
-    if native_type == "bool" -> return "Bool"
-    if native_type == "double" -> return "Float"
-    native_type.trim().copy()
+    if native_type == {
+        "long" | "long long" | "int64_t" -> "I64"
+        "unsigned long" | "unsigned long long" | "uint64_t" -> "U64"
+        "int" -> "I32"
+        "unsigned int" -> "U32"
+        "short" -> "I16"
+        "unsigned short" -> "U16"
+        "bool" -> "Bool"
+        "double" -> "Float"
+        "float" -> "F32"
+        else -> native_type.copy()
+    }
 }
 
-// A value LLDB printed, kept only when it is a whole literal of its Jet type.
-native_debug_jet_value: fn(type_name: String, raw: String) -> String Never! {
-    if type_name == "Int" {
-        _: Int.parse(raw) ?? return NATIVE_DEBUG_UNAVAILABLE
-        return raw.copy()
+// A row as a Jet value, None when its memory is unread or unreadable.
+native_debug_render: fn(row: NativeValue, memory: &NativeMemory) -> String? Never! {
+    type_name: native_debug_jet_type(row.native_type)
+    if type_name.starts_with("[") && type_name.ends_with("]") -> return native_debug_list(type_name, row, memory)
+    if type_name == {
+        "Int" -> {
+            word: Int.parse(row.raw) ?? return None
+            value: native_debug_int(word, memory) ?? return None
+            Val("{value}")
+        }
+        "String" -> native_debug_string(native_debug_address(row.raw) ?? return None, memory)
+        "Decimal" | "Fraction" -> native_debug_precise(type_name, native_debug_address(row.raw) ?? return None, memory)
+        "Bool" -> if {
+            row.raw == "true" -> Val("true")
+            row.raw == "false" -> Val("false")
+            else -> None
+        }
+        "Float" | "F32" -> {
+            value: Float.parse(row.raw) ?? return None
+            Val("{value}")
+        }
+        "I64" | "U64" | "I32" | "U32" | "I16" | "U16" -> {
+            value: Int.parse(row.raw) ?? return None
+            Val("{value}")
+        }
+        else -> native_debug_struct(type_name, row, memory)
     }
-    if type_name == "Bool" && (raw == "true" || raw == "false") -> return raw.copy()
-    if type_name == "Float" {
-        _: Float.parse(raw) ?? return NATIVE_DEBUG_UNAVAILABLE
-        return raw.copy()
+}
+
+// A struct `Name{field: value, ...}` from the member rows LLDB nests under
+// it; None for a row without members.
+native_debug_struct: fn(type_name: String, row: NativeValue, memory: &NativeMemory) -> String? Never! {
+    if row.children.len() == 0 -> return None
+    fields := [String]{}
+    loop child in row.children {
+        shown: native_debug_render(child, memory) ?? NATIVE_DEBUG_UNAVAILABLE
+        fields.push("{child.name}: {shown}")
     }
-    NATIVE_DEBUG_UNAVAILABLE
+    Val("{type_name}{{{fields.join(", ")}}}")
+}
+
+// The exact Int whose word is `word`: the word itself when inline (its bits
+// 63 and 62 agree), else the carrier at `word` without bit 62: sign at 16,
+// limbs at 24 and their count at 32, u32 limbs base 1e9 least significant
+// first (JetRuntime Int.jet).
+native_debug_int: fn(word: Int, memory: &NativeMemory) -> Int? Never! {
+    bit62: 4611686018427387904
+    if word >= -bit62 && word < bit62 -> return Val(word)
+    if word < 0 -> return None
+    carrier: native_debug_read(memory, word - bit62, 8, 5) ?? return None
+    count: carrier[4]
+    if count < 1 || count > 1000000 -> return None
+    limbs: native_debug_read(memory, carrier[3], 4, count) ?? return None
+    value := 0
+    at := count - 1
+    loop at >= 0 {
+        value = value * 1000000000 + limbs[at]
+        at -= 1
+    }
+    Val(if carrier[2] != 0 -> -value else -> value)
+}
+
+// The String whose header [data, byte length, cap] is at `address`, quoted,
+// its first NATIVE_DEBUG_SHOWN_BYTES bytes shown.
+native_debug_string: fn(address: Int, memory: &NativeMemory) -> String? Never! {
+    header: native_debug_read(memory, address, 8, 2) ?? return None
+    length: header[1]
+    if length < 0 -> return None
+    shown: if length > NATIVE_DEBUG_SHOWN_BYTES -> NATIVE_DEBUG_SHOWN_BYTES else -> length
+    if shown == 0 -> return Val("\"\"")
+    words: native_debug_read(memory, header[0], 1, shown) ?? return None
+    bytes: loop word in words -> U8{word.bit_and(255)}
+    text: native_debug_text_literal(String.from_bytes_lossy(bytes))
+    if length > shown -> return Val("{text}… ({length} bytes)")
+    Val(text)
+}
+
+// `text` as a Jet string literal.
+native_debug_text_literal: fn(text: String) -> String Never! {
+    "\"{text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")}\""
+}
+
+// A Decimal or Fraction whose runtime handle (two exact Ints: coefficient
+// and scale, or numerator and denominator) is at `address`.
+native_debug_precise: fn(type_name: String, address: Int, memory: &NativeMemory) -> String? Never! {
+    words: native_debug_read(memory, address, 8, 2) ?? return None
+    first: native_debug_int(words[0], memory) ?? return None
+    if type_name == "Fraction" {
+        second: native_debug_int(words[1], memory) ?? return None
+        return Val("{first}/{second}")
+    }
+    Val(native_debug_decimal_text(first, words[1]))
+}
+
+// A Decimal's text: `coefficient` with `scale` digits after the point.
+native_debug_decimal_text: fn(coefficient: Int, scale: Int) -> String Never! {
+    sign: if coefficient < 0 -> "-" else -> ""
+    digits := "{if coefficient < 0 -> -coefficient else -> coefficient}"
+    if scale <= 0 -> return "{sign}{digits}"
+    loop digits.len() <= scale -> digits = "0{digits}"
+    split: digits.len() - scale
+    bytes: digits.bytes()
+    whole: String.from_bytes(bytes[0..<split]) ?? ""
+    fraction: String.from_bytes(bytes[split..<bytes.len()]) ?? ""
+    "{sign}{whole}.{fraction}"
+}
+
+// A List: its len and data members (the inline header [len, cap, data]),
+// the first NATIVE_DEBUG_SHOWN_ITEMS Int or String elements, or the count
+// of any other element type's.
+native_debug_list: fn(type_name: String, row: NativeValue, memory: &NativeMemory) -> String? Never! {
+    element: type_name.removeprefix("[").removesuffix("]")
+    length := -1
+    data := 0
+    loop child in row.children {
+        if child.name == "len" -> length = Int.parse(child.raw) ?? -1
+        if child.name == "data" -> data = native_debug_address(child.raw) ?? 0
+    }
+    if length < 0 -> return None
+    if length == 0 -> return Val("[]")
+    if element != "Int" && element != "String" -> return Val("[{length} items]")
+    if data == 0 -> return None
+    shown: if length > NATIVE_DEBUG_SHOWN_ITEMS -> NATIVE_DEBUG_SHOWN_ITEMS else -> length
+    words: native_debug_read(memory, data, 8, shown) ?? return None
+    items := [String]{}
+    loop word in words {
+        item: if element == "Int" -> "{native_debug_int(word, memory) ?? return None}" else -> native_debug_string(word, memory) ?? return None
+        items.push(item)
+    }
+    if length > shown -> items.push("… {length - shown} more")
+    Val("[{items.join(", ")}]")
+}
+
+// The units of `size` bytes `memory` holds from `address`; None when they
+// are unreadable or not read yet (then they join memory.missing).
+native_debug_read: fn(memory: &NativeMemory, address: Int, size: Int, count: Int) -> [Int]? Never! {
+    loop (index, read) in memory.reads {
+        if read.address == address && read.size == size && read.count == count -> return memory.values[index]
+    }
+    if address <= 0 -> return None
+    loop read in memory.missing {
+        if read.address == address && read.size == size && read.count == count -> return None
+    }
+    memory.missing.push(NativeRead{address: address, size: size, count: count})
+    None
+}
+
+// The `count` values `memory read` printed (`0xADDRESS: value ...` rows),
+// None when it printed an error or another count.
+native_debug_parse_memory: fn(output: String, count: Int) -> [Int]? Never! {
+    values := [Int]{}
+    loop line in output.split("\n") {
+        trimmed: line.trim()
+        if trimmed.starts_with("error:") -> return None
+        if !trimmed.starts_with("0x") || !trimmed.contains(": ") -> next
+        loop word in trimmed.after(": ").split(" ") {
+            if word == "" -> next
+            values.push(Int.parse(word) ?? return None)
+        }
+    }
+    if values.len() != count -> return None
+    Val(values)
+}
+
+// The address a pointer value starts with (`0x…`, then any summary).
+native_debug_address: fn(raw: String) -> Int? Never! {
+    token: if raw.contains(" ") -> raw.before(" ") else -> raw
+    if !token.starts_with("0x") -> return None
+    value := 0
+    loop byte in token.removeprefix("0x").bytes() {
+        digit: if {
+            byte >= (U8{48}) && byte <= (U8{57}) -> Int{byte} - 48
+            byte >= (U8{97}) && byte <= (U8{102}) -> Int{byte} - 87
+            byte >= (U8{65}) && byte <= (U8{70}) -> Int{byte} - 55
+            else -> return None
+        }
+        value = value * 16 + digit
+    }
+    if value == 0 -> return None
+    Val(value)
 }

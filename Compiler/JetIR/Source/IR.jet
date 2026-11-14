@@ -455,7 +455,12 @@ IRDataReloc: struct { offset: Int, target: Int, addend: Int, text: Bool }
 // `field <identity> <offset> <size> <member> <type>` line per stored member
 // of each struct the program reached (BuildMerge.jet ir_merge), for the
 // emission log; `<type>` is the member's checked type (`box` for a boxed
-// one), last since it may hold spaces.
+// one), last since it may hold spaces. `debug_members`: the same members
+// by the merged row of their struct, each member's type a merged row (-1
+// when the program never reached it), for the DWARF struct types
+// (X64Module.jet ir_x64_debug_types). `list_elements`: a List row's
+// element row, for the DWARF list types (none for a list laid out only
+// inside a struct's layout); merged rows in the merged module.
 IRModule: struct {
     types: [IRType]
     type_keys: [String]
@@ -501,6 +506,8 @@ IRModule: struct {
     debug_directory: String{""}
     host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
     struct_fields: [String]{[String]{}}
+    debug_members: [Int:[IRMember]]{[Int:[IRMember]]{}}
+    list_elements: [Int:Int]{[Int:Int]{}}
     // The data rows that are Core cells of the runtime image the program
     // binds to (BuildCore.jet ir_core_cells_bind), by row: the symbol of
     // the image's cell, which x86-64 selection addresses instead of the

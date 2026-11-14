@@ -9,7 +9,7 @@
 use {
     jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
     jet_backend.[
-        X64CompiledFunction, X64Data, X64DataExport, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
+        X64CompiledFunction, X64Data, X64DataExport, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
         X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
         x64_object_functions_threads, x64_object_main, x64_object_main_debug,
     ]
@@ -143,12 +143,63 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     tables.ints[text] = word_row
 }
 
-// The DWARF description of a slot type, by its machine layout.
-ir_x64_debug_type: fn(ty: IRType) -> X64DebugType Never! {
+// The shared rows the DWARF types of the IR type rows name.
+IRX64DebugRows: struct {
+    // A machine word (I64), a byte (U8) and an untyped pointer.
+    word: Int
+    byte: Int
+    pointer: Int
+    // The exact Int: the word under its own name, which a debugger shows
+    // so a reader knows to decode a tagged carrier (JetRuntime Int.jet).
+    int: Int
+    // The pointee structs, made on first use (-1 before).
+    string: Int
+    decimal: Int
+    fraction: Int
+}
+
+// Appends `ty` to the debug types; returns its row.
+ir_x64_debug_add: fn(tables: &IRX64Tables, ty: &&X64DebugType) -> Int Never! {
+    row: tables.debug_types.len()
+    tables.debug_types.push(ty)
+    row
+}
+
+// A pointer to debug row `target`.
+ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
+    ir_x64_debug_add(tables, X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: target}})
+}
+
+// The DWARF type of every IR type row, by its checked type and machine
+// layout: debug row r describes m.types[r]; the rows they name follow. A
+// String is a pointer to its header [data, byte length, cap]; a List its
+// inline header [len, cap, data], data pointing at its element row
+// (IRModule.list_elements); a struct its members at their offsets
+// (IRModule.debug_members); a Decimal or Fraction a pointer to its runtime
+// handle's two exact Ints (JetRuntime RoutePrecise.jet). Any other
+// aggregate stays opaque.
+ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
+    loop row in 0..<m.types.len() {
+        tables.type_debug.push(row)
+        tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
+    }
+    word: ir_x64_debug_add(tables, X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}})
+    byte: ir_x64_debug_add(tables, X64DebugType{name: "U8", size: 1, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Unsigned}})
+    pointer: ir_x64_debug_pointer(tables, -1)
+    int: ir_x64_debug_add(tables, X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: word}})
+    shared := IRX64DebugRows{word: word, byte: byte, pointer: pointer, int: int, string: -1, decimal: -1, fraction: -1}
+    loop (row, ty) in m.types {
+        described: ir_x64_debug_type(m, tables, shared, row, ty)
+        tables.debug_types[row] = described
+    }
+}
+
+// The DWARF description of IR type row `row`.
+ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType Never! {
     if ty.kind == {
         .Unit -> X64DebugType{name: "Unit", size: 0, kind: X64DebugTypeKind.Opaque}
         .Bool -> X64DebugType{name: "Bool", size: 1, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Bool}}
-        .Int -> X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}}
+        .Int -> X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.word}}
         .Word -> {
             bits: ir_x64_bits(ir_x64_shape(ty))
             // Whole bytes, rounded up: a U4 is 1 byte.
@@ -157,10 +208,48 @@ ir_x64_debug_type: fn(ty: IRType) -> X64DebugType Never! {
         .Float -> X64DebugType{name: "Float", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Float}}
         .Float32 -> X64DebugType{name: "F32", size: 4, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Float}}
         .Char -> X64DebugType{name: "Char", size: 4, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Char}}
-        .String -> X64DebugType{name: "String", size: 8, kind: X64DebugTypeKind.Opaque}
-        .Pointer -> X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
-        .Aggregate -> X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
+        .String -> {
+            if shared.string < 0 {
+                data: ir_x64_debug_pointer(tables, shared.byte)
+                members: [X64DebugMember]{X64DebugMember{name: "data", offset: 0, ty: data}, X64DebugMember{name: "len", offset: 8, ty: shared.word}, X64DebugMember{name: "cap", offset: 16, ty: shared.word}}
+                header: ir_x64_debug_add(tables, X64DebugType{name: "String", size: 24, kind: X64DebugTypeKind.Struct{members: members}})
+                shared.string = ir_x64_debug_pointer(tables, header)
+            }
+            X64DebugType{name: "String", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.string}}
+        }
+        .Pointer -> {
+            precise: ir_short_name(ir_nominal_name(ir_untag(ty.ty)) ?? "")
+            if precise == "Decimal" {
+                if shared.decimal < 0 -> shared.decimal = ir_x64_debug_handle(tables, "Decimal", "coefficient", "scale", shared.int, shared.word)
+                return X64DebugType{name: "Decimal", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.decimal}}
+            }
+            if precise == "Fraction" {
+                if shared.fraction < 0 -> shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
+                return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
+            }
+            X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
+        }
+        .Aggregate -> {
+            if ir_untag(ty.ty) == .List(_) {
+                target: m.list_elements.get(row) ?? -1
+                data: ir_x64_debug_pointer(tables, target)
+                members: [X64DebugMember]{X64DebugMember{name: "len", offset: 0, ty: shared.word}, X64DebugMember{name: "cap", offset: 8, ty: shared.word}, X64DebugMember{name: "data", offset: 16, ty: data}}
+                return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
+            }
+            if m.debug_members.get(row) == .Val(fields) {
+                members: loop field in fields -> X64DebugMember{name: field.name, offset: field.offset, ty: if field.boxed -> shared.pointer else -> field.ty}
+                return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
+            }
+            X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
+        }
     }
+}
+
+// A pointer to a runtime handle of two words named `first` and `second`.
+ir_x64_debug_handle: fn(tables: &IRX64Tables, name: String, first: String, second: String, first_ty: Int, second_ty: Int) -> Int Never! {
+    members: [X64DebugMember]{X64DebugMember{name: first, offset: 0, ty: first_ty}, X64DebugMember{name: second, offset: 8, ty: second_ty}}
+    handle: ir_x64_debug_add(tables, X64DebugType{name: name, size: 16, kind: X64DebugTypeKind.Struct{members: members}})
+    ir_x64_debug_pointer(tables, handle)
 }
 
 ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
@@ -212,10 +301,7 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
             tables.data[row].relocs.push(X64DataReloc{offset: reloc.offset, target: X64DataID{value: target}, addend: reloc.addend})
         }
     }
-    loop ty in m.types {
-        tables.type_debug.push(tables.debug_types.len())
-        tables.debug_types.push(ir_x64_debug_type(ty))
-    }
+    ir_x64_debug_types(m, tables)
     tables
 }
 

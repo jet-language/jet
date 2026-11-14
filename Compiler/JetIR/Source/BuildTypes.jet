@@ -294,6 +294,11 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
         // at 16; cap 0 is a frozen buffer.
         if !ir_pointee_lays_out(m, p, element, laying) -> return None
         interned: ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        // The element's row, for the list's DWARF type. Outside a struct's
+        // layout it is the row the check above just laid out.
+        if laying.len() == 0 && m.list_elements.get(interned) == None {
+            m.list_elements[interned] = ir_value_type_in(m, p, element, laying) ?? -1
+        }
         return Val(ir_mark_counted(m, interned))
     }
     // A Queue is its List (the elements front to back), a Tally the ordered
