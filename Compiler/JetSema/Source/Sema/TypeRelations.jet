@@ -1855,14 +1855,22 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
         if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Printable") == (Val(true)) -> return Val(true)
     }
     unresolved_impl := false
-    loop module_index in 0..<graph.modules.len() {
-        loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            if graph.modules[module_index].impls[impl_index].trait_name != (Val(bound_name)) -> next
-            target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? {
-                unresolved_impl = true
-                next
+    // Only impls declaring `bound_name` can match: with the registration index
+    // built they are read from that name's rows instead of every impl.
+    if {
+        graph.impl_traits_indexed -> {
+            if graph.impl_trait_name_slots.get(bound_name) == .Val(found) {
+                loop impl_row in graph.impl_trait_name_buckets[found] {
+                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[impl_row.module_index].impls[impl_row.row], nominal, bound_name, unresolved_impl) -> return Val(true)
+                }
             }
-            if target_matches -> return Val(true)
+        }
+        else -> {
+            loop module_index in 0..<graph.modules.len() {
+                loop impl_index in 0..<graph.modules[module_index].impls.len() {
+                    if sema_type_builtin_bound_impl_matches(graph, graph.modules[module_index].impls[impl_index], nominal, bound_name, unresolved_impl) -> return Val(true)
+                }
+            }
         }
     }
     if nominal.source == .SourceAST(item) {
@@ -1887,6 +1895,17 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
     }
     if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) -> return None
     Val(false)
+}
+
+// Whether impl `implementation` declares `bound_name` for `nominal`; an impl
+// declaring it whose target does not resolve sets `unresolved`.
+sema_type_builtin_bound_impl_matches: fn(graph: SemaRegistrationGraph, implementation: SemaRegistrationImpl, nominal: SemaRegistrationNominal, bound_name: String, unresolved: &Bool) -> Bool {
+    if implementation.trait_name != (Val(bound_name)) -> return false
+    target_matches: sema_type_graph_impl_matches_nominal(graph, implementation, nominal) ?? {
+        unresolved = true
+        return false
+    }
+    target_matches
 }
 
 // A trait block or derive named `bound_name`, read in place: collecting the

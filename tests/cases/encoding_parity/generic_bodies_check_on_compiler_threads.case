@@ -1,0 +1,20 @@
+# Card #6793 c6: a body with generic parameters checks on a compiler thread
+# too (JetSema Sema/CheckProgram.jet, sema_function_check_registered_on_thread):
+# the thread checks it as the module check does, on its own copy of the
+# module's environment with the body's generic parameters set. A streaming
+# struct's generated Decode impl has a generic `__read<__Source>` method beside
+# `decode`, so the seven structs here give the codec wave seven generic
+# methods: the eight types' Encode and Decode impls (16) hold 23 methods, and
+# every one is a wave job. `count_of` is a generic top-level function. The run
+# shows the bodies the threads checked are the ones one thread checks: the
+# JSON round trip and the generic call both come out right.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\nSize: struct { width: Int height: Int }\nLabel: struct { text: String weight: Int }\nBox: struct { origin: Point size: Size label: Label }\nShade: enum { Light Dark }\nStyle: struct { shade: Shade border: Int fill: Bool }\nLayer: struct { name: String boxes: [Box] style: Style }\nPage: struct { title: String layers: [Layer] number: Int }\n\ncount_of: fn<T>(items: [T]) -> Int {\n    items.len()\n}\n\nrun: fn() {\n    box: Box{origin: Point{x: 1, y: 2}, size: Size{width: 3, height: 4}, label: Label{text: \"a\", weight: 5}}\n    layer: Layer{name: \"top\", boxes: [Box]{box.copy()}, style: Style{shade: Shade.Dark, border: 2, fill: true}}\n    page: Page{title: \"p\", layers: [Layer]{layer.copy()}, number: 7}\n    text: json.to_string(page)\n    print(text)\n    back: json.decode<Page>(text) ?? return\n    print(json.to_string(back) == text)\n    print(count_of(back.layers))\n}\n"
+step: jet check --threads 2 --trace main.jet
+exit: 0
+stderr: ~ "# sema.codec_generated = 16\n" # the eight types each get a generated Encode and Decode impl
+stderr: ~ "# sema.codecs.wave_jobs = 23\n" # all 23 generated codec methods, the seven generic `__read` methods among them, are wave jobs
+step: jet run --threads 2 main.jet
+exit: 0
+stdout: = "{\"title\":\"p\",\"layers\":[{\"name\":\"top\",\"boxes\":[{\"origin\":{\"x\":1,\"y\":2},\"size\":{\"width\":3,\"height\":4},\"label\":{\"text\":\"a\",\"weight\":5}}],\"style\":{\"shade\":\"Dark\",\"border\":2,\"fill\":true}}],\"number\":7}\ntrue\n1\n"

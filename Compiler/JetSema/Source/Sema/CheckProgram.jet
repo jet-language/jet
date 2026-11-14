@@ -1858,7 +1858,8 @@ sema_function_check: fn(func: Func, owner_key: String, function_kind: TFuncKind,
 }
 
 // The same body checker on a compiler thread, reading one frozen environment.
-// Admission excludes declared owner and planned function generic parameters.
+// A function with generic parameters reads them from the environment, so a
+// compiler thread checks one through sema_function_check_registered_on_thread.
 // The scope owns the panic location for the entire check; no shared write is
 // needed to the environment's callable name.
 sema_function_check_shared: fn(func: Func, owner_key: String, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
@@ -3275,9 +3276,9 @@ sema_function_check_generics_in_graph: fn(graph: SemaRegistrationGraph, job: Sem
     }
 }
 
-// Worker admission remains unchanged. Serial generic functions use the actual
-// mutable-environment path; this is only the existing read checker with an
-// existing scalar source selector in place of an owning planned Func input.
+// The read checker a compiler thread runs for a body that declares no generic
+// parameters (sema_function_check_registered_on_thread): the existing scalar
+// source selector in place of an owning planned Func input.
 sema_function_check_registered_shared: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
     if sema_function_check_registered_unregistered(job, module_index, memory_plan, memory_position, owner_id, function_kind, environment, program, module_scopes) == .Val(unavailable) -> return unavailable
     generics := sema_function_check_registered_generics(job, module_index, memory_plan, memory_position, environment, program)
@@ -3288,6 +3289,47 @@ sema_function_check_registered_shared: fn(job: SemaBodyJob, module_index: Int, m
     checked := sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     module_scopes.location_function = previous_location
     checked
+}
+
+// A body check on a compiler thread. A function that declares generic
+// parameters of its own, or a method its owner gives some (`generic_params`,
+// SemaMethodInput.generic_params), checks as the module check does
+// (sema_function_check_registered): a check reads those parameters from the
+// environment, so it runs on this job's own copy of the shared environment
+// with them set. The copy shares the environment's rows until the check sets
+// its generic parameters and name. Any other body reads the shared environment
+// as it is (sema_function_check_registered_shared).
+sema_function_check_registered_on_thread: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, generic_params: [TGenericParam], environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: &SemaScopeTable, host_hooks: SemaHostHookAccess?, diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    if generic_params.len() == 0 && !sema_function_registered_declares_generics(job, module_index, memory_plan, memory_position, program) {
+        return sema_function_check_registered_shared(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    }
+    job_environment := environment.copy()
+    job_environment.generic_params = generic_params.copy()
+    // copy: `previous_location` restores module_scopes.location_function after this function's
+    // check overwrites it. Jet has no exchange on a field of the write-borrowed table.
+    previous_location: module_scopes.location_function.copy()
+    sema_function_check_registered_location(job, module_index, memory_plan, memory_position, job_environment, program, module_scopes)
+    checked: sema_function_check_registered(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, job_environment, program, module_scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
+    module_scopes.location_function = previous_location
+    checked
+}
+
+// Whether the function `job` checks declares generic parameters of its own:
+// the memory plan's rewritten function when it has one, else the registered
+// declaration, as sema_function_check_registered_generics reads them.
+sema_function_registered_declares_generics: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, program: SemaProgramTables) -> Bool Never! {
+    if memory_position == .Val(position) {
+        if memory_plan.functions[position].function == .Val(planned) -> return planned.type_params.len() != 0
+    }
+    graph: program.registration_graph ?? panic("a registered Jet body check lost its owning graph")
+    if job == {
+        .TopLevel(item_index) -> {
+            if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.type_params.len() != 0
+            panic("a selected source function lost its original item")
+        }
+        .NominalMethod(_, owner, row) -> graph.modules[module_index].nominals[owner].methods[row].declaration.type_params.len() != 0
+        .ImplMethod(_, owner, row) -> graph.modules[module_index].impls[owner].methods[row].declaration.type_params.len() != 0
+    }
 }
 
 sema_function_check_registered_location: fn(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, memory_position: Int?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) {
@@ -4942,8 +4984,7 @@ SemaBodyClaim: struct {
 // The item indexes of module `module_index`'s top-level functions a compiler
 // thread can check, in item order: not foreign (the foreign stage checks
 // those), not already checked by comptime (the body loop takes that result),
-// without generic parameters (sema_function_check_shared), not waiting
-// for demand (sema_core_demand_deferred), and not reaching an unusable
+// not waiting for demand (sema_core_demand_deferred), and not reaching an unusable
 // declaration (sema_checked_unusable_bodies); during a Core demand wave
 // (graph.core_wave_rows) only that wave's, and during a codec or derive wave
 // (graph.codec_wave_rows, graph.derive_wave_rows) none: those check methods
@@ -4958,7 +4999,7 @@ sema_check_parallel_jobs: fn(graph: SemaRegistrationGraph, module_index: Int, co
         if item == .Func(func) {
             key: sema_check_top_level_key(module_text(graph.module_table, source_module.module_identity), func.name)
             waiting: if core_wave -> graph.core_wave_rows.get(key) == None else -> sema_core_demand_deferred(graph, key)
-            if func.inline_foreign == None && !sema_function_is_guest_import(func) && func.type_params.len() == 0 && comptime_rows.get("{source_module.module_identity.id}\n{key}") == None && !waiting && !sema_check_unusable_body(graph, key) {
+            if func.inline_foreign == None && !sema_function_is_guest_import(func) && comptime_rows.get("{source_module.module_identity.id}\n{key}") == None && !waiting && !sema_check_unusable_body(graph, key) {
                 jobs.push(SemaBodyJob.TopLevel{item_index: item_index})
                 weights.push(func.span.end - func.span.start)
             }
@@ -5047,9 +5088,7 @@ sema_check_method_jobs: fn(graph: SemaRegistrationGraph, source_module: SemaRegi
 
 sema_check_method_parallel_eligible: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, memory_plan: SemaFunctionMemoryPlan, registered: SemaRegistrationFunction, owner_type: Type, comptime_rows: [String:Int]) -> Bool {
     if comptime_rows.get("{source_module.module_identity.id}\n{symbol_table_key(graph.symbols, registered.symbol.id)}") != None -> return false
-    position: memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) ?? return false
-    planned: memory_plan.functions[position].function ?? registered.declaration
-    if planned.type_params.len() != 0 -> return false
+    if memory_plan.positions.get(sema_function_memory_key(source_module.module_identity, sema_serde_named_leaf(sema_type_graph_base_name(owner_type) ?? ""), registered.declaration.name, registered.declaration.span)) == None -> return false
     // A concrete generic owner still has declared generics, even when
     // owner-generic normalization would return no unresolved parameters.
     owner_row := sema_type_resolve_nominal_row(graph, owner_type, source_module.module_identity)
@@ -5109,7 +5148,7 @@ sema_check_prepare_method_body: fn(job: SemaBodyJob, module_index: Int, memory_p
     name_references := [SemaNameReferenceFact]{}
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
-    checked := sema_function_check_registered_shared(job, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), diagnostics, call_facts, comptime_requests, name_references)
+    checked := sema_function_check_registered_on_thread(job, module_index, memory_plan, memory_position, owner_id, input.function_kind, raw_protocol_return, input.generic_params, environment, program, scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), diagnostics, call_facts, comptime_requests, name_references)
     checked = sema_check_walk_prelude_demands(checked, sema_check_registered_module_text(program, sema_check_registered_module_identity(environment, program, module_index)))
     reach: sema_incremental_reach(observed)
     SemaParallelBody{job_index: ordinal, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: Val(input.move()), wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body}
@@ -5217,7 +5256,7 @@ sema_check_body_claimed: fn(environment: SemaScopeEnvironment, program: SemaProg
                     call_facts := [SemaCallSiteFact]{}
                     comptime_requests := [SemaComptimeRequest]{}
                     name_references := [SemaNameReferenceFact]{}
-                    checked := sema_function_check_registered_shared(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), diagnostics, call_facts, comptime_requests, name_references)
+                    checked := sema_function_check_registered_on_thread(claim.job, module_index, memory_plan, memory_position, sema_check_registered_function_id(claim.job, module_index, environment, program), TFuncKind.TopLevel, false, environment.generic_params, environment, program, part.scopes, Val(SemaHostHookAccess.Withheld{wanted: wanted, observed: observed}), diagnostics, call_facts, comptime_requests, name_references)
                     checked = sema_check_walk_prelude_demands(checked, module_text(graph.module_table, graph.modules[module_index].module_identity))
                     reach: sema_incremental_reach(observed)
                     part.bodies.push(SemaPreparedBody.Checked{body: SemaParallelBody{job_index: item_index, checked: Val(checked.move()), diagnostics: diagnostics.move(), call_facts: call_facts.move(), comptime_requests: comptime_requests.move(), name_references: name_references.move(), method_input: None, wanted_hooks: sema_host_hook_was_wanted(wanted), host_reached: reach.host, volatile: reach.foreign_raw_body, memory_position: memory_position, memory_known: true}})
