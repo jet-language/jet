@@ -438,7 +438,7 @@ stage_steps: fn(st: Staging, language: String, staged: String, artifact: String,
 // A service row: its probe sequence verified and its startup, latencies and
 // peak memory measured.
 stage_service: fn(st: Staging, language: String, staged: String, artifact: String, row: &Dyn) IOError! {
-    service: run_service(st.s, st.entry, staged, run_command(language, artifact, []))
+    service: run_service(st.s, st.entry, staged, run_command(language, artifact, []), st.runs)
     row["command"] = words(run_command(language, artifact, ["<port>"]))
     metrics := dyn_at(row, "metrics")
     put_build_metrics(metrics, dyn_at(row, "build"))
@@ -692,7 +692,7 @@ service_tier: fn(st: Staging, rule: TierRule, jet_dir: String, jet_row: Dyn) -> 
         settle_run_tier(out, primary_metric(st.mode), source_metric_values(dyn_at(jet_row, "metrics")), "service_probe_sequence")
         return Ok(out)
     }
-    service: run_service(st.s, st.entry, jet_dir, prefix)
+    service: run_service(st.s, st.entry, jet_dir, prefix, 1)
     failure: or_null(service, "failure")
     out["status"] = Dyn.Text(if truthy(Val(failure)) -> "broken" else -> "ok")
     out["reason"] = failure.copy()
@@ -813,7 +813,7 @@ cache_states: fn(st: Staging, jet_dir: String, commands: [[String]], reset: Rese
 // One cache state of a service's run tier.
 service_state: fn(st: Staging, jet_dir: String, prefix: [String], before: &Before) -> Dyn IOError! {
     prepare(before)
-    service: run_service(st.s, st.entry, jet_dir, prefix)
+    service: run_service(st.s, st.entry, jet_dir, prefix, 1)
     failure: or_null(service, "failure")
     out := Dyn.object()
     out["status"] = Dyn.Text(if truthy(Val(failure)) -> "broken" else -> "ok")
@@ -1393,9 +1393,11 @@ module_candidate: fn(source_dir: String, base: String, specifier: String) -> Str
 // Services ---------------------------------------------------------------
 
 // The service of `entry` run from `cwd` by `prefix` and its port: a
-// verification run of its probe sequence, then a measured run of its
-// startup, probe latencies and peak memory.
-run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOError! {
+// verification run of its probe sequence, `runs - 1` more fresh starts, then
+// a measured run of its probe latencies and peak memory. Its startup is the
+// median of the verification run's and the fresh starts' samples, `runs` in
+// all, as a batch entry's metrics are the median of its runs.
+run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String], runs: Int) -> Dyn IOError! {
     config: if member(entry, "spec/service") == .Val(found) -> found else -> member(entry, "service") ?? Dyn.object()
     protocol: or_text(member(config, "protocol"), "http")
     probes: items_at(config, "probe")
@@ -1409,12 +1411,18 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOE
         files.remove_all(reports)
         return Ok(service_failure(verified.failure, Val(verified.startup)))
     }
+    startups := field_values([verified.startup.copy()], "")
+    loop sample in 1..<runs {
+        seconds: startup_sample(s, cwd, prefix, shell, config, probes, protocol, path_joined(reports, "startup-{sample}")) ?? return Ok(removed_failure(reports, err.message, median_of(startups)))
+        startups.push(seconds)
+    }
+    startup: median_of(startups)
     report: path_joined(reports, "measure")
-    port: free_port() ?? return Ok(removed_failure(reports, "{err}", verified.startup))
-    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(removed_failure(reports, "{err}", verified.startup))
+    port: free_port() ?? return Ok(removed_failure(reports, "{err}", startup))
+    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Ok(removed_failure(reports, "{err}", startup))
     ready: wait_for_ready(service, port, config, report, s.clock_offset_ns) ?? {
         stop_process(service)
-        return Ok(removed_failure(reports, err.message, verified.startup))
+        return Ok(removed_failure(reports, err.message, startup))
     }
     latencies := [Float]{}
     measurement := ""
@@ -1440,7 +1448,7 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOE
     if exit.code == None -> stop_process(service)
     rss: if launch_fields(report, "end") == .Val(fields) -> number_field(fields, 3) else -> Dyn.Null
     files.remove_all(reports)
-    invalid: !positive(Val(verified.startup)) || !positive(Val(rss)) || latencies.len() == 0 || !latencies.all(fn(value) { value > 0.0 })
+    invalid: !positive(Val(startup)) || !positive(Val(rss)) || latencies.len() == 0 || !latencies.all(fn(value) { value > 0.0 })
     failure: if {
         measurement != "" -> Dyn.Text(measurement)
         invalid -> Dyn.Text("service timing or RSS measurement invalid")
@@ -1450,13 +1458,12 @@ run_service: fn(s: Stager, entry: Dyn, cwd: String, prefix: [String]) -> Dyn IOE
     latency := Dyn.object()
     latency["median"] = median_of(latencies)
     latency["p99"] = percentile_of(latencies, 0.99)
-    startups: field_values([verified.startup.copy()], "")
     out := Dyn.object()
     out["failure"] = failure
-    out["startupSeconds"] = verified.startup.copy()
-    out["startup_samples_seconds"] = Dyn.Array([verified.startup.copy()])
+    out["startupSeconds"] = startup.copy()
+    out["startup_samples_seconds"] = Dyn.Array(startups.map(fn(value) { Dyn.Float(value) }))
     out["startup_noise"] = noise_summary(startups)
-    out["startup_confidence"] = confidence("independent_service_startup_sample", "Only one fresh-process startup sample is retained; no confidence interval is inferred.")
+    out["startup_confidence"] = confidence("independent_service_startup_samples", "Each sample is a fresh process's startup and the startup is their median; no confidence interval is inferred.")
     out["latencyMs"] = latency
     out["latency_samples_ms"] = Dyn.Array(latencies.map(fn(value) { Dyn.Float(value) }))
     out["latency_noise"] = noise_summary(latencies)
@@ -1490,6 +1497,31 @@ verify_service: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, confi
         stop_process(service)
     }
     Ok(Verified{failure: failure, startup: Dyn.Float(ready)})
+}
+
+// One more startup sample of a verified service: a fresh process, started
+// through the launcher and timed to its readiness answer, then shut down by
+// its last probe, which must answer as expected and end it cleanly.
+startup_sample: fn(s: Stager, cwd: String, prefix: [String], shell: Shell, config: Dyn, probes: [Dyn], protocol: String, report: String) -> Float Err! {
+    port: free_port() ?? return Err("{err}")
+    service := start_service(s, cwd, prefix.concat(["{port}"]), shell, report) ?? return Err("{err}")
+    ready: wait_for_ready(service, port, config, report, s.clock_offset_ns) ?? {
+        stop_process(service)
+        return Err(err.message)
+    }
+    last: probes[probes.len() - 1]
+    shutdown: service_probe(port, last, protocol)
+    if !probe_matches(last, shutdown, Dyn.Text(protocol.copy())) {
+        stop_process(service)
+        return Err("startup sample shutdown probe failed: {or_text(member(shutdown, "error"), "response mismatch")}")
+    }
+    exit: wait_for_exit(service, 1000)
+    if exit.code == None {
+        stop_process(service)
+        return Err("startup sample shutdown did not produce a clean exit")
+    }
+    if exit.code != Val(0) -> return Err("startup sample service exit {exit_shown(exit)}")
+    Ok(ready)
 }
 
 // `probes` sent in order: "" when each answers as expected, else which

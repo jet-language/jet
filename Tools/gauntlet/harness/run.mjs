@@ -2044,11 +2044,14 @@ async function waitForReady(child, port, service, report) {
   throw new Error(`service did not answer ${protocol === "line" ? "line readiness probe" : service.readyPath}`);
 }
 
-// Measures a service: a verification run, then a measured run whose startup,
-// probe latencies and peak memory are the result. Both run through the
-// launcher; the peak is the launcher's, each service process's exact VmHWM
-// at its exit (the largest), read from its report once the service exits.
-async function runService(language, sourceDir, artifact, entry, commandForOverride = null) {
+// Measures a service: a verification run, `runs - 1` more fresh starts, then a
+// measured run whose probe latencies and peak memory are the result. Its
+// startup is the median of the verification run's and the fresh starts'
+// samples, `runs` in all, as a batch entry's metrics are the median of its
+// runs. Every run goes through the launcher; the peak is the launcher's, each
+// service process's exact VmHWM at its exit (the largest), read from its
+// report once the service exits.
+async function runService(language, sourceDir, artifact, entry, commandForOverride = null, runs = 1) {
   const service = entry.spec?.service ?? entry.service ?? {};
   const protocol = service.protocol ?? "http";
   const probes = service.probe ?? [];
@@ -2076,6 +2079,15 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     failure = error.message;
     if (child) await stopProcess(child);
   }
+  const startupSamples = startupSeconds === null ? [] : [startupSeconds];
+  for (let sample = 1; sample < runs && !failure; sample += 1) {
+    try {
+      startupSamples.push(await serviceStartupSample(sourceDir, commandFor, entry, service, probes, protocol, path.join(reports, `startup-${sample}`)));
+    } catch (error) {
+      failure = error.message;
+    }
+  }
+  startupSeconds = startupSamples.length ? median(startupSamples) : null;
   if (failure) {
     await fs.rm(reports, { recursive: true, force: true });
     return { failure, startupSeconds };
@@ -2127,13 +2139,13 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   return {
     failure: finalFailure,
     startupSeconds,
-    startup_samples_seconds: [startupSeconds],
-    startup_noise: noiseSummary([startupSeconds]),
+    startup_samples_seconds: startupSamples,
+    startup_noise: noiseSummary(startupSamples),
     startup_confidence: {
       status: "not_computed",
-      method: "independent_service_startup_sample",
+      method: "independent_service_startup_samples",
       level: null,
-      reason: "Only one fresh-process startup sample is retained; no confidence interval is inferred.",
+      reason: "Each sample is a fresh process's startup and the startup is their median; no confidence interval is inferred.",
     },
     latencyMs: { median: median(latencies), p99: percentile(latencies, 0.99) },
     latency_samples_ms: latencies,
@@ -2149,6 +2161,26 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     exitCode: exit.code,
     readySeconds: ready.seconds,
   };
+}
+
+// One more startup sample of a verified service: a fresh process, started
+// through the launcher and timed to its readiness answer, then shut down by
+// its last probe, which must answer as expected and end it cleanly.
+async function serviceStartupSample(sourceDir, commandFor, entry, service, probes, protocol, report) {
+  const port = await freePort();
+  const child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true, report });
+  try {
+    const { seconds } = await waitForReady(child, port, service, report);
+    const shutdown = await serviceProbe(port, probes.at(-1), protocol);
+    if (!probeMatches(probes.at(-1), shutdown, protocol)) throw new Error(`startup sample shutdown probe failed: ${shutdown.error ?? "response mismatch"}`);
+    const exit = await waitForExit(child, 1000);
+    if (exit.code === null) throw new Error("startup sample shutdown did not produce a clean exit");
+    if (exit.code !== 0) throw new Error(`startup sample service exit ${exit.code}`);
+    return seconds;
+  } catch (error) {
+    await stopProcess(child);
+    throw error;
+  }
 }
 
 function serviceMetrics(service) {
@@ -2715,7 +2747,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
     }
 
     if (entry.mode === "service") {
-      const service = await runService(language, stagedSource, artifact, entry);
+      const service = await runService(language, stagedSource, artifact, entry, null, selectedRuns ?? (entry.perf ? 7 : 3));
       row.command = runCommand(language, stagedSource, artifact, ["<port>"]);
       row.metrics = {
         ...row.metrics,

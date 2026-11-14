@@ -197,6 +197,36 @@ test("peer fixture stops when a Jet tier fails", stagedEntryTestOptions, async (
   });
 });
 
+test("a service row's startup is the median of one fresh-process sample per run", stagedEntryTestOptions, async () => {
+  await withScratch("service-startup", async (root) => {
+    const launcher = path.join(root, "launch");
+    await execFileAsync("cc", ["-O2", "-o", launcher, path.join(repoRoot, "Tools", "gauntlet", "harness", "launch.c")]);
+    const fixtures = path.join(repoRoot, "Tools", "gauntlet", "entries", "run-stage-entry", "fixtures");
+    const jetBin = path.join(root, "jet");
+    await fs.copyFile(path.join(fixtures, "fake-jet.txt"), jetBin);
+    chmodSync(jetBin, 0o755);
+    const entryDir = path.join(fixtures, "service");
+    const entry = JSON.parse(await fs.readFile(path.join(entryDir, "entry.json"), "utf8"));
+    const previousLauncher = process.env.JET_GAUNTLET_LAUNCHER;
+    process.env.JET_GAUNTLET_LAUNCHER = launcher;
+    try {
+      const result = await stageEntry(entryDir, entry, path.join(root, "run"), jetBin, 3, false);
+      for (const language of ["jet", "python"]) {
+        const row = result.rows[language];
+        assert.equal(row.status, "ok", `${language}: ${row.reason}`);
+        const samples = row.metrics.service_startup_samples_seconds;
+        assert.equal(samples.length, 3);
+        assert.ok(samples.every((sample) => sample > 0));
+        assert.equal(row.metrics.service_startup_seconds, [...samples].sort((left, right) => left - right)[1]);
+        assert.equal(row.metrics.service_startup_noise.count, 3);
+      }
+    } finally {
+      if (previousLauncher === undefined) delete process.env.JET_GAUNTLET_LAUNCHER;
+      else process.env.JET_GAUNTLET_LAUNCHER = previousLauncher;
+    }
+  });
+});
+
 test("Zig axis probe uses the rail's version subcommand", async () => {
   await withScratch("zig-probe", async (root) => {
     const bin = path.join(root, "bin");
