@@ -1377,7 +1377,15 @@ priv autodiff: module {
     ad_rule: fn(node: __ADNode, index: Int, g: Tensor) -> Tensor ComputeError! {
         op: node.op
         a: node.inputs[0]
-        if op == "identity" -> return Ok(g.copy())
+        if op == "identity" {
+            if g.device == a.device && g.numeric_profile == a.numeric_profile -> return Ok(g.copy())
+            // The f32 tile rule's read of its adjoint as the oracle's profile:
+            // the adjoint goes back in its input's contract, so it adds to
+            // that input's other adjoints. A tracked adjoint stays tracked.
+            back := like(a, g.shape.copy(), g.data.copy())
+            if g.node >= 0 -> back.node = ad_record("identity", [Tensor]{g.copy()}, 0)
+            return Ok(back)
+        }
         if op == "negate" -> return Ok(negate(g))
         if op == "exp" -> return Ok(mul(g, exp(a)))
         if op == "log" -> return Ok(div(g, a))
