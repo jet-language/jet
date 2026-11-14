@@ -1,0 +1,8 @@
+Error [jet.ImageSettingNotLiteral]: `app.images` setting `quality` is not written as a literal.
+  --> tests/ui/web_app_images_setting_not_literal.jet:5:39
+    |
+  5 | run: fn() { web.app().images(quality: level()).serve() }
+    |                                       ^^^^^^^
+ Why: The image variants are facts of the application graph, which is read from the source before the app runs, so each setting must be known there.
+ Fix: Write `quality:` as a literal, such as `formats: [.JPEG]`, `widths: [640, 1280]`, `quality: 80` or `enabled: false`.
+More: jet-lang.dev/e/E2811

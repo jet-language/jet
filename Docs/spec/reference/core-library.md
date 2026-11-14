@@ -5442,6 +5442,11 @@ setting:
 - `quality` is the JPEG quality, from 1 to 100.
 - `enabled: false` serves each original alone, as the `<img>` of its page.
 
+Each setting is written as literal data, such as `widths: [640, 1280]` or
+`quality: 80`, or as `None`. The variants are facts of the application graph
+(`jet explain --web-graph`), which is read from the source before the app
+runs, so a setting computed by a call or read from a name is E2811.
+
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.

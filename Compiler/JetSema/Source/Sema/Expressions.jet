@@ -4306,6 +4306,7 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, diagnostics) -> return None
     if method == "routes" -> _ := sema_call_app_route_registrations(receiver, receiver_value, method, args, method_span, environment, program, diagnostics)
     if method == "csr" || method == "island" || method == "hydration_dev" || method == "hydration_release" -> sema_call_app_browser_feature(receiver_value, method, method_span, environment, program, context.function_name, diagnostics)
+    if method == "images" -> sema_call_app_image_settings(receiver_value, args, environment, program, diagnostics)
     // Core declares the UI backends' `set_focus_group`, so its focus-ring lint
     // runs ahead of the declared-method check, not among the builtin routes.
     sema_call_ui_backend_lint(receiver_value, method, args, method_span, environment, program, scopes, diagnostics)

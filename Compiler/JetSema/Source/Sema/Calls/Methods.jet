@@ -1403,6 +1403,19 @@ sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: S
     diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
 }
 
+// `app.images` takes each setting as literal data: the image variants are
+// facts of the application graph, which is read from the source. A setting
+// the method doesn't declare is the declared method check's to refuse.
+sema_call_app_image_settings: fn(receiver_value: TExpr, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return
+    loop argument in args {
+        setting: if argument.label == .Val(given) -> "{given.name}" else -> ""
+        if setting == "" || sema_checked_module_literal(argument.expr) -> next
+        entry: diagnostic_registry_row("E2811") ?? panic("E2811 must have a registry row")
+        diagnostics.push(sema_error("E2811", expr_span(argument.expr), entry.what.replace("{{setting}}", setting), entry.why, entry.fix.replace("{{setting}}", setting)))
+    }
+}
+
 // The registration row of the module being checked, -1 when it has none.
 sema_app_module_row: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int {
     if environment.module_row >= 0 && environment.module_row < graph.modules.len() && graph.modules[environment.module_row].module_identity == environment.module_identity -> return environment.module_row

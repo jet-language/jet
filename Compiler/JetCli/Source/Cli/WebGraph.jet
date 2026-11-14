@@ -160,14 +160,13 @@ JetCLIWebImage: struct {
 }
 
 // The `app.images(...)` settings as written: None leaves a setting at its
-// default. `literal` is false once an argument is not a literal, so the
-// variants can't be known before the app runs.
+// default. The check holds each one to literal data (E2811), so the graph
+// knows every variant before the app runs.
 JetCLIWebImageSettings: struct {
     formats: [String]?{None}
     widths: [Int]?{None}
     quality: Int?{None}
     enabled: Bool?{None}
-    literal: Bool{true}
 }
 
 JetCLIWebGraph: struct {
@@ -237,6 +236,7 @@ jet_cli_web_wire_text: fn(expression: Expr?) -> String? {
 jet_cli_web_const_int: fn(expression: Expr) -> Int? {
     if expression == .Int(number, _, _, _, _) -> return Val(number)
     if expression == .Paren(inner, _, _) -> return jet_cli_web_const_int(inner)
+    if expression == .Present(inner, _, _) -> return jet_cli_web_const_int(inner)
     if expression == .Unary(op, inner, _, _) && op == UnOp.Neg {
         number: jet_cli_web_const_int(inner) ?? return None
         return Val(0 - number)
@@ -758,6 +758,7 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
 jet_cli_web_list_elements: fn(expression: Expr) -> [Expr]? {
     if expression == .ListLit(elements, _, _) -> return Val(elements)
     if expression == .Paren(inner, _, _) -> return jet_cli_web_list_elements(inner)
+    if expression == .Present(inner, _, _) -> return jet_cli_web_list_elements(inner)
     if expression == .TypedLit(_, body, _, _) && body == .Elements(elements) -> return Val(elements)
     None
 }
@@ -791,18 +792,26 @@ jet_cli_web_int_list: fn(expression: Expr) -> [Int]? {
 }
 
 // `app.images(formats:, widths:, quality:, enabled:)` as written; a later
-// call overrides the settings it names, as it does when the app runs.
+// call overrides the settings it names, as it does when the app runs, and
+// `None` keeps a setting.
 jet_cli_web_images_apply: fn(args: [CallArg], settings: &JetCLIWebImageSettings) {
     loop argument in args {
         name: if argument.label == .Val(given) -> "{given.name}" else -> ""
         if name == {
-            "formats" -> if jet_cli_web_variant_names(argument.expr) == .Val(names) -> settings.formats = Val(names) else -> settings.literal = false
-            "widths" -> if jet_cli_web_int_list(argument.expr) == .Val(widths) -> settings.widths = Val(widths) else -> settings.literal = false
-            "quality" -> if jet_cli_web_const_int(argument.expr) == .Val(quality) -> settings.quality = Val(quality) else -> settings.literal = false
-            "enabled" -> if argument.expr == .Bool(flag, _, _) -> settings.enabled = Val(flag) else -> settings.literal = false
-            else -> settings.literal = false
+            "formats" -> settings.formats = Val(jet_cli_web_variant_names(argument.expr) ?? next)
+            "widths" -> settings.widths = Val(jet_cli_web_int_list(argument.expr) ?? next)
+            "quality" -> settings.quality = Val(jet_cli_web_const_int(argument.expr) ?? next)
+            "enabled" -> settings.enabled = Val(jet_cli_web_const_bool(argument.expr) ?? next)
+            else -> next
         }
     }
+}
+
+jet_cli_web_const_bool: fn(expression: Expr) -> Bool? {
+    if expression == .Bool(flag, _, _) -> return Val(flag)
+    if expression == .Paren(inner, _, _) -> return jet_cli_web_const_bool(inner)
+    if expression == .Present(inner, _, _) -> return jet_cli_web_const_bool(inner)
+    None
 }
 
 jet_cli_web_walk_run: fn(run: Func, walk: &JetCLIWebWalk, functions: [Func]) {
@@ -1497,7 +1506,6 @@ jet_cli_web_image_settings_value: fn(settings: JetCLIWebImageSettings) -> JetCLI
         jet_cli_status_field("widths", widths),
         jet_cli_status_field("quality", quality),
         jet_cli_status_field("enabled", enabled),
-        jet_cli_status_field("literal", jet_cli_status_bool(settings.literal)),
     })
 }
 
@@ -1507,8 +1515,7 @@ jet_cli_web_image_settings_text: fn(settings: JetCLIWebImageSettings) -> String 
     widths: if settings.widths == .Val(numbers) -> (loop width in numbers -> "{width}").join(",") else -> "default"
     quality: if settings.quality == .Val(number) -> "{number}" else -> "default"
     enabled: if settings.enabled == .Val(flag) -> "{flag}" else -> "default"
-    written: if settings.literal -> "" else -> " (not all literal: the variants are known only when the app runs)"
-    "formats={formats} widths={widths} quality={quality} enabled={enabled}{written}"
+    "formats={formats} widths={widths} quality={quality} enabled={enabled}"
 }
 
 // ---- text ----
