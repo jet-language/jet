@@ -214,14 +214,17 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // that checks no call (since the last check only an inlined body,
 // arithmetic or other stop points, and no stop edge of the constructs just
 // closed lands on it) can observe only a stop another task asked for, which
-// a later poll that checks no call observes as well. A poll after a call
-// may test only what the call returned (X64Select.jet ir_x64_stop_point),
-// so it does not count. When every path from it reaches such a poll, with
-// no Loop, Return or branch on the way that could skip it, the earlier one
-// goes: a stop asked for meanwhile is delivered a little later, at the
-// later stop point, while every stop a call or a trap publishes is still
-// taken where it was. A turn poll folded so makes the later one a turn
-// poll, which still delivers a passed deadline once per iteration.
+// any later poll that does not follow a call right away observes as well:
+// one that checks no call reads the armed word, any other calls the poll.
+// A poll right after a call may test only what the call returned
+// (X64Select.jet ir_x64_stop_point), so it does not count. When every path
+// from it reaches such a poll, with no Loop, Return or branch on the way
+// that could skip it, the earlier one goes: a stop asked for meanwhile is
+// delivered a little later, at the later stop point, while every stop a
+// call or a trap publishes is still taken where it was. So an inlined
+// recursive body's entry check folds into the poll after its body. A turn
+// poll folded so makes the later one a turn poll, which still delivers a
+// passed deadline once per iteration.
 ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
     poll := -1
     trap := -1
@@ -280,14 +283,14 @@ ir_opt_polls_hands_on: fn(f: IRFunction, start: Int, end: Int) -> Bool Never! {
     false
 }
 
-// The first poll every path from `start` reaches that checks no call
-// (ir_opt_polls_checks_call) outside any construct opened on the way, or
-// -1. A construct closing goes on after it (a Loop's ends the search), an
-// Else on after its If, a Br leaving the constructs opened on after the End
-// it lands on; a poll counts only past every such End a branch skipped to.
-// A Loop, Return, Unreachable or a branch back to a Loop's head ends the
-// search. Edges that never come back (ir_opt_dead_end: a trap's or
-// failure's cleanup) are passed over.
+// The first poll every path from `start` reaches that does not follow a
+// call right away (ir_opt_polls_after_call) outside any construct opened on
+// the way, or -1. A construct closing goes on after it (a Loop's ends the
+// search), an Else on after its If, a Br leaving the constructs opened on
+// after the End it lands on; a poll counts only past every such End a
+// branch skipped to. A Loop, Return, Unreachable or a branch back to a
+// Loop's head ends the search. Edges that never come back (ir_opt_dead_end:
+// a trap's or failure's cleanup) are passed over.
 ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, turn: Int, start: Int) -> Int Never! {
     depth := 0
     past := -1
@@ -299,7 +302,7 @@ ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, turn
             next
         }
         op: f.op[at]
-        if depth == 0 && at > past && ir_opt_stops_any_poll(f, keys, at) && !ir_opt_polls_checks_call(f, poll, trap, turn, at) -> return at
+        if depth == 0 && at > past && ir_opt_stops_any_poll(f, keys, at) && !ir_opt_polls_after_call(f, poll, trap, turn, at) -> return at
         if op == .Loop || op == .Return || op == .Unreachable -> return -1
         if op == .Block || op == .If {
             depth += 1
@@ -323,6 +326,14 @@ ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, turn
         at += 1
     }
     -1
+}
+
+// Whether the poll at `at` comes right after a call that is no stop
+// point's (whose callee is no function `poll`, `trap` or `turn`): after a
+// direct call of a body it tests only what the call returned (X64Select.jet
+// ir_x64_stop_point, JetWeb Select.jet web_stop_point).
+ir_opt_polls_after_call: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, at: Int) -> Bool Never! {
+    at > 0 && f.op[at - 1] == .Call && f.a[at - 1] != poll && f.a[at - 1] != trap && f.a[at - 1] != turn
 }
 
 // The End a Br at `at` with depth `level` lands after, or -1 when it

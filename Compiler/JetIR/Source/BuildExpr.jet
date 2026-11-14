@@ -5821,7 +5821,9 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     // A variable the return reads is at its last use, since its frame ends
     // here: its own value moves out as `x.move()` would move it, instead of
     // gaining an owner that the variable's scope-end drop then gives back.
-    if b.transactions.len() == 0 && !ir_lent(b, slot) && returned_node.kind == .Local(_) -> b.moving = slot
+    // An open `defer` body runs after this read and may read or assign the
+    // variable, so there the return keeps a copy.
+    if b.transactions.len() == 0 && !ir_defers_open(b) && !ir_lent(b, slot) && ir_returns_local(m, p, b, returned, result_row) -> b.moving = slot
     owned := ir_own(m, p, b, slot)
     // A drop-free aggregate ir_own leaves in place can be a window into
     // storage the return's own drops free (a payload bound out of an Option
@@ -5833,6 +5835,16 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     owned = ir_masked_result(m, b, owned, span)
     if ir_failed(b) -> return
     ir_return_slot(m, p, b, owned, span)
+}
+
+// Whether returned value `node` reads a variable: a Local, or one inside the
+// `Ok(…)` an infallible function's tail wears (its `T Never!` carrier), which
+// ir_value_as reads through when the result `row` is no Result.
+ir_returns_local: fn(m: IRModule, p: IRProgram, b: IRBuilder, node: Int, row: Int) -> Bool Never! {
+    kind: ir_body_node(p, b, node).kind
+    if kind == .Local(_) -> return true
+    if kind == .Ok(inner) && !ir_is_result(m.types[row].ty) -> return ir_returns_local(m, p, b, inner, row)
+    false
 }
 
 // Whether returned value `node` is a call that does not return: its checked

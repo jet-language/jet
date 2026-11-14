@@ -252,8 +252,9 @@ ir_opt_reshares: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String],
 // the header's buffer its own: an Offset whose address the rules follow
 // too; a `#unique<..>` call on the header or on another header apart from
 // it; a Load or Store through `slot` of bytes apart from the header; a
-// Load of a header word; or a Store of one keeping the buffer
-// (ir_opt_header_store_keeps).
+// Load of a header word; a Store of one keeping the buffer
+// (ir_opt_header_store_keeps); or a growth's jet_rt_alloc_value_grow, handed
+// the header's address as its `place`.
 ir_opt_header_kept: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [String], root: [Int], disp: [Int], header: Int, at: Int, slot: Int) -> Bool Never! {
     count: root.len()
     low: header /% count
@@ -278,7 +279,12 @@ ir_opt_header_kept: fn(m: IRModule, f: IRFunction, facts: OptFacts, keys: [Strin
         within: start >= low && size <= 8 && (start - low) %% 8 + size <= 8
         return op == .Store && within && ir_opt_header_store_keeps(m, f, facts, at, start - low - (start - low) %% 8)
     }
-    false
+    // A program list's growth hands jet_rt_alloc_value_grow the header's
+    // address as `place` (BuildRoutes.jet ir_list_grow_buffer), which it only
+    // compares with the stack and the allocator regions to find the allocator
+    // owning the list's storage (Alloc.jet alloc_grow_carrier, alloc_owner):
+    // it keeps no pointer to the header.
+    ir_opt_calls_route(m, f, at, "jet_rt_alloc_value_grow")
 }
 
 // Whether instruction `at` is a runtime route that only reads the buffer it
