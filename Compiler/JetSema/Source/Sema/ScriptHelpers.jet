@@ -280,13 +280,19 @@ sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, 
     why: if in_lines -> "`{helper}` uses the script's `{name}`{through}, so each call passes it, and this call runs before the line that sets it" else -> "`{helper}` uses `{name}`{through}, and only the script's own lines pass it by themselves"
     fix: if in_lines -> "move this call below the line that sets `{name}`" else -> "pass it by name: `{helper}(…, {name}: …)`"
     diagnostic := sema_error("E0107", call_span, what, why, fix)
-    entry: sema_script_entry_function_item(items, "run") ?? return diagnostic
+    bound: sema_script_binding_span(items, name) ?? return diagnostic
+    diagnostic_with_label(diagnostic, bound, "`{name}` is set here")
+}
+
+// Where the script's own lines bind `name`, at the binding's name.
+sema_script_binding_span: fn(items: [Item], name: String) -> Span? Never! {
+    entry: sema_script_entry_function_item(items, "run") ?? return None
     if items[entry] == .Func(function) {
         loop statement in function.body {
-            if statement == .Val(binding) && binding.name == name -> return diagnostic_with_label(diagnostic, binding.name_span, "`{name}` is set here")
+            if statement == .Val(binding) && binding.name == name -> return Val(binding.name_span)
         }
     }
-    diagnostic
+    None
 }
 
 // The script function named at `declared`.

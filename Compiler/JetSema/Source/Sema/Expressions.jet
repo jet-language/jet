@@ -4608,6 +4608,7 @@ sema_expr_note_name_reference: fn(span: Span, binding_index: Int, environment: S
 sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_expr_lint_raw_multiline_html(parts, span, expected, environment, context, diagnostics)
     tree_parts := [TStrPart]{}
+    failed := false
     index := 0
     loop index < parts.len() {
         if parts[index] == {
@@ -4619,6 +4620,13 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 context.allow_string_view_read = true
                 checked_value := sema_check_expression(value, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 context.allow_string_view_read = previous_string_view_read
+                if checked_value == None {
+                    // A part that doesn't check leaves the rest of the string
+                    // to check, so each unknown name in it is reported.
+                    failed = true
+                    index += 1
+                    next
+                }
                 checked: checked_value ?? return None
                 if format == StrFormat.Count {
                     if !sema_expr_check_selector_count(checked, parts, index, diagnostics) -> return None
@@ -4648,6 +4656,7 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
         }
         index += 1
     }
+    if failed -> return None
     sema_expr_expected_owned(sema_tree_node(Type.String, TExprKind.StrLit{parts: tree_parts}, span), expected, environment, program, diagnostics)
 }
 

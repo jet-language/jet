@@ -1,0 +1,12 @@
+Error [jet.UnknownName]: `total` is used here before the script sets it on line 5
+  --> tests/ui/script_lambda_reads_binding_below.jet:3:22
+    |
+  3 | show := fn() { print(total) }
+    |                      ^^^^^
+  --> tests/ui/script_lambda_reads_binding_below.jet:5:1
+    |
+  5 | total: 5
+    | ^^^^^ `total` is set here
+ Why: The script's lines run in order, and this use comes before line 5, which sets `total`
+ Fix: Move this use below line 5, or set `total` above it
+More: jet-lang.dev/e/E0107

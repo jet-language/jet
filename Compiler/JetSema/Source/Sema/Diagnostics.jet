@@ -13,6 +13,7 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_registry_row,
     diagnostic_with_edit,
+    diagnostic_with_label,
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
@@ -341,14 +342,24 @@ sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Di
 // E0107 for a name an unresolved read or write spells in a function of an
 // entry file of top-level statements: when the file binds `name` at its top
 // level, that binding is a local of the file's entry (sema_script_entry),
-// which the function can't see, and the fix is to pass it in. In a body
-// comptime site's staged check, a run-time local or parameter of the
-// function around the site is E0640 instead.
+// which the function can't see, and the fix is to pass it in. A use among the
+// script's own lines, such as a lambda the script makes, sees the script's
+// bindings above it, so there the binding is below the use and the cause is
+// the order. In a body comptime site's staged check, a run-time local or
+// parameter of the function around the site is E0640 instead.
 sema_unknown_name_at: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
     if scopes.comptime_runtime_locals.contains(name) -> return sema_comptime_reads_runtime_value(name, span)
     if program.registration_graph == .Val(graph) {
         if sema_registration_module_index(graph, environment.module_identity) == .Val(index) {
             if graph.modules[index].program.entry_locals.contains(name) {
+                items: graph.modules[index].program.items
+                if sema_script_lines_hold(items, span) {
+                    if sema_script_binding_span(items, name) == .Val(bound) {
+                        line: sema_source_line_at(environment.source_segments, bound) ?? 0
+                        report: sema_error("E0107", span, "`{name}` is used here before the script sets it on line {line}", "the script's lines run in order, and this use comes before line {line}, which sets `{name}`", "move this use below line {line}, or set `{name}` above it")
+                        return diagnostic_with_label(report, bound, "`{name}` is set here")
+                    }
+                }
                 return sema_error("E0107", span, "`{name}` is a local of this file's top-level statements, which a function can't see", "a file's top-level statements are its entry, and the names they bind are that entry's locals", "pass `{name}` as a parameter")
             }
         }
