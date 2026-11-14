@@ -1,0 +1,24 @@
+# A file whose first line is `#!/usr/bin/env jet` and whose body is top-level
+# statements is a script: `jet run FILE` runs the statements, and so does
+# executing the file directly once it is executable. A script that also
+# declares `run: fn` has two entries, which is E0621.
+env: NO_COLOR=1
+requires: os:unix
+write: hi.jet = "#!/usr/bin/env jet\nprint(\"hi\")\n"
+write: mixed.jet = "#!/usr/bin/env jet\nprint(\"hi\")\n\nrun: fn() {\n    print(\"run\")\n}\n"
+chmod: hi.jet 755
+mkdir: bin
+symlink: {jet} bin/jet
+step via_jet: jet run hi.jet
+exit: 0
+stdout: = "hi\n"
+stderr: empty
+step direct: {work}/hi.jet
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+stdout: = "hi\n"
+step mixed: jet run mixed.jet
+exit: 1
+stdout: empty
+stderr: ~ "Error [jet.TopLevelStatementsBesideRun]: This file has top-level statements and a `run: fn`" # one file, two entries
+stderr: ~ "mixed.jet:2:1" # reported at the first top-level statement
