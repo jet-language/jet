@@ -1,0 +1,18 @@
+// `unsubscribe` and `is_active` are core.reactive exports: a program calls
+// them through the module and imports them by name.
+use {
+    reactive: core.reactive
+    core.reactive.[is_active, unsubscribe]
+}
+
+run: fn() {
+    subscription: reactive.autorun(fn() { print("ran") })
+    print("active {reactive.is_active(subscription)}")
+    released: reactive.unsubscribe(subscription)
+    print("released {reactive.is_active(released)}")
+    print("still held {is_active(subscription)}")
+    again: unsubscribe(released)
+    print("released twice {is_active(again)} last {reactive.effect_last(again)}")
+    rerun: reactive.effect_run(released, 3)
+    print("run again {is_active(rerun)} last {reactive.effect_last(rerun)}")
+}
