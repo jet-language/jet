@@ -1,6 +1,8 @@
 use {
+    files: core.files
     service: core.service
     testing: core.testing
+    time: core.time
 }
 
 worker: fn() {}
@@ -16,12 +18,28 @@ sleeping_workflow: fn(store_path: String, ready: Sender<Int>) {
     workflow.sleep(Duration.seconds(10) ?? panic("duration")) ?? panic("sleep completed")
 }
 
+// A task's cancel is taken at its next stop poll, so a cancel sent before the
+// workflow reaches its sleep stops it there, with no sleep recorded. The
+// store's workflow log records the sleep before the wait starts; the short
+// pause after it lets the task enter the wait the cancel ends.
+sleep_recorded: fn(store_path: String) -> Bool {
+    text: files.read("{store_path}.workflows") ?? return false
+    text.contains("workflow-wait-sleep:")
+}
+
 run: fn() {
     temp: testing.temp_dir("workflow-sleep-cancel")
     store_path: Path.from(temp).join("workflow.log").to_string()
     { sender: ready, receiver: started }: channel<Int>()
     task_handle: task sleeping_workflow(store_path.copy(), ready)
     started.receive() ?? panic("workflow did not start")
+    tries := 0
+    loop !sleep_recorded(store_path.copy()) {
+        if tries == 2000 -> panic("the workflow never recorded its sleep")
+        time.sleep(5ms)
+        tries += 1
+    }
+    time.sleep(50ms)
     task_handle.cancel()
     if task_handle.join() == {
         .Err(_) -> print("cancelled")
