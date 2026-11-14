@@ -54,6 +54,7 @@ use {
         TraitMethodSig,
         TraitImplBlock,
         Type,
+        TypeAliasChoice,
         TypeAliasDef,
         TypeParam,
         UserPolicyDecl,
@@ -106,9 +107,11 @@ use {
         TOKEN_INT,
         TOKEN_KW_COPY,
         TOKEN_KW_EFFECT,
+        TOKEN_KW_ELSE,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
         TOKEN_KW_FN,
+        TOKEN_KW_IF,
         TOKEN_KW_IMPL,
         TOKEN_KW_MODULE,
         TOKEN_KW_MOVE,
@@ -2505,7 +2508,9 @@ parser_parse_persist_binding: fn(state: &JetParserState) -> Item? {
     Val(Item.Const{value: definition})
 }
 
-// `Name: Type` / `Name<T>: Type<T>` (parser_type_alias_ahead_at).
+// `Name: Type` / `Name<T>: Type<T>` (parser_type_alias_ahead_at), or a
+// computed alias that chooses its type while building:
+// `Name<N: Int>: Bound #run { if cond -> Type else -> Type }`.
 parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
     name: parser_bump(state)
     type_params := parser_parse_type_params(state)
@@ -2519,8 +2524,48 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
         }
         else -> parser_parse_type(state, 0)
     }
+    choices := [TypeAliasChoice]{}
+    end := target.span.end
+    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_text(state, parser_current(state)) == "#run" {
+        parser_bump(state)
+        parser_bump(state)
+        choices = parser_parse_alias_choices(state)
+        end = parser_prev_token_end(state)
+    }
     parser_finish_statement(state)
-    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: Span{start: name.span.start, end: end}, choices: choices}
+}
+
+// A computed alias's choices, after the `{` of its `#run` body: `if cond ->
+// Type`, any `else if cond -> Type` links, then the final `else -> Type`.
+parser_parse_alias_choices: fn(state: &JetParserState) -> [TypeAliasChoice] {
+    choices := [TypeAliasChoice]{}
+    parser_skip_semicolons(state)
+    parser_expect(state, TOKEN_KW_IF, "to open a computed alias's choices")
+    loop {
+        condition: parser_parse_expression_no_struct_lit(state, 1)
+        parser_expect(state, TOKEN_UNIFIED_ARROW, "`->` after a computed alias's condition")
+        chosen: parser_parse_type(state, 0)
+        choices.push(TypeAliasChoice{cond: Val(condition.expr), target: chosen.ty, target_span: chosen.span})
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) != TOKEN_KW_ELSE {
+            missing: parser_current(state).span
+            parser_add_error(state, missing, "a computed alias needs a final `else -> Type`", "every instance of the alias chooses some type", "end the choices with `else -> Type`")
+            break
+        }
+        parser_bump(state)
+        if parser_current_kind(state) == TOKEN_KW_IF {
+            parser_bump(state)
+            next
+        }
+        parser_expect(state, TOKEN_UNIFIED_ARROW, "`->` after `else` in a computed alias")
+        fallback: parser_parse_type(state, 0)
+        choices.push(TypeAliasChoice{cond: None, target: fallback.ty, target_span: fallback.span})
+        break
+    }
+    parser_skip_semicolons(state)
+    parser_expect(state, TOKEN_RBRACE, "`}}` to close a computed alias's choices")
+    choices
 }
 
 // At file and module scope an unmarked `name: fn(…)` with no

@@ -1453,6 +1453,18 @@ jfmt_fmt_type_alias: fn(f: &JetFmt, a: TypeAliasDef) {
     jfmt_fmt_type_params(f, a.type_params, type_source)
     jfmt_write(f, ": ")
     jfmt_fmt_type_at(f, a.target, Val(a.target_span))
+    if a.choices.len() == 0 -> return
+    jfmt_write(f, " #run {{")
+    loop (index, choice) in a.choices {
+        if index > 0 -> jfmt_write(f, " else")
+        if choice.cond == .Val(cond) {
+            jfmt_write(f, " if ")
+            jfmt_fmt_expr(f, cond, JFMT_PREC_OR_FALLBACK)
+        }
+        jfmt_write(f, " -> ")
+        jfmt_fmt_type_at(f, choice.target, Val(choice.target_span))
+    }
+    jfmt_write(f, " }}")
 }
 
 jfmt_fmt_type_params: fn(f: &JetFmt, params: [TypeParam], source: JetFmtSourceList?) {

@@ -1156,9 +1156,23 @@ TypeAliasDef: struct {
     name: String
     name_span: Span
     type_params: [TypeParam]
+    // A computed alias (`Storage<N: Int>: Store #run { if N <= 16 -> Inline<N>
+    // else -> Heap }`) writes its bound here, the trait every choice
+    // implements.
     target: Type
     target_span: Span
     span: Span
+    // A computed alias's choices in order. The last one has no condition.
+    // Empty for a plain alias.
+    choices: [TypeAliasChoice]{[TypeAliasChoice]{}}
+}
+
+// One choice of a computed alias: `if cond -> Type`, or the final
+// `else -> Type` with no condition.
+TypeAliasChoice: struct {
+    cond: Expr?
+    target: Type
+    target_span: Span
 }
 
 DistinctDef: struct {

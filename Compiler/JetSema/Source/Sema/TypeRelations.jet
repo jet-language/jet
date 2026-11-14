@@ -63,6 +63,9 @@ use jet_foundation.[
     module_is_none,
     module_none,
     module_text,
+    AST_NODE_GENERATED,
+    comptime_walk_identifiers,
+    TypeAliasDef,
 ]
 
 
@@ -809,6 +812,7 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
         if item == .TypeAlias(definition) {
             names := [String]{}
             sema_type_alias_references(definition.target, names)
+            loop choice in definition.choices -> sema_type_alias_references(choice.target, names)
             loop name in names {
                 bound := false
                 loop parameter in definition.type_params {
@@ -1112,7 +1116,8 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
                         item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
                         if item == .TypeAlias(definition) {
                             names: loop parameter in definition.type_params -> parameter.name
-                            target: sema_inference_substitute_type(definition.target, names, rewritten)
+                            written: sema_type_alias_chosen(graph, alias_row.module_index, definition, rewritten) ?? return Type.Apply{name: head, args: rewritten}
+                            target: sema_inference_substitute_type(written, names, rewritten)
                             return sema_type_resolve_declared_recursive(graph, target, sema_registration_module_index(graph, nominal.symbol.module_identity) ?? -1, generic_params)
                         }
                     }
@@ -1146,6 +1151,61 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
+}
+
+// The type an alias stands for under `args`, before they are substituted:
+// its target, or the first choice of a computed alias whose condition holds.
+// None while a condition can't be decided, as when an argument is still a
+// type parameter. `module_index` is the alias's module, whose constants a
+// condition may read.
+sema_type_alias_chosen: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> Type? {
+    if definition.choices.len() == 0 -> return Val(definition.target.copy())
+    values: sema_type_alias_number_values(graph, module_index, definition, args)
+    loop choice in definition.choices {
+        cond: choice.cond ?? return Val(choice.target.copy())
+        folded: sema_genmod_fold(cond, values, [String:Bool]{}) ?? return None
+        if folded == .Bool(holds, _, _) {
+            if holds -> return Val(choice.target.copy())
+        } else {
+            return None
+        }
+    }
+    None
+}
+
+// The whole numbers a computed alias's conditions fold over: its number
+// parameters bound to the literals in `args`, and the module constants the
+// conditions name. A parameter shadows a constant of the same name.
+sema_type_alias_number_values: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> [String:Expr] Never! {
+    values := [String:Expr]{}
+    loop (index, param) in definition.type_params {
+        if index >= args.len() -> break
+        if args[index] == .Measure(measure) {
+            if measure_literal_value(measure) == .Val(number) -> values[param.name] = Expr.Int{value: number, span: param.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+        }
+    }
+    loop name in sema_type_alias_constant_names(definition) {
+        if sema_type_measure_constant(graph, module_index, name, 0) == .Val(number) -> values[name] = Expr.Int{value: number, span: definition.name_span, width: None, raw: None, id: AST_NODE_GENERATED}
+    }
+    values
+}
+
+// The names a computed alias's conditions read that aren't its parameters:
+// each may only be a constant of the alias's module.
+sema_type_alias_constant_names: fn(definition: TypeAliasDef) -> [String] Never! {
+    names := [String]{}
+    loop choice in definition.choices {
+        cond: choice.cond ?? next
+        loop site in comptime_walk_identifiers(cond) {
+            if names.contains(site.name) -> next
+            shadowed := false
+            loop param in definition.type_params {
+                if param.name == site.name -> shadowed = true
+            }
+            if !shadowed -> names.push(site.name)
+        }
+    }
+    names
 }
 
 // One argument of `Name<…>`: a constant of the spelling module (`Packet<SIZE>`)

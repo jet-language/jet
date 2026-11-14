@@ -1584,6 +1584,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 mapped := definition
                 mapped.name = sema_inline_mapped_name(visible, definition.name)
                 mapped.target = sema_inline_rewrite_type(visible, definition.target)
+                loop index in 0..<definition.choices.len() -> mapped.choices[index].target = sema_inline_rewrite_type(visible, definition.choices[index].target)
                 hoist.declarations.push(Item.TypeAlias{value: mapped})
             }
             .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}

@@ -83,6 +83,7 @@ use {
         TraitImplBlock,
         TraitMethodSig,
         Type,
+        TypeAliasDef,
         TypeParam,
         UnOp,
         UnitFamilyDef,
@@ -2960,7 +2961,10 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
             base: sema_checked_qualify_type_with_generics(graph, value.base, module_row.module_identity, generic_params)
             kind = Val(TTypeDefKind.Distinct{base: base, range: value.range.map(fn(item) { TIntegerRange{lo: item.lo, hi: item.hi} })})
         }
-        .TypeAlias(value) -> kind = Val(TTypeDefKind.Alias{target: sema_checked_qualify_type_with_generics(graph, value.target, module_row.module_identity, generic_params)})
+        .TypeAlias(value) -> {
+            if value.choices.len() > 0 -> sema_checked_computed_alias(graph, module_row, value, diagnostics)
+            kind = Val(TTypeDefKind.Alias{target: sema_checked_qualify_type_with_generics(graph, value.target, module_row.module_identity, generic_params)})
+        }
         .UnitFamily(value) -> {
             members: loop member in value.members -> member.name
             base := String?{None}
@@ -2995,6 +2999,38 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         specified: if definition == .Enum(value) -> sema_enum_numbers_marker(value.type_markers, "Specified") != None else -> false,
         boxed_edges: boxed_edges,
         kind: type_kind,
+    }
+}
+
+// A computed alias (`Storage<N: Int>: Store #run { if N <= 16 -> Inline<N>
+// else -> Heap }`) is bounded by a trait every choice implements, and each
+// condition is a `Bool` decided by its number parameters and the module's
+// constants alone.
+sema_checked_computed_alias: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: TypeAliasDef, diagnostics: &[Diagnostic]) {
+    bound := ""
+    if definition.target == .Named(name) {
+        if sema_registration_lookup_name(graph, module_row.module_identity, name) == .Val(symbol) {
+            if sema_resolved_kind(graph, symbol) == SymbolKind.Trait -> bound = name
+        }
+    }
+    if bound == "" {
+        diagnostics.push(sema_error("E0301", definition.target_span, "the computed alias bound `{type_name(definition.target)}` is not a trait", "every type a computed alias chooses implements its bound, a trait", "write a trait between `:` and `#run`"))
+        return
+    }
+    numbers := [String:Type]{}
+    loop param in definition.type_params {
+        if param.prep != None -> numbers[param.name] = Type.Int
+    }
+    module_index: sema_registration_module_index(graph, module_row.module_identity) ?? -1
+    loop name in sema_type_alias_constant_names(definition) {
+        if sema_type_measure_constant(graph, module_index, name, 0) != None -> numbers[name] = Type.Int
+    }
+    loop choice in definition.choices {
+        if choice.cond == .Val(cond) {
+            decided: sema_genmod_value_type(cond, numbers, [String:Bool]{})
+            if decided != .Val(Type.Bool) -> diagnostics.push(sema_error("E0391", expr_span(cond), "this condition isn't a `Bool` decided while building", "a computed alias chooses its type while building, from its number parameters and the module's constants", "compare the `Int` parameters with literals or constants, such as `N <= 16`"))
+        }
+        if !sema_genmod_implements(graph, module_row.module_identity, choice.target, bound) -> diagnostics.push(sema_error("E0905", choice.target_span, "`{type_name(choice.target)}` isn't `{bound}`", "`{definition.name}` can choose `{type_name(choice.target)}`, and every type it chooses must implement its bound `{bound}`", "implement `{bound}` for `{type_name(choice.target)}`, or choose a type that has it"))
     }
 }
 

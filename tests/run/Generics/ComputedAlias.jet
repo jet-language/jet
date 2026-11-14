@@ -1,0 +1,31 @@
+// A computed alias chooses its type while building: `Storage<N: Int>` is an
+// `Inline<N>` while `N <= 16` and a `Heap` past that. Both choices implement
+// the bound, `Store`, so each value counts its items through it.
+Store: trait {
+    count: fn(self) -> Int
+}
+
+Inline: struct<N: Int> {
+    items: [Int#N]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Heap: struct {
+    items: [Int]
+
+    impl Store {
+        count: fn(self) -> Int { self.items.len() }
+    }
+}
+
+Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }
+
+run: fn() {
+    small: Storage<2>{items: [Int#2]{1, 2}}
+    big: Storage<100>{items: [1, 2, 3]}
+    print(small.count())
+    print(big.count())
+}

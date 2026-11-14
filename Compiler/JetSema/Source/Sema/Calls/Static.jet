@@ -994,14 +994,16 @@ SemaStaticAliasTarget: struct {
 // target's owner type arguments. A plain alias (`Spot: Point`) passes the
 // call's owner arguments on. A generic alias (`Pair<A, B>: Pair2<Float, A,
 // B>`) substitutes them into its target's arguments; without them the
-// target's arguments are left to inference.
+// target's arguments are left to inference. A computed alias names the
+// statics of the type it chooses for the call's owner arguments.
 sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, owner_type_args: [Type]) -> SemaStaticAliasTarget? {
     alias_row: graph.modules[row.module_index].nominals[row.row]
     if alias_row.kind != SemaRegistrationNominalKind.TypeAlias -> return None
     definition: if alias_row.source == .SourceAST(item) && item == .TypeAlias(found) -> found else -> { return None }
+    written: sema_type_alias_chosen(graph, row.module_index, definition, owner_type_args) ?? return None
     target_name := ""
     target_args := [Type]{}
-    if definition.target == {
+    if written == {
         .Named(name) -> target_name = name
         .Apply(name, args) -> {
             target_name = name
@@ -1012,7 +1014,7 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
     target: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
     if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
     if definition.type_params.len() == 0 {
-        if definition.target == .Named(_) -> return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: owner_type_args})
+        if written == .Named(_) -> return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: owner_type_args})
         if owner_type_args.len() > 0 -> return None
         return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: target_args})
     }
