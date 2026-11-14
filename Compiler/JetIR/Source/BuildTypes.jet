@@ -3751,9 +3751,10 @@ ir_carrier_type: fn(ty: Type) -> Bool Never! {
 
 // The payload members of variant `index` of the enum declaration `row`
 // (applied to the instance arguments `args`), laid out from byte 8; a
-// recursive edge holds an 8-byte wrapper box pointer. Memoized in
-// m.variant_members by the instance's arguments in the terms of the instance
-// being built, as ir_struct_members is.
+// recursive edge, and a struct wider than IR_VARIANT_INLINE_BYTES in a
+// non-generic enum (ir_variant_member_outsized), hold an 8-byte wrapper box
+// pointer. Memoized in m.variant_members by the instance's arguments in the
+// terms of the instance being built, as ir_struct_members is.
 ir_variant_members: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
     bound: args.copy()
     identity: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
@@ -3799,7 +3800,7 @@ ir_variant_members_laid: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], 
         offset := 8
         loop (position, name) in names {
             ty: ir_value_type(m, p, sema_type_def_instance_type(p.types[row], args, types[position])) ?? return None
-            boxed: definition.boxed_edges.contains(edges[position])
+            boxed: definition.boxed_edges.contains(edges[position]) || ir_variant_member_outsized(m, definition, ty)
             size: if boxed -> 8 else -> m.types[ty].size
             align: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
             if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align
@@ -3808,6 +3809,26 @@ ir_variant_members_laid: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], 
         }
     }
     Val(members)
+}
+
+// The widest struct a variant holds inline. Every value of an enum takes a
+// box as wide as its widest variant (ir_enum_box_size), so one rare wide
+// payload made every value that wide: the checked body's NodeKind took 288
+// bytes a node for a median variant of 24 (#6527 c11). Past six words, a
+// wrapper box of its own costs the wide variant one allocation and saves
+// every other variant the width.
+IR_VARIANT_INLINE_BYTES: 48
+
+// Whether the member of type row `ty` in a variant of `definition` is held
+// in a wrapper box of its own, as a recursive edge is, for being a struct
+// wider than IR_VARIANT_INLINE_BYTES. An enum whose layout is promised
+// elsewhere keeps its payloads inline: a declared C or aligned layout, a
+// generic enum the lowering reads by its given layout (ir_event_variant),
+// and the Dyn enum the runtime walks (ir_dyn_schema).
+ir_variant_member_outsized: fn(m: IRModule, definition: TTypeDef, ty: Int) -> Bool Never! {
+    if m.types[ty].kind != .Aggregate || m.types[ty].size <= IR_VARIANT_INLINE_BYTES -> return false
+    if definition.generic_params.len() > 0 || ir_dyn_declaration(definition) -> return false
+    definition.layout == None && definition.c_layout_tag == None && definition.enum_layout == None && definition.layout_alignment == None
 }
 
 // The end of the widest variant, in whole words. Memoized in m.enum_sizes by

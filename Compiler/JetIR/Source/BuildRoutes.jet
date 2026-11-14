@@ -5205,8 +5205,14 @@ ir_dyn_def: fn(p: IRProgram, ty: Type) -> Int? Never! {
     row: ir_type_def(p, name) ?? return None
     definition: p.types[row]
     if definition.kind == .Alias(target) -> return ir_dyn_def(p, target)
-    if definition.key == "Dyn" && definition.name == "Dyn" -> return Val(row)
+    if ir_dyn_declaration(definition) -> return Val(row)
     None
+}
+
+// Whether `definition` declares the checked Dyn enum, whose storage the
+// runtime walks by ir_dyn_schema's descriptor.
+ir_dyn_declaration: fn(definition: TTypeDef) -> Bool Never! {
+    definition.key == "Dyn" && definition.name == "Dyn"
 }
 
 // The read-only storage descriptor of the Dyn enum `row` the runtime walks:
