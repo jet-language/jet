@@ -2888,7 +2888,10 @@ ir_equal_into: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int
         return ir_equal_members(m, p, b, members, left, right, differ, outer, span)
     }
     if ir_native_carrier(ty) -> return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
-    name: ir_nominal_name(ty) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
+    // An anonymous union compares as the structural enum ir_add_union_types
+    // declares for it, as its constants are built (ir_comptime_enum).
+    union_key: if ty == .Union(_) -> Val(ir_union_key(ty)) else -> String?{None}
+    name: union_key ?? ir_nominal_name(ty) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
     definition_row: ir_type_def(p, name) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
     if !outer {
         helper: ir_equal_helper(m, p, b, row, span)

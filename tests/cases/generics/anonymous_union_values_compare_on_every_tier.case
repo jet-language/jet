@@ -1,0 +1,18 @@
+# Two anonymous-union values compare by their member and value (equal
+# members with equal values are equal, different members differ), and a
+# match over the union selects the member, on O0, O1 and O2.
+fixture: anonymous_union_values_compare_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = anonymous_union_values_compare_on_every_tier.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = anonymous_union_values_compare_on_every_tier.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = anonymous_union_values_compare_on_every_tier.stdout.expected
+stderr: empty
