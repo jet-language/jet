@@ -8050,6 +8050,11 @@ sema_comptime_function_precheck_claimed: fn(shared_state: Shared<SemaFunctionPre
         if claim.wave_module != current {
             current = claim.wave_module
             probe = sema_comptime_function_thread_probe(inputs.value.slots[current], wanted)
+            // The probe's light rows keep their types in the wave module's
+            // prepared scope, which a check reads in place through the
+            // environment's `module_scope` (sema_scope_binding_type), as an
+            // item precheck's module environment holds it.
+            environment.module_scope = Val(inputs.value.slots[current].table)
         }
         sema_host_hook_unwant(wanted)
         // Passed straight through: a local binding of a guarded row would copy it.
