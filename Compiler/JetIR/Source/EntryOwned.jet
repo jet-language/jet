@@ -168,6 +168,7 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
     loop route in IR_ROOT_FREE_ROUTES -> free[route.copy()] = true
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     // Each stop edge as (function, its first instruction, its End).
     edges := [Int]{}
     seeds := [Int]{}
@@ -179,7 +180,7 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
                 if free.get(symbol) == None -> return "`{f.name}` calls the runtime route `{symbol}`"
                 next
             }
-            if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> next
+            if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) -> next
             if at + 1 >= f.op.len() || f.op[at + 1] != .If || f.a[at + 1] != f.dst[at] || f.b[at + 1] >= 0 -> return "`{f.name}` has a stop point without its stop edge"
             edges.push(id)
             edges.push(at + 2)
@@ -331,6 +332,7 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
     if need != "" -> return need
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     entry_return: name_rows_value(m.name_rows, "jet_rt_process_entry_return") ?? -1
     buffered := false
     loop route in IR_OWNED_STDOUT_ROUTES {
@@ -355,7 +357,7 @@ ir_entry_own: fn(m: &IRModule) -> String Never! {
     if exit >= 0 -> attach[exit_owned] = true
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
-        ir_entry_own_strip(m.functions[id], poll, trap, entry_return, redirect, cleanup)
+        ir_entry_own_strip(m.functions[id], poll, trap, turn, entry_return, redirect, cleanup)
         loop (at, op) in m.functions[id].op {
             if op == .CallRuntime && attach[m.functions[id].a[at]] -> m.owned_attach = true
         }
@@ -388,7 +390,7 @@ IRCleanupRoutes: struct {
 // cleanup scopes (an enter's saved word becomes the 0 it returns with no
 // control), and points each runtime call whose name row `redirect` maps
 // (-1: none) at the owned main's route.
-ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
+ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, turn: Int, entry_return: Int, redirect: [Int], cleanup: IRCleanupRoutes) Never! {
     removed := false
     at := 0
     loop at < f.op.len() {
@@ -402,7 +404,7 @@ ir_entry_own_strip: fn(f: &IRFunction, poll: Int, trap: Int, entry_return: Int, 
             f.c[at] = -1
         } else if f.op[at] == .CallRuntime && f.a[at] < redirect.len() && redirect[f.a[at]] >= 0 {
             f.a[at] = redirect[f.a[at]]
-        } else if f.op[at] == .Call && f.a[at] >= 0 && (f.a[at] == poll || f.a[at] == trap) {
+        } else if f.op[at] == .Call && f.a[at] >= 0 && (f.a[at] == poll || f.a[at] == trap || f.a[at] == turn) {
             end: f.c[at + 1]
             loop k in at..<(end + 1) -> ir_opt_kill(f, k)
             removed = true

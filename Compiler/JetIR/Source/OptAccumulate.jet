@@ -361,12 +361,12 @@ ir_opt_accumulate_arg: fn(f: IRFunction, args: Int, slot: Int) -> Int Never! {
     -1
 }
 
-// Whether `at` is `stopped := poll()` or `stopped := trap()` followed by
+// Whether `at` is `stopped := poll()` (any of the stop polls) followed by
 // `if stopped` with no Else: a stop point (Build.jet ir_stop_point).
 ir_opt_accumulate_stop: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
     if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
     callee: f.a[at]
-    if callee < 0 || callee >= keys.len() || (keys[callee] != IR_STOP_POLL_KEY && keys[callee] != IR_STOP_TRAP_KEY) -> return false
+    if callee < 0 || callee >= keys.len() || !ir_stop_key(keys[callee]) -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 

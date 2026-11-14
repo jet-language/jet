@@ -179,10 +179,27 @@ ir_overflow_wraps: fn(c: Int) -> Bool Never! {
     c == IR_OVERFLOW_WRAP || c == IR_OVERFLOW_NONNEG
 }
 
-// The stop polls (Build.jet ir_stop_poll): after a call, and after a user
-// operation whose slow path can publish a numeric stop.
+// The stop polls (Build.jet ir_stop_poll): after a call, after a user
+// operation whose slow path can publish a numeric stop, and at a loop's
+// turn or a recursive body's entry. Only the turn's also delivers a passed
+// deadline, as "waiting in a loop" (JetRuntime Scheduler.jet
+// jet_rt_session_turn): a stop poll after a call takes what the call
+// published, so a wait that returned its typed timeout keeps it.
 IR_STOP_POLL_KEY: "jet_ir_stop_poll#asm"
 IR_STOP_TRAP_KEY: "jet_ir_stop_trap#asm"
+IR_STOP_TURN_KEY: "jet_ir_stop_turn#asm"
+
+// Whether function key `key` is one of the stop polls.
+ir_stop_key: fn(key: String) -> Bool Never! {
+    key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY || key == IR_STOP_TURN_KEY
+}
+
+// The runtime routine stop poll `key` calls when the runtime's words ask
+// for it: the turn poll's also delivers a passed deadline.
+ir_stop_routine: fn(key: String) -> String Never! {
+    if key == IR_STOP_TURN_KEY -> "jet_rt_session_turn" else -> "jet_rt_session_propagate"
+}
+
 // The stack mark leaf (Build.jet ir_stack_mark).
 IR_STACK_MARK_KEY: "jet_ir_stack_mark#asm"
 

@@ -15,7 +15,7 @@
 // where the module before it ended (WebLayout).
 
 use {
-    jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
+    jet_ir.[IRFunction, IRModule, IRX64Tables, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_STOP_TURN_KEY, ir_drop_early, ir_tail_calls, ir_x64_tables]
     jet_wasm.[WASM_I32, WASM_I64, WASM_PAGE, wasm_put_fixed, wasm_put_signed, wasm_put_unsigned, wasm_sig_side, wat_put_name, wat_put_section, wat_put_vec_section]
 }
 
@@ -222,7 +222,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     st := WebState{
         app: app, stop_points: m.stop_points, data_at: places, table_base: layout.table_base, slots: [Int]{}, slot_rows: [Int]{},
         types: [String]{}, type_rows: [String:Int]{}, refs: [WebRef]{}, ref_rows: [String:Int]{}, internal: [String:Int]{},
-        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), armed: armed, errors: [String]{},
+        exports: runtime, hosts: hosts, sigs: [String]{}, poll: web_find_key(m, IR_STOP_POLL_KEY), trap: web_find_key(m, IR_STOP_TRAP_KEY), turn: web_find_key(m, IR_STOP_TURN_KEY), armed: armed, errors: [String]{},
     }
     loop (row, f) in m.functions {
         st.slots.push(-1)

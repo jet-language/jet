@@ -2620,34 +2620,36 @@ ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
     ir_stop_point(m, b, IR_STOP_POLL_KEY)
 }
 
-// The check every user loop's iteration starts with: a stop poll
-// (IR_STOP_POLL_KEY) whether or not the body calls anything, so a task
+// The check every user loop's iteration starts with: a turn poll
+// (IR_STOP_TURN_KEY) whether or not the body calls anything, so a task
 // paused with `pause(mode: .CheckLoops)` stops at its next iteration, and a
 // cancel of it or its passed deadline is delivered there (JetRuntime
-// Scheduler.jet scheduler_check_loops). At the start of the body rather
-// than at its back branch, so an iteration a `next` ends early is checked
-// too. Every loop form that lowers to a Loop (BuildExpr.jet, BuildLazy.jet)
-// emits it right after pushing its IRLoopFrame. The passes treat it as any
-// other poll: a poll later in the same iteration folds it (OptStops.jet
-// ir_opt_fold_polls); the branch back to the head keeps one per iteration.
-// On x86-64 and the web target, a check that follows no call reads only the
-// runtime's armed word before it calls the poll, and on x86-64 the poll
-// keeps every register but rax (X64Select.jet ir_x64_stop_point,
-// ir_x64_stop_poll; JetWeb Select.jet web_stop_point).
+// Scheduler.jet scheduler_check_loops, jet_rt_session_turn). At the start
+// of the body rather than at its back branch, so an iteration a `next` ends
+// early is checked too. Every loop form that lowers to a Loop (BuildExpr.jet,
+// BuildLazy.jet) emits it right after pushing its IRLoopFrame. The passes
+// treat it as any other poll that checks no call, except that a poll it
+// folds into becomes a turn poll (OptStops.jet ir_opt_fold_polls); the
+// branch back to the head keeps one per iteration. On x86-64 and the web
+// target, a check that follows no call reads only the runtime's armed word
+// before it calls the poll, and on x86-64 the poll keeps every register but
+// rax (X64Select.jet ir_x64_stop_point, ir_x64_stop_poll; JetWeb Select.jet
+// web_stop_point).
 ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
-    ir_stop_check(m, b)
+    if !m.stop_points || b.stopping -> return
+    ir_stop_point(m, b, IR_STOP_TURN_KEY)
 }
 
-// The check a body starts with, before its first statement: a stop poll
-// (IR_STOP_POLL_KEY) as ir_loop_check puts at each iteration, its index
-// kept in the function (IRFunction.entry_check). A recursion that runs no
-// loop meets it at each entry, so a cancel of a task busy in one is
+// The check a body starts with, before its first statement: the turn poll
+// ir_loop_check puts at each iteration, its index kept in the function
+// (IRFunction.entry_check). A recursion that runs no loop meets it at each
+// entry, so a cancel of a task busy in one, or its passed deadline, is
 // delivered there as it is at a loop's turn. ir_recursion_checks removes
 // it from every body that is not recursive once the module is built.
 ir_entry_check: fn(m: &IRModule, b: &IRBuilder) Never! {
     if !m.stop_points || b.stopping -> return
     b.f.entry_check = b.f.op.len()
-    ir_stop_check(m, b)
+    ir_stop_point(m, b, IR_STOP_TURN_KEY)
 }
 
 // Keeps the entry checks (ir_entry_check) of the bodies that can call
@@ -2767,14 +2769,18 @@ ir_stop_catches: fn(m: &IRModule, b: &IRBuilder) Never! {
     b.stopping = false
 }
 
-// A stop poll: true when the thread's task control holds a stop and
-// jet_rt_session_propagate delivers it. Its code is the selector's
-// (X64Select ir_x64_stop_poll); IR_STOP_TRAP_KEY's is the same. Built
-// once per module, by key.
+// A stop poll: true when the thread's task control holds a stop and its
+// routine (ir_stop_routine) delivers it. Its code is the selector's
+// (X64Select ir_x64_stop_poll); the three keys' differ only in the routine.
+// Built once per module, by key.
 ir_stop_poll: fn(m: &IRModule, key: String) -> Int Never! {
     found: name_rows_value(m.function_rows, key) ?? -1
     if found >= 0 -> return found
-    name: if key == IR_STOP_TRAP_KEY -> "jet_ir_stop_trap" else -> "jet_ir_stop_poll"
+    name: if {
+        key == IR_STOP_TRAP_KEY -> "jet_ir_stop_trap"
+        key == IR_STOP_TURN_KEY -> "jet_ir_stop_turn"
+        else -> "jet_ir_stop_poll"
+    }
     f := ir_function_new(name, key, name, "", 0)
     f.result = ir_type_row(m, Type.Bool) ?? 0
     // An asm leaf with no template: never inlined.

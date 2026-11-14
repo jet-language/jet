@@ -1263,11 +1263,11 @@ ir_opt_access_address: fn(keys: [String], f: IRFunction, k: Int) -> Int Never! {
 }
 
 // Whether instruction `k` calls an inline template: an `#FFI(asm)` leaf
-// other than the stop poll and trap, which the selector calls.
+// other than the stop polls, which the selector calls.
 ir_opt_template_call: fn(keys: [String], f: IRFunction, k: Int) -> Bool Never! {
     if f.op[k] != .Call || f.a[k] < 0 || f.a[k] >= keys.len() -> return false
     key: keys[f.a[k]]
-    key.ends_with("#asm") && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+    key.ends_with("#asm") && !ir_stop_key(key)
 }
 
 // Whether instruction `k` calls nothing but an inline template: no body,

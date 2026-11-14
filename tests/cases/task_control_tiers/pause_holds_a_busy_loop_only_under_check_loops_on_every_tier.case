@@ -3,10 +3,10 @@
 # at the check every loop iteration starts with, and a cancel after it stops
 # the loop there. The output is the same on every optimization level and in
 # the built program. The check is one lowering rule (JetIR Build.jet
-# ir_loop_check): `spin`, a loop with no call, has its stop poll before the
+# ir_loop_check): `spin`, a loop with no call, has its turn poll before the
 # passes and keeps it after them at O1 and O2, and a build for the web
-# target selects the same poll. Without the check the spinner never stops
-# and the run steps time out.
+# target selects the same poll and its routine. Without the check the
+# spinner never stops and the run steps time out.
 # Hand-derived expectations, not worker-run.
 fixture: pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.fixture
 env: NO_COLOR=1
@@ -18,12 +18,12 @@ step: jet inspect decisions --optimize=basic main.jet
 env: JET_OPT_DUMP=spin
 exit: 0
 stdout: ~ "O1:" # optimize: basic runs the O1 passes
-stdout: count "jet_ir_stop_poll" >= 2 # the loop's check before the passes, and after them
+stdout: count "jet_ir_stop_turn" >= 2 # the loop's check before the passes, and after them
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=spin
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
-stdout: count "jet_ir_stop_poll" >= 2 # the loop's check before the passes, and after them
+stdout: count "jet_ir_stop_turn" >= 2 # the loop's check before the passes, and after them
 step: jet run --optimize=none main.jet
 exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
@@ -40,4 +40,4 @@ exit: 0
 stdout: = pause_holds_a_busy_loop_only_under_check_loops_on_every_tier.out
 step: jet build --target web main.jet
 exit: 0
-file: .jet/build/app.wasm ~ "jet_rt_session_propagate" # the web poll's routine
+file: .jet/build/app.wasm ~ "jet_rt_session_turn" # the web turn poll's routine

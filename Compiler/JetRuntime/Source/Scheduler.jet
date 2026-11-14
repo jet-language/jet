@@ -585,6 +585,14 @@ scheduler_delivered_status: fn() -> I64 {
 #Export(c) jet_rt_session_propagate: fn() -> I64 {
     scheduler_turn_give()
     control: scheduler_control_current()
+    if (control != I64{0}) -> scheduler_check_loops(control)
+    scheduler_delivered_status()
+}
+// The turn poll's routine (JetIR IR.jet IR_STOP_TURN_KEY): at a loop's
+// turn or a recursive body's entry a passed deadline is delivered too.
+#Export(c) jet_rt_session_turn: fn() -> I64 {
+    scheduler_turn_give()
+    control: scheduler_control_current()
     if (control != I64{0}) {
         scheduler_check_loops(control)
         scheduler_check_loop_deadline(control)
@@ -820,12 +828,14 @@ scheduler_check_loops: fn(control: I64) {
     }
 }
 
-// Once a deadline has been set (the bit stays), each stop poll of compiled
-// code (jet_rt_session_propagate, jet_scheduler_native_poll) reads the clock
-// while the context holds a deadline and no stop is published, and delivers
-// E3003 once it has passed. The runtime's own stop checks
-// (jet_scheduler_native_propagate) leave it to the wait points: a typed
-// join waits past its joiner's deadline, an async entry turns its passed
+// Once a deadline has been set (the bit stays), each turn poll of compiled
+// code (jet_rt_session_turn, at a loop's turn or a recursive body's entry)
+// and jet_scheduler_native_poll read the clock while the context holds a
+// deadline and no stop is published, and deliver E3003 once it has passed.
+// The stop poll after a call (jet_rt_session_propagate) and the runtime's
+// own stop checks (jet_scheduler_native_propagate) leave it to the wait
+// points: a wait that returned its typed timeout keeps it, a typed join
+// waits past its joiner's deadline, an async entry turns its passed
 // deadline into its report, and a task body that has returned keeps its
 // value.
 scheduler_check_loop_deadline: fn(control: I64) {

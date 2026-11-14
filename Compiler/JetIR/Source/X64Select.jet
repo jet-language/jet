@@ -577,11 +577,10 @@ ir_x64_below: fn(e: &IRX64Emitter, bytes: Int) Never! {
     if bytes > e.below -> e.below = bytes
 }
 
-// Whether function `id` is a stop poll or trap (ir_x64_stop_poll).
+// Whether function `id` is a stop poll, trap or turn (ir_x64_stop_poll).
 ir_x64_is_poll: fn(m: IRModule, id: Int) -> Bool Never! {
     if id < 0 || id >= m.functions.len() -> return false
-    key: m.functions[id].key
-    key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY
+    ir_stop_key(m.functions[id].key)
 }
 
 // ---------------------------------------------------------------------------
@@ -750,7 +749,7 @@ ir_x64_asm_access_size: fn(m: IRModule, f: IRFunction, at: Int) -> Int Never! {
     if f.op[at] != .Call || f.a[at] < 0 || f.a[at] >= m.functions.len() -> return 0
     if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return 0
     key: m.functions[f.a[at]].key
-    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return 0
+    if ir_stop_key(key) -> return 0
     leaf: m.functions[f.a[at]].asm ?? return 0
     if !ir_x64_asm_inlinable(m, f, leaf, f.args, f.b[at], f.c[at], f.dst[at]) -> return 0
     if f.c[at] == 2 && f.dst[at] < 0 -> return ir_x64_asm_store_size(leaf)
@@ -3250,7 +3249,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             // apart from its If (ir_x64_stop_point) is a call of its body.
             key: m.functions[f.a[at]].key
             if ir_x64_asm_access_size(m, f, at) > 0 -> return ir_x64_memory(e, m, f, al, at)
-            if m.functions[f.a[at]].asm == .Val(leaf) && key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY {
+            if m.functions[f.a[at]].asm == .Val(leaf) && !ir_stop_key(key) {
                 if ir_x64_asm_inline(e, m, f, al, leaf, f.args, f.b[at], f.c[at], dst) -> return
             }
             if ir_x64_unique_call(e, m, f, al, at) -> return
@@ -3362,15 +3361,16 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // Stop points.
 
 // A stop point (Build.jet ir_stop_point): `stopped := poll()` at `at`, then
-// `if stopped { edge }` with no Else, its Bool read by nothing else. Right
-// after a direct call of a selected body (ir_x64_reports_stop) the hot path
-// is `test edx, edx; jnz edge`: every body returns edx 0 from its epilogue
-// and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
-// jnz edge`. A poll that checks no call (OptStops.jet
-// ir_opt_polls_checks_call: a loop's own check, a recursive body's entry
-// check) reads only the runtime's armed word in its hot path, which stays
-// zero until a stop is published to another task, an interrupt is sent or
-// a strong pause is asked for, so a loop that calls nothing pays a load, a
+// `if stopped { edge }` with no Else, its Bool read by nothing else. A stop
+// poll right after a direct call of a selected body (ir_x64_reports_stop)
+// has the hot path `test edx, edx; jnz edge`: every body returns edx 0 from
+// its epilogue and 1 from its stop exit. Elsewhere it keeps `call poll;
+// test rax, rax; jnz edge`. A stop or turn poll that checks no call
+// (OptStops.jet ir_opt_polls_checks_call: a loop's own check, a recursive
+// body's entry check) reads only the runtime's armed word in its hot path,
+// which stays zero until a stop is published to another task, an interrupt
+// is sent, a deadline passes or a strong pause is asked for, so a loop that
+// calls nothing pays a load, a
 // test and a branch per iteration and a recursion the same per entry; the
 // poll's call is a slow path (IRX64ColdKind.Poll) that takes the edge or
 // comes back. In a loop any other poll's tests run inline first
@@ -3381,8 +3381,8 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // selected with no such slow path (a division by a constant, or one the
 // ranges proved safe) the edge is never taken and not laid out.
 // Returns the If's End when `at` is such a stop point, else -1.
-ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, traps: Int) -> Int Never! {
-    if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> return -1
+ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, turn: Int, traps: Int) -> Int Never! {
+    if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) -> return -1
     branch: at + 1
     stopped: f.dst[at]
     if stopped < 0 || branch >= f.op.len() || f.op[branch] != .If || f.a[branch] != stopped || f.b[branch] >= 0 || al.ends[stopped] != branch -> return -1
@@ -3400,12 +3400,12 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     site := -1
     if !wired {
         skips := [Int]{}
-        if at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
+        if f.a[at] == poll && at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
             // test edx, edx
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
             site = x64_jcc_rel32(e.code, X64Cond.NE)
-        } else if f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
+        } else if f.a[at] != trap && !ir_opt_polls_checks_call(f, poll, trap, turn, at) {
             // A poll that checks no call can observe only what another task
             // asked for, which arms the runtime's word first: the hot path
             // is its load, test and branch, and the poll's call, its test
@@ -3445,8 +3445,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 // or a poll leaves edx as it is.
 ir_x64_reports_stop: fn(m: IRModule, id: Int) -> Bool Never! {
     if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
-    key: m.functions[id].key
-    key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+    !ir_stop_key(m.functions[id].key)
 }
 
 // `xor edx, edx`: no stop, as a selected body's return reports it, for a
@@ -3956,7 +3955,7 @@ ir_x64_import: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 
 ir_x64_compile_function: fn(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     key: m.functions[row].key
-    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return ir_x64_stop_poll(m.functions[row], row)
+    if ir_stop_key(key) -> return ir_x64_stop_poll(m.functions[row], row)
     if m.functions[row].asm == .Val(leaf) -> return ir_x64_asm_function(m, m.functions[row], leaf, row, ir_x64_logged(tables, row))
     ir_x64_compile_body(m, m.functions[row], tables, row)
 }
@@ -3993,13 +3992,14 @@ ir_x64_log_text: fn(m: IRModule, f: IRFunction, code: X64Code) -> [String] Never
 // rcx, rdx, rsi, rdi, r8, r9, r10 and r11.
 IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 
-// A stop poll (Build.jet ir_stop_poll), frameless: GS:0 holds the attached
-// thread's TCB address (OS/Linux.jet os_tls_base_i64), whose word 16 is the
-// current task control, whose word 32 is its status (JetRuntime
-// Scheduler.jet scheduler_control_current); an unattached thread's GS names
-// a zero word (Thread.jet thread_base). With no stop it returns 0 from the
-// first zero word; with one, jet_rt_session_propagate's delivered status as
-// a Bool (zero while a cleanup or shield masks it). It keeps xmm2-xmm15 and
+// A stop poll, trap or turn (Build.jet ir_stop_poll), frameless: GS:0 holds
+// the attached thread's TCB address (OS/Linux.jet os_tls_base_i64), whose
+// word 16 is the current task control, whose word 32 is its status
+// (JetRuntime Scheduler.jet scheduler_control_current); an unattached
+// thread's GS names a zero word (Thread.jet thread_base). With no stop it
+// returns 0 from the first zero word; with one, its routine's
+// (IR.jet ir_stop_routine) delivered status as a Bool (zero while a cleanup
+// or shield masks it). It keeps xmm2-xmm15 and
 // every general register but rax across that call, so a call of it keeps
 // the Float slots in place (ir_x64_call_out) and is silent to the slot
 // allocator (X64Alloc.jet ir_x64_silent): a loop's check leaves r8 and r9
@@ -4010,7 +4010,7 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 //   test rax, rax; jz done; enter:
 //   sub rsp, 296; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
 //   mov [rsp + 224 + 8k], r for the k-th of rcx, rdx, rsi, rdi, r8-r11;
-//   call jet_rt_session_propagate; the loads back; add rsp, 296;
+//   call the routine; the loads back; add rsp, 296;
 //   test rax, rax; setne al; movzx eax, al; done: ret
 ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := x64_code()
@@ -4041,7 +4041,7 @@ ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     dwarf_cfa_def_cfa_offset(cfi, 8 + frame)
     dwarf_cfa_advance(cfi, framed, restored)
     dwarf_cfa_def_cfa_offset(cfi, 8)
-    relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_session_propagate"}}}
+    relocs := [X64Reloc]{X64Reloc{at: status_at, target: X64RelocTarget.Runtime{symbol: ir_stop_routine(f.key)}}}
     name: if f.symbol != "" -> f.symbol else -> f.key
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: code.bytes.move(), relocs: relocs.move(), align: X64_FUNCTION_ALIGN},
@@ -4402,6 +4402,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     if f.line > 0 -> lines.push(X64LineRow{at: body, line: f.line})
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     // The slow paths of the instruction before `at` start at colds[traps].
     traps := 0
     at := wrap
@@ -4410,7 +4411,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
         ir_x64_debug_line(lines, e.code.bytes.len(), ir_code_line_source(f.code_line[at]))
         e.at = at
         e.code.at = at
-        end: ir_x64_stop_point(e, m, f, al, at, poll, trap, traps)
+        end: ir_x64_stop_point(e, m, f, al, at, poll, trap, turn, traps)
         traps = e.colds.len()
         if end > at {
             loop _ in (at + 1)..<(end + 1) -> positions.push(e.code.bytes.len())

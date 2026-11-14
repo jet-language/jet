@@ -43,14 +43,15 @@ IRDropPlan: struct {
 ir_drop_early: fn(m: &IRModule) Never! {
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
     loop id in 0..<m.functions.len() {
         if m.functions[id].asm != None -> next
-        plan: ir_drop_plan(m, m.functions[id], poll, trap)
+        plan: ir_drop_plan(m, m.functions[id], poll, trap, turn)
         if plan.slots.len() > 0 -> ir_drop_apply(m.functions[id], plan)
     }
 }
 
-ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan Never! {
+ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int, turn: Int) -> IRDropPlan Never! {
     n: f.op.len()
     plan := IRDropPlan{slots: [Int]{}, to: [Int]{}, lines: [Int]{}, kill: [Bool]{}}
     // Per instruction: the If of the stop poll holding it, -1 for none.
@@ -59,7 +60,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
     found := false
     loop at in 0..<n {
         if f.op[at] == .Drop -> found = true
-        if f.op[at] != .If || stop[at] >= 0 || !ir_drop_stop_edge(m, f, at, poll, trap) -> next
+        if f.op[at] != .If || stop[at] >= 0 || !ir_drop_stop_edge(m, f, at, poll, trap, turn) -> next
         loop inner in at..<(f.c[at] + 1) -> stop[inner] = at
     }
     if !found -> return plan
@@ -133,7 +134,7 @@ ir_drop_plan: fn(m: IRModule, f: IRFunction, poll: Int, trap: Int) -> IRDropPlan
         reached: ir_drop_target(f, stop, blocked, previous, at)
         // After the stop poll of the last reference, not between them.
         to := reached
-        if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap) && to + 1 < n && stop[to + 1] == to + 1 -> to = f.c[to + 1] + 1
+        if to < at && f.op[to] == .Call && (f.a[to] == poll || f.a[to] == trap || f.a[to] == turn) && to + 1 < n && stop[to + 1] == to + 1 -> to = f.c[to + 1] + 1
         if to >= at -> next
         plan.slots.push(slot)
         plan.to.push(to)
@@ -171,10 +172,10 @@ ir_drop_borrows_only: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 //     it, OptSplit.jet), which touch no String;
 //   - it leaves by a Return of nothing, or by a Br when an inlined call's
 //     poll leaves the inlined body.
-ir_drop_stop_edge: fn(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: Int) -> Bool Never! {
+ir_drop_stop_edge: fn(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: Int, turn: Int) -> Bool Never! {
     if opener < 1 || f.b[opener] >= 0 -> return false
     check: opener - 1
-    if f.op[check] != .Call || (f.a[check] != poll && f.a[check] != trap) || f.dst[check] != f.a[opener] -> return false
+    if f.op[check] != .Call || (f.a[check] != poll && f.a[check] != trap && f.a[check] != turn) || f.dst[check] != f.a[opener] -> return false
     end: f.c[opener]
     if end - 1 <= opener -> return false
     last: end - 1

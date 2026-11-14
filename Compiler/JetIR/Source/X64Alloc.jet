@@ -282,12 +282,13 @@ ir_x64_tail_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     general <= 4
 }
 
-// Whether `at` calls the stop poll with no argument (Build.jet
+// Whether `at` calls a stop or turn poll with no argument (Build.jet
 // ir_stop_poll), not as a tail call.
 ir_x64_poll_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.a[at] < 0 || f.a[at] >= m.functions.len() || f.c[at] != 0 -> return false
     if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return false
-    m.functions[f.a[at]].key == IR_STOP_POLL_KEY
+    key: m.functions[f.a[at]].key
+    key == IR_STOP_POLL_KEY || key == IR_STOP_TURN_KEY
 }
 
 // Whether Call `at` is a quiet `#FFI(asm)` template selected in place: an
@@ -297,7 +298,7 @@ ir_x64_asm_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return false
     if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return false
     key: m.functions[f.a[at]].key
-    if key == IR_STOP_POLL_KEY || key == IR_STOP_TRAP_KEY -> return false
+    if ir_stop_key(key) -> return false
     leaf: m.functions[f.a[at]].asm ?? return false
     leaf.quiet && leaf.code.len() > 0 && ir_x64_asm_inlinable(m, f, leaf, f.args, f.b[at], f.c[at], f.dst[at])
 }

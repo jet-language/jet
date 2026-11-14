@@ -1435,13 +1435,14 @@ ir_range_drop_point: fn(f: &IRFunction, key: Int, at: Int) Never! {
     loop k in at..<(end + 1) -> ir_opt_kill(f, k)
 }
 
-// How many stop points (calls of the trap or the stop poll) `f` has.
+// How many stop points (calls of the trap or a stop poll) `f` has.
 ir_range_traps: fn(m: IRModule, f: IRFunction) -> Int Never! {
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
+    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
     count := 0
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Call && (f.a[at] == trap || f.a[at] == poll) -> count += 1
+        if f.op[at] == .Call && (f.a[at] == trap || f.a[at] == poll || f.a[at] == turn) -> count += 1
     }
     count
 }

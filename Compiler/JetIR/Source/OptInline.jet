@@ -174,11 +174,12 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
 ir_opt_inline_cost: fn(m: IRModule, f: IRFunction) -> Int Never! {
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
+    turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -2
     cost := 0
     at := 0
     loop at < f.op.len() {
         if f.op[at] != .Nop && f.op[at] != .End -> cost += 1
-        cold: f.op[at] == .If && f.b[at] < 0 && f.c[at] > at + 1 && (f.op[f.c[at] - 1] == .Unreachable || (at > 0 && f.op[at - 1] == .Call && (f.a[at - 1] == poll || f.a[at - 1] == trap) && f.dst[at - 1] >= 0 && f.a[at] == f.dst[at - 1]))
+        cold: f.op[at] == .If && f.b[at] < 0 && f.c[at] > at + 1 && (f.op[f.c[at] - 1] == .Unreachable || (at > 0 && f.op[at - 1] == .Call && (f.a[at - 1] == poll || f.a[at - 1] == trap || f.a[at - 1] == turn) && f.dst[at - 1] >= 0 && f.a[at] == f.dst[at - 1]))
         at = if cold -> f.c[at] + 1 else -> at + 1
     }
     cost

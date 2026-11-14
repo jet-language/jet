@@ -323,10 +323,11 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
     body := [Int]{}
     faults := [Int]{}
     guards := [Int]{}
-    // The Ifs of stop points (a stop poll's call, then an If with no Else
-    // on what it returned), whose bodies are left out too.
+    // The Ifs of stop points (a stop or turn poll's call, then an If with no
+    // Else on what it returned), whose bodies are left out too.
     polls := [Int]{}
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -2
+    turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -2
     loop k := at + 1, k < end - 1 {
         if f.op[k] == .Loop -> return ir_reduce_declined(IR_REDUCE_SUM, "-")
         body.push(k)
@@ -336,7 +337,7 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
         } else if f.op[k] == .If && f.b[k] < 0 && ir_reduce_leaves(f, k) {
             guards.push(k)
             k = f.c[k] + 1
-        } else if f.op[k] == .If && f.b[k] < 0 && k > at + 1 && f.op[k - 1] == .Call && f.a[k - 1] == poll && f.dst[k - 1] >= 0 && f.a[k] == f.dst[k - 1] {
+        } else if f.op[k] == .If && f.b[k] < 0 && k > at + 1 && f.op[k - 1] == .Call && (f.a[k - 1] == poll || f.a[k - 1] == turn) && f.dst[k - 1] >= 0 && f.a[k] == f.dst[k - 1] {
             polls.push(k)
             k = f.c[k] + 1
         } else {
@@ -371,7 +372,7 @@ ir_reduce_loop: fn(m: IRModule, f: IRFunction, at: Int, first: [Int], latest: [I
         // The Loop's own check (Build.jet ir_loop_check) and any other stop
         // point: the leaf's run is finite, and the one pass the Loop runs
         // after it still checks.
-        checked: (f.op[k] == .Call && f.a[k] == poll && polls.contains(k + 1)) || (f.op[k] == .If && polls.contains(k))
+        checked: (f.op[k] == .Call && (f.a[k] == poll || f.a[k] == turn) && polls.contains(k + 1)) || (f.op[k] == .If && polls.contains(k))
         if fill && f.op[k] == .Load -> loads.push(k)
         if !ir_reduce_allowed(f.op[k]) && !dropped && !inline_drop && !closes && !stored && !converted && !checked && !(f.op[k] == .If && (faults.contains(k) || guards.contains(k) || k == update.match)) -> return ir_reduce_declined(kind, "the Loop holds a {ir_op_name(f.op[k])}")
     }
