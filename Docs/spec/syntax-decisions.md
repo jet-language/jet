@@ -51,6 +51,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `#loop` | build-time loop over statements or declarations |
 | `#run fn` | build-time literal-hook method |
 | `#run use { … } / #run use alias: path` | build-only import: the rows of `use`, whose names work only in compile-time code (a `#run { … }` block, a `#run fn` body, a compile-time argument, a value computed while building); a user module only compile-time code uses, however it is imported, stays out of the shipped program |
+| `#Pre(#run { … }, "…")` | required early answer: `#run` around a marker expression (a `#Pre` or `#Post` predicate, a `#Memo` bound, a `#Layout` alignment) evaluates it while building at the contract's instantiation point, after the call's checked argument facts are substituted; a false `#Pre` is a build error, and an answer that can't be computed while building is its own error, never deferred to run time |
 | `<N: Int>` | compile-time number parameter declaration: a parameter bounded by exactly the core `Int` is a number, not a type |
 | `$` | config-surface environment read `$NAME`; program source has no `$` words |
 | `#{name}` | template paste: `#{method}: fn`, `self.#{field}`, `.#{left}` splice a derive or marker template binding |
