@@ -1,0 +1,19 @@
+// A socket pair carries bytes both ways, and a pseudoterminal hands what its
+// primary writes to its secondary as a canonical-mode line, echoing it back.
+use sys: core.sys
+
+SECOND: 1000000000
+
+run: fn() {
+    ends: sys.open_socket_pair() ?? panic("socket pair: {err}")
+    ends[0].write("ping".bytes(), SECOND) ?? panic("write: {err}")
+    print(String.from_bytes(ends[1].read(16, SECOND) ?? panic("read: {err}")) ?? "")
+    ends[1].write("pong".bytes(), SECOND) ?? panic("write back: {err}")
+    print(String.from_bytes(ends[0].read(16, SECOND) ?? panic("read back: {err}")) ?? "")
+
+    terminal: sys.open_pseudoterminal() ?? panic("pseudoterminal: {err}")
+    print(terminal.path.starts_with("/dev/pts/"))
+    terminal.primary.write("hi\n".bytes(), SECOND) ?? panic("type: {err}")
+    print(terminal.secondary.read(16, SECOND) ?? panic("line: {err}"))
+    print(terminal.primary.read(16, SECOND) ?? panic("echo: {err}"))
+}

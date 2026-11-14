@@ -21,6 +21,7 @@ use {
     host_path: __core_files_path_components
     __core_files_path_components.[PathPlatform]
     shared_bounds.[shared_range_valid, shared_word_valid, shared_word_fits]
+    fd_words.[packed_word]
     process_errors.[process_error]
     id_rows.[ids_of, set_ids, database_lines, passwd_entry, group_entry]
 }
@@ -1361,7 +1362,8 @@ set_current_dir: fn(path: String) IOError! -[FS, Env]> {
 
 // An owned operating-system descriptor, closed exactly once when its owner
 // drops it. Descriptors arrive from `net.unix_receive`,
-// `SharedMemory.descriptor` or `open_pipe`. The Fd holds the runtime's
+// `SharedMemory.descriptor`, `open_pipe`, `open_socket_pair` or
+// `open_pseudoterminal`. The Fd holds the runtime's
 // token for the descriptor, never its number, and every descriptor is
 // close-on-exec. Descriptors from another process are read with `read_at`,
 // never mapped, so a peer that truncates its file cannot fault this one.
@@ -1407,13 +1409,35 @@ Fd: struct {
 // go to another process; `Fd.read` and `Fd.write` wait with a timeout.
 open_pipe: fn() -[Env]> [Fd] IOError! {
     packed: core.sys.__fd_pipe_raw()
-    ends := [Fd]{}
-    loop end in 0..<2 {
-        token := 0
-        loop byte in 0..<8 { token = token * 256 + (Int{packed[end * 8 + 7 - byte]}) }
-        ends.push(Fd{token: token})
-    }
-    Ok(ends)
+    Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
+}
+
+// A new connected pair of Unix stream sockets (socketpair): each end reads
+// what the other writes. Both block, so either can go to another process;
+// `Fd.read` and `Fd.write` wait with a timeout.
+open_socket_pair: fn() -[Env]> [Fd] IOError! {
+    packed: core.sys.__fd_socket_pair_raw()
+    Ok([Fd]{Fd{token: packed_word(packed, 0)}, Fd{token: packed_word(packed, 1)}})
+}
+
+// A pseudoterminal: the `primary` end a terminal emulator or supervisor
+// holds, the `secondary` end a program sees as its terminal, and the
+// secondary's device `path` (`/dev/pts/N`, as ptsname names it). What one
+// end writes the other reads through the terminal's line discipline. Both
+// ends block; `Fd.read` and `Fd.write` wait with a timeout.
+PseudoTerminal: struct {
+    primary: Fd
+    secondary: Fd
+    path: String
+}
+
+// A new pseudoterminal, unlocked and with its secondary already open
+// (posix_openpt, unlockpt, then opening the secondary), so no other process
+// can claim it first. Neither end becomes this process's controlling
+// terminal.
+open_pseudoterminal: fn() -[Env]> PseudoTerminal IOError! {
+    packed: core.sys.__fd_pseudoterminal_raw()
+    Ok(PseudoTerminal{primary: Fd{token: packed_word(packed, 0)}, secondary: Fd{token: packed_word(packed, 1)}, path: "/dev/pts/{packed_word(packed, 2)}"})
 }
 
 // The Fd owning a token the runtime just issued (net.unix_receive).
@@ -1536,6 +1560,17 @@ priv shared_bounds: module {
     // Whether `value` fits a signed 64-bit word.
     shared_word_fits: fn(value: Int) -> Bool {
         value >= -9223372036854775807 - 1 && value <= 9223372036854775807
+    }
+}
+
+// How the descriptor leaves pack what they return: not part of the sys
+// surface. Each token or number is eight little-endian bytes.
+priv fd_words: module {
+    // The `index`th eight-byte little-endian word of `packed`.
+    packed_word: fn(packed: [U8], index: Int) -> Int {
+        word := 0
+        loop byte in 0..<8 { word = word * 256 + (Int{packed[index * 8 + 7 - byte]}) }
+        word
     }
 }
 
