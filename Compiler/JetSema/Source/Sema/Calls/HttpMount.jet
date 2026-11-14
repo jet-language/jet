@@ -598,7 +598,7 @@ sema_app_endpoint_limit: fn(marker: Marker, environment: SemaScopeEnvironment, p
     args := [TCallArg]{}
     written: [Expr]{calls, window}
     loop expression in written {
-        value: sema_check_expression(expression, Val(Type.Named{name: "Int"}), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        value: sema_check_expression(expression, Val(Type.Int), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         args.push(sema_call_http_static_tree_arg(value, sema_http_mount_arg(expression, expr_span(expression))))
     }
     Val(args)
