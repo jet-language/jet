@@ -76,12 +76,12 @@ ir_opt_stops_poll: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
-// Whether `at` is a stop or turn poll's call followed by `if stopped` with
-// no Else.
-ir_opt_stops_any_poll: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+// Whether `at` is a call of the stop or turn poll (functions `poll` and
+// `turn`) followed by `if stopped` with no Else.
+ir_opt_stops_any_poll: fn(f: IRFunction, poll: Int, turn: Int, at: Int) -> Bool Never! {
     if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
     callee: f.a[at]
-    if callee < 0 || callee >= keys.len() || (keys[callee] != IR_STOP_POLL_KEY && keys[callee] != IR_STOP_TURN_KEY) -> return false
+    if callee < 0 || (callee != poll && callee != turn) -> return false
     f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
 }
 
@@ -299,15 +299,15 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // poll folded so makes the later one a turn poll, which still delivers a
 // passed deadline once per iteration. The stop points' ids are the
 // module's (ir_opt_view names them in `m`).
-ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
+ir_opt_fold_polls: fn(f: &IRFunction, m: IRModule) Never! {
     poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.name_rows, IR_STOP_TURN_KEY) ?? -1
     folded := false
     loop at in 0..<f.op.len() {
-        if !ir_opt_stops_any_poll(f, keys, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) -> next
+        if !ir_opt_stops_any_poll(f, poll, turn, at) || ir_opt_polls_checks_call(f, poll, trap, turn, at) -> next
         end: f.c[at + 1]
-        later: ir_opt_polls_reach(f, keys, poll, trap, turn, end + 1)
+        later: ir_opt_polls_reach(f, poll, trap, turn, end + 1)
         if later < 0 -> next
         if f.a[at] == turn -> f.a[later] = turn
         loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
@@ -360,7 +360,7 @@ ir_opt_polls_hands_on: fn(f: IRFunction, start: Int, end: Int) -> Bool Never! {
 // branch skipped to. A Loop, Return, Unreachable or a branch back to a
 // Loop's head ends the search. Edges that never come back (ir_opt_dead_end:
 // a trap's or failure's cleanup) are passed over.
-ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, turn: Int, start: Int) -> Int Never! {
+ir_opt_polls_reach: fn(f: IRFunction, poll: Int, trap: Int, turn: Int, start: Int) -> Int Never! {
     depth := 0
     past := -1
     at := start
@@ -371,7 +371,7 @@ ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, turn
             next
         }
         op: f.op[at]
-        if depth == 0 && at > past && ir_opt_stops_any_poll(f, keys, at) && !ir_opt_polls_after_call(f, poll, trap, turn, at) -> return at
+        if depth == 0 && at > past && ir_opt_stops_any_poll(f, poll, turn, at) && !ir_opt_polls_after_call(f, poll, trap, turn, at) -> return at
         if op == .Loop || op == .Return || op == .Unreachable -> return -1
         if op == .Block || op == .If {
             depth += 1

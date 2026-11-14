@@ -535,10 +535,11 @@ ir_opt_mark_cold: fn(functions: &[IRFunction], calls: OptCalls) Never! {
 
 // The passes read the module's type and data rows, moved out of `m` into a
 // module of their own (ir_opt_unview moves them back), the ids of the
-// runtime routes they know (ir_opt_routes), the stop and trap polls'
-// (OptRange.jet), by name, and the `#unique<..>` helpers' (of `keys`, the
-// functions' keys) by the type row of the header each takes, as
-// "#unique@<row>" (OptRange.jet ir_range_unique_call).
+// runtime routes they know (ir_opt_routes), the stop, trap and turn polls'
+// (OptRange.jet, OptStops.jet ir_opt_fold_polls), by name, and the
+// `#unique<..>` helpers' (of `keys`, the functions' keys) by the type row of
+// the header each takes, as "#unique@<row>" (OptRange.jet
+// ir_range_unique_call).
 ir_opt_view: fn(m: &IRModule, keys: [String]) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
@@ -881,7 +882,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     // its stop edge along, so simplify can unwrap the Block that edge left.
     stops: ir_opt_enabled(options, "stops")
     if stops {
-        ir_opt_fold_polls(out, m, keys)
+        ir_opt_fold_polls(out, m)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", report)
     }
     ir_opt_simplify(m, out, report)
@@ -921,7 +922,7 @@ ir_opt_function: fn(m: IRModule, bodies: [[IRFunction]], keys: [String], f: &&IR
     // between two polls (inlined bodies' Blocks and stop edges, aggregate
     // copies) kept the earlier one from folding.
     if stops {
-        ir_opt_fold_polls(out, m, keys)
+        ir_opt_fold_polls(out, m)
         if checking -> checking = ir_opt_lint(m, lint, out, "polls", report)
         ir_opt_stops_after_calls(out, m, keys)
         if checking -> checking = ir_opt_lint(m, lint, out, "stops", report)
