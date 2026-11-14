@@ -1564,6 +1564,9 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             }
         }
     }
+    // An arm for a failure the subject can no longer fail with is left out
+    // (sema_gone_failure_arms).
+    if !multi_head && sema_gone_failure_arms(arms, else_body, scopes, environment, program, diagnostics) == .Val(kept) -> return sema_stmt_check_switch(subject, kept, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
     // Arm conditions are checked on the fallthrough path in place; each arm
     // body and the else body are checked in place and rolled back, on the
     // scope table and on the ownership state (sema_ownership_fork). Paths are

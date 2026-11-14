@@ -260,10 +260,149 @@ sema_catch_all_err_rewrite: fn(subject: Expr, name: String, name_span: Span, pat
 sema_catch_all_err_check_body: fn(caught: SemaCatchAllErr, body: [Stmt], return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int) -> SemaStatementResult {
     bound := sema_check_statements(caught.bind, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
     if !bound.complete -> return bound
-    rest := sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+    rest: sema_check_statements(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
     loop statement in rest.value -> bound.value.push(statement)
     bound.complete = rest.complete
     bound
+}
+
+// An arm for a failure type the subject can no longer fail with: its failure
+// union holds only the types that can still reach it, so once nothing that
+// fails with `LookupError` is called, `.Err(.LookupError(_))` never matches.
+// The arm is L0304, with an edit that deletes it, and the table is checked
+// without it. A name that is no type stays the pattern's E0305.
+SemaGoneFailure: struct {
+    // The failure type the arm names.
+    name: String
+    // The arm's whole pattern.
+    head: Span
+}
+
+sema_gone_failure_arm: fn(cond: Expr, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaGoneFailure? {
+    if cond == .PatternTest(subject, pattern, _, _) {
+        name: sema_gone_failure_written(pattern) ?? return None
+        index := Int?{None}
+        if subject == .Ident(subject_name, _, _) -> index = sema_scope_resolve_index(scopes, subject_name)
+        found: index ?? return None
+        carrier: sema_expr_unwrap_tag(scopes.bindings[found].symbol.ty ?? return None)
+        failure: if carrier == .Result(_, error) -> sema_expr_unwrap_tag(error) else -> return None
+        if failure == .Union(members) {
+            loop member in members {
+                if sema_pattern_union_tag(member) == name -> return None
+            }
+            if sema_pattern_flat_union_owner(failure, name, environment, program, sema_pattern_span(pattern)) != None -> return None
+            if sema_stmt_type_switch_resolve(name, environment, program) == None -> return None
+            return Val(SemaGoneFailure{name: name, head: sema_pattern_span(pattern)})
+        }
+    }
+    None
+}
+
+// The member a `.Err(.Member(…))` pattern names, or None for any other pattern.
+sema_gone_failure_written: fn(pattern: Pattern) -> String? Never! {
+    if pattern == .Err(_, _, inner, _) {
+        if inner == .Val(member) -> return sema_gone_failure_member(member)
+    }
+    if pattern == .Variant(variant, slots, leading_dot, _) {
+        if variant == "Err" && leading_dot && slots.len() == 1 {
+            if slots[0] == .Nested(member) -> return sema_gone_failure_member(member)
+        }
+    }
+    None
+}
+
+sema_gone_failure_member: fn(member: Pattern) -> String? Never! {
+    if member == .Variant(name, _, leading_dot, _) {
+        if leading_dot -> return Val("{name}")
+    }
+    None
+}
+
+// The arms of a statement table without those L0304 reports, None when it
+// reports none. A table left with no arm and no `else` keeps them all, and
+// each reports its E0305; so does an arm a `#Through` runs into or out of.
+// The arms are read in place: binding one copies its body.
+sema_gone_failure_arms: fn(arms: [SwitchArm], else_body: [Stmt]?, scopes: SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [SwitchArm]? {
+    gone := [SemaGoneFailure]{}
+    gone_at := [Int]{}
+    index := 0
+    loop index < arms.len() {
+        through: arms[index].through != None || (index > 0 && arms[index - 1].through != None)
+        if !through && sema_gone_failure_arm(arms[index].cond, scopes, environment, program) == .Val(found) {
+            gone.push(found)
+            gone_at.push(index)
+        }
+        index += 1
+    }
+    if gone.len() == 0 || (else_body == None && gone.len() == arms.len()) -> return None
+    kept := [SwitchArm]{}
+    next_gone := 0
+    index = 0
+    loop index < arms.len() {
+        if {
+            next_gone < gone_at.len() && gone_at[next_gone] == index -> {
+                // An `if … else if` link records only its condition, which is
+                // no arm to delete.
+                recorded := Span?{None}
+                if arms[index].span.end > gone[next_gone].head.end -> recorded = Val(arms[index].span)
+                diagnostics.push(sema_gone_failure_lint(gone[next_gone], recorded, 0, environment, program))
+                next_gone += 1
+            }
+            else -> kept.push(SwitchArm{cond: arms[index].cond, body: arms[index].body, span: arms[index].span, through: arms[index].through})
+        }
+        index += 1
+    }
+    Val(kept)
+}
+
+// L0304 at the arm's pattern. Its edit deletes the arm: `arm` where the table
+// recorded it, else the pattern through `value_end`, the end of the arm's
+// value, or through the `}` that closes a braced body. A whole line goes with
+// the arm when the arm is all it holds.
+sema_gone_failure_lint: fn(gone: SemaGoneFailure, arm: Span?, value_end: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    lint: sema_lint("L0304", gone.head, "arm `{gone.name}` can never match — `{gone.name}` can no longer reach this value", "a failure union holds only the failure types that can still reach it, and `{gone.name}` is no longer one of them", "delete this arm")
+    edit: sema_gone_failure_edit(gone.head, arm, value_end, environment, program) ?? return lint
+    diagnostic_with_edit_grade(lint, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
+}
+
+// The end of a value arm's text when its value ends it; 0 for an arm of
+// statements, which only its braces end (sema_gone_failure_edit).
+sema_gone_failure_value_end: fn(then_body: [Stmt], then_value: Expr) -> Int Never! {
+    if then_body.len() > 0 -> return 0
+    expr_span(then_value).end
+}
+
+sema_gone_failure_edit: fn(head: Span, arm: Span?, value_end: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    start: head.start
+    end: if arm == .Val(recorded) -> recorded.end else -> sema_gone_failure_braced_end(raw, head.end) ?? value_end
+    if start < 0 || end > raw.len() || start >= end -> return None
+    line_start := start
+    loop line_start > 0 && (raw[line_start - 1] == (U8{32}) || raw[line_start - 1] == (U8{9})) -> line_start -= 1
+    line_end := end
+    loop line_end < raw.len() && (raw[line_end] == (U8{32}) || raw[line_end] == (U8{9}) || raw[line_end] == (U8{59})) -> line_end += 1
+    if (line_start == 0 || raw[line_start - 1] == (U8{10})) && line_end < raw.len() && raw[line_end] == (U8{10}) -> return Val(TextEdit{span: Span{start: line_start, end: line_end + 1}, new_text: ""})
+    Val(TextEdit{span: Span{start: start, end: line_end}, new_text: ""})
+}
+
+// The offset past the `}` that closes an arm's braced body after `->`, or
+// None when the arm has no braced body.
+sema_gone_failure_braced_end: fn(raw: [U8], head_end: Int) -> Int? {
+    at := sema_gone_failure_blank_end(raw, head_end)
+    if at + 1 >= raw.len() || raw[at] != (U8{45}) || raw[at + 1] != (U8{62}) -> return None
+    at = sema_gone_failure_blank_end(raw, at + 2)
+    if at >= raw.len() || raw[at] != (U8{123}) -> return None
+    close: sema_stmt_table_close(raw, at) ?? return None
+    Val(close + 1)
+}
+
+// The offset past the spaces and tabs at `from`.
+sema_gone_failure_blank_end: fn(raw: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at < raw.len() && (raw[at] == (U8{32}) || raw[at] == (U8{9})) -> at += 1
+    at
 }
 
 sema_core_error_type: fn(name: String) -> Bool Never! {

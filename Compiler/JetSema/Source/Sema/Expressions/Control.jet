@@ -2532,6 +2532,22 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     if type_param == .Val(param) -> return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     dispatch_subject: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    // An arm for a failure the subject can no longer fail with is left out
+    // (sema_gone_failure_arm): the table goes on from the arm after it.
+    if else_body.len() == 0 && else_value == .If(next_condition, _, _, _, _, next_span, _) {
+        if next_span == span {
+            if sema_gone_failure_arm(condition, scopes, environment, program) == .Val(gone) {
+                diagnostics.push(sema_gone_failure_lint(gone, None, sema_gone_failure_value_end(then_body, then_value), environment, program))
+                if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) -> return sema_expression_if(next_condition, next_then_body, next_then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            if sema_gone_failure_arm(next_condition, scopes, environment, program) == .Val(gone) {
+                if else_value == .If(_, next_then_body, next_then_value, next_else_body, next_else_value, _, _) {
+                    diagnostics.push(sema_gone_failure_lint(gone, None, sema_gone_failure_value_end(next_then_body, next_then_value), environment, program))
+                    return sema_expression_if(condition, then_body, then_value, next_else_body, next_else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
+            }
+        }
+    }
     // A stable `x == None` test reads as the presence test
     // with the branches swapped, so the other branch holds the payload (Rust
     // value `if`). Source order of evaluation is unchanged.
