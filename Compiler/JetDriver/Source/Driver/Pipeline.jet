@@ -2242,7 +2242,7 @@ jet_driver_comptime_flush: fn(
         return flushed
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[0].source.source_file, jet_driver_comptime_batch_names(batch))
-    native := jet_eval_native_load(built, jet_driver_comptime_eval_config(request.eval_config, None, None))
+    native := jet_eval_native_load(built, jet_driver_comptime_eval_config(request.eval_config, None, None), threads: request.compiler_threads)
     compiler_queries: jet_driver_comptime_compiler_for(request)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.load", 1)
     loop item in 0..<batch.entries.len() {
