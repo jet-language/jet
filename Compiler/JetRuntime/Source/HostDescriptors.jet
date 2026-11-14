@@ -225,22 +225,75 @@ host_call_restarting: fn(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
     writer: net_load_uint(wrapping(ends + I64{4}), I64{4})
     jet_rt_free(ends, I64{8}, I64{8})
     if (made < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error)
-    read_token: host_descriptor_insert(reader, I64{0}, I64{0})
-    if (read_token < I64{0}) {
-        _ := host_call(I64{3}, reader, I64{0}, I64{0})
-        _ := host_call(I64{3}, writer, I64{0}, I64{0})
+    host_descriptor_pair_take(reader, writer, I64{0}, I64{2}, output, length, error)
+}
+
+// socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC): two connected blocking
+// stream ends, as pipe's two tokens. Each end reads what the other writes.
+#Export(c) jet_sys_fd_socket_pair_raw: fn(output: I64, length: I64, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ends: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(ends, I64{8})
+    made: host_call4(I64{53}, I64{1}, I64{524289}, I64{0}, ends)
+    first: net_load_uint(ends, I64{4})
+    second: net_load_uint(wrapping(ends + I64{4}), I64{4})
+    jet_rt_free(ends, I64{8}, I64{8})
+    if (made < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -made, error)
+    host_descriptor_pair_take(first, second, I64{0}, I64{2}, output, length, error)
+}
+
+// posix_openpt(O_RDWR | O_NOCTTY | O_CLOEXEC), unlockpt and the secondary
+// opened through TIOCGPTPEER (as spawn_pty does, without the process-global
+// ptsname buffer): the primary's token, the secondary's token and the pts
+// number, eight little-endian bytes each.
+#Export(c) jet_sys_fd_pseudoterminal_raw: fn(output: I64, length: I64, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    // "/dev/ptmx\0" at 0, the ioctl int at 16.
+    scratch: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(scratch, I64{24})
+    net_store_uint(scratch, I64{8}, I64{7887052196584711215})
+    net_store_uint(wrapping(scratch + I64{8}), I64{8}, I64{120})
+    primary: host_call4(I64{257}, I64{-100}, scratch, I64{524546}, I64{0})
+    if (primary < I64{0}) {
+        jet_rt_free(scratch, I64{24}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -primary, error)
+    }
+    result := host_call(I64{16}, primary, I64{1074025521}, wrapping(scratch + I64{16}))
+    if (result == I64{0}) {
+        result = host_call(I64{16}, primary, I64{2147767344}, wrapping(scratch + I64{16}))
+    }
+    number: net_load_uint(wrapping(scratch + I64{16}), I64{4})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    secondary: if (result < I64{0}) -> result else -> host_call(I64{16}, primary, I64{21569}, I64{524546})
+    if (secondary < I64{0}) {
+        _ := host_call(I64{3}, primary, I64{0}, I64{0})
+        return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, -secondary, error)
+    }
+    host_descriptor_pair_take(primary, secondary, number, I64{3}, output, length, error)
+}
+
+// Files the fresh descriptors `first` and `second` under tokens and hands
+// back their tokens, then `extra` when `words` is 3, as eight little-endian
+// bytes each. When the table is full, both descriptors are closed: EMFILE.
+host_descriptor_pair_take: fn(first: I64, second: I64, extra: I64, words: I64, output: I64, length: I64, error: I64) -> I64 {
+    first_token: host_descriptor_insert(first, I64{0}, I64{0})
+    if (first_token < I64{0}) {
+        _ := host_call(I64{3}, first, I64{0}, I64{0})
+        _ := host_call(I64{3}, second, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
-    write_token: host_descriptor_insert(writer, I64{0}, I64{0})
-    if (write_token < I64{0}) {
-        host_descriptor_release(read_token)
-        _ := host_call(I64{3}, writer, I64{0}, I64{0})
+    second_token: host_descriptor_insert(second, I64{0}, I64{0})
+    if (second_token < I64{0}) {
+        host_descriptor_release(first_token)
+        _ := host_call(I64{3}, second, I64{0}, I64{0})
         return compiler_fs_errno(HOST_IO_OP_READ, I64{0}, I64{24}, error)
     }
-    bytes: jet_rt_alloc_8(I64{16})
-    net_store_uint(bytes, I64{8}, read_token)
-    net_store_uint(wrapping(bytes + I64{8}), I64{8}, write_token)
-    compiler_fs_bytes_take(bytes, I64{16}, I64{16}, output, length)
+    size: words * I64{8}
+    bytes: jet_rt_alloc_8(size)
+    net_store_uint(bytes, I64{8}, first_token)
+    net_store_uint(wrapping(bytes + I64{8}), I64{8}, second_token)
+    if (words == I64{3}) -> net_store_uint(wrapping(bytes + I64{16}), I64{8}, extra)
+    compiler_fs_bytes_take(bytes, size, size, output, length)
     I64{1}
 }
 
