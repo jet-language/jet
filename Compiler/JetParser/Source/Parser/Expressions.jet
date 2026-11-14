@@ -718,13 +718,23 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
         }
         None -> false
     }
+    // A named head may be an alias of a list or map type (`Grid<Int>{[1, 2], [3]}`,
+    // `Table<Int>{"a": 1}`): its items or entries parse like an unnamed literal's,
+    // and sema checks them against the alias's expansion.
+    named_head: if head == {
+        Val(ty) -> if ty == {
+            .Named(_) | .Apply(_, _) -> true
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        }
+        None -> false
+    }
     first := parser_parse_expression(state, 1, depth + 1)
     parser_literal_close_terminators(state)
     // #3739: a map head's lone expression with no `:` stays a one-expression
     // body; sema reads it as the whole value. Every part moves into the body:
     // a copied element list costs a clone and a drop of every element tree.
     body := if {
-        (map_head && parser_current_kind(state) != TOKEN_RBRACE) || (head == None && parser_current_kind(state) == TOKEN_COLON) -> {
+        (map_head && parser_current_kind(state) != TOKEN_RBRACE) || ((head == None || named_head) && parser_current_kind(state) == TOKEN_COLON) -> {
             parser_expect(state, TOKEN_COLON, "`:` between a map key and its value")
             first_value := parser_parse_expression(state, 1, depth + 1)
             entries := [ExprPair]{ExprPair{key: first.expr.move(), value: first_value.expr.move()}}
@@ -738,7 +748,7 @@ parser_parse_typed_literal_body: fn(state: &JetParserState, head: Type?, start: 
             }
             TypedLitBody.Entries{entries: entries.move()}
         }
-        list_head || (head == None && parser_current_kind(state) == TOKEN_COMMA) -> {
+        list_head || ((head == None || named_head) && parser_current_kind(state) == TOKEN_COMMA) -> {
             elements := [Expr]{first.expr.move()}
             loop parser_current_kind(state) == TOKEN_COMMA {
                 parser_bump(state)

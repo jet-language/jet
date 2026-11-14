@@ -2265,7 +2265,17 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
                 return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
-            .Fields(_) | .Entries(_) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
+            // A list alias's items that are all bare names (`Grid<Int>{top, bottom}`)
+            // parse as record shorthand before types are known; they are its elements.
+            .Fields(fields) -> {
+                values := [Expr]{}
+                loop field in fields {
+                    if !sema_expression_field_is_shorthand(field) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
+                    values.push(field.value.copy())
+                }
+                return sema_expression_typed_literal(head, TypedLitBody.Elements{elements: values}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            .Entries(_) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
         .Map(_, _, _) -> if body == {
             .Empty -> {
@@ -2278,7 +2288,19 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
             // #3739: a map body without `:` can only be the whole value.
             .Value(value) -> return sema_expression_typed_literal_whole(result_head, value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-            .Fields(_) | .Elements(_) | .ByteText(_) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
+            // A map alias's body parses as record fields when its keys are bare
+            // names (`Table<Int>{key: 3}`); each is an entry keyed by that name's
+            // value, as under a written map head, and a lone `{m}` is the whole value.
+            .Fields(fields) -> {
+                if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) -> return sema_expression_typed_literal_whole(result_head, fields[0].value, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                entries := [ExprPair]{}
+                loop field in fields {
+                    if sema_expression_field_is_shorthand(field) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
+                    entries.push(ExprPair{key: Expr.Ident{name: field.name.copy(), span: field.name_span, id: AST_NODE_GENERATED}, value: field.value.copy()})
+                }
+                return sema_expression_typed_literal(head, TypedLitBody.Entries{entries: entries}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            .Elements(_) | .ByteText(_) -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
         .Named(name) -> if body == {
             .Fields(fields) -> {
