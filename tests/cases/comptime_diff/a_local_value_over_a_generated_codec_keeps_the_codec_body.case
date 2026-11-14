@@ -1,16 +1,10 @@
 # Card #6759 c1: a local value whose initializer reaches a generated codec
 # (`show` encodes a Point through json.to_string) leaves that codec's body in
-# the built program. The landing refuses the pass, whose closure names Core
-# bodies that wait for demand, so the full recheck checks the bodies again
-# and takes `show` from the pass's comptime check. That result carries the
-# Encode demand its check recorded (SemaDemandCapture), so the recheck
-# generates Point's encode body, which the built `show` calls. Before, the
-# reused result demanded nothing and IR found Point's encode method
-# unlowered. The refused run is not kept for the body pass
-# (JetDriver BodyComptime.jet jet_driver_run_demands_generated): the
-# whole-program half generates the codec's body, so the pass run after it
-# checks another closure, which the suite's JET_RECHECK_VERIFY=1 run
-# reported as a difference.
+# the built program. The pass's comptime check of `show` carries the Encode
+# demand it recorded (SemaDemandCapture), so the finalization that takes
+# `show` from that check, the landing's or the full recheck's, generates
+# Point's encode body, which the built `show` calls. Before, the reused
+# result demanded nothing and IR found Point's encode method unlowered.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"

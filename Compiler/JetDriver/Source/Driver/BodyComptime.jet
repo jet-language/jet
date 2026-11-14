@@ -217,9 +217,7 @@ jet_driver_comptime_body_stage: fn(
 
 // The caller moves its registration graph in and takes it back from
 // `registration` of the result (every exit returns it). The run's values,
-// closures and trace move in too; the result hands them back. `refused` is
-// the pass the first finalization ran and did not land
-// (jet_driver_land_local_values), or None; the first pass takes it.
+// closures and trace move in too; the result hands them back.
 jet_driver_orchestrate_comptime_bodies: fn(
     graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
@@ -230,18 +228,16 @@ jet_driver_orchestrate_comptime_bodies: fn(
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
-    refused: &&JetDriverRefusedPass?,
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
         graph, stage, initial_graph, initial_values, initial_functions,
-        initial_trace, load, request, diagnostics, 0, refused,
+        initial_trace, load, request, diagnostics, 0,
     )
 }
 
 // Each bounded pass owns its graphs until evaluation succeeds, then moves
 // them into rechecking. Like pure folding, passes thread ownership through
-// calls instead of copying a graph across a loop backedge. A pass takes the
-// run of `refused` when it fits (jet_driver_comptime_body_run).
+// calls instead of copying a graph across a loop backedge.
 jet_driver_comptime_body_pass: fn(
     graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
@@ -253,7 +249,6 @@ jet_driver_comptime_body_pass: fn(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
     completed_passes: Int,
-    refused: &&JetDriverRefusedPass?,
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
     current_graph := initial_graph.move()
@@ -297,7 +292,7 @@ jet_driver_comptime_body_pass: fn(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
     jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
-    run := jet_driver_comptime_body_run(registration, body_sources, values, functions, refused, request, diagnostics)
+    run := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions, request, diagnostics)
     jet_driver_trace_step_end(request.trace_sink, "comptime.body.run", body_sources.len())
     finished_registration := run.graph.move()
     run.graph = None
@@ -352,7 +347,7 @@ jet_driver_comptime_body_pass: fn(
         sema_graph_trail_undo(registration, run.trail)
         return jet_driver_comptime_body_pass(
             registration, stage, current_graph, values, functions, trace,
-            load, request, diagnostics, pass, None,
+            load, request, diagnostics, pass,
         )
     }
     // The refused splice was the last reader of the values and closures the
@@ -371,123 +366,8 @@ jet_driver_comptime_body_pass: fn(
     sema_graph_trail_undo(registration, run.trail)
     jet_driver_comptime_body_pass(
         registration, stage, rechecked, values, functions, trace,
-        load, request, diagnostics, pass, None,
+        load, request, diagnostics, pass,
     )
-}
-
-// A body comptime pass the first finalization ran and did not land
-// (jet_driver_land_local_values): its sites by `module\nkey`, how many
-// values and closures it started from, and the run's results. The first
-// body pass after finalization starts from the same values and closures and
-// takes the same sites, so it takes these results instead of building and
-// evaluating the same comptime program again. A run whose closures demand a
-// generated body is never kept (jet_driver_run_demands_generated).
-JetDriverRefusedPass: struct {
-    sites: [String:Bool]
-    base_values: Int
-    base_functions: Int
-    values: [SemaComptimeItemValue]
-    functions: [SemaComptimeFunctionResult]
-    trace: JetDriverCompileTrace
-}
-
-// What the first finalization's landings (jet_driver_land_local_values) hand
-// on: whether a landing ended with a site pending, after which no later
-// landing runs, and the pass a landing refused, for the first body pass
-// after finalization to take.
-JetDriverLanding: struct {
-    stopped: Bool
-    refused: JetDriverRefusedPass?
-}
-
-// `refused`, moved out, when its pass is the one a body pass over `sources`
-// runs from `values` and `functions`: the same sites, from the same values
-// and closures. Otherwise None, and `refused` is dropped.
-jet_driver_take_refused_pass: fn(refused: &&JetDriverRefusedPass?, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult]) -> JetDriverRefusedPass? Never! {
-    pass := refused.move() ?? return None
-    if pass.base_values != values.len() || pass.base_functions != functions.len() || pass.sites.len() != sources.len() -> return None
-    loop source in sources {
-        if pass.sites.get("{source.module_identity.id}\n{source.key}") == None -> return None
-    }
-    Val(pass.move())
-}
-
-// Whether a run's closures (`functions`) demand a generated codec or derived
-// method (SemaComptimeFunctionResult.codec_demand, derive_demand). The first
-// finalization's whole-program half generates and checks those bodies after
-// the run, so the same pass run after it reaches them and checks another
-// closure: its run is not the one the body pass would make.
-jet_driver_run_demands_generated: fn(functions: [SemaComptimeFunctionResult]) -> Bool Never! {
-    loop function in functions {
-        if function.codec_demand.len() > 0 || function.derive_demand.len() > 0 -> return true
-    }
-    false
-}
-
-// JET_RECHECK_VERIFY: every value and closure row, by position, in which
-// the kept run of a refused pass (`kept`) differs from the same pass run
-// again (`fresh`), one line each.
-jet_driver_refused_pass_differences: fn(kept: JetDriverRefusedPass, fresh: JetDriverComptimeRunResult) -> [String] Never! {
-    differences := [String]{}
-    if kept.values.len() != fresh.values.len() -> differences.push("values: {kept.values.len()} kept, {fresh.values.len()} run again")
-    shared_values: if kept.values.len() < fresh.values.len() -> kept.values.len() else -> fresh.values.len()
-    loop index in 0..<shared_values {
-        if "{kept.values[index]:Debug}" != "{fresh.values[index]:Debug}" -> differences.push("value {index}: `{kept.values[index].key}` kept, `{fresh.values[index].key}` run again")
-    }
-    if kept.functions.len() != fresh.functions.len() -> differences.push("closure rows: {kept.functions.len()} kept, {fresh.functions.len()} run again")
-    shared_functions: if kept.functions.len() < fresh.functions.len() -> kept.functions.len() else -> fresh.functions.len()
-    loop index in 0..<shared_functions {
-        if "{kept.functions[index]:Debug}" != "{fresh.functions[index]:Debug}" -> differences.push("closure row {index}: `{kept.functions[index].function_key}` kept, `{fresh.functions[index].function_key}` run again")
-    }
-    differences
-}
-
-// The comptime run of a body pass over `sources` from `values` and
-// `functions` (jet_driver_run_comptime). When `refused` fits
-// (jet_driver_take_refused_pass), its results stand for the run: the graph
-// takes `values` as a run's environment does and the pass's values on the
-// result's trail, as the run applies them. Under `recheck_verify` the pass
-// runs again instead, and a run that differs from the refused one fails.
-// The graph moves in and comes back in the result.
-jet_driver_comptime_body_run: fn(
-    graph: &&SemaRegistrationGraph,
-    sources: [SemaComptimeItemSource],
-    values: [SemaComptimeItemValue],
-    functions: [SemaComptimeFunctionResult],
-    refused: &&JetDriverRefusedPass?,
-    request: JetDriverCompileRequest,
-    diagnostics: &[Diagnostic],
-) -> JetDriverComptimeRunResult {
-    registration := graph.move()
-    kept := jet_driver_take_refused_pass(refused, sources, values, functions)
-    pass := kept.move() ?? return jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, sources, values, functions, request, diagnostics)
-    if request.recheck_verify {
-        fresh := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, sources, values, functions, request, diagnostics)
-        differences: if fresh.complete -> jet_driver_refused_pass_differences(pass, fresh) else -> [String]{}
-        if differences.len() > 0 {
-            fresh.complete = false
-            fresh.internal_problem = Val("JET_RECHECK_VERIFY: the body pass the first finalization did not land differs from the same pass run again:\n{differences.join("\n")}")
-        }
-        return fresh
-    }
-    if request.trace_sink == .Val(sink) -> sink.progress("counters.comptime.refused_pass_taken", sources.len(), -1)
-    environment_trail := sema_graph_trail_init()
-    sema_comptime_graph_apply_values(registration, values, environment_trail)
-    trail := sema_graph_trail_init()
-    sema_comptime_graph_apply_values(registration, pass.values, trail)
-    JetDriverComptimeRunResult{
-        values: pass.values.move(),
-        functions: pass.functions.move(),
-        trace: pass.trace.move(),
-        complete: true,
-        soft_stop: false,
-        internal_problem: None,
-        graph: Val(registration.move()),
-        partial_graph: None,
-        graph_finished: true,
-        trail: trail.move(),
-        declared: [SemaGraphModuleResult]{},
-    }
 }
 
 // JET_RECHECK_VERIFY (JetDriverCompileRequest.recheck_verify): the first
@@ -668,6 +548,13 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
     }
 }
 
+// What the first finalization's landings (jet_driver_land_local_values) hand
+// on: whether a landing ended with a site pending, after which no later
+// landing runs.
+JetDriverLanding: struct {
+    stopped: Bool
+}
+
 // Lands each body comptime pass whose pending sites are all local values in
 // the modules of the first finalization (`bodies`) before its whole-program
 // half (sema_finalize_program), so that half runs once, over every value,
@@ -686,16 +573,12 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
 // that reports anything, stops, does not complete or adds no value, or a
 // splice that does not hold) is dropped, and the body passes after
 // finalization (jet_driver_orchestrate_comptime_bodies) take its sites as
-// before. A clean run whose splice does not hold goes to `landing.refused`,
-// so the first of those passes takes its results instead of running it
-// again, unless its closures demand a generated body
-// (jet_driver_run_demands_generated). A
-// landing that ends with a site pending stops `landing`, and a stopped
-// landing runs no pass: the later landing's pass would hold the earlier's
-// sites again. A taken seeded module's sites (sema_finalize_seeded_taken)
-// are the Core record's, final as taken: none lands again. The registration
-// graph moves in and comes back with no edit; `values`, `functions` and
-// `trace` take what the landed passes add.
+// before. A landing that ends with a site pending stops `landing`, and a
+// stopped landing runs no pass: the later landing's pass would hold the
+// earlier's sites again. A taken seeded module's sites
+// (sema_finalize_seeded_taken) are the Core record's, final as taken: none
+// lands again. The registration graph moves in and comes back with no edit;
+// `values`, `functions` and `trace` take what the landed passes add.
 jet_driver_land_local_values: fn(
     graph: &&SemaRegistrationGraph,
     bodies: &SemaFinalizeBodies,
@@ -761,18 +644,7 @@ jet_driver_land_local_values: fn(
         splice := sema_local_value_land(registration, run.trail, bodies.modules, into, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
         registration = splice.graph.move()
         sema_graph_trail_undo(registration, run.trail)
-        if !splice.spliced {
-            // A run whose closures demand a generated codec or derived
-            // method (jet_driver_run_demands_generated) is not kept: the
-            // whole-program half generates and checks those bodies, so the
-            // same pass run after it checks another closure.
-            if !jet_driver_run_demands_generated(run.functions) {
-                sites := [String:Bool]{}
-                loop source in body_sources -> sites["{source.module_identity.id}\n{source.key}"] = true
-                landing.refused = Val(JetDriverRefusedPass{sites: sites, base_values: values.len(), base_functions: functions.len(), values: run.values.move(), functions: run.functions.move(), trace: run.trace.move()})
-            }
-            break
-        }
+        if !splice.spliced -> break
         // The closures the pass adds are demanded in the next round of the
         // Core demand, after the bodies whose sites they serve.
         loop index in functions.len()..<run.functions.len() -> run.functions[index].demand_round = bodies.core_tally.rounds
