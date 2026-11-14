@@ -5,12 +5,16 @@
 # each to two decimals, then "overall n=<count> mean=<m>".
 #
 # Technique:
-# - the file is mapped (MAP_POPULATE); each value is parsed straight to an
-#   integer count of thousandths (the data's three decimals; a value with
-#   more fails), so that every sum is exact;
+# - the file streams through one 64 KiB buffer, a run of whole lines at a
+#   time; each value is parsed straight to an integer count of thousandths
+#   (the data's three decimals; a value with more fails), so that every sum
+#   is exact;
 # - a row finds its group by the last group hit, then a scan of the groups;
-#   a row is recorded as {group, value} and counted, and one pass scatters
-#   the values into one contiguous run per group;
+#   a new group's name is copied out of the buffer, and its values are
+#   appended as int32s to its own run (a reserved mapping, touched only as
+#   it fills): no row is kept beyond its value, and nothing is scattered;
+# - transparent huge pages are off (prctl), so memory is the pages the
+#   values fill, not 2 MiB at a time;
 # - median and p95 are two quickselects (median-of-three Hoare partitions)
 #   over the group's run, not a sort;
 # - mean is the exact sum over the count, sd a second pass of squared
@@ -24,24 +28,31 @@
     .intel_syntax noprefix
     .text
 
-    .set STAT, 0                 # struct stat (144 bytes)
-    .set ROWS, 144
-    .set VALS, 152
-    .set NGROUPS, 160
-    .set ORDER, 168
-    .set OUT, 176
-    .set TOTAL, 184
-    .set NTOTAL, 192
-    .set FRAME, 256
+    .set FD, 0
+    .set NGROUPS, 8
+    .set ORDER, 16
+    .set OUT, 24
+    .set TOTAL, 32
+    .set NTOTAL, 40
+    .set BUFP, 48
+    .set EOF, 56
+    .set NAMES, 64               # the names' start
+    .set FRAME, 128
 
-    # A group: its name, row count, value sum, and its run in the values.
+    # The area: the buffer, the names' cursor, the groups, the names.
+    .set BUFSZ, 65536
+    .set GROUPS, BUFSZ + 4096
+    .set NAMEAREA, GROUPS + (1 << 26)
+    .set AREASZ, NAMEAREA + (1 << 28)
+    .set RUNSZ, 1 << 30          # a group's run: at most 2^28 values
+
+    # A group: its name, row count, value sum, and its run of values.
     .set G_PTR, 0
     .set G_LEN, 8
     .set G_COUNT, 16
     .set G_SUM, 24
     .set G_START, 32
-    .set G_FILL, 40
-    .set GSZ, 48
+    .set GSZ, 40
 
 _start:
     mov rdi, [rsp + 16]          # argv[1]
@@ -53,73 +64,67 @@ _start:
     syscall
     test rax, rax
     js fail_read
-    mov rbx, rax
-    mov edi, eax
-    lea rsi, [rsp + STAT]
-    mov eax, 5                   # fstat
+    mov [rsp + FD], rax
+    mov edi, 41                  # prctl(PR_SET_THP_DISABLE, 1)
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
     syscall
-    test rax, rax
-    js fail_read
-    mov r13, [rsp + STAT + 48]   # st_size
-    cmp r13, 11
-    jb fail_csv                  # no header
-    xor edi, edi                 # mmap(NULL, size, PROT_READ, MAP_PRIVATE | MAP_POPULATE, fd, 0)
-    mov rsi, r13
-    mov edx, 1
-    mov r10d, 0x8002
-    mov r8, rbx
-    xor r9d, r9d
-    mov eax, 9
-    syscall
-    cmp rax, -4096
-    ja fail_read
-    mov r12, rax
-    # Rows ({group offset, value}), values and groups, each for at most
-    # size / 2 + 2 rows.
-    mov rbp, r13
-    shr rbp, 1
-    add rbp, 2
-    imul rsi, rbp, 8 + 4 + GSZ
     xor edi, edi
+    mov rsi, AREASZ
     mov edx, 3                   # PROT_READ | PROT_WRITE
     mov r10d, 0x4022             # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
     mov r8, -1
     xor r9d, r9d
-    mov eax, 9
+    mov eax, 9                   # mmap
     syscall
     cmp rax, -4096
     ja fail_read
-    mov [rsp + ROWS], rax
-    mov r14, rax                 # the next row
-    lea rcx, [rax + rbp * 8]
-    mov [rsp + VALS], rcx
-    lea r15, [rcx + rbp * 4]     # the groups
+    mov [rsp + BUFP], rax
+    lea r15, [rax + GROUPS]
+    lea rcx, [rax + NAMEAREA]
+    mov [rsp + NAMES], rcx
+    mov [r15 - 8], rcx           # the names' cursor
+    mov qword ptr [rsp + EOF], 0
     xor ebx, ebx                 # groups
     xor ebp, ebp                 # the last group hit
+    mov r12, rax                 # the cursor, the lines' end, the data's end
+    mov r13, rax
+    mov r14, rax
+    call refill
 
     # The header.
+    mov rax, r13
+    sub rax, r12
+    cmp rax, 11
+    jb fail_csv
     mov rsi, r12
     lea rdi, [rip + header]
     mov ecx, 11
     repe cmpsb
     jne fail_csv
-    lea r13, [r12 + r13]         # the end
-    lea r12, [r12 + 11]
+    add r12, 11
     cmp r12, r13
-    jae parsed
+    jae row
     cmp byte ptr [r12], 13
     jne 1f
     inc r12
 1:  cmp r12, r13
-    jae parsed
+    jae row
     cmp byte ptr [r12], 10
     jne fail_csv
     inc r12
 
 row:
     cmp r12, r13
-    jae parsed
-    cmp byte ptr [r12], 10       # a blank line
+    jb 1f
+    cmp qword ptr [rsp + EOF], 0
+    jne parsed
+    call refill
+    jmp row
+1:  cmp byte ptr [r12], 10       # a blank line
     jne 1f
     inc r12
     jmp row
@@ -199,52 +204,78 @@ row:
 12: cmp byte ptr [r12], 10
     jne fail_csv
     inc r12
-13: mov rdx, r9
-    sub rdx, r15
-    mov [r14], edx
-    mov [r14 + 4], eax
-    add r14, 8
-    inc qword ptr [r9 + G_COUNT]
+13: mov rdx, [r9 + G_COUNT]
+    mov rcx, [r9 + G_START]
+    mov [rcx + rdx * 4], eax
+    inc rdx
+    mov [r9 + G_COUNT], rdx
     add [r9 + G_SUM], rax
+    cmp rdx, RUNSZ / 4
+    jae fail_csv
     jmp row
+
+# refill: the unparsed bytes [r12, r14) moved to the buffer's start and
+# more read after them, until the data holds a newline (r13 just past the
+# last one) or the file ends (r13 = r14, EOF set). A line longer than the
+# buffer fails as "csv".
+refill:
+    mov rsi, r12
+    mov rdi, [rsp + 8 + BUFP]
+    mov rcx, r14
+    sub rcx, r12
+    mov r12, rdi
+    rep movsb
+    mov r14, rdi
+1:  mov rdx, [rsp + 8 + BUFP]
+    add rdx, BUFSZ
+    mov rsi, r14
+    sub rdx, r14
+    jz fail_csv
+    mov rdi, [rsp + 8 + FD]
+    xor eax, eax                 # read
+    syscall
+    cmp rax, -4
+    je 1b
+    test rax, rax
+    js fail_read
+    jz 3f
+    mov rdi, r14                 # the new bytes' first, for the scan's stop
+    add r14, rax
+    mov rcx, r14
+2:  dec rcx                      # the last newline in them
+    cmp byte ptr [rcx], 10
+    je 4f
+    cmp rcx, rdi
+    ja 2b
+    jmp 1b
+3:  mov qword ptr [rsp + 8 + EOF], 1
+    mov r13, r14
+    ret
+4:  lea r13, [rcx + 1]
+    ret
 
 parsed:
     test rbx, rbx
     jz fail_describe
     mov [rsp + NGROUPS], rbx
-    # Each group's run, and the totals.
+    # The totals.
     xor eax, eax
     xor edx, edx
     mov rdi, r15
     mov rcx, rbx
-1:  mov [rdi + G_START], rax
-    mov [rdi + G_FILL], rax
-    add rax, [rdi + G_COUNT]
+1:  add rax, [rdi + G_COUNT]
     add rdx, [rdi + G_SUM]
     add rdi, GSZ
     dec rcx
     jnz 1b
     mov [rsp + NTOTAL], rax
     mov [rsp + TOTAL], rdx
-    # Scatter.
-    mov rsi, [rsp + ROWS]
-    mov rdi, [rsp + VALS]
-2:  cmp rsi, r14
-    jae 3f
-    mov edx, [rsi]
-    mov eax, [rsi + 4]
-    add rdx, r15
-    mov rcx, [rdx + G_FILL]
-    mov [rdi + rcx * 4], eax
-    inc rcx
-    mov [rdx + G_FILL], rcx
-    add rsi, 8
-    jmp 2b
-3:  # The name order (one pointer per group) and the output buffer.
+    # The name order (one pointer per group) and the output buffer.
     lea rsi, [rbx * 8 + 512]
     imul rax, rbx, 160
     add rsi, rax
-    add rsi, [rsp + STAT + 48]
+    add rsi, [r15 - 8]
+    sub rsi, [rsp + NAMES]
     xor edi, edi
     mov edx, 3
     mov r10d, 0x22               # MAP_PRIVATE | MAP_ANONYMOUS
@@ -310,8 +341,6 @@ group:
     mov ecx, 8
     rep movsb
     mov r14, [r13 + G_START]
-    shl r14, 2
-    add r14, [rsp + VALS]
     mov r15, [r13 + G_COUNT]
     lea rdx, [r15 - 1]
     shr rdx, 1
@@ -390,7 +419,7 @@ overall:
     syscall
 
 # find: the group named (rsi, rcx), added when new, in rax; the last hit
-# (rbp) is tried first. Clobbers rdx, rdi.
+# (rbp) is tried first. Clobbers rdx, rdi, r8 through r11.
 find:
     mov rax, rbp
     test rax, rax
@@ -406,8 +435,29 @@ find:
     add rax, GSZ
     dec rdx
     jmp 2b
-3:  mov [rax + G_PTR], rsi
+3:  push rsi                     # new: its name copied, its run reserved
+    push rcx
+    mov rdi, [r15 - 8]
+    mov [rax + G_PTR], rdi
     mov [rax + G_LEN], rcx
+    rep movsb
+    mov [r15 - 8], rdi
+    push rax
+    xor edi, edi
+    mov esi, RUNSZ
+    mov edx, 3
+    mov r10d, 0x4022             # MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
+    mov r8, -1
+    xor r9d, r9d
+    mov eax, 9                   # mmap
+    syscall
+    cmp rax, -4096
+    ja fail_read
+    mov rdx, rax
+    pop rax
+    mov [rax + G_START], rdx
+    pop rcx
+    pop rsi
     inc rbx
 4:  mov rbp, rax
     ret

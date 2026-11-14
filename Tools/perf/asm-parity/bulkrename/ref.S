@@ -41,6 +41,13 @@ _start:
     test rax, rax
     js fail
     mov r14, rax                 # the directory
+    mov edi, 41                  # prctl(PR_SET_THP_DISABLE, 1): pages as touched
+    mov esi, 1
+    xor edx, edx
+    xor r10d, r10d
+    xor r8d, r8d
+    mov eax, 157
+    syscall
     xor edi, edi
     mov esi, REGION
     mov edx, 3                   # PROT_READ | PROT_WRITE
@@ -281,7 +288,11 @@ _start:
     rep movsb
     mov byte ptr [rdi], 10
     inc rdi
-    inc r10
+    test r10, r10
+    jnz 26f
+    call flush                   # the first line out at once
+    mov rdi, [rsp + TARGET + 32]
+26: inc r10
     jmp 21b
 23: mov rax, 0x2064656d616e6572  # "renamed "
     mov [rdi], rax

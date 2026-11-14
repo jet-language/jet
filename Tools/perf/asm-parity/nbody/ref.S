@@ -17,7 +17,8 @@
 # The start state (masses, velocities, the Sun's offset momentum) is the
 # program's constant expressions, evaluated in its order in IEEE doubles.
 # The energies print as correctly rounded nine-decimal fixed point, from the
-# double's exact value (mantissa times 1e9, shifted, ties to even).
+# double's exact value (mantissa times 1e9, shifted, ties to even); each
+# line is written once known, the first before any step.
 # Errors: no step count -> exit 1.
     .intel_syntax noprefix
     .text
@@ -57,6 +58,7 @@ _start:
     vbroadcastsd ymm15, [rip + dt]
     lea r12, [rsp + OUT]         # output position
     call energy
+    call flush                   # the first line out before the steps
     test rbx, rbx
     jle 9f
 
@@ -153,19 +155,7 @@ step:
     jnz step
 
 9:  call energy
-    lea rsi, [rsp + OUT]
-    mov rdx, r12
-    sub rdx, rsi
-3:  mov edi, 1
-    mov eax, 1
-    syscall
-    cmp rax, -4
-    je 3b
-    test rax, rax
-    jle fail
-    add rsi, rax
-    sub rdx, rax
-    jnz 3b
+    call flush
     xor edi, edi
     mov eax, 231
     syscall
@@ -174,6 +164,25 @@ fail:
     mov edi, 1
     mov eax, 231
     syscall
+
+# flush: the line(s) at OUT up to r12 written, and r12 back at OUT. Called
+# from _start's frame.
+flush:
+    lea rsi, [rsp + 8 + OUT]
+    mov rdx, r12
+    sub rdx, rsi
+1:  mov edi, 1
+    mov eax, 1
+    syscall
+    cmp rax, -4
+    je 1b
+    test rax, rax
+    jle fail
+    add rsi, rax
+    sub rdx, rax
+    jnz 1b
+    lea r12, [rsp + 8 + OUT]
+    ret
 
 # energy: run.jet's energy() of the state in ymm0-ymm9, as a line at r12
 # (advanced). Called from _start's frame: its slots are rsp + 8 + X.

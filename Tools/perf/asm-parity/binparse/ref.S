@@ -8,8 +8,10 @@
 # are ignored.
 #
 # Technique:
-# - the file is mapped with MAP_POPULATE and walked with one pointer, one
-#   unsigned length compare per header and per name;
+# - the file is mapped and walked with one pointer, one unsigned length
+#   compare per header and per name; it is resident a window at a time
+#   (the next two populated ahead, the one before the last dropped behind),
+#   so memory stays three windows whatever the file's size;
 # - "id % 7 == 0" is one multiply by the inverse of 7 mod 2^32 and a
 #   compare; the value or +0.0 is chosen by cmov and always added (the sum
 #   starts at +0.0 and so is never -0.0: adding +0.0 changes nothing), so
@@ -30,6 +32,7 @@
     .set CHUNKS, 304             # 17 base-10^19 digits
     .set OUT, 448
     .set FRAME, OUT + 512
+    .set WINDOW, 1 << 17         # the file's resident window
 
 _start:
     mov rdi, [rsp + 16]          # argv[1]
@@ -54,14 +57,19 @@ _start:
     xor edi, edi
     mov rsi, r13
     mov edx, 1                   # PROT_READ
-    mov r10d, 0x8002             # MAP_PRIVATE | MAP_POPULATE
+    mov r10d, 2                  # MAP_PRIVATE
     mov r8, rbx
     xor r9d, r9d
     mov eax, 9
     syscall
     cmp rax, -4096
     ja quiet
+    mov rbp, rax                 # the file
     lea r14, [rax + r13]         # end
+    lea r12, [rax - WINDOW]      # the first two windows in
+    call advance
+    call advance
+    mov rax, rbp
     cmp dword ptr [rax], 0x3142474a      # "JGB1"
     jne quiet
     mov r15d, [rax + 4]          # n
@@ -74,6 +82,10 @@ _start:
     test r15, r15
     jz report
 record:
+    cmp rsi, r12
+    jb 4f
+    call advance
+4:
     mov rax, r14
     sub rax, rsi
     cmp rax, 14
@@ -160,6 +172,44 @@ fail:
     syscall
 
 # rax -> its decimal digits at rdi, rdi advanced. Clobbers rax, rcx, rdx, rsi, r10.
+# advance: the cursor reached r12, a window boundary of the file at rbp
+# (ending at r14): the window two back dropped (MADV_DONTNEED; a later
+# read of it faults it back in from the page cache), the one after the
+# next populated (MADV_POPULATE_READ), r12 a window on. Keeps every
+# register.
+advance:
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r11
+    lea rdi, [r12 - 2 * WINDOW]
+    cmp rdi, rbp
+    jb 1f
+    mov esi, WINDOW
+    mov edx, 4                   # MADV_DONTNEED
+    mov eax, 28                  # madvise
+    syscall
+1:  lea rdi, [r12 + WINDOW]
+    mov rsi, r14
+    sub rsi, rdi
+    jbe 2f
+    mov eax, WINDOW
+    cmp rsi, rax
+    cmova rsi, rax
+    mov edx, 22                  # MADV_POPULATE_READ
+    mov eax, 28
+    syscall
+2:  add r12, WINDOW
+    pop r11
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rax
+    ret
+
 put_dec:
     mov r10d, 10
     lea rsi, [rsp - 8]           # the red zone: digits backwards from here

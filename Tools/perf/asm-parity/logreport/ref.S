@@ -18,8 +18,10 @@
 # second is outside the class: exit 2.
 #
 # Technique:
-# - the file is mapped (MAP_POPULATE) into a reservation one page longer,
-#   so that vector loads past its end read zeros;
+# - the file is mapped into a reservation one page longer, so that vector
+#   loads past its end read zeros; it is resident a window at a time (the
+#   next two populated ahead, the one before the last dropped behind), so
+#   memory stays three windows whatever the file's size;
 # - AVX-512BW compares 64 bytes at a time into a '\n' mask and a ' ' mask,
 #   walked together with tzcnt/blsr: three spaces give a line's stamp,
 #   level and component, and then every space up to the line's '\n' goes
@@ -70,6 +72,8 @@
     .set OUT, 320
     .set OUTSZ, 4096
     .set FRAME, OUT + OUTSZ
+    .set NEXTW, 304              # the chunk offset of the next window
+    .set WINDOW, 1 << 17         # the file's resident window
     .set INITCAP, 64             # entries, 64 bytes each
 
 _start:
@@ -107,7 +111,7 @@ _start:
     mov rdi, r12
     mov rsi, r13
     mov edx, 1
-    mov r10d, 0x8012             # MAP_PRIVATE | MAP_FIXED | MAP_POPULATE
+    mov r10d, 0x12               # MAP_PRIVATE | MAP_FIXED
     mov r8, rbx
     xor r9d, r9d
     mov eax, 9
@@ -152,10 +156,17 @@ _start:
     xor ebx, ebx                 # chunk offset
     mov rsi, r12                 # line start
     xor edi, edi                 # spaces seen in the line (3: skip to '\n')
+    mov qword ptr [rsp + NEXTW], -WINDOW
+    call advance                 # the first two windows in
+    call advance
 
 chunk:
     cmp rbx, r13
     jae eof
+    cmp rbx, [rsp + NEXTW]
+    jb 1f
+    call advance
+1:
     vmovdqu64 zmm0, [r12 + rbx]
     vpord zmm25, zmm25, zmm0
     vpcmpeqb k1, zmm0, zmm20
@@ -981,6 +992,47 @@ write_all:
     sub rdx, rax
     jnz 1b
 2:  ret
+
+# advance: the chunk offset (rbx) reached [NEXTW], a window boundary of the
+# file at r12 (r13 bytes): the window two back dropped (MADV_DONTNEED; a
+# later read of it, a kept stamp or component, faults it back in from the
+# page cache), the one after the next populated (MADV_POPULATE_READ),
+# [NEXTW] a window on. Called from _start's frame; keeps every register.
+advance:
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r11
+    mov rax, [rsp + 56 + NEXTW]
+    lea rdi, [r12 + rax - 2 * WINDOW]
+    cmp rdi, r12
+    jb 1f
+    mov esi, WINDOW
+    mov edx, 4                   # MADV_DONTNEED
+    mov eax, 28                  # madvise
+    syscall
+1:  mov rax, [rsp + 56 + NEXTW]
+    lea rdi, [r12 + rax + WINDOW]
+    mov rsi, r13
+    sub rsi, rax
+    sub rsi, WINDOW
+    jle 2f
+    mov eax, WINDOW
+    cmp rsi, rax
+    cmova rsi, rax
+    mov edx, 22                  # MADV_POPULATE_READ
+    mov eax, 28
+    syscall
+2:  add qword ptr [rsp + 56 + NEXTW], WINDOW
+    pop r11
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rax
+    ret
 
 fail:
     mov edi, 1
