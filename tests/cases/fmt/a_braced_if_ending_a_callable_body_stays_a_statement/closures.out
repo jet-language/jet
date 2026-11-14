@@ -21,22 +21,16 @@ bad: fn(name: String) -> IOError Never! {
 }
 
 generic_case: fn(flag: Bool) -> Bool IOError! {
-    with_lock<Bool>(
-        "x",
-        fn() {
-            if flag -> return Err(bad("a"))
-            Ok(true)
-        },
-    )
+    with_lock<Bool>("x", fn() {
+        if flag -> return Err(bad("a"))
+        Ok(true)
+    })
 }
 
 unit_case: fn(flag: Bool) IOError! {
-    with_unit(
-        "x",
-        fn() {
-            if flag -> return Err(bad("b"))
-        },
-    )
+    with_unit("x", fn() {
+        if flag -> return Err(bad("b"))
+    })
 }
 
 run: fn() {

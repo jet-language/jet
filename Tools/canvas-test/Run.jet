@@ -141,7 +141,7 @@ native_lifecycle: fn() {
         .timeout(15000ms).run() ?? fail("cannot run jet dev: {err}")
     if missing.timed_out -> fail("jet dev did not exit for a missing source\n{missing.output}\n{missing.errors}")
     if missing.success -> fail("source-not-found must exit with an error")
-    if !"{missing.output}\n{missing.errors}".contains("the file `missing-canvas-lifecycle.jet`") -> fail("source-not-found did not name the file\n{missing.output}\n{missing.errors}")
+    if !"{missing.output}\n{missing.errors}".contains("no file `missing-canvas-lifecycle.jet`") -> fail("source-not-found did not name the file\n{missing.output}\n{missing.errors}")
     if missing.output.contains("Canvas: http") -> fail("source-not-found must not start Canvas")
 
     // Ctrl-C must reach jet dev with its default disposition. A job started

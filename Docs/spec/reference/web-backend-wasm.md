@@ -102,7 +102,9 @@ The top-level source set under `Examples/Apps/Web/` is the contract checked
 by [`tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case`](../../../tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case).
 Each file is named here so documentation review cannot silently omit a new example:
 
+- `AppConfigReadiness.jet`
 - `AppHello.jet`
+- `AppRouteTable.jet`
 - `AppTypedArgs.jet`
 - `BrowserSurface.jet`
 - `FormsTable.jet`
