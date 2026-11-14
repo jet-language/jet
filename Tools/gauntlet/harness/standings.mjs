@@ -19,7 +19,7 @@ export const STANDINGS_METRICS = Object.freeze([
   Object.freeze({ id: "wall", family: "run", label: "run wall", what: "wall time of the whole run (service: p50 request latency)" }),
   Object.freeze({ id: "cycles", family: "run", label: "run cycles", what: "user-mode CPU cycles of the process tree (perf stat -e cycles:u)" }),
   Object.freeze({ id: "peak_rss", family: "run", label: "peak RSS", what: "peak resident memory of the process tree" }),
-  Object.freeze({ id: "size", family: "size", label: "size", what: "deployed artifact bytes; interpreted peers count script plus runtime" }),
+  Object.freeze({ id: "size", family: "size", label: "size", what: "deployed bytes on the stated size basis: a static stripped binary, else the stripped binary plus every shared library it loads (libc included); interpreted peers count script plus runtime" }),
 ]);
 
 const METRIC_IDS = STANDINGS_METRICS.map((metric) => metric.id);
@@ -46,6 +46,10 @@ export const PEER_KINDS = Object.freeze({
   bun: "interpreted",
   vite: "bundled",
 });
+
+// The stated size basis (#6834 c6): every size cell names one of these, and
+// measurement-manifest.json standings.size_basis defines each, in this order.
+export const SIZE_BASES = Object.freeze(["static stripped", "stripped + shared libraries", "web artifact", "bundle", "script+runtime"]);
 
 const WEB_MODES = new Set(["web", "web-app"]);
 const TIMED_SOURCES = Object.freeze({
@@ -94,11 +98,13 @@ export function standingsPolicy(matrix, manifest) {
       if (!Array.isArray(rule?.modes) || rule.modes.length === 0) issues.push(`standings.not_applicable[${index}] names no entry modes`);
       if (typeof rule?.reason !== "string" || rule.reason.length === 0) issues.push(`standings.not_applicable[${index}] has no reason`);
     }
+    if (JSON.stringify(Object.keys(contract.size_basis ?? {})) !== JSON.stringify(SIZE_BASES)) issues.push(`measurement-manifest.json standings.size_basis must define ${SIZE_BASES.join(", ")}`);
   }
   return {
     peers: [...(rail?.peers ?? [])],
     ceiling: rail?.ceiling ?? "asm",
     not_applicable: [...(contract?.not_applicable ?? [])],
+    size_basis: { ...(contract?.size_basis ?? {}) },
     issues,
   };
 }
@@ -142,10 +148,32 @@ export function planEntry(entry, policy, { programs = {}, references = [], toolc
         ? { role: "ceiling", plan: "unavailable", reason: unavailableReason(ceiling, toolchains[ceiling]), program: program.path, reference: names[0] }
         : { role: "ceiling", plan: "measure", reason: null, program: program.path, reference: names[0] };
   }
+  for (const [peer, item] of Object.entries(peers)) {
+    if (item.plan === "measure") item.size_basis = plannedSizeBasis(entry, peer, item.role);
+  }
   const cycles = toolchains.perf && toolchains.perf.status !== "ok"
     ? { status: "unavailable", reason: unavailableReason("perf", toolchains.perf) }
     : null;
-  return { entry: entry.name, mode: entry.mode, cells: [...(entry.cells ?? [])], peers, cycles };
+  // Jet links statically and has no other build to try; a web entry ships its artifacts.
+  const jet_size_basis = isWebEntry(entry) ? "web artifact" : "static stripped";
+  return { entry: entry.name, mode: entry.mode, cells: [...(entry.cells ?? [])], peers, cycles, jet_size_basis };
+}
+
+// The size basis a measured cell is planned on (#6834 c6). A compiled peer's
+// static build is tried first; whether it links statically and reproduces the
+// output is only known once built, so the plan names the fallback too. An
+// entry that overrides a peer's build command keeps that build. The asm
+// ceiling links statically.
+export function plannedSizeBasis(entry, peer, role = "peer") {
+  const kind = PEER_KINDS[peer] ?? "compiled";
+  if (kind === "interpreted") return "script+runtime";
+  if (isWebEntry(entry)) return kind === "bundled" ? "bundle" : "web artifact";
+  if (role === "ceiling") return "static stripped";
+  const build = entry.spec?.build;
+  const overridden = build && typeof build === "object" && !Array.isArray(build) ? (build[peer] ?? build.default) : build;
+  return overridden
+    ? "stripped + shared libraries if dynamic (the entry overrides the build command)"
+    : "static stripped, else stripped + shared libraries";
 }
 
 function unavailableReason(peer, toolchain) {
@@ -169,6 +197,8 @@ export function planCells(plans) {
           status: fixed?.status ?? item.plan,
           reason: fixed?.reason ?? item.reason,
           program: item.program,
+          size_basis: metric === "size" && (fixed?.status ?? item.plan) === "measure" ? item.size_basis : null,
+          jet_size_basis: metric === "size" && (fixed?.status ?? item.plan) === "measure" ? plan.jet_size_basis : null,
         });
       }
     }
@@ -213,10 +243,28 @@ function sizeValue(entry, peer, row, runtimes) {
       ? { value, unit: "bytes", source: "artifact_bytes", basis: kind === "bundled" ? "bundle" : "web artifact" }
       : { value: null, reason: "artifact_bytes was not recorded" };
   }
-  const value = row?.metrics?.binary_bytes;
-  return positive(value)
-    ? { value, unit: "bytes", source: "binary_bytes", basis: "binary" }
-    : { value: null, reason: "binary_bytes was not recorded" };
+  // #6834 c6: run.mjs records the deployed size (row.size): the static
+  // stripped build where the peer can build that way, otherwise the stripped
+  // binary plus every shared library it loads, libc included.
+  const size = row?.size;
+  if (!size) return { value: null, reason: "deployed size was not recorded" };
+  if (size.status !== "ok" || !positive(size.bytes)) {
+    return { value: null, reason: `deployed size unmeasured: ${size.reason ?? "no bytes recorded"}`, ...(size.status === "unavailable" ? { status: "unavailable" } : {}) };
+  }
+  return {
+    value: size.bytes,
+    unit: "bytes",
+    source: "deployed_bytes",
+    basis: size.basis,
+    detail: {
+      build: size.build,
+      linkage: size.linkage,
+      measured: size.measured,
+      file_bytes: size.file_bytes,
+      libraries: size.libraries,
+      ...(size.static_build ? { static_build: size.static_build } : {}),
+    },
+  };
 }
 
 // A measured row's standing: ok, or why its numbers do not count.
@@ -277,6 +325,7 @@ export function entryStandings(plan, result, { runtimes = {} } = {}) {
         ...(value.unit ? { unit: value.unit } : jet.unit ? { unit: jet.unit } : {}),
         ...(value.source ? { source: value.source } : {}),
         ...(metric === "size" ? { jet_basis: jet.basis ?? null, peer_basis: value.basis ?? null } : {}),
+        ...(metric === "size" && jet.detail ? { jet_detail: jet.detail } : {}),
         ...(value.detail ? { detail: value.detail } : {}),
       };
     }
@@ -333,6 +382,7 @@ export function buildStandings(entries, policy, { generated = new Date().toISOSt
     metrics: STANDINGS_METRICS,
     judgement: STANDINGS_JUDGEMENT,
     not_applicable: policy.not_applicable,
+    size_basis: policy.size_basis,
     runtimes,
     toolchains,
     entries,
@@ -377,7 +427,7 @@ function formatNumber(value) {
   return Math.abs(value) >= 100 ? value.toFixed(1) : value.toPrecision(4);
 }
 
-export const STANDINGS_COLUMNS = Object.freeze(["entry", "peer", "role", "metric", "jet", "peer_value", "unit", "jet/peer", "verdict", "reason"]);
+export const STANDINGS_COLUMNS = Object.freeze(["entry", "peer", "role", "metric", "jet", "peer_value", "unit", "jet/peer", "verdict", "size basis (jet / peer)", "reason"]);
 
 // Tab-separated rows, one per entry x peer x metric, header first.
 export function standingsLines(section) {
@@ -395,6 +445,7 @@ export function standingsLines(section) {
           cell.unit ?? "-",
           cell.ratio === null || cell.ratio === undefined ? "-" : cell.ratio.toFixed(2),
           cell.verdict,
+          metric === "size" && (cell.jet_basis || cell.peer_basis) ? `${cell.jet_basis ?? "-"} / ${cell.peer_basis ?? "-"}` : "-",
           (cell.reason ?? "").replace(/\s+/g, " ").slice(0, 200) || "-",
         ].join("\t"));
       }

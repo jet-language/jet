@@ -3,18 +3,22 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import os from "node:os";
 
-import { loadEntries, standingsPlans } from "./run.mjs";
+import { elf } from "../../perf/asm-parity/ref-build.mjs";
+import { elfLinkage, loadEntries, standingsPlans } from "./run.mjs";
 import {
   buildStandings,
   ceilingMeasurements,
   entryStandings,
   planCells,
   planEntry,
+  plannedSizeBasis,
   STANDINGS_COLUMNS,
   STANDINGS_METRICS,
   STANDINGS_SCHEMA,
   standingsLines,
+  SIZE_BASES,
   standingsPolicy,
 } from "./standings.mjs";
 
@@ -37,6 +41,7 @@ const timed = (wall, cycles, extra = {}) => ({
   runtime_peak_rss_kb: 1000,
   ...extra,
 });
+const deployed = (bytes, basis = "static stripped") => ({ size: { status: "ok", basis, build: "static stripped build", file_bytes: bytes, libraries: [], bytes } });
 
 test("the standings policy names every peer and the asm ceiling, and the manifest explains what no peer can run", () => {
   assert.deepEqual(policy.issues, []);
@@ -46,7 +51,10 @@ test("the standings policy names every peer and the asm ceiling, and the manifes
   assert.deepEqual(vite.modes, ["batch", "batch-steps", "service"]);
   assert.match(vite.reason, /web front end/);
   assert.deepEqual(METRICS, ["startup", "wall", "cycles", "peak_rss", "size"]);
+  assert.deepEqual(Object.keys(policy.size_basis), SIZE_BASES);
   assert.deepEqual(standingsPolicy({ rails: {} }, {}).issues.length > 0, true);
+  const unstated = { ...manifest, standings: { ...manifest.standings, size_basis: { binary: "bytes of the built executable" } } };
+  assert.ok(standingsPolicy(matrix, unstated).issues.some((issue) => /size_basis must define static stripped/.test(issue)));
 });
 
 test("a plan gives every peer and the ceiling a row: measured, uncovered, not applicable or unavailable, with a reason", () => {
@@ -89,7 +97,23 @@ test("dry-run cells cover entry x peer x metric; service cycles and a missing pe
   assert.equal(perfCycles.status, "unavailable");
   for (const cell of cells) {
     if (cell.status !== "measure") assert.ok(cell.reason, `${cell.entry}/${cell.peer}/${cell.metric} has no reason`);
+    if (cell.metric !== "size" || cell.status !== "measure") assert.equal(cell.size_basis, null, `${cell.entry}/${cell.peer}/${cell.metric}`);
   }
+  const rustSize = cells.find((cell) => cell.entry === "sieve" && cell.peer === "rust" && cell.metric === "size");
+  assert.deepEqual([rustSize.jet_size_basis, rustSize.size_basis], ["static stripped", "static stripped, else stripped + shared libraries"]);
+});
+
+test("each measured size cell is planned on one stated basis", () => {
+  assert.equal(plannedSizeBasis(batchEntry, "c"), "static stripped, else stripped + shared libraries");
+  assert.equal(plannedSizeBasis(batchEntry, "asm", "ceiling"), "static stripped");
+  assert.equal(plannedSizeBasis(batchEntry, "python"), "script+runtime");
+  assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web" }, "rust"), "web artifact");
+  assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web-app" }, "vite"), "bundle");
+  assert.equal(plannedSizeBasis({ ...batchEntry, mode: "web" }, "node"), "script+runtime");
+  const overridden = { ...batchEntry, spec: { build: { c: ["gcc", "-O3", "main.c", "-o", "main-c"] } } };
+  assert.match(plannedSizeBasis(overridden, "c"), /^stripped \+ shared libraries if dynamic \(the entry overrides the build command\)$/);
+  assert.equal(plannedSizeBasis(overridden, "rust"), "static stripped, else stripped + shared libraries");
+  assert.equal(planEntry({ ...batchEntry, mode: "web" }, policy, { programs: programs([]), references: [] }).jet_size_basis, "web artifact");
 });
 
 test("every comparison entry in the corpus plans a row for every peer and its ceiling", async () => {
@@ -126,8 +150,8 @@ test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.
   };
   const result = {
     rows: {
-      jet: ok(timed(1, 120, { binary_bytes: 1000 })),
-      rust: ok(timed(2, 200, { binary_bytes: 4000 })),
+      jet: ok(timed(1, 120), deployed(1000)),
+      rust: ok(timed(2, 200), deployed(4000, "stripped + shared libraries")),
       python: ok(timed(0.5, 50, { source_bytes: 100 }), { script: { bytes: 100, files: [{ path: "main.py", bytes: 100 }] } }),
       node: { status: "broken", reason: "stdout differs", verification: { status: "failed", kind: "byte_exact_stdout", reason: "line 1 differs" } },
     },
@@ -135,14 +159,16 @@ test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.
       c: { status: "broken", reason: "exit 1: boom", verification: { status: "failed", kind: "byte_exact_stdout", reason: "exit 1: boom" } },
       zig: { status: "broken", reason: "cold build exit 127", missing_toolchain: true, verification: { status: "failed", kind: "build" } },
       bun: ok(timed(1, 100), { script: { bytes: 100, files: [] } }),
-      asm: ok(timed(0.5, 100, { binary_bytes: 500 })),
+      asm: ok(timed(0.5, 100), deployed(500)),
     },
   };
   const standing = entryStandings(plan, result, { runtimes });
   assert.equal(standing.peers.rust.metrics.wall.ratio, 0.5);
   assert.equal(standing.peers.rust.metrics.wall.verdict, "pass");
   assert.equal(standing.peers.rust.metrics.size.verdict, "pass");
-  assert.equal(standing.peers.rust.metrics.size.peer_basis, "binary");
+  assert.equal(standing.peers.rust.metrics.size.peer_basis, "stripped + shared libraries");
+  assert.equal(standing.peers.rust.metrics.size.jet_basis, "static stripped");
+  assert.equal(standing.peers.rust.metrics.size.jet_detail.build, "static stripped build");
   assert.equal(standing.peers.python.metrics.wall.verdict, "fail");
   assert.equal(standing.peers.python.metrics.size.peer, 9100);
   assert.equal(standing.peers.python.metrics.size.peer_basis, "script+runtime");
@@ -169,6 +195,13 @@ test("judged rows: the floor passes below 1.00, the ceiling meets at or below 1.
   const crashed = entryStandings(plan, { status: "broken", reason: "harness error: boom", rows: {} }, { runtimes });
   assert.equal(crashed.peers.rust.status, "failed");
   assert.match(crashed.peers.rust.reason, /harness error: boom/);
+
+  const stripless = entryStandings(plan, { ...result, rows: { ...result.rows, rust: ok(timed(2, 200), { size: { status: "unavailable", reason: "strip main-rust exit 127: strip: command not found" } }) } }, { runtimes });
+  assert.equal(stripless.peers.rust.metrics.size.verdict, "unavailable");
+  assert.match(stripless.peers.rust.metrics.size.reason, /deployed size unmeasured: strip main-rust exit 127/);
+  const unrecorded = entryStandings(plan, { ...result, rows: { ...result.rows, rust: ok(timed(2, 200)) } }, { runtimes });
+  assert.equal(unrecorded.peers.rust.metrics.size.verdict, "unmeasured");
+  assert.equal(unrecorded.peers.rust.metrics.size.reason, "deployed size was not recorded");
 });
 
 test("the section lists every floor loss and ceiling miss, feeds the scoreboard's ceiling and renders one line per cell", () => {
@@ -177,12 +210,13 @@ test("the section lists every floor loss and ceiling miss, feeds the scoreboard'
     references: [{ name: "sieve" }],
   });
   const result = {
-    rows: { jet: ok(timed(1, 120, { binary_bytes: 1000 })), rust: ok(timed(2, 200, { binary_bytes: 4000, runtime_peak_rss_kb: 2000 })), python: ok(timed(0.5, 50), { script: { bytes: 10, files: [] } }) },
-    standings_rows: { asm: ok(timed(1, 100, { binary_bytes: 500 })) },
+    rows: { jet: ok(timed(1, 120), deployed(1000)), rust: ok(timed(2, 200, { runtime_peak_rss_kb: 2000 }), deployed(4000)), python: ok(timed(0.5, 50), { script: { bytes: 10, files: [] } }) },
+    standings_rows: { asm: ok(timed(1, 100), deployed(500)) },
   };
   const runtimes = { python: { status: "ok", bytes: 100, path: "/runtime/python3" } };
   const section = buildStandings([entryStandings(plan, result, { runtimes })], policy, { generated: "2026-11-13T00:00:00.000Z", runtimes });
   assert.equal(section.schema, STANDINGS_SCHEMA);
+  assert.deepEqual(Object.keys(section.size_basis), SIZE_BASES);
   assert.deepEqual(section.losses.floor.map((loss) => `${loss.peer}/${loss.metric}`), ["python/size", "python/cycles", "python/startup", "python/wall", "python/peak_rss"]);
   assert.ok(section.losses.ceiling.some((miss) => miss.metric === "cycles" && Math.abs(miss.ratio - 1.2) < 1e-12));
   assert.ok(section.open.some((cell) => cell.peer === "c" && cell.verdict === "uncovered"));
@@ -209,5 +243,23 @@ test("the section lists every floor loss and ceiling miss, feeds the scoreboard'
   const lines = standingsLines(section);
   assert.equal(lines[0], STANDINGS_COLUMNS.join("\t"));
   assert.equal(lines.length, 1 + (PEERS.length + 1) * METRICS.length);
-  assert.ok(lines.includes(["sieve", "rust", "peer", "wall", "1", "2", "s", "0.50", "pass", "-"].join("\t")));
+  assert.ok(lines.includes(["sieve", "rust", "peer", "wall", "1", "2", "s", "0.50", "pass", "-", "-"].join("\t")));
+  assert.ok(lines.includes(["sieve", "rust", "peer", "size", "1000", "4000", "bytes", "0.25", "pass", "static stripped / static stripped", "-"].join("\t")));
+});
+
+test("the deployed size reads each binary's linkage: a dynamic loader makes it dynamic, symbols make it unstripped", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "standings-elf-"));
+  try {
+    const image = elf(Buffer.from([0xb8, 0x3c, 0, 0, 0, 0x31, 0xff, 0x0f, 0x05]));
+    await fs.writeFile(path.join(dir, "static"), image);
+    assert.deepEqual(await elfLinkage(path.join(dir, "static")), { dynamic: false, stripped: true, bytes: image.length });
+    const loaded = Buffer.from(image);
+    loaded.writeUInt32LE(3, 64 + 56);
+    await fs.writeFile(path.join(dir, "dynamic"), loaded);
+    assert.equal((await elfLinkage(path.join(dir, "dynamic"))).dynamic, true);
+    await fs.writeFile(path.join(dir, "script"), "#!/bin/sh\n");
+    assert.match((await elfLinkage(path.join(dir, "script"))).error, /script is not an ELF executable/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

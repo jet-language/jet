@@ -28,11 +28,15 @@ test('every entry gets a row for every peer and the asm ceiling, every metric a 
 
 test('ratios carry the floor verdict and the ceiling gap; non-measured rows keep their reason', () => {
   const projected = view();
-  assert.equal(cell(projected, 'c', 'size').text, '6.92 fail');
-  assert.equal(cell(projected, 'rust', 'startup').text, '0.37 pass');
-  assert.equal(cell(projected, 'asm', 'startup').text, '1.14 miss +14%');
+  assert.equal(cell(projected, 'c', 'size').text, '7.16 fail');
+  assert.equal(cell(projected, 'rust', 'startup').text, '0.54 pass');
+  assert.equal(cell(projected, 'asm', 'startup').text, '1.12 miss +12%');
   assert.equal(row(projected, 'asm').role, 'ceiling');
   assert.match(cell(projected, 'python', 'size').detail, /peer script\+runtime/);
+  assert.equal(cell(projected, 'c', 'size').peerBasis, 'static stripped');
+  assert.equal(cell(projected, 'c', 'size').jetBasis, 'static stripped');
+  assert.match(cell(projected, 'rust', 'size').detail, /\(Jet static stripped, peer stripped \+ shared libraries: \S+ kB binary \+ \S+ MB in 3 shared libraries\)$/);
+  assert.deepEqual(projected.sizeBasis.map((item) => item.basis), ['static stripped', 'stripped + shared libraries', 'web artifact', 'bundle', 'script+runtime']);
   assert.equal(row(projected, 'go').status, 'uncovered');
   assert.equal(row(projected, 'go').reason, 'no go program: go/main.go is missing');
   assert.equal(row(projected, 'vite').status, 'not_applicable');
@@ -46,6 +50,8 @@ test('a peer missing from the results file stays a row with a reason', () => {
   assert.equal(row(projected, 'zig').status, 'failed');
   assert.match(row(projected, 'zig').reason, /no row for this peer/);
   assert.equal(projectGauntletStandings({ standings: { schema: 'other' } }), null);
+  const { size_basis: _unstated, ...older } = report().standings;
+  assert.match(gauntletStandingsText(projectGauntletStandings({ standings: older })), /\nsize basis: not stated by this results file/);
 });
 
 test('the text table and the page render the same projection', () => {
@@ -53,14 +59,18 @@ test('the text table and the page render the same projection', () => {
   const text = gauntletStandingsText(projected);
   assert.match(text, /^Gauntlet standings · results results\.json · partial entry · generated /);
   assert.match(text, /floor 29 pass, 1 fail, 10 other · ceiling 0 meet, 5 miss, 0 other/);
-  assert.match(text, /\n {2}C +0\.59 pass +0\.63 pass +0\.15 pass +0\.15 pass +6\.92 fail\n/);
+  assert.match(text, /\nsize basis \(each size cell names the Jet and the peer basis\):\n {2}static stripped: Jet, Rust, C, Zig, Go and asm/);
+  assert.match(text, /\n {2}stripped \+ shared libraries: a compiled program with no static build/);
+  assert.match(text, /\n {2}C +0\.48 pass +0\.49 pass +0\.09 pass +0\.15 pass +7\.16 fail\n/);
+  assert.match(text, /\n {2}size basis: Jet static stripped · Rust stripped \+ shared libraries · C static stripped · Zig static stripped · Python script\+runtime · Bun script\+runtime · Node script\+runtime · asm ceiling static stripped(\n|$)/);
   assert.match(text, /\n {2}Go +uncovered: no go program: go\/main\.go is missing\n/);
   assert.match(text, /\n {2}Vite +not applicable: Vite bundles web front ends/);
-  assert.match(text, /\n {2}asm ceiling +1\.14 miss \+14% +1\.08 miss \+8% +5\.31 miss \+431% +4\.29 miss \+329% +75\.69 miss \+7469%/);
+  assert.match(text, /\n {2}asm ceiling +1\.12 miss \+12% +1\.12 miss \+12% +6\.01 miss \+501% +4\.06 miss \+306% +65\.76 miss \+6476%/);
   const html = renderGauntletStandings(projected);
   assert.equal(html.match(/<tr class="standings__row/g).length, 9);
   assert.match(html, /<tr class="standings__row standings__row--ceiling">/);
-  assert.match(html, /standings__cell standings__cell--fail" title="hello vs C, size: Jet 110 kB \/ 15\.9 kB \(Jet binary, peer binary\)"><b>6\.92 fail<\/b>/);
+  assert.match(html, /standings__cell standings__cell--fail" title="hello vs C, size: Jet 95\.6 kB \/ 13\.4 kB \(Jet static stripped, peer static stripped\)"><b>7\.16 fail<\/b><span><i>95\.6 kB<\/i><i>13\.4 kB<\/i><\/span><em>static stripped<\/em><\/td>/);
+  assert.match(html, /<p class="gauntlet__policy standings__basis"><strong>size basis \(each size cell names the Jet and the peer basis\):<\/strong><span>static stripped: /);
   assert.match(html, /colspan="5" class="standings__cell standings__cell--open"><b>uncovered<\/b>/);
   assert.match(html, /colspan="5" class="standings__cell standings__cell--na"><b>not applicable<\/b>/);
 });

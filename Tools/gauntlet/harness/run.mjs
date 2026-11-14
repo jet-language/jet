@@ -36,6 +36,8 @@ const TOOL_VERSION_COMMANDS = Object.freeze({
   vite: ["vite", "--version"],
   as: ["as", "--version"],
   perf: ["perf", "--version"],
+  strip: ["strip", "--version"],
+  ldd: ["ldd", "--version"],
   entr: ["entr", "-V"],
 });
 
@@ -1780,53 +1782,161 @@ async function scriptFiles(dir) {
   return { bytes: files.reduce((total, file) => total + file.bytes, 0), files };
 }
 
-// glibc's core objects every native program loads too; an interpreter's
-// runtime is its executable plus every other shared library it loads.
-const GLIBC_CORE_OBJECT = /^(?:libc|libm|libpthread|libdl|librt|ld-linux[\w.-]*|linux-vdso)\.so/;
+// ---- deployed size (#6834 c6) ------------------------------------------------
+// One stated size basis (measurement-manifest.json standings.size_basis). A
+// compiled program is charged the static, symbol-stripped build of the same
+// program where its language can build that way and that build reproduces the
+// expected output; otherwise its stripped binary plus every shared library it
+// loads, libc and the dynamic loader included. Jet and asm build static.
+// Interpreted peers are charged their script plus the interpreter and every
+// shared library it loads, on the same terms.
+const STATIC_SIZE_BUILDS = Object.freeze({
+  c: (dir, out) => ["gcc", "-O2", "-static", "-s", "main.c", "-o", out, "-lm"],
+  rust: (dir, out) => ["rustc", "--edition=2021", "-O", "-C", "target-feature=+crt-static", "-C", "strip=symbols", "main.rs", "-o", out],
+  zig: (dir, out) => ["zig", "build-exe", "-O", "ReleaseFast", "-fstrip", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", `-femit-bin=${out}`, "main.zig"],
+  go: (dir, out) => ["env", "GO111MODULE=off", "CGO_ENABLED=0", `GOCACHE=${path.join(dir, "go-cache")}`, "go", "build", "-ldflags=-s -w", "-o", out, "main.go"],
+});
 
-// The runtime an interpreted peer ships with: the interpreter executable the
-// dev shell resolves and its shared libraries outside glibc, by ldd.
-async function interpreterFootprint(cwd, interpreter) {
-  const script = 'exe=$(command -v "$1") || exit 127; exe=$(readlink -f "$exe"); printf "%s\\n" "$exe"; ldd "$exe" 2>&1; printf "ldd-exit %s\\n" "$?"';
-  const result = await runProcess(cwd, ["sh", "-c", script, "sh", interpreter], { timeoutMs: 30_000 });
-  const lines = result.stdout.toString("utf8").split(/\r?\n/).filter(Boolean);
-  if (result.code !== 0 || lines.length < 2) {
-    return { interpreter, status: "unavailable", reason: `\`command -v ${interpreter}\` exit ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 200)}` };
-  }
-  const exe = lines[0];
-  const head = Buffer.alloc(4);
-  const handle = await fs.open(exe, "r");
+// Whether an ELF64 executable loads through a dynamic loader (PT_INTERP), and
+// whether it still carries a symbol table or debug sections.
+async function elfLinkage(file) {
+  const name = path.basename(file);
   try {
-    await handle.read(head, 0, 4, 0);
-  } finally {
-    await handle.close();
+    const data = await fs.readFile(file);
+    if (data.length < 64 || data.toString("latin1", 0, 4) !== "\x7fELF") return { error: `${name} is not an ELF executable` };
+    if (data[4] !== 2 || data[5] !== 1) return { error: `${name} is not a little-endian ELF64 executable` };
+    const phoff = Number(data.readBigUInt64LE(32));
+    const phentsize = data.readUInt16LE(54);
+    let dynamic = false;
+    for (let index = 0; index < data.readUInt16LE(56); index += 1) {
+      if (data.readUInt32LE(phoff + index * phentsize) === 3) dynamic = true;
+    }
+    const shoff = Number(data.readBigUInt64LE(40));
+    const shentsize = data.readUInt16LE(58);
+    const shnum = data.readUInt16LE(60);
+    const shstrndx = data.readUInt16LE(62);
+    const sections = [];
+    if (shoff > 0 && shstrndx < shnum) {
+      const strings = Number(data.readBigUInt64LE(shoff + shstrndx * shentsize + 24));
+      for (let index = 0; index < shnum; index += 1) {
+        const start = strings + data.readUInt32LE(shoff + index * shentsize);
+        sections.push(data.toString("latin1", start, data.indexOf(0, start)));
+      }
+    }
+    return { dynamic, stripped: !sections.some((section) => section === ".symtab" || section.startsWith(".debug")), bytes: data.length };
+  } catch (error) {
+    return { error: `${name} could not be read as ELF: ${error.message}` };
   }
-  if (head.toString("latin1") !== "\x7fELF") return { interpreter, path: exe, status: "unmeasured", reason: `${exe} is a wrapper script, not the interpreter binary` };
-  const lddExit = Number(lines.at(-1).replace(/^ldd-exit /, ""));
-  const lddLines = lines.slice(1, -1);
-  if (lddExit !== 0 && !lddLines.some((line) => /not a dynamic executable|statically linked/.test(line))) {
-    return { interpreter, path: exe, status: "unmeasured", reason: `ldd ${exe} exit ${lddExit}: ${lddLines.join(" ").slice(0, 200)}` };
-  }
+}
+
+// Every shared library `file` loads, by ldd, libc and the dynamic loader
+// included; the vDSO has no file and costs nothing to deploy.
+async function sharedLibraries(cwd, file) {
+  const result = await runProcess(cwd, ["ldd", file], { timeoutMs: 30_000 });
+  const text = `${result.stdout.toString("utf8")}\n${result.stderr.toString("utf8")}`;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (result.code === 127) return { status: "unavailable", reason: `ldd unavailable: ${lines.join(" ").slice(0, 200)}` };
+  if (lines.some((line) => /not a dynamic executable|statically linked/.test(line))) return { status: "ok", libraries: [] };
+  if (result.code !== 0) return { status: "unmeasured", reason: `ldd ${path.basename(file)} exit ${result.code}: ${lines.join(" ").slice(0, 200)}` };
+  const missing = lines.find((line) => /=> not found/.test(line));
+  if (missing) return { status: "unmeasured", reason: `ldd ${path.basename(file)}: ${missing}` };
   const libraries = new Map();
-  for (const line of lddLines) {
-    const match = line.trim().match(/^(\S+)(?:\s+=>\s+(\S+))?\s+\(0x[0-9a-f]+\)$/);
-    if (!match) continue;
-    const name = path.basename(match[1]);
-    const file = match[2] ?? (match[1].startsWith("/") ? match[1] : null);
-    if (!file || GLIBC_CORE_OBJECT.test(name) || GLIBC_CORE_OBJECT.test(path.basename(file))) continue;
-    const real = await fs.realpath(file);
+  for (const line of lines) {
+    const match = line.match(/^(\S+)(?:\s+=>\s+(\S+))?\s+\(0x[0-9a-f]+\)$/);
+    const library = match?.[2] ?? (match?.[1].startsWith("/") ? match[1] : null);
+    if (!library) continue;
+    const real = await fs.realpath(library);
     if (!libraries.has(real)) libraries.set(real, { path: real, bytes: (await fs.stat(real)).size });
   }
-  const exeBytes = (await fs.stat(exe)).size;
-  const listed = [...libraries.values()].sort((left, right) => left.path.localeCompare(right.path));
+  return { status: "ok", libraries: [...libraries.values()].sort((left, right) => left.path.localeCompare(right.path)) };
+}
+
+const libraryBytes = (libraries) => libraries.reduce((total, library) => total + library.bytes, 0);
+
+// The deployed size of a compiled row's program on the stated basis. `check`
+// runs a candidate binary the way the row was verified and returns a failure
+// or null; a static build or stripped copy counts only once it passes. Size
+// builds go to <dir>.size so a state reset of `dir` cannot remove them.
+async function deployedSize(language, dir, artifact, { override = false, check }) {
+  const sizeDir = `${dir}.size`;
+  await fs.mkdir(sizeDir, { recursive: true });
+  const measured = await elfLinkage(artifact);
+  if (measured.error) return { status: "unmeasured", reason: measured.error };
+  let file = artifact;
+  let build = "measured binary";
+  let staticBuild = null;
+  const variant = STATIC_SIZE_BUILDS[baseLanguage(language)];
+  if (variant && override) staticBuild = "not used: the entry overrides the build command";
+  else if (variant) {
+    // Relative to `dir`, the build's cwd, so the recorded command names no stage path.
+    const out = path.join("..", path.basename(sizeDir), `static-${baseLanguage(language)}`);
+    const built = path.join(dir, out);
+    const command = variant(dir, out);
+    const result = await runProcess(dir, command);
+    const linkage = result.code === 0 ? await elfLinkage(built) : null;
+    const stderr = result.stderr.toString("utf8").trim();
+    const firstError = stderr.split("\n").find((line) => /\berror\b/i.test(line))?.trim();
+    const failure = result.code !== 0 ? `\`${command.join(" ")}\` exit ${result.code}: ${[firstError, stderr.slice(-200)].filter(Boolean).join(" … ")}`
+      : linkage.error ? linkage.error
+        : linkage.dynamic ? "the static build still loads a dynamic loader"
+          : await check(built);
+    if (failure) staticBuild = `not used: ${failure}`;
+    else {
+      file = built;
+      build = "static stripped build";
+      staticBuild = command.join(" ");
+    }
+  }
+  let linkage = await elfLinkage(file);
+  if (linkage.error) return { status: "unmeasured", reason: linkage.error };
+  if (!linkage.stripped) {
+    const stripped = path.join(sizeDir, `${path.basename(file)}.stripped`);
+    const result = await runProcess(dir, ["strip", "-o", stripped, file]);
+    if (result.code !== 0) {
+      return { status: result.code === 127 ? "unavailable" : "unmeasured", reason: `strip ${path.basename(file)} exit ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 200)}` };
+    }
+    const failure = await check(stripped);
+    if (failure) return { status: "unmeasured", reason: `the stripped binary fails its check: ${failure}` };
+    file = stripped;
+    build = `${build}, stripped`;
+    linkage = await elfLinkage(file);
+    if (linkage.error) return { status: "unmeasured", reason: linkage.error };
+  }
+  const shared = linkage.dynamic ? await sharedLibraries(dir, file) : { status: "ok", libraries: [] };
+  if (shared.status !== "ok") return { status: shared.status, reason: shared.reason };
+  return {
+    status: "ok",
+    basis: linkage.dynamic ? "stripped + shared libraries" : "static stripped",
+    linkage: linkage.dynamic ? "dynamic" : "static",
+    measured: { linkage: measured.dynamic ? "dynamic" : "static", stripped: measured.stripped, bytes: measured.bytes },
+    build,
+    file_bytes: linkage.bytes,
+    libraries: shared.libraries,
+    bytes: linkage.bytes + libraryBytes(shared.libraries),
+    ...(staticBuild ? { static_build: staticBuild } : {}),
+  };
+}
+
+// The runtime an interpreted peer ships with: the interpreter executable the
+// dev shell resolves and every shared library it loads.
+async function interpreterFootprint(cwd, interpreter) {
+  const script = 'exe=$(command -v "$1") || exit 127; readlink -f "$exe"';
+  const result = await runProcess(cwd, ["sh", "-c", script, "sh", interpreter], { timeoutMs: 30_000 });
+  const exe = result.stdout.toString("utf8").trim();
+  if (result.code !== 0 || !exe) {
+    return { interpreter, status: "unavailable", reason: `\`command -v ${interpreter}\` exit ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 200)}` };
+  }
+  const linkage = await elfLinkage(exe);
+  if (linkage.error) return { interpreter, path: exe, status: "unmeasured", reason: `${exe} is not the interpreter binary: ${linkage.error}` };
+  const shared = linkage.dynamic ? await sharedLibraries(cwd, exe) : { status: "ok", libraries: [] };
+  if (shared.status !== "ok") return { interpreter, path: exe, status: shared.status, reason: shared.reason };
   return {
     interpreter,
     status: "ok",
     path: exe,
-    exe_bytes: exeBytes,
-    libraries: listed,
-    bytes: exeBytes + listed.reduce((total, library) => total + library.bytes, 0),
-    excluded: "glibc core objects (libc, libm, libpthread, libdl, librt, ld-linux, linux-vdso)",
+    exe_bytes: linkage.bytes,
+    libraries: shared.libraries,
+    bytes: linkage.bytes + libraryBytes(shared.libraries),
   };
 }
 
@@ -2468,6 +2578,10 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
     const buildOverride = webMode ? null : commandFromSpec(languageSpecValue(entry.spec?.build ?? null, language), language, jetBin, null);
     const build = webMode ? await configuredBuildAndMeasure(language, stagedSource, jetBin, entry) : await buildAndMeasure(language, stagedSource, jetBin, buildOverride);
     row.build = build.build ? { command: build.command, ...build.build } : null;
+    // #6834 c6: a standings run charges every compiled row its deployed size.
+    const deployed = standings && PEER_KINDS[baseLanguage(language)] === "compiled"
+      ? (check) => deployedSize(language, stagedSource, build.artifact, { override: buildOverride !== null, check })
+      : null;
     row.metrics = await sourceMetrics(sourceDir, sourceFile);
     if (standings && PEER_KINDS[baseLanguage(language)] === "interpreted") row.script = await scriptFiles(sourceDir);
     row.provenance = {
@@ -2519,6 +2633,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
       const binary = artifact && await exists(artifact) ? (await fs.stat(artifact)).size : null;
       row.metrics = { ...row.metrics, ...runtimeMetrics(row.runtime), ...buildMetrics(row.build), binary_bytes: binary };
       if (standings) await countCycles(row, stagedSource, commands, runs, { reset });
+      if (deployed) row.size = await deployed((file) => verifySequence(stagedSource, steps.map((args) => runCommand(language, stagedSource, file, args)), expected, reset));
       continue;
     }
 
@@ -2555,6 +2670,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
       }
       row.status = "ok";
       row.verification = { status: "passed", kind: "service_probe_sequence" };
+      if (deployed) row.size = await deployed(async (file) => (await runService(language, stagedSource, file, entry)).failure ?? null);
       continue;
     }
 
@@ -2644,6 +2760,12 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
     const binary = artifact && await exists(artifact) ? (await fs.stat(artifact)).size : null;
     row.metrics = { ...row.metrics, ...runtimeMetrics(row.runtime), ...buildMetrics(row.build), binary_bytes: binary };
     if (standings) await countCycles(row, stagedSource, [command], runs, { reset: fixtureReset });
+    if (deployed) {
+      row.size = await deployed(async (file) => {
+        if (fixtureReset) await fixtureReset();
+        return verify(stagedSource, runCommand(language, stagedSource, file, entry.spec?.args ?? []), expected);
+      });
+    }
     await stopPeer();
   }
 
@@ -4356,6 +4478,8 @@ async function toolchainFingerprint(runDir, jetBin) {
     vite: toolVersionCommand("vite"),
     asm: toolVersionCommand("as"),
     perf: toolVersionCommand("perf"),
+    strip: toolVersionCommand("strip"),
+    ldd: toolVersionCommand("ldd"),
   };
   const versions = {};
   for (const [language, command] of Object.entries(commands)) {
@@ -4409,8 +4533,10 @@ async function standingsPlans(loaded, policy, references, toolchains) {
   return plans;
 }
 
+// The standings peers' toolchains plus the measuring tools: perf counts
+// cycles, strip and ldd give the deployed size.
 function standingsToolchains(policy, toolchains) {
-  return Object.fromEntries([...policy.peers, policy.ceiling, "perf"].filter((tool) => toolchains[tool]).map((tool) => [tool, toolchains[tool]]));
+  return Object.fromEntries([...policy.peers, policy.ceiling, "perf", "strip", "ldd"].filter((tool) => toolchains[tool]).map((tool) => [tool, toolchains[tool]]));
 }
 
 // --dry-run: every entry x peer x metric standings cell the run would fill,
@@ -4424,9 +4550,10 @@ async function dryRun(options, matrix, entriesDir) {
   const { loaded, tools, skipped } = await loadEntries(entriesDir, options.entry);
   const plans = await standingsPlans(loaded, policy, references, toolchains);
   const cells = planCells(plans.map(({ plan }) => plan));
-  console.log(["cell", "entry", "mode", "peer", "role", "metric", "status", "program", "reason"].join("\t"));
+  for (const [basis, definition] of Object.entries(policy.size_basis)) console.log(`size-basis\t${basis}\t${definition}`);
+  console.log(["cell", "entry", "mode", "peer", "role", "metric", "status", "program", "size basis (jet / peer)", "reason"].join("\t"));
   for (const cell of cells) {
-    console.log(["cell", cell.entry, cell.mode, cell.peer, cell.role, cell.metric, cell.status, cell.program ?? "-", cell.reason ?? "-"].join("\t"));
+    console.log(["cell", cell.entry, cell.mode, cell.peer, cell.role, cell.metric, cell.status, cell.program ?? "-", cell.size_basis ? `${cell.jet_size_basis} / ${cell.size_basis}` : "-", cell.reason ?? "-"].join("\t"));
   }
   for (const [tool, row] of Object.entries(standingsToolchains(policy, toolchains))) {
     console.log(`toolchain\t${tool}\t${row.status}\t${row.version || "-"}`);
@@ -4660,6 +4787,7 @@ async function main() {
     console.log(`source-total\t${total.jet.loc}\t${total.python.loc}\t${total.loc_ratio}\t${total.jet.source_tokens}\t${total.python.source_tokens}\t${total.source_token_delta}`);
   }
   if (standings) {
+    for (const [basis, definition] of Object.entries(standings.size_basis)) console.log(`standings-size-basis\t${basis}\t${definition}`);
     for (const line of standingsLines(standings)) console.log(`standings\t${line}`);
     const { floor, ceiling } = standings.summary;
     console.log(`standings-summary\tfloor pass ${floor.pass} fail ${floor.fail} other ${floor.other}\tceiling meet ${ceiling.meet} miss ${ceiling.miss} other ${ceiling.other}`);
@@ -4712,4 +4840,5 @@ export {
   matrixPeerLanguages,
   LOSS_OWNER_CATEGORY_BY_METRIC,
   standingsPlans,
+  elfLinkage,
 };

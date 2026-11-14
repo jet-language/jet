@@ -68,7 +68,13 @@ against every peer in `matrix.json` `rails.standings` (Rust, C, Zig, Go,
 Python, Bun, Node, Vite) and its hand-written asm ceiling
 (`Tools/perf/asm-parity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
 The metrics are startup, run wall, run cycles (`perf stat -e cycles:u`), peak
-RSS and size; interpreted peers count script plus runtime. Each metric gets
+RSS and size. Size is compared on one stated basis (`measurement-manifest.json`
+`standings.size_basis`): a compiled program counts as its static, stripped
+build where its language can build that way and that build reproduces the
+expected output; otherwise as its stripped binary plus every shared library it
+loads, libc and the loader included (the row names why). Interpreted peers
+count script plus runtime on the same terms. Each row records the linkage, the
+build and the libraries charged. Each metric gets
 Jet/peer with a floor verdict (pass below 1.00) and, for asm, a ceiling verdict
 (meet at 1.00 or below, gap = ratio − 1). A peer with no program is
 `uncovered`; one the manifest's `standings.not_applicable` excludes is

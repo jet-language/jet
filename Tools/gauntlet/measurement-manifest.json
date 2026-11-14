@@ -639,10 +639,11 @@
       "size": "deployed artifact bytes, by the size basis below"
     },
     "size_basis": {
-      "binary": "Jet, Rust, C, Zig, Go and asm on non-web entries: bytes of the built executable",
+      "static stripped": "Jet, Rust, C, Zig, Go and asm on non-web entries, where the language can build that way: bytes of a static, symbol-stripped build of the same program (C: gcc -O2 -static -s; Rust: -C target-feature=+crt-static -C strip=symbols; Zig: ReleaseFast -fstrip; Go: CGO_ENABLED=0 -ldflags='-s -w'; Jet and asm: their static binary, stripped), counted only after it reproduces expected output",
+      "stripped + shared libraries": "a compiled program with no static build (the static build fails, still links dynamically, changes the output, or the entry overrides the build command): bytes of its stripped binary plus every shared library it loads, libc and the dynamic loader included (by ldd); the row names why the static build was not used",
       "web artifact": "Jet and Rust on web entries: bytes of the emitted .js, .mjs and .wasm artifacts",
       "bundle": "Vite: bytes of the bundle vite build writes to dist/",
-      "script+runtime": "Python, Node and Bun: bytes of the program's script files plus the interpreter executable and every shared library it loads outside glibc (libc, libm, libpthread, libdl, librt, ld-linux)"
+      "script+runtime": "Python, Node and Bun: bytes of the program's script files plus the interpreter executable and every shared library it loads, libc and the dynamic loader included (by ldd)"
     },
     "judgement": "ratio = jet / peer per metric; the peer floor passes below 1.00, the asm ceiling is met at or below 1.00 and its gap is ratio - 1.00",
     "missing_program": "uncovered: the row stays, its reason names the missing program",

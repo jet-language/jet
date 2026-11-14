@@ -419,7 +419,11 @@ file (`Tools/gauntlet/harness/run.mjs`; a full-matrix run is preferred over
 partial runs). Each entry gets a row for every peer and the hand-written asm
 ceiling, and each metric gets a column showing Jet/peer, the peer-floor
 verdict and the gap to the ceiling. Rows that are uncovered, not applicable,
-unavailable or failed keep their reason. The status matrix follows below them.
+unavailable or failed keep their reason. The page and the text table state the
+size basis from the section's `size_basis` (static stripped, else stripped plus
+every shared library including libc; web artifact; bundle; script+runtime), and
+each size cell names Jet's and the peer's basis. The status matrix follows
+below them.
 `config.gauntletResults` (default `Tools/gauntlet/results`) is the results
 directory.
 
