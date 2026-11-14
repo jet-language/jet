@@ -1116,8 +1116,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
                         item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
                         if item == .TypeAlias(definition) {
                             names: loop parameter in definition.type_params -> parameter.name
-                            written: sema_type_alias_chosen(graph, alias_row.module_index, definition, rewritten) ?? return Type.Apply{name: head, args: rewritten}
-                            target: sema_inference_substitute_type(written, names, rewritten)
+                            target: sema_type_alias_expanded(graph, alias_row.module_index, definition, rewritten, names) ?? return Type.Apply{name: head, args: rewritten}
                             return sema_type_resolve_declared_recursive(graph, target, sema_registration_module_index(graph, nominal.symbol.module_identity) ?? -1, generic_params)
                         }
                     }
@@ -1153,19 +1152,19 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
     }
 }
 
-// The type an alias stands for under `args`, before they are substituted:
-// its target, or the first choice of a computed alias whose condition holds.
-// None while a condition can't be decided, as when an argument is still a
-// type parameter. `module_index` is the alias's module, whose constants a
-// condition may read.
-sema_type_alias_chosen: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type]) -> Type? {
-    if definition.choices.len() == 0 -> return Val(definition.target.copy())
+// The type an alias stands for under `args`, with `names` (its parameters, or
+// none to keep them as written) substituted by `args`: its target, or the
+// first choice of a computed alias whose condition holds. None while a
+// condition can't be decided, as when an argument is still a type parameter.
+// `module_index` is the alias's module, whose constants a condition may read.
+sema_type_alias_expanded: fn(graph: SemaRegistrationGraph, module_index: Int, definition: TypeAliasDef, args: [Type], names: [String]) -> Type? {
+    if definition.choices.len() == 0 -> return Val(sema_inference_substitute_type(definition.target, names, args))
     values: sema_type_alias_number_values(graph, module_index, definition, args)
     loop choice in definition.choices {
-        cond: choice.cond ?? return Val(choice.target.copy())
+        cond: choice.cond ?? return Val(sema_inference_substitute_type(choice.target, names, args))
         folded: sema_genmod_fold(cond, values, [String:Bool]{}) ?? return None
         if folded == .Bool(holds, _, _) {
-            if holds -> return Val(choice.target.copy())
+            if holds -> return Val(sema_inference_substitute_type(choice.target, names, args))
         } else {
             return None
         }

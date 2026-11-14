@@ -1000,7 +1000,7 @@ sema_call_static_alias_target: fn(graph: SemaRegistrationGraph, row: SemaRegistr
     alias_row: graph.modules[row.module_index].nominals[row.row]
     if alias_row.kind != SemaRegistrationNominalKind.TypeAlias -> return None
     definition: if alias_row.source == .SourceAST(item) && item == .TypeAlias(found) -> found else -> { return None }
-    written: sema_type_alias_chosen(graph, row.module_index, definition, owner_type_args) ?? return None
+    written: sema_type_alias_expanded(graph, row.module_index, definition, owner_type_args, [String]{}) ?? return None
     target_name := ""
     target_args := [Type]{}
     if written == {
