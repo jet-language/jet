@@ -1,5 +1,6 @@
 # Claim: a host built against a valid Component, whose artifact is then replaced by a malformed one, fails the load at run time as PluginError.Guest with export `load` and no frames, and keeps running; on the default and release tiers
 # The compiler reads the guest's interface from guest.wat when it builds the host; the run-time load reads the same path again and refuses bytes that differ from the built guest
+# The package declares `needs: [FS.Read]` for the guest's `read` host import, so the built guest passes the load's needs check and runs
 fixture: plugin_load_fails_as_a_guest_load_fault_when_the_artifact_changes_after_the_build.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
