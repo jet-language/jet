@@ -72,11 +72,6 @@ Orders: struct {
     path: String
     state: Shared<RouteState>
 
-    #Server.Get("/")
-    home: fn(self) -> HTTPResponse HTTPError! {
-        Ok(battery.ok_response("<h1>Orders</h1><a href=\"/orders\">list</a>"))
-    }
-
     #Server.Get("/old")
     redirect: fn(self) -> HTTPResponse HTTPError! {
         Ok(battery.redirect_response("/orders"))
@@ -137,7 +132,6 @@ run: fn() {
     _reset: battery.reset_orders(db_path) ?? panic("reset failed")
     seeded_count: battery.seed_orders(db_path) ?? panic("seed failed")
 
-    _app_graph: app_graph()
     _page: battery.ssr_orders_page(seeded_count, "alice")
     print("route-list:{battery.order_list_path(3)}")
     print("route-detail:{battery.order_detail_path(1)}")
@@ -159,46 +153,47 @@ run: fn() {
 
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
-    // Each route is registered once: the tagged methods of the mounted
-    // `Orders` value, plus the static assets (`public/`, relative to the
-    // project directory the example runs in).
-    mux: core_web.app()
-    mux.mount(Orders{path: db_path, state: state})
-    mux.static_files("/assets", "public")
+    // One table answers every request: the App graph's pages and its static
+    // assets (`public/`, relative to the project directory the example runs
+    // in), and the marked methods of `Orders`, mounted once under `/api`.
+    app: app_graph().mount("/api", Orders{path: db_path, state: state})
     task_handle: task {
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
-        mux.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
+        app.serve_once(listener)
     }
 
     home: client.get("http://{addr}/")
     print("home:{home.status()}")
+    orders_page: client.get("http://{addr}/orders")
+    print("orders-page:{orders_page.status()}")
     // Redirects are not followed here, so the 303 and its location show.
-    redirected: client.request("GET", "http://{addr}/old").redirects(0).send()
+    redirected: client.request("GET", "http://{addr}/api/old").redirects(0).send()
     print("redirect:{redirected.status()}:{redirected.header("location") ?? "missing"}")
-    listed: client.get("http://{addr}/orders?limit=3")
+    listed: client.get("http://{addr}/api/orders?limit=3")
     print("list-before:{listed.status()}:{listed.body().text(8192) ?? "bad"}")
-    created_request: client.request("POST", "http://{addr}/orders").form("item", "pen").form("quantity", "3")
+    created_request: client.request("POST", "http://{addr}/api/orders").form("item", "pen").form("quantity", "3")
     created: created_request.send()
     print("create:{created.status()}")
-    listed_after: client.get("http://{addr}/orders")
+    listed_after: client.get("http://{addr}/api/orders")
     print("list-after:{listed_after.status()}:{listed_after.body().text(8192) ?? "bad"}")
-    detail: client.get("http://{addr}/orders/1")
-    protected_failure_request: client.get("http://{addr}/protected")
+    detail: client.get("http://{addr}/api/orders/1")
+    protected_failure_request: client.get("http://{addr}/api/protected")
     print("protected-failure-http:{protected_failure_request.status()}")
     print("detail:{detail.status()}")
-    login_request: client.request("POST", "http://{addr}/login").json(Login{user: "alice", password: "argon2id:demo"})
+    login_request: client.request("POST", "http://{addr}/api/login").json(Login{user: "alice", password: "argon2id:demo"})
     logged: login_request.send()
     set_cookie: logged.header("set-cookie") ?? return
     print("login:{logged.status()}:cookie={set_cookie.starts_with("jet_session=")}")
-    protected_request: client.request("GET", "http://{addr}/protected").cookie("jet_session", state.guard_read().value.session_id)
+    protected_request: client.request("GET", "http://{addr}/api/protected").cookie("jet_session", state.guard_read().value.session_id)
     protected_response: protected_request.send()
     print("protected:{protected_response.status()}")
     asset: client.get("http://{addr}/assets/index.html")
