@@ -221,9 +221,11 @@ reads whole, holds the runtime alone. Binding a program object to that image
 (`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
 runtime and looks up only the program's imports in that index; the bound
 bytes are a complete static executable at the
-run base. `jet run` reads only the image's first page and the bytes after its
-loaded segments for that bind, and maps the segments from the file
-(`Image/Loader.jet`). The step runs no C compiler or archiver, and the pack
+run base. `jet run` and the comptime session read only the image's first
+page and the bytes after its loaded segments for that bind (a jet that
+carries its runtime lends its image part instead), and map the segments
+from the file (`Image/Loader.jet`); a comptime batch binds to the session's
+one read, never a copy. The step runs no C compiler or archiver, and the pack
 packages no C platform archives, which a program with C takes from jet's C
 toolchain pack (foreign C, below). The key (`jet-native-runtime/v5`) hashes
 the source inventory, checked ABI, thread receipt, lifecycle and backend

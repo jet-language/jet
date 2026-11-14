@@ -16,6 +16,7 @@ use {
         LINK_RUN_BASE,
         LINK_RUN_LOW_BASE,
         X64Executable,
+        X64ImageFile,
         X64ImagePart,
         X64Launch,
         x64_bind_runtime_image,
@@ -722,6 +723,19 @@ jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
     cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
 }
 
+// This jet's runtime image part, lent (jet_cli_runtime_part), for a bind
+// (JetBackend Image/MemoryLink.jet): its file offset and its file's
+// identity when the part found in this jet's file is the one lent, so the
+// loader maps the image part from that file (Image/Loader.jet
+// x64_executable_load); else offset 0 and no identity, and the loader
+// copies the lent bytes.
+jet_cli_runtime_image_lent: fn() -[FS.Read, Env]> X64ImageFile Never! {
+    image: jet_cli_runtime_part(JET_CLI_RUNTIME_IMAGE_FILE)
+    part: x64_image_part_file(JET_CLI_SELF_EXECUTABLE, "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_IMAGE_FILE}") ?? X64ImagePart{at: 0, size: -1, stamp: [Int]{}}
+    if part.size != image.len() -> return X64ImageFile{bytes: image, at: 0, stamp: [Int]{}, gap_at: 0, gap: 0, failure: ""}
+    X64ImageFile{bytes: image, at: part.at, stamp: part.stamp.move(), gap_at: 0, gap: 0, failure: ""}
+}
+
 // This jet's identity, its JET_CLI_IDENTITY_PART part, lent from its mapped
 // image with no file read; None for jet-bare, which carries no part. A jet
 // that carries its runtime but lacks the part is an internal error.
@@ -1139,15 +1153,10 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
     if runtime_key == None -> return realized
     if bind && no_closure && !platform {
         if jet_cli_runtime_embedded() {
-            image: jet_cli_runtime_part(JET_CLI_RUNTIME_IMAGE_FILE)
-            // Mapped from this jet's file when the part found there is the
-            // one lent here; else the loader copies the lent bytes.
-            part := x64_image_part_file(JET_CLI_SELF_EXECUTABLE, "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_IMAGE_FILE}") ?? X64ImagePart{at: 0, size: -1, stamp: [Int]{}}
-            if part.size == image.len() {
-                realized.runtime_at = part.at
-                realized.runtime_stamp = part.stamp.move()
-            }
-            realized.runtime = Val(image)
+            image: jet_cli_runtime_image_lent()
+            realized.runtime_at = image.at
+            realized.runtime_stamp = image.stamp.move()
+            realized.runtime = Val(image.bytes.move())
             realized.runtime_path = JET_CLI_SELF_EXECUTABLE
             realized.bound = true
             return realized

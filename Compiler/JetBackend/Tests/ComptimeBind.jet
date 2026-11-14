@@ -16,12 +16,17 @@ use {
         link_synth_code,
         link_synth_function,
         link_synth_object,
+        x64_bind_runtime_image,
         x64_bind_runtime_image_at,
         x64_comptime_code,
         x64_comptime_symbol_address,
         x64_comptime_symbols,
         x64_executable_bytes,
+        x64_executable_complete,
         x64_executable_header,
+        x64_executable_image_head,
+        x64_executable_segments,
+        x64_image_file_read,
         x64_image_segments,
     ]
     bind_files: core.files
@@ -69,10 +74,10 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
     view: link_image_view(reference, 1, 0, 0)
     assert(reference.errors.len() == 0, "the runtime image has a program base")
     base: view.program_base
-    failed: x64_bind_runtime_image_at("no-main", comptime_bind_object("helper"), comptime_bind_read(path), base)
+    failed: x64_bind_runtime_image_at("no-main", comptime_bind_object("helper"), comptime_bind_read(path), base, 0, 0)
     assert(failed.errors.len() > 0 && failed.errors[0].contains("does not define `main`"), "a batch without `main` fails after its object loads")
     assert(comptime_bind_unchanged(failed.executable.image, reference), "a failed bind gives the image back unchanged")
-    bound := x64_bind_runtime_image_at("batch", comptime_bind_object("main"), failed.executable.image.move(), base)
+    bound := x64_bind_runtime_image_at("batch", comptime_bind_object("main"), failed.executable.image.move(), base, 0, 0)
     assert(bound.errors.len() == 0, "the next batch binds: {bound.errors.join("; ")}")
     assert(comptime_bind_unchanged(bound.executable.image, reference), "a bound batch gives the image back unchanged")
     held: bound.executable.image.move()
@@ -99,6 +104,49 @@ comptime_bind_unchanged: fn(image: [U8], reference: LinkContext) -> Bool Never! 
     all: x64_comptime_symbols(whole, whole, 0, "", true)
     loop name in ([String]{"main", "__jet_bind_main"}) {
         found: x64_comptime_symbol_address(part, name) ?? panic("the program part names no `{name}`")
+        assert((x64_comptime_symbol_address(all, name) ?? -1) == found, "`{name}` has the whole file's address")
+    }
+}
+
+// The session reads the image as `jet run` does, without its loaded
+// segments (Image/Loader.jet x64_image_file_read). A batch binds to that
+// read and gives it back unchanged; the entry program binds to it and gives
+// it back too (x64_executable_image_head), keeping only the first page, and
+// its segments and symbols are those of the whole file it stands for.
+#Test("comptime binds read the runtime image without its loaded segments and give it back") {
+    path: comptime_bind_image_path()
+    read: x64_image_file_read(path)
+    assert(read.failure == "" && read.gap > 0 && read.stamp.len() > 0, "the image file is read without its loaded segments: {read.failure}")
+    // A second read to compare the one the binds take with.
+    again: x64_image_file_read(path)
+    reference := link_context([[U8]]{[U8]{}, again.bytes.move()}, LINK_RUN_BASE)
+    view: link_image_view(reference, 1, read.gap_at, read.gap)
+    assert(reference.errors.len() == 0, "the image read has a program base")
+    batch: x64_bind_runtime_image_at("batch", comptime_bind_object("main"), read.bytes.move(), view.program_base, read.gap_at, read.gap)
+    assert(batch.errors.len() == 0, "a batch binds to the image read: {batch.errors.join("; ")}")
+    assert(comptime_bind_unchanged(batch.executable.image, reference), "the batch gives the image read back unchanged")
+    code: x64_comptime_code(batch.executable, view.program_base)
+    assert(code.failure == "" && code.segments.len() > 0, "the batch's program part has its segments: {code.failure}")
+    size: read.stamp[2]
+    entry := x64_bind_runtime_image("entry", comptime_bind_object("main"), batch.executable.image.move(), path, read.stamp.move(), 0, read.gap_at, read.gap, true)
+    assert(entry.errors.len() == 0, "the entry program binds to the image read: {entry.errors.join("; ")}")
+    given: entry.executable.image.move()
+    entry.executable.image = [U8]{}
+    x64_executable_image_head(entry.executable, given)
+    assert(comptime_bind_unchanged(given, reference), "the entry program gives the image read back unchanged")
+    assert(entry.executable.image.len() == 4096 && entry.executable.image_gap_at == 4096, "the entry program keeps the image's first page")
+    assert(entry.executable.image.len() + entry.executable.image_gap == size, "the rest of the image file is the entry program's gap")
+    plan: x64_executable_segments(entry.executable)
+    part: x64_comptime_symbols(x64_executable_header(entry.executable), entry.executable.tail, entry.executable.tail_at, "", true)
+    // The whole file the entry program stands for.
+    whole := entry.executable.move()
+    assert(x64_executable_complete(whole) == "", "the image file reads whole again")
+    file: x64_executable_bytes(whole.move())
+    expected: x64_image_segments(file)
+    assert(plan.failure == "" && expected.failure == "" && plan.segments.len() == expected.segments.len() && plan.high == expected.high && plan.entry == expected.entry, "the entry program's segments are the whole file's")
+    all: x64_comptime_symbols(file, file, 0, "", true)
+    loop name in ([String]{"main", "__jet_bind_main"}) {
+        found: x64_comptime_symbol_address(part, name) ?? panic("the entry program's part names no `{name}`")
         assert((x64_comptime_symbol_address(all, name) ?? -1) == found, "`{name}` has the whole file's address")
     }
 }

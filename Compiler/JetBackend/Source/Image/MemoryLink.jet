@@ -506,14 +506,16 @@ x64_link_with_runtime_image: fn(name: String, program: &&[U8], image: &&[U8]) ->
 
 // Bind the program object `program` (named `name` in reports) with its part
 // at `program_base`, a page boundary at or above the image's own, for code
-// loaded into a process already running the runtime image `image`
-// (compile-time batches, SessionHost.jet x64_comptime_code), which maps only
-// the loads from `program_base` up. The executable's image part is `image`
-// itself, unchanged, whether or not the program binds, so a caller binding
-// batch after batch keeps one image. It has no `.debug_*` section: none
-// lies in a load, so the process would never map one.
-x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], program_base: Int) -> X64BindResult Never! {
-    link_bind_image(name, program, image, 0, 0, Val(program_base), false)
+// loaded into a process already running the runtime image `image`, read
+// without its bytes [gap_at, gap_at + gap) (Image/Loader.jet
+// x64_image_file_read; gap 0 when whole) (compile-time batches,
+// SessionHost.jet x64_comptime_code), which maps only the loads from
+// `program_base` up. The executable's image part is `image` itself,
+// unchanged, whether or not the program binds, so a caller binding batch
+// after batch keeps one image. It has no `.debug_*` section: none lies in a
+// load, so the process would never map one.
+x64_bind_runtime_image_at: fn(name: String, program: &&[U8], image: &&[U8], program_base: Int, gap_at: Int, gap: Int) -> X64BindResult Never! {
+    link_bind_image(name, program, image, gap_at, gap, Val(program_base), false)
 }
 
 link_bind_bytes: fn(bound: &&X64BindResult) -> X64ExecutableResult Never! {

@@ -28,6 +28,8 @@ use {
         X64ComptimeChild,
         X64ComptimeCode,
         X64ComptimeSymbols,
+        X64Executable,
+        X64ImageFile,
         X64Segment,
         X64_COMPTIME_ALLOC,
         X64_COMPTIME_CALL,
@@ -52,6 +54,7 @@ use {
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
         os_page_round,
+        x64_bind_runtime_image,
         x64_bind_runtime_image_at,
         x64_comptime_admit,
         x64_comptime_close,
@@ -70,8 +73,9 @@ use {
         x64_comptime_symbols_none,
         x64_comptime_word,
         x64_executable_header,
-        x64_image_segments,
-        x64_link_with_runtime_image,
+        x64_executable_image_head,
+        x64_executable_segments,
+        x64_executable_whole,
     ]
 }
 
@@ -101,27 +105,37 @@ JetEvalNativeSession: struct {
 
 // The runtime image file, read when a batch first needs it, so a compile
 // without compile-time code never reads it: `bytes` holds it once read
-// (nothing when the file can't be read), `read` once tried. A batch's bind
-// takes it out and puts it back (jet_eval_native_bind).
+// (nothing when the file can't be read), `read` once tried. It is read as
+// the host reads it for a bind (JetBackend Image/Loader.jet X64ImageFile):
+// lent from the jet that carries it, or without its loaded segments (its
+// bytes [gap_at, gap_at + gap)), which no bind reads and the loader maps
+// from the file `file`, where it lies from offset `at`, while that file
+// has the identity `stamp`. A bind takes it out and puts it back
+// (jet_eval_native_bind).
 JetEvalNativeImage: struct {
     file: String
     reader: JetEvalNativeImageReader
     read: Bool
     bytes: [[U8]]
+    at: Int
+    stamp: [Int]
+    gap_at: Int
+    gap: Int
 }
 
 // The host's read of the runtime image file; `None` when it can't be read.
 JetEvalNativeImageReader: trait {
-    read: fn(self, file: String) -[FS.Read]> [U8]?
+    read: fn(self, file: String) -[FS.Read, Env]> X64ImageFile?
 }
 
-// One child: the entry program bound to the image (`stub`, bound once) and
-// its global symbols (`defined`, what a batch's runtime calls resolve to);
+// One child: the entry program bound to the image (`stub`, bound once,
+// its image part mapped from the image's file when it spawns) and its
+// global symbols (`defined`, what a batch's runtime calls resolve to);
 // `base` the page the next batch loads at, `generation` counting the
 // child's spawns, so a batch knows when it must load again.
 JetEvalNativeChild: struct {
     child: X64ComptimeChild
-    stub: [U8]
+    stub: X64Executable
     defined: X64ComptimeSymbols
     base: Int
     generation: Int
@@ -193,7 +207,7 @@ JetEvalIRState: struct {
 }
 
 jet_eval_native_session: fn(file: String, reader: &&JetEvalNativeImageReader) -> Shared<JetEvalNativeSession> Never! {
-    image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: [[U8]]{}}}
+    image: Shared{JetEvalNativeImage{file: file, reader: reader.move(), read: false, bytes: [[U8]]{}, at: 0, stamp: [Int]{}, gap_at: 0, gap: 0}}
     Shared{JetEvalNativeSession{image: image, sealed: jet_eval_native_child_new(), runtime: jet_eval_native_child_new()}}
 }
 
@@ -202,18 +216,11 @@ jet_eval_native_image_read: fn(image: &JetEvalNativeImage) Never! {
     if image.read -> return
     image.read = true
     found: image.reader.read(image.file) ?? return
-    image.bytes.push(found)
-}
-
-// A copy of the session's runtime image, read on the first call; None when
-// the file can't be read. The image cell serializes the read, so build
-// threads sharing the session read the file once.
-jet_eval_native_image: fn(session: JetEvalNativeSession) -> [U8]? Never! {
-    permit := session.image.guard_edit()
-    jet_eval_native_image_read(permit.value)
-    // copy: the stub's link consumes its image; the cell keeps it for every batch.
-    if permit.value.bytes.len() > 0 -> return Val(permit.value.bytes[0].copy())
-    None
+    image.at = found.at
+    image.stamp = found.stamp.move()
+    image.gap_at = found.gap_at
+    image.gap = found.gap
+    image.bytes.push(found.bytes.move())
 }
 
 // Whether the session's runtime image can be read (reading it on first use).
@@ -223,24 +230,50 @@ jet_eval_native_image_present: fn(session: JetEvalNativeSession) -> Bool Never! 
     permit.value.bytes.len() > 0
 }
 
-// Binds the batch object `object` with its program part at `base` to the
-// session's runtime image (MemoryLink.jet x64_bind_runtime_image_at), which
-// the bind takes out of the image cell instead of a copy and which goes back
-// unchanged whether the batch bound or not; the executable has no image
-// part. None when the image can't be read. The cell stays locked for the
+// Binds the program object `object` to the session's runtime image, which
+// the bind takes out of the image cell instead of a copy and which goes
+// back unchanged whether the program bound or not. A batch, its program
+// part at `base` (MemoryLink.jet x64_bind_runtime_image_at), gets no image
+// part. The entry program (`base` None: MemoryLink.jet
+// x64_bind_runtime_image) keeps the image's first page, and its image part
+// is mapped from the image's file when it spawns (Image/Loader.jet
+// x64_executable_image_head); an image with no file identity it keeps
+// whole. None when the image can't be read. The cell stays locked for the
 // bind, so a bind of the other child waits for it.
-jet_eval_native_bind: fn(session: JetEvalNativeSession, object: &&[U8], base: Int) -> X64BindResult? Never! {
+jet_eval_native_bind: fn(session: JetEvalNativeSession, object: &&[U8], base: Int?) -> X64BindResult? Never! {
     permit := session.image.guard_edit()
-    jet_eval_native_image_read(permit.value)
-    runtime: permit.value.bytes.remove(0, .Slot) ?? return None
-    bound := x64_bind_runtime_image_at("jet-comptime", object.move(), runtime, base)
-    permit.value.bytes.push(bound.executable.image.move())
+    jet_eval_native_bind_image(permit.value, object.move(), base)
+}
+
+jet_eval_native_bind_image: fn(image: &JetEvalNativeImage, object: &&[U8], base: Int?) -> X64BindResult? Never! {
+    jet_eval_native_image_read(image)
+    runtime: image.bytes.remove(0, .Slot) ?? return None
+    if base == .Val(at) {
+        bound := x64_bind_runtime_image_at("jet-comptime", object.move(), runtime, at, image.gap_at, image.gap)
+        image.bytes.push(bound.executable.image.move())
+        bound.executable.image = [U8]{}
+        return Val(bound.move())
+    }
+    bound := x64_bind_runtime_image("jet-comptime", object.move(), runtime, image.file, image.stamp.copy(), image.at, image.gap_at, image.gap, true)
+    if bound.errors.len() > 0 {
+        image.bytes.push(bound.executable.image.move())
+        bound.executable.image = [U8]{}
+        return Val(bound.move())
+    }
+    if image.stamp.len() == 0 {
+        // copy: an image with no file identity can't be mapped, so the entry program keeps it whole.
+        image.bytes.push(bound.executable.image.copy())
+        return Val(bound.move())
+    }
+    taken: bound.executable.image.move()
     bound.executable.image = [U8]{}
+    x64_executable_image_head(bound.executable, taken)
+    image.bytes.push(taken)
     Val(bound.move())
 }
 
 jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
-    Shared{JetEvalNativeChild{child: X64ComptimeChild{}, stub: [U8]{}, defined: x64_comptime_symbols_none(), base: 0, generation: 0, failure: ""}}
+    Shared{JetEvalNativeChild{child: X64ComptimeChild{}, stub: x64_executable_whole([U8]{}), defined: x64_comptime_symbols_none(), base: 0, generation: 0, failure: ""}}
 }
 
 // ---------------------------------------------------------------------------
@@ -252,7 +285,7 @@ jet_eval_native_child_new: fn() -> Shared<JetEvalNativeChild> Never! {
 // `c.failure`.
 jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession, stdout: Bool) -> Bool {
     if c.child.pid > 0 -> return true
-    if c.stub.len() == 0 {
+    if c.stub.tail.len() == 0 {
         entry := jet_eval_native_entry_module()
         found: ir_lint_module(entry, "eval.entry", compiler_threads_single())
         if found.len() > 0 {
@@ -264,24 +297,23 @@ jet_eval_native_start: fn(c: &JetEvalNativeChild, session: JetEvalNativeSession,
             c.failure = "the comptime entry program doesn't compile: {compiled.errors.join("; ")}"
             return false
         }
-        runtime := jet_eval_native_image(session) ?? {
+        bound: jet_eval_native_bind(session, compiled.bytes.move(), None) ?? {
             c.failure = "the runtime image (jet_runtime.image) can't be read"
             return false
         }
-        bound := x64_link_with_runtime_image("jet-comptime", compiled.bytes.move(), runtime)
         if bound.errors.len() > 0 {
             c.failure = "the comptime entry program doesn't bind to the runtime image: {bound.errors.join("; ")}"
             return false
         }
-        plan: x64_image_segments(bound.bytes)
+        plan: x64_executable_segments(bound.executable)
         if plan.failure != "" {
             c.failure = "the bound comptime entry program is not an image: {plan.failure}"
             return false
         }
         high: os_page_round(plan.high)
         if high > c.base -> c.base = high
-        c.defined = x64_comptime_symbols(bound.bytes, bound.bytes, 0, "", true)
-        c.stub = bound.bytes.move()
+        c.defined = x64_comptime_symbols(x64_executable_header(bound.executable), bound.executable.tail, bound.executable.tail_at, "", true)
+        c.stub = bound.executable.move()
     }
     x64_comptime_close(c.child)
     spawned := x64_comptime_spawn(c.stub, stdout, -1)
@@ -443,7 +475,7 @@ jet_eval_native_load: fn(built: &&JetEvalIRComptime, config: JetEvalConfig, thre
     }
     // The batch binds to the session's image itself, not a copy, and only
     // its program part is put together: the child runs the image already.
-    bound: jet_eval_native_bind(session.value, compiled.bytes.move(), permit.value.base) ?? {
+    bound: jet_eval_native_bind(session.value, compiled.bytes.move(), Val(permit.value.base)) ?? {
         program.failure = "no runtime image"
         program.missing = true
         program.entries = entries.move()

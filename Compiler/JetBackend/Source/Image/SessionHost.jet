@@ -38,10 +38,11 @@ X64ComptimeChild: struct {
     admitted: Bool{false}
 }
 
-// Starts the static executable `image` (Image/Loader.jet) in a child and
-// receives its entries; `stdout` admits the child's own standard output. A
-// failure leaves `failure` set.
-x64_comptime_spawn: fn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChild {
+// Starts the linked executable `image` (Image/Loader.jet
+// x64_executable_load: a bound one's image part is mapped from its file,
+// not copied) in a child and receives its entries; `stdout` admits the
+// child's own standard output. A failure leaves `failure` set.
+x64_comptime_spawn: fn(image: X64Executable, stdout: Bool, budget: Int) -> X64ComptimeChild {
     child := X64ComptimeChild{budget: budget}
     scratch: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(scratch) {
@@ -62,7 +63,7 @@ x64_comptime_spawn: fn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChi
         pipes.push(ends[0])
         pipes.push(ends[1])
     }
-    loaded: x64_image_load(image)
+    loaded: x64_executable_load(image)
     spawned := X64Spawned{pid: -1, failure: loaded.failure}
     if loaded.failure == "" {
         // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
