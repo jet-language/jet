@@ -267,6 +267,14 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
         concrete: sema_inference_resolve_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
             satisfied: sema_inference_bound_value(graph, context, concrete, bound, parameter.bound_module) ?? {
+                // A type argument that names nothing is the cause, not the
+                // bound it cannot be judged against.
+                if graph == .Val(graph_value) {
+                    reported: diagnostics.len()
+                    generic_names: loop param in context.lexical_generic_params -> param.name
+                    sema_type_unknown_written_names(graph_value, sema_type_module_row(graph_value, context.caller_module_identity), concrete, span, generic_names, diagnostics)
+                    if diagnostics.len() > reported -> return None
+                }
                 has_graph: if graph == .Val(_) -> true else -> false
                 diagnostics.push(sema_inference_unresolved_bound_diagnostic(has_graph, bound, parameter.bounds, sema_inference_declared_name(parameter.name), span))
                 return None
