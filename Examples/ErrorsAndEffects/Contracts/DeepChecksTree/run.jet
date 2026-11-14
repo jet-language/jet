@@ -1,18 +1,21 @@
-// Deep checks on a search tree loaded from a stored snapshot.
+// Deep checks on search trees loaded from stored snapshots.
 //
-// `load` trusts its snapshot, and this one stores 6 in the left subtree of 5,
-// so a lookup of 6 misses a key the snapshot holds. Two deep checks find the
-// fault, and both are off unless `--deep-checks` selects them:
+// `load` trusts its snapshot. The valid snapshot keeps every key in order; the
+// corrupt one stores 6 in the left subtree of 5, so a lookup of 6 misses a key
+// the snapshot holds. Two deep checks find the fault, and both are off unless
+// `--deep-checks` selects them:
 //
 // - `load` walks the loaded tree once and checks that every key lies between
 //   the bounds its ancestors set.
 // - `run` compares the lookup with a scan of the stored keys.
 //
-// `jet run` loads, answers wrongly and serves. `jet run --deep-checks`, or
-// `--deep-checks=tree` for this package, keeps both checks, so the load
-// stops the program before it serves. `--deep-checks=tree::run` keeps only the
-// lookup's check, which stops the program after the load. A scope that names
-// nothing in the program, such as `tree::nowhere`, is refused before the run.
+// `jet run` loads both trees, answers wrongly for the corrupt one and serves.
+// `jet run --deep-checks`, or `--deep-checks=tree` for this package, keeps
+// both checks: the valid tree passes them and prints what the plain run
+// prints, and the corrupt load stops the program before it serves.
+// `--deep-checks=tree::run` keeps only the lookup's check, which stops the
+// program after the corrupt load. A scope that names nothing in the program,
+// such as `tree::nowhere`, is refused before the run.
 
 Node: struct {
     key: Int
@@ -62,6 +65,11 @@ Tree: struct {
     }
 }
 
+Snapshot: struct {
+    name: String
+    nodes: [Node]
+}
+
 load: fn(nodes: [Node]) -> Tree {
     tree: Tree{nodes: nodes}
     #On(.Deep) {
@@ -71,24 +79,36 @@ load: fn(nodes: [Node]) -> Tree {
 }
 
 // Node 0 is the root; `left` and `right` index the children.
-snapshot: fn() -> [Node] {
-    [Node]{
-        Node{key: 5, left: Val(1), right: Val(2)},
-        Node{key: 3, left: Val(3), right: Val(4)},
-        Node{key: 8},
-        Node{key: 1},
-        Node{key: 6},
+snapshots: fn() -> [Snapshot] {
+    [Snapshot]{
+        Snapshot{name: "valid", nodes: [Node]{
+            Node{key: 5, left: Val(1), right: Val(2)},
+            Node{key: 3, left: Val(3), right: Val(4)},
+            Node{key: 8, left: Val(5)},
+            Node{key: 1},
+            Node{key: 4},
+            Node{key: 6},
+        }},
+        Snapshot{name: "corrupt", nodes: [Node]{
+            Node{key: 5, left: Val(1), right: Val(2)},
+            Node{key: 3, left: Val(3), right: Val(4)},
+            Node{key: 8},
+            Node{key: 1},
+            Node{key: 6},
+        }},
     }
 }
 
 run: fn() {
-    tree: load(snapshot())
-    print("loaded {tree.nodes.len()} keys")
-    found: tree.contains(6)
-    #On(.Deep) {
-        assert(found == tree.stored(6), "a lookup of 6 disagrees with the stored keys")
+    loop snapshot in snapshots() {
+        tree: load(snapshot.nodes)
+        print("{snapshot.name}: loaded {tree.nodes.len()} keys")
+        found: tree.contains(6)
+        #On(.Deep) {
+            assert(found == tree.stored(6), "a lookup of 6 disagrees with the stored keys")
+        }
+        answer: if found -> "found" else -> "missing"
+        print("{snapshot.name}: lookup 6: {answer}")
     }
-    answer: if found -> "found" else -> "missing"
-    print("lookup 6: {answer}")
     print("serving")
 }

@@ -1,0 +1,18 @@
+// A library with two deep checks: one in `area`, and one in a lambda that
+// `total` declares, which belongs to `total` wherever it runs.
+area: fn(width: Int, height: Int) -> Int {
+    #On(.Deep) assert(width >= 0 && height >= 0, "a side is negative")
+    width * height
+}
+
+total: fn(sizes: [Int]) -> Int {
+    checked: fn(size: Int) -> Int {
+        #On(.Deep) assert(size >= 0, "a size is negative")
+        size
+    }
+    sum := 0
+    loop size in sizes {
+        sum += checked(size)
+    }
+    sum
+}

@@ -10316,7 +10316,11 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     sema_ownership_keep_mutations(state, erased_state)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if kept -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move()) else -> sema_check_context_rollback(context, erased_mark.move())
+                    if {
+                        kept && marker.name == MARKER_ON -> sema_check_context_rollback_keep_calls(context, erased_mark.move())
+                        kept -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move())
+                        else -> sema_check_context_rollback(context, erased_mark.move())
+                    }
                     sema_scope_rollback(scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {

@@ -1733,6 +1733,21 @@ sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: 
     context.next_expr_id = next_expr_id
 }
 
+// Rolls a kept `#On(.Deep)` body's facts back as
+// sema_check_context_rollback_keep_expr_ids does, but keeps its call sites:
+// the deep check runs where `--deep-checks` selects it, and the effect pass
+// reads what each of its calls reaches (E0713) from them.
+sema_check_context_rollback_keep_calls: fn(context: &SemaCheckContext, mark: &&SemaCheckContextMark) Never! {
+    calls := [SemaCallSiteFact]{}
+    loop context.call_facts.len() > mark.call_facts {
+        fact: context.call_facts.pop() ?? break
+        calls.push(fact)
+    }
+    calls.reverse()
+    sema_check_context_rollback_keep_expr_ids(context, mark.move())
+    context.call_facts.extend(calls.move())
+}
+
 sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
     loop fact in source -> result.push(fact.copy())

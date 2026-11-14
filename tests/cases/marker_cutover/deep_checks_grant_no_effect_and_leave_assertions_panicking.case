@@ -1,0 +1,129 @@
+# Selecting deep checks changes nothing else about a program. An ordinary
+# `assert` beside a deep check still stops with a panic (E3001, exit 70),
+# whether or not deep checks are selected, on every optimize level, under
+# `jet dev` and on web. A deep check gets no effect from being selected:
+# one that prints is refused (E0713) with checks off, with them on, and
+# with every effect granted by `-A`, on every engine.
+requires: tool:node
+fixture: deep_checks_grant_no_effect_and_leave_assertions_panicking.fixture
+env: NO_COLOR=1
+step assert_off_o0: jet run --optimize=none main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step assert_on_o0: jet run --optimize=none --deep-checks main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step effect_off_o0: jet run --optimize=none effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_on_o0: jet run --optimize=none --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_granted_o0: jet run --optimize=none -A --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step assert_off_o1: jet run --optimize=basic main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step assert_on_o1: jet run --optimize=basic --deep-checks main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step effect_off_o1: jet run --optimize=basic effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_on_o1: jet run --optimize=basic --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_granted_o1: jet run --optimize=basic -A --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step assert_off_o2: jet run --release main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step assert_on_o2: jet run --release --deep-checks main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step effect_off_o2: jet run --release effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_on_o2: jet run --release --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_granted_o2: jet run --release -A --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step assert_off_dev: jet dev --watch=off main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step assert_on_dev: jet dev --watch=off --deep-checks main.jet
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step effect_off_dev: jet dev --watch=off effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_on_dev: jet dev --watch=off --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # the E0713 headline, which goes on to name the effect
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step effect_granted_dev: jet dev --watch=off -A --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "This deep check uses the effect" # `-A` grants the program, not the deep check
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link
+step assert_off_web_build: jet build --target web main.jet
+timeout: 120s
+exit: 0
+step assert_off_web: node .jet/build/app.js
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step assert_on_web_build: jet build --target web --deep-checks main.jet
+timeout: 120s
+exit: 0
+step assert_on_web: node .jet/build/app.js
+exit: 70
+stdout: = "5\n"
+stderr: ~ "Stop [E3001]: `panic: the size is too large`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> main.jet:4 in check" # the stop names the deep check's line and function
+step effect_on_web: jet build --target web --deep-checks effect.jet
+exit: 1
+stdout: empty
+stderr: ~ "jet-lang.dev/e/E0713" # the diagnostic's code link

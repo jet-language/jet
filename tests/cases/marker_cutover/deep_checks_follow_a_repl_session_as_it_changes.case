@@ -1,0 +1,23 @@
+# A REPL session keeps the deep checks its flags selected when it started,
+# for code it gains later too. Each session defines `limit`, calls it, then
+# defines `grow` and calls it with a size its deep check refuses. A session
+# started without `--deep-checks` runs neither check; one started with it
+# runs both, so the later `grow` stops on its check and its line never prints.
+fixture: deep_checks_follow_a_repl_session_as_it_changes.fixture
+step off: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state-off
+stdin: deep_checks_follow_a_repl_session_as_it_changes.fixture/input.txt
+exit: 0
+stdout: ~ "limit: 3" # the REPL prints its banner and prompts around the output
+stdout: ~ "grow: 1" # no deep check runs, so `grow(0)` returns
+stderr: !~ "E3001" # no deep check runs, so nothing stops
+step all: jet repl --deep-checks
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state-all
+stdin: deep_checks_follow_a_repl_session_as_it_changes.fixture/input.txt
+exit: 0
+stdout: ~ "limit: 3" # `limit` passes its deep check
+stdout: !~ "grow: 1" # the stopped call never prints
+stderr: ~ "panic: the size is not positive" # the session's selection keeps the deep check `grow` added later
+stderr: ~ "in grow" # the stop names the deep check's line and function

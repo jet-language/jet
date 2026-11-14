@@ -1,0 +1,17 @@
+// The deep check reaches `print` only through two calls, and the effect is
+// still its own.
+log_line: fn(text: String) {
+    print(text)
+}
+
+report: fn(count: Int) {
+    log_line("count is {count}")
+}
+
+run: fn() {
+    count: 3
+    #On(.Deep) {
+        report(count)
+    }
+    print(count)
+}

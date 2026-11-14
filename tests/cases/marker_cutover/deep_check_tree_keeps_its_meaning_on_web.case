@@ -1,0 +1,31 @@
+# The DeepChecksTree example built for web and run under node prints what
+# it prints natively. With no deep check selected, the corrupt tree loads and
+# answers wrongly; with every deep check selected, its load stops on the
+# order check; under `tree::run` only the lookup check is kept, so the
+# corrupt tree loads and the lookup stops.
+requires: tool:node
+env: NO_COLOR=1
+copy: {root}/Examples/ErrorsAndEffects/Contracts/DeepChecksTree/run.jet run.jet
+copy: {root}/Examples/ErrorsAndEffects/Contracts/DeepChecksTree/package.jet package.jet
+step off_build: jet build --target web run.jet
+timeout: 120s
+exit: 0
+step off: node .jet/build/app.js
+exit: 0
+stdout: = ../../../Examples/ErrorsAndEffects/Contracts/DeepChecksTree.out
+step all_build: jet build --target web --deep-checks run.jet
+timeout: 120s
+exit: 0
+step all: node .jet/build/app.js
+exit: 70
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
+step function_build: jet build --target web --deep-checks=tree::run run.jet
+timeout: 120s
+exit: 0
+step function: node .jet/build/app.js
+exit: 70
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
+stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function

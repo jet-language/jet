@@ -1,8 +1,13 @@
-# The tree's deep checks at each optimize level (none, basic, and full through
-# `--release`): off under a plain run, all kept under a bare `--deep-checks`
-# or the package's scope, only `run`'s under `tree::run`, a scope that names
-# nothing refused before the run (E2120), and the dotted `tree.run`, which is
-# no scope, refused before the compile (E2119).
+# The tree example at each optimize level (none, basic, and full through
+# `--release`) and under `jet dev`. It loads a valid snapshot, then a corrupt
+# one, and each deep check walks the loaded tree once. A plain run keeps no deep
+# check, so both trees load and the corrupt one answers wrongly. A bare
+# `--deep-checks` or the package scope keeps both checks: the valid tree passes
+# them with the plain run's output, and the corrupt load stops the program.
+# Under `tree::run` only the lookup's check is kept, so the corrupt tree loads
+# and the lookup stops. A scope that names nothing is refused before the run
+# (E2120), and the dotted `tree.run`, which is no scope, is refused before the
+# compile (E2119).
 env: NO_COLOR=1
 step off_o0: jet run --optimize=none run.jet
 exit: 0
@@ -10,74 +15,88 @@ stdout: = DeepChecksTree.out
 stderr: empty
 step all_o0: jet run --optimize=none --deep-checks run.jet
 exit: 70
-stdout: empty # the load stops the program before it serves
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n" # the valid tree passes both checks; the corrupt load stops before it serves
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step package_o0: jet run --optimize=none --deep-checks=tree run.jet
 exit: 70
-stdout: empty # the package scope keeps the load's deep check
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n" # the package scope keeps the load's deep check
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step function_o0: jet run --optimize=none --deep-checks=tree::run run.jet
 exit: 70
-stdout: = "loaded 5 keys\n" # `load`'s deep check is off, so the load passes
-stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`"
-stderr: ~ "--> run.jet:89 in run"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n" # `load`'s deep check is off, so the corrupt load passes
+stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
 step unknown_o0: jet run --optimize=none --deep-checks=tree::nowhere run.jet
 exit: 1
 stdout: empty # refused before the run
-stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program"
-stderr: ~ "jet-lang.dev/e/E2120"
+stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist
+stderr: ~ "jet-lang.dev/e/E2120" # the diagnostic's code link
 step off_o1: jet run --optimize=basic run.jet
 exit: 0
 stdout: = DeepChecksTree.out
 stderr: empty
 step all_o1: jet run --optimize=basic --deep-checks run.jet
 exit: 70
-stdout: empty
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step package_o1: jet run --optimize=basic --deep-checks=tree run.jet
 exit: 70
-stdout: empty
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step function_o1: jet run --optimize=basic --deep-checks=tree::run run.jet
 exit: 70
-stdout: = "loaded 5 keys\n"
-stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`"
-stderr: ~ "--> run.jet:89 in run"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
+stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
 step unknown_o1: jet run --optimize=basic --deep-checks=tree::nowhere run.jet
 exit: 1
 stdout: empty
-stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program"
-stderr: ~ "jet-lang.dev/e/E2120"
+stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist
+stderr: ~ "jet-lang.dev/e/E2120" # the diagnostic's code link
 step off_o2: jet run --release run.jet
 exit: 0
 stdout: = DeepChecksTree.out
 stderr: empty
 step all_o2: jet run --release --deep-checks run.jet
 exit: 70
-stdout: empty # a release build keeps a selected deep check
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step package_o2: jet run --release --deep-checks=tree run.jet
 exit: 70
-stdout: empty
-stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`"
-stderr: ~ "--> run.jet:68 in load"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
 step function_o2: jet run --release --deep-checks=tree::run run.jet
 exit: 70
-stdout: = "loaded 5 keys\n"
-stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`"
-stderr: ~ "--> run.jet:89 in run"
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
+stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
 step unknown_o2: jet run --release --deep-checks=tree::nowhere run.jet
 exit: 1
 stdout: empty
-stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program"
-stderr: ~ "jet-lang.dev/e/E2120"
+stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program" # the E2120 headline; its fix lists the scopes that exist
+stderr: ~ "jet-lang.dev/e/E2120" # the diagnostic's code link
+step off_dev: jet dev --watch=off run.jet
+exit: 0
+stdout: = DeepChecksTree.out # the resident engine keeps no deep check either
+stderr: empty
+step all_dev: jet dev --watch=off --deep-checks run.jet
+exit: 70
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\n"
+stderr: ~ "Stop [E3001]: `panic: the snapshot's tree is out of order`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:76 in load" # the stop names the deep check's line and function
+step function_dev: jet dev --watch=off --deep-checks=tree::run run.jet
+exit: 70
+stdout: = "valid: loaded 6 keys\nvalid: lookup 6: found\ncorrupt: loaded 5 keys\n"
+stderr: ~ "Stop [E3001]: `panic: a lookup of 6 disagrees with the stored keys`" # the stop headline; the report goes on with the stock E3001 text
+stderr: ~ "--> run.jet:108 in run" # the stop names the deep check's line and function
 step dotted: jet run --deep-checks=tree.run run.jet
 exit: 2
 stdout: empty # refused before anything is compiled
-stderr: ~ "`--deep-checks=tree.run` isn't a deep-check scope"
-stderr: ~ "jet-lang.dev/e/E2119"
+stderr: ~ "`--deep-checks=tree.run` isn't a deep-check scope" # the E2119 headline; a dotted path is no scope
+stderr: ~ "jet-lang.dev/e/E2119" # the diagnostic's code link

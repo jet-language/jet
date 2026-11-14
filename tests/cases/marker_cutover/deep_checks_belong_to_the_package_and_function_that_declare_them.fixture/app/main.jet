@@ -1,0 +1,16 @@
+// The app calls the library with a bad side and a bad size, and holds a deep
+// check of its own. `--bad` names the input that is wrong.
+use shapes
+
+#CLI
+Args: struct {
+    #Doc("the input that is wrong") bad: String{""}
+}
+
+run: fn(args: Args) {
+    side: if args.bad == "side" -> -1 else -> 1
+    size: if args.bad == "size" -> -2 else -> 2
+    count: if args.bad == "count" -> 0 else -> 2
+    #On(.Deep) assert(count > 0, "the app has no shapes")
+    print(shapes.area(side, 3) + shapes.total([Int]{size, 3}))
+}
