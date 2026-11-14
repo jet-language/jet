@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102569,
+    "rev": 102575,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98853,6 +98853,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Main, 2026-11-14: c1 met; ballot D-MEM-CHOKEPOINT1 is open (recommended A: kernel files hand out close owners plus owner-tied views, checked by the existing E0212/E2305/E0211). c3-c7 wait on the ballot. The review found I1 holes that hold in today's code regardless of the ballot, so they are fixed now under this card: (1) .copy() of a #SingleUse handle compiles, and so does copying a struct that holds one; releasing both frees twice and release builds exit 0 with no #Unsafe in user code; Core mem.Block copies the same way. (2) a mem.Window handed out by a handle reads after the handle is released. (3) a view stored in a field of a returned record escapes its owner. (4) values bound by a pattern skip close duties (owners are not closed; handles skip the drop error E0140). Probes are in the review's tests (inbox MemKernel-2-review/tests/adv)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Created by Main from the owner direction of 2026-11-14 (a single inspectable memory chokepoint). Built only after criterion 1's adversarial review passes."
         }
       ],
@@ -98860,11 +98865,11 @@
         {
           "n": 1,
           "text": "Adversarial review first: a dated audit in Docs/audits attacks each claimed strength of the one-chokepoint design (structural prevention, single audit spot, zero run-time cost) against the strongest existing practice, with sources: Rust's unsafe concentrated in std and audited crates (and its unsafe-code guidelines), seL4's verified kernel boundary, CHERI capabilities, Zig's explicit allocator interface, Go's runtime-only unsafe and Swift's UnsafePointer surface. It checks each claim with a runnable probe or measurement, and ends with a verdict per claim. Nothing below is built until the verdict holds or every gap is redesigned and reviewed again.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T22:51:31.815Z"
+          "evidence": "dev 08aa682149 Docs/audits/2026-11-14-memory-chokepoint-review.md: the adversarial review (MemKernel-1, repaired and re-probed by fresh reviewer MemReview-1) attacks all five claimed strengths with probes; verdicts recorded; owner ballot D-MEM-CHOKEPOINT1 filed with options A-E, validator ok",
+          "at": "2026-11-14T23:42:29.327Z"
         },
         {
           "n": 2,
@@ -98919,6 +98924,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T22:51:38.154Z"
+        },
+        {
+          "n": 8,
+          "text": "A #SingleUse value (and any struct, list or enum payload that holds one) cannot be copied: .copy() and an implicit copy are refused by sema with a registered code and UI snapshot, and Core mem.Block follows the same rule. Proof: the review's copy probes fail to compile, and a case pins each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T23:42:31.061Z"
+        },
+        {
+          "n": 9,
+          "text": "A mem.Window (and every view a handle hands out) cannot be read after its owner is released, and a view stored in a field of a returned record cannot outlive its owner: both refused by sema with a registered code and UI snapshot. Proof: the review's window and escape probes fail to compile; a case pins each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T23:42:31.932Z"
         }
       ],
       "refs": [],
@@ -98929,9 +98952,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T22:51:11.682Z",
-      "updated": "2026-11-14T22:51:50.037Z",
+      "updated": "2026-11-14T23:42:31.932Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 9
     },
     {
       "id": "c0in2dft",
@@ -201550,6 +201573,295 @@
       "created": "2026-11-14T17:58:27.522Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-14"
+    },
+    {
+      "id": "D-MEM-CHOKEPOINT1",
+      "cardId": "c0oo8eeq",
+      "group": "library",
+      "title": "Memory chokepoint: kernel files with owners and checked views; kernel files with single-use handles; a kernel of raw primitives; today's blocks plus a report; or Core only",
+      "situation": "Jet code that touches raw memory opens an #Unsafe block and writes a reason. There are 1,528 such blocks, and 656 of them read, write, allocate or free memory directly. The runtime also has 248 ordinary functions that read or write at an address their caller picks, used 17,528 times with no block at the call. The owner asked that every raw memory action go through one small, heavily audited place. Probes show that moving raw operations alone changes nothing: a read after free still compiles, and a release build runs it silently. Single-use handles stopped some of these bugs. But a handle can be copied, directly or inside a struct, and the release build then reads freed memory. Jet's view checker, which already guards list and arena views, refused every read after close that the probes tried.",
+      "gist": "Should raw memory live in kernel files that hand out owners and checked views, in kernel files with single-use handles, in raw primitives, in today's blocks, or only in Core?",
+      "lesson": "Raw memory means reading and writing bytes at an address the program computed. If the address is wrong, or the memory was already freed, the program reads garbage or crashes, and a release build does not check. Jet makes such code open an #Unsafe block and write why it is safe. This vote decides whether those blocks may sit anywhere, or only in a few small kernel files, and what those files hand the rest of the program.",
+      "explainer": "Words used here. A kernel file is a file a package names as allowed to hold raw memory code. An owner is a value that holds a piece of memory and frees it when it closes. Only the kernel can make one, and Jet refuses to copy it.\n\nA view is a window into memory that an owner hands out, like a slice of a list. Jet ties each view to its owner, so the owner cannot close, move or grow while the view is still used. A single-use handle is a value that must be spent exactly once. A release build is the fast build. It runs without the sentries that watch memory in the default and hardened builds.",
+      "story": "Ana writes a ring buffer for audio over memory she allocates herself. Today she opens #Unsafe blocks in four files. A teammate later keeps a copy of a pointer after the buffer is freed. The default build stops at the bad read, but the release build prints stale samples.\n\nUnder A, Ana puts the buffer in one kernel file. It hands out a Ring owner and views of its samples. The teammate's view, kept past the close, does not compile, and the audit report lists her one file.\n\nUnder B the Ring is a single-use handle. The teammate copies it with .copy(), and the release build still reads freed samples. Under C she calls kernel read and write functions, and the stale copy still compiles. Under D nothing changes, but the report lists all four blocks. Under E she cannot write the buffer at all unless Core ships one.",
+      "inWild": "// Rust: a slice borrows its owner, so the owner can't be freed first.\nlet v = vec![1, 2, 3];\nlet s = &v[0..2];\ndrop(v);   // error[E0505]: cannot move out of `v` because it is borrowed\nprintln!(\"{}\", s[0]);",
+      "detail": "What this ballot decides. Where Jet code may perform raw memory actions, and what the rest of a program uses instead.\n\nWhat the review measured. The raw primitives are already defined in three places: the core memory module, the compiler's intrinsic rows and the operating-system leaves. What is scattered is the reasoning at each use. 656 blocks address memory directly, and 248 runtime functions take an address from their caller with no block at the call. The runtime's raw code sits in 81 files of about 36,600 lines.\n\nWhat probes showed. A read through a copy of a freed pointer compiles under every build, and the release build prints the stale value. Moving the read into a kernel function changes nothing, because the caller still vouches for the address. A word-sized read through a kernel function built to the same image size and ran in the same time as the direct read.\n\nWhat a second, fresh review found. Single-use handles refuse forging and a plain use after release. But .copy() of a handle compiles, a struct that holds one copies freely, and a raw window handed out by one outlives it. Each case reads or frees freed memory silently in a release build. Jet's own Core memory block copies the same way.\n\nWhat already works. Jet ties a view returned by an owner's method to that owner. Closing, moving or growing the owner while the view is used is a compile error, and so is returning a view of a dead owner. Owners that close themselves cannot be copied, even inside a struct, and can be lent to helpers. One escape remains: a view stored in a field of a returned record.\n\nWhat it costs. With the loop in its own function, a view read runs at raw speed and a checked handle read costs 1.4 times. With the loop in the main function, the view costs 1.8 times and the handle 3.6 times. The existing raw window boxes every element, about 15 times slower.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Kernel files that hand out owners and checked views",
+          "detail": "A package lists its kernel files in its policy. Raw memory operations anywhere else are refused, and the message names the safe type to use instead. A single-file program is its own kernel, so small scripts keep working. Kernels hand out owners: memory, regions, mappings, device registers and shared atomic words. An owner hands out views tied to itself. Beginners use lists and never see a kernel. Experts write their own kernel file, still behind #Unsafe.",
+          "technical": "A new policy field, memory: .Kernel([paths]), next to unsafe: .Paths. A package without it has no kernel files. A type declared in a kernel file keeps its private fields private to the kernel files, not the whole package. A kernel's public function that is not #Unsafe may not take an integer or pointer that reaches a raw address.\n\nOwners are Close resources: copies are refused, lending is plain, and scope end closes them. Inside a kernel, mem.window(owner, pointer, count) builds a View<T> whose owner is the first argument. It replaces the copyable mem.Window<T>, which amends that row of D-RAWPTR2. Sema's existing view rules then refuse closing, moving or growing the owner while a view lives. Two gaps close first: a view inside a returned record, and the close duty of pattern bindings.\n\nKernel primitives are intrinsics or always inlined. The compiler's lowering rows are the kernel for generated loads, and proven accesses stay plain loads. jet audit memory lists every kernel file, raw operation, adopting or view constructor, lowering row, asm leaf and vouch block. The runtime, below Core, gets its own kernel.",
+          "code": "// package.jet: policy: { memory: .Kernel([\"src/kernel\"]) }\n// src/kernel/Words.jet, a kernel file:\nWords: struct {\n    priv base: Int      // private to the kernel files\n    priv count: Int\n    all: fn(self) -> View<I64> {\n        #Unsafe(\"base names count live I64s while this Words lives\") {\n            mem.window(self, mem.Ptr<I64>.from_addr(self.base), self.count)\n        }\n    }\n    impl Close {\n        close: fn(&&self) {\n            #Unsafe(\"base came from alloc_raw in zeroed and is freed once, here\") {\n                mem.free_raw(mem.Ptr<U8>.from_addr(self.base))\n            }\n        }\n    }\n}\n\n// any other file:\nwords: kernel.Words.zeroed(4) ?? panic(\"no memory\")\nview: words.all()   // a View<I64> tied to words\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\nwords.close()       // won't compile while view is used below\nprint(view[0])"
+        },
+        {
+          "key": "B",
+          "name": "Kernel files that hand out single-use handles",
+          "detail": "The same kernel files as A, but kernels hand out single-use handles instead of owners and views. A handle carries its own bounds and is spent exactly once. Today a handle can be copied, directly or inside a struct, and a release build then reads freed memory. A handle cannot be passed to a helper function at all.",
+          "technical": "The same policy, kernel privacy and address rule as A, with #SingleUse handles instead of owners and views. Four sema changes are needed first. Copies of single-use values must be refused, and their duty must pass through struct fields. Handles must not hand out copyable views. Lending with & must be allowed, which amends D-LIN1. A bounds-checked read costs 1.4 times with the loop in a handle method and 3.6 times with it in the main function.",
+          "code": "// src/kernel/Words.jet, a kernel file:\n#SingleUse Words: struct {\n    priv base: Int\n    priv count: Int\n    len: fn(self) -> Int { self.count }\n    read: fn(self, index: Int) -> I64 {\n        if index < 0 || index >= self.count -> panic(\"outside\")\n        #Unsafe(\"base names count live I64s while Words lives\") {\n            mem.Ptr<I64>.from_addr(self.base).offset(index).*\n        }\n    }\n}\n\n// any other file:\nwords: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\nloop i in 0..<words.len() -> total += words.read(i)\nkernel.release(words)   // spent once\n// today words.copy() compiles, and releasing both frees twice"
+        },
+        {
+          "key": "C",
+          "name": "A kernel of raw primitives",
+          "detail": "Each package has one kernel of typed raw primitives: read, write, step, copy, allocate and free. Raw syntax elsewhere is refused. Callers still open an #Unsafe block around each primitive call and vouch for the address. There are no owners or handles, so the bugs the probes found still compile.",
+          "technical": "The same policy field and report as A, without kernel privacy, owners or the address rule. Primitives are always inlined. The 42 runtime one-word wrappers become kernel primitives that callers gate, so their 17,528 calls each open a block.",
+          "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\n#Unsafe(\"words names 4 live I64s until release\") {\n    loop i in 0..<4 -> total += kernel.read(words, i)\n}\nkernel.release(words)"
+        },
+        {
+          "key": "D",
+          "name": "Today's blocks plus a report",
+          "detail": "#Unsafe blocks stay where they are. Jet adds the generated jet audit memory report and refuses safe functions that take a raw address. Packages may still opt in to path limits.",
+          "technical": "The existing unsafe: .Paths policy stays opt-in. The address rule applies everywhere, so the runtime's 248 address-taking wrappers become #Unsafe functions. Their 17,528 calls open blocks or move to typed views. No new types.",
+          "code": "total := I64{0}\n#Unsafe(\"bytes holds 4 live I64s until free_raw\") {\n    bytes: mem.alloc_raw(32, 8) ?? panic(\"no memory\")\n    words: bytes.cast<I64>()\n    loop i in 0..<4 -> total += words.offset(i).*\n    mem.free_raw(bytes)\n}\n// jet audit memory lists this block"
+        },
+        {
+          "key": "E",
+          "name": "Core only",
+          "detail": "Only Core and the runtime may hold raw memory code. User code gets owners and views and nothing else, so a user allocator or driver needs Core to ship it or goes through FFI.",
+          "technical": "Removes the user raw-pointer set the owner ratified earlier. Core's kernel and the runtime's kernel are the only kernel files; package policy cannot add one. A foreign vouch block in a user package is raw memory outside Core, so it must be banned or listed as a kernel.",
+          "code": "words: mem.Buffer<I64>.zeroed(4) ?? panic(\"no memory\")   // an owner Core ships\nview: words.all()\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\n// no raw pointers outside Core and the runtime"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Unsafe code may appear in any crate. Soundness rests on module privacy, and safe code gets owners and borrowed slices that the borrow checker ties to them.",
+          "code": "let s = &v[1..];   // drop(v) won't compile while s is used"
+        },
+        {
+          "lang": "Tock",
+          "note": "Drivers may not use unsafe at all; only the core kernel and chip crates may. Privileged calls take capability objects only trusted code can make.",
+          "code": "#![forbid(unsafe_code)]   // every capsule crate"
+        },
+        {
+          "lang": "Swift",
+          "note": "Span is a safe, non-escaping view of contiguous memory tied to its owner, and strict memory safety marks each unsafe use when a module opts in.",
+          "code": "let s: Span<Int> = array.span\nlet x = s[i]   // checked, no copy"
+        },
+        {
+          "lang": "Java",
+          "note": "The foreign memory API replaced raw access with MemorySegment handles that carry bounds and an arena lifetime. A closed arena turns later access into a run-time error, not a compile error.",
+          "code": "MemorySegment seg = arena.allocate(32);\nlong x = seg.get(ValueLayout.JAVA_LONG, 8);"
+        },
+        {
+          "lang": "Zig",
+          "note": "Raw pointers work anywhere. Allocation is explicit through an allocator argument, and safe builds keep bounds checks.",
+          "code": "const words = try allocator.alloc(i64, 4);\ndefer allocator.free(words);"
+        },
+        {
+          "lang": "Go",
+          "note": "Raw pointer code must import unsafe, which is easy to search for. Tools check the documented conversion rules at run time.",
+          "code": "p := unsafe.Pointer(&x)   // vet and checkptr check this"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the only option where every probed read after free stops compiling. It reuses the view rules Jet already enforces for lists and arenas. Its views read at raw speed in a function, and experts keep raw code in small listed files.",
+        "gains": [
+          "Forged owners, reads after close, copied owners and views that outlive their owner are compile errors.",
+          "One generated report lists every kernel file, raw operation and generated load.",
+          "Word reads through a kernel cost nothing once inlined, and views read at raw speed in a function.",
+          "Experts keep raw pointers in their own kernel files."
+        ],
+        "losses": [
+          {
+            "loss": "There are about five audit places in this repository, plus one per package with raw code, not one.",
+            "mitigation": "One generated report lists them all with their sizes, and kernels stay small."
+          },
+          {
+            "loss": "The runtime migration is large: raw code in 81 files and 17,528 wrapper uses.",
+            "mitigation": "The 42 one-word wrappers collapse mechanically into owners and views first; the rest is counted down by subsystem."
+          },
+          {
+            "loss": "Release builds do not watch kernel code, so a kernel bug is silent there.",
+            "mitigation": "Kernel tests run under the hardened build and under fuzzing, and views shrink what the sentries must catch."
+          },
+          {
+            "loss": "Views last only for their scope and stay on one task.",
+            "mitigation": "Owners carry long-lived memory and can be stored and lent. Shared memory uses a shared owner with checked atomic offsets, as Core's shared-word API does."
+          },
+          {
+            "loss": "Two checker gaps must close before raw-backed views ship: a view in a returned record field, and the close duty of pattern bindings.",
+            "mitigation": "Both are criteria on this card, and the probes that show them are written."
+          },
+          {
+            "loss": "mem.window gains an owner argument, which amends one row of the ratified raw-pointer decision.",
+            "mitigation": "The old copyable window is 15 times slower and readable after free, so nothing worth keeping is lost."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's handles can be copied directly or inside a struct, and the release build then reads freed memory. Closing those holes rebuilds A's rules, amends the ratified single-use rule for lending, and still costs 1.4 to 3.6 times per checked read."
+          },
+          {
+            "key": "C",
+            "reason": "C moves raw reads into named functions but leaves each caller vouching for the address, so the read after free still compiles."
+          },
+          {
+            "key": "D",
+            "reason": "D shows every raw memory operation in a report but turns no memory bug into a compile error."
+          },
+          {
+            "key": "E",
+            "reason": "E takes raw pointers away from users, so allocators and drivers need Core or FFI."
+          }
+        ],
+        "tradeoff": "Several small listed kernel files, a large runtime migration and two checker fixes, for memory bugs that stop compiling and one report of every raw memory operation."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: MemReview-1. The fresh pass reran the probes and found that single-use handles copy directly and inside structs, so release builds read freed memory. It added the owner-and-view option, which Jet's view checker already enforces, and moved the recommendation to it."
+      },
+      "checkInstructions": "The audit is Docs/audits/2026-11-14-memory-chokepoint-review.md. The probes, the census script and their outputs sit in the submission's tests directory. With JET set to the gate jet, run-checks.sh reruns the first pass's compile and run checks, and run-timing.sh rebuilds and times its release loops. run-review2.sh reruns the fresh pass: the copy, struct, view and owner probes and the same-shape timings. python3 census.py on the repository prints the counts.",
+      "surface": {
+        "gist": "Where should raw memory live: kernel files with owners and views, kernel files with handles, raw primitives, today's blocks, or Core?",
+        "lesson": "Raw memory code reads bytes at an address the program computed. A wrong or freed address reads garbage, and a release build does not check. Jet code opens an #Unsafe block for this today, anywhere. This vote decides whether such code must sit in a few kernel files, and what those files hand everyone else.",
+        "trio": {
+          "current": {
+            "note": "A read after free compiles, and the release build prints the stale value.",
+            "code": "kept: bytes.cast<Int>()\nmem.free_raw(bytes)\nprint(kept.*)   // release: 5, no error"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A slice borrows its owner, so freeing the owner first won't compile.",
+            "code": "let s = &v[0..2];\ndrop(v);   // error: v is still borrowed by s\nprintln!(\"{}\", s[0]);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Kernel files with owners and views",
+            "gist": "Raw memory only in listed kernel files; others get owners and checked views.",
+            "gains": [
+              "Probed reads after free stop compiling.",
+              "Uses view rules Jet already enforces."
+            ],
+            "losses": [
+              "About five audit places, not one.",
+              "A large runtime migration."
+            ],
+            "proposed": {
+              "code": "words: kernel.Words.zeroed(4) ?? panic(\"no memory\")\nview: words.all()   // a View<I64> tied to words\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\nwords.close()       // won't compile while view is used below\nprint(view[0])"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Kernel files with single-use handles",
+            "gist": "Raw memory only in listed kernel files; others get single-use handles.",
+            "gains": [
+              "Forged handles and plain use after release stop compiling."
+            ],
+            "losses": [
+              "Copied handles read freed memory silently in release.",
+              "Handles can't be passed to helpers."
+            ],
+            "proposed": {
+              "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\nloop i in 0..<words.len() -> total += words.read(i)\nkernel.release(words)   // spent once\n// today words.copy() compiles and frees twice"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Kernel of raw primitives",
+            "gist": "Raw memory only through kernel functions; callers still vouch for addresses.",
+            "gains": [
+              "Raw operations have one home per package."
+            ],
+            "losses": [
+              "Read after free still compiles.",
+              "Every caller still opens #Unsafe."
+            ],
+            "proposed": {
+              "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\n#Unsafe(\"words names 4 live I64s until release\") {\n    loop i in 0..<4 -> total += kernel.read(words, i)\n}\nkernel.release(words)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today plus a report",
+            "gist": "Blocks stay where they are; a generated report lists them all.",
+            "gains": [
+              "The report shows every raw memory operation."
+            ],
+            "losses": [
+              "Prevents no new bug.",
+              "Runtime wrapper calls still need blocks."
+            ],
+            "proposed": {
+              "code": "total := I64{0}\n#Unsafe(\"bytes holds 4 live I64s until free_raw\") {\n    bytes: mem.alloc_raw(32, 8) ?? panic(\"no memory\")\n    words: bytes.cast<I64>()\n    loop i in 0..<4 -> total += words.offset(i).*\n    mem.free_raw(bytes)\n}\n// jet audit memory lists this block"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Core only",
+            "gist": "Only Core and the runtime hold raw memory; users get owners and views.",
+            "gains": [
+              "Fewest audit places."
+            ],
+            "losses": [
+              "No raw pointers for users.",
+              "Allocators and drivers need Core or FFI."
+            ],
+            "proposed": {
+              "code": "words: mem.Buffer<I64>.zeroed(4) ?? panic(\"no memory\")\nview: words.all()\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\n// no raw pointers outside Core"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Only A turns every probed read after free into a compile error. It reuses view rules Jet already enforces, its views read at raw speed, and experts keep raw code in listed files.",
+          "gains": [
+            "Probed memory bugs stop compiling.",
+            "One report lists every raw memory operation.",
+            "Views cost nothing in a function."
+          ],
+          "losses": [
+            {
+              "loss": "About five audit places, not one.",
+              "mitigation": "One generated report lists them all, with sizes."
+            },
+            {
+              "loss": "A large runtime migration.",
+              "mitigation": "Mechanical wrapper rewrite first, then a countdown by subsystem."
+            },
+            {
+              "loss": "Two checker gaps must close first.",
+              "mitigation": "Both are fixes on this card, with probes written."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Copied handles read freed memory; fixing that rebuilds A."
+            },
+            {
+              "key": "C",
+              "reason": "Callers still vouch for addresses, so bugs still compile."
+            },
+            {
+              "key": "D",
+              "reason": "Shows risk but prevents nothing."
+            },
+            {
+              "key": "E",
+              "reason": "Takes raw pointers from experts."
+            }
+          ],
+          "tradeoff": "A few kernel files, a migration and two checker fixes, for memory bugs that stop compiling."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-14T23:42:11.192Z",
+      "reports": [
+        {
+          "title": "Adversarial design review (dev 08aa682149)",
+          "path": "Docs/audits/2026-11-14-memory-chokepoint-review.md"
+        }
+      ]
     }
   ],
   "questions": [
@@ -205011,6 +205323,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T23:42:31.932Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#9 A mem.Window (and every view a handle hands out) cannot be r"
+    },
+    {
+      "at": "2026-11-14T23:42:31.061Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oo8eeq",
+      "note": "#8 A #SingleUse value (and any struct, list or enum payload tha"
+    },
+    {
+      "at": "2026-11-14T23:42:30.206Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oo8eeq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T23:42:29.327Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oo8eeq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T23:42:12.433Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-MEM-CHOKEPOINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-14T23:42:11.192Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MEM-CHOKEPOINT1",
+      "note": "Memory chokepoint: kernel files with owners and checked views; kernel files with single-use handles; a kernel of raw primitives; today's blocks plus a report; or Core only"
+    },
     {
       "at": "2026-11-14T23:34:34.351Z",
       "by": "Main",
