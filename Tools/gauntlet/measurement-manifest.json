@@ -617,6 +617,45 @@
       "comparator": "ratio = jet median / nix median; eval, noop and incremental need ratio <= 0.25, cold_cache and scratch need ratio < 1.00; a failed command, wrong output or missing sample fails closed"
     }
   },
+  "standings": {
+    "schema": "jet.gauntlet.standings.v1",
+    "rail": "matrix.json rails.standings names the peers and the ceiling; every comparison entry gets a row for each of them on every metric",
+    "programs": {
+      "rust": "rust/main.rs",
+      "c": "c/main.c",
+      "zig": "zig/main.zig",
+      "go": "go/main.go",
+      "python": "python/main.py",
+      "node": "node/main.mjs",
+      "bun": "node/main.mjs, run by bun in place of node",
+      "vite": "js/ (the entry's web program), bundled by `vite build --ssr runner.mjs` into dist/ and run by node",
+      "asm": "Tools/perf/asm-parity/<reference>/ref.S of the cells.json reference naming one of the entry's cells, built by Tools/perf/asm-parity/ref-build.mjs"
+    },
+    "metrics": {
+      "startup": "exec to first output, wall time; a service is timed from exec to ready",
+      "wall": "wall time of the whole run; a service is judged by its p50 request latency",
+      "cycles": "user-mode CPU cycles of the process tree, perf stat -e cycles:u, median of the run count",
+      "peak_rss": "peak resident memory of the process tree",
+      "size": "deployed artifact bytes, by the size basis below"
+    },
+    "size_basis": {
+      "binary": "Jet, Rust, C, Zig, Go and asm on non-web entries: bytes of the built executable",
+      "web artifact": "Jet and Rust on web entries: bytes of the emitted .js, .mjs and .wasm artifacts",
+      "bundle": "Vite: bytes of the bundle vite build writes to dist/",
+      "script+runtime": "Python, Node and Bun: bytes of the program's script files plus the interpreter executable and every shared library it loads outside glibc (libc, libm, libpthread, libdl, librt, ld-linux)"
+    },
+    "judgement": "ratio = jet / peer per metric; the peer floor passes below 1.00, the asm ceiling is met at or below 1.00 and its gap is ratio - 1.00",
+    "missing_program": "uncovered: the row stays, its reason names the missing program",
+    "missing_toolchain": "unavailable: the row stays, its reason names the failed version command",
+    "failed_run": "failed (build or run error) or mismatched (stdout differs from expected.out): the row stays with the reason",
+    "not_applicable": [
+      {
+        "peer": "vite",
+        "modes": ["batch", "batch-steps", "service"],
+        "reason": "Vite bundles web front ends; an entry without a web front end has nothing for it to build"
+      }
+    ]
+  },
   "loss_owners": {
     "binparse": {
       "runtime": 2253,

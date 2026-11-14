@@ -12,6 +12,7 @@ import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./mem
 import { compileThroughputContractIssues, runCompileThroughputAxisAdapter } from "./compile-throughput.mjs";
 import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-system.mjs";
 import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
+import { buildStandings, ceilingMeasurements as standingsCeilingMeasurements, entryStandings, planCells, planEntry, PEER_KINDS, standingsLines, standingsPolicy } from "./standings.mjs";
 import { stateRoot } from "../../agent/roots.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -20,6 +21,7 @@ const repoDir = path.resolve(harnessDir, "../../..");
 const envRunner = path.join(repoDir, "Tools/agent/JetEnv.jet");
 const timer = path.join(harnessDir, "timer.py");
 const launcherSource = path.join(harnessDir, "launch.c");
+const refBuild = path.join(repoDir, "Tools/perf/asm-parity/ref-build.mjs");
 
 const TOOL_VERSION_COMMANDS = Object.freeze({
   python3: ["python3", "--version"],
@@ -30,6 +32,10 @@ const TOOL_VERSION_COMMANDS = Object.freeze({
   zig: ["zig", "version"],
   go: ["go", "version"],
   node: ["node", "--version"],
+  bun: ["bun", "--version"],
+  vite: ["vite", "--version"],
+  as: ["as", "--version"],
+  perf: ["perf", "--version"],
   entr: ["entr", "-V"],
 });
 
@@ -274,9 +280,14 @@ const LANGUAGE_FILES = {
   node: "main.mjs",
   lua: "main.lua",
   luajit: "main.lua",
+  bun: "main.mjs",
+  vite: "main.mjs",
+  asm: "ref.S",
 };
-// LuaJIT runs the entry's Lua program; every other language has its own directory.
-const LANGUAGE_SOURCE_DIRS = { luajit: "lua" };
+// LuaJIT runs the entry's Lua program, Bun the Node program and Vite bundles
+// the web (js) program; the asm ceiling's directory is its asm-parity
+// reference. Every other language has its own directory.
+const LANGUAGE_SOURCE_DIRS = { luajit: "lua", bun: "node", vite: "js" };
 
 function baseLanguage(language) {
   return language.endsWith("-expert") ? language.slice(0, -"-expert".length) : language;
@@ -287,7 +298,7 @@ function shellQuote(value) {
 }
 
 function parseArgs(argv) {
-  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null };
+  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null, dryRun: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis" || arg === "--ceiling-results") {
@@ -301,8 +312,12 @@ function parseArgs(argv) {
       if (arg === "--ceiling-results") options.ceilingResults = value;
       continue;
     }
+    if (arg === "--dry-run") {
+      options.dryRun = true;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node Tools/gauntlet/harness/run.mjs [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json]");
+      console.log("usage: node Tools/gauntlet/harness/run.mjs [--dry-run] [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json]");
       process.exit(0);
     }
     throw new Error(`unknown argument: ${arg}`);
@@ -1482,6 +1497,7 @@ function buildCommand(language, jetBin, sourceDir) {
   if (language === "c") return ["gcc", "-O2", "main.c", "-o", "main-c", "-lm"];
   if (language === "zig") return ["zig", "build-exe", "-O", "ReleaseFast", "--cache-dir", "zig-cache", "--global-cache-dir", "zig-global-cache", "main.zig"];
   if (language === "go") return ["env", "GO111MODULE=off", `GOCACHE=${path.join(sourceDir, "go-cache")}`, "go", "build", "-o", "main-go", "main.go"];
+  if (language === "asm") return ["node", refBuild, "ref.S", "main-asm"];
   return null;
 }
 
@@ -1492,6 +1508,7 @@ function runCommand(language, sourceDir, artifact, args) {
   if (language === "lua") return ["lua", "main.lua", ...args];
   if (language === "luajit") return ["luajit", "main.lua", ...args];
   if (language === "js" || language === "node") return ["node", "main.mjs", ...args];
+  if (language === "bun") return ["bun", "main.mjs", ...args];
   return [artifact, ...args];
 }
 
@@ -1539,7 +1556,7 @@ async function buildAndMeasure(language, sourceDir, jetBin, overrideCommand = nu
   const cold = await timedProcess(sourceDir, command);
   const warm = cold.exit_code === 0 ? await timedProcess(sourceDir, command) : null;
   const artifact = base === "jet" ? await discoverJetArtifact(sourceDir) : path.join(sourceDir, {
-    rust: "main-rust", c: "main-c", zig: "main", go: "main-go",
+    rust: "main-rust", c: "main-c", zig: "main", go: "main-go", asm: "main-asm",
   }[base]);
   const failure = cold.exit_code !== 0 ? `cold build exit ${cold.exit_code}` :
     !validBuildSample(cold) ? "cold build measurement invalid" :
@@ -1562,8 +1579,13 @@ function languageSpecValue(value, language) {
   return value[language] ?? value.default;
 }
 
+// Vite has no entry-local build spec: it bundles the web program's runner
+// (with everything it imports) into dist/runner.mjs, which node runs.
+const VITE_WEB_BUILD = Object.freeze(["vite", "build", "--ssr", "runner.mjs", "--outDir", "dist", "--minify", "esbuild", "--logLevel", "warn"]);
+const VITE_WEB_RUN = Object.freeze(["node", "dist/runner.mjs"]);
+
 async function configuredBuildAndMeasure(language, sourceDir, jetBin, entry) {
-  const configured = languageSpecValue(entry.spec?.build ?? entry.build, language);
+  const configured = languageSpecValue(entry.spec?.build ?? entry.build, language) ?? (language === "vite" ? [...VITE_WEB_BUILD] : null);
   const command = commandFromSpec(configured, language, jetBin, null);
   if (!command) return { supported: true, command: null, build: null, artifact: null, failure: null };
   const full = entry.spec?.fullShell === true;
@@ -1574,6 +1596,18 @@ async function configuredBuildAndMeasure(language, sourceDir, jetBin, entry) {
       warm?.exit_code !== 0 ? `warm build exit ${warm?.exit_code}` :
         !validBuildSample(warm) ? "warm build measurement invalid" : null;
   return { supported: true, command, build: { cold, warm }, artifact: null, failure };
+}
+
+// A web entry's run command. Bun runs the Node program's command with bun in
+// place of node; Vite runs its bundle.
+function webRunCommand(entry, language, jetBin) {
+  const configured = (name) => commandFromSpec(languageSpecValue(entry.spec?.run ?? entry.run, name), name, jetBin, ["node", "runner.mjs"]);
+  if (language === "vite") return [...VITE_WEB_RUN];
+  if (language === "bun") {
+    const node = configured("node");
+    return node[0] === "node" ? ["bun", ...node.slice(1)] : node;
+  }
+  return configured(language);
 }
 
 async function copyRelativeFile(sourceDir, stageDir, relative) {
@@ -1696,6 +1730,109 @@ async function measureRuns(cwd, command, count, { full = false, reset = null, re
   }
   return summary;
 }
+
+// User-mode cycles of `commands` run in sequence (a batch-steps sample runs
+// every step), counted by `perf stat -e cycles:u` over the process tree; the
+// median of `count` samples, each after `reset`. A missing perf, a failed run
+// or an uncounted event is the row's reason, never a dropped sample.
+async function measureCycles(cwd, commands, count, { full = false, reset = null } = {}) {
+  const samples = [];
+  for (let i = 0; i < count; i += 1) {
+    if (reset) await reset();
+    let total = 0;
+    for (const command of commands) {
+      const result = await runProcess(cwd, ["perf", "stat", "-x,", "-e", "cycles:u", "--", ...command], { full });
+      const stderr = result.stderr.toString("utf8");
+      const line = stderr.split(/\r?\n/).reverse().find((text) => (text.split(",")[2] ?? "").startsWith("cycles"));
+      if (result.code === 127 && !line) return { status: "unavailable", value: null, samples, reason: `perf unavailable: ${stderr.trim().slice(0, 200)}` };
+      if (result.code !== 0) return { status: "failed", value: null, samples, reason: `perf stat run exit ${result.code}: ${stderr.trim().slice(-300)}` };
+      const cycles = Number(line?.split(",")[0]);
+      if (!Number.isFinite(cycles) || cycles <= 0) return { status: "unmeasured", value: null, samples, reason: `perf stat counted no cycles: ${line ?? stderr.trim().slice(-200)}` };
+      total += cycles;
+    }
+    samples.push(total);
+  }
+  return { status: "ok", value: median(samples), samples, statistic: "median", counter: "cycles:u" };
+}
+
+// A standings run counts every measured row's cycles beside its timed runs.
+async function countCycles(row, cwd, commands, count, options) {
+  row.cycles = await measureCycles(cwd, commands, count, options);
+  row.metrics.runtime_cycles = row.cycles.value;
+}
+
+// An interpreted peer's script: its program directory's script files, the
+// harness fixtures left out.
+async function scriptFiles(dir) {
+  const files = [];
+  async function walk(current) {
+    for (const item of await fs.readdir(current, { withFileTypes: true })) {
+      const full = path.join(current, item.name);
+      if (item.isDirectory()) {
+        if (!["fixtures", "node_modules", "__pycache__"].includes(item.name)) await walk(full);
+      } else if (/\.(?:py|mjs|cjs|js)$/.test(item.name)) {
+        files.push({ path: path.relative(dir, full).split(path.sep).join("/"), bytes: (await fs.stat(full)).size });
+      }
+    }
+  }
+  await walk(dir);
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  return { bytes: files.reduce((total, file) => total + file.bytes, 0), files };
+}
+
+// glibc's core objects every native program loads too; an interpreter's
+// runtime is its executable plus every other shared library it loads.
+const GLIBC_CORE_OBJECT = /^(?:libc|libm|libpthread|libdl|librt|ld-linux[\w.-]*|linux-vdso)\.so/;
+
+// The runtime an interpreted peer ships with: the interpreter executable the
+// dev shell resolves and its shared libraries outside glibc, by ldd.
+async function interpreterFootprint(cwd, interpreter) {
+  const script = 'exe=$(command -v "$1") || exit 127; exe=$(readlink -f "$exe"); printf "%s\\n" "$exe"; ldd "$exe" 2>&1; printf "ldd-exit %s\\n" "$?"';
+  const result = await runProcess(cwd, ["sh", "-c", script, "sh", interpreter], { timeoutMs: 30_000 });
+  const lines = result.stdout.toString("utf8").split(/\r?\n/).filter(Boolean);
+  if (result.code !== 0 || lines.length < 2) {
+    return { interpreter, status: "unavailable", reason: `\`command -v ${interpreter}\` exit ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 200)}` };
+  }
+  const exe = lines[0];
+  const head = Buffer.alloc(4);
+  const handle = await fs.open(exe, "r");
+  try {
+    await handle.read(head, 0, 4, 0);
+  } finally {
+    await handle.close();
+  }
+  if (head.toString("latin1") !== "\x7fELF") return { interpreter, path: exe, status: "unmeasured", reason: `${exe} is a wrapper script, not the interpreter binary` };
+  const lddExit = Number(lines.at(-1).replace(/^ldd-exit /, ""));
+  const lddLines = lines.slice(1, -1);
+  if (lddExit !== 0 && !lddLines.some((line) => /not a dynamic executable|statically linked/.test(line))) {
+    return { interpreter, path: exe, status: "unmeasured", reason: `ldd ${exe} exit ${lddExit}: ${lddLines.join(" ").slice(0, 200)}` };
+  }
+  const libraries = new Map();
+  for (const line of lddLines) {
+    const match = line.trim().match(/^(\S+)(?:\s+=>\s+(\S+))?\s+\(0x[0-9a-f]+\)$/);
+    if (!match) continue;
+    const name = path.basename(match[1]);
+    const file = match[2] ?? (match[1].startsWith("/") ? match[1] : null);
+    if (!file || GLIBC_CORE_OBJECT.test(name) || GLIBC_CORE_OBJECT.test(path.basename(file))) continue;
+    const real = await fs.realpath(file);
+    if (!libraries.has(real)) libraries.set(real, { path: real, bytes: (await fs.stat(real)).size });
+  }
+  const exeBytes = (await fs.stat(exe)).size;
+  const listed = [...libraries.values()].sort((left, right) => left.path.localeCompare(right.path));
+  return {
+    interpreter,
+    status: "ok",
+    path: exe,
+    exe_bytes: exeBytes,
+    libraries: listed,
+    bytes: exeBytes + listed.reduce((total, library) => total + library.bytes, 0),
+    excluded: "glibc core objects (libc, libm, libpthread, libdl, librt, ld-linux, linux-vdso)",
+  };
+}
+
+// The interpreter each interpreted standings peer runs.
+const STANDINGS_INTERPRETERS = Object.freeze({ python: "python3", node: "node", bun: "bun" });
+
 async function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -2200,7 +2337,13 @@ function settleRunTier(tierRow, metric, sourceMetrics, verificationKind) {
   tierRow.metrics = { ...sourceMetrics, ...slower.metrics };
 }
 
-async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
+// `standings`, on a standings run, names the standings peers the entry does
+// not declare and the asm-parity reference ({ name, dir }) that is its
+// ceiling: they are staged, verified and measured like the declared rows into
+// `standings_rows`, which the scoreboard and status never read, and every
+// measured row also counts its cycles and an interpreted row its script
+// bytes. Without it (null) the entry stages its declared rows alone.
+async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, standings = null) {
   const entryStage = path.join(runDir, entry.name);
   const languages = entry.languages ?? [];
   const provenance = {
@@ -2255,11 +2398,17 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
 
   const rows = {};
   const resets = {};
-  for (const language of languages) {
-    const sourceDir = path.join(entryDir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
+  const standingsRows = {};
+  const standingsOnly = [
+    ...(standings?.peers ?? []).filter((peer) => !languages.includes(peer)),
+    ...(standings?.ceiling ? ["asm"] : []),
+  ];
+  for (const language of [...languages, ...standingsOnly]) {
+    const sourceDir = language === "asm" ? standings.ceiling.dir : path.join(entryDir, LANGUAGE_SOURCE_DIRS[baseLanguage(language)] ?? language);
     const sourceFile = LANGUAGE_FILES[baseLanguage(language)];
     const row = { language, status: "broken", metrics: {}, diagnostics: [] };
-    rows[language] = row;
+    if (languages.includes(language)) rows[language] = row;
+    else standingsRows[language] = row;
     const nonApplicable = entry.non_applicable?.[language];
     if (nonApplicable) {
       row.status = "not_applicable";
@@ -2320,8 +2469,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     const build = webMode ? await configuredBuildAndMeasure(language, stagedSource, jetBin, entry) : await buildAndMeasure(language, stagedSource, jetBin, buildOverride);
     row.build = build.build ? { command: build.command, ...build.build } : null;
     row.metrics = await sourceMetrics(sourceDir, sourceFile);
+    if (standings && PEER_KINDS[baseLanguage(language)] === "interpreted") row.script = await scriptFiles(sourceDir);
     row.provenance = {
-      source: path.relative(entryDir, path.join(sourceDir, sourceFile)).replaceAll(path.sep, "/"),
+      source: path.relative(language === "asm" ? repoDir : entryDir, path.join(sourceDir, sourceFile)).replaceAll(path.sep, "/"),
       source_sha256: row.metrics.source_sha256,
       base_language: baseLanguage(language),
       authoring: entry.authoring?.[language] ?? entry.expert?.[language] ?? null,
@@ -2368,6 +2518,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
       }
       const binary = artifact && await exists(artifact) ? (await fs.stat(artifact)).size : null;
       row.metrics = { ...row.metrics, ...runtimeMetrics(row.runtime), ...buildMetrics(row.build), binary_bytes: binary };
+      if (standings) await countCycles(row, stagedSource, commands, runs, { reset });
       continue;
     }
 
@@ -2408,8 +2559,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     }
 
     if (webMode) {
-      const configuredRun = languageSpecValue(entry.spec?.run ?? entry.run, language);
-      const command = commandFromSpec(configuredRun, language, jetBin, ["node", "runner.mjs"]);
+      const command = webRunCommand(entry, language, jetBin);
       const full = entry.spec?.fullShell === true;
       const verification = await verify(stagedSource, command, expected, { full });
       if (verification) {
@@ -2447,6 +2597,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         artifact_bytes: webArtifact?.artifact_bytes ?? null,
         wasm_bytes: WEB_WASM_LANGUAGES.has(baseLanguage(language)) ? (webArtifact?.wasm_bytes ?? null) : null,
       };
+      if (standings) await countCycles(row, stagedSource, [command], runs, { full });
       continue;
     }
 
@@ -2492,6 +2643,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     }
     const binary = artifact && await exists(artifact) ? (await fs.stat(artifact)).size : null;
     row.metrics = { ...row.metrics, ...runtimeMetrics(row.runtime), ...buildMetrics(row.build), binary_bytes: binary };
+    if (standings) await countCycles(row, stagedSource, [command], runs, { reset: fixtureReset });
     await stopPeer();
   }
 
@@ -2644,7 +2796,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     .filter(([, policy]) => policy.required)
     .every(([tier]) => tiers[tier]?.status === "ok");
   const status = languages.every((language) => ["ok", "not_applicable"].includes(rows[language]?.status)) && requiredTiersReady ? "ok" : "broken";
-  return finish({ entry, status, stage: entryStage, languages, rows, comparisons: comparisons(entry, languages, rows, tiers), jet_tiers: tiers });
+  return finish({ entry, status, stage: entryStage, languages, rows, ...(standings ? { standings_rows: standingsRows } : {}), comparisons: comparisons(entry, languages, rows, tiers), jet_tiers: tiers });
 }
 
 // Comparison entries (ENTRY_MODES) go to `loaded`; tool entries (TOOL_MODE)
@@ -4200,6 +4352,10 @@ async function toolchainFingerprint(runDir, jetBin) {
     node: toolVersionCommand("node"),
     lua: toolVersionCommand("lua"),
     luajit: toolVersionCommand("luajit"),
+    bun: toolVersionCommand("bun"),
+    vite: toolVersionCommand("vite"),
+    asm: toolVersionCommand("as"),
+    perf: toolVersionCommand("perf"),
   };
   const versions = {};
   for (const [language, command] of Object.entries(commands)) {
@@ -4220,12 +4376,75 @@ function dateStamp() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Each comparison entry's standings plan: its programs for every standings
+// peer, the asm-parity reference naming one of its cells, and the toolchains.
+async function standingsPlans(loaded, policy, references, toolchains) {
+  const plans = [];
+  const referenceDir = path.dirname(CEILING_POLICY.references);
+  for (const item of loaded) {
+    const cells = item.entry.cells ?? [];
+    const entryReferences = (Array.isArray(references) ? references : [])
+      .filter((reference) => Array.isArray(reference?.[CEILING_POLICY.reference_link]) && reference[CEILING_POLICY.reference_link].some((cell) => cells.includes(cell)));
+    const programs = {};
+    for (const peer of policy.peers) {
+      const dir = LANGUAGE_SOURCE_DIRS[peer] ?? peer;
+      const file = LANGUAGE_FILES[peer];
+      programs[peer] = { path: `${dir}/${file}`, exists: Boolean(file) && await exists(path.join(item.dir, dir, file)) };
+    }
+    if (entryReferences.length === 1) {
+      const program = `${referenceDir}/${entryReferences[0].name}/${CEILING_POLICY.reference_source}`;
+      programs[policy.ceiling] = { path: program, exists: await exists(path.join(repoDir, program)) };
+    }
+    const plan = planEntry(item.entry, policy, { programs, references: entryReferences, toolchains });
+    const ceiling = plan.peers[policy.ceiling];
+    plans.push({
+      item,
+      plan,
+      stage: {
+        peers: policy.peers.filter((peer) => plan.peers[peer].plan === "measure"),
+        ceiling: ceiling.plan === "measure" ? { name: ceiling.reference, dir: path.join(repoDir, referenceDir, ceiling.reference) } : null,
+      },
+    });
+  }
+  return plans;
+}
+
+function standingsToolchains(policy, toolchains) {
+  return Object.fromEntries([...policy.peers, policy.ceiling, "perf"].filter((tool) => toolchains[tool]).map((tool) => [tool, toolchains[tool]]));
+}
+
+// --dry-run: every entry x peer x metric standings cell the run would fill,
+// with its planned status, and nothing built or measured.
+async function dryRun(options, matrix, entriesDir) {
+  const manifest = JSON.parse(await fs.readFile(path.join(repoDir, "Tools/gauntlet/measurement-manifest.json"), "utf8"));
+  const policy = standingsPolicy(matrix, manifest);
+  for (const issue of policy.issues) console.warn(`WARN standings: ${issue}`);
+  const references = JSON.parse(await fs.readFile(path.join(repoDir, CEILING_POLICY.references), "utf8"));
+  const toolchains = await toolchainFingerprint(repoDir, null);
+  const { loaded, tools, skipped } = await loadEntries(entriesDir, options.entry);
+  const plans = await standingsPlans(loaded, policy, references, toolchains);
+  const cells = planCells(plans.map(({ plan }) => plan));
+  console.log(["cell", "entry", "mode", "peer", "role", "metric", "status", "program", "reason"].join("\t"));
+  for (const cell of cells) {
+    console.log(["cell", cell.entry, cell.mode, cell.peer, cell.role, cell.metric, cell.status, cell.program ?? "-", cell.reason ?? "-"].join("\t"));
+  }
+  for (const [tool, row] of Object.entries(standingsToolchains(policy, toolchains))) {
+    console.log(`toolchain\t${tool}\t${row.status}\t${row.version || "-"}`);
+  }
+  for (const item of skipped) console.log(`skipped\t${item.name}\t${item.reason ?? "-"}`);
+  const counts = {};
+  for (const cell of cells) counts[cell.status] = (counts[cell.status] ?? 0) + 1;
+  console.log(`dry-run\tentries ${loaded.length}\tpeers ${policy.peers.length}+${policy.ceiling}\tmetrics 5\tcells ${cells.length}\t${Object.entries(counts).map(([status, count]) => `${status} ${count}`).join(", ")}\ttool entries ${tools.length} (judged by PortBars, not standings)`);
+  if (policy.issues.length) process.exitCode = 1;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const matrixPath = path.join(repoDir, "Tools/gauntlet/matrix.json");
   const matrixText = await fs.readFile(matrixPath, "utf8");
   const matrix = JSON.parse(matrixText);
   const entriesDir = path.resolve(process.cwd(), options.entriesDir ?? path.join(repoDir, "Tools/gauntlet/entries"));
+  if (options.dryRun) return dryRun(options, matrix, entriesDir);
   const defaultEntriesDir = path.resolve(path.join(repoDir, "Tools/gauntlet/entries"));
   const axisOnly = options.axis !== null;
   const fullScope = !axisOnly && entriesDir === defaultEntriesDir && options.entry === null;
@@ -4247,21 +4466,24 @@ async function main() {
     : await loadEntries(entriesDir, options.entry);
   // The machine-ceiling references and, when given, the asm-parity run that measured them.
   const ceilingReferences = JSON.parse(await fs.readFile(path.join(repoDir, CEILING_POLICY.references), "utf8"));
-  const ceilingMeasurements = options.ceilingResults === null
+  const ceilingMeasurementsGiven = options.ceilingResults === null
     ? null
     : JSON.parse(await fs.readFile(path.resolve(process.cwd(), options.ceilingResults), "utf8"));
+  const standingsSpec = standingsPolicy(matrix, sourceManifest ?? JSON.parse(await fs.readFile(manifestPath, "utf8")));
+  const plans = await standingsPlans(loaded, standingsSpec, ceilingReferences, toolchains);
   const validationIssues = axisOnly
     ? []
     : [
       ...await validateCorpus(entriesDir, loaded, skipped, matrix, sourceManifest, fullScope),
       ...await ceilingReferenceIssues(matrix, ceilingReferences),
+      ...standingsSpec.issues.map((issue) => `standings: ${issue}`),
     ];
   for (const issue of validationIssues) console.warn(`WARN corpus: ${issue}`);
   const results = [];
   for (const item of loaded) {
     console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
     try {
-      results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev));
+      results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev, plans.find((plan) => plan.item === item).stage));
     } catch (error) {
       console.error(`gauntlet: entry ${item.entry.name} CRASHED: ${error.message}`);
       results.push({
@@ -4280,6 +4502,22 @@ async function main() {
     }
     console.error(`gauntlet: entry ${item.entry.name} done`);
   }
+  // Interpreted peers count their runtime in their size: measure each
+  // interpreter's footprint once per run.
+  const runtimes = {};
+  if (!axisOnly) {
+    for (const [peer, interpreter] of Object.entries(STANDINGS_INTERPRETERS)) {
+      if (standingsSpec.peers.includes(peer)) runtimes[peer] = await interpreterFootprint(runDir, interpreter);
+    }
+  }
+  const standings = axisOnly ? null : buildStandings(
+    plans.map(({ item, plan }) => entryStandings(plan, results.find((result) => result.entry === item.entry), { runtimes })),
+    standingsSpec,
+    { runtimes, toolchains: standingsToolchains(standingsSpec, toolchains) },
+  );
+  // Without an asm-parity results file, this run's own asm and Jet rows are
+  // the scoreboard's machine-ceiling measurements.
+  const ceilingMeasurements = ceilingMeasurementsGiven ?? (standings ? standingsCeilingMeasurements(standings.entries) : null);
   const toolResults = [];
   for (const item of tools) {
     console.error(`gauntlet: tool ${item.entry.name} ...`);
@@ -4341,6 +4579,7 @@ async function main() {
     source_measurements: sourceMeasurements,
     axes,
     scoreboard,
+    standings,
     publication,
     provenance: {
       matrix_sha256: sha256(matrixText),
@@ -4420,6 +4659,11 @@ async function main() {
     const total = sourceMeasurements.aggregate;
     console.log(`source-total\t${total.jet.loc}\t${total.python.loc}\t${total.loc_ratio}\t${total.jet.source_tokens}\t${total.python.source_tokens}\t${total.source_token_delta}`);
   }
+  if (standings) {
+    for (const line of standingsLines(standings)) console.log(`standings\t${line}`);
+    const { floor, ceiling } = standings.summary;
+    console.log(`standings-summary\tfloor pass ${floor.pass} fail ${floor.fail} other ${floor.other}\tceiling meet ${ceiling.meet} miss ${ceiling.miss} other ${ceiling.other}`);
+  }
   console.log(`results\t${resultPath}`);
   console.log(`uncovered\t${uncovered.length}`);
   console.log(`publication\t${publication.status}`);
@@ -4467,4 +4711,5 @@ export {
   ceilingReferenceIssues,
   matrixPeerLanguages,
   LOSS_OWNER_CATEGORY_BY_METRIC,
+  standingsPlans,
 };

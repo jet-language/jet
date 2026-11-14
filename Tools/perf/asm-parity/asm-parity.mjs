@@ -19,11 +19,10 @@
 // come from PATH (Tools/agent/JetEnv.jet provides the first two).
 //
 // Per cell:
-// - the reference: `as` assembles ref.S (a kernel cell .include's common.S
-//   first; either way _start is the blob's first byte), `objcopy -O binary`
-//   takes its .text, and the file is that blob behind an ELF header, one R+X
-//   PT_LOAD and PT_GNU_STACK (176 bytes): no section headers, symbols or
-//   padding;
+// - the reference: ref-build.mjs assembles ref.S (a kernel cell .include's
+//   common.S first; either way _start is the blob's first byte) into its
+//   .text behind a 176-byte ELF header: no section headers, symbols or
+//   padding. The gauntlet harness builds its asm ceiling rows the same way;
 // - the Jet program: `jet build` of a copy of the package, once per mode
 //   (default, release = --release);
 // - input: a cell with a `fixture` {script, out} has `python3 script out`
@@ -81,9 +80,10 @@
 // and the geometric mean of candidate / base). Best-of-N wall time is only as
 // quiet as the machine: run it with nothing else heavy running.
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assemble } from './ref-build.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SIZE_GATE = 2.0;
@@ -130,43 +130,7 @@ function must(cmd, args, opts = {}) {
   return r;
 }
 
-// The blob behind an ELF header, one R+X PT_LOAD over the whole file and
-// PT_GNU_STACK (read+write, so the stack is never executable).
-function elf(blob) {
-  const base = 0x400000, ehsize = 64, phsize = 56, phnum = 2;
-  const head = ehsize + phnum * phsize;
-  const total = head + blob.length;
-  const b = Buffer.alloc(total);
-  b.write('\x7fELF', 0, 'latin1');
-  b[4] = 2; b[5] = 1; b[6] = 1;
-  b.writeUInt16LE(2, 16); b.writeUInt16LE(0x3e, 18); b.writeUInt32LE(1, 20);
-  b.writeBigUInt64LE(BigInt(base + head), 24);
-  b.writeBigUInt64LE(BigInt(ehsize), 32);
-  b.writeUInt16LE(ehsize, 52); b.writeUInt16LE(phsize, 54); b.writeUInt16LE(phnum, 56);
-  b.writeUInt16LE(64, 58);
-  let p = ehsize;
-  b.writeUInt32LE(1, p); b.writeUInt32LE(5, p + 4);
-  b.writeBigUInt64LE(BigInt(base), p + 16); b.writeBigUInt64LE(BigInt(base), p + 24);
-  b.writeBigUInt64LE(BigInt(total), p + 32); b.writeBigUInt64LE(BigInt(total), p + 40);
-  b.writeBigUInt64LE(0x1000n, p + 48);
-  p += phsize;
-  b.writeUInt32LE(0x6474e551, p); b.writeUInt32LE(6, p + 4);
-  b.writeBigUInt64LE(16n, p + 48);
-  blob.copy(b, head);
-  return b;
-}
-
-// `src` assembled into DIR/NAME: its .text behind an ELF header.
-function assemble(src, dir, name) {
-  const obj = join(dir, `${name}.o`), bin = join(dir, `${name}.bin`), exe = join(dir, name);
-  must('as', ['-I', HERE, '-o', obj, src]);
-  must('objcopy', ['-O', 'binary', '-j', '.text', obj, bin]);
-  writeFileSync(exe, elf(readFileSync(bin)));
-  chmodSync(exe, 0o755);
-  return exe;
-}
-
-const buildRef = (cell, dir) => assemble(join(HERE, cell.name, 'ref.S'), dir, 'ref');
+const buildRef = (cell, dir) => assemble(join(HERE, cell.name, 'ref.S'), join(dir, 'ref'));
 
 function buildJet(jet, cell, mode, dir, label = 'jet') {
   const src = join(dir, label === 'jet' ? `src-${mode}` : `src-${label}-${mode}`);
@@ -363,7 +327,7 @@ function gains(all) {
   const extra = JSON.parse(readFileSync(join(HERE, 'gains.json'), 'utf8'));
   const cells = [...all, ...extra].filter((c) => !o.cells || o.cells.includes(c.name));
   const compilers = [...(o.older ? [['older', o.older]] : []), ['base', o.jet], ['candidate', o.candidate]];
-  const launcher = assemble(join(HERE, 'launch.S'), o.out, 'launch');
+  const launcher = assemble(join(HERE, 'launch.S'), join(o.out, 'launch'));
   const results = [];
   let wrong = 0;
   for (const mode of o.modes) {
