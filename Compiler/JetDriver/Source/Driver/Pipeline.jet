@@ -18,6 +18,7 @@ use {
         SemaComptimeItemSource,
         SemaComptimeItemValue,
         SemaCoreCrossingResult,
+        SemaCoreEffectResult,
         SemaCoreModuleUsageResult,
         SemaComptimeValueSites,
         SemaForeignProviderInput,
@@ -121,6 +122,7 @@ use {
         SemaCompilerModuleSource,
         sema_inline_member_module,
         sema_inline_member_source_name,
+        sema_core_effect_rows,
         sema_taint_core_crossings,
     ]
     jet_foundation.[
@@ -4426,6 +4428,9 @@ JetDriverLoweringInputs: struct {
     // Each checked module's taint crossings (sema_taint_core_crossings), for
     // the Core record to hold its Core modules' rows.
     core_crossings: [SemaCoreCrossingResult]{[SemaCoreCrossingResult]{}}
+    // Each Core module's effect rows (sema_core_effect_rows), for the Core
+    // record to hold.
+    core_effects: [SemaCoreEffectResult]{[SemaCoreEffectResult]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -5562,11 +5567,16 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // `jet prove --lens solver` reads every checked function, unpruned,
         // with the declaration table their direct calls name; the Core
         // record also writes the finalized registration modules, the
-        // landed comptime values, each module's Core usage and its taint
-        // crossings, which walk the finalized graph whole.
+        // landed comptime values, each module's Core usage, its taint
+        // crossings and its effect rows, which walk the finalized graph
+        // whole.
         if capture.stop_before_lowering {
             crossing_rows := [SemaCoreCrossingResult]{}
-            if request.every_core_body -> crossing_rows = sema_taint_core_crossings(registration_graph)
+            effect_rows := [SemaCoreEffectResult]{}
+            if request.every_core_body {
+                crossing_rows = sema_taint_core_crossings(registration_graph)
+                effect_rows = sema_core_effect_rows(registration_graph)
+            }
             sources := [String:String]{}
             loop file in load.source_files {
                 if sources.get(file.path) == None -> sources[file.path] = file.source
@@ -5589,7 +5599,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
                 demand_rows = load.core_demands.move()
                 load.core_demands = [JetDriverCoreModuleDemand]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move(), core_usage: usage_rows.move(), core_demands: demand_rows.move(), core_crossings: crossing_rows.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, canonical_effect_module_identity: canonical_effect_module_identity, module_table: load.module_table.copy(), entry_key: check_entry.move(), registration_modules: registration_modules.move(), comptime_values: landed_values.move(), core_usage: usage_rows.move(), core_demands: demand_rows.move(), core_crossings: crossing_rows.move(), core_effects: effect_rows.move()})
         }
         return result
     }

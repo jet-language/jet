@@ -66,7 +66,6 @@ use jet_foundation.[
     Span,
     Stmt,
     StmtKind,
-    SymbolKind,
     TEffectFacts,
     TEffectSpan,
     TFailureCarrier,
@@ -91,7 +90,6 @@ use jet_foundation.[
     symbol_is_local,
     symbol_is_none,
     symbol_key,
-    symbol_key_text,
     symbol_none,
     symbol_table,
     symbol_table_key,
@@ -452,9 +450,33 @@ SemaEffectScopedCall: struct {
     scoped: String
 }
 
-sema_effect_source_from_function: fn(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
+// The effect facts a function's body gives its effect source: its `#FX(…)`
+// regions, loop spans and `assume_deterministic` spans, and for a top-level
+// function its pending kernel (sema_kernel_pending). A function whose body
+// the graph took from the Core record has its record row's instead
+// (sema_core_effect_rows).
+SemaEffectBodyFacts: struct {
+    fx_regions: [SemaEffectFxRegion]{[SemaEffectFxRegion]{}}
+    loop_spans: [Span]{[Span]{}}
+    assume_det_spans: [Span]{[Span]{}}
+    kernel: SemaKernelPending?{None}
+}
+
+// The body facts of `func`, walked from its body, its kernel left out.
+sema_effect_body_facts: fn(func: Func) -> SemaEffectBodyFacts Never! {
+    SemaEffectBodyFacts{
+        fx_regions: sema_authority_fx_regions(func.body),
+        loop_spans: sema_effect_statement_spans(func.body, false),
+        assume_det_spans: sema_effect_statement_spans(func.body, true),
+    }
+}
+
+// The effect source of `func`, keyed `key`, its body facts `facts`: what its
+// header gives it, with no walk of its body.
+sema_effect_source_from_header: fn(func: Func, key: String, facts: &&SemaEffectBodyFacts) -> SemaEffectFunctionSource Never! {
+    owned := facts.move()
     SemaEffectFunctionSource{
-        key: symbol_key_text(SymbolKind.Function, module_identity, "", func.name),
+        key: key,
         name: func.name,
         span: func.span,
         name_span: Val(func.name_span),
@@ -466,10 +488,11 @@ sema_effect_source_from_function: fn(func: Func, module_identity: String) -> Sem
         unsafe_span: func.unsafe_span,
         replayable_span: func.replayable_span,
         effect_via: func.effect_via,
-        fx_regions: sema_authority_fx_regions(func.body),
-        loop_spans: sema_effect_statement_spans(func.body, false),
-        assume_det_spans: sema_effect_statement_spans(func.body, true),
+        fx_regions: owned.fx_regions.move(),
+        loop_spans: owned.loop_spans.move(),
+        assume_det_spans: owned.assume_det_spans.move(),
         memo_span: sema_effect_memo_span(func),
+        kernel: owned.kernel.move(),
         module_caps: func.module_caps,
     }
 }
@@ -701,10 +724,11 @@ sema_effect_push_memory_event: fn(nodes: &[SemaEffectNode], node_index: Int, spa
     nodes[node_index].memory_events.push(SemaMemoryEvent{span: span, operation: operation, kind: kind, bytes: bytes, executions: executions})
 }
 
-sema_effect_source_from_function_key: fn(func: Func, module_identity: String, key: String) -> SemaEffectFunctionSource Never! {
-    source := sema_effect_source_from_function(func, module_identity)
-    source.key = key
-    source
+// The effect source of `func`, keyed `key`, with its body walked for its
+// body facts, its kernel left out.
+sema_effect_source_from_function_key: fn(func: Func, key: String) -> SemaEffectFunctionSource Never! {
+    facts := sema_effect_body_facts(func)
+    sema_effect_source_from_header(func, key, facts)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

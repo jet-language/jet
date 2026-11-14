@@ -1,4 +1,4 @@
-// The Core record's body packets (its section 5, schema `jet.core/v13`). The
+// The Core record's body packets (its section 5, schema `jet.core/v14`). The
 // record is written from a finalized Core check, whose module rows hold every
 // checked body with the facts all of them recorded, merged. At write time
 // each row is split: every body becomes one packet, a
@@ -185,8 +185,9 @@ sema_core_body_packet_take: fn(row: &SemaGraphModuleResult, packet: &&SemaCompti
     row.exact_int_reachable = row.exact_int_reachable || owned.exact_int_reachable
 }
 
-// The body packets and taint crossing rows a graph takes from its Core
-// record, filled by the driver that opened it (sema_core_body_store_new).
+// The body packets, taint crossing rows and effect rows a graph takes from
+// its Core record, filled by the driver that opened it
+// (sema_core_body_store_new).
 SemaCoreBodyStore: struct {
     reader: RecordReader
     // Where the record's tree tables lie (JetFoundation RecordTree.jet).
@@ -199,11 +200,13 @@ SemaCoreBodyStore: struct {
     // (sema_finalize_seeded_taken), by the function's SymbolID.
     rows: [U32:SemaCoreBodyRow]
     rebase: SemaCoreDeclRebase
-    // The record section that holds the crossing rows (Taint.jet
-    // SemaCoreCrossingResult), and the element of each taken module's, by
-    // its module identity.
+    // The element of each taken module's one-per-module rows (a crossing
+    // row, an effect row), by its module identity, and the record sections
+    // that hold the crossing rows (Taint.jet SemaCoreCrossingResult) and the
+    // effect rows (CheckProgram.jet SemaCoreEffectResult).
+    modules: [U32:Int]
     crossing_section: Int
-    crossings: [U32:Int]
+    effect_section: Int
     // This finalization's: the functions it takes up front, in record
     // order, and every function it took (sema_core_body_begin).
     eager: [SymbolID]{[SymbolID]{}}
@@ -233,10 +236,11 @@ SemaCoreDeclRebase: struct {
 
 // A store over the packets `rows` of `reader`'s section `section`, tree rows
 // of the tables `tree` places, whose bodies name the `decl_count`
-// declaration rows of its section `decl_section`, and over the crossing rows
-// `crossings` of its section `crossing_section`.
-sema_core_body_store_new: fn(reader: RecordReader, tree: RecordTreeView, section: Int, rows: [U32:SemaCoreBodyRow], decl_section: Int, decl_count: Int, crossing_section: Int, crossings: [U32:Int]) -> SemaCoreBodyStore Never! {
-    SemaCoreBodyStore{reader: reader, tree: tree, section: section, rows: rows, decl_section: decl_section, rebase: sema_core_decl_rebase_new(decl_count), crossing_section: crossing_section, crossings: crossings}
+// declaration rows of its section `decl_section`, and over the crossing and
+// effect rows of its sections `crossing_section` and `effect_section`, whose
+// element for each taken module `modules` holds.
+sema_core_body_store_new: fn(reader: RecordReader, tree: RecordTreeView, section: Int, rows: [U32:SemaCoreBodyRow], decl_section: Int, decl_count: Int, modules: [U32:Int], crossing_section: Int, effect_section: Int) -> SemaCoreBodyStore Never! {
+    SemaCoreBodyStore{reader: reader, tree: tree, section: section, rows: rows, decl_section: decl_section, rebase: sema_core_decl_rebase_new(decl_count), modules: modules, crossing_section: crossing_section, effect_section: effect_section}
 }
 
 // The crossing rows of the taken module `module_identity`, read from the
@@ -244,13 +248,37 @@ sema_core_body_store_new: fn(reader: RecordReader, tree: RecordTreeView, section
 // row that doesn't read is a record that doesn't match this compiler.
 sema_core_crossing_read: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> SemaCoreCrossingResult? {
     if graph.core_bodies == .Val(store) {
-        element: store.crossings.get(module_identity.id) ?? return None
+        element: store.modules.get(module_identity.id) ?? return None
         read: record_tree_row(store.reader, store.tree, store.crossing_section, element)
         value: read.value ?? panic("the Core record has no crossing row {element}")
         crossings: value.decode<SemaCoreCrossingResult>() ?? panic("the Core record's crossing row {element} doesn't decode: {sema_core_record_field_errors(err)}")
         return Val(crossings)
     }
     None
+}
+
+// The effect rows of the taken module `module_identity`, read from the
+// graph's Core record; None when the graph took no such module from one. A
+// row that doesn't read, or is another module's, is a record that doesn't
+// match this compiler.
+sema_core_effect_read: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> SemaCoreEffectResult? {
+    if graph.core_bodies == .Val(store) {
+        element: store.modules.get(module_identity.id) ?? return None
+        read: record_tree_row(store.reader, store.tree, store.effect_section, element)
+        value: read.value ?? panic("the Core record has no effect row {element}")
+        effects: value.decode<SemaCoreEffectResult>() ?? panic("the Core record's effect row {element} doesn't decode: {sema_core_record_field_errors(err)}")
+        if effects.module_identity != module_identity -> panic("the Core record's effect row {element} is another module's")
+        return Val(effects)
+    }
+    None
+}
+
+// Whether the graph took the body of the function `symbol` from its Core
+// record: a function its finalization registered (a generated codec or
+// derived method the record has no body of) is not.
+sema_core_body_recorded: fn(graph: SemaRegistrationGraph, symbol: SymbolID) -> Bool Never! {
+    if graph.core_bodies == .Val(store) -> return store.rows.get(symbol.id) != None
+    false
 }
 
 // A rebase of a record with `count` declaration rows that maps no row yet.

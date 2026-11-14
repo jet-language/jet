@@ -3,14 +3,15 @@
 // checks it) decodes: each row reads back from its record tree (JetFoundation
 // RecordTree.jet) and encodes to the tree it was read from, it holds every
 // comptime value the check landed on a Core module, each Core module's
-// Core usage as the check walked it and each Core module's taint crossings,
-// and each symbol range reads back with the keys the check reserved.
+// Core usage as the check walked it, each Core module's taint crossings and
+// its effect rows, and each symbol range reads back with the keys the check
+// reserved.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_body_key, jet_driver_core_record_module,
         jet_driver_core_record_module_first_body, jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
-        jet_driver_core_record_crossings, jet_driver_core_record_symbol_rows, jet_driver_core_record_symbols, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
+        jet_driver_core_record_crossings, jet_driver_core_record_effects, jet_driver_core_record_symbol_rows, jet_driver_core_record_symbols, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -90,6 +91,17 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     // Some Core function branches on a parameter, so a fixed value passed
     // there has a path.
     assert(crossed > 0)
+    effect_at := [U32:Int]{}
+    loop (index, effects) in inputs.core_effects -> effect_at[effects.module_identity.id] = index
+    looped := 0
+    loop index in 0..<record.module_names.len() {
+        effects: jet_driver_core_record_effects(record, index) ?? panic("module {index}'s effect row doesn't decode: {err}")
+        at: effect_at.get(record.module_identities[index].id) ?? panic("module {index} has no effect rows in the check")
+        assert_eq("{effects:Debug}", "{inputs.core_effects[at]:Debug}")
+        loop effect_row in effects.rows -> looped += effect_row.facts.loop_spans.len()
+    }
+    // Core loops, so its effect rows hold loop spans.
+    assert(looped > 0)
     symbols: jet_driver_core_record_symbols(record, recorded) ?? panic("the record's symbol keys don't read: {err}")
     assert_eq(symbols.len(), reserved.len())
     loop (index, keys) in reserved {

@@ -1460,7 +1460,7 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v13` record of that check to the file and prints one
+also writes the `jet.core/v14` record of that check to the file and prints one
 line per record section at once: its element count, the bytes its elements
 take and the bytes of its largest element. It then reads the file back and
 encodes every row again, which must give the tree it was read from. The record
@@ -1481,7 +1481,10 @@ of its own, so a compile that takes the record walks no Core body for it. So
 are its taint crossings: for each parameter of each Core function, the path on
 which its body steers on a `timing: .Fixed` value passed there, so a compile
 that takes the record walks no Core body to check a call that carries such a
-value into Core.
+value into Core. So are its effect facts: each Core function's `#FX(…)`
+regions, loop spans, `assume_deterministic` spans and pending
+`#Kernel(.parallel)` obligations, so a compile that takes the record walks no
+Core body for the effect check either.
 `--embed <image> <out>` writes the executable `image` to `out` with the
 record added as its `jet.core` part; the compiler build runs it with the jet it
 just linked. The record names the compiler `JET_COMPILER_IDENTITY` names;

@@ -2454,7 +2454,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ContextAttached)
     unsafe_gate_valid := true
     if func.is_unsafe {
-        unsafe_source: sema_effect_source_from_function_key(func, module_text, owner_key)
+        unsafe_source: sema_effect_source_from_function_key(func, owner_key)
         unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, diagnostics)
         if !unsafe_gate_valid -> complete = false
     }
@@ -10613,21 +10613,27 @@ sema_comptime_dependency_cycle_diagnostic: fn(chain: [String], span: Span) -> Di
 // to each of its methods, trait impls written apart from its body included.
 // Each trait impl method also takes the trait it implements, resolved in
 // `graph` where its `impl` block is written, which binds the trait's cap
-// and its trait-value calls to it.
+// and its trait-value calls to it. A function whose body the graph took from
+// its Core record takes its body facts from the record's effect rows
+// (sema_core_effect_read), and its body isn't walked.
 sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, type_caps: [U32:SemaEffectTypeCap]) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
     compute_aliases: sema_kernel_compute_aliases(source_module, graph.module_table)
-    // Effect sources name their module by its identity text.
-    module_name: module_text(graph.module_table, source_module.module_identity)
-    loop function in source_module.functions {
-        source := sema_effect_source_from_function_key(function.declaration, module_name, symbol_table_key(graph.symbols, function.symbol.id))
-        source.kernel = sema_kernel_pending(function.declaration, compute_aliases)
-        sources.push(source)
+    rows := [String:SemaEffectBodyFacts]{}
+    read := sema_core_effect_read(graph, source_module.module_identity)
+    if read != None {
+        held := read.move() ?? panic("a taken module's effect rows were lost")
+        loop held.rows.len() > 0 {
+            row := held.rows.pop() ?? break
+            key := row.key.move()
+            rows[key] = row.facts.move()
+        }
     }
+    loop function in source_module.functions -> sources.push(sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, true))
     loop nominal in source_module.nominals {
         block_traits: sema_effect_body_block_traits(graph, source_module.module_identity, nominal)
         loop (index, function) in nominal.methods {
-            source := sema_effect_source_from_function_key(function.declaration, module_name, symbol_table_key(graph.symbols, function.symbol.id))
+            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, Val(nominal.symbol.id), source_module.module_identity)
             if index < block_traits.len() -> source.trait_symbol = block_traits[index].copy()
             sources.push(source)
@@ -10639,13 +10645,60 @@ sema_comptime_effect_sources: fn(graph: SemaRegistrationGraph, source_module: Se
             trait_id = if implementation.trait_symbol == .Val(symbol) -> Val(symbol.id) else -> sema_effect_impl_trait(graph, source_module.module_identity, trait_name)
         }
         loop function in implementation.methods {
-            source := sema_effect_source_from_function_key(function.declaration, module_name, symbol_table_key(graph.symbols, function.symbol.id))
+            source := sema_comptime_effect_source(graph, function.declaration, function.symbol.id, rows, compute_aliases, false)
             sema_effect_bind_type_cap(source, type_caps, implementation.target_nominal, source_module.module_identity)
             source.trait_symbol = trait_id.copy()
             sources.push(source)
         }
     }
     sources
+}
+
+// The effect source of the function `symbol` declared by `func`: its body
+// facts and, for a `top_level` function, its pending kernel
+// (`compute_aliases`: its module's aliases of `core.compute`). A body the
+// graph took from its Core record (sema_core_body_recorded) gives them by its
+// row of `rows`, none without one; any other body is walked for them.
+sema_comptime_effect_source: fn(graph: SemaRegistrationGraph, func: Func, symbol: SymbolID, rows: &[String:SemaEffectBodyFacts], compute_aliases: [String], top_level: Bool) -> SemaEffectFunctionSource Never! {
+    key: symbol_table_key(graph.symbols, symbol)
+    recorded: sema_core_body_recorded(graph, symbol)
+    facts := if recorded -> rows.remove(key) ?? SemaEffectBodyFacts{} else -> sema_effect_body_facts(func)
+    if top_level && !recorded -> facts.kernel = sema_kernel_pending(func, compute_aliases)
+    sema_effect_source_from_header(func, key, facts)
+}
+
+// The body facts of one function of a Core module (its effect source's,
+// sema_comptime_effect_sources), by its symbol key, for the Core record. A
+// function with none has no row.
+SemaCoreEffectRow: struct {
+    key: String
+    facts: SemaEffectBodyFacts
+}
+
+// A Core module's effect rows (Core record section 18).
+SemaCoreEffectResult: struct {
+    module_identity: ModuleID
+    rows: [SemaCoreEffectRow]
+}
+
+// The effect rows of each Core module of `graph`, a graph that walked every
+// body, as its effect sources give them.
+sema_core_effect_rows: fn(graph: SemaRegistrationGraph) -> [SemaCoreEffectResult] Never! {
+    results := [SemaCoreEffectResult]{}
+    loop source_module in graph.modules {
+        if !module_is_core(source_module.module_identity) -> next
+        sources := sema_comptime_effect_sources(graph, source_module, [U32:SemaEffectTypeCap]{})
+        rows := [SemaCoreEffectRow]{}
+        sources.reverse()
+        loop sources.len() > 0 {
+            source := sources.pop() ?? break
+            if source.fx_regions.len() == 0 && source.loop_spans.len() == 0 && source.assume_det_spans.len() == 0 && source.kernel == None -> next
+            facts: SemaEffectBodyFacts{fx_regions: source.fx_regions.move(), loop_spans: source.loop_spans.move(), assume_det_spans: source.assume_det_spans.move(), kernel: source.kernel.move()}
+            rows.push(SemaCoreEffectRow{key: source.key.move(), facts: facts})
+        }
+        results.push(SemaCoreEffectResult{module_identity: source_module.module_identity, rows: rows.move()})
+    }
+    results
 }
 
 // The trait each of `nominal`'s methods implements, by method row: None for
