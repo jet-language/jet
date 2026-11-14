@@ -1,7 +1,10 @@
 # A `#Test` body is checked the same way by `jet test`, `jet run` and
 # `jet build`: a body one of them refuses, the others refuse with the same
 # diagnostic. Here the test reads a script's top-level binding, which no
-# function can see.
+# function can see. `jet test` and `jet build` print it word for word alike.
+# A refused `jet run` names each file by its full path (so its report reads
+# the same from any directory), so its report is matched line by line around
+# that path.
 fixture: run_and_test_refuse_a_test_body_alike.fixture
 env: NO_COLOR=1
 env: TERM=dumb
@@ -10,14 +13,13 @@ exit: 1
 stderr: ~ "`total` is a local of this file's top-level statements" # the test body is refused
 capture: test_err = text stderr
 write: test.err = "{cap:test_err}"
-step: jet run main.jet
-exit: 1
-stdout: !~ "5" # the script never runs
-capture: run_err = text stderr
-write: run.err = "{cap:run_err}"
-file: run.err == test.err # the same diagnostic, word for word
 step: jet build main.jet
 exit: 1
 capture: build_err = text stderr
 write: build.err = "{cap:build_err}"
-file: build.err == test.err
+file: build.err == test.err # the same diagnostic, word for word
+step: jet run main.jet
+exit: 1
+stdout: !~ "5" # the script never runs
+stderr: ~ "Error [jet.UnknownName]: `total` is a local of this file's top-level statements, which a function can't see\n  --> " # the same headline
+stderr: ~ "main.jet:6:15\n    |\n  6 |     assert_eq(total, 5)\n    |               ^^^^^\n Why: A file's top-level statements are its entry, and the names they bind are that entry's locals\n Fix: Pass `total` as a parameter\nMore: jet-lang.dev/e/E0107\n" # the same span, why and fix
