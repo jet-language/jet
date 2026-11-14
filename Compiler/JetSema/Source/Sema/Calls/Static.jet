@@ -1379,8 +1379,8 @@ sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: 
                 accepts = false
                 break
             }
-            required: sema_call_resolved_type(declared, environment, program)
-            if required == argument_types[index] -> next
+            required: Val(sema_call_resolved_type(declared, environment, program))
+            if required == .Val(resolved) && resolved == argument_types[index] -> next
             same = false
             if !sema_call_static_argument_checks_under(args[index].expr, required, environment, program, scopes, state, tail_store, context) {
                 accepts = false
@@ -1393,13 +1393,14 @@ sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: 
     if exact.len() > 0 -> exact else -> assignable
 }
 
-// Whether `value` checks under the parameter type `required` with no report
-// and a type `required` takes.
-sema_call_static_argument_checks_under: fn(value: Expr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+// Whether `value` checks under `expected`, its parameter's type, with no
+// report and a type that parameter takes.
+sema_call_static_argument_checks_under: fn(value: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(value, Val(required.copy()), environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
+    probed: sema_probe_expression(value, expected, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return false
     if probe_diagnostics.len() > 0 -> return false
-    sema_call_type_assignable(required, sema_call_resolved_type(probed.ty, environment, program), environment, program) ?? false
+    if expected == .Val(required) -> return sema_call_type_assignable(required, sema_call_resolved_type(probed.ty, environment, program), environment, program) ?? false
+    false
 }
 
 // `ExpiringSecret.new` owns only the closed secret family (E0112 at the value)
