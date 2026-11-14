@@ -31,10 +31,10 @@ run: fn() {
     child := process.cmd(["sh", "-c", script]).stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
     // The shell prints only once it has waited for the busy grandchild.
     said: child.stdout.read(64) ?? panic("read: {err}")
-    tree: os.tree_cpu_time(child.id())
-    own: os.cpu_time(child.id())
-    counted: if tree == {
-        .Ok(spent) -> if own == {
+    // A bound fallible call would pass its failure up; matching the call keeps
+    // the result, so an Unsupported host still prints its line.
+    counted: if os.tree_cpu_time(child.id()) == {
+        .Ok(spent) -> if os.cpu_time(child.id()) == {
             // The grandchild's loop runs for far more than 50 ms of CPU.
             .Ok(alone) -> spent.in(.Nanoseconds) - alone.in(.Nanoseconds) >= 50000000
             .Err(error) -> spent.in(.Nanoseconds) >= 50000000
