@@ -615,18 +615,21 @@ build_finish_action: fn(run: BuildActionRun, receipt: ProcessReceipt, project_ro
 // other special file is refused before any blocking open; the per-file and
 // per-action limits are checked against the opened file's size before a byte
 // is read). Only when all of them are read are they restored atomically
-// under the project root, so a refused output publishes nothing. A kept
+// under the project root, so a refused output publishes nothing; one the
+// action left runnable by its owner is published runnable. A kept
 // output that already holds its bytes is left as it is; when one holds bytes
 // no build wrote (build_output_write), nothing is published and its path is
 // returned.
 build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action: HermeticBuildAction) -[FS, Rand]> String? BuildIOError! {
     contents := [[U8]]{}
     writes := [BuildOutputWrite]{}
+    runnable := [Bool]{}
     total := 0
     loop declared in action.outputs {
         from: build_resolve_under(sandbox, declared)
         bytes: build_secure_read_file(sandbox, from, build_read_budget(total))
         total += bytes.len()
+        runnable.push(build_owner_executable(from) ?? return Err(err))
         write := BuildOutputWrite.Write
         if build_kept_output(action, declared) == .Val(kept) -> write = build_output_write(project_root, kept, ContentDigest.from_bytes(bytes))
         if write == .HandEdited -> return Ok(Val(declared.copy()))
@@ -637,7 +640,7 @@ build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action:
         if writes[index] == .Unchanged -> next
         to: build_resolve_under(project_root, action.outputs[index])
         build_prepare_output_destination(project_root, to)
-        build_atomic_restore_file(project_root, to, contents[index])
+        build_atomic_restore_file(project_root, to, contents[index], executable: runnable[index])
     }
     Ok(None)
 }

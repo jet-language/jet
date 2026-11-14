@@ -80,10 +80,13 @@ ActionInputCapture: struct {
     bytes: [U8]
 }
 
+// `executable`: a declared output its action left runnable by its owner,
+// which is published and restored runnable too.
 ActionOutputRecord: struct {
     path: String
     digest: ContentDigest
     byte_len: Int
+    executable: Bool{false}
 }
 
 ActionOutcome: enum {
@@ -137,11 +140,16 @@ build_snapshot_declared_inputs: fn(base: String, action: HermeticBuildAction) -[
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: ContentDigest.from_bytes(bytes)
-        mode: (files.stat(path) ?? return Err(BuildIOError.from(err))).mode
-        executable: (mode /% 64) % 2 == 1
+        executable: build_owner_executable(path) ?? return Err(err)
         inputs.push(ActionInputCapture{snapshot: ActionInputSnapshot{path: input, digest, byte_len: bytes.len(), executable}, bytes})
     }
     Ok(inputs)
+}
+
+// Whether the file at `path` has its owner's execute bit.
+build_owner_executable: fn(path: String) -[FS]> Bool BuildIOError! {
+    mode: (files.stat(path) ?? return Err(BuildIOError.from(err))).mode
+    Ok((mode /% 64) % 2 == 1)
 }
 
 // Every file of each folder `action` reads whole, as the input snapshots its
@@ -202,7 +210,8 @@ build_capture_declared_outputs: fn(store: BuildArtifactStoreHandle, base: String
         bytes: build_secure_read_file(base, path, build_read_budget(total))
         total += bytes.len()
         digest: store.put_blob(bytes)
-        outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len()})
+        executable: build_owner_executable(path) ?? return Err(err)
+        outputs.push(ActionOutputRecord{path: output, digest, byte_len: bytes.len(), executable})
     }
     Ok(ActionResultRecord{key, outcome, outputs, failure_report: None, status})
 }
@@ -242,7 +251,7 @@ build_restore_action_outputs: fn(store: BuildArtifactStoreHandle, base: String, 
             .None -> { return Err(BuildIOError.new(.NotFound, "CAS blob is missing")) }
             .Err(error) -> { return Err(error) }
         }
-        build_atomic_restore_file(base, path, found)
+        build_atomic_restore_file(base, path, found, executable: output.executable)
     }
     Ok(None)
 }
@@ -334,9 +343,10 @@ build_secure_read_file: fn(base: String, path: String, limit: Int) -[FS]> [U8] B
 }
 
 // Rust `atomic_restore_file`: walk (creating 0755) every parent without
-// following links, write a fresh `.jet-restore-<nonce>` exclusively (0600),
-// fsync it, then rename it over the final name inside the held directory.
-build_atomic_restore_file: fn(base: String, path: String, bytes: [U8]) BuildIOError! -[FS, Rand]> {
+// following links, write a fresh `.jet-restore-<nonce>` exclusively (0600,
+// or 0755 when `executable`), fsync it, then rename it over the final name
+// inside the held directory.
+build_atomic_restore_file: fn(base: String, path: String, bytes: [U8], *, executable: Bool) BuildIOError! -[FS, Rand]> {
     parts: build_relative_components(base, path, "build output escapes root")
     if parts.len() == 0 -> return Err(BuildIOError.new(.InvalidInput, "build output has no file name"))
     directory := files.open_directory(base) ?? return Err(BuildIOError.from(err))
@@ -358,7 +368,7 @@ build_atomic_restore_file: fn(base: String, path: String, bytes: [U8]) BuildIOEr
     loop {
         random_bytes: random.bytes(16) ?? return Err(BuildIOError.new(.Other, "{err}"))
         temp_name: ".jet-restore-{build_hex_encode(random_bytes)}"
-        if directory.create(temp_name, if_exists: .Refuse, mode: Val(0o600)) == {
+        if directory.create(temp_name, if_exists: .Refuse, mode: Val(if executable -> 0o755 else -> 0o600)) == {
             .Ok(created) -> {
                 writer := created
                 writer.write_all(bytes) ?? return Err(BuildIOError.from(err))
@@ -517,7 +527,7 @@ build_write_action_record: fn(store: BuildArtifactStoreHandle, key: String, reco
         wire: build_report_to_json(report)
         text = "{text}failure={build_hex_encode(wire.bytes())}\n"
     }
-    loop output in record.outputs -> text = "{text}{output.path}\t{output.digest.as_str()}\t{output.byte_len}\n"
+    loop output in record.outputs -> text = "{text}{output.path}\t{output.digest.as_str()}\t{output.byte_len}{if output.executable -> "\tx" else -> ""}\n"
     store.put_record(key, text.bytes())
 }
 
@@ -557,11 +567,12 @@ build_read_action_record: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
             next
         }
         fields: line.split("\t").to_list()
-        if fields.len() != 3 -> return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
+        // A runnable output's line ends in a fourth field, `x`.
+        if fields.len() != 3 && (fields.len() != 4 || fields[3] != "x") -> return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
         path: build_path_new(fields[0]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
         digest: ContentDigest.parse(fields[1]) ?? return Err(BuildIOError.new(.InvalidData, err.message))
         byte_len: build_parse_u64(fields[2]) ?? return Err(BuildIOError.new(.InvalidData, "malformed action output record"))
-        outputs.push(ActionOutputRecord{path, digest, byte_len})
+        outputs.push(ActionOutputRecord{path, digest, byte_len, executable: fields.len() == 4})
     }
     found: outcome ?? return Err(BuildIOError.new(.InvalidData, "action record has no outcome"))
     failed: if found == {

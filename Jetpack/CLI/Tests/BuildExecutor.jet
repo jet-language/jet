@@ -358,6 +358,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
     assert_eq(published, String?{None})
     assert_eq(files.read(files.join(root, "b.o")) ?? panic("published output"), "second")
+    assert(!(build_owner_executable(files.join(root, "b.o")) ?? panic("published mode")))
     files.remove(files.join(root, "a.o")) ?? panic("reset first output")
     files.remove(files.join(root, "b.o")) ?? panic("reset second output")
     // A FIFO with no writer would block a plain open forever.
@@ -464,13 +465,31 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     files.remove_all(sandbox).drop("test cleanup")
 }
 
+#Test("sandbox outputs: an output the action left runnable publishes runnable, the others not") {
+    root: build_test_root("runnable-output")
+    sandbox: build_test_root("runnable-output-sandbox")
+    action: build_test_output_action([String]{"tool", "data"})
+    files.write(files.join(sandbox, "tool"), "image") ?? panic("runnable output")
+    files.set_mode(files.join(sandbox, "tool"), 493) ?? panic("make the output runnable")
+    files.write(files.join(sandbox, "data"), "bytes") ?? panic("plain output")
+    published: if build_publish_sandbox_outputs(sandbox, root, action) == {
+        .Ok(edited) -> edited
+        .Err(error) -> panic("outputs publish: {error.message}")
+    }
+    assert_eq(published, String?{None})
+    assert(build_owner_executable(files.join(root, "tool")) ?? panic("runnable mode"))
+    assert(!(build_owner_executable(files.join(root, "data")) ?? panic("plain mode")))
+    files.remove_all(root).drop("test cleanup")
+    files.remove_all(sandbox).drop("test cleanup")
+}
+
 #Test("atomic restore: outputs land under real parents, a linked parent is refused without writing outside") {
     root: build_test_root("restore")
     outside: build_test_root("restore-outside")
-    build_atomic_restore_file(root, files.join(root, "build/obj/a.o"), "object".bytes()) ?? panic("restore under fresh parents")
+    build_atomic_restore_file(root, files.join(root, "build/obj/a.o"), "object".bytes(), executable: false) ?? panic("restore under fresh parents")
     assert_eq(files.read(files.join(root, "build/obj/a.o")) ?? panic("restored"), "object")
     files.symlink(outside, files.join(root, "linked")) ?? panic("parent link")
-    assert(build_atomic_restore_file(root, files.join(root, "linked/a.o"), "object".bytes()) == .Err(_))
+    assert(build_atomic_restore_file(root, files.join(root, "linked/a.o"), "object".bytes(), executable: false) == .Err(_))
     assert(!files.exists(files.join(outside, "a.o")))
     names: loop entry in files.list_dir(files.join(root, "build/obj")) ?? panic("list") -> entry.name
     assert_eq(names, [String]{"a.o"})
@@ -770,7 +789,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     plan: build.plan() ?? panic("plan")
     action: plan.actions[handle.id]
     digest: store.put_blob("object".bytes()) ?? panic("blob")
-    record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
+    record: ActionResultRecord{key: "act-sha256:k", outcome: ActionOutcome.Succeeded{exit_code: 0}, outputs: [ActionOutputRecord]{ActionOutputRecord{path: "a.o", digest, byte_len: 6, executable: true}}, failure_report: None, status: ActionCacheStatus.Miss(.NoLocalActionRecord)}
     build_write_action_record(store, "act-sha256:k", record) ?? panic("write record")
     read: if build_read_action_record(store, "act-sha256:k") == {
         .Ok(found) -> found
@@ -783,6 +802,8 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     }
     assert_eq(restored, String?{None})
     assert_eq(files.read(files.join(root, "a.o")) ?? panic("restored output"), "object")
+    // The record keeps the output runnable, and the restore makes it so.
+    assert(build_owner_executable(files.join(root, "a.o")) ?? panic("restored mode"))
     store.put_record("act-sha256:other", "act-sha256:k\noutcome=succeeded:0\n".bytes()) ?? panic("forged record")
     if build_read_action_record(store, "act-sha256:other") == {
         .Err(error) -> assert(error == BuildIOError.new(.InvalidData, "action record key does not match its cache path"))
