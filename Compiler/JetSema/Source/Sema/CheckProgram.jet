@@ -5463,6 +5463,12 @@ SEMA_BODY_SCOPE_BYTES_PER_BINDING: 2048
 // function's does (the self-compile's 1052 codecs took 3.7 s on one thread).
 SEMA_CODEC_JOB_BYTES: 4096
 
+// The work one derived method's check counts for thread admission, like a
+// codec's (SEMA_CODEC_JOB_BYTES): its span is its type's derive marker. It
+// costs about an eighth of a codec's (the Core check's 2139 derived methods
+// took 1.15 s on one thread).
+SEMA_DERIVE_JOB_BYTES: 512
+
 // The module-level binding rows sema_registration_apply_graph_module gives
 // module `module_index`'s scope: its declarations, import bindings and
 // package namespace rows (the compiler builtins are a fixed few more).
@@ -11363,12 +11369,12 @@ sema_finalize_pass_modules: fn(shared_state: Shared<SemaCheckShared>, values: [S
     }
     starts.reverse()
     start := 0
-    // Core demand and codec waves share body waves too (sema_check_body_wave
-    // with their `kind`); a derive wave, and either of them in single
-    // passes, checks module by module.
+    // Core demand, codec and derive waves share body waves too
+    // (sema_check_body_wave with their `kind`); in single passes they check
+    // module by module.
     loop start < selected.len() {
         module_index: selected[start]
-        if kind == SemaWaveKind.Derive || (kind != SemaWaveKind.Modules && single_passes) {
+        if kind != SemaWaveKind.Modules && single_passes {
             checked_functions += sema_check_demand_module_in_shared(shared_state, host_hooks, module_index, kind, comptime_functions, comptime_rows, pending_obligations, phase, trace_sink, modules[module_index])
             start += 1
             next
@@ -11500,13 +11506,14 @@ sema_check_body_wave_end: fn(shared_state: Shared<SemaCheckShared>, selected: [I
 // result from the module checks, run in module order, are those of a pass
 // per module.
 // `starts` holds the modules' declaration checks, made ahead, last first.
-// A Core demand wave's or a codec wave's (`kind`, sema_core_demand_pass,
-// sema_codec_waves) has none: it checks the wave's bodies of each module
-// into the module's existing result (sema_check_demand_module_lent). A
-// codec wave's jobs are all methods, which the wave selects once it has
-// built each module's scope (sema_check_body_wave_run); the codecs it filled
-// admit its threads (sema_check_codec_jobs_in_shared, SEMA_CODEC_JOB_BYTES
-// each), counted as `<phase>.wave_workers`.
+// A Core demand, codec or derive wave's (`kind`, sema_core_demand_pass,
+// sema_codec_waves, sema_derive_waves) has none: it checks the wave's
+// bodies of each module into the module's existing result
+// (sema_check_demand_module_lent). A codec or derive wave's jobs are all
+// methods, which the wave selects once it has built each module's scope
+// (sema_check_body_wave_run); the methods it names admit its threads
+// (sema_check_wave_method_jobs_in_shared, SEMA_CODEC_JOB_BYTES or
+// SEMA_DERIVE_JOB_BYTES each), counted as `<phase>.wave_workers`.
 // Returns how many functions the modules checked.
 sema_check_body_wave: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, selected: [Int], start: Int, end: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, threads: CompilerThreads, phase: String, trace_sink: CompilerTraceSink?, kind: SemaWaveKind, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
     jobs := [SemaBodyJob]{}
@@ -11518,22 +11525,27 @@ sema_check_body_wave: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Sema
     body_work := 0
     scope_rows := 0
     method_jobs := 0
+    method_job_bytes: if {
+        kind == SemaWaveKind.Codec -> SEMA_CODEC_JOB_BYTES
+        kind == SemaWaveKind.Derive -> SEMA_DERIVE_JOB_BYTES
+        else -> 0
+    }
     loop wave_module in 0..<(end - start) {
         module_index: selected[start + wave_module]
         module_indexes.push(module_index)
         firsts.push(jobs.len())
         weights := [Int]{}
         module_jobs: sema_check_module_jobs_in_shared(shared_state, module_index, comptime_rows, weights)
-        codec_jobs: if kind == SemaWaveKind.Codec -> sema_check_codec_jobs_in_shared(shared_state, module_index) else -> 0
-        if module_jobs.len() > 0 || codec_jobs > 0 {
+        wave_methods: if method_job_bytes > 0 -> sema_check_wave_method_jobs_in_shared(shared_state, module_index) else -> 0
+        if module_jobs.len() > 0 || wave_methods > 0 {
             rows: sema_check_module_scope_rows_in_shared(shared_state, module_index)
             if rows > scope_rows -> scope_rows = rows
         }
         first: jobs.len()
         loop index in compiler_threads_heaviest_first(weights) -> order.push(first + index)
         loop weight in weights -> body_work += weight
-        body_work += codec_jobs * SEMA_CODEC_JOB_BYTES
-        method_jobs += codec_jobs
+        body_work += wave_methods * method_job_bytes
+        method_jobs += wave_methods
         loop position in 0..<module_jobs.len() {
             jobs.push(module_jobs[position])
             job_modules.push(wave_module)
@@ -11541,7 +11553,7 @@ sema_check_body_wave: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Sema
     }
     firsts.push(jobs.len())
     workers: compiler_threads_admit(threads, jobs.len() + method_jobs, body_work, SEMA_BODY_MIN_BYTES_PER_THREAD, scope_rows * SEMA_BODY_SCOPE_BYTES_PER_BINDING, 0)
-    if kind == SemaWaveKind.Codec && trace_sink == .Val(sink) {
+    if method_job_bytes > 0 && trace_sink == .Val(sink) {
         sink.progress("counters.{phase}.wave_workers", workers, -1)
     }
     if workers > 1 {
@@ -11583,9 +11595,9 @@ sema_check_body_wave: fn(shared_state: Shared<SemaCheckShared>, host_hooks: Sema
 // A body wave on `workers` threads (sema_check_body_wave): builds the wave
 // modules' post-summary scopes and the wave's plan, then runs the threads
 // and the module checks; returns how many functions the modules checked.
-// Every module of a Core demand or codec wave (`kind`) has bodies the wave
-// names, so each builds its scope. A codec wave counts the methods its
-// threads may check as `<phase>.wave_jobs`.
+// Every module of a Core demand, codec or derive wave (`kind`) has bodies
+// the wave names, so each builds its scope. A codec or derive wave counts
+// the methods its threads may check as `<phase>.wave_jobs`.
 sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, start: Int, module_indexes: &&[Int], owned_firsts: &&[Int], jobs: &&[SemaBodyJob], job_modules: &&[Int], order: &&[Int], workers: Int, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, view_jobs: [[Int]?], counter_phase: String, trace_sink: CompilerTraceSink?, kind: SemaWaveKind, starts: &[SemaDeclarationCheck], modules: &[SemaGraphModuleResult]) -> Int {
     wave_modules := module_indexes.move()
     firsts := owned_firsts.move()
@@ -11638,7 +11650,7 @@ sema_check_body_wave_run: fn(shared_state: Shared<SemaCheckShared>, host_hooks: 
         outs.push(out)
     }
     method_firsts.push(wave_jobs.len())
-    if kind == SemaWaveKind.Codec && trace_sink == .Val(sink) {
+    if (kind == SemaWaveKind.Codec || kind == SemaWaveKind.Derive) && trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.wave_jobs", wave_jobs.len(), -1)
     }
     left := [SemaBodyCount]{}
@@ -11700,10 +11712,10 @@ sema_check_module_in_shared: fn(shared_state: Shared<SemaCheckShared>, host_hook
     checked.module_result.move()
 }
 
-// How many codec methods the current codec wave filled in module
-// `module_index` (graph.codec_wave_rows): the work that admits a codec
-// wave's threads.
-sema_check_codec_jobs_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
+// How many methods the current codec or derive wave names in module
+// `module_index` (graph.codec_wave_rows, graph.derive_wave_rows): the work
+// that admits the wave's threads.
+sema_check_wave_method_jobs_in_shared: fn(shared_state: Shared<SemaCheckShared>, module_index: Int) -> Int {
     inputs: shared_state.guard_read()
     scanned := 0
     sema_check_registered_method_jobs(inputs.value.environments[0], inputs.value.programs[0], module_index, scanned, false).len()

@@ -1,0 +1,11 @@
+# `jet check Core` demands every derived `equal`/`compare` of a Core type, and its derive wave checks
+# them on compiler threads as a body wave does (JetSema Sema/CheckProgram.jet, sema_check_body_wave
+# with SemaWaveKind.Derive); the module checks then take those bodies in module order. The verdict
+# shows the bodies the threads checked are the ones a single thread checks.
+env: NO_COLOR=1
+step: jet check --threads 2 --trace {root}/Core
+exit: 0
+stdout+stderr: ~ "has no problems" # the verdict line; the path varies with the checkout
+stderr: ~ "# sema.derives.wave_workers = 2\n" # the derive wave admits both threads the cap allows
+stderr: ~ "# sema.derives.wave_jobs = " # the wave counts the derived methods its threads may check
+stderr: !~ "# sema.derives.wave_jobs = 0\n" # and the threads get some of them
