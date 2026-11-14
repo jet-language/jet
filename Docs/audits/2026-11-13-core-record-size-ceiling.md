@@ -230,3 +230,44 @@ its parts.
 
   [INFERENCE] The 2,363 functions in the binary may not be typical of all Core.
   The full O2 measure (§1) would settle this.
+
+### r9 census: every walker that reads a Core function body
+
+Measured on v8: with every Func body emptied outside the four kept kinds above,
+the record shrinks by 18,253,080 bytes. Section 6 loses 16.13 MB and section 3
+loses 2.39 MB. Section 5 gains 0.28 MB, because subtrees the bodies shared now
+sit in the packets alone.
+
+Each walker that reads a Core module's item bodies falls in one of three
+classes:
+- **(a)** safe as it is: with empty Core bodies it gives the same output a
+  user sees;
+- **(b)** a keeper: the strip keeps the bodies it reads whole;
+- **(c)** a summary: the walker reads a row the record holds, not the bodies.
+
+Each (c) conversion is its own exact slice, landed while the bodies are still
+in the record. The strip comes last. The record's `seeded_writes` guard stays
+the net for any drift.
+
+| walker | where | class | why, or the plan | slice |
+|---|---|---|---|---|
+| budget scene catalog | per package | a | Core has no `Scene.new(` | — |
+| FunctionMemory | per module | a | Core has no ScopedGC policy | — |
+| typestate | per module | a | it reports only Core's own diagnostics | — |
+| taint module walk | `sema_taint_check_module` | a | it reports no Core taint; the masks are in the module rows | — |
+| divergence | fixpoint | a | it skips `module_is_core`; `diverges` is in the header | — |
+| liveness | Snapshot origin | a | it reads Snapshot-origin bodies only | — |
+| MarkerRules inline_always | `own` guard | a | it runs on the module's own items only | — |
+| UserTemplates package_info | entry package | a | it reads the entry package only | — |
+| JetEval CompilerServices | supplied modules | a | it skips supplied modules | — |
+| histories | generated text | a | it parses generated text | — |
+| derives report text | Diagnostic impls | a | Core has no Diagnostic impl | — |
+| variadic bounds | declaring program | a | expansion is per declaring program | — |
+| codec pending | `fill_demanded` | a | it skips taken modules, and regeneration is deterministic; `sema_check_method_jobs` and `sema_comptime_codec_methods_add` are still to be confirmed | r9e |
+| window facts | `sema_window_function_candidates` | b | keep each Func with a write-convention list parameter (`&[`): 586 functions, about 5.8% of body bytes | r9e |
+| C callback context and foreign thread safety | `sema_call_c_callback_context_read`, `sema_call_foreign_thread_safe_func` | b | keep each pure, non-generic Func with no pre or post (`-[]>`): about 10 functions | r9e |
+| HTTP route shape | `HttpRouting.jet` | b | keep each Func whose parameters name `HTTPRequest`: about 55 functions | r9e |
+| Core usage | `sema_finalize_walks` | c | the record holds each module's usage row (section 15), and finalization walks no taken module for it | **r9b** |
+| taint crossing | `sema_taint_crossing_path`, `sema_taint_check_crossing` | c | the path text per Core function and parameter, with a tag placeholder, plus the tag names Core knows | r9c |
+| comptime closure and effect source | `sema_comptime_indexed_function_source`, `sema_check_comptime_function`, `sema_comptime_effect_sources` | c | served from the body packets, on top of the comptime prefetch | r9d |
+| SemanticIndex (LSP) | `from_checked` | accepted | Core bodies go unindexed: no reference inside a Core body is indexed, while Core's declarations still are | r9e |
