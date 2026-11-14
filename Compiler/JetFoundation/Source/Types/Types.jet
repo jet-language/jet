@@ -932,6 +932,31 @@ type_table_grow: fn(table: &TypeTable, capacity: Int) Never! {
     table.slots = slots.move()
 }
 
+// A table's `hashes` and `slots` follow from its types, so a stored table
+// may leave them out (type_table_index_drop) for the reader to rebuild them
+// (type_table_index_rebuild): the slot count the interns grew to (a
+// function of the type count alone) and each type placed in index order, as
+// a grow places them.
+type_table_index_drop: fn(table: &TypeTable) Never! {
+    table.hashes = [Int]{}
+    table.slots = [Int]{}
+}
+
+type_table_index_rebuild: fn(table: &TypeTable) Never! {
+    hashes := [Int]{}
+    loop ty in table.types -> hashes.push(type_shape_hash(ty))
+    table.hashes = hashes.move()
+    if table.types.len() == 0 {
+        table.slots = [Int]{}
+        return
+    }
+    capacity := TYPE_TABLE_INITIAL_SLOTS
+    loop index in 0..<table.types.len() {
+        if (index + 1) * 2 > capacity - 1 -> capacity *= 2
+    }
+    type_table_grow(table, capacity)
+}
+
 type_carrier_identity: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int"

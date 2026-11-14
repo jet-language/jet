@@ -1,0 +1,93 @@
+// Record trees: Dyn rows written once by id and read back on demand.
+use jet_foundation.[
+    RecordReader, RecordSection, RecordTreeTables, RecordValue, record_encode, record_open_schema,
+    record_tree_add, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer,
+]
+
+RECORD_TREE_TEST_SCHEMA: "jet.tree-test/v1"
+
+// The `push` symbol of core.list, or its `pop`.
+record_tree_test_symbol: fn(pop: Bool) -> Dyn Never! {
+    Dyn.Object([(key: String, value: Dyn)]{
+        (key: "owner", value: Dyn.Text("core.list")),
+        (key: "name", value: Dyn.Text(if pop -> "pop" else -> "push")),
+        (key: "span", value: Dyn.Object([(key: String, value: Dyn)]{(key: "start", value: Dyn.Int(12)), (key: "end", value: Dyn.Int(40))})),
+    })
+}
+
+record_tree_test_rows: fn() -> [Dyn] Never! {
+    shared: record_tree_test_symbol(false)
+    [Dyn]{
+        Dyn.Array([Dyn]{shared, shared, record_tree_test_symbol(true)}),
+        Dyn.Object([(key: String, value: Dyn)]{
+            (key: "symbol", value: shared),
+            (key: "count", value: Dyn.Int(0 - 9223372036854775807 - 1)),
+            (key: "ratio", value: Dyn.Float(-2.5)),
+            (key: "raw", value: Dyn.Bytes([U8]{0, 255, 7})),
+            (key: "none", value: Dyn.Null),
+            (key: "flags", value: Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Bool(false)})),
+            (key: "empty", value: Dyn.Object([(key: String, value: Dyn)]{})),
+            (key: "text", value: Dyn.Text("é")),
+        }),
+        Dyn.Text("push"),
+        Dyn.Int(0),
+    }
+}
+
+record_tree_test_tables: fn(rows: [Dyn]) -> RecordTreeTables Never! {
+    writer := record_tree_writer()
+    added := [[U8]]{}
+    loop row in rows -> added.push(record_tree_add(writer, row))
+    record_tree_tables(writer.move(), [[[U8]]]{added})
+}
+
+// A record of the tables' one row section (1) and three tables (2, 3, 4),
+// which move into it; `broken` names a string out of range in row 2.
+record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordReader Never! {
+    held := tables.move()
+    rows := held.rows.pop() ?? [RecordValue]{}
+    if broken -> rows[2] = RecordValue.Bytes{value: [U8]{5, 120}}
+    sections: [RecordSection]{
+        RecordSection{id: 1, elements: rows.move()},
+        RecordSection{id: 2, elements: held.strings.move()},
+        RecordSection{id: 3, elements: held.shapes.move()},
+        RecordSection{id: 4, elements: held.nodes.move()},
+    }
+    encoded: record_encode(RECORD_TREE_TEST_SCHEMA, sections)
+    opened: record_open_schema(encoded.bytes ?? panic("the tree record encodes"), RECORD_TREE_TEST_SCHEMA)
+    opened.reader ?? panic("the tree record opens")
+}
+
+#Test("a record tree reads back every row it was written from") {
+    rows: record_tree_test_rows()
+    tables := record_tree_test_tables(rows)
+    assert_eq(tables.problem, None)
+    reader: record_tree_test_reader(tables.move(), false)
+    opened: record_tree_view(reader, 2, 3, 4)
+    view: opened.view ?? panic("the tree view opens: {opened.problem ?? ""}")
+    loop (index, row) in rows {
+        read: record_tree_row(reader, view, 1, index)
+        assert_eq(read.problem, None)
+        assert((read.value ?? panic("row {index} reads")) == row)
+    }
+}
+
+#Test("a record tree stores a repeated subtree once and writes a single use in place") {
+    tables: record_tree_test_tables(record_tree_test_rows())
+    // The `push` symbol (three uses) and the span both symbols share are
+    // stored; the `pop` symbol and every scalar are written in place.
+    if tables.nodes[0] == .Bytes(ends) -> assert_eq(ends.len(), 8) else -> panic("the node end column is bytes")
+    again: record_tree_test_tables(record_tree_test_rows())
+    assert(again.nodes == tables.nodes && again.rows == tables.rows && again.strings == tables.strings && again.shapes == tables.shapes)
+}
+
+#Test("a record tree refuses a value with no tree form and a malformed row") {
+    writer := record_tree_writer()
+    _: record_tree_add(writer, Dyn.Int(9223372036854775808))
+    assert_eq(record_tree_tables(writer.move(), [[[U8]]]{}).problem, Val("record tree integer 9223372036854775808 is outside i64"))
+    tables := record_tree_test_tables(record_tree_test_rows())
+    reader: record_tree_test_reader(tables.move(), true)
+    view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
+    assert_eq(record_tree_row(reader, view, 1, 2).problem, Val("record is malformed: tree entry 120 is out of range"))
+    assert_eq(record_tree_view(reader, 2, 3, 9).problem, Val("record section 9 is missing"))
+}

@@ -3,7 +3,6 @@
 // program and line table with no source lexed or scanned, and the loaded
 // rows seed the graph (CoreRecordRebase.jet jet_driver_core_record_seeds).
 use {
-    load_cbor: core.encoding.cbor
     jet_parser.[parse_source, parser_line_starts]
     jet_sema.[
         SemaBuildFacts, SemaForeignProviderInput, SemaRegistrationForeignHandleFacts,
@@ -51,8 +50,7 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     row := core_record_load_row()
     items: row.program.items.len()
     assert(items > 0)
-    bytes: load_cbor.to_bytes_canonical(row) ?? panic("the registration row has no record encoding: {err}")
-    unit := jet_driver_parse_one(JetDriverParseJob.Record{row: bytes, module_name: "main", index: 3}, compiler_threads_single())
+    unit := jet_driver_parse_one(JetDriverParseJob.Record{row: row.encode(), bytes: 0, module_name: "main", index: 3}, compiler_threads_single())
     assert_eq(unit.parsed.diagnostics.len(), 0)
     assert_eq(unit.parsed.program.items.len(), items)
     assert_eq(unit.tokens, 0)

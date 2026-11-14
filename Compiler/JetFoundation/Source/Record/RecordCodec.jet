@@ -806,6 +806,26 @@ record_element: fn(reader: RecordReader, id: Int, index: Int) -> RecordValueResu
     record_section_element(reader, section, index)
 }
 
+// Where the bytes of a `Bytes` element lie in `reader.bytes`: its payload
+// from `start` up to `end`, found without copying it.
+RecordSpanResult: struct {
+    start: Int
+    end: Int
+    problem: String?
+}
+
+record_element_bytes_span: fn(reader: RecordReader, id: Int, index: Int) -> RecordSpanResult Never! {
+    section: record_section_index(reader, id) ?? return RecordSpanResult{start: 0, end: 0, problem: Val("record section {id} is missing")}
+    if index < 0 || index >= record_section_elements(reader, section) -> return RecordSpanResult{start: 0, end: 0, problem: Val("record is malformed: section {id} has no element {index}")}
+    cursor := RecordCursor{at: reader.bounds[reader.firsts[section] + index], end: reader.bounds[reader.firsts[section] + index + 1], problem: None}
+    kind: record_read_byte(reader.bytes, cursor)
+    if cursor.problem == None && kind != RECORD_TAG_BYTES -> record_malformed(cursor, "section {id} element {index} is not bytes")
+    len: record_read_len(reader.bytes, cursor)
+    if cursor.problem == None && cursor.at + len != cursor.end -> record_malformed(cursor, "element has trailing bytes")
+    if cursor.problem != None -> return RecordSpanResult{start: 0, end: 0, problem: cursor.problem}
+    RecordSpanResult{start: cursor.at, end: cursor.end, problem: None}
+}
+
 // Decode every element of one section.
 record_elements: fn(reader: RecordReader, id: Int) -> RecordElementsResult Never! {
     section: record_section_index(reader, id) ?? return RecordElementsResult{value: None, problem: Val("record section {id} is missing")}

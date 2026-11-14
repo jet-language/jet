@@ -4007,10 +4007,11 @@ JetDriverParseJob: enum {
     // `tested` unit is the Core source a `jet test` of that file runs
     // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
-    // A Core module the Core record holds: its encoded registration row, the
-    // module's name, and its module key position. Decoding it replaces the
-    // lex and the parse: the row's tree is the program the record checked.
-    Record(row: [U8], module_name: String, index: Int)
+    // A Core module the Core record holds: the tree of its registration row,
+    // the bytes the row takes in the record (its parse weight), the module's
+    // name, and its module key position. Decoding it replaces the lex and the
+    // parse: the row's tree is the program the record checked.
+    Record(row: Dyn, bytes: Int, module_name: String, index: Int)
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -4076,8 +4077,8 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     if request.core_record == .Val(record) {
         if jet_driver_core_record_loads(request, record) && module_find(record.module_table, jet_driver_unit_module_identity(unit)) == .Val(recorded) {
             if record.module_rows.get(recorded.id) == .Val(index) {
-                bytes: jet_driver_core_record_registration_bytes(record, index) ?? panic("the Core record: {err}")
-                return JetDriverParseJob.Record{row: bytes, module_name: row.module_name, index: index}
+                tree: jet_driver_core_record_registration_tree(record, index) ?? panic("the Core record: {err}")
+                return JetDriverParseJob.Record{row: tree, bytes: jet_driver_core_record_registration_size(record, index), module_name: row.module_name, index: index}
             }
         }
     }
@@ -4097,7 +4098,7 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
         .RuntimeEntry(text) -> text.len()
         .Prelude(text) -> text.len()
         .Core(text, _, _, _, _) -> text.len()
-        .Record(row, _, _) -> row.len()
+        .Record(_, bytes, _, _) -> bytes
         .Missing -> 0
     }
 }
@@ -4111,7 +4112,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
-        .Record(row, module_name, index) -> jet_driver_core_record_parsed_unit(row, module_name, index)
+        .Record(row, _, module_name, index) -> jet_driver_core_record_parsed_unit(row, module_name, index)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
     }
 }
@@ -4122,7 +4123,7 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 // the row's imports are already final. Its line table is the row's own, so
 // no load step scans the module's text for one (jet_driver_fill_line_starts).
 // A record this jet wrote whose row doesn't decode is a compiler fault.
-jet_driver_core_record_parsed_unit: fn(row: [U8], module_name: String, index: Int) -> JetDriverParsedUnit {
+jet_driver_core_record_parsed_unit: fn(row: Dyn, module_name: String, index: Int) -> JetDriverParsedUnit {
     registration := jet_driver_core_record_registration_decode(row, module_name) ?? panic("the Core record: {err}")
     program := registration.program.move()
     registration.program = ast_program()
@@ -4637,7 +4638,7 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                     core_source_units += 1
                 }
                 // A record row is no source.
-                .Record(_, _, _) -> {}
+                .Record(_, _, _, _) -> {}
                 .Missing -> {}
             }
             user_jobs.push(user_job)
@@ -5239,6 +5240,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         core_record_index: parsed_unit.core_record_index
         core_registration := parsed_unit.core_registration.move()
         recorded: core_registration.len() > 0
+        // A row the record wrote without its source takes the embedded Core
+        // source it was checked from (CoreRecord.jet module keys).
+        if recorded && request.core_record == .Val(record) && record.module_embedded_sources[core_record_index] -> core_registration[0].source = request.core_sources[unit.file_index].source()
         // A Core module (public module, private part or runtime unit) defers
         // its private imports until reached code spells their aliases.
         defers: reach.enabled && is_core && !is_runtime_entry && !recorded

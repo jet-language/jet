@@ -139,6 +139,41 @@ name_table_grow: fn(table: &NameTable) Never! {
     table.mask = mask
 }
 
+// A table's lookup columns (`bytes`, `ends`, `hashes` and `slots`) follow
+// from its texts and its mask, so a stored table may leave them out
+// (name_table_index_drop) for the reader to rebuild them
+// (name_table_index_rebuild). Every spelling of a table that interned only
+// Strings is its text's bytes, so the rebuild gives the columns the interns
+// left: ids placed in id order, as a grow places them.
+name_table_index_drop: fn(table: &NameTable) Never! {
+    table.bytes = [U8]{}
+    table.ends = [Int]{}
+    table.hashes = [Int]{}
+    table.slots = [Int]{}
+}
+
+name_table_index_rebuild: fn(table: &NameTable) Never! {
+    bytes := [U8]{}
+    ends := [Int]{}
+    hashes := [Int]{}
+    slots := [Int]{}
+    loop _ in 0..<table.mask + 1 -> slots.push(0)
+    loop (id, text) in table.texts {
+        spelled: text.bytes()
+        hash: name_hash(spelled, 0, spelled.len())
+        bytes.extend(spelled)
+        ends.push(bytes.len())
+        hashes.push(hash)
+        slot := hash.bit_and(table.mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(table.mask)
+        slots[slot] = id + 1
+    }
+    table.bytes = bytes.move()
+    table.ends = ends.move()
+    table.hashes = hashes.move()
+    table.slots = slots.move()
+}
+
 // Loaded modules by identity (#6793, Docs/spec/compiler-data.md). The loader
 // interns each module's identity text once, as it first meets it; every later phase
 // names a module by its `ModuleID` and resolves the text only at an edge (a

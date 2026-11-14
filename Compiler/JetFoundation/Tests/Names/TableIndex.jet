@@ -1,0 +1,52 @@
+// A stored name or type table leaves its lookup columns out; the rebuild
+// gives back the columns its interns left.
+use jet_foundation.[
+    NameTable, Type, TypeTable, name_find, name_index, name_intern, name_table,
+    name_table_index_drop, name_table_index_rebuild, type_table_find,
+    type_table_index_drop, type_table_index_rebuild, type_table_intern,
+]
+
+// Forty names: enough to grow a table past its first slots.
+table_index_names: fn() -> NameTable Never! {
+    table := name_table()
+    loop index in 0..<40 -> _: name_intern(table, "key.{index}")
+    table
+}
+
+table_index_types: fn() -> TypeTable Never! {
+    table := TypeTable{}
+    loop bits in 1..<20 {
+        _: type_table_intern(table, Type.IntN{signed: true, bits: bits})
+        _: type_table_intern(table, Type.List{element: Type.IntN{signed: false, bits: bits}})
+    }
+    table
+}
+
+#Test("a name table's rebuilt lookup columns are the ones its interns left") {
+    interned: table_index_names()
+    table := table_index_names()
+    name_table_index_drop(table)
+    assert_eq(table.bytes.len(), 0)
+    assert_eq(table.slots.len(), 0)
+    name_table_index_rebuild(table)
+    assert_eq(table.bytes, interned.bytes)
+    assert_eq(table.ends, interned.ends)
+    assert_eq(table.hashes, interned.hashes)
+    assert_eq(table.slots, interned.slots)
+    assert_eq(name_index(name_find(table, "key.17") ?? panic("key.17 is not found")), 18)
+    assert(name_find(table, "key.40") == None)
+}
+
+#Test("a type table's rebuilt lookup columns are the ones its interns left") {
+    interned: table_index_types()
+    table := table_index_types()
+    type_table_index_drop(table)
+    assert_eq(table.slots.len(), 0)
+    type_table_index_rebuild(table)
+    assert_eq(table.hashes, interned.hashes)
+    assert_eq(table.slots, interned.slots)
+    assert_eq(type_table_find(table, Type.List{element: Type.IntN{signed: false, bits: 7}}) ?? -1, 13)
+    empty := TypeTable{}
+    type_table_index_rebuild(empty)
+    assert_eq(empty.slots.len(), 0)
+}
