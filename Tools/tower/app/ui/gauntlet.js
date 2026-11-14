@@ -212,7 +212,7 @@ function jetGrid(jet, measured, rows) {
 // and Jet once measured, smallest (best) first. Bar length is log scale, so
 // a thousandfold spread between asm and an interpreter stays readable. A
 // measured row without this metric's value is listed with its reason.
-function standingPanel(metric, rows) {
+function standingPanel(metric, rows, jetLabel = 'Jet') {
   const bars = [];
   const missing = [];
   let jet = null;
@@ -226,7 +226,12 @@ function standingPanel(metric, rows) {
     }
     bars.push({ peer: row.peer, label: row.label, role: row.role, value: cell.peerValue, unit: cell.unit, basis: cell.peerBasis, ratio: cell.ratio, verdict: cell.ratio !== null ? cell.verdict : null, text: cell.ratio !== null ? cell.text : null, detail: cell.detail });
   }
-  if (jet) bars.push({ peer: 'jet', label: 'Jet', role: 'jet', value: jet.value, unit: jet.unit, basis: jet.basis, ratio: null, verdict: null, text: null, detail: null });
+  if (jet) bars.push({ peer: 'jet', label: jetLabel, role: 'jet', value: jet.value, unit: jet.unit, basis: jet.basis, ratio: null, verdict: null, text: null, detail: null });
+  return { metric: metric.id, label: metric.label, what: metric.what, jet: jet !== null, bars: scaleBars(bars), missing };
+}
+
+// Sorts bars best (smallest) first and sizes each on a log scale.
+function scaleBars(bars) {
   bars.sort((left, right) => left.value - right.value);
   const logs = bars.map((bar) => Math.log(bar.value));
   const low = Math.min(...logs);
@@ -235,39 +240,65 @@ function standingPanel(metric, rows) {
     bar.display = standingValue(bar.unit, bar.value);
     bar.width = high > low ? Math.round((8 + 92 * (Math.log(bar.value) - low) / (high - low)) * 10) / 10 : 100;
   }
-  return { metric: metric.id, label: metric.label, what: metric.what, jet: jet !== null, bars, missing };
+  return bars;
+}
+
+// Jet's two ways to run a program, each judged against every peer: `jet
+// build`'s binary and `jet run` (compile and run in one step).
+export const JET_MODES = Object.freeze([
+  { mode: 'build', label: 'Jet build', what: 'the binary jet build writes, run on its own' },
+  { mode: 'run', label: 'Jet run', what: 'jet run: compile and run in one step, no binary written' },
+]);
+
+// One entry judged with one Jet mode standing as Jet: its rows, bar panels,
+// grid line and the peers that beat the ceiling.
+function projectEntry(entry, metrics, order, listed, jetLabel) {
+  const rows = order.map((peer) => standingRow(peer, object(entry.peers)[peer] ?? null, metrics, listed.includes(peer)));
+  const panels = metrics.map((metric) => standingPanel(metric, rows, jetLabel));
+  const jet = object(entry.jet);
+  const measured = panels.some((panel) => panel.jet);
+  const jetRow = { status: jet.status ?? null, reason: jet.reason ?? null, measured, provenance: isObject(jet.measured) ? jet.measured : null, runs: finite(jet.runs) ? jet.runs : null };
+  const beaten = ceilingBeaten(rows);
+  for (const row of rows) row.grid = { ...rowGrid(row, measured, beaten), reason: row.reason };
+  return {
+    jet: jetRow,
+    beaten,
+    grid: [{ peer: 'jet', label: jetLabel, ...jetGrid(jetRow, measured, rows), reason: jetRow.reason }, ...rows.map((row) => ({ peer: row.peer, label: row.label, ...row.grid }))],
+    rows,
+    panels,
+  };
 }
 
 // `payload` is { file, table, standings } as the server and the CLI read it:
 // the table's file, its row counts and its standings section; null when it
 // holds no standings section. With no row measured the page is the grid only.
+// Each entry is the `jet build` projection, with the `jet run` one as `run`.
 export function projectGauntletStandings(payload) {
   const section = object(payload?.standings);
   if (section.schema !== STANDINGS_SCHEMA) return null;
   const metrics = array(section.metrics).filter(isObject).map((metric) => ({ id: metric.id, label: metric.label ?? standingWords(metric.id), what: metric.what ?? null }));
   const listed = [...array(section.peers), section.ceiling ?? CEILING];
   const order = [...GRID_PEERS, ...listed.filter((peer) => !GRID_PEERS.includes(peer) && peer !== CEILING), CEILING];
+  const runSection = object(section.run);
+  const runEntries = new Map(array(runSection.entries).filter(isObject).map((entry) => [entry.entry, entry]));
   const entries = array(section.entries).filter(isObject).map((entry) => {
-    const rows = order.map((peer) => standingRow(peer, object(entry.peers)[peer] ?? null, metrics, listed.includes(peer)));
-    const panels = metrics.map((metric) => standingPanel(metric, rows));
-    const jet = object(entry.jet);
-    const measured = panels.some((panel) => panel.jet);
-    const jetRow = { status: jet.status ?? null, reason: jet.reason ?? null, measured, provenance: isObject(jet.measured) ? jet.measured : null, runs: finite(jet.runs) ? jet.runs : null };
-    const beaten = ceilingBeaten(rows);
-    for (const row of rows) row.grid = { ...rowGrid(row, measured, beaten), reason: row.reason };
+    const run = runEntries.get(entry.entry);
     return {
       entry: entry.entry,
       mode: entry.mode ?? null,
-      jet: jetRow,
-      beaten,
-      grid: [{ peer: 'jet', label: 'Jet', ...jetGrid(jetRow, measured, rows), reason: jetRow.reason }, ...rows.map((row) => ({ peer: row.peer, label: row.label, ...row.grid }))],
-      rows,
-      panels,
+      ...projectEntry(entry, metrics, order, listed, JET_MODES[0].label),
+      run: run ? projectEntry(run, metrics, order, listed, JET_MODES[1].label) : null,
     };
   });
-  const summary = object(section.summary);
-  const floor = object(summary.floor);
-  const ceiling = object(summary.ceiling);
+  const counts = (from) => {
+    const summary = object(from);
+    const floor = object(summary.floor);
+    const ceiling = object(summary.ceiling);
+    return {
+      floor: { pass: count(floor.pass), fail: count(floor.fail), other: count(floor.other) },
+      ceiling: { meet: count(ceiling.meet), miss: count(ceiling.miss), other: count(ceiling.other) },
+    };
+  };
   const table = object(payload.table);
   const rows = count(table.rows);
   return {
@@ -280,10 +311,9 @@ export function projectGauntletStandings(payload) {
     metrics,
     entries,
     jetMeasured: entries.some((entry) => entry.jet.measured),
-    summary: {
-      floor: { pass: count(floor.pass), fail: count(floor.fail), other: count(floor.other) },
-      ceiling: { meet: count(ceiling.meet), miss: count(ceiling.miss), other: count(ceiling.other) },
-    },
+    runMeasured: entries.some((entry) => entry.run?.jet.measured),
+    summary: counts(section.summary),
+    runSummary: counts(runSection.summary),
     losses: { floor: array(object(section.losses).floor), ceiling: array(object(section.losses).ceiling) },
     sizeBasis: Object.entries(object(section.size_basis)).map(([basis, what]) => ({ basis, what: String(what) })),
   };
@@ -316,40 +346,52 @@ const jetPendingText = (jet) => jet.status && jet.status !== 'ok' && jet.status 
 
 // The plain-text table `tower gauntlet standings` prints. The planned grid is
 // one block per entry, a line per column. A run is one block per entry, a
-// line for Jet and one per peer, one column per metric: a cell is the value,
-// and Jet/peer with its verdict once Jet is measured. A row that measured
+// line for each Jet mode and one per peer, one column per metric: a cell is
+// the value, and Jet/peer with its verdict for each measured Jet mode (`jet
+// build`'s binary first, then `run` for `jet run`). A row that measured
 // nothing names its grid cell once instead of five times; a measured row's
 // missing value is a note with its reason.
 export function gauntletStandingsText(view) {
-  const labelWidth = Math.max(4, ...view.columns.map((column) => column.label.length));
+  const labelWidth = Math.max(9, ...view.columns.map((column) => column.label.length));
   if (view.planned) {
     const lines = [`Gauntlet · ${gauntletRunText(view)}`];
     for (const entry of view.entries) {
       lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})`);
-      for (const cell of entry.grid) lines.push(`  ${cell.label.padEnd(labelWidth)}  ${cell.text}`);
+      const runJet = entry.run?.grid.find((cell) => cell.peer === 'jet');
+      for (const cell of [entry.grid[0], ...(runJet ? [runJet] : []), ...entry.grid.slice(1)]) lines.push(`  ${cell.label.padEnd(labelWidth)}  ${cell.text}`);
     }
     return lines.join('\n');
   }
-  const lines = [`Gauntlet · ${gauntletRunText(view)}`, ...standingRuleLines(view), ...(view.jetMeasured ? [standingSummary(view.summary)] : []), ...sizeBasisLines(view)];
-  const cellText = (cell) => cell.peerValue === null ? '—' : `${standingValue(cell.unit, cell.peerValue)}${cell.ratio === null ? '' : ` ${cell.text}`}`;
-  const jetText = (panel) => panel.bars.find((bar) => bar.role === 'jet')?.display ?? '—';
+  const lines = [`Gauntlet · ${gauntletRunText(view)}`, ...standingRuleLines(view),
+    ...(view.jetMeasured ? [`${JET_MODES[0].label}: ${standingSummary(view.summary)}`] : []),
+    ...(view.runMeasured ? [`${JET_MODES[1].label}: ${standingSummary(view.runSummary)}`] : []),
+    ...sizeBasisLines(view)];
+  const cellText = (cell, runCell) => cell.peerValue === null ? '—'
+    : `${standingValue(cell.unit, cell.peerValue)}${cell.ratio === null ? '' : ` ${cell.text}`}${runCell?.ratio == null ? '' : ` · run ${runCell.text}`}`;
+  const jetText = (panel) => panel?.bars.find((bar) => bar.role === 'jet')?.display ?? '—';
+  const runCells = (entry, row) => entry.run?.rows.find((item) => item.peer === row.peer)?.cells ?? [];
   const widths = view.metrics.map((metric, index) => Math.max(metric.label.length,
     ...view.entries.flatMap((entry) => [
       ...(entry.jet.measured ? [jetText(entry.panels[index]).length] : []),
-      ...entry.rows.filter((row) => row.status === 'ok').map((row) => cellText(row.cells[index]).length),
+      ...(entry.run?.jet.measured ? [jetText(entry.run.panels[index]).length] : []),
+      ...entry.rows.filter((row) => row.status === 'ok').map((row) => cellText(row.cells[index], runCells(entry, row)[index]).length),
     ])));
   const line = (label, cells) => `  ${label.padEnd(labelWidth)}  ${cells.map((text, index) => text.padEnd(widths[index])).join('  ')}`.trimEnd();
   for (const entry of view.entries) {
-    lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})${entry.jet.measured ? '' : ` · ${jetPendingText(entry.jet)}`}`);
+    const pending = [[JET_MODES[0].label, entry.jet], [JET_MODES[1].label, entry.run?.jet ?? { status: 'not_measured' }]]
+      .filter(([, jet]) => !jet.measured).map(([label, jet]) => ` · ${jetPendingText(jet).replace(/^Jet/, label)}`).join('');
+    lines.push('', `${entry.entry} (${entry.mode ?? 'mode?'})${pending}`);
     lines.push(line('peer', view.metrics.map((metric) => metric.label)));
-    if (entry.jet.measured) lines.push(line('Jet', entry.panels.map(jetText)));
+    if (entry.jet.measured) lines.push(line(JET_MODES[0].label, entry.panels.map(jetText)));
+    if (entry.run?.jet.measured) lines.push(line(JET_MODES[1].label, entry.run.panels.map(jetText)));
     const notes = [];
     for (const row of entry.rows) {
       if (row.status !== 'ok') {
         lines.push(`  ${row.label.padEnd(labelWidth)}  ${row.grid.text}`);
         continue;
       }
-      lines.push(line(row.label, row.cells.map(cellText)));
+      const run = runCells(entry, row);
+      lines.push(line(row.label, row.cells.map((cell, index) => cellText(cell, run[index]))));
       for (const cell of row.cells) {
         if (cell.peerValue === null) notes.push(`  · ${row.label} ${cell.metric}: ${standingWords(cell.verdict)}: ${cell.reason ?? 'no value recorded'}`);
       }
@@ -366,7 +408,7 @@ const standingTone = (verdict) => ({ pass: 'pass', meet: 'pass', fail: 'fail', m
 
 function standingBar(entry, bar) {
   const tone = bar.verdict ? ` standings__bar--${standingTone(bar.verdict)}` : '';
-  const title = bar.role === 'jet' ? `${entry} · Jet ${bar.display}${bar.basis ? ` (${bar.basis})` : ''}`
+  const title = bar.role === 'jet' ? `${entry} · ${bar.label} ${bar.display}${bar.basis ? ` (${bar.basis})` : ''}`
     : `${entry} · ${bar.label} ${bar.detail ?? bar.display}${bar.text ? ` · ${bar.text}` : ''}`;
   return `<li class="standings__bar standings__bar--${bar.role}${tone}" title="${esc(title)}"><span class="standings__name">${esc(bar.label)}</span>`
     + `<span class="standings__track"><span class="standings__fill" style="width:${bar.width}%"></span></span>`
@@ -398,54 +440,66 @@ function jetVersus(metric, jet, value) {
 }
 
 // Everything one grid cell stands for, for the panel a click opens: the row's
-// state and provenance, and per metric its value, Jet's, how far Jet is off
-// it, the best peer's and the asm ceiling's. `peer` is a column ('jet' too).
-export function gauntletDetail(view, entryName, peer) {
+// state and provenance, and per metric its value, each Jet mode's value and
+// how far it is off this one, the best peer's and the asm ceiling's. `peer`
+// is a column ('jet' too); `mode` is the grid line clicked ('build' or 'run'),
+// whose Jet is the panel's own when the cell is Jet's.
+export function gauntletDetail(view, entryName, peer, mode = 'build') {
   const entry = view?.entries.find((item) => item.entry === entryName);
   if (!entry) return null;
+  const sides = JET_MODES.map((item) => ({ ...item, side: item.mode === 'run' ? entry.run : entry })).filter((item) => item.side);
+  const own = sides.find((item) => item.mode === mode);
+  if (!own) return null;
+  const side = own.side;
   const isJet = peer === 'jet';
-  const row = isJet ? null : entry.rows.find((item) => item.peer === peer);
+  const row = isJet ? null : side.rows.find((item) => item.peer === peer);
   if (!isJet && !row) return null;
-  const cells = entry.rows.flatMap((item) => item.cells);
+  const cells = side.rows.flatMap((item) => item.cells);
   const valueIn = (item, id) => item?.status === 'ok' ? item.cells.find((cell) => cell.metric === id)?.peerValue ?? null : null;
-  const peers = entry.rows.filter((item) => item.role === 'peer' && item.status === 'ok');
-  const ceiling = entry.rows.find((item) => item.role === 'ceiling');
+  const jetIn = (from, id) => from.rows.flatMap((item) => item.cells).find((cell) => cell.metric === id && cell.jetValue !== null)?.jetValue ?? null;
+  const peers = side.rows.filter((item) => item.role === 'peer' && item.status === 'ok');
+  const ceiling = side.rows.find((item) => item.role === 'ceiling');
   const metrics = view.metrics.map((metric) => {
     const unit = cells.find((cell) => cell.metric === metric.id && cell.unit)?.unit ?? null;
     const shown = (value) => value === null ? null : standingValue(unit, value);
-    const jet = cells.find((cell) => cell.metric === metric.id && cell.jetValue !== null)?.jetValue ?? null;
-    const own = isJet ? jet : valueIn(row, metric.id);
+    const jets = sides.map((item) => ({ mode: item.mode, label: item.label, value: jetIn(item.side, metric.id) }));
+    const jet = jets.find((item) => item.mode === mode).value;
+    const value = isJet ? jet : valueIn(row, metric.id);
     const cell = isJet ? null : row.cells.find((item) => item.metric === metric.id);
     const best = peers.map((item) => ({ label: item.label, value: valueIn(item, metric.id) })).filter((item) => item.value !== null)
       .sort((left, right) => left.value - right.value)[0] ?? null;
     const asm = valueIn(ceiling, metric.id);
+    const against = (bar) => jets.map((item) => ({ mode: item.mode, label: item.label, versus: jetVersus(metric.id, item.value, bar) }));
     return {
       metric: metric.id,
       label: metric.label,
       what: metric.what,
-      value: shown(own),
+      value: shown(value),
       basis: cell?.peerBasis ?? null,
-      missing: own !== null ? null : isJet ? NOT_MEASURED_YET : row.status === 'ok' ? cell?.reason ?? 'no value recorded' : null,
+      missing: value !== null ? null : isJet ? NOT_MEASURED_YET : row.status === 'ok' ? cell?.reason ?? 'no value recorded' : null,
       jet: shown(jet),
-      versus: isJet ? null : jetVersus(metric.id, jet, own),
-      best: best ? { label: best.label, value: shown(best.value), versus: jetVersus(metric.id, jet, best.value) } : null,
-      ceiling: asm === null ? null : { value: shown(asm), versus: jetVersus(metric.id, jet, asm) },
-      beaten: row?.role === 'ceiling' ? entry.beaten.find((item) => item.metric === metric.id) ?? null : null,
+      versus: isJet ? null : jetVersus(metric.id, jet, value),
+      modes: jets.map((item) => ({ mode: item.mode, label: item.label, jet: shown(item.value), versus: isJet ? null : jetVersus(metric.id, item.value, value) })),
+      best: best ? { label: best.label, value: shown(best.value), versus: jetVersus(metric.id, jet, best.value), modes: against(best.value) } : null,
+      ceiling: asm === null ? null : { value: shown(asm), versus: jetVersus(metric.id, jet, asm), modes: against(asm) },
+      beaten: row?.role === 'ceiling' ? side.beaten.find((item) => item.metric === metric.id) ?? null : null,
     };
   });
   return {
     entry: entry.entry,
     mode: entry.mode,
+    jetMode: mode,
     peer,
-    label: isJet ? 'Jet' : row.label,
+    label: isJet ? own.label : row.label,
     role: isJet ? 'jet' : row.role,
-    status: isJet ? (entry.jet.measured ? 'ok' : entry.jet.status ?? 'not_measured') : row.status,
-    reason: isJet ? entry.jet.reason : row.reason,
+    status: isJet ? (side.jet.measured ? 'ok' : side.jet.status ?? 'not_measured') : row.status,
+    reason: isJet ? side.jet.reason : row.reason,
     program: row?.program ?? null,
     reference: row?.reference ?? null,
-    measured: isJet ? entry.jet.provenance : row.measured,
-    runs: isJet ? entry.jet.runs : row.runs,
-    jetMeasured: entry.jet.measured,
+    measured: isJet ? side.jet.provenance : row.measured,
+    runs: isJet ? side.jet.runs : row.runs,
+    jetMeasured: side.jet.measured,
+    jetModes: sides.map((item) => ({ mode: item.mode, label: item.label, measured: item.side.jet.measured })),
     metrics,
   };
 }
@@ -472,20 +526,26 @@ export function renderGauntletDetail(detail) {
   const status = detail.status === 'ok' ? ''
     : `<p class="gdetail__status gdetail__status--${detail.status === 'not_measured' ? 'open' : 'fail'}">${esc(standingWords(detail.status))}${detail.reason && detail.reason !== NOT_MEASURED_YET ? `: ${esc(detail.reason)}` : ''}</p>`;
   const isJet = detail.role === 'jet';
+  const modes = detail.jetModes;
   const head = isJet
-    ? ['metric', 'Jet', 'best peer', 'Jet vs best peer', 'asm ceiling', 'Jet vs asm']
-    : ['metric', detail.label, 'Jet', `Jet vs ${detail.label}`, 'best peer', 'asm ceiling'];
+    ? ['metric', ...modes.map((item) => item.label), 'best peer', ...modes.map((item) => `${item.label} vs best peer`), 'asm ceiling', ...modes.map((item) => `${item.label} vs asm`)]
+    : ['metric', detail.label, ...modes.flatMap((item) => [item.label, `${item.label} vs ${detail.label}`]), 'best peer', 'asm ceiling'];
   const value = (text, basis, missing) => text === null ? `<span class="gdetail__missing">${esc(missing ?? '—')}</span>` : `${esc(text)}${basis ? `<em>${esc(basis)}</em>` : ''}`;
+  const jetValue = (item) => item.jet === null ? `<span class="gdetail__missing">${esc(modes.find((mode) => mode.mode === item.mode)?.measured ? '—' : NOT_MEASURED_YET)}</span>` : esc(item.jet);
+  const labelled = (list) => list.filter((item) => item.versus).map((item) => `<span class="gdetail__mode">${esc(item.label)}</span> ${versus(item.versus)}`).join(' ');
   const rows = detail.metrics.map((item) => {
     const metric = `<th scope="row" title="${esc(item.what ?? item.label)}">${esc(item.label)}</th>`;
     const best = item.best ? `${esc(item.best.label)} ${esc(item.best.value)}` : '—';
     const asm = item.ceiling ? esc(item.ceiling.value) : '—';
     if (isJet) {
-      return `<tr>${metric}<td>${value(item.value, null, item.missing)}</td><td>${best}</td><td>${versus(item.best?.versus) || '—'}</td><td>${asm}</td><td>${versus(item.ceiling?.versus) || '—'}</td></tr>`;
+      return `<tr>${metric}${item.modes.map((mode) => `<td>${jetValue(mode)}</td>`).join('')}<td>${best}</td>`
+        + `${modes.map((mode) => `<td>${versus(item.best?.modes.find((other) => other.mode === mode.mode)?.versus) || '—'}</td>`).join('')}<td>${asm}</td>`
+        + `${modes.map((mode) => `<td>${versus(item.ceiling?.modes.find((other) => other.mode === mode.mode)?.versus) || '—'}</td>`).join('')}</tr>`;
     }
     const flag = item.beaten ? `<span class="gdetail__flag">beaten by ${esc(item.beaten.label)} ${esc(standingValue(item.beaten.unit, item.beaten.value))} (${item.beaten.ratio.toFixed(2)}×): the reference is wrong</span>` : '';
-    return `<tr${item.beaten ? ' class="gdetail__row--flag"' : ''}>${metric}<td>${value(item.value, item.basis, item.missing)}${flag}</td><td>${item.jet === null ? `<span class="gdetail__missing">${esc(pending)}</span>` : esc(item.jet)}</td><td>${versus(item.versus) || '—'}</td>`
-      + `<td>${best}${item.best?.versus ? ` ${versus(item.best.versus)}` : ''}</td><td>${asm}${item.ceiling?.versus ? ` ${versus(item.ceiling.versus)}` : ''}</td></tr>`;
+    return `<tr${item.beaten ? ' class="gdetail__row--flag"' : ''}>${metric}<td>${value(item.value, item.basis, item.missing)}${flag}</td>`
+      + item.modes.map((mode) => `<td>${jetValue(mode)}</td><td>${versus(mode.versus) || '—'}</td>`).join('')
+      + `<td>${best}${item.best ? ` ${labelled(item.best.modes)}` : ''}</td><td>${asm}${item.ceiling ? ` ${labelled(item.ceiling.modes)}` : ''}</td></tr>`;
   }).join('');
   return `<header class="gdetail__head"><h3>${esc(detail.entry)} <small>${esc(detail.mode ?? '')}</small> · ${esc(detail.label)}</h3>`
     + `<button type="button" class="gdetail__close" data-gclose aria-label="Close details">×</button></header>${status}`
@@ -494,15 +554,23 @@ export function renderGauntletDetail(detail) {
     + `<p class="gdetail__rule">Lower is better on every metric. Jet must beat every peer (Jet/peer below 1.00) and reach the asm ceiling (Jet/asm at most 1.00).</p>`;
 }
 
-// The grid: one row per entry, one column for Jet, each peer and the asm
-// ceiling; every cell names its state, its reason beneath and in its title.
-// The title adds the full reason where the cell shortens it (the ceiling's).
+// The grid: two lines per entry, one with `jet build`'s binary as Jet and one
+// with `jet run`, each with a column for Jet, each peer and the asm ceiling,
+// every peer cell coloured by how that line's Jet does against it. Every cell
+// names its state, its reason beneath and in its title. The title adds the
+// full reason where the cell shortens it (the ceiling's).
 function gridHtml(view) {
   const title = (entry, item) => `${entry.entry} · ${item.label}: ${item.text}${item.reason && !item.text.includes(item.reason) && item.reason !== NOT_MEASURED_YET ? ` (${item.reason})` : ''} · click for details`;
-  const cell = (entry, item) => `<td class="ggrid ggrid--${item.tone}" title="${esc(title(entry, item))}" tabindex="0" role="button" data-gentry="${esc(entry.entry)}" data-gpeer="${esc(item.peer)}"><b>${esc(item.head)}</b>${item.note ? `<small>${esc(item.note)}</small>` : ''}</td>`;
+  const cell = (entry, mode, item) => `<td class="ggrid ggrid--${item.tone}" title="${esc(title(entry, item))}" tabindex="0" role="button" data-gentry="${esc(entry.entry)}" data-gmode="${mode}" data-gpeer="${esc(item.peer)}"><b>${esc(item.head)}</b>${item.note ? `<small>${esc(item.note)}</small>` : ''}</td>`;
+  const lines = (entry) => {
+    const sides = JET_MODES.map((item) => ({ ...item, side: item.mode === 'run' ? entry.run : entry })).filter((item) => item.side);
+    return sides.map((item, index) => `<tr class="ggrid__line ggrid__line--${item.mode}">`
+      + (index === 0 ? `<th scope="row" rowspan="${sides.length}"><div><strong>${esc(entry.entry)}</strong><small>${esc(entry.mode ?? '')}</small></div></th>` : '')
+      + `<th scope="row" class="ggrid__mode" title="${esc(item.what)}">${esc(item.label)}</th>${item.side.grid.map((gridItem) => cell(entry, item.mode, gridItem)).join('')}</tr>`).join('');
+  };
   return `<div class="gauntlet__grid"><table class="gauntlet__table" aria-label="Gauntlet grid">
-    <thead><tr><th scope="col">entry</th>${view.columns.map((column) => `<th scope="col">${esc(column.label)}</th>`).join('')}</tr></thead>
-    <tbody>${view.entries.map((entry) => `<tr><th scope="row"><div><strong>${esc(entry.entry)}</strong><small>${esc(entry.mode ?? '')}</small></div></th>${entry.grid.map((item) => cell(entry, item)).join('')}</tr>`).join('')}</tbody>
+    <thead><tr><th scope="col">entry</th><th scope="col">Jet as</th>${view.columns.map((column) => `<th scope="col">${esc(column.label)}</th>`).join('')}</tr></thead>
+    <tbody>${view.entries.map(lines).join('')}</tbody>
   </table></div>
   <section class="gdetail" data-gdetail aria-live="polite" hidden></section>`;
 }
@@ -517,20 +585,27 @@ export function renderGauntletStandings(view) {
     ${view.entries.length ? gridHtml(view) : '<div class="empty">No comparison entries in Tools/gauntlet/entries.</div>'}
   </section>`;
   }
-  const pills = view.jetMeasured
-    ? [
-      ['floor pass', view.summary.floor.pass, 'pass'], ['floor fail', view.summary.floor.fail, 'fail'],
-      ['ceiling meet', view.summary.ceiling.meet, 'pass'], ['ceiling miss', view.summary.ceiling.miss, 'fail'],
-      ['other', view.summary.floor.other + view.summary.ceiling.other, 'open'],
-    ].map(([label, value, tone]) => `<span class="gauntlet__pill standings__pill--${tone}">${esc(label)} <b>${esc(value)}</b></span>`).join('')
-    : `<span class="gauntlet__pill standings__pill--open">Jet <b>pending</b></span>`;
+  const pillsFor = (label, measured, summary) => measured
+    ? `<span class="gauntlet__pill gauntlet__pill--mode">${esc(label)}</span>` + [
+      ['floor pass', summary.floor.pass, 'pass'], ['floor fail', summary.floor.fail, 'fail'],
+      ['ceiling meet', summary.ceiling.meet, 'pass'], ['ceiling miss', summary.ceiling.miss, 'fail'],
+      ['other', summary.floor.other + summary.ceiling.other, 'open'],
+    ].map(([name, value, tone]) => `<span class="gauntlet__pill standings__pill--${tone}">${esc(name)} <b>${esc(value)}</b></span>`).join('')
+    : `<span class="gauntlet__pill standings__pill--open">${esc(label)} <b>pending</b></span>`;
+  const pills = `<div class="gauntlet__pills">${pillsFor(JET_MODES[0].label, view.jetMeasured, view.summary)}</div>`
+    + `<div class="gauntlet__pills">${pillsFor(JET_MODES[1].label, view.runMeasured, view.runSummary)}</div>`;
   const entries = view.entries.map((entry) => {
     const blocked = entry.rows.filter((row) => row.status !== 'ok');
     const blockedList = blocked.length
       ? `<ul class="standings__blocked">${blocked.map((row) => `<li class="standings__blocked--${standingTone(row.status)}"><b>${esc(row.label)}</b> <span>${esc(row.grid.text)}</span></li>`).join('')}</ul>` : '';
-    const jetNote = entry.jet.measured ? '' : ` · ${jetPendingText(entry.jet)}`;
-    return `<article class="standings__entry"><h3>${esc(entry.entry)} <small>${esc(entry.mode ?? '')}${esc(jetNote)}</small></h3>`
-      + `<div class="standings__panels">${entry.panels.map((panel) => standingPanelHtml(entry, panel)).join('')}</div>${blockedList}</article>`;
+    const pending = [[JET_MODES[0].label, entry.jet], [JET_MODES[1].label, entry.run?.jet ?? { status: 'not_measured' }]]
+      .filter(([, jet]) => !jet.measured).map(([label, jet]) => ` · ${jetPendingText(jet).replace(/^Jet/, label)}`).join('');
+    const panels = entry.panels.map((panel, index) => {
+      const runBar = entry.run?.panels[index]?.bars.find((bar) => bar.role === 'jet');
+      return runBar ? { ...panel, jet: true, bars: scaleBars([...panel.bars.map((bar) => ({ ...bar })), { ...runBar }]) } : panel;
+    });
+    return `<article class="standings__entry"><h3>${esc(entry.entry)} <small>${esc(entry.mode ?? '')}${esc(pending)}</small></h3>`
+      + `<div class="standings__panels">${panels.map((panel) => standingPanelHtml(entry, panel)).join('')}</div>${blockedList}</article>`;
   }).join('');
   return `<section class="standings" aria-label="Gauntlet standings">${runLine}
     ${view.entries.length ? gridHtml(view) : ''}

@@ -65,7 +65,7 @@ test('with an empty table the route serves the planned grid from the entry manif
   assert.equal(hello.peers.asm.role, 'ceiling');
   assert.equal(hello.peers.asm.reference, 'hello');
   assert.ok(standings.entries.some((entry) => entry.peers.asm.status === 'uncovered'), 'an entry with no asm reference keeps its asm cell');
-  assert.ok(standings.entries.some((entry) => entry.peers.lua.status === 'uncovered' && /^no lua program: lua\/main\.lua is missing$/.test(entry.peers.lua.reason)));
+  for (const entry of standings.entries.filter((item) => item.peers.lua.status === 'uncovered')) assert.match(entry.peers.lua.reason, /^no lua program: lua\/main\.lua is missing$/, entry.entry);
 });
 
 test('each row the table holds shows on the route at once, with the table\'s counts', async () => {

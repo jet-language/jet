@@ -351,14 +351,16 @@ test('secret final and crash-residue files stay ignored while public config rema
   assert.equal(child.status, 73, 'child exits after fsync and before rename');
   writeFileSync(join(dataDir, 'secrets.json'), '{}\n', { mode: 0o600 });
 
-  execFileSync('git', ['init', '-q'], { cwd, stdio: 'ignore' });
-  const ignored = (path) => spawnSync('git', ['check-ignore', '-q', '--', path], { cwd }).status === 0;
+  const gitEnv = { ...process.env };
+  for (const key of ['GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY']) delete gitEnv[key];
+  execFileSync('git', ['init', '-q'], { cwd, stdio: 'ignore', env: gitEnv });
+  const ignored = (path) => spawnSync('git', ['check-ignore', '-q', '--', path], { cwd, env: gitEnv }).status === 0;
   assert.equal(ignored('.tower/secrets.json'), true);
   assert.equal(ignored(`.tower/${residueName}`), true);
   assert.equal(ignored('.tower/config.json'), false, 'public config remains trackable');
 
-  execFileSync('git', ['add', '.'], { cwd, stdio: 'ignore' });
-  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd })
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'ignore', env: gitEnv });
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd, env: gitEnv })
     .toString('utf8').split('\0').filter(Boolean);
   assert.equal(tracked.includes('.tower/config.json'), true);
   assert.equal(tracked.includes('.tower/secrets.json'), false);

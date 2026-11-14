@@ -30,22 +30,30 @@ async function entryPlans() {
 // The standings section for `table`: each entry's plan with the table's rows.
 // Each measured cell also names how it was measured (the row's provenance:
 // when, which run, commit, toolchain) and how many timed runs it holds.
+// Jet is judged twice: `jet build`'s binary is the section's Jet, and the
+// same entries judged with `jet run` standing as Jet are its `run` section.
 export async function tableStandings(table) {
   const { buildStandings, entryStandings } = await import('../../gauntlet/harness/standings.mjs');
-  const { tableResult } = await import('../../gauntlet/harness/table.mjs');
+  const { tableResult, JET_RUN } = await import('../../gauntlet/harness/table.mjs');
   const { policy, plans } = await entryPlans();
   const runtimes = table.runtimes ?? {};
-  const standings = buildStandings(
-    plans.map(({ plan }) => entryStandings(plan, tableResult(table, plan.entry), { runtimes, pending: true })),
-    policy,
-    { generated: table.updated ?? null, runtimes },
-  );
-  for (const entry of standings.entries ?? []) {
-    const rows = table.rows?.[entry.entry] ?? {};
-    const facts = (row) => row ? { measured: row.measured ?? null, runs: row.runtime?.samples?.length ?? null } : {};
-    for (const [language, item] of Object.entries(entry.peers ?? {})) Object.assign(item, facts(rows[language]));
-    if (entry.jet) Object.assign(entry.jet, facts(rows.jet));
-  }
+  const facts = (row) => row ? { measured: row.measured ?? null, runs: row.runtime?.samples?.length ?? null } : {};
+  const judged = (jet) => {
+    const standings = buildStandings(
+      plans.map(({ plan }) => entryStandings(plan, tableResult(table, plan.entry, jet), { runtimes, pending: true })),
+      policy,
+      { generated: table.updated ?? null, runtimes },
+    );
+    for (const entry of standings.entries ?? []) {
+      const rows = table.rows?.[entry.entry] ?? {};
+      for (const [language, item] of Object.entries(entry.peers ?? {})) Object.assign(item, facts(rows[language]));
+      if (entry.jet) Object.assign(entry.jet, facts(rows[jet]));
+    }
+    return standings;
+  };
+  const standings = judged('jet');
+  const run = judged(JET_RUN);
+  standings.run = { summary: run.summary, losses: run.losses, entries: run.entries };
   return standings;
 }
 

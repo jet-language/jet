@@ -2570,16 +2570,16 @@ async function loadGauntlet() {
   gauntletCache = r.ok ? { data: j, error: null } : { data: null, error: j.message || 'Gauntlet standings fetch failed' };
 }
 
-function showGauntletDetail(v, view, entry, peer) {
+function showGauntletDetail(v, view, entry, peer, mode = 'build') {
   const panel = v.querySelector('[data-gdetail]');
   if (!panel) return;
   v.querySelectorAll('.ggrid--selected').forEach((cell) => cell.classList.remove('ggrid--selected'));
-  const detail = entry ? gauntletDetail(view, entry, peer) : null;
-  gauntletOpen = detail ? { entry, peer } : null;
+  const detail = entry ? gauntletDetail(view, entry, peer, mode) : null;
+  gauntletOpen = detail ? { entry, peer, mode } : null;
   panel.hidden = !detail;
   panel.innerHTML = renderGauntletDetail(detail);
   if (!detail) return;
-  const selector = `[data-gentry="${CSS.escape(entry)}"][data-gpeer="${CSS.escape(peer)}"]`;
+  const selector = `[data-gentry="${CSS.escape(entry)}"][data-gmode="${CSS.escape(mode)}"][data-gpeer="${CSS.escape(peer)}"]`;
   v.querySelector(selector)?.classList.add('ggrid--selected');
 }
 
@@ -2597,7 +2597,7 @@ async function viewGauntlet() {
   const body = view ? renderGauntletStandings(view)
     : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the table has no standings section')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">Jet against every peer and the asm ceiling · click a cell for its details</span>
+      <span class="viewhead__sub">Jet, as jet build's binary and as jet run, against every peer and the asm ceiling · click a cell for its details</span>
     </div>${body}`;
   if (!view) return;
   const open = (event) => {
@@ -2608,13 +2608,14 @@ async function viewGauntlet() {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
     }
-    const same = gauntletOpen && gauntletOpen.entry === cell.dataset.gentry && gauntletOpen.peer === cell.dataset.gpeer;
-    showGauntletDetail(v, view, same ? null : cell.dataset.gentry, cell.dataset.gpeer);
+    const mode = cell.dataset.gmode || 'build';
+    const same = gauntletOpen && gauntletOpen.entry === cell.dataset.gentry && gauntletOpen.peer === cell.dataset.gpeer && gauntletOpen.mode === mode;
+    showGauntletDetail(v, view, same ? null : cell.dataset.gentry, cell.dataset.gpeer, mode);
     if (!same) v.querySelector('[data-gdetail]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   };
   v.querySelector('.standings')?.addEventListener('click', open);
   v.querySelector('.standings')?.addEventListener('keydown', open);
-  if (gauntletOpen) showGauntletDetail(v, view, gauntletOpen.entry, gauntletOpen.peer);
+  if (gauntletOpen) showGauntletDetail(v, view, gauntletOpen.entry, gauntletOpen.peer, gauntletOpen.mode);
   clearTimeout(gauntletTimer);
   gauntletTimer = setTimeout(() => {
     if ($('#view').querySelector('.viewhead--gauntlet')) viewGauntlet();

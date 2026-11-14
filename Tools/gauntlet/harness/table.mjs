@@ -91,13 +91,35 @@ export function currentRow(table, entry, language, programSha256, toolchain) {
   return measured.program_sha256 === programSha256 && measured.toolchain === toolchain ? row : null;
 }
 
-// Adds one entry's measured rows (its declared languages and its
-// standings-only peers and ceiling). A row the run did not measure keeps the
-// table's earlier row.
+// Jet's `jet run` tier (compile and run in one step, no binary written) is
+// its own row, `jet-run`, beside the built binary's `jet` row, so every peer
+// is set against both. Its cycles are the median of its samples' user cycles.
+export const JET_RUN = "jet-run";
+
+function jetRunRow(tier) {
+  const cycles = (tier.runtime?.samples ?? []).map((sample) => sample.cycles_u).filter((value) => typeof value === "number" && value > 0).sort((a, b) => a - b);
+  const median = cycles.length ? cycles[Math.floor((cycles.length - 1) / 2)] : null;
+  return {
+    language: JET_RUN,
+    status: tier.status,
+    reason: tier.reason ?? null,
+    command: tier.command ?? null,
+    verification: tier.verification ?? null,
+    runtime: tier.runtime ?? null,
+    metrics: { ...(tier.metrics ?? {}), ...(median ? { runtime_cycles: median } : {}) },
+    size: { status: "not_applicable", reason: "jet run compiles and runs in one step and writes no binary" },
+  };
+}
+
+// Adds one entry's measured rows (its declared languages, its standings-only
+// peers and ceiling, and Jet's run tier). A row the run did not measure keeps
+// the table's earlier row.
 export function recordEntry(table, result, { runId, generated, commit, toolchains, jetBinarySha256, programs = {} }) {
   const entry = result.entry?.name;
   if (!entry) return;
   const rows = { ...(result.rows ?? {}), ...(result.standings_rows ?? {}) };
+  const tier = result.jet_tiers?.run;
+  if (tier?.status && tier.status !== "not_measured" && !tier.not_measured && rows.jet && !rows.jet.not_measured) rows[JET_RUN] = jetRunRow(tier);
   for (const [language, row] of Object.entries(rows)) {
     if (!row || row.not_measured) continue;
     table.rows[entry] ??= {};
@@ -108,17 +130,18 @@ export function recordEntry(table, result, { runId, generated, commit, toolchain
         run_id: runId,
         commit: commit ?? null,
         toolchain: toolchainKey(language, toolchains, jetBinarySha256),
-        program_sha256: programs[language] ?? null,
+        program_sha256: programs[language === JET_RUN ? "jet" : language] ?? null,
       },
     };
   }
   table.updated = generated;
 }
 
-// One entry's rows as the harness result shape entryStandings reads.
-export function tableResult(table, entry) {
+// One entry's rows as the harness result shape entryStandings reads, with
+// `jet` (the built binary's row, or JET_RUN) standing as Jet.
+export function tableResult(table, entry, jet = "jet") {
   const rows = table.rows?.[entry] ?? {};
-  return { rows: rows.jet ? { jet: rows.jet } : {}, standings_rows: rows };
+  return { rows: rows[jet] ? { jet: rows[jet] } : {}, standings_rows: rows };
 }
 
 // Adds every entry row of an earlier run report, with that run's provenance.
