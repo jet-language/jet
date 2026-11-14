@@ -84,6 +84,50 @@ compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, 
     rt_text_store(len, length)
 }
 #Export(c) jet_files_read_bytes_os: fn(path: I64, output: I64, len: I64, error: I64) -> I64 {
+    cells: jet_rt_alloc(I64{24}, I64{8})
+    if (compiler_fs_read_whole(path, I64{8}, cells, error) == I64{0}) {
+        jet_rt_free(cells, I64{24}, I64{8})
+        return I64{0}
+    }
+    compiler_fs_bytes_take(rt_text_word(cells), rt_text_word(wrapping(cells + I64{8})), rt_text_word(wrapping(cells + I64{16})), output, len)
+    jet_rt_free(cells, I64{24}, I64{8})
+    I64{1}
+}
+// The file `path` as text. A regular file's bytes are read into one buffer,
+// checked as UTF-8 in place and become the text's own buffer, so a file is
+// never held twice. Bytes that are not UTF-8 are core.files.read's
+// InvalidInput error.
+#Export(c) jet_files_read_text_os: fn(path: I64, output: I64, error: I64) -> I64 {
+    cells: jet_rt_alloc(I64{24}, I64{8})
+    if (compiler_fs_read_whole(path, I64{1}, cells, error) == I64{0}) {
+        jet_rt_free(cells, I64{24}, I64{8})
+        return I64{0}
+    }
+    bytes: rt_text_word(cells)
+    capacity: rt_text_word(wrapping(cells + I64{8}))
+    used: rt_text_word(wrapping(cells + I64{16}))
+    jet_rt_free(cells, I64{24}, I64{8})
+    if (rt_text_valid_run(bytes, used) != used) {
+        jet_rt_free(bytes, capacity, I64{1})
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")), error)
+    }
+    // A buffer the bytes fill exactly is taken whole. A short text, or one a
+    // larger buffer holds (a file without a size), is copied as
+    // jet_files_read_bytes_os copies its list.
+    if (used == capacity && used > RT_TEXT_INLINE) {
+        text: rt_text_take(bytes, used, capacity)
+        if (text == I64{0}) -> jet_rt_free(bytes, capacity, I64{1})
+        rt_text_store(output, text)
+        return I64{1}
+    }
+    rt_text_store(output, rt_text_copy(bytes, used))
+    jet_rt_free(bytes, capacity, I64{1})
+    I64{1}
+}
+// Reads all of `path` into one buffer from jet_rt_alloc(capacity, align):
+// `cells` gets its address, then its capacity, then its byte count. 1, or 0
+// with the IOError written through `error` and nothing to free.
+compiler_fs_read_whole: fn(path: I64, align: I64, cells: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     name: fd_c_path(path)
     fd: host_call(I64{2}, name, I64{524288}, I64{0})
@@ -100,7 +144,7 @@ compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, 
         if (rt_text_word(wrapping(facts + I64{24})).bit_and(I64{61440}) == I64{32768} && size > I64{0}) -> capacity = size
     }
     jet_rt_free(facts, I64{144}, I64{8})
-    bytes := jet_rt_alloc(capacity, I64{8})
+    bytes := jet_rt_alloc(capacity, align)
     used := I64{0}
     failure := I64{0}
     loop {
@@ -118,10 +162,10 @@ compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, 
                 break
             }
             grown: capacity * I64{2}
-            next_bytes: jet_rt_alloc(grown, I64{8})
+            next_bytes: jet_rt_alloc(grown, align)
             rt_text_bytes_copy(next_bytes, bytes, used)
             rt_text_put(wrapping(next_bytes + used), rt_text_byte(probe))
-            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(bytes, capacity, align)
             bytes = next_bytes
             capacity = grown
             used += I64{1}
@@ -137,10 +181,12 @@ compiler_fs_bytes_take: fn(bytes: I64, capacity: I64, length: I64, output: I64, 
     _ := host_call(I64{3}, fd, I64{0}, I64{0})
     fd_c_path_drop(name, path)
     if (failure < I64{0}) {
-        jet_rt_free(bytes, capacity, I64{8})
+        jet_rt_free(bytes, capacity, align)
         return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
     }
-    compiler_fs_bytes_take(bytes, capacity, used, output, len)
+    rt_text_store(cells, bytes)
+    rt_text_store(wrapping(cells + I64{8}), capacity)
+    rt_text_store(wrapping(cells + I64{16}), used)
     I64{1}
 }
 #Export(c) jet_files_write_bytes_os: fn(path: I64, data: I64, length: I64, error: I64) -> I64 {

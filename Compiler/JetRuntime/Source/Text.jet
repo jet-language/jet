@@ -165,6 +165,20 @@ rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
     header
 }
 
+// A heap text of the `len` bytes at `data`, a separate buffer of `cap`
+// (above RT_TEXT_INLINE) bytes from alloc_bytes that it takes over: its drop
+// returns the buffer by free_bytes. The bytes are UTF-8 the caller checked.
+// 0 only after a propagated allocation failure, the buffer still the
+// caller's.
+rt_text_take: fn(data: I64, len: I64, cap: I64) -> I64 {
+    header: rt_text_builder_with_capacity(I64{0})
+    if (header == I64{0}) -> return I64{0}
+    rt_text_store(header, data)
+    rt_text_store(wrapping(header + I64{8}), len)
+    rt_text_store(wrapping(header + I64{16}), cap)
+    header
+}
+
 // The `len` (under 8) bytes at `ptr` as one little-endian word, the bytes
 // past them zero, read one at a time. Bytes their writer just stored one at
 // a time (a [U8] built by push) reach a byte read from those stores, while a

@@ -111,8 +111,10 @@ files: module {
     // Each is `priv`: only Core calls them. A `handle` is a held directory's
     // key, or -1 for the working directory.
 
-    // The bytes of the file `path`.
+    // The bytes of the file `path`, and its text (InvalidInput when the
+    // bytes are not UTF-8).
     #Import(c) priv read_bytes_os: fn(path: String) -[FS.Read]> [U8] IOError! = "jet_files_read_bytes_os"
+    #Import(c) priv read_text_os: fn(path: String) -[FS.Read]> String IOError! = "jet_files_read_text_os"
 
     // Writes `data` as the whole file `path`, and appends `data` to it.
     #Import(c) priv write_bytes_os: fn(path: String, data: [U8]) -[FS.Write]> IOError! = "jet_files_write_bytes_os"
