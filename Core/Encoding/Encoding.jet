@@ -264,10 +264,11 @@ __input_failure: fn(format: String, failures: [FieldError]) -> String Never! {
 // not spelled `T` (see json.__decode_typed).
 
 // `FieldError.under(segment, inner)`: every error of `inner` framed under
-// `segment`; a success passes through.
-__decode_under: fn<Item>(segment: String, inner: Item [FieldError]!) -> Item [FieldError]! {
-    value: inner ?? return Err(loop error in err -> decode_under(segment, error))
-    Ok(value)
+// `segment`; a success is handed back as is, its carrier and value neither
+// copied nor retained.
+__decode_under: fn<Item>(segment: String, &&inner: Item [FieldError]!) -> Item [FieldError]! {
+    if inner == .Err(errors) -> return Err(loop error in errors -> decode_under(segment, error))
+    inner
 }
 
 // A List: each Array item decodes in order; a failing item's errors are
