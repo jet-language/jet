@@ -21,11 +21,14 @@ store_test_nix_projection_record: fn(id: String, output_name: String, digest: St
     output_path: "/nix/store/{digest}"
     plan: ProviderPlanFacts.from_facts([String: String]{"nix.drv_path": drv, "nix.reference": reference, "nix.output.{output_name}": output_path}) ?? panic("plan facts must build")
     producer: ProducerRecord.new("nix", drv, store_sha256_hex(drv.bytes()), plan, "nix-derivation:{drv}", "policy=test\nplatform=test", [String: String]{"nix.drv_path": drv, "nix.output.{output_name}": output_path}) ?? panic("producer must build")
+    // The alias may be `out` itself, which a map literal holding both keys refuses.
+    outputs := [String: String]{"out": digest}
+    outputs[output_name] = digest
     ClosureRecord{
         id: id,
         primary: digest,
         action_key: "sha256-same-action",
-        outputs: [String: String]{"out": digest, output_name: digest},
+        outputs: outputs,
         references: [String]{},
         producer_record: producer.encode(),
         package_meta: "",

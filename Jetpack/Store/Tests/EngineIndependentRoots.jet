@@ -49,7 +49,7 @@ engine_independent_root_cleanup: fn(base: String) {
     verification := StoreVerification.new()
     checks := 0
     source: files.join(fixture.repo, "pkgs/hello/bin/hello")
-    changed: fn() -[FS]> {
+    changed: fn() -[FS]> Bool {
         checks += 1
         if checks == 2 -> files.write(source, "#!/bin/sh\necho divergent\n") ?? panic("divergent source")
         false
@@ -78,7 +78,7 @@ engine_independent_root_cleanup: fn(base: String) {
 #Test("independent_root_runner_cancellation_leaves_no_store_result") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()
-    cancelled: fn() -[FS]> { true }
+    cancelled: fn() -[FS]> Bool { true }
     options: IndependentRootOptions{retries: 1, cancelled: Val(cancelled)}
     if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
         .Ok(_) -> panic("cancelled certification was promoted")

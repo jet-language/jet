@@ -207,7 +207,10 @@ store_test_project_multi: fn(original: StoreEntry, id: String, output_name: Stri
     entry.id = id
     entry.name = "multi-projection"
     entry.reference = "alias:{output_name}"
-    entry.named_outputs = [String: String]{"out": entry.envelope.output_hash, output_name: entry.envelope.output_hash}
+    // The alias may be `out` itself, which a map literal holding both keys refuses.
+    outputs := [String: String]{"out": entry.envelope.output_hash}
+    outputs[output_name] = entry.envelope.output_hash
+    entry.named_outputs = outputs
     entry.producer_record = store_test_nix_producer("/nix/store/multi-projection.drv", output_name, path, entry.reference)
     entry
 }

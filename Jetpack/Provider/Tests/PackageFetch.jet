@@ -108,7 +108,8 @@
 }
 
 #Test("fetch resolves a version dependency on a shipped battery to the toolchain's battery and pins it under the batteries source") {
-    toolchain: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet toolchain whose batteries the claim reads")
+    // The unit runs without JET_TOOLCHAIN_ROOT; the repository it tests is the toolchain whose batteries it ships.
+    toolchain: sys.get("JETPACK_TEST_REPO_ROOT") ?? panic("JETPACK_TEST_REPO_ROOT must name the Jet repository whose batteries the claim reads")
     directory: pkg_fetch_battery_dir(toolchain, "backend", "0.1.0") ?? panic("the toolchain ships the backend battery at 0.1.0")
     assert(directory.ends_with("/Jetpack/Provider/Batteries/backend"), directory)
     assert(pkg_fetch_battery_dir(toolchain, "backend", "^9.0.0") == None)

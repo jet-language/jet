@@ -112,7 +112,7 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
     workspace: store_records_test_root("receipt-workspace")
     store.publish_receipt(workspace, record) ?? panic("publish receipt")
 
-    resolve: fn(revision: String) { if revision == origin.revision -> Val(module_source) else -> None }
+    resolve: fn(revision: String) -> String? { if revision == origin.revision -> Val(module_source) else -> None }
     loaded: if store.receipt(workspace, record.closure, resolve) == {
         .Ok(found) -> found ?? panic("receipt hit")
         .Err(error) -> panic("read receipt: {error}")
@@ -131,7 +131,7 @@ store_records_test_diagnostic: fn(origin: DiagnosticOrigin, core: DiagnosticOrig
 
     // A closure whose module bytes changed cannot resolve the stored origin:
     // a miss, never a replay against different bytes.
-    unresolved: fn(revision: String) { String?{None} }
+    unresolved: fn(revision: String) -> String? { None }
     missed: if store.receipt(workspace, record.closure, unresolved) == {
         .Ok(found) -> found == None
         .Err(error) -> panic("read unresolved: {error}")
