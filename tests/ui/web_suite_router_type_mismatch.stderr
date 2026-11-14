@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `W
     |
   5 |     router.navigate("wrong-router", "/")
     |            ^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `WebRouterError` can reach `Err` only through `impl WebRouterError -> Err`
- Fix: Handle this call locally with `??`, add `impl WebRouterError -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `WebRouterError` can reach `Err` only through `impl Err.From(WebRouterError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(WebRouterError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402

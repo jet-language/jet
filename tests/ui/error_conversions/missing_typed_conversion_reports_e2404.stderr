@@ -13,5 +13,5 @@ Error [jet.ErrorNotPropagatable]: `read` fails with `SourceErr`, which can't pro
  12 |     value: read()
     |            ^^^^
  Why: `read` is defined at `missing_typed_conversion_reports_e2404.jet:7:1` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
- Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `read` locally with `??`
+ Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl TargetErr.From(SourceErr) { … }`; otherwise handle `read` locally with `??`
 More: jet-lang.dev/e/E2404

@@ -4,5 +4,5 @@ Error [jet.ErrorNotPropagatable]: `read_config` fails with `FileErr`, which can'
  17 |     raw: read_config(path)
     |          ^^^^^^^^^^^
  Why: `read_config` is defined at `error_family_missing_conversion.jet:11:1` with effective failure contract `explicit FileErr!`; the caller's `explicit AppErr!` contract has no route from `FileErr` to `AppErr`
- Fix: Declare the caller with `FileErr` as its failure domain, or add `impl FileErr -> AppErr { … }`; otherwise handle `read_config` locally with `??`
+ Fix: Declare the caller with `FileErr` as its failure domain, or add `impl AppErr.From(FileErr) { … }`; otherwise handle `read_config` locally with `??`
 More: jet-lang.dev/e/E2404

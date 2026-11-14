@@ -3,6 +3,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `P
     |
  12 |     age: parse_age("7")
     |          ^^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `ParseError` can reach `Err` only through `impl ParseError -> Err`
- Fix: Handle this call locally with `??`, add `impl ParseError -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `ParseError` can reach `Err` only through `impl Err.From(ParseError)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(ParseError) { … }`, or change the return type
 More: jet-lang.dev/e/E2402

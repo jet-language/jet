@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `E
     |
   9 | run: fn() { needs_int(might_fail()) }
     |                       ^^^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `E` can reach `Err` only through `impl E -> Err`
- Fix: Handle this call locally with `??`, add `impl E -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `E` can reach `Err` only through `impl Err.From(E)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(E) { … }`, or change the return type
 More: jet-lang.dev/e/E2402

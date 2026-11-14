@@ -4,7 +4,7 @@ Error [jet.ErrorNotPropagatable]: `load_row` fails with `SourceErr`, which can't
  28 |     load_row()
     |     ^^^^^^^^
  Why: `load_row` is defined at `e2392_root_cascade.jet:23:1` with effective failure contract `explicit SourceErr!`; the caller's `explicit TargetErr!` contract has no route from `SourceErr` to `TargetErr`
- Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl SourceErr -> TargetErr { … }`; otherwise handle `load_row` locally with `??`
+ Fix: Declare the caller with `SourceErr` as its failure domain, or add `impl TargetErr.From(SourceErr) { … }`; otherwise handle `load_row` locally with `??`
 More: jet-lang.dev/e/E2404
 
 Error [jet.ErrorNotPropagatable]: `load_other` fails with `OtherSourceErr`, which can't propagate into `OtherTargetErr` here
@@ -13,5 +13,5 @@ Error [jet.ErrorNotPropagatable]: `load_other` fails with `OtherSourceErr`, whic
  37 |     load_other()
     |     ^^^^^^^^^^
  Why: `load_other` is defined at `e2392_root_cascade.jet:25:1` with effective failure contract `explicit OtherSourceErr!`; the caller's `explicit OtherTargetErr!` contract has no route from `OtherSourceErr` to `OtherTargetErr`
- Fix: Declare the caller with `OtherSourceErr` as its failure domain, or add `impl OtherSourceErr -> OtherTargetErr { … }`; otherwise handle `load_other` locally with `??`
+ Fix: Declare the caller with `OtherSourceErr` as its failure domain, or add `impl OtherTargetErr.From(OtherSourceErr) { … }`; otherwise handle `load_other` locally with `??`
 More: jet-lang.dev/e/E2404

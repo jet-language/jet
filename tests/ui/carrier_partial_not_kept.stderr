@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `I
     |
  13 |     spotty: import_rows([String]{})
     |             ^^^^^^^^^^^
- Why: Ordinary fallible calls propagate automatically; `ImportErr` can reach `Err` only through `impl ImportErr -> Err`
- Fix: Handle this call locally with `??`, add `impl ImportErr -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `ImportErr` can reach `Err` only through `impl Err.From(ImportErr)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(ImportErr) { … }`, or change the return type
 More: jet-lang.dev/e/E2402

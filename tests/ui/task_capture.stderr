@@ -12,6 +12,6 @@ Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `T
     |
   6 |     t.join()
     |       ^^^^
- Why: Ordinary fallible calls propagate automatically; `TaskFailure` can reach `Err` only through `impl TaskFailure -> Err`
- Fix: Handle this call locally with `??`, add `impl TaskFailure -> Err { … }`, or change the return type
+ Why: Ordinary fallible calls propagate automatically; `TaskFailure` can reach `Err` only through `impl Err.From(TaskFailure)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(TaskFailure) { … }`, or change the return type
 More: jet-lang.dev/e/E2402
