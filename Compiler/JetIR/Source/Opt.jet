@@ -1347,54 +1347,63 @@ OptFacts: struct {
 }
 
 ir_opt_facts: fn(f: IRFunction) -> OptFacts Never! {
+    facts := OptFacts{defs: [Int]{}, def_at: [Int]{}, uses: [Int]{}, region: [Int]{}, parent: [Int]{}}
+    ir_opt_facts_refill(f, facts)
+    facts
+}
+
+// Recomputes `facts` over `f` in place: each list is emptied and refilled,
+// so a caller that recomputes them after every change (ir_opt_simplify)
+// reuses their buffers instead of growing and dropping five fresh lists.
+ir_opt_facts_refill: fn(f: IRFunction, facts: &OptFacts) Never! {
     count: f.slot_type.len()
-    defs := [Int]{}
-    def_at := [Int]{}
-    uses := [Int]{}
+    facts.defs.clear()
+    facts.def_at.clear()
+    facts.uses.clear()
+    facts.region.clear()
+    facts.parent.clear()
     loop slot in 0..<count {
-        defs.push(if slot < f.param_count -> 1 else -> 0)
-        def_at.push(-1)
-        uses.push(0)
+        facts.defs.push(if slot < f.param_count -> 1 else -> 0)
+        facts.def_at.push(-1)
+        facts.uses.push(0)
     }
-    region := [Int]{}
-    parent := [Int]{-1}
+    facts.parent.push(-1)
     open := [Int]{0}
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Else || op == .End -> _ := open.pop()
-        region.push(open[open.len() - 1])
+        facts.region.push(open[open.len() - 1])
         if op == .Block || op == .Loop || op == .If || op == .Else {
-            parent.push(open[open.len() - 1])
-            open.push(parent.len() - 1)
+            facts.parent.push(open[open.len() - 1])
+            open.push(facts.parent.len() - 1)
         }
         // The reads of ir_x64_reads_into, counted in place.
         form: ir_x64_read_form(op)
         if form != IR_X64_READS_NONE {
             a: f.a[at]
-            if form != IR_X64_READS_ARGS && a >= 0 && a < count -> uses[a] = uses[a] + 1
+            if form != IR_X64_READS_ARGS && a >= 0 && a < count -> facts.uses[a] = facts.uses[a] + 1
             if form == IR_X64_READS_AB {
                 b: f.b[at]
-                if b >= 0 && b < count -> uses[b] = uses[b] + 1
+                if b >= 0 && b < count -> facts.uses[b] = facts.uses[b] + 1
             }
             if form == IR_X64_READS_AC {
                 c: f.c[at]
-                if c >= 0 && c < count -> uses[c] = uses[c] + 1
+                if c >= 0 && c < count -> facts.uses[c] = facts.uses[c] + 1
             }
             if form == IR_X64_READS_ARGS || form == IR_X64_READS_A_ARGS {
                 first: f.b[at]
                 loop index in first..<(first + f.c[at]) {
                     slot: f.args[index]
-                    if slot >= 0 && slot < count -> uses[slot] = uses[slot] + 1
+                    if slot >= 0 && slot < count -> facts.uses[slot] = facts.uses[slot] + 1
                 }
             }
         }
         written: ir_x64_write(f, at)
         if written >= 0 && written < count {
-            defs[written] = defs[written] + 1
-            def_at[written] = at
+            facts.defs[written] = facts.defs[written] + 1
+            facts.def_at[written] = at
         }
     }
-    OptFacts{defs: defs.move(), def_at: def_at.move(), uses: uses.move(), region: region.move(), parent: parent.move()}
 }
 
 // Whether region `outer` encloses (or is) region `inner`.
@@ -1464,29 +1473,30 @@ ir_opt_compact: fn(f: &IRFunction) Never! {
         if kind == .Nop -> nops += 1
     }
     // Without a Nop the columns stay as they are; only the indexes are
-    // recomputed.
+    // recomputed. With one, each kept row moves down over the Nops in
+    // place and the freed tail is popped, so no column is rebuilt.
     if nops > 0 {
-        op := [IROp]{}
-        dst := [Int]{}
-        a := [Int]{}
-        b := [Int]{}
-        c := [Int]{}
-        line := [Int]{}
+        kept := 0
         loop at in 0..<f.op.len() {
             if f.op[at] == .Nop -> next
-            op.push(f.op[at])
-            dst.push(f.dst[at])
-            a.push(f.a[at])
-            b.push(f.b[at])
-            c.push(f.c[at])
-            line.push(f.code_line[at])
+            if kept != at {
+                f.op[kept] = f.op[at]
+                f.dst[kept] = f.dst[at]
+                f.a[kept] = f.a[at]
+                f.b[kept] = f.b[at]
+                f.c[kept] = f.c[at]
+                f.code_line[kept] = f.code_line[at]
+            }
+            kept += 1
         }
-        f.op = op.move()
-        f.dst = dst.move()
-        f.a = a.move()
-        f.b = b.move()
-        f.c = c.move()
-        f.code_line = line.move()
+        loop f.op.len() > kept {
+            _ := f.op.pop()
+            _ := f.dst.pop()
+            _ := f.a.pop()
+            _ := f.b.pop()
+            _ := f.c.pop()
+            _ := f.code_line.pop()
+        }
     }
     open := [Int]{}
     loop at in 0..<f.op.len() {

@@ -58,28 +58,29 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
     fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
     texts: OptTextRoutes{clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2, scalars: name_rows_value(m.name_rows, "jet_char_len") ?? -2}
+    // The facts stay true until a sweep changes the function, so they are
+    // computed again (in place, their buffers reused) only after one does
+    // (most sweeps change nothing, and the last round none).
+    facts := ir_opt_facts(f)
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
-        // The facts stay true until a sweep changes the function, so they
-        // are computed again only after one does (most sweeps change
-        // nothing, and the last round none).
-        facts := ir_opt_facts(f)
+        if round > 0 -> ir_opt_facts_refill(f, facts)
         changed := ir_opt_fold(m, f, facts, fixed, texts, report)
         changed += ir_opt_unreachable(f, report)
-        if changed > 0 -> facts = ir_opt_facts(f)
+        if changed > 0 -> ir_opt_facts_refill(f, facts)
         step := ir_opt_fuse_compares(m, f, facts, report)
-        if step > 0 -> facts = ir_opt_facts(f)
+        if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         step = ir_opt_common(m, f, facts)
-        if step > 0 -> facts = ir_opt_facts(f)
+        if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         step = ir_opt_propagate(m, f, facts, report)
-        if step > 0 -> facts = ir_opt_facts(f)
+        if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         step = ir_opt_addresses(m, f, facts)
-        if step > 0 -> facts = ir_opt_facts(f)
+        if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         step = ir_opt_coalesce(f, facts, report)
-        if step > 0 -> facts = ir_opt_facts(f)
+        if step > 0 -> ir_opt_facts_refill(f, facts)
         changed += step
         changed += ir_opt_dead(m, f, facts, report)
         changed += ir_opt_structure(f, report)
@@ -87,7 +88,7 @@ ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         // A later round that changed nothing up to here finds the function
         // as the last round's compaction (or short circuits) left it.
         if changed > 0 || round == 0 -> ir_opt_compact(f)
-        changed += ir_opt_short_circuits(f, report)
+        changed += ir_opt_short_circuits(f, facts, report)
         if changed == 0 -> break
         round += 1
     }
@@ -595,11 +596,13 @@ ir_opt_fused_def: fn(f: IRFunction, at: Int) -> Int Never! {
 // shifts a moved Br by every range it leaves, outermost first: the rows are
 // the ones those rewrites made. Each later pass takes just the short
 // circuits the one before exposed, until it exposes none.
-ir_opt_short_circuits: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
+// `facts` is ir_opt_simplify's buffer: each pass that finds a candidate
+// refills it in place (ir_opt_facts_refill).
+ir_opt_short_circuits: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport) -> Int Never! {
     exposed := [Int]{}
-    total := ir_opt_short_pass(f, report, exposed, true)
+    total := ir_opt_short_pass(f, facts, report, exposed, true)
     loop exposed.len() > 0 {
-        found: ir_opt_short_pass(f, report, exposed, false)
+        found: ir_opt_short_pass(f, facts, report, exposed, false)
         if found == 0 -> break
         total += found
     }
@@ -610,7 +613,7 @@ ir_opt_short_circuits: fn(f: &IRFunction, report: &IROptReport) -> Int Never! {
 // those whose negated branch tests an r in `exposed`. `exposed` comes back
 // as the r of each rewritten short circuit whose c2 is a Not of the short
 // circuit ending right before it.
-ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], first: Bool) -> Int Never! {
+ir_opt_short_pass: fn(f: &IRFunction, facts: &OptFacts, report: &IROptReport, exposed: &[Int], first: Bool) -> Int Never! {
     count: f.op.len()
     // A short circuit's If has the Copy or Move of its test right before
     // it (ir_opt_short_circuit_copy): without one there is nothing to find,
@@ -626,7 +629,7 @@ ir_opt_short_pass: fn(f: &IRFunction, report: &IROptReport, exposed: &[Int], fir
         exposed.clear()
         return 0
     }
-    facts: ir_opt_facts(f)
+    ir_opt_facts_refill(f, facts)
     nesting: ir_opt_nesting(f)
     wanted := [Bool]{}
     if !first {
@@ -1346,13 +1349,13 @@ ir_opt_removable: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 }
 
 // `facts` are the function's as it is now; each sweep after one that removed
-// something reads new ones.
-ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+// something reads new ones, refilled in place (ir_opt_facts_refill).
+ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: &OptFacts, report: &IROptReport) -> Int Never! {
     total := ir_opt_dead_sweep(m, f, facts)
     removed := total
     loop removed > 0 {
-        fresh: ir_opt_facts(f)
-        removed = ir_opt_dead_sweep(m, f, fresh)
+        ir_opt_facts_refill(f, facts)
+        removed = ir_opt_dead_sweep(m, f, facts)
         total += removed
     }
     report.dead_removed += total
