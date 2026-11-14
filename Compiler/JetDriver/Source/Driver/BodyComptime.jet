@@ -30,6 +30,7 @@ use {
         sema_graph_trail_undo,
         sema_finalize_graph,
         sema_finalize_seeded_taken,
+        sema_local_splice_demand_snapshot,
         sema_local_splice_demand_swap,
         sema_local_value_land,
         sema_local_value_splice,
@@ -733,6 +734,13 @@ jet_driver_land_local_values: fn(
         loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
         if !jet_driver_local_sources_only(body_sources) -> break
         run_diagnostics := [Diagnostic]{}
+        // The run's checks record the codecs and derived methods they reach
+        // into the graph's demand, which the Core demand after an
+        // `Undemanded` landing would generate. The pass's owner checks
+        // demand what its comptime results captured (SemaDemandCapture), as
+        // the full recheck's do, so the graph's demand goes back to what it
+        // held before the run.
+        held_demand := sema_local_splice_demand_snapshot(registration)
         run := jet_driver_run_comptime(
             registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
             request, run_diagnostics,
@@ -742,6 +750,7 @@ jet_driver_land_local_values: fn(
         partial_registration := run.partial_graph.move()
         run.partial_graph = None
         registration = jet_driver_comptime_take_registration(finished_registration, partial_registration)
+        _ := sema_local_splice_demand_swap(registration, held_demand)
         if run.soft_stop || !run.complete || run.values.len() <= values.len() || run_diagnostics.len() > 0 {
             sema_graph_trail_undo(registration, run.trail)
             break
