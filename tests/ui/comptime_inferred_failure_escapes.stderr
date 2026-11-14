@@ -4,5 +4,5 @@ Error [jet.ErrorNotPropagatable]: `halve` fails with `Err`, which can't propagat
   8 |     loop index in 0..<count -> total += halve(index)
     |                                         ^^^^^
  Why: `halve` is defined at `comptime_inferred_failure_escapes.jet:1:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`
- Fix: Declare the caller with `Err` as its failure domain, or add `impl Err -> Never { … }`; otherwise handle `halve` locally with `??`
+ Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `halve` locally with `??`
 More: jet-lang.dev/e/E2404

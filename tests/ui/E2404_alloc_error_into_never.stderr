@@ -4,5 +4,5 @@ Error [jet.ErrorNotPropagatable]: `try_push()` fails with `AllocError`, which ca
   5 |     rows.try_push(1)
     |          ^^^^^^^^
  Why: `try_push()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller's `explicit Never! (proven unreachable)` contract has no route from `AllocError` to `Never`
- Fix: Declare the caller with `AllocError` as its failure domain, or add `impl Never.From(AllocError) { … }`; otherwise handle `try_push()` locally with `??`
+ Fix: The caller is declared `Never!`, so it can't fail: declare `AllocError!` in its return type, or handle `try_push()` locally with `??`
 More: jet-lang.dev/e/E2404

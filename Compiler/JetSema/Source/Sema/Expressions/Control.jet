@@ -921,16 +921,20 @@ sema_failure_domain_mismatch: fn(expr: Expr?, span: Span, source: Type, target: 
     source_name: sema_failure_conversion_leaf(source)
     target_name: sema_failure_conversion_leaf(target)
     caller: context.failure_contract_source
-    // A written conversion names one type on each side, so a list domain
-    // (`[FieldError]`) on either side has no conversion `impl` to suggest.
-    convertible: !sema_failure_list_domain(source) && !sema_failure_list_domain(target)
+    // A `Never!` caller can't fail, so nothing converts into its domain: it
+    // takes a failure type or handles the call. A written conversion names
+    // one type on each side, so a list domain (`[FieldError]`) on either side
+    // has no conversion `impl` to suggest either.
+    infallible: sema_expr_unwrap_tag(target) == (Type.Named{name: "Never"})
+    convertible: !infallible && !sema_failure_list_domain(source) && !sema_failure_list_domain(target)
     conversion_fix: if convertible -> ", or add `impl {target_name}.From({source_name}) {{ … }}`" else -> ""
+    fix: if infallible -> "The caller is declared `Never!`, so it can't fail: declare `{source_name}!` in its return type, or handle `{callee}` locally with `??`" else -> "Declare the caller with `{source_name}` as its failure domain{conversion_fix}; otherwise handle `{callee}` locally with `??`"
     diagnostic: sema_error(
         "E2404",
         span,
         "`{callee}` fails with `{source_name}`, which can't propagate into `{target_name}` here",
         "`{callee}` is defined at `{provenance.definition}` with effective failure contract `{provenance.contract}`; the caller's `{caller}` contract has no route from `{source_name}` to `{target_name}`",
-        "Declare the caller with `{source_name}` as its failure domain{conversion_fix}; otherwise handle `{callee}` locally with `??`",
+        fix,
     )
     detailed: diagnostic_with_detail(diagnostic, "failure-domain:{callee}|{source_name}|{target_name}\ncallee: {callee}\ndefinition: {provenance.definition}\neffective contract: {provenance.contract}\ncaller contract: {caller}")
     // The repair, for review: the caller takes the callee's domain, or a

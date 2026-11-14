@@ -13,7 +13,7 @@ write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nchecked: fn(row:
 step: jet check main.jet
 exit: nonzero
 stdout: empty
-stderr: = "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + four\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: Declare the caller with `Err` as its failure domain, or add `impl Never.From(Err) { … }`; otherwise handle `checked` locally with `??`\nMore: jet-lang.dev/e/E2404\n\n1 problem found\nrun `jet explain E2404` to learn more\n"
+stderr: = "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + four\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: The caller is declared `Never!`, so it can't fail: declare `Err!` in its return type, or handle `checked` locally with `??`\nMore: jet-lang.dev/e/E2404\n\n1 problem found\nrun `jet explain E2404` to learn more\n"
 step: jet check --trace main.jet
 exit: nonzero
 stderr: ~ "# comptime.programs_built = 1\n" # `four` ran while compiling, before the failure solve
