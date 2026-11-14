@@ -399,3 +399,26 @@ SUM: #run { count() + 1 }
     assert(formatted.contains(`d: '\n'`), formatted)
     assert(formatted.contains(`x\u{1}\ry`), formatted)
 }
+
+// `if r == .Val(n) -> A else -> B` is one pattern test, so fmt keeps it as
+// written when an arm's value is a table of its own; the table's `{` is not
+// the test's. As a table, its `else` would stand for `.None` (E0641).
+#Test("one_arm_pattern_test_keeps_its_form_beside_a_table_in_an_arm") {
+    source: `describe: fn(code: Int?, light: Light) -> String {
+    kind: if code == .Val(n) -> "code {n}" else -> if light == {
+        .Red -> "red"
+        .Green -> "green"
+    }
+    kind
+}
+
+pick: fn(found: Int?, light: Light) -> Bool {
+    chosen: if found == .Val(n) -> if light == {
+        .Red -> n > 0
+        .Green -> n < 0
+    } else -> false
+    chosen
+}
+`
+    assert_eq(fmt_core_stable(source), source)
+}

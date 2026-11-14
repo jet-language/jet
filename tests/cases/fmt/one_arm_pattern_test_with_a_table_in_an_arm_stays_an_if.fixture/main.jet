@@ -1,0 +1,30 @@
+// `if r == .Val(n) -> A else -> B` is one pattern test, not a table, even
+// when an arm's value is a table of its own. Rewritten as a table, its
+// `else` would stand for `.None` of a closed set (E0641).
+Light: enum {
+    Red
+    Green
+}
+
+describe: fn(code: Int?, light: Light) -> String {
+    kind: if code == .Val(n) -> "code {n}" else -> if light == {
+        .Red -> "red"
+        .Green -> "green"
+    }
+    kind
+}
+
+pick: fn(found: Int?, light: Light) -> Bool {
+    chosen: if found == .Val(n) -> if light == {
+        .Red -> n > 0
+        .Green -> n < 0
+    } else -> false
+    chosen
+}
+
+run: fn() {
+    print(describe(Val(3), .Red))
+    print(describe(None, .Green))
+    print(pick(Val(1), .Red))
+    print(pick(None, .Green))
+}

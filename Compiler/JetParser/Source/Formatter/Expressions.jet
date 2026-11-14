@@ -362,8 +362,10 @@ jfmt_dispatch_value_head: fn(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never
 // first `{` outside parentheses, brackets and string literals, so a typed
 // literal in the subject's arguments (`if set(.RoundRobin{priority: 1}) == {`)
 // is not taken for the table. `if cond -> { … }` is a braced arm body, not a
-// table. Bytes, not tokens: a table inside an interpolation hole has no
-// tokens of its own.
+// table, and a `->` before any `{` ends the head: in
+// `if r == .Val(n) -> if n == { … } else -> 0` the `{` belongs to the arm's
+// value, and the one-arm test is no table. Bytes, not tokens: a table inside
+// an interpolation hole has no tokens of its own.
 jfmt_cmp_op_before_brace: fn(bytes: [U8], rest: Int, end: Int) -> BinOp? Never! {
     depth := 0
     brace := -1
@@ -383,6 +385,7 @@ jfmt_cmp_op_before_brace: fn(bytes: [U8], rest: Int, end: Int) -> BinOp? Never! 
                 depth -= 1
                 if depth < 0 -> return None
             }
+            byte == 45 && depth == 0 && index + 1 < end && index + 1 < bytes.len() && bytes[index + 1] == 62 -> return None
             byte == 123 && depth == 0 -> {
                 brace = index
                 break

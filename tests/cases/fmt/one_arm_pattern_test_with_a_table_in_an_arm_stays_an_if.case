@@ -1,0 +1,16 @@
+# `jet fmt` keeps `if x == .Val(p) -> A else -> B` as written when an arm's
+# value holds a table (`if y == { … }`). It used to take that table's `{` for
+# the test's own and print a table whose `else` stands for `.None`, which
+# does not compile (E0641). The file is already formatted, so fmt leaves it
+# byte for byte, and it still checks and runs.
+fixture: one_arm_pattern_test_with_a_table_in_an_arm_stays_an_if.fixture
+copy: main.jet written.jet
+step: jet fmt main.jet
+exit: 0
+file: main.jet == written.jet # fmt keeps both one-arm tests and their tables as written
+step: jet check main.jet
+exit: 0
+stderr: !~ "E0641" # no `else` over the closed set `Int?`
+step: jet run main.jet
+exit: 0
+stdout: = "code 3\ngreen\ntrue\nfalse\n"
