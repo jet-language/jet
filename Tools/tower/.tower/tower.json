@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102494,
+    "rev": 102497,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -41145,8 +41145,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "G5DevX-diag-sweep (5d0368f086). b12 priority slice (Lander5 batch.sh b12 --deferred-only DEFERRED_SUBS, 2026-11-12 04:07-04:09, rc 0) on dev 2844b04984 with seed-b12, published from 2844b04984; out $JET_SCRATCH_ROOT/lanes/Lander/loop/out/deferred-b12/: ui E0109_literal_pieces PASS, \"a\" + 1 gives Fix 'Write the pieces inside one string: \"a{1}\"' (11.out); ui unicode_caret PASS (12.out).",
-          "at": "2026-11-12T09:15:26.627Z"
+          "evidence": "jet test Compiler --profile ui, collect-all sweep with batch compiler gate-p126 (dev 69fe5ca75e), 2026-11-14 16:33: ui PASS 2753, FAIL 0; PASS tests/ui/E0109_literal_pieces.jet (Fix shows \"a{1}\")",
+          "at": "2026-11-14T22:25:24.174Z"
         },
         {
           "n": 20,
@@ -41199,8 +41199,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "meet-G5d on dev d0eba66902 with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-11 23:5x: jet test Compiler --profile ui tests/ui/string_plus.jet: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. E0109 jet.OperatorTypeMismatch, with What, Why and the Fix: Write the pieces inside one string: \"{first}{last}\".",
-          "at": "2026-11-12T04:43:30.381Z"
+          "evidence": "jet test Compiler --profile ui, collect-all sweep with batch compiler gate-p126 (dev 69fe5ca75e), 2026-11-14 16:33: ui PASS 2753, FAIL 0; PASS tests/ui/string_plus.jet (Fix \"{first}{last}\")",
+          "at": "2026-11-14T22:25:25.416Z"
         },
         {
           "n": 26,
@@ -41622,8 +41622,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Landed on dev in batch 16 (980e02feb4, Lander5); b16proofs on the batch-16 jet (gate-p21): f179dbb3b1 (G5DevX2-e0107-it-e0111-loop): ui E0107_it_outside_a_loop 1/0 (its Fix names the bindingless loop and `loop item in items`).",
-          "at": "2026-11-14T01:23:13.365Z"
+          "evidence": "jet test Compiler --profile ui, collect-all sweep with batch compiler gate-p126 (dev 69fe5ca75e), 2026-11-14 16:33: ui PASS 2753, FAIL 0; PASS tests/ui/E0107_it_outside_a_loop.jet",
+          "at": "2026-11-14T22:25:26.308Z"
         },
         {
           "n": 81,
@@ -41686,7 +41686,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-14T20:44:57.667Z",
+      "updated": "2026-11-14T22:25:26.308Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -84834,191 +84834,6 @@
       "created": "2026-11-06T19:42:47.719Z",
       "updated": "2026-11-14T01:52:43.025Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0ihjl6a",
-      "num": 6614,
-      "title": "Every effect is allowed by default; code denies, and a run warns when its effects change",
-      "body": "Owner ruling 2026-11-06 (chat): 'I think by default, we should consider all effects allowed. Packages, functions, types, etc can deny them. When a script or program is first run it warns about the effects that are used unless using the -A flag.' Approved with Main's four refinements: (1) the notice repeats whenever the program's effect set changes, not only on the first run; (2) a written authority row is a ceiling and silences the notice for what it lists; (3) jetpack records each dependency's effect row and reports widening, and --locked refuses it; (4) code run straight from a URL or the registry asks before its first run. Decision D-AUTH-DEFAULT1. This supersedes the prompt model of D-AUTH-AMBIENT1, D-AUTH-AMBIENT3 and D-SCRIPT-CONFIRM1 (spec.md 'Application authority'). Greenfield cutover: the prompt path, its diagnostics and every caller migrate in one change.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Proof-line refresh (G8Scope-3 sweep on b5, 2026-11-11). c10: `git grep -nF \"Run it?\" -- Compiler Jetpack Core ':!Compiler/JetCli/Source/Cli/RemoteRun.jet' ':!Compiler/Prelude/Diagnostics.jet' ':!Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet'; test $? -eq 1` gives rc 1 with no hits. 07bb069962 (c8) restored the remote-run prompt on purpose in those three files. c11/c12: the line `jet test Examples/Interop` has no package entry; the current line is `jet test Compiler --profile golden --filter Examples/Interop`, rc 0: 18 pass, 0 fail, 6 known-failing, 52 skip-host. The Bridges run line needs cargo, the flake's JET_RUST_MUSL_TOOLCHAIN/_LINKER/_AR and a cc; with those it passes on b5. G8Scope-35 fixes E1275 (the bwrap probe exec'd /run/current-system/sw/bin/sh). c3/c4/c9: the NoNix 'launcher reexec preserves argv stdin environment cwd and both network modes' red is environment only: with LC_ALL=C.UTF-8 set, bash inside the namespace warns on stderr because the namespace hides the locale archive. With `env -u LC_ALL`, 1 passed, 0 failed."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "G8 fresh-context review (Review3, 2026-11-11) found that c5 and c6 do not hold for an empty or a repeated type cap. The fixes are carded as #6129 c62 and c63; this card's c5 and c6 hold only once those land."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "All criteria met (verified by Main from landed dev commits; the last was #6129 c60 in t23, dev 9755703c76, 2026-11-11). Card closed; the G8 milestone sweep is the a0.0.44 admit's full suites."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-09: D-AUTH-DEFAULT1=A replaces the prompt model for local scripts. D-SCRIPT-REAPPROVE1=A (ratified 2026-10-28 on #5949) now applies only to the prompt D-AUTH-DEFAULT1 keeps, remote code: a comment or format edit keeps its approval, and a code edit asks again."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (Q33 a): D-AUTH-DEFAULT1 covers the REPL. The REPL follows the program model: every effect allowed, a notice when the session effect set widens, --deny wins. Its separate TTY prompt (once/session/deny) and the piped E1803 are removed in the same cutover. EffectsLead builds it with the c2 docs."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Ballot D-JET-RUN-REMOTE1 posted for the owner (Q25a B): the command that runs code straight from a URL or the registry and asks before its first run. Options A jet run <https-url|name#ver|name> (recommended), B a jet x verb, C jet fetch then run the stored path. c8 applies to the ratified form."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner rulings 2026-11-08 (Q25). a: B, ballot a command that runs URL or registry code (jet run <url> or pkg@ver) now; c8 applies to it. b: A, --allow=R acknowledges R (left out of the notice) and resource-qualified rows still confine through Landlock. c: A, the ambient floor (IO, Mem.Alloc, Exec.Args) stays inside every written ceiling and leaves only through an explicit deny. FYI items (jet new writes no authority row; scripts lose the #! -A rule; the notice omits floor effects) stand, no objection."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: EffectsLead (G8), starting with the c1 adversarial review. Also on EffectsLead: #6206, #6551 (ballot draft for c1) and #6129 for direction."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A dated adversarial review in Docs/audits attacks every claimed strength of D-AUTH-DEFAULT1 (allow-by-default against Deno's deny-by-default prompts, Node's opt-in permission model, and Python, Go and Rust having no authority model) and ends with a holds verdict; every gap it finds is on a card or ballot. No build criterion below starts before this one is met.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 22e9c3fc82 (EffectsLead-1b, review Docs/audits/2026-11-08-d-auth-default1-review.md), batch b2r census rc=0",
-          "at": "2026-11-08T20:13:05.144Z"
-        },
-        {
-          "n": 2,
-          "text": "spec.md 'Application authority' and syntax-decisions.md state the new model in one cutover; D-AUTH-AMBIENT1, D-AUTH-AMBIENT3 and D-SCRIPT-CONFIRM1 are marked superseded by D-AUTH-DEFAULT1; no prose still describes the Run it? prompt.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "97e0817c3e (EffectsLead-3r2). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47).",
-          "at": "2026-11-09T06:57:13.066Z"
-        },
-        {
-          "n": 3,
-          "text": "With no written authority, jet run grants every effect and, before the program's first instruction, prints the program's inferred effects in plain words on stderr. A rerun with the same effect set prints nothing, and a rerun whose effect set changed prints the notice again. Proof: a UI snapshot plus a case that runs the same program three times (first, unchanged, after adding an effect).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Release a0_041 (dev 0e92e16c65) suite:cases PASS 4728 rows, 0 untracked failures; tests/cases/repl/repl_tty_session_names_each_effect_once.case passes on the candidate s2: the PTY REPL names FS.Read once and reads value.txt with no E1803. Reuse dir $JET_STATE_ROOT/release/55de262024e5.",
-          "at": "2026-11-09T08:33:16.623Z"
-        },
-        {
-          "n": 4,
-          "text": "-A (--allow-all) suppresses the notice, and --deny=<RIGHTS> still wins over every grant (E1803 before host state changes). Proof: a case per flag.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "d7b9425cf3 (EffectsLead-4r2). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47). JetTestKit golden/UI rows timed out under load in-batch and passed rerun alone (9/0, 12/0).",
-          "at": "2026-11-09T06:57:14.807Z"
-        },
-        {
-          "n": 5,
-          "text": "A written authority row (package.jet, a script's inline package block, a module, a type or a function effect row) is a ceiling: reaching an effect outside it fails at check time with E0749, and the effects it lists no longer appear in the notice. Proof: a UI snapshot and a case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "on dev 6a06b917cb: c27e05b954, E0749 UI snapshot and case (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
-          "at": "2026-11-09T17:18:02.957Z"
-        },
-        {
-          "n": 6,
-          "text": "A deny written on a package, module, type or function prohibits the denied effects for everything inside it, transitively, at check time (E0749). The existing deny rows keep passing, and a new case covers a deny on a type.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "on dev 6a06b917cb: tests/cases/effects/type_cap_binds_every_method, module_cap_* cases, e562609300 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
-          "at": "2026-11-09T17:18:04.245Z"
-        },
-        {
-          "n": 7,
-          "text": "jetpack records each dependency's inferred effect row in the lock. An update that widens a dependency's row prints which package gained which effect, and --locked refuses the widening with a registered diagnostic that has a UI snapshot. Proof: a jetpack case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "on dev 6a06b917cb: 84c15bf0d5 (E3513) (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
-          "at": "2026-11-09T17:18:05.241Z"
-        },
-        {
-          "n": 8,
-          "text": "Code run straight from a URL or the registry asks before its first run in a terminal. Without a terminal it stops, and the Fix names the -A command. Proof: a case for each path.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "on dev 6a06b917cb: 07bb069962 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
-          "at": "2026-11-09T17:18:06.179Z"
-        },
-        {
-          "n": 9,
-          "text": "Without a terminal or a writable state store, the notice prints once per run on stderr, and --json carries the effect list as structured detail. Proof: a case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "d7b9425cf3 (EffectsLead-4r2). Landed on dev in batch b6d (integrated on 2a884927e5 with 20 other SUBs; census, ratchets and the SUB tests file all pass with the b6d-built compiler; final tree byte-identical to the tested composed tree; dev 0073f4fc47). JetTestKit golden/UI rows timed out under load in-batch and passed rerun alone (9/0, 12/0).",
-          "at": "2026-11-09T06:57:15.759Z"
-        },
-        {
-          "n": 10,
-          "text": "The Run it? prompt path, the always grant writer, and every diagnostic used only by the old model are removed; every in-repository caller, test, snapshot and example is migrated in the same change (no alias, fallback or second path). Proof: a census in the closing commit shows no remaining caller.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "on dev 6a06b917cb: 8f0c8df256 (EffectsLead-3 G8 census, commit verified an ancestor of dev by Main)",
-          "at": "2026-11-09T17:18:07.248Z"
-        },
-        {
-          "n": 11,
-          "text": "Soundness (found by the c1 review, EffectsLead 2026-11-08): a written #Import(c) or other foreign import records FFI.C (or its language leaf) and, with no declared effect row, is treated as reaching every effect, so deny rows and written ceilings apply to it. Probe: deny:[FFI, Exec, FS] plus a C system() call that writes a file is refused at check time. Proof: a case per path.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4f9ea0fa27 (EffectsLead-2r), integration b4b: census rc=0 and every test line passes.",
-          "at": "2026-11-09T03:05:46.549Z"
-        },
-        {
-          "n": 12,
-          "text": "Soundness (found by the c1 review): the run and entry effect list is sema sound row: open-world calls through function values (fn-value reference edges, values stored in lists or records) count as maximal, so the notice, --deny and ceilings never miss an effect. Probe p6/hidden2.jet (a file read through a list-stored fn value, listed as IO only) reports FS.Read. Proof: a case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4f9ea0fa27 (EffectsLead-2r), integration b4b: census rc=0 and every test line passes.",
-          "at": "2026-11-09T03:05:48.149Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "authority",
-        "owner-direction"
-      ],
-      "goals": [
-        "G8"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-11T21:49:11.348Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 12,
-      "completedAt": "2026-11-09T18:27:54.966Z"
     },
     {
       "id": "c0bbj6h3",
@@ -178396,158 +178211,6 @@
       "ratifiedAt": "2026-11-06"
     },
     {
-      "id": "D-AUTH-DEFAULT1",
-      "cardId": "c0ihjl6a",
-      "group": "authority",
-      "title": "Every effect is allowed by default; written code denies, and a run warns when its effects change",
-      "situation": "",
-      "gist": "What may a Jet program do when nobody has written any authority?",
-      "lesson": "Every effect is allowed unless code denies it. Jet knows a program's effects before it starts, so a run lists them up front, and lists them again whenever they change. A written authority row is a ceiling and silences the notice for what it lists.",
-      "explainer": "",
-      "story": "Ana writes a script that reads a file and calls an API. She runs it and sees one line naming what it does, then it runs. Next week a dependency update adds process launching, and the next run names the new effect. Her team adds an authority row to the package, and anything outside that row fails at check time.",
-      "inWild": "Deno denies by default and prompts at first access, so most users pass -A. Node allows everything unless started with --permission. Python, Go and Rust have no authority model at all.",
-      "detail": "Option A is the owner's proposal with four refinements. First, the notice repeats when the effect set changes. Second, a written authority row is a ceiling and silences the notice for what it lists. Third, jetpack reports a dependency whose effects widen, and --locked refuses it. Fourth, code run straight from a URL or the registry asks before its first run.\n\nOption B is the proposal as first stated: a notice on the first run only.\n\nOption C keeps today's model, where undecided effects prompt in a terminal and stop without one.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Allow by default, warn on change, ceilings",
-          "detail": "Every effect is allowed unless denied. The run lists effects before the program starts and again when they change. Authority rows are ceilings, jetpack reports dependency widening, and remote code asks first.",
-          "code": "$ jet run tool.jet\nnote: tool.jet reads files and connects to the network (-A hides this)"
-        },
-        {
-          "key": "B",
-          "name": "Allow by default, warn on first run",
-          "detail": "Every effect is allowed unless denied, and the first run lists the effects once.",
-          "code": "$ jet run tool.jet\nnote: first run: tool.jet reads files and connects to the network"
-        },
-        {
-          "key": "C",
-          "name": "Keep the prompt",
-          "detail": "Undecided effects prompt in a terminal and stop without one.",
-          "code": "$ jet run tool.jet\ntool.jet reads files and connects to the network. Run it? [Y/n/always]"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "No friction for beginners, and nothing changes silently: a new effect, from your code or a dependency, is always named.",
-        "tradeoff": "A run is never blocked by default; protection comes from written ceilings and the change notice.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "A dependency update that adds an effect would never be noticed after the first run."
-          },
-          {
-            "key": "C",
-            "reason": "Prompts train people to answer yes, and stop every run without a terminal."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "Unreviewed local code runs with the user's full authority.",
-            "mitigation": "The notice names every effect before the program starts, and ceilings stop what a team denies."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "What may a Jet program do when nobody has written any authority?",
-        "lesson": "Every effect is allowed unless code denies it. A run names its effects before starting, and again whenever they change.",
-        "trio": {
-          "current": {
-            "note": "Today an undecided effect prompts.",
-            "code": "$ jet run tool.jet\ntool.jet reads files and connects to the network. Run it? [Y/n/always]"
-          },
-          "wild": {
-            "lang": "Deno",
-            "note": "Deno prompts at first access; most users pass -A.",
-            "code": "$ deno run main.ts\n⚠ Deno requests net access to \"api.example.com\". Allow? [y/n/A]"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Allow, warn on change",
-            "gist": "Allowed unless denied; changes are named.",
-            "gains": [
-              "No prompts",
-              "Dependency changes are named"
-            ],
-            "losses": [
-              "No block by default"
-            ],
-            "proposed": {
-              "code": "$ jet run tool.jet\nnote: tool.jet reads files and connects to the network (-A hides this)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Allow, warn once",
-            "gist": "Allowed unless denied; first run only.",
-            "gains": [
-              "Simplest notice"
-            ],
-            "losses": [
-              "Later changes go unseen"
-            ],
-            "proposed": {
-              "code": "$ jet run tool.jet\nnote: first run: tool.jet reads files and connects to the network"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep the prompt",
-            "gist": "Undecided effects prompt.",
-            "gains": [
-              "Blocks before running"
-            ],
-            "losses": [
-              "Prompt fatigue"
-            ],
-            "proposed": {
-              "code": "$ jet run tool.jet\nRun it? [Y/n/always]"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "No friction, and nothing changes silently.",
-          "gains": [
-            "Beginners just run",
-            "Teams write ceilings"
-          ],
-          "losses": [
-            {
-              "loss": "Local code runs with full authority.",
-              "mitigation": "Effects are named before start; ceilings deny."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Later dependency changes go unseen."
-            },
-            {
-              "key": "C",
-              "reason": "Prompts train people to say yes."
-            }
-          ],
-          "tradeoff": "Never blocked by default; ceilings and notices protect."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-06T21:38:15.663Z",
-      "outcome": "A",
-      "comment": "Owner ruled in chat 2026-11-06. Build card #6614; its c1 (adversarial review) gates every build criterion.",
-      "ratifiedAt": "2026-11-06"
-    },
-    {
       "id": "D-FLOAT-INT1",
       "cardId": "c0w1wcfc",
       "group": "conversions",
@@ -179288,175 +178951,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-11-08T02:19:45.520Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-08"
-    },
-    {
-      "id": "D-JET-RUN-REMOTE1",
-      "cardId": "c0ihjl6a",
-      "group": "cli",
-      "title": "Run code straight from a URL or the registry, asking before its first run",
-      "situation": "D-AUTH-DEFAULT1 refinement (4) says code run straight from a URL or the registry asks before its first run (card #6614 c8). Q25a=B asked for a ballot on the command itself. Today `jet run` takes local paths only, and `jet X` resolves a command, a job, a retired spelling, a path, then `jet-X` on PATH (D-JET-VERBS1). Jet already fetches remote code in one place: a script's inline `pkg#1.4` dependency. It is resolved through the signed registry index, verified, stored in the Hangar by content hash and pinned in `<script>.jet.lock` (D-JPK-SCRIPTDEP1). This ballot picks the command that runs remote code, what it fetches and pins, and how the first-run question behaves with and without a terminal.",
-      "gist": "How do you run a Jet program that lives at a URL or in the registry?",
-      "lesson": "`jet run` also takes an https URL or a registry package. Jet fetches it, checks it, pins its exact bytes, and asks once before the first run, naming what the program can do. Later runs of the same bytes are silent. Changed bytes or new effects ask again.",
-      "explainer": "The question happens after Jet fetches and checks the code and before its first instruction. Jet knows every effect a program can reach before it starts, so the question names them all at once.\n\nPinning is by content. A registry package is pinned by its signed index entry and artifact hash. A URL is pinned by the hash of the bytes fetched the first time. Nothing is fetched again silently: `--update` re-resolves, and `--locked` refuses any change.\n\nFetching never runs code. Nothing is written to the current folder. The fetched code lives in the Hangar store, and a small per-user record under `$XDG_STATE_HOME/jet/remote` keeps the pin and the effects the user said yes to.",
-      "story": "Sam sees a log-cleaning tool in a blog post. He types `jet run https://example.org/tool.jet`. Jet shows where it came from, its hash and that it reads files and connects to the network, then asks. He says yes and it runs. Next week the author changes the file, and Jet asks again before running the new bytes. In CI, the same command stops and names the `-A` flag to use.",
-      "inWild": "npx asks \"Need to install the following packages. Ok to proceed?\" in a terminal and fails in CI without --yes. Deno runs a URL directly and pins hashes with a lockfile, then prompts per permission while the program runs. Go runs `go run pkg@version` against a checksum database with no question.",
-      "detail": "Option A adds a remote target to `jet run`: an `https://` URL, `name#1.4.2`, `name#1.4` or a bare `name` that is not a local path. A local path always wins. Plain `http://` is refused. In a terminal Jet asks `Run it? [y/N]`, and only `y` runs. Without a terminal it stops before running and its Fix names `jet run -A <target>`.\n\nUnder A, `-A` skips the question, `--allow=R` skips it when R covers the effects, and `--deny=R` still wins. `--sha256=<hex>` pins a URL's first fetch, and `--locked` refuses any re-resolution.\n\nOption B adds a separate verb, `jet x <target>`, with the same fetch, pin and question.\n\nOption C has no remote run form. `jet fetch <target>` stores the code and prints a local path, and the first `jet run` of that path asks.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`jet run` takes a URL or package",
-          "detail": "`jet run` accepts an https URL or a registry package as its target. It fetches, verifies and pins the code, then asks once in a terminal before the first run. Every run flag works as it does for a local file.",
-          "code": "$ jet run https://example.org/tool.jet\ntool.jet from example.org (sha256 3f9a…), new to this machine\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
-        },
-        {
-          "key": "B",
-          "name": "A separate `jet x` verb",
-          "detail": "A new top-level verb runs remote code with the same fetch, pin and question. `jet run` stays local-only.",
-          "code": "$ jet x https://example.org/tool.jet\ntool.jet from example.org (sha256 3f9a…), new to this machine\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
-        },
-        {
-          "key": "C",
-          "name": "Fetch first, then run the path",
-          "detail": "`jet fetch` stores the code and prints its local path. The first `jet run` of that path asks.",
-          "code": "$ jet fetch https://example.org/tool.jet\n~/.local/share/jet/hangar/3f9a…/tool.jet\n$ jet run ~/.local/share/jet/hangar/3f9a…/tool.jet\nit reads files and connects to the network\nRun it? [y/N] y\ncleaned 12 log files"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "npx",
-          "note": "npx runs a registry package by name and asks before installing it in a terminal. In CI it fails unless you pass --yes.",
-          "code": "$ npx cowsay hi\nNeed to install the following packages:\ncowsay@1.6.0\nOk to proceed? (y)"
-        },
-        {
-          "lang": "Deno",
-          "note": "Deno runs a URL directly. A lockfile pins the hashes, and it prompts for each permission while the program runs.",
-          "code": "$ deno run https://example.org/tool.ts\n⚠ Deno requests read access to \"logs\". Allow? [y/n/A]"
-        },
-        {
-          "lang": "Go",
-          "note": "Go runs a module at an exact version and checks it against a public checksum database. It never asks.",
-          "code": "$ go run example.org/tool@v1.4.2"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It is one run command: flags, entry selection and authority work as for a local file. It reuses the `#version` selector, the Hangar store, the signed index and the lock record. The question is the change notice turned into a question.",
-        "tradeoff": "`jet run` gains a second kind of target, so a bare word that is not a local path may reach the registry.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It adds a second run command whose flags must mirror `jet run`, and it takes a top-level word from every project's job names."
-          },
-          {
-            "key": "C",
-            "reason": "It takes two steps for the common case, and the printed store path is long and opaque."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "A typo in a bare package name could reach the registry instead of failing locally.",
-            "mitigation": "The question shows the source and hash before anything runs, and `name#version` or `./name` makes the intent explicit."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Try each option's command on the same remote tool.jet. Check that nothing runs before the question, that CI stops with a Fix naming -A, and that changed bytes ask again.",
-      "surface": {
-        "gist": "How do you run a Jet program that lives at a URL or in the registry?",
-        "lesson": "`jet run` also takes a URL or a registry package. Jet fetches it, pins its exact bytes and asks once before the first run. Changed bytes ask again.",
-        "trio": {
-          "current": {
-            "note": "Today `jet run` takes local files only.",
-            "code": "$ jet run https://example.org/tool.jet\nerror: no file https://example.org/tool.jet"
-          },
-          "wild": {
-            "lang": "npx",
-            "note": "npx asks before installing in a terminal and fails in CI without --yes.",
-            "code": "$ npx cowsay hi\nNeed to install the following packages:\ncowsay@1.6.0\nOk to proceed? (y)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`jet run` takes a URL",
-            "gist": "One run command for local and remote code.",
-            "gains": [
-              "One command to learn",
-              "Every run flag works"
-            ],
-            "losses": [
-              "Bare names may reach the registry"
-            ],
-            "proposed": {
-              "code": "$ jet run https://example.org/tool.jet\nit reads files and connects to the network\nRun it? [y/N]"
-            }
-          },
-          {
-            "key": "B",
-            "name": "A `jet x` verb",
-            "gist": "A separate verb for remote code.",
-            "gains": [
-              "Remote runs stand out"
-            ],
-            "losses": [
-              "Second run command",
-              "Takes a job name"
-            ],
-            "proposed": {
-              "code": "$ jet x https://example.org/tool.jet\nit reads files and connects to the network\nRun it? [y/N]"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Fetch, then run",
-            "gist": "Store the code first, then run its path.",
-            "gains": [
-              "No new run target"
-            ],
-            "losses": [
-              "Two steps",
-              "Long store path"
-            ],
-            "proposed": {
-              "code": "$ jet fetch https://example.org/tool.jet\n~/.local/share/jet/hangar/3f9a…/tool.jet\n$ jet run ~/.local/share/jet/hangar/3f9a…/tool.jet\nRun it? [y/N]"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One run command, and remote code is pinned and named before it runs.",
-          "gains": [
-            "Same flags as local runs",
-            "Pinned by content"
-          ],
-          "losses": [
-            {
-              "loss": "Bare names may reach the registry.",
-              "mitigation": "The question shows source and hash first."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Two run commands to keep in step."
-            },
-            {
-              "key": "C",
-              "reason": "Two steps and an opaque path."
-            }
-          ],
-          "tradeoff": "`jet run` gains remote targets; local paths still win."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-08T19:18:07.783Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-08"
     },
@@ -180301,179 +179795,6 @@
       "draft": false,
       "status": "ratified",
       "created": "2026-11-09T06:25:56.836Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-09"
-    },
-    {
-      "id": "D-JET-EXPLAIN-EFFECTS1",
-      "cardId": "c0ihjl6a",
-      "group": "cli",
-      "title": "The command that lists the effect caps in force at a site, nearest first",
-      "situation": "The effect-rung and type-rung rulings promise `jet explain effects` (every cap in force, nearest first) and `jet explain effects --caps` (each module cap with its file and line), card #6551. They do not fix the site it explains or its JSON shape, and today the command is E2104 (not built). The ratified CLI has `jet explain marker <file>:<line>` for one site and `jet explain log [<file|dir>]` for a listing with file and line. `jet explain <ref> --json` uses the `jet.report/v1` envelope. `jet inspect rights [TARGET]` lists every callable's declared and inferred rows against the application authority. The owner answered Q27 with option A on 2026-11-08; this ballot records that form with its alternatives and costs.",
-      "gist": "How do you ask Jet which effect limits apply to a line of code?",
-      "lesson": "`jet explain effects` prints every limit in force at a site, nearest first: the `#FX` block, the function row, the module cap, the package row and the run. Each line names the file and line that wrote it, and the last line names the effects the site reaches.",
-      "explainer": "A site is `<file>:<line>`, the innermost scope at that line. A bare `<file>` is that file's module, plus its `run` if it has one. No site means the entry `jet run` would pick, with the same selection rules and the same errors when it is ambiguous.\n\nThe output has one line per rung, nearest first. The rungs are `block` (an `#FX` region), `function` (the `-[…]>` row or `-[!E]>` denials) and `module` (`#FX` on the module). Then come `package` (the `authority` row or `deny`) and `run` (everything allowed unless denied; `--deny` wins). A rung that writes nothing prints `(none written)`, so the ladder is always the same shape. The last line names the effects the site reaches, each with the first call that reaches it, which is the same chain E0749 prints.\n\n`--caps` lists every module cap in the project, or under a given file or directory, as `file:line  #FX(…)  module`, sorted by path then line. `--json` uses the `jet.report/v1` envelope. The command shares one walker with `jet inspect rights`; it is the explain view of the same facts.",
-      "story": "Ana's `jet check` stops with E0749 in `push`. She runs `jet explain effects Source/sync.jet:14`. Jet lists the block cap, the function row, the module cap and the package deny, each with its file and line. It shows that the line reaches `Net.HTTP.Get` through `http.get`. She sees the module cap is the one that leaves it out and widens it.",
-      "inWild": "Rust's `cargo tree -e features` prints which features are on and why, but only for features. Deno's `deno info` lists a module's permissions requests only at run time. AWS IAM's policy simulator shows, for one action, every policy that allows or denies it, nearest first, with the deciding statement.",
-      "detail": "Option A is `jet explain effects [<file>[:<line>]] [--caps] [--json]`, the form ruled in Q27. A line outside any function starts at the module rung. A line inside a lambda gets its own `function` rung, then the enclosing function. A line inside `comptime` adds a `comptime` rung for the `#Impure` gate. A file with no `package.jet` shows `package (none written)`.\n\nA line past the end of the file, or `:0`, gets the existing `jet explain marker` refusal and its code. Generated code maps to the user site that produced it, as diagnostics do. A line holding more than one function explains the first one that starts on it; no column form is proposed. `--caps` with `:line` is a usage error.\n\nOption B folds the ladder into `jet inspect rights [TARGET]`, with `file:line` targets and a `--caps` filter.\n\nOption C names a function instead of a line: `jet explain effects <module>.<function>`.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`jet explain effects [<file>[:<line>]]`",
-          "detail": "A site is a line, a file or the entry `jet run` would pick. One line per rung, nearest first, then what the site reaches. `--caps` lists every module cap; `--json` uses `jet.report/v1`.",
-          "code": "$ jet explain effects Source/sync.jet:14\neffects at Source/sync.jet:14, in `push`, nearest first\n  block     #FX(Net.HTTP)            Source/sync.jet:12\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins\nreaches: Net.HTTP.Get via http.get (Source/sync.jet:14)"
-        },
-        {
-          "key": "B",
-          "name": "Fold it into `jet inspect rights`",
-          "detail": "`jet inspect rights` takes a `file:line` target and prints the same ladder; `--caps` becomes its filter. No `jet explain effects` command.",
-          "code": "$ jet inspect rights Source/sync.jet:14\nrights at Source/sync.jet:14, in `push`, nearest first\n  block     #FX(Net.HTTP)            Source/sync.jet:12\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins"
-        },
-        {
-          "key": "C",
-          "name": "Name a function, not a line",
-          "detail": "`jet explain effects <module>.<function>` explains that function's rungs. No line form.",
-          "code": "$ jet explain effects sync.push\neffects in `sync.push`, nearest first\n  function  -[Net, Log]>             Source/sync.jet:9\n  module    #FX(Net, Log, FS.Read)   Source/sync.jet:1\n  package   deny: [Exec]             package.jet:4\n  run       everything else allowed; --deny wins"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "AWS IAM",
-          "note": "The policy simulator lists, for one action on one resource, each policy that applies and the statement that decides it.",
-          "code": "$ aws iam simulate-principal-policy --action-names s3:GetObject ...\nEvalDecision: explicitDeny\nMatchedStatements: [deny-prod-reads (policy prod-guard)]"
-        },
-        {
-          "lang": "Rust",
-          "note": "`cargo tree -e features` shows each enabled feature and the dependency edge that turned it on.",
-          "code": "$ cargo tree -e features -i serde\nserde v1.0.200\n└── serde feature \"derive\"\n    └── app (feature \"default\")"
-        },
-        {
-          "lang": "Deno",
-          "note": "Deno names the permission only when the program asks for it at run time; there is no static listing.",
-          "code": "$ deno run tool.ts\n⚠ Deno requests net access to \"example.org\". Allow? [y/n/A]"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It keeps the spelling both rulings already name and reuses the ratified `file:line` grammar of `jet explain marker` and the `jet.report/v1` envelope. Every rung's data already exists: `#FX` regions, function rows, module caps, package authority and run rights. `explain` is where a beginner looks after a diagnostic.",
-        "tradeoff": "`jet explain` gains a site-taking subcommand next to `jet inspect rights`, so the two must share one walker to stay in step.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It amends two rulings that name `jet explain effects`, and puts a beginner's question under the whole-program `inspect` plane."
-          },
-          {
-            "key": "C",
-            "reason": "It cannot name a block or lambda rung, needs a second site grammar next to `file:line`, and overloaded or generic names need disambiguation."
-          }
-        ],
-        "losses": [
-          {
-            "loss": "Two commands print overlapping rights facts.",
-            "mitigation": "One walker serves both; `explain effects` is the nearest-first view of one site, `inspect rights` the whole-program table."
-          },
-          {
-            "loss": "A line with two one-line functions is ambiguous.",
-            "mitigation": "The first function that starts on the line is explained, and the output names it."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Run each option on the same line inside a `#FX` block in a function under a module cap in a package with a deny row. Check that every rung is listed nearest first with its file and line, that empty rungs print `(none written)`, and that the reaches line matches the chain E0749 prints.",
-      "surface": {
-        "gist": "How do you ask Jet which effect limits apply to a line of code?",
-        "lesson": "`jet explain effects` lists every limit in force at a site, nearest first, with where each is written and what the site reaches.",
-        "trio": {
-          "current": {
-            "note": "Today the command is not built.",
-            "code": "$ jet explain effects Source/sync.jet:14\nError [E2104]: `jet explain effects` is not built yet"
-          },
-          "wild": {
-            "lang": "AWS IAM",
-            "note": "The policy simulator names each policy that applies to one action and the one that decides.",
-            "code": "$ aws iam simulate-principal-policy --action-names s3:GetObject ...\nEvalDecision: explicitDeny"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`jet explain effects <file>:<line>`",
-            "gist": "The ladder at a line, a file or the entry.",
-            "gains": [
-              "Ruled spelling",
-              "Same site grammar as `jet explain marker`"
-            ],
-            "losses": [
-              "Overlaps `jet inspect rights`"
-            ],
-            "proposed": {
-              "code": "$ jet explain effects Source/sync.jet:14\n  block     #FX(Net.HTTP)   Source/sync.jet:12\n  function  -[Net, Log]>    Source/sync.jet:9\n  ..."
-            }
-          },
-          {
-            "key": "B",
-            "name": "`jet inspect rights <file>:<line>`",
-            "gist": "The same ladder under the inspect plane.",
-            "gains": [
-              "One command for rights facts"
-            ],
-            "losses": [
-              "Amends two rulings",
-              "Hard for beginners to find"
-            ],
-            "proposed": {
-              "code": "$ jet inspect rights Source/sync.jet:14\n  block     #FX(Net.HTTP)   Source/sync.jet:12\n  ..."
-            }
-          },
-          {
-            "key": "C",
-            "name": "`jet explain effects sync.push`",
-            "gist": "Name a function instead of a line.",
-            "gains": [
-              "Stable across edits"
-            ],
-            "losses": [
-              "No block or lambda rung",
-              "Second site grammar"
-            ],
-            "proposed": {
-              "code": "$ jet explain effects sync.push\n  function  -[Net, Log]>    Source/sync.jet:9\n  ..."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "The ruled spelling with the ratified line grammar, and every rung's facts already exist.",
-          "gains": [
-            "Beginner finds it after a diagnostic",
-            "Same walker as `jet inspect rights`"
-          ],
-          "losses": [
-            {
-              "loss": "Two commands overlap.",
-              "mitigation": "One walker serves both."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Amends two rulings and hides the ladder under inspect."
-            },
-            {
-              "key": "C",
-              "reason": "Cannot name a block or lambda rung."
-            }
-          ],
-          "tradeoff": "`jet explain` gains a site-taking subcommand beside `jet inspect rights`."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-09T07:44:19.525Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-09"
     },
@@ -205416,6 +204737,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T22:25:26.308Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#80"
+    },
+    {
+      "at": "2026-11-14T22:25:25.416Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-14T22:25:24.174Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o8f1p4",
+      "note": "#19"
+    },
     {
       "at": "2026-11-14T21:35:47.455Z",
       "by": "Main",
