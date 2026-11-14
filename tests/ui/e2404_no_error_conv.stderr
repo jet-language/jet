@@ -22,5 +22,5 @@ Error [jet.ErrorNotPropagatable]: `inner` fails with `FileErr`, which can't prop
  14 |     inner()
     |     ^^^^^
  Why: `inner` is defined at `e2404_no_error_conv.jet:11:1` with effective failure contract `explicit FileErr!`; the caller's `explicit AppErr!` contract has no route from `FileErr` to `AppErr`
- Fix: Declare the caller with `FileErr` as its failure domain, or add `impl FileErr -> AppErr { … }`; otherwise handle `inner` locally with `??`
+ Fix: Declare the caller with `FileErr` as its failure domain, or add `impl AppErr.From(FileErr) { … }`; otherwise handle `inner` locally with `??`
 More: jet-lang.dev/e/E2404

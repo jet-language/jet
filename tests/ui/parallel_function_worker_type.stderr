@@ -26,19 +26,19 @@ Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker bo
 More: jet-lang.dev/e/E1102
 
 Error [jet.BindingTypeMismatch]: Argument 2 to `.para_fold()` should be fn(fn(Int) -[]> Int Never!, Int) -> fn(Int) -[]> Int Never!, not fn(fn(Int) -> Int, Int) -[]> (fn(Int) -> Int) Never!
-  --> tests/ui/parallel_function_worker_type.jet:13:57
+  --> tests/ui/parallel_function_worker_type.jet:13:55
     |
  13 |     bad_acc: [1].para_fold(fn() { fn(x: Int) { x } }, fn(callback: fn(Int) -> Int, n: Int) { callback }, fn(left: fn(Int) -> Int, right: fn(Int) -> Int) { left })
-    |                                                         ^
+    |                                                       ^^
  Why: Built-in methods need arguments of the right type
  Fix: Use fn(fn(Int) -[]> Int Never!, Int) -> fn(Int) -[]> Int Never! here
 More: jet-lang.dev/e/E0108
 
 Error [jet.BindingTypeMismatch]: Argument 3 to `.para_fold()` should be fn(fn(Int) -[]> Int Never!, fn(Int) -[]> Int Never!) -> fn(Int) -[]> Int Never!, not fn(fn(Int) -> Int, fn(Int) -> Int) -[]> (fn(Int) -> Int) Never!
-  --> tests/ui/parallel_function_worker_type.jet:13:108
+  --> tests/ui/parallel_function_worker_type.jet:13:106
     |
  13 |     bad_acc: [1].para_fold(fn() { fn(x: Int) { x } }, fn(callback: fn(Int) -> Int, n: Int) { callback }, fn(left: fn(Int) -> Int, right: fn(Int) -> Int) { left })
-    |                                                                                                            ^
+    |                                                                                                          ^^
  Why: Built-in methods need arguments of the right type
  Fix: Use fn(fn(Int) -[]> Int Never!, fn(Int) -[]> Int Never!) -> fn(Int) -[]> Int Never! here
 More: jet-lang.dev/e/E0108
