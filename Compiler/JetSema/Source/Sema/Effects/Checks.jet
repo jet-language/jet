@@ -4532,7 +4532,7 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], no
         }
     }
     loop dispatch in values.dispatches {
-        loop target in dispatch.targets -> sema_effect_set_add(seal.names[dispatch.node], "`{nodes[target].display_key}`")
+        loop target in dispatch.targets -> sema_effect_stack_name_add(seal.names[dispatch.node], "`{nodes[target].display_key}`")
     }
     loop index in 0..<nodes.len() {
         if !seal.reached[index] -> next
@@ -4586,7 +4586,7 @@ sema_effect_stack_run_taken: fn(seal: &SemaStackSeal, frames: &SemaStackFrames, 
     if call.arity < 0 -> return
     if arity[target] != call.arity && arity[target] + 1 != call.arity -> return
     sema_effect_stack_add_edge(frames.edges[call.node], target)
-    sema_effect_set_add(seal.names[call.node], "`{nodes[target].display_key}`")
+    sema_effect_stack_name_add(seal.names[call.node], "`{nodes[target].display_key}`")
     sema_effect_stack_reach(seal, target)
 }
 
@@ -4596,13 +4596,33 @@ sema_effect_stack_run_lambda: fn(seal: &SemaStackSeal, frames: &SemaStackFrames,
         sema_effect_stack_add_edge(frames.edges[call.node], target)
         sema_effect_stack_reach(seal, target)
     }
-    sema_effect_set_add(seal.names[call.node], "a lambda in {nodes[lambda.node].display_key}")
+    sema_effect_stack_name_add(seal.names[call.node], "a lambda in {nodes[lambda.node].display_key}")
     writer: frames.own[lambda.node]
     if frames.carrier[call.node] >= 0 && frames.carried[call.node] < 0 -> return
     if writer < 0 || writer > frames.carried[call.node] {
         frames.carried[call.node] = writer
         frames.carrier[call.node] = lambda.node
     }
+}
+
+// Adds `value` once to a node's sealed target names, kept in text order. A
+// name is quoted or `a lambda in …`, so no name's root is an effect root
+// and the effect-row order (sema_effect_set_add) of the names is their text
+// order: a binary search finds the slot, where the row insertion re-ranked
+// every name it passed.
+sema_effect_stack_name_add: fn(names: &[String], value: &&String) Never! {
+    low := 0
+    high := names.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if names[middle] == value -> return
+        if names[middle] < value {
+            low = middle + 1
+        } else {
+            high = middle
+        }
+    }
+    names.insert(low, value)
 }
 
 sema_effect_stack_add_edge: fn(edges: &[Int], target: Int) Never! {
