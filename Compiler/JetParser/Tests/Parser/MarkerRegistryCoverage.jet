@@ -19,6 +19,10 @@ mrc_catalog: fn() -> TAppliedRuleCatalog {
     sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, menus) ?? panic("the applied-rule catalog must build")
 }
 
+// A retired row stays declared only so old sources parse; the parser reports
+// each use with its migration (`#State`, E0175), so no walk covers it.
+mrc_row_is_active: fn(rule: TAppliedRule) -> Bool { rule.name != "State" }
+
 // Sites no source text can spell. An operator impl spells the Impl site after
 // its header (`impl W.Add(Int) #Commutative { … }`).
 mrc_site_is_source_renderable: fn(site: String) -> Bool { site != "Package" && site != "Operation" && site != "Text" }
@@ -91,7 +95,12 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
         "Impl" -> return Val("W: struct {{\n    a: Int\n}}\n\nimpl W.Add(Int) {marker} {{\n    add: fn(self, rhs: Int) -> W {{ return W{{a: self.a + rhs}} }}\n}}\n\nrun: fn() {{\n}}\n")
         "Block" -> return Val("run: fn() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n")
         "Statement" -> return Val("run: fn() {{\n    {marker} print(\"ok\")\n}}\n")
-        "Declaration" -> if marker.starts_with("#Persist") -> return Val("{marker} value := 1\n\nrun: fn() {{\n}}\n") else -> return Val("run: fn() {{\n    {marker} value: 1\n}}\n")
+        "Declaration" -> {
+            if marker.starts_with("#Persist") -> return Val("{marker} value := 1\n\nrun: fn() {{\n}}\n")
+            // A context key is a module constant.
+            if marker.starts_with("#ContextKey") -> return Val("{marker} frame_index: 0\n\nrun: fn() {{\n}}\n")
+            return Val("run: fn() {{\n    {marker} value: 1\n}}\n")
+        }
         "Constant" -> return Val("{marker} VALUE: #run 1\n\nrun: fn() {{\n}}\n")
         "Parameter" -> return Val("helper: fn({marker} a: Int) {{\n}}\n\nrun: fn() {{\n}}\n")
         "Expression" -> return Val("run: fn() {{\n    value: {marker}\n}}\n")
@@ -126,6 +135,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
     assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
     ghosts := [String]{}
     loop rule in catalog.rows {
+        if !mrc_row_is_active(rule) -> next
         marker: mrc_spelling(rule, catalog.argument_menus)
         renderable := [String]{}
         loop site in rule.sites {
@@ -163,6 +173,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
     assert(sema_scope_members_registry_add_applied_catalog(registry, catalog), "the applied catalog must register once")
     failures := [String]{}
     loop rule in catalog.rows {
+        if !mrc_row_is_active(rule) -> next
         marker: mrc_spelling(rule, catalog.argument_menus)
         found := String?{None}
         loop site in rule.sites {
