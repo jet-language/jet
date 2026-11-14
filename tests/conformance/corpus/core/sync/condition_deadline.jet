@@ -17,13 +17,12 @@ run: fn() {
     changed: Condition.new()
     #Deadline(0ms) {
         waiter: task wait_for_deadline(state, changed)
-        outcome: waiter.join()
-        if outcome == {
+        if waiter.join() == {
             .Ok(_) -> print("deadline:unexpected-success")
             .Err(error) -> {
                 if error == {
                     .DeadlineBlown -> print("deadline:E3003")
-                    else -> print("deadline:wrong-failure")
+                    .Cancelled | .Panicked(_) -> print("deadline:wrong-failure")
                 }
             }
         }

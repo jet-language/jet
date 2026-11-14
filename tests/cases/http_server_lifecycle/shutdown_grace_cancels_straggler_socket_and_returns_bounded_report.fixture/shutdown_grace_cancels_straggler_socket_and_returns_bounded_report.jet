@@ -12,7 +12,7 @@ use {
     { sender: entered_tx, receiver: entered_rx }: channel<Int>()
     mux: web.app()
     mux.get("/slow", fn(_req: HTTPRequest) {
-        entered_tx.send(1)
+        entered_tx.send(1) ?? panic("entered")
         time.sleep(250ms)
         Ok(server.response(200, "too late"))
     })

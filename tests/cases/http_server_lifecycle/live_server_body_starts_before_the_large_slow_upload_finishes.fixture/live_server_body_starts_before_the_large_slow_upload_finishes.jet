@@ -17,7 +17,7 @@ use {
         loop packet in chunks {
             chunk: packet ?? panic("body chunk")
             if first {
-                first_tx.send(chunk.len())
+                first_tx.send(chunk.len()) ?? panic("first chunk")
                 first = false
             }
             total += chunk.len()

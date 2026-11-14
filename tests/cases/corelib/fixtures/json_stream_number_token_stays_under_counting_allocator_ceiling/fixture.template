@@ -13,13 +13,11 @@ run: fn() {
     limits.max_expansion_bytes = 0
     input: files.open("{work}/number.json") ?? panic("open number")
     reader: json.reader(input, limits) ?? panic("create reader")
-    result: reader.next()
-    if result == {
+    if reader.next() == {
         .Ok(_) -> { panic("oversized number allocation accepted") }
         .Err(first) -> {
             print(first.reason)
-            again: reader.next()
-            if again == {
+            if reader.next() == {
                 .Ok(_) -> { panic("number allocation error not terminal") }
                 .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
             }
@@ -33,13 +31,11 @@ run: fn() {
     malformed_limits.max_expansion_bytes = 0
     malformed_input: files.open("{work}/malformed.json") ?? panic("open malformed number")
     malformed_reader: json.reader(malformed_input, malformed_limits) ?? panic("create malformed reader")
-    malformed_result: malformed_reader.next()
-    if malformed_result == {
+    if malformed_reader.next() == {
         .Ok(_) -> { panic("malformed number accepted") }
         .Err(first) -> {
             print(first.reason)
-            again: malformed_reader.next()
-            if again == {
+            if malformed_reader.next() == {
                 .Ok(_) -> { panic("malformed number error not terminal") }
                 .Err(second) -> { print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }
             }
