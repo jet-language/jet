@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102553,
+    "rev": 102557,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93115,11 +93115,11 @@
         {
           "n": 2,
           "text": "The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter PluginFailure, jet test Compiler --profile ui --filter authority_ (the refused-scope snapshots), and jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error (the run case's guest wasm is #4268's).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T14:05:16.700Z"
+          "evidence": "jet test Compiler --profile golden --filter PluginFailure: 1 PASS; --profile ui --filter authority_: 13 PASS; jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error, only E1257 SandboxInterfaceChanged (plugin export greet has no Component interface: the guest-wasm gap #4268 owns) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:25.353Z"
         }
       ],
       "refs": [],
@@ -93130,7 +93130,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:17:40.458Z",
-      "updated": "2026-11-14T14:05:16.700Z",
+      "updated": "2026-11-14T23:17:25.353Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -94786,11 +94786,11 @@
         {
           "n": 1,
           "text": "E0909 gets the check that reports it, at a sema site with its UI snapshot (jet check today accepts the polymorphic-recursion fixture that the dev_parts case expects to fail with E0909). E1278–E1291, the rows for jet os verbs that are refused by name until their engine lands, stay registered and are listed by code in an explicit allowlist in the checker. DiagnosticRows --check then refuses any registered code that has no report site and is not on that allowlist, and it refuses any growth of the allowlist.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T08:55:50.588Z"
+          "evidence": "jet run Tools/agent/DiagnosticRows.jet -- --check passes (every active row but the 14 allowlisted E1278-E1291 has a report site; the allowlist only shrinks, its guard test passes); jet test Compiler --profile ui --filter E0909_expanding_generic_instance: 1 PASS; --profile cases --filter dev_parts_routine/unused_expanding_generic: 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:26.275Z"
         }
       ],
       "refs": [],
@@ -94801,7 +94801,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T08:52:50.895Z",
-      "updated": "2026-11-14T09:03:01.895Z",
+      "updated": "2026-11-14T23:17:26.275Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -98697,7 +98697,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c1 holds except its jet explain clause: build_entry/optimize_levels_are_flags_and_trace_their_level PASSES on gate-p131 and jet build --help lists -O0/-O1/-O2, but local jet explain fails with E1227 (jetpack a0.0.44 against jet a0.0.45). c1 stays open for the explain proof after the next release admit."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98711,11 +98717,11 @@
         {
           "n": 2,
           "text": "Every in-repository caller moves in the same cutover: Compiler, Core, Jetpack, Tools (agent, release, ci, perf, gauntlet, tower), tests cases and UI snapshots, Examples, package.jet profiles, Docs/spec and the website source. Proof: `git grep -n -e '--optimize' -e 'optimize: \\(none\\|basic\\|full\\)' -e 'optimize(\\.\\(None\\|Basic\\|Full\\))' -- Compiler Core Jetpack Tools tests Examples Docs/spec` prints nothing, and the touched cases and goldens pass on the batch jet.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T08:59:14.807Z"
+          "evidence": "The criterion's git grep over Compiler Core Jetpack Tools tests Examples Docs/spec finds no caller: its only hits are the board's own records quoting this criterion (Tools/tower/.tower/tower.json 67, history.json 37) and tests/cases/build_entry/optimize_levels_are_flags_and_trace_their_level.case (7), the proof that --optimize is refused as UnknownFlag, which passes; zero hits in Compiler, Core, Jetpack, Examples, Docs/spec or any other Tools or tests file on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:27.182Z"
         }
       ],
       "refs": [],
@@ -98726,7 +98732,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T08:59:10.868Z",
-      "updated": "2026-11-14T08:59:14.807Z",
+      "updated": "2026-11-14T23:17:28.050Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -204995,6 +205001,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T23:17:28.050Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c3gh6u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-14T23:17:27.182Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0c3gh6u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-14T23:17:26.275Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0604fz5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T23:17:25.353Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ba2y7a",
+      "note": "#2"
+    },
     {
       "at": "2026-11-14T23:16:43.953Z",
       "by": "Main",
