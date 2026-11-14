@@ -8,7 +8,7 @@ import { applyIndexDelta } from './live-delta.js';
 import { renderNowReports, refreshRelativeTimes, briefingBody } from './now.js';
 import { renderBallotIntro, lossText } from './ballot.js';
 
-import { projectGauntletMatrix, buildGauntletTooltip, formatPair, formatRatio, formatStamp, projectGauntletStandings, renderGauntletStandings } from './gauntlet.js';
+import { projectGauntletStandings, renderGauntletStandings } from './gauntlet.js';
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
 // milestones → cards). The beacon on the left edge carries one lit segment
@@ -2554,146 +2554,15 @@ async function viewGuidance() {
     }
   });
 }
-// ---- Gauntlet tab: one fixed matrix (cell × peer), latest measurement ------
+// ---- Gauntlet tab: the one run shown (#6834) --------------------------------
+// The newest full or merged results run, else the planned grid from the
+// entries' manifests; the server decides which (app/gauntlet-standings.mjs).
 let gauntletCache = null;
-const GAUNTLET_VERDICTS = Object.freeze(new Set(['win', 'loss', 'unmeasured', 'n/a']));
-const gauntletVerdict = (value) => GAUNTLET_VERDICTS.has(value) ? value : 'unmeasured';
-const gauntletCount = (value) => Number.isFinite(value) ? value : 0;
-const gauntletRowLabel = (row) => row.kind === 'axis' ? `axis · ${String(row.mode).replaceAll('_', ' ')}` : row.id;
-const GAUNTLET_PEER_LABELS = { js: 'JS', nodemon: 'Node', 'entr+cc': 'C build · reference' };
-const gauntletPeerLabel = (peer) => GAUNTLET_PEER_LABELS[peer] ?? peer;
 
-function gauntletBadge(value) {
-  const verdict = gauntletVerdict(value);
-  const modifier = { loss: 'loss', unmeasured: 'open', win: 'verified', 'n/a': 'open' }[verdict];
-  return `<span class="critrow__badge critrow__badge--${modifier}">${verdict}</span>`;
-}
-
-// Run and dev stay separate so a measured run cannot hide a missing dev sample.
-function gauntletCell(row, peerName, details) {
-  const missing = row.kind === 'axis' || row.peerNames?.length ? 'n/a' : 'unmeasured';
-  const peer = row.peers?.[peerName] || {
-    peer: peerName, verdict: missing, ratio: null, values: {},
-    detail: { cell: row.cell, axis: row.axis, peer: { peer: peerName }, metric: row.primary_metric, values: {}, verdict: missing },
-  };
-  const peerLabel = gauntletPeerLabel(peerName);
-  return `<td>${(peer.samples ?? [peer]).map((sample) => {
-    const state = gauntletVerdict(sample.verdict);
-    const key = details.length;
-    details.push(sample.detail || {});
-    const pair = formatPair(row.primary_metric, sample.values?.jet, sample.values?.peer);
-    const measured = state !== 'n/a' && (Number.isFinite(sample.values?.jet) || Number.isFinite(sample.values?.peer));
-    const tier = peer.samples?.length > 1 ? sample.tier : null;
-    const label = `${gauntletRowLabel(row)} versus ${peerLabel}${sample.tier ? ` (${sample.tier})` : ''}: ${state}${Number.isFinite(sample.ratio) ? `, ${formatRatio(sample.ratio)}` : ''}`;
-    return `<button type="button" class="gcell gcell--${state === 'n/a' ? 'na' : state}" data-gauntlet-key="${key}" aria-label="${esc(label)}">
-      <b>${tier ? `<em>${esc(tier)}</em>` : ''}${esc(formatRatio(sample.ratio))}</b>
-      ${measured ? `<span><i>${esc(pair.jet)}</i><i>${esc(pair.peer)}</i></span>` : ''}
-    </button>`;
-  }).join('')}</td>`;
-}
-
-function gauntletRow(row, columns, width, details) {
-  const secondary = row.kind === 'axis' ? `${row.primary_metric ? row.primary_metric.replaceAll('_', ' ') : ''}` : (row.entry || 'no entry');
-  const filler = width > columns.length ? `<td class="gauntlet__blank" colspan="${width - columns.length}"></td>` : '';
-  return `<tr class="gauntlet__row gauntlet__row--${gauntletVerdict(row.verdict)}${row.kind === 'axis' ? ' gauntlet__row--axis' : ''}">
-    <th scope="row"><div><strong>${esc(gauntletRowLabel(row))}</strong><small>${esc(secondary)}</small></div></th>
-    ${columns.map((peer) => gauntletCell(row, peer, details)).join('')}${filler}
-  </tr>`;
-}
-
-function gauntletHeader(label, columns, width) {
-  const filler = width > columns.length ? `<th class="gauntlet__blank" colspan="${width - columns.length}"></th>` : '';
-  return `<tr><th scope="col">${esc(label)}</th>${columns.map((peer) => `<th scope="col">${esc(gauntletPeerLabel(peer))}</th>`).join('')}${filler}</tr>`;
-}
-
-function gauntletMeasuredRange(matrix) {
-  const stamps = matrix.rows.map((row) => row.cell?.measured_iso || row.axis?.measured_iso || row.cell?.measured_at || row.axis?.measured_at)
-    .filter(Boolean).sort();
-  if (!stamps.length) return 'nothing measured yet';
-  const first = formatStamp(stamps[0]), last = formatStamp(stamps.at(-1));
-  return first === last ? `measured ${last}` : `measured ${first} → ${last}`;
-}
-
-// The standings (the newest results file, #6834) and the status matrix
-// (status.json) load independently: either can be missing without hiding the
-// other.
 async function loadGauntlet() {
-  const read = async (path, what) => {
-    const r = await fetch(path);
-    const j = await r.json().catch(() => ({}));
-    return r.ok ? { data: j, error: null } : { data: null, error: j.message || `${what} fetch failed` };
-  };
-  const [status, standings] = await Promise.all([
-    read('/api/gauntlet', 'Gauntlet status'),
-    read('/api/gauntlet/standings', 'Gauntlet standings'),
-  ]);
-  gauntletCache = { status, standings };
-}
-
-// One shared card for every cell. It stays open while the pointer is on the
-// cell or on the card itself, closes shortly after leaving both, and pins on
-// click so links inside it can be used.
-let gauntletTipScope = null;
-function gauntletTips(root, details) {
-  gauntletTipScope?.abort();
-  gauntletTipScope = new AbortController();
-  const signal = gauntletTipScope.signal;
-  const tip = el('<div class="gauntlet__tip" id="gauntlet-tip" hidden></div>');
-  root.appendChild(tip);
-  let current = null, pinned = false, timer = 0;
-  const place = (cell) => {
-    const rect = cell.getBoundingClientRect();
-    const width = Math.min(440, window.innerWidth - 24);
-    tip.style.width = `${width}px`;
-    const height = tip.offsetHeight;
-    const below = rect.bottom + 6;
-    const top = below + height <= window.innerHeight - 12 ? below : Math.max(12, rect.top - height - 6);
-    const left = Math.min(Math.max(12, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 12);
-    tip.style.top = `${top}px`;
-    tip.style.left = `${left}px`;
-  };
-  const open = (cell) => {
-    clearTimeout(timer);
-    if (current === cell && !tip.hidden) return;
-    if (current) current.dataset.open = 'false';
-    current = cell;
-    cell.dataset.open = 'true';
-    tip.innerHTML = buildGauntletTooltip(details[Number(cell.dataset.gauntletKey)] || {});
-    tip.hidden = false;
-    place(cell);
-  };
-  const close = () => {
-    clearTimeout(timer);
-    pinned = false;
-    tip.hidden = true;
-    if (current) current.dataset.open = 'false';
-    current = null;
-  };
-  const closeSoon = () => {
-    if (pinned) return;
-    clearTimeout(timer);
-    timer = setTimeout(close, 220);
-  };
-  tip.addEventListener('mouseenter', () => clearTimeout(timer));
-  tip.addEventListener('mouseleave', closeSoon);
-  root.querySelectorAll('[data-gauntlet-key]').forEach((cell) => {
-    cell.addEventListener('mouseenter', () => { if (!pinned) open(cell); });
-    cell.addEventListener('mouseleave', closeSoon);
-    cell.addEventListener('focus', () => { if (!pinned) open(cell); });
-    cell.addEventListener('blur', closeSoon);
-    cell.addEventListener('click', (event) => {
-      event.stopPropagation();
-      if (pinned && current === cell) { close(); return; }
-      pinned = false;
-      open(cell);
-      pinned = true;
-    });
-  });
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('[data-gauntlet-key], .gauntlet__tip')) close();
-  }, { signal });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); }, { signal });
-  window.addEventListener('scroll', () => { if (current && !tip.hidden) place(current); }, { passive: true, signal });
+  const r = await fetch('/api/gauntlet/standings');
+  const j = await r.json().catch(() => ({}));
+  gauntletCache = r.ok ? { data: j, error: null } : { data: null, error: j.message || 'Gauntlet standings fetch failed' };
 }
 
 async function viewGauntlet() {
@@ -2706,43 +2575,12 @@ async function viewGauntlet() {
       return;
     }
   }
-  const { status: statusLoad, standings: standingsLoad } = gauntletCache;
-  const standingsView = standingsLoad.data ? projectGauntletStandings(standingsLoad.data) : null;
-  const standings = standingsView ? renderGauntletStandings(standingsView)
-    : `<section class="standings" aria-label="Gauntlet standings"><div class="empty">Standings unavailable: ${esc(standingsLoad.error || 'the results file has no standings section')}</div></section>`;
-  const matrix = projectGauntletMatrix(statusLoad.data || {});
-  const summary = matrix.summary;
-  const summaryPills = [['win', summary.win], ['loss', summary.loss], ['unmeasured', summary.unmeasured]]
-    .map(([value, count]) => `<span class="gauntlet__pill">${gauntletBadge(value)} <b>${esc(gauntletCount(count))}</b></span>`)
-    .join('');
-  const details = [];
+  const view = gauntletCache.data ? projectGauntletStandings(gauntletCache.data) : null;
+  const body = view ? renderGauntletStandings(view)
+    : `<div class="empty">Gauntlet unavailable: ${esc(gauntletCache.error || 'the results file has no standings section')}</div>`;
   v.innerHTML = `<div class="viewhead viewhead--gauntlet"><h1 class="h1">Gauntlet</h1>
-      <span class="viewhead__sub">ratio is Jet / peer</span>
-    </div>${standings}
-    <div class="standings__head"><h2 class="standings__title">Status matrix</h2>
-      <span class="viewhead__sub">${esc(gauntletMeasuredRange(matrix))} · shown primary metrics</span>
-      <div class="gauntlet__summary" aria-label="Gauntlet summary">${summaryPills}</div>
-    </div>
-    <p class="gauntlet__policy">AOT vs Rust, C, Zig, Go. Run and dev vs Python and JS. Web development vs Node, Bun, Vite.
-      <span>Recorded samples, not a fresh full-gate result. Cross-group measurements remain in the details as non-blocking references.</span></p>`;
-  if (!statusLoad.data) {
-    v.innerHTML += `<div class="empty">Gauntlet status unavailable: ${esc(statusLoad.error)}</div>`;
-    return;
-  }
-  const width = Math.max(matrix.columns.length, matrix.axisColumns.length);
-  const axisBand = matrix.axisRows.length ? `<tbody class="gauntlet__axes">
-      ${gauntletHeader('Web dev / tools', matrix.axisColumns, width)}
-      ${matrix.axisRows.map((row) => gauntletRow(row, matrix.axisColumns, width, details)).join('')}
-    </tbody>` : '';
-  v.innerHTML += `<div class="gauntlet__matrix" aria-label="Gauntlet status matrix">${matrix.rows.length ? `<table class="gauntlet__table">
-      <thead><tr class="gauntlet__groups"><th scope="col">Comparison</th>
-        ${matrix.groups.map((group) => `<th scope="colgroup" colspan="${group.columns.length}">${esc(group.label)}</th>`).join('')}
-        ${width > matrix.columns.length ? `<th class="gauntlet__blank" colspan="${width - matrix.columns.length}"></th>` : ''}
-      </tr>${gauntletHeader('cell', matrix.columns, width)}</thead>
-      <tbody>${matrix.cellRows.map((row) => gauntletRow(row, matrix.columns, width, details)).join('')}</tbody>${axisBand}
-    </table>` : '<div class="empty">No Gauntlet cells.</div>'}</div>`;
-  const root = $('.gauntlet__matrix', v);
-  if (root) gauntletTips(root, details);
+      <span class="viewhead__sub">Jet against every peer and the asm ceiling</span>
+    </div>${body}`;
 }
 
 

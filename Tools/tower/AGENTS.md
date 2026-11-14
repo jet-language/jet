@@ -414,21 +414,37 @@ tower board check                 # exit 1 (E_BOARD_STALE) when the committed
 
 ## Gauntlet standings (#6834)
 
-The Gauntlet page opens with the standings from the newest gauntlet results
-file (`Tools/gauntlet/harness/run.mjs`; a full-matrix run, including a
-`--languages … --merge` run, is preferred over partial runs). Each entry gets
-one bar chart per metric (startup, run wall, run cycles, peak RSS, size). Every
-measured peer value is a bar Jet must beat, the hand-written asm ceiling is the
-marked bar, and Jet is a bar once a run measured it. Until then each chart
-says "Jet pending" and no ratio or verdict is shown. Once Jet is measured,
-each peer bar carries Jet/peer with the peer-floor verdict, and the ceiling bar
-carries the gap. Rows that are uncovered, not applicable, unavailable,
-mismatched or failed are listed under the charts with their reason. A
-measured peer with no value for one metric is listed in that chart with its
-reason. The page and the text table state the size basis from the section's
-`size_basis` (static stripped, else stripped plus every shared library
-including libc; web artifact; bundle; script+runtime), and each size bar names
-its basis. The status matrix follows below them.
+The Gauntlet page shows one run and nothing older: the newest full-matrix
+results file of `Tools/gauntlet/harness/run.mjs` (a whole run, or a
+`--languages … --merge` run). Partial runs are never shown. The page names the
+run: its id, date and commit (the harness records `provenance.commit`; an older
+file says "commit not recorded"), and for a merged run the run it merged into.
+
+The page opens with a grid: one row per comparison entry, one column each for
+Jet, Rust, C, Zig, Go, Python, Node, Bun, Vite, Lua, LuaJIT and the asm ceiling.
+A cell is measured (with its verdict tally once Jet is measured), not measured
+yet, uncovered (a peer with no program, with the missing path; the asm ceiling
+with no reference reads "uncovered: no ceiling reference"), not applicable, or
+failed, mismatched or unavailable with its reason. A results file written before
+a peer joined `rails.standings` keeps that column and says so.
+
+Until a full run exists the page shows the planned grid instead: every entry
+and column from this checkout's entry manifests, the standings policy and the
+asm-parity references, each cell not measured yet or the manifest's reason it
+cannot be.
+
+Below the grid of a run, each entry gets one bar chart per metric (startup,
+run wall, run cycles, peak RSS, size). Every measured peer value is a bar Jet
+must beat, the hand-written asm ceiling is the marked bar, and Jet is a bar
+once a run measured it. Until then each chart says "Jet pending" and no ratio or
+verdict is shown. Once Jet is measured, each peer bar carries Jet/peer with the
+peer-floor verdict, and the ceiling bar carries the gap. Rows that are
+uncovered, not applicable, unavailable, mismatched or failed are listed under
+the charts with their reason. A measured peer with no value for one metric is
+listed in that chart with its reason. The page and the text table state the
+size basis from the section's `size_basis` (static stripped, else stripped plus
+every shared library including libc; web artifact; bundle; script+runtime),
+and each size bar names its basis.
 
 Tower searches `config.gauntletResults` (default `Tools/gauntlet/results`,
 relative to the project root) and the machine's shared results directory
@@ -457,8 +473,8 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      picker; claims only when agent= AND
                                      claim=1 are both given
 GET  /api/events?limit=50           audit trail
-GET  /api/gauntlet                  Tools/gauntlet/status.json (status matrix)
-GET  /api/gauntlet/standings        newest results file's standings section
+GET  /api/gauntlet/standings        the one run shown: newest full or merged
+                                     results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen

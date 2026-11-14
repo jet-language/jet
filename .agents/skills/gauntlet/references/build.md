@@ -65,7 +65,7 @@ entry's cases run with that compiler's directory first on PATH and as `$JET`, so
 Every run also writes the results file's `standings` section (#6834,
 `Tools/gauntlet/harness/standings.mjs`). Each comparison entry is measured
 against every peer in `matrix.json` `rails.standings` (Rust, C, Zig, Go,
-Python, Bun, Node, Vite) and its hand-written asm ceiling
+Python, Node, Bun, Vite, Lua, LuaJIT) and its hand-written asm ceiling
 (`Tools/perf/asm-parity/<cell>/ref.S`, linked by the cell's `gauntlet` list).
 The metrics are startup, run wall, run cycles (`perf stat -e cycles:u`), peak
 RSS and size. Size is compared on one stated basis (`measurement-manifest.json`
@@ -80,8 +80,11 @@ Jet/peer with a floor verdict (pass below 1.00) and, for asm, a ceiling verdict
 `uncovered`; one the manifest's `standings.not_applicable` excludes is
 `not_applicable` with its reason; a missing toolchain is `unavailable`. Failed
 and mismatched runs stay rows too. `--dry-run` lists every entry × peer ×
-metric cell and the toolchains without running anything. Tower's Gauntlet page
-and `tower gauntlet standings` show the newest results file's section.
+metric cell and the toolchains without running anything. Every results file
+records the commit it measured (`provenance.commit`). Tower's Gauntlet page
+and `tower gauntlet standings` show only the newest full or merged run's
+section (never a partial or older run), and before any exists the planned
+grid from the entry manifests.
 
 Use snapshot-only history unless the owner approves a different policy.
 

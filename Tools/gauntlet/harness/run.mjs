@@ -1950,7 +1950,7 @@ async function interpreterFootprint(cwd, interpreter) {
 }
 
 // The interpreter each interpreted standings peer runs.
-const STANDINGS_INTERPRETERS = Object.freeze({ python: "python3", node: "node", bun: "bun" });
+const STANDINGS_INTERPRETERS = Object.freeze({ python: "python3", node: "node", bun: "bun", lua: "lua", luajit: "luajit" });
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -3003,6 +3003,7 @@ async function loadMergeSource(file) {
     path: file,
     run_id: report.run_id ?? null,
     generated: report.generated ?? null,
+    commit: report.provenance?.commit ?? null,
     jet_binary_sha256: report.provenance?.jet_binary_sha256 ?? null,
     toolchains: report.provenance?.toolchains ?? null,
     entries: new Map(report.entries.map((result) => [result.entry?.name, result])),
@@ -4588,6 +4589,13 @@ function dateStamp() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// The commit a run measured: the checkout's HEAD, null outside a git checkout.
+// Tower's Gauntlet page names it beside the run's date.
+async function checkoutCommit() {
+  const head = await runProcess(repoDir, ["git", "rev-parse", "HEAD"], { timeoutMs: 10_000 });
+  return head.code === 0 ? head.stdout.toString("utf8").trim() || null : null;
+}
+
 // Each comparison entry's standings plan: its programs for every standings
 // peer, the asm-parity reference naming one of its cells, and the toolchains.
 async function standingsPlans(loaded, policy, references, toolchains) {
@@ -4778,7 +4786,7 @@ async function main() {
     generated: new Date().toISOString(),
     run_id: runId,
     options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, ceiling_results: options.ceilingResults, languages: options.languages, merge: options.merge, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
-    ...(mergeSource ? { merged_from: { path: mergeSource.path, run_id: mergeSource.run_id, generated: mergeSource.generated, jet_binary_sha256: mergeSource.jet_binary_sha256, toolchains: mergeSource.toolchains } } : {}),
+    ...(mergeSource ? { merged_from: { path: mergeSource.path, run_id: mergeSource.run_id, generated: mergeSource.generated, commit: mergeSource.commit, jet_binary_sha256: mergeSource.jet_binary_sha256, toolchains: mergeSource.toolchains } } : {}),
     matrix_version: matrix.version,
     matrix_rails: matrix.rails,
     strict_performance_policy: STRICT_PERFORMANCE_POLICY,
@@ -4806,6 +4814,7 @@ async function main() {
       matrix_sha256: sha256(matrixText),
       measurement_manifest_sha256: sourceManifest ? sha256(await fs.readFile(manifestPath)) : null,
       corpus_tree_sha256: await treeSha256(entriesDir),
+      commit: await checkoutCommit(),
       jet_binary_sha256: await fileSha256(jetBin),
       toolchains,
       host: { platform: process.platform, arch: process.arch, node: process.version },

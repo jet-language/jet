@@ -1449,17 +1449,18 @@ function cmdBoard(store, { pos, flags }) {
   }
 }
 
-// #6834: the standings table of the newest gauntlet results file, the same
-// projection the Gauntlet page renders. --results names a results file or a
-// directory of them; by default config `gauntletResults` and the machine's
-// shared results directory ($JET_STATE_ROOT/gauntlet/results) are searched.
-function cmdGauntlet(store, { pos, flags }) {
+// #6834: the one gauntlet run the Gauntlet page shows, as a table: the newest
+// full or merged results file, else the planned grid from the entries'
+// manifests. --results names a results file or a directory of them; by
+// default config `gauntletResults` and the machine's shared results directory
+// ($JET_STATE_ROOT/gauntlet/results) are searched.
+async function cmdGauntlet(store, { pos, flags }) {
   const [verb] = pos;
   if (verb !== 'standings') throw new TowerError('E_USAGE', `unknown gauntlet verb "${verb}" — standings`);
   if (flags.results === true) throw new TowerError('E_USAGE', 'gauntlet standings --results needs a PATH');
   const root = projectRoot(store.dataDir);
   const locations = standingsLocations(root, store.config.gauntletResults, flags.results === undefined ? undefined : String(flags.results));
-  const view = projectGauntletStandings(readGauntletStandings(root, locations));
+  const view = projectGauntletStandings(await readGauntletStandings(root, locations));
   return out(flags, gauntletStandingsText(view), view);
 }
 
@@ -1631,7 +1632,7 @@ export async function run(argv) {
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);
-      case 'gauntlet':  return cmdGauntlet(store, sub);
+      case 'gauntlet':  return await cmdGauntlet(store, sub);
       case 'githook':
         if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);
         return cmdGithookInstall(store);

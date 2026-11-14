@@ -45,6 +45,8 @@ export const PEER_KINDS = Object.freeze({
   node: "interpreted",
   bun: "interpreted",
   vite: "bundled",
+  lua: "interpreted",
+  luajit: "interpreted",
 });
 
 // The stated size basis (#6834 c6): every size cell names one of these, and

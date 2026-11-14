@@ -28,7 +28,7 @@ const matrix = await readJson("Tools/gauntlet/matrix.json");
 const manifest = await readJson("Tools/gauntlet/measurement-manifest.json");
 const references = await readJson("Tools/perf/asm-parity/cells.json");
 const policy = standingsPolicy(matrix, manifest);
-const PEERS = ["rust", "c", "zig", "go", "python", "bun", "node", "vite"];
+const PEERS = ["rust", "c", "zig", "go", "python", "node", "bun", "vite", "lua", "luajit"];
 const METRICS = STANDINGS_METRICS.map((metric) => metric.id);
 
 const batchEntry = { name: "sieve", mode: "batch", cells: ["cli.sieve"], languages: ["jet", "rust", "python", "node"] };

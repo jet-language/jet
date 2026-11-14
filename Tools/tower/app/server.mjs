@@ -403,30 +403,12 @@ export function serve(store, port = 7878, open = false) {
 
       // ---- reads ----
       if (req.method === 'GET' && url.pathname === '/api/state') return sendBody(req, res, live.index().body);
-      if (req.method === 'GET' && url.pathname === '/api/gauntlet') {
-        const root = projectRoot(store.dataDir);
-        const file = root && join(root, 'Tools', 'gauntlet', 'status.json');
-        if (!file) return send(res, 404, { error: 'E_NOT_FOUND', message: 'Gauntlet status is unavailable: project root is unknown' });
-        let text;
-        try {
-          text = await readFile(file, 'utf8');
-        } catch (error) {
-          if (error.code === 'ENOENT') {
-            return send(res, 404, { error: 'E_NOT_FOUND', message: `Gauntlet status is unavailable: ${file}` });
-          }
-          return send(res, 500, { error: 'E_INVALID', message: `Gauntlet status could not be read: ${error.message}` });
-        }
-        try {
-          return send(res, 200, JSON.parse(text));
-        } catch {
-          return send(res, 500, { error: 'E_INVALID', message: `Gauntlet status is not valid JSON: ${file}` });
-        }
-      }
-      // #6834: the newest results file's standings section (config
-      // gauntletResults and the machine's shared results directory).
+      // #6834: the one gauntlet run the page shows, the newest full or merged
+      // results file (config gauntletResults and the machine's shared results
+      // directory), else the planned grid from the entries' manifests.
       if (req.method === 'GET' && url.pathname === '/api/gauntlet/standings') {
         const root = projectRoot(store.dataDir);
-        return send(res, 200, readGauntletStandings(root, standingsLocations(root, store.config.gauntletResults)));
+        return send(res, 200, await readGauntletStandings(root, standingsLocations(root, store.config.gauntletResults)));
       }
       if (req.method === 'GET' && url.pathname === '/api/card') {
         const ref = url.searchParams.get('id') || url.searchParams.get('card');
