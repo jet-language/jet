@@ -2296,84 +2296,84 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 62,
+      "line": 69,
       "column": 9,
       "reason": "jet_rt_main calls this on the main thread before the entry runs"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 78,
+      "line": 85,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 89,
+      "line": 96,
       "column": 5,
       "reason": "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 107,
+      "line": 114,
       "column": 5,
       "reason": "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 139,
+      "line": 146,
       "column": 5,
       "reason": "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 173,
+      "line": 180,
       "column": 5,
       "reason": "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 185,
+      "line": 192,
       "column": 9,
       "reason": "path is a fresh private page; the executable is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 213,
+      "line": 220,
       "column": 5,
       "reason": "the trace made this mapping and holds no pointer into it past this call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 223,
+      "line": 230,
       "column": 5,
       "reason": "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 251,
+      "line": 258,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 273,
+      "line": 280,
       "column": 9,
       "reason": "block + 12 is inside this block, which lies in the read-only table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 342,
+      "line": 349,
       "column": 5,
       "reason": "at lies in the executable's read-only mapping: its ELF header, section table or location table"
     },
@@ -6531,56 +6531,56 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 141,
+      "line": 172,
       "column": 5,
       "reason": "checked IPv4/IPv6 octets transferred into the native address carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 147,
+      "line": 178,
       "column": 5,
       "reason": "read native address octets; no parsing or formatting policy in the carrier leaf"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 153,
+      "line": 184,
       "column": 5,
       "reason": "read the native IP address discriminant"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 210,
+      "line": 241,
       "column": 5,
       "reason": "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 217,
+      "line": 248,
       "column": 5,
       "reason": "read socket IP representation; formatting stays in Jet"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 220,
+      "line": 251,
       "column": 5,
       "reason": "read native socket port"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 232,
+      "line": 263,
       "column": 5,
       "reason": "read native IPv6 socket scope identifier"
     },
     {
       "package": "Core",
       "file": "Core/Net/Net.jet",
-      "line": 410,
+      "line": 441,
       "column": 5,
       "reason": "read the native UDP packet's socket-address carrier"
     },
@@ -6867,105 +6867,105 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1595,
+      "line": 1606,
       "column": 1,
       "reason": "posix mkfifo: the caller owns `path` and removes the named pipe it creates"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1609,
+      "line": 1620,
       "column": 1,
       "reason": "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1623,
+      "line": 1634,
       "column": 1,
       "reason": "posix fork: the caller handles both the parent and the child return and reaps the child"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1627,
+      "line": 1638,
       "column": 1,
       "reason": "posix setsid: the caller owns the process session topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1631,
+      "line": 1642,
       "column": 1,
       "reason": "posix wait: the caller owns the child processes it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1637,
+      "line": 1648,
       "column": 1,
       "reason": "posix waitpid: the caller owns the child process it reaps"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1643,
+      "line": 1654,
       "column": 1,
       "reason": "posix setuid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1647,
+      "line": 1658,
       "column": 1,
       "reason": "posix setgid: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1672,
+      "line": 1683,
       "column": 1,
       "reason": "posix set_user_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1679,
+      "line": 1690,
       "column": 1,
       "reason": "posix set_group_ids: the caller drops or changes process credentials deliberately"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1857,
+      "line": 1868,
       "column": 1,
       "reason": "posix setpgrp: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1861,
+      "line": 1872,
       "column": 1,
       "reason": "posix setpgid: the caller owns the process group topology it changes"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1865,
+      "line": 1876,
       "column": 1,
       "reason": "posix kill: the caller owns or is entitled to signal the target process"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1872,
+      "line": 1883,
       "column": 1,
       "reason": "posix signal reset: the caller owns the process signal disposition it resets"
     },
     {
       "package": "Core",
       "file": "Core/Sys/Sys.jet",
-      "line": 1876,
+      "line": 1887,
       "column": 1,
       "reason": "posix initgroups: the caller changes supplementary groups deliberately"
     },
@@ -11197,18 +11197,18 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/EnvOverlay.jet | 44:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/EnvRoutes.jet | 18:5 | "removed lends exactly one initialized writable C bool byte; no adjacent padding belongs to this output" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 52:5 | "the image's entry calls this before it starts any other thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 62:9 | "jet_rt_main calls this on the main thread before the entry runs" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 78:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 89:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 107:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 139:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 173:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 185:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 213:5 | "the trace made this mapping and holds no pointer into it past this call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 223:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 251:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 273:9 | "block + 12 is inside this block, which lies in the read-only table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 342:5 | "at lies in the executable's read-only mapping: its ELF header, section table or location table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 69:9 | "jet_rt_main calls this on the main thread before the entry runs" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 85:5 | "rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 96:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 114:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 146:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 180:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 192:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 220:5 | "the trace made this mapping and holds no pointer into it past this call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 230:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 258:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 280:9 | "block + 12 is inside this block, which lies in the read-only table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 349:5 | "at lies in the executable's read-only mapping: its ELF header, section table or location table" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 108:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
@@ -11802,14 +11802,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 287:5 | "the allocator is a place the `#Context(allocator:)` block keeps in place until it ends" |
 | Core | Core/Mem/Mem.jet | 292:9 | "the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else" |
 | Core | Core/Mem/Mem.jet | 341:9 | "the block's bytes went back to the allocator that served them" |
-| Core | Core/Net/Net.jet | 141:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
-| Core | Core/Net/Net.jet | 147:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
-| Core | Core/Net/Net.jet | 153:5 | "read the native IP address discriminant" |
-| Core | Core/Net/Net.jet | 210:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
-| Core | Core/Net/Net.jet | 217:5 | "read socket IP representation; formatting stays in Jet" |
-| Core | Core/Net/Net.jet | 220:5 | "read native socket port" |
-| Core | Core/Net/Net.jet | 232:5 | "read native IPv6 socket scope identifier" |
-| Core | Core/Net/Net.jet | 410:5 | "read the native UDP packet's socket-address carrier" |
+| Core | Core/Net/Net.jet | 172:5 | "checked IPv4/IPv6 octets transferred into the native address carrier" |
+| Core | Core/Net/Net.jet | 178:5 | "read native address octets; no parsing or formatting policy in the carrier leaf" |
+| Core | Core/Net/Net.jet | 184:5 | "read the native IP address discriminant" |
+| Core | Core/Net/Net.jet | 241:5 | "validated IP octets, port and IPv6 numeric scope transferred into the socket carrier" |
+| Core | Core/Net/Net.jet | 248:5 | "read socket IP representation; formatting stays in Jet" |
+| Core | Core/Net/Net.jet | 251:5 | "read native socket port" |
+| Core | Core/Net/Net.jet | 263:5 | "read native IPv6 socket scope identifier" |
+| Core | Core/Net/Net.jet | 441:5 | "read the native UDP packet's socket-address carrier" |
 | Core | Core/Net/SSL/TLS.jet | 3454:1 | "`key` and `iv` are a vector record's, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3456:5 | "a vector record's key and nonce, used for that record only" |
 | Core | Core/Net/SSL/TLS.jet | 3462:1 | "`key` and `iv` are a vector record's, used for that record only" |
@@ -11850,21 +11850,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Sys/Sys.jet | 1343:1 | "posix stop: the caller accepts that the process ends here after the shared cleanup boundary" |
 | Core | Core/Sys/Sys.jet | 1353:1 | "posix pipe: the caller owns both returned descriptors and closes each exactly once" |
 | Core | Core/Sys/Sys.jet | 1359:1 | "posix close_fd: the caller owns `fd` and nothing uses it after this call" |
-| Core | Core/Sys/Sys.jet | 1595:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
-| Core | Core/Sys/Sys.jet | 1609:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
-| Core | Core/Sys/Sys.jet | 1623:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
-| Core | Core/Sys/Sys.jet | 1627:1 | "posix setsid: the caller owns the process session topology it changes" |
-| Core | Core/Sys/Sys.jet | 1631:1 | "posix wait: the caller owns the child processes it reaps" |
-| Core | Core/Sys/Sys.jet | 1637:1 | "posix waitpid: the caller owns the child process it reaps" |
-| Core | Core/Sys/Sys.jet | 1643:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1647:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1672:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1679:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
-| Core | Core/Sys/Sys.jet | 1857:1 | "posix setpgrp: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1861:1 | "posix setpgid: the caller owns the process group topology it changes" |
-| Core | Core/Sys/Sys.jet | 1865:1 | "posix kill: the caller owns or is entitled to signal the target process" |
-| Core | Core/Sys/Sys.jet | 1872:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
-| Core | Core/Sys/Sys.jet | 1876:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
+| Core | Core/Sys/Sys.jet | 1606:1 | "posix mkfifo: the caller owns `path` and removes the named pipe it creates" |
+| Core | Core/Sys/Sys.jet | 1620:1 | "posix mknod: the caller owns `path` and grants every process that may open it access to the device it names" |
+| Core | Core/Sys/Sys.jet | 1634:1 | "posix fork: the caller handles both the parent and the child return and reaps the child" |
+| Core | Core/Sys/Sys.jet | 1638:1 | "posix setsid: the caller owns the process session topology it changes" |
+| Core | Core/Sys/Sys.jet | 1642:1 | "posix wait: the caller owns the child processes it reaps" |
+| Core | Core/Sys/Sys.jet | 1648:1 | "posix waitpid: the caller owns the child process it reaps" |
+| Core | Core/Sys/Sys.jet | 1654:1 | "posix setuid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1658:1 | "posix setgid: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1683:1 | "posix set_user_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1690:1 | "posix set_group_ids: the caller drops or changes process credentials deliberately" |
+| Core | Core/Sys/Sys.jet | 1868:1 | "posix setpgrp: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1872:1 | "posix setpgid: the caller owns the process group topology it changes" |
+| Core | Core/Sys/Sys.jet | 1876:1 | "posix kill: the caller owns or is entitled to signal the target process" |
+| Core | Core/Sys/Sys.jet | 1883:1 | "posix signal reset: the caller owns the process signal disposition it resets" |
+| Core | Core/Sys/Sys.jet | 1887:1 | "posix initgroups: the caller changes supplementary groups deliberately" |
 | Core | Core/Testing/Testing.jet | 1389:5 | "the caller bounded this byte position by the String storage length" |
 | Core | Core/Testing/Testing.jet | 1410:5 | "all appended bytes came from complete UTF-8 strings or ASCII" |
 | Core | Core/Tui/Tui.jet | 109:5 | "Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption" |
