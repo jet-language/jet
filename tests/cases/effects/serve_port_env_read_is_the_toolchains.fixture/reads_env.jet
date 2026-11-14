@@ -1,0 +1,15 @@
+package: {
+    name: "reads_env"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    env: core.sys
+    web: core.web
+}
+
+home: fn() -> WebPage { web.page("Home", env.get("GREETING") ?? "hello") }
+
+run: fn() {
+    web.app().route("/", home).serve()
+}

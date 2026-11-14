@@ -5219,7 +5219,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
 // JetSema Registration/CliEntry.jet), read argv and its env fallbacks, print
 // help and exit on a refusal through Core; that parse is the toolchain's, as
 // the Rust runtime parse was, so only the user functions they dispatch to
-// contribute required effects.
+// contribute required effects. The platform port contract's env reads
+// (jet_driver_toolchain_env_read) are the toolchain's too.
 jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [String] Never! {
     // Each key's first row: a hashed map, only looked up.
     by_key: ir_first_function_rows(functions)
@@ -5238,12 +5239,23 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String) -> [Stri
         }
         loop edge in jet_driver_effect_edges(functions[index]) {
             callee: name_rows_get_text(by_key, edge) ?? next
+            if jet_driver_toolchain_env_read(functions[callee]) -> next
             if cli && functions[callee].module_name.starts_with("core.") -> next
             if cli && index != parser && functions[callee].module_identity == functions[index].module_identity && functions[callee].name == functions[index].name.replace("__jet_cli_run", "__jet_cli_parse") -> parser = callee
             pending.push(callee)
         }
     }
     required
+}
+
+// Whether `function` is one of the two env reads of the platform port
+// contract: `serve` reads JET_APP_PORT, which `jet run`, `jet dev` and the
+// platform set to choose the port, and JET_DEV, which `jet dev` sets
+// (core.web `__app_port`, `__app_dev`). The toolchain owns those variables,
+// as it owns the typed CLI's parse, so neither read charges the package Env;
+// a program's own env read still does.
+jet_driver_toolchain_env_read: fn(function: FnBody) -> Bool {
+    function.module_name == "core.web" && (function.name == "__app_port" || function.name == "__app_dev")
 }
 
 // The edges an effect walk follows from `function`: its call edges, then the
@@ -5437,6 +5449,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         order.push(index)
         loop edge in jet_driver_effect_edges(functions[index]) {
             callee: name_rows_get_text(by_key, edge) ?? next
+            if jet_driver_toolchain_env_read(functions[callee]) -> next
             callees[index].push(callee)
             pending.push(callee)
         }

@@ -1,0 +1,12 @@
+package: {
+    name: "serve_port"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use web: core.web
+
+home: fn() -> WebPage { web.page("Home", "hello") }
+
+run: fn() {
+    web.app().route("/", home).serve()
+}
