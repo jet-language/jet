@@ -2189,24 +2189,19 @@ jet_driver_module_values_refused: fn(
     refusals.len() > 0
 }
 
-// Whether a check that ran while `keys` (a batch's source keys) were still
-// held back may differ from the check the run makes one item at a time,
-// after the batch's values landed: it waits on a batch key, or it is
-// `unsettled` (it reported anything or did not complete; such an item stops
-// or reports, which the run does only after the batch's values and reports).
-// A check that reported nothing, completed and waits on no batch key named
-// no batch constant (naming one makes the check wait on its key: a constant
-// without a value is a dependency, sema_comptime_dependencies_from_references),
-// so landing the batch first changes neither its result nor its waits. A
-// local value's check is never unsettled: whatever it reports is withdrawn,
-// and one that fails or does not complete stays run-time code, which no
-// other item reads, so it stops and reports nothing.
-jet_driver_comptime_reads_batch: fn(keys: [String:Bool], waiting: [String], unsettled: Bool) -> Bool Never! {
-    if unsettled -> return true
-    loop key in waiting {
-        if keys.get(key) != None -> return true
-    }
-    false
+// Whether an item's check or closure, which ran while a batch held its
+// values back, settled: it reported nothing (`reported`) and it completed
+// or waits on values (`waiting`), so it neither stops nor reports. A
+// settled one named no batch constant, and then the batch landing first
+// changes nothing, or it waits on that constant's key (a constant without a
+// value is a dependency, sema_comptime_dependencies_from_references) and is
+// checked again once the value lands. An unsettled one stops or reports,
+// which the run does only after the batch's values and reports. A local
+// value's check and closure always settle: whatever they report is
+// withdrawn, and one that fails or does not complete stays run-time code,
+// which no other item reads.
+jet_driver_comptime_settled: fn(local_value: Bool, reported: Bool, complete: Bool, waiting: [String]) -> Bool Never! {
+    local_value || (!reported && (complete || waiting.len() > 0))
 }
 
 // Whether one of `keys` has a value now.
@@ -2217,9 +2212,9 @@ jet_driver_comptime_any_available: fn(available: SemaComptimeAvailableConstants,
     false
 }
 
-// Whether a checked item whose check and closure read nothing its batch
-// holds back (jet_driver_comptime_reads_batch) may wait in the batch, to be
-// evaluated together with it: a constant, not checked text, whose key a
+// Whether a checked item whose check and closure settled
+// (jet_driver_comptime_settled) and wait on nothing may wait in the batch,
+// to be evaluated together with it: a constant, not checked text, whose key a
 // later check names in its waits when it reads it; a field default whose
 // struct doesn't bake it, whose value no check of the run reads (it lands
 // only on the field's shape, sema_checked_shape_defaults) and whose failure
@@ -2819,26 +2814,29 @@ jet_driver_comptime_run: fn(
     // lands later changes only its own constant's row, which each build puts
     // first (jet_driver_comptime_stage).
     staging.sites = jet_driver_comptime_program_sites(programs[0])
-    // Items whose check and closure read nothing a batch holds back
-    // (jet_driver_comptime_reads_batch) are checked and, when
-    // jet_driver_comptime_batchable admits them, wait in `batch` to be
-    // evaluated together on one IR build. An item whose check reads
-    // the batch lands it first and is checked again; one whose closure reads
-    // it withdraws the closure's reports and function checks, lands the batch
-    // and starts over (`retry`). Either way every check sees exactly the
-    // values it would see one item at a time, and a flush leaves the batch
-    // empty, so an item starts over at most once. Any other item flushes the
-    // batch before it is evaluated alone. A literal (sema_comptime_fold) or a
-    // literal input lands at its turn even with a batch waiting: it reads no
-    // batch value, and a later item that names it then reads it landed
-    // instead of flushing the batch early.
+    // Items whose check and closure settled (jet_driver_comptime_settled)
+    // with no waits are checked and, when jet_driver_comptime_batchable
+    // admits them, wait in `batch` to be evaluated together on one IR
+    // build. One that waits on a batch key waits like any item that names
+    // an unvalued constant: the pass's last flush lands the batch, and the
+    // next pass checks it again. So one IR build and one load serve every
+    // item of a dependency level, not one stretch of the declaration order.
+    // An item whose check is unsettled lands the batch first and is checked
+    // again; one whose closure is unsettled withdraws the closure's reports
+    // and function checks, lands the batch and starts over (`retry`). Either
+    // way it sees exactly the values it would see one item at a time, and a
+    // flush leaves the batch empty, so an item starts over at most once. Any
+    // other item flushes the batch before it is evaluated alone. A literal
+    // (sema_comptime_fold) or a literal input lands at its turn even with a
+    // batch waiting: it reads no batch value, and a later item that names it
+    // then reads it landed instead of flushing the batch early.
     batch := jet_driver_comptime_batch_new()
     // The waits of each pending item (`module\nkey`) whose last check, with
-    // its closure, reported nothing: until one of those keys has a value or
-    // joins the batch, checking it again gives the same waits (it names no
-    // other unvalued constant), so the run reuses them instead of checking it
-    // once per pass; a dependency chain declared in reverse order would
-    // otherwise check every waiting item on every pass.
+    // its closure, reported nothing: until one of those keys has a value,
+    // checking it again gives the same waits (it names no other unvalued
+    // constant), so the run reuses them instead of checking it once per
+    // pass; a dependency chain declared in reverse order would otherwise
+    // check every waiting item on every pass.
     settled_waits := [String:[String]]{}
     loop pending.len() > 0 {
         next_pending := [SemaComptimeItemSource]{}
@@ -2878,7 +2876,7 @@ jet_driver_comptime_run: fn(
                 }
                 source_key: "{source.module_identity.id}\n{source.key}"
                 if settled_waits.get(source_key) == .Val(previous_waits) {
-                    if !jet_driver_comptime_any_available(available, previous_waits) && !jet_driver_comptime_reads_batch(batch.keys, previous_waits, false) {
+                    if !jet_driver_comptime_any_available(available, previous_waits) {
                         wait_rows.push(
                             JetDriverComptimeWaitRow{
                                 key: source.key,
@@ -2899,7 +2897,8 @@ jet_driver_comptime_run: fn(
                 jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
-                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, !source.local_value && (checked_item.diagnostics.len() > 0 || !checked_item.complete)) {
+                // A settled check that waits on a batch key waits below.
+                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, checked_item.diagnostics.len() > 0, checked_item.complete, checked_item.waiting_dependencies) {
                     flushed := jet_driver_comptime_flush(request, batch, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
@@ -3060,7 +3059,8 @@ jet_driver_comptime_run: fn(
                 }
                 closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics, request.compiler_threads)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len() + closure.rows.len())
-                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, !source.local_value && (diagnostics.len() > item_diagnostic_start || !closure.complete)) {
+                // A settled closure that waits on a batch key waits below.
+                if batch.entries.len() > 0 && !jet_driver_comptime_settled(source.local_value, diagnostics.len() > item_diagnostic_start, closure.complete, closure.waiting_dependencies) {
                     loop diagnostics.len() > item_diagnostic_start -> _ := diagnostics.pop()
                     jet_driver_comptime_forget_functions(checked_functions, run_index, checked_mark)
                     flushed := jet_driver_comptime_flush(request, batch, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
