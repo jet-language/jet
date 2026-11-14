@@ -1,5 +1,5 @@
-// `\u{…}` is no escape of quoted text, so a function body that writes one
-// is E0001 after the qualified, generic, list, map, optional and fallible
+// `\q` is no escape of quoted text, so a function body that writes one is
+// E0001 after the qualified, generic, list, map, optional and fallible
 // return-type forms, exactly as after `-> String`.
 #Error
 Bad: enum {
@@ -14,12 +14,12 @@ Holder: struct<T> {
     value: T
 }
 
-unicode_qualified: fn() -[IO]> names.Text<Int> { "\u{41}" }
-unicode_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "\u{41}"} }
-unicode_list: fn() -[IO]> [String] { ["\u{41}"] }
-unicode_map: fn() -[IO]> [String: String] { ["k": "\u{41}"] }
-unicode_optional: fn() -[IO]> String? { Val("\u{41}") }
-unicode_fallible: fn() -[IO]> String Bad! { Ok("\u{41}") }
+unknown_qualified: fn() -[IO]> names.Text<Int> { "\q41" }
+unknown_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "\q41"} }
+unknown_list: fn() -[IO]> [String] { ["\q41"] }
+unknown_map: fn() -[IO]> [String: String] { ["k": "\q41"] }
+unknown_optional: fn() -[IO]> String? { Val("\q41") }
+unknown_fallible: fn() -[IO]> String Bad! { Ok("\q41") }
 
 run: fn() {
     print("other forms")

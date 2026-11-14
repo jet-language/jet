@@ -21,18 +21,18 @@ Holder: struct<T> {
     label: fn(self) -[IO]> String { "holder\t{1 + 1}\n" }
 }
 
-// Escapes: `\n`, `\t`, `\"`, `\\`.
-escape_plain: fn() -> String { "a\n\t\"\\b" }
-escape_empty_row: fn() -[]> String { "a\n\t\"\\b" }
-escape_one_effect: fn() -[IO]> String { "a\n\t\"\\b" }
-escape_effects: fn() -[IO, FS]> String { "a\n\t\"\\b" }
-escape_qualified: fn() -[IO]> names.Text<Int> { "a\n\t\"\\b" }
-escape_generic_fn: fn<T>(x: T) -[IO]> String { "a\n\t\"\\b" }
-escape_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "a\n\t\"\\b"} }
-escape_list: fn() -[IO]> [String] { ["a\n\t\"\\b"] }
-escape_map: fn() -[IO]> [String: String] { ["k": "a\n\t\"\\b"] }
-escape_optional: fn() -[IO]> String? { Val("a\n\t\"\\b") }
-escape_fallible: fn() -[IO]> String Bad! { Ok("a\n\t\"\\b") }
+// Escapes: `\n`, `\t`, `\"`, `\\`, `\u{41}`.
+escape_plain: fn() -> String { "a\n\t\"\\b\u{41}" }
+escape_empty_row: fn() -[]> String { "a\n\t\"\\b\u{41}" }
+escape_one_effect: fn() -[IO]> String { "a\n\t\"\\b\u{41}" }
+escape_effects: fn() -[IO, FS]> String { "a\n\t\"\\b\u{41}" }
+escape_qualified: fn() -[IO]> names.Text<Int> { "a\n\t\"\\b\u{41}" }
+escape_generic_fn: fn<T>(x: T) -[IO]> String { "a\n\t\"\\b\u{41}" }
+escape_generic: fn() -[IO]> Holder<String> { Holder<String>{value: "a\n\t\"\\b\u{41}"} }
+escape_list: fn() -[IO]> [String] { ["a\n\t\"\\b\u{41}"] }
+escape_map: fn() -[IO]> [String: String] { ["k": "a\n\t\"\\b\u{41}"] }
+escape_optional: fn() -[IO]> String? { Val("a\n\t\"\\b\u{41}") }
+escape_fallible: fn() -[IO]> String Bad! { Ok("a\n\t\"\\b\u{41}") }
 
 // Interpolation, with an escape after the hole.
 hole_plain: fn(n: Int) -> String { "<{n}>\n" }
