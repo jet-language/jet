@@ -58,6 +58,6 @@ recv dap until $.request_seq = 15 timeout 30s every 100ms
 json: stdout doc $.success = true
 close dap
 exit: 0
-stdout: ~ "\"event\":\"exited\""
-stdout: ~ "\"output\":\"10"
-stdout: !~ "__jet_"
+stdout: ~ "\"event\":\"exited\"" # the debuggee ran to its end
+stdout: ~ "\"output\":\"10" # the program's own print reaches the client as output
+stdout: !~ "__jet_" # no compiler-internal name leaks into the session
