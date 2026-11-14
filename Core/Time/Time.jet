@@ -774,7 +774,7 @@ DateTime: struct {
     }
     subtract_period: fn(self, value: Period) -> DateTime Never! { self.add_period(value.negated()) }
     round: fn(self, unit: String, increment: Int{1}, rounding_mode: String{"half_expand"}) -> DateTime Never! {
-        total: civil_round(civil_datetime_ns(self), unit, increment, rounding_mode)
+        total: civil_round_instant(civil_datetime_ns(self), unit, increment, rounding_mode)
         civil_timestamp(civil_i64(civil_floor(total, 1000000000)), civil_mod(total, 1000000000), false)
     }
     truncate: fn(self, unit: String, increment: Int{1}) -> DateTime Never! { self.round(unit, increment, "trunc") }
@@ -1162,12 +1162,15 @@ civil_unit_ns: fn(unit: String) -> Int? Never! {
     if unit == "week" || unit == "weeks" || unit == "w" -> return Val(604800000000000)
     None
 }
+// Signed rounding of a span: `trunc` goes toward zero and `floor` toward
+// negative infinity, so a negative span rounds as the mirror of its positive
+// one. `%%` keeps the dividend's sign, so `trunc` is the quotient toward zero.
 civil_round: fn(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
     if increment <= 0 -> return value
     size: civil_unit_ns(unit) ?? return value
     quantum: size * increment
-    trunc: value /% quantum
     remainder: value %% quantum
+    trunc: (value - remainder) /% quantum
     if remainder == 0 -> return value
     away: trunc + civil_sign(value)
     floor: if value < 0 -> trunc - 1 else -> trunc
@@ -1191,6 +1194,17 @@ civil_round: fn(value: Int, unit: String, increment: Int, mode: String) -> Int N
     if half_ceil -> return ceil * quantum
     if half_floor -> return floor * quantum
     away * quantum
+}
+// Rounding of a point in time: the clock reading before 1970 rounds as it
+// does after, so `trunc` drops the smaller fields (23:59:59 truncates to
+// 23:59:00) and the half modes pick the nearer boundary. The offset into the
+// quantum is never negative, so the signed rounding sees a positive value.
+civil_round_instant: fn(value: Int, unit: String, increment: Int, mode: String) -> Int Never! {
+    if increment <= 0 -> return value
+    size: civil_unit_ns(unit) ?? return value
+    quantum: size * increment
+    base: (value /% quantum) * quantum
+    base + civil_round(value - base, unit, increment, mode)
 }
 __datetime_literal: fn(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int) -> DateTime Never! {
     civil_timestamp(civil_utc(new(year, month, day), local_time(hour, minute, second)), nanosecond, hour == 23 && minute == 59 && second == 60)
