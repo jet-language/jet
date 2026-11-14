@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6838,
-    "rev": 101919,
+    "nextNum": 6839,
+    "rev": 101923,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98218,6 +98218,56 @@
       "updated": "2026-11-14T01:12:28.468Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0623tfx",
+      "num": 6838,
+      "title": "Two sema diagnostic regressions in ui ownership/ on the batch-15 jet",
+      "body": "Found by G5DevX-2 on 2026-11-13 (b15proofs/9.out, gate-p20, dev 734568e5cd). The snapshots are not re-blessed, because the new text is wrong. (1) ownership/map_value_window_blocks_map_growth: `count` returns ViewMut<Int>, but the report now says \"`c` is a live read view\" and drops E0220. (2) ownership/shared_guard_wait_requires_edit_access_and_bool_predicate_2: E0113 \"this lambda should return Bool, not Int\" became E0108 \"required by this declaration\" at the body, because Lambdas.jet swaps in E0113 only when the body check returns None, which no longer happens here.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A ViewMut returned by a call is reported as a live edit view, and map growth while it lives is refused with E0220. Proof: jet test Compiler --profile ui --filter ownership/map_value_window_blocks_map_growth passes against its unchanged snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T01:16:43.546Z"
+        },
+        {
+          "n": 2,
+          "text": "A lambda passed where Bool is required but returning Int reports E0113 \"this lambda should return Bool, not Int\" at the lambda, not E0108 at the body. Proof: jet test Compiler --profile ui --filter ownership/shared_guard_wait_requires_edit_access_and_bool_predicate_2 passes against its unchanged snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T01:16:45.134Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T01:16:32.174Z",
+      "updated": "2026-11-14T01:16:47.984Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -204537,6 +204587,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T01:16:47.984Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0623tfx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:16:45.134Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0623tfx",
+      "note": "#2 A lambda passed where Bool is required but returning Int rep"
+    },
+    {
+      "at": "2026-11-14T01:16:43.546Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0623tfx",
+      "note": "#1 A ViewMut returned by a call is reported as a live edit view"
+    },
+    {
+      "at": "2026-11-14T01:16:32.175Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0623tfx",
+      "note": "Two sema diagnostic regressions in ui ownership/ on the batch-15 jet"
+    },
     {
       "at": "2026-11-14T01:12:28.469Z",
       "by": "Main",
