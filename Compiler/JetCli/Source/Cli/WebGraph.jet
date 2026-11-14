@@ -1243,6 +1243,11 @@ jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDr
     if expression == .Call(call, _) && (call.name == "form" || call.name == "web.form" || call.name == "core.web.form") {
         if jet_cli_web_form(modules, functions, call.args, source) == .Val(fact) -> uses.forms.push(fact)
     }
+    // `web.image(…)` on the module alias is a method call; a written-out
+    // qualified name is a plain call.
+    if expression == .MethodCall(receiver, method, method_span, _, _, args, _) && method == "image" && jet_cli_web_is_app_receiver(receiver) {
+        if jet_cli_web_const_text(args, 0) == .Val(path) -> uses.images.push(JetCLIWebImage{source: path, provenance: source, span: method_span})
+    }
     if expression == .Call(call, _) && (call.name == "web.image" || call.name == "core.web.image") {
         if jet_cli_web_const_text(call.args, 0) == .Val(path) -> uses.images.push(JetCLIWebImage{source: path, provenance: source, span: call.name_span})
     }
