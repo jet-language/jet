@@ -3,7 +3,7 @@
 This page is the contract for package authors, toolchain maintainers, and registry
 operators. It covers the pre-1.0 boundary, the owner-declared post-1.0 rules,
 and release-facing CLI behavior. Executable truth lives in
-`Jetpack/PackageModel/Source/Manifest/Manifest.jet`, `Jetpack/Foundation/Source/ExitCodes.jet`,
+`Jetpack/PackageModel/Source/Manifest/Manifest.jet`, `Compiler/JetFoundation/Source/Registry/ExitCodes.jet`,
 and the release fixtures under `tests/release/`.
 
 ## Compatibility boundary
@@ -247,15 +247,19 @@ first release whose jet embeds it; an earlier release is never replaced.
 
 `jet` returns stable documented exit codes so shells and CI can branch without
 parsing text. The single source of truth is
-`Jetpack/Foundation/Source/ExitCodes.jet`.
+`Compiler/JetFoundation/Source/Registry/ExitCodes.jet`; this table is
+generated from it.
 
+<!-- BEGIN GENERATED EXIT CODES (Tools/agent/RuntimeGenerators.jet; edit Compiler/JetFoundation/Source/Registry/ExitCodes.jet) -->
 | Code | Name | Meaning |
 |---:|---|---|
 | 0 | `OK` | Success. |
 | 1 | `USER_ERROR` | An unhandled entry error report or a driver-reported user problem. |
-| 2 | `USAGE` | The command line was wrong: an unknown command or a missing, invalid, or unknown argument/flag. |
-| 70 | `RUNTIME_PANIC` | A built program stopped at runtime through `panic`, `require`, an index fault, or another program-side fault; emitted by the Prelude boundary. |
+| 2 | `USAGE` | The command line was wrong: an unknown command or a missing, invalid, or unknown argument or flag. |
+| 70 | `RUNTIME_PANIC` | A built program stopped at runtime through `panic`, `require`, an index fault, or another program-side fault. |
+| 78 | `CONFIG` | A program stopped because its configuration did not decode (sysexits EX_CONFIG): an app's settings record (E2416). |
 | 101 | `ICE` | Jet's own compiler defect: the compiler reached an impossible state (invariant I2), never a user-program exit. |
+<!-- END GENERATED EXIT CODES -->
 
 `USER_ERROR` (1) and `USAGE` (2) stay distinct: the former means the program
 or its inputs failed, while the latter means the `jet` invocation was wrong.

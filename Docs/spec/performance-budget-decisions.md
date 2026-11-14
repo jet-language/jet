@@ -729,7 +729,7 @@ parsed back from rendered stderr.
 
 ### Exit law
 
-The exit mapping reuses [`ExitCodes.jet`](../../Jetpack/Foundation/Source/ExitCodes.jet): OK=0 covers pass,
+The exit mapping reuses [`ExitCodes.jet`](../../Compiler/JetFoundation/Source/Registry/ExitCodes.jet): OK=0 covers pass,
 warning-only output, cancelled plans, non-TTY/JSON plan-only output, and
 successful or idempotent mutation. USER_ERROR=1 covers budget, evidence,
 compiler, and tool failure. USAGE=2 covers command, flag, argument, and
