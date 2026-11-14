@@ -304,13 +304,19 @@ Delegation), commits, directly on `dev` in the dev worktree, one commit per
 landed submission that stages only that submission's paths.
 Every worktree has one named, live owner: the dev worktree (the orchestrator),
 the Lander's trees, and at most one per standing agent within the team cap.
+This is a standing owner order: besides the master checkout, at most six
+worktrees exist at any time, and no work in them is ever lost. An agent never
+opens a second worktree; it moves its one worktree forward to the `dev` tip
+for each new task.
 Each one except the dev worktree is a detached checkout of `dev`, kept at a
 current `dev` commit (moved forward whenever its owner's work lands, never a
 day behind), and holds no build output and no commits of its own. It is
-removed as soon as its owner is idle or gone, after its work reaches `dev` or
-is recorded on its card. Stale, orphaned and superseded worktrees are removed
-whenever found and at every milestone. The master checkout tracks `master`
-only: it is the board's checkout. Its other files are an untracked mirror of
+closed as soon as its owner is done with its work: the work is integrated
+into `dev` (and its board state into `master`) or recorded on its card first,
+then the worktree is removed. Stale, orphaned and superseded worktrees are
+removed the same way whenever found and at every milestone. The master
+checkout tracks `master` only: it is the board's checkout. Its other files
+are an untracked mirror of
 `dev`'s tip, refreshed after every push to `dev`, so sessions and tools
 started there read the current code and rules; nothing is ever committed from
 the mirror, and work reads and runs code from the dev worktree. Never create
