@@ -227,7 +227,7 @@ use {
         PackageFacts,
         pkg_compute_package_effects,
         pkg_effect_enforce,
-        pkg_effect_module_owner,
+        pkg_effect_module_owners,
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
@@ -5282,8 +5282,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         module_identities.push(loaded.module_identity)
         program.modules.push(EffectBudgetModule{path: jet_driver_physical_path(root.root_path, unit.path), alias: alias, function_keys: [String]{}, function_spans: [String: Span]{}, imports: [EffectBudgetImport]{}, has_build_entry: false})
     }
-    owners := [String]{}
-    loop loaded in program.modules -> owners.push(pkg_effect_module_owner(program, loaded.path))
+    owners: pkg_effect_module_owners(program)
     by_key: ir_first_function_rows(functions)
     entry_row: name_rows_get_text(by_key, entry_key) ?? return None
     rows := [Int]{}

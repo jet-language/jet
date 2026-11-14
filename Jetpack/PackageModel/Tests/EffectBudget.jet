@@ -5,7 +5,7 @@ use {
     jet_pkg_model.[
         EffectBudgetImport, EffectBudgetModule, EffectBudgetProgram, EffectBudgetWitness,
         EffectProjection, PackageEffectSummary, PackageEffects, PackageFacts, PackageGrant,
-        pkg_compute_package_effects, pkg_effect_enforce, pkg_effect_summary_json_for_entry,
+        pkg_compute_package_effects, pkg_effect_enforce, pkg_effect_module_owners, pkg_effect_summary_json_for_entry,
         pkg_effect_summary_line_for_entry, pkg_lock_e3513, pkg_lock_record_effect_rows, pkg_lock_widened_note, pkg_render_effect_projection_json,
     ]
     jet_foundation.[Span, authority_holds]
@@ -107,6 +107,33 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
             assert(diagnostic.what.contains("crypto.seal"))
         }
     }
+}
+
+pkg_test_owner_module: fn(path: String) -> EffectBudgetModule Never! {
+    EffectBudgetModule{path: path, alias: "m", function_keys: [String]{}, function_spans: [String: Span]{}, imports: [EffectBudgetImport]{}, has_build_entry: false}
+}
+
+#Test("a module belongs to the first dependency in name order whose root holds its path") {
+    // `lib`'s root is a text prefix of `lib2`'s modules but not a path
+    // prefix; uncollapsed paths and roots compare as collapsed; a module
+    // under no root is the root package's.
+    program: EffectBudgetProgram{
+        entry: 0,
+        modules: [EffectBudgetModule]{
+            pkg_test_owner_module("/w/app/run.jet"),
+            pkg_test_owner_module("/w/deps/lib2/src/a.jet"),
+            pkg_test_owner_module("/w/deps/lib/./src/../b.jet"),
+            pkg_test_owner_module("/w/deps/other/c.jet"),
+            pkg_test_owner_module("/w/deps//lib/d.jet"),
+            pkg_test_owner_module("/w/deps/lib"),
+            pkg_test_owner_module("deps/rel/e.jet"),
+            pkg_test_owner_module("x/g.jet"),
+            pkg_test_owner_module("../h.jet")
+        },
+        dep_roots: [String: String]{"lib": "/w/deps/lib/", "lib2": "/w/deps/lib2", "zz_outer": "/w/deps", "rel": "deps/./rel", "zzz_here": "."},
+        selected_output: None
+    }
+    assert_eq(pkg_effect_module_owners(program), [String]{"root", "lib2", "lib", "zz_outer", "lib", "lib", "rel", "zzz_here", "root"})
 }
 
 #Test("effect budget authority block is the E1220 source") {

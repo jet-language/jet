@@ -17,6 +17,9 @@ use jet_foundation.[
     authority_covers, authority_covers_any, authority_holds, authority_is_deny_only, authority_parse_rights,
     authority_root, diagnostic_from_registry, diagnostic_with_rights, diagnostic_with_source_path, effect_scope_is_scoped,
 ]
+use {
+    files: core.files
+}
 
 EFFECT_ROOT_PACKAGE: "root"
 EFFECT_PANIC_EDGE: "__jet_panic__"
@@ -120,13 +123,23 @@ pkg_dependency_boundary_span: fn(program: EffectBudgetProgram, dependency: Strin
     None
 }
 
-// The package owning a module path: the first dependency (in name order)
-// whose source root contains it, else `root`.
-pkg_effect_module_owner: fn(program: EffectBudgetProgram, path: String) -> String Never! {
+// The package owning each module of `program`, in module order: the first
+// dependency (in name order) whose source root contains the module's path,
+// else `root`. Each root and module path collapses once. A collapsed path
+// within a collapsed root other than `.` starts with that root's text, so
+// only those roots take the exact test (pkg_authority_path_within).
+pkg_effect_module_owners: fn(program: EffectBudgetProgram) -> [String] Never! {
     names := program.dep_roots.keys().to_list()
     names.sort()
-    loop name in names {
-        if pkg_authority_path_within(path, program.dep_roots[name]) -> return name
+    roots: loop name in names -> files.collapse(program.dep_roots[name])
+    loop loaded in program.modules -> pkg_effect_owner_among(program, names, roots, loaded.path)
+}
+
+pkg_effect_owner_among: fn(program: EffectBudgetProgram, names: [String], roots: [String], path: String) -> String Never! {
+    target: files.collapse(path)
+    loop (index, name) in names {
+        if roots[index] != "." && !target.starts_with(roots[index]) -> next
+        if pkg_authority_path_within(path, program.dep_roots[name]) -> return name.copy()
     }
     EFFECT_ROOT_PACKAGE
 }
@@ -139,7 +152,7 @@ pkg_effect_module_owner: fn(program: EffectBudgetProgram, path: String) -> Strin
 // with it.
 pkg_compute_package_effects: fn(program: EffectBudgetProgram, solved: [String: [String]], summaries: [String: PackageEffectSummary]) -> [PackageEffects] Never! {
     reachable: pkg_effect_entry_reachable_keys(program, summaries, "run")
-    module_owners: loop loaded in program.modules -> pkg_effect_module_owner(program, loaded.path)
+    module_owners: pkg_effect_module_owners(program)
     // Each program function's package, by its key.
     owners := [String: String]{}
     loop (index, loaded) in program.modules {
