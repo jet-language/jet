@@ -11,6 +11,11 @@ build/
 !/crates/jet-foundation/build/
 !/tests/conformance/corpus/core/build/
 
+# The repository root's `.jet/` is run state of jets started at the root
+# (evidence, stamps, the job queue, traces, proofs, secrets audit); nothing
+# reads a committed copy.
+/.jet/
+
 # `jet build/run/test` emits its canonical tree under `.jet/build/`.
 **/.jet/build/
 # A build's workspace stamps (absolute source paths) and the sandbox folders
@@ -28,14 +33,12 @@ jet-lsp-timing.json
 # --- Machine-local Jet state -----------------------------------------------
 # Native C-dependency link cache: per-machine `/nix/store` paths.
 **/.jet/clinks/
-# Discovery index and lock, ICE bug-report bundles, and the peer launcher
-# built from Tools/ci/CompiledWorkloadPeerLauncher.jet.
+# Discovery index and lock, and ICE bug-report bundles.
 **/.jet/discovery/
 **/.jet/ice-report/
 **/.jet/.locks/
 **/.jet/rustc
 **/.jet/rustc-args
-/.jet/compiled-workload-peer-launcher
 # Production receipts carry this machine's toolchain and hardware identity.
 **/.jet/receipts/
 **/.jet/reports/
@@ -45,7 +48,7 @@ jet-lsp-timing.json
 **/.jet/records/.index.jsonl.*
 **/.jet/records/.index.lock
 # `jet test` history (`.jet/evidence/<report id>.json`, one per run) is
-# per machine. Evidence already tracked at the repository root stays tracked.
+# per machine.
 **/.jet/evidence/
 # `jet test --profile <p>` baselines (`.jet/test/<p>/*.rows`) hold the rows of
 # this checkout's last recorded run, so they are per machine too.

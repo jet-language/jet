@@ -993,7 +993,10 @@ grep_args: fn(rules: [Rule], kind: String) -> [String] Never! {
 
 GREP_EXCLUDES: [String]{"--", ".", ":!.git", ":!.chain", ":!.chain-base", ":!.chain-lock"}
 
-// Refuse personal or machine information anywhere in `dir` (#6564 c5).
+// Refuse personal or machine information anywhere in `dir` (#6564 c5). The
+// path rules search binary files too, as text (a binary run record can carry
+// a machine path, #6726); the word rules, short enough to match noise in
+// compressed bytes, search text files only.
 personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
     if !files.is_dir(dir) {
         term.eprint("personal-info-guard: {dir} is not a directory")
@@ -1007,10 +1010,10 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     path_args: grep_args(rules, "path")
     word_args: grep_args(rules, "word")
     found := [String]{}
-    passes: [(flags: [String], args: [String])]{(flags: [String]{"-l"}, args: path_args), (flags: [String]{"-l", "-i"}, args: word_args)}
+    passes: [(flags: [String], args: [String])]{(flags: [String]{"-l", "-a"}, args: path_args), (flags: [String]{"-l", "-i", "-I"}, args: word_args)}
     loop pass in passes {
         if pass.args.len() == 0 -> next
-        argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-I", "-P"}
+        argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-P"}
         argv.extend(pass.flags)
         argv.extend(pass.args)
         argv.extend(GREP_EXCLUDES)
@@ -1033,8 +1036,8 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     loop file in found {
         if shown == 20 -> break
         shown += 1
-        line := first_hit(dir, file, path_args, [String]{})
-        if line == "" -> line = first_hit(dir, file, word_args, [String]{"-i"})
+        line := first_hit(dir, file, path_args, [String]{"-a"})
+        if line == "" -> line = first_hit(dir, file, word_args, [String]{"-i", "-I"})
         term.eprint("  {hit_text(line)}")
     }
     65
@@ -1047,7 +1050,7 @@ hit_text: fn(line: String) -> String Never! {
 
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
     if args.len() == 0 -> return ""
-    argv := [String]{"git", "grep", "--no-index", "-I", "-P", "-n", "-m", "1"}
+    argv := [String]{"git", "grep", "--no-index", "-P", "-n", "-m", "1"}
     argv.extend(flags.copy())
     argv.extend(args.copy())
     argv.extend([String]{"--", file})
@@ -1089,6 +1092,20 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     loop rule in generic -> assert(rule.kind == "path")
     assert_eq(unescape_mount("/mnt/my\\040disk"), "/mnt/my disk")
     assert_eq(noreply_handle("someone@example.com"), "")
+}
+
+#Test("the personal-information guard searches binary files for machine paths") {
+    dir: files.mkdtemp("personal-info-guard") ?? panic("a temporary directory cannot be made: {err}")
+    home: machine_identity(dir).home
+    files.write_bytes(files.join(dir, "clean.bin"), [U8]{0, 1, 2, 3}) ?? panic("clean.bin: {err}")
+    assert_eq(personal_info_guard(dir), 0)
+    if home != "" && home != "/" {
+        record := [U8]{0, 1, 2}
+        record.extend("{home}/.cache/run".bytes())
+        files.write_bytes(files.join(dir, "record.bin"), record) ?? panic("record.bin: {err}")
+        assert_eq(personal_info_guard(dir), 65)
+    }
+    files.remove_all(dir) ?? ()
 }
 
 #Test("the runtime unit drops imports behind source markers and maps locations back") {
