@@ -5581,7 +5581,11 @@ report names the innermost Jet function and its line under both `full` and
 `Stop [E3012]: Stack overflow`. Naming frames needs `debug_info`, so writing
 `backtrace: full` (in a profile, in `build: fn` or as `--backtrace=full`)
 together with `debug_info: false` is refused with E2104. The stock `full` under
-`debug_info: false` prints the return addresses instead.
+`debug_info: false` prints the return addresses instead. A program stop (a
+`panic`, a failed `assert` or `assert_eq`, a bounds or arithmetic stop)
+follows the same rule: `brief` prints its stopping frame (location, source
+line and locals), and `off` prints none of it, only the stop line and its Why,
+Fix and More.
 
 `dead_code` (stock `remove`) says whether the image keeps functions the entry
 never reaches. `remove` builds only the reached ones, and for `jet build`,

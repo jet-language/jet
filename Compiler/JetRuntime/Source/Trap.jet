@@ -224,7 +224,10 @@ trap_header_bytes: fn(code: I64) {
     }
 }
 
+// A stop's frame: its `-->` location, source line and caret. `backtrace:
+// off` prints none (fault_frames_off).
 trap_context: fn(file: I64, file_len: I64, line: I64, function: I64, function_len: I64, source: I64, source_len: I64, column: I64, caret: I64) {
+    if fault_frames_off() -> return
     if (file_len != I64{0}) {
         trap_msg_location()
         trap_write(file, file_len)
@@ -638,13 +641,7 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
     trap_write_handle(message)
     trap_msg_message_end()
     trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_line(column), trap_line(caret))
-    if (locals != I64{0}) {
-        if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
-            trap_msg_locals()
-            trap_write_handle(locals)
-            trap_msg_newline()
-        }
-    }
+    trap_locals(locals)
     trap_footer(I64{0})
 }
 
@@ -724,12 +721,17 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
 // locals line, when it has any.
 trap_descriptor_context: fn(descriptor: I64, locals: I64) {
     trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
-    if (locals != I64{0}) {
-        if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
-            trap_msg_locals()
-            trap_write_handle(locals)
-            trap_msg_newline()
-        }
+    trap_locals(locals)
+}
+
+// A stop's locals line, when it has any: part of its frame, so `backtrace:
+// off` prints none.
+trap_locals: fn(locals: I64) {
+    if (locals == I64{0} || fault_frames_off()) -> return
+    if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
+        trap_msg_locals()
+        trap_write_handle(locals)
+        trap_msg_newline()
     }
 }
 

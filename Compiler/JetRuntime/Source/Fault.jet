@@ -54,6 +54,13 @@ fault_backtrace := I64{0}
     }
 }
 
+// `backtrace: off`: a stop's report (Trap.jet trap_context) is its first
+// line, message and footer, with no location, source line or locals, as a
+// fault report is its stop line alone.
+fault_frames_off: fn() -> Bool Never! {
+    fault_backtrace == I64{2}
+}
+
 // The handler for the four fatal signals, and the calling thread's
 // alternate stack. jet_rt_main calls it once per entry; a loaded-image host
 // running another entry on the same thread keeps the first stack.
