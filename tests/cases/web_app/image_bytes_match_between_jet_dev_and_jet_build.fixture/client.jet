@@ -1,0 +1,77 @@
+// Fetches the page on IMAGE_PAGE_PORT, then every image address it names,
+// and writes one `address sha256` line per address to IMAGE_HASHES_FILE.
+// With IMAGE_HASHES_SAME_AS set, it also says whether that file holds the
+// same lines.
+package: {
+    name: "image_hash_client"
+    authority: { allow: [Env, FS, Net, Time] }
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+    net: core.net
+    sys: core.sys
+    time: core.time
+}
+
+// The body of the answer to `GET path`, once the app listens.
+get_body: fn(port: String, path: String) -> [U8] {
+    deadline: time.instant() + 120s
+    connected := net.TCPStream?{None}
+    loop {
+        if net.tcp_connect("127.0.0.1:{port}") == {
+            .Ok(stream) -> {
+                connected = Val(stream)
+                break
+            }
+            .Err(error) -> {
+                if time.instant() >= deadline -> panic("the app did not listen on {port}: {error}")
+                time.sleep(50ms)
+            }
+        }
+    }
+    stream := connected ?? panic("connected stream")
+    stream.write_all("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request write")
+    bytes := [U8]{}
+    loop {
+        part: net.tcp_read_bytes(stream, 65536) ?? panic("response read")
+        if part.len() == 0 -> break
+        loop byte in part -> bytes.push(byte)
+    }
+    head: String.from_bytes(bytes.slice(0, 12)) ?? panic("status line")
+    if !head.ends_with(" 200") -> panic("{path} answered {head}")
+    loop index in 0..<bytes.len() - 3 {
+        if bytes[index] == 13 && bytes[index + 1] == 10 && bytes[index + 2] == 13 && bytes[index + 3] == 10 {
+            return bytes.slice(index + 4, bytes.len())
+        }
+    }
+    panic("no header end in the answer to {path}")
+}
+
+// Every `/a/` address on `page`, in the order it names them.
+addresses: fn(page: String) -> [String] {
+    found := [String]{}
+    loop (index, piece) in page.split("\"/a/").to_list() {
+        if index == 0 -> next
+        loop candidate in piece.split("\"").to_list()[0].split(", /a/") {
+            address: "/a/{candidate.split(" ").to_list()[0]}"
+            if !found.contains(address) -> found.push(address)
+        }
+    }
+    found
+}
+
+run: fn() {
+    port: sys.get("IMAGE_PAGE_PORT") ?? panic("missing IMAGE_PAGE_PORT")
+    out: sys.get("IMAGE_HASHES_FILE") ?? panic("missing IMAGE_HASHES_FILE")
+    page: String.from_bytes(get_body(port, "/")) ?? panic("page UTF-8")
+    lines := [String]{}
+    loop address in addresses(page) -> lines.push("{address} {crypto.sha256(get_body(port, address)).hex()}\n")
+    text: lines.join("")
+    files.write(out, text) ?? panic("record hashes: {err}")
+    print("{lines.len()} addresses")
+    if sys.get("IMAGE_HASHES_SAME_AS") == .Val(other) {
+        print("same as {other.split("/").to_list().last() ?? other}: {(files.read(other) ?? panic("read {other}: {err}")) == text}")
+    }
+}

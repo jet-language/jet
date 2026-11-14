@@ -1,0 +1,85 @@
+// `web.image(src, alt:)` puts an image on a page. When the app serves the
+// page, the image becomes a `<picture>` whose variants and original sit at
+// hashed `/a/` addresses, each answered with immutable caching. The same two
+// images, one PNG and one JPEG, are served by five apps, each changing one
+// `app.images` setting from the first. Every app prints the address, size
+// and SHA-256 prefix of each image its page names.
+package: {
+    name: "app_images"
+    authority: { allow: [FS.Read, IO, Net, Time] }
+}
+
+use {
+    crypto: core.crypto
+    core.image.[ImageFormat]
+    net: core.net
+    web: core.web
+}
+
+gallery: fn() -> WebPage {
+    web.page("Gallery", "{web.image("Images/Tile.png", alt: "A tile")}{web.image("Images/Photo.jpg", alt: "A photo")}")
+}
+
+// The body of the answer to `GET path`, read until the server closes.
+get_body: fn(addr: String, path: String) -> [U8] {
+    stream := net.tcp_connect(addr) ?? panic("connect: {err}")
+    stream.write_all("GET {path} HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n".bytes()) ?? panic("request: {err}")
+    bytes := [U8]{}
+    loop {
+        part: net.tcp_read_bytes(stream, 65536) ?? panic("read: {err}")
+        if part.len() == 0 -> break
+        loop byte in part -> bytes.push(byte)
+    }
+    loop index in 0..<bytes.len() - 3 {
+        if bytes[index] == 13 && bytes[index + 1] == 10 && bytes[index + 2] == 13 && bytes[index + 3] == 10 {
+            return bytes.slice(index + 4, bytes.len())
+        }
+    }
+    panic("no header end in the answer to {path}")
+}
+
+// Every `/a/` address on `page`, in the order it names them.
+addresses: fn(page: String) -> [String] {
+    found := [String]{}
+    loop (index, piece) in page.split("\"/a/").to_list() {
+        if index == 0 -> next
+        loop candidate in piece.split("\"").to_list()[0].split(", /a/") {
+            address: "/a/{candidate.split(" ").to_list()[0]}"
+            if !found.contains(address) -> found.push(address)
+        }
+    }
+    found
+}
+
+// The `<source>` types on `page`, in order.
+source_types: fn(page: String) -> String {
+    types := [String]{}
+    loop (index, piece) in page.split("<source type=\"").to_list() {
+        if index == 0 -> next
+        types.push(piece.split("\"").to_list()[0].copy())
+    }
+    if types.len() == 0 -> return "none"
+    types.join(", ")
+}
+
+show: fn(label: String, app: web.App) {
+    listening: app.route("/", gallery).bind("127.0.0.1:0") ?? panic("bind: {err}")
+    addr: listening.local_addr() ?? panic("address: {err}")
+    serving: task { listening.serve() ?? panic("serve: {err}") }
+    page: String.from_bytes(get_body(addr, "/")) ?? panic("page UTF-8")
+    print("{label}: sources {source_types(page)}")
+    loop address in addresses(page) {
+        bytes: get_body(addr, address)
+        print("  {address} {bytes.len()} bytes {crypto.sha256(bytes).hex().slice(0, 12)}")
+    }
+    _: listening.shutdown() ?? panic("shutdown: {err}")
+    _: serving.join() ?? panic("the server task failed")
+}
+
+run: fn() {
+    show("widths 160 and 320", web.app().images(widths: [Int]{320, 160}))
+    show("formats JPEG then PNG", web.app().images(widths: [Int]{320, 160}, formats: [ImageFormat]{.JPEG, .PNG}))
+    show("widths 240", web.app().images(widths: [Int]{240}))
+    show("quality 40", web.app().images(widths: [Int]{320, 160}, quality: 40))
+    show("enabled false", web.app().images(widths: [Int]{320, 160}, enabled: false))
+}

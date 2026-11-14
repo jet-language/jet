@@ -104,6 +104,7 @@ Each file is named here so documentation review cannot silently omit a new examp
 
 - `AppConfigReadiness.jet`
 - `AppHello.jet`
+- `AppImages.jet`
 - `AppRouteTable.jet`
 - `AppTypedArgs.jet`
 - `BrowserSurface.jet`

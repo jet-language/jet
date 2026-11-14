@@ -1,0 +1,34 @@
+# `jet build` and `jet dev` of one app with one PNG and one JPEG serve the
+# same image bytes. The client records the SHA-256 of every image address on
+# the built program's page. Then `jet dev` serves a page that names the same
+# addresses, and the bytes at each one hash the same.
+fixture: image_bytes_match_between_jet_dev_and_jet_build.fixture
+mkdir: Images
+copy: {root}/Examples/Apps/Web/Images/Tile.png Images/tile.png
+copy: {root}/Examples/Apps/Web/Images/Photo.jpg Images/photo.jpg
+step: jet build app.jet
+exit: 0
+spawn built-server: built
+env: JET_APP_PORT={free-port:aot}
+step: jet run client.jet
+env: IMAGE_PAGE_PORT={free-port:aot}
+env: IMAGE_HASHES_FILE={work}/built.hashes
+exit: 0
+stdout: = "10 addresses\n" # each source's original and its JPEG and PNG variants at 160 and 320
+file: built.hashes ~ "/a/Images/tile." # the PNG's addresses
+file: built.hashes ~ ".320.jpg " # a JPEG variant of each source
+file: built.hashes ~ "/a/Images/photo." # the JPEG's addresses
+signal built-server: KILL
+wait: built-server
+exit: any # the case kills the built server; its status is not part of this proof
+spawn dev: jet dev {work}/app.jet
+env: JET_APP_PORT={free-port:dev}
+step: jet run client.jet
+env: IMAGE_PAGE_PORT={free-port:dev}
+env: IMAGE_HASHES_FILE={work}/dev.hashes
+env: IMAGE_HASHES_SAME_AS={work}/built.hashes
+exit: 0
+stdout: = "10 addresses\nsame as built.hashes: true\n" # the same addresses, and the same bytes at each
+signal dev: KILL
+wait: dev
+exit: any # the case kills the dev loop; its status is not part of this proof

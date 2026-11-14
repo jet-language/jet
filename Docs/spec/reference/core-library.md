@@ -5424,8 +5424,11 @@ is asked for, then kept for the run. A variant in the source's format that
 comes out no smaller than the source is the source's bytes. Under `jet dev`
 the page reads the source each time, so an edited image gets new addresses.
 A source the app cannot read or decode fails the route with its error
-boundary. `App.serve` answers image addresses after the app's own routes, so
-a route of the app's own, including a root catch-all, takes precedence.
+boundary. Serving the app (`App.serve`, `App.bind`, `App.serve_once`,
+`web.serve`, `web.bind`) adds one row, `GET /a/*jet_image`, unless the app
+has no page or already routes something under `/a/`. An address no source
+makes gets the app's not-found page. The row's file reads are charged where
+the first page is registered, so `App.bind` stays `-[Net]>`.
 
 `app.images(formats:, widths:, quality:, enabled:)` sets how variants are
 made. Every option is labelled and optional, and one left out keeps its

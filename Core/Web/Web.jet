@@ -188,6 +188,9 @@ __AppState: struct {
     // Whether the app is served under `jet dev`, which __app_serve reads once
     // from the environment, so an image page reads no environment itself.
     dev: Bool
+    // The handler of GET `/a/*jet_image`, made with the first page, which is
+    // where its file reads are charged; serving the app only adds the row.
+    image_handler: HTTPHandler?
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -220,6 +223,7 @@ App: struct {
         page: path.copy()
         http_server.__route_add(__app_table(self), "GET", path, http_server.__handler(fn(request: HTTPRequest) { Ok(__app_page_response(target, page, request)) }), "", at)
         guard := self.__state.guard_edit()
+        if guard.value.image_handler == None -> guard.value.image_handler = Val(__app_image_handler(self))
         mode: guard.value.mode.copy()
         explicit: guard.value.explicit_mode
         route: __AppRoute{
@@ -466,11 +470,13 @@ App: struct {
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
     // A failed bind is the caller's error to handle.
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net]> HTTPServer HTTPError! {
+        __app_image_route(self)
         http_server.__bind(address, __app_table(self), tls, deadline)
     }
 
     // Answer the one connection `listener` accepts next.
     serve_once: fn(self, listener: TCPListener) HTTPError! -[Net, FS.Read, Time]> {
+        __app_image_route(self)
         http_server.__serve_once(listener, __app_table(self))
     }
 }
@@ -496,6 +502,7 @@ app: fn() -> App Never! {
         image_bytes: [String: [U8]]{},
         image_settings: __image_settings(),
         dev: false,
+        image_handler: None,
     }}}
 }
 
@@ -516,6 +523,7 @@ serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port:
 bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Settings) -> App, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, IO, Net, FS, Exec, Time]> HTTPServer HTTPError! {
     settings: __app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
+    __app_image_route(app)
     http_server.__bind(address, __app_table(app), tls, deadline)
 }
 
@@ -600,6 +608,7 @@ __app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Tim
     }
     table: __app_table(app)
     if dev -> __app_dev_reload(table)
+    __app_image_route(app)
     if !__app_has_root_catch_all(table) {
         fallback: app.copy()
         http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #here)
@@ -728,10 +737,33 @@ __app_page_response: fn(app: App, path: String, request: HTTPRequest) -[Net, FS.
 }
 
 __app_not_found_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
-    // An image address no route claims is answered by the app's images.
-    if request.path.starts_with(C_IMAGE_PREFIX) && __app_image_answer(app, request.path) == .Val(answer) -> return answer
     state: __app_state(app)
     __app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
+}
+
+// Registers GET `/a/*jet_image`, which answers the app's image addresses,
+// unless the app has no page, routes something under `/a/` itself or did
+// this before.
+__app_image_route: fn(app: App) Never! {
+    table: __app_table(app)
+    loop route in http_server.__mux_routes(table) {
+        if route.pattern.starts_with(C_IMAGE_PREFIX) -> return
+    }
+    guard: app.__state.guard_read()
+    if guard.value.image_handler == .Val(handler) -> http_server.__route_add(table, "GET", "{C_IMAGE_PREFIX}*jet_image", handler.copy(), "", #here)
+}
+
+// The handler __app_image_route adds. Only a page places an image, so
+// `__route` makes it with the app's first page.
+__app_image_handler: fn(app: App) -> HTTPHandler Never! {
+    target: app.copy()
+    http_server.__handler(fn(request: HTTPRequest) { Ok(__app_image_response(target, request)) })
+}
+
+// The image at `request`'s address, else the app's not-found page.
+__app_image_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if __app_image_answer(app, request.path) == .Val(answer) -> return answer
+    __app_not_found_response(app, request)
 }
 
 // ── Images ──────────────────────────────────────────────────────────────
