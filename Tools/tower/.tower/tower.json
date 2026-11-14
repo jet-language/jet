@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102031,
+    "rev": 102039,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,16 +23,16 @@
         "radar:e12",
         "radar:e5",
         "radar:e4",
-        "radar:e11",
         "board-ideas",
         "radar:e10",
         "radar:e13",
         "radar:e9",
-        "radar:e14",
         "radar:e15",
         "radar-sq",
         "radar:e3",
-        "radar:e16"
+        "radar:e16",
+        "radar:e17",
+        "radar:e14"
       ]
     },
     "completionCursor": "2026-11-14T02:24:33.777Z"
@@ -2673,7 +2673,7 @@
       "title": "M05 · MCP interoperability",
       "goal": "Jet provides a complete MCP SDK that can act as client and server, negotiate protocol versions, expose tools, resources, and prompts, use stdio and Streamable HTTP transports, secure remote OAuth flows, reflect typed schemas, interoperate with Jet and external hosts, and contain hostile peers, cancellation, loss, and authority failures. The capability is proven by interoperable examples plus success, cancellation, disconnect, and adversarial protocol tests on each supported transport.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:06:03.587Z"
     },
     {
@@ -20095,198 +20095,6 @@
       "probe": null,
       "visualMedia": [],
       "goals": []
-    },
-    {
-      "id": "c06tpil4",
-      "num": 1061,
-      "title": "MCP SDK: client role",
-      "body": "[R-POSTE3-1:#768:1] Split from the former #768 umbrella. This card owns only “MCP SDK: client role.” It keeps the ratified decisions, invariants, and production seams linked from #768. The other 8 delivery slices have separate cards.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e11",
-      "milestoneId": "e11-m05-mcp-interoperability",
-      "phase": "ready",
-      "priority": "P2",
-      "plan": "## Goal\nAdd the MCP client role on the single revisioned Jet protocol core (D-MCP-SURFACE1=A): typed client builders, the request lifecycle, client-side negotiation, bounded failures and redacted audit facts.\n\n## Current state\n- The protocol core is ported: Jetpack/PackageModel/Source/Mcp/McpProtocol.jet (502 lines) and McpMessages.jet (501, working-tree edits under #3609), listed at sources.list:98-99.\n- It provides McpRevision (:29), McpCodec (:75), McpVersionPolicy (:88), McpLimits (:120), McpPolicy (:147), the lifecycle profile and state (:221, :229), McpPeerRole.Client (:263), McpAuditFacts (:367), and McpPeer with `client(policy)` (:392-399). The core carries no transport or authorization code (:5-6).\n- Claims are in Jetpack/PackageModel/Tests/McpProtocol.jet (tests.list:17).\n- Rust has only a role constructor, crates/jet-pkg-model/src/MCP.rs:861-864,1106-1113, and serves as reference only. #768 (protocol core) is done.\n\n## Changes\n1. Add Jetpack/PackageModel/Source/Mcp/McpClient.jet:\n   - A McpClient builder over McpPeer.client and McpPolicy: stable default, explicit preview opt-in.\n   - The initialize, initialized, request/response, shutdown and exit sequence on McpLifecycleState.\n   - Typed calls for tools/list and tools/call, resources/list and resources/read, prompts/list and prompts/get, pagination cursors, progress and cancellation (notifications/cancelled).\n   - It reuses McpCodec encode and decode and McpLimits, and adds no transport.\n2. Failures are version conflict, hostile schema, oversize, timeout, disconnect and cancel. They map to the existing McpNegotiationError, McpLifecycleError and McpCodecError, or to a new McpClientError variant. Every failure is bounded and secret-free, and McpAuditFacts records the role, revision, codec and outcome.\n3. Add Jetpack/PackageModel/Tests/McpClient.jet. Drive a client against an in-process McpPeer.server over message values, and cover each failure. Bypassing McpClient must fail the claims.\n4. List both files, document the surface in Docs/spec/reference, and register the diagnostics.\n\n## Proof\n1. `JETPACK_WORKER=b19mcp Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head` -> `JETPACK CHECK OK`.\n2. The same command with `--tests` -> `JETPACK CHECK OK (check, default run, AOT test)`, with every McpClient claim passing. This is criterion 9's command, spelled with the canonical `Tools/agent/jet-env`.\n\n## Batch\nbatch-jetpack-mcp.\n\n## Dependencies\n#3609 (finishing the MCP core port). #768 is done.",
-      "blockedBy": [],
-      "workOrder": 5470,
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #1062, #1063, #1064, #1065, #1066, #1067, #1068; their criteria are carried here as [#n] rows."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #1062, #1063, #1064, #1065, #1066, #1067, #1068; their criteria are carried here verbatim as [#n] rows."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetpack-mcp."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0 triage 2026-09-28 (toolwebmem1a, Opus 5.5): C_RETARGET. #768 (protocol core) is done. The MCP core lives in the package model, and its Jet port is Jetpack/PackageModel/Source/Mcp (McpProtocol.jet, McpMessages.jet, being finished under #3609). The client role is only a PeerRole::Client constructor in Rust MCP.rs, with no client builders or request lifecycle. Evidence: crates/jet-pkg-model/src/MCP.rs:861-864,1106-1113,1183 (role enum, client(), server-side initialize only); crates/jetpack/src/lib.rs:33 (re-export); Jetpack/PackageModel/Source/Mcp/McpProtocol.jet:1-38; Jetpack/PackageModel/Tests/McpProtocol.jet:18-32; tower #3609 building"
-        },
-        {
-          "at": "2026-09-11",
-          "by": "Main",
-          "text": "Preparation complete: source-grounded plan, references and observable criteria. The client role is authorized by the shared MCP protocol decision, but #768 protocol types, negotiation, and lifecycle must land first. The stale archived-audit reference must be removed from the plan and criterion. DOCS ONLY; no implementation or product proof."
-        },
-        {
-          "at": "2026-08-24",
-          "by": "orchestrator",
-          "text": "Governing ratified decisions: D-MCP-SURFACE1. Umbrella head: #768. Recorded by the #2078 split-family census: this slice closes on its own criterion, not on the umbrella-wide row."
-        },
-        {
-          "at": "2026-08-19",
-          "by": "fable",
-          "text": "Path repoint (2026-08-19): Work step 2 starts from docs/archive/field-audit-2026-07-23.md (an archived audit). Start instead from the core.mcp package paths #768 establishes (protocol modules, negotiation, lifecycle); the archived audit is background only."
-        },
-        {
-          "at": "2026-08-01",
-          "by": "codex-plan-audit",
-          "text": "Plan audit: replaced thin generic gates with intent, production-path, failure, and targeted-proof criteria."
-        },
-        {
-          "at": "2026-07-26",
-          "by": "codex-rebalance",
-          "text": "Restored the first-child dependency for R-POSTE3-1; later slices keep their sequential chain."
-        },
-        {
-          "at": "2026-07-26",
-          "by": "codex-rebalance",
-          "text": "Rebalanced dependency targets for R-POSTE3-1; completion still waits for every former umbrella slice."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 2,
-          "text": "Negotiation, codecs, lifecycle, tools, resources, prompts, transports, auth, schemas, cancellation, and audit facts interoperate on the declared revisions.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:04.317Z"
-        },
-        {
-          "n": 3,
-          "text": "Version conflict, hostile schema, oversized messages, timeout, redirect or origin abuse, token misuse, disconnect, and cancellation remain bounded and redacted.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:16:04.317Z"
-        },
-        {
-          "n": 7,
-          "text": "[retarget] Client builders, request lifecycle, negotiation, bounded failure handling and redacted audit facts are exercised through Jetpack/PackageModel/Source/Mcp client code; the focused Jet test fails when that path is bypassed, and #768/#3609 protocol-core tests do not supply this evidence",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T01:36:46.300Z"
-        },
-        {
-          "n": 9,
-          "text": "`jet test Compiler --profile packages --filter Mcp` passes with the MCP client claims included (client builders, request lifecycle, negotiation, bounded failures, redacted audit facts).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:52:26.373Z"
-        },
-        {
-          "n": 10,
-          "text": "[#1062] Typed server registries and handlers for tools, resources and prompts on the negotiated revision.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:45.636Z"
-        },
-        {
-          "n": 11,
-          "text": "[#1063] Over stdio, a Jet MCP client and server complete initialize/initialized, a tool call and cancellation using newline-delimited UTF-8 JSON-RPC (not LSP framing). Malformed, truncated, oversized and mid-frame-EOF input and child disconnect fail bounded and redacted.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:46.601Z"
-        },
-        {
-          "n": 12,
-          "text": "[#1064] The Streamable HTTP transport shares revision, lifecycle and limits with stdio.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:47.273Z"
-        },
-        {
-          "n": 13,
-          "text": "[#1065] OAuth/PKCE, resource audience and token checks with redacted hostile proof (depends on #3595 capped fetch, now in #3665).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:48.383Z"
-        },
-        {
-          "n": 14,
-          "text": "[#1066] Bounded schemas are derived from checked Jet reflection, with no second schema authority.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:49.463Z"
-        },
-        {
-          "n": 15,
-          "text": "[#1067] Real Jet-to-Jet and external-host interoperability examples.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:50.115Z"
-        },
-        {
-          "n": 16,
-          "text": "[#1068] Hostile peers, cancellation, connection loss and authority proof run through the real adapters.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:50.794Z"
-        }
-      ],
-      "refs": [
-        "docs/archive/field-audit-2026-07-23.md",
-        "docs/spec/architecture.md",
-        "docs/spec/syntax-decisions.md",
-        "docs/spec/diagnostics.md",
-        "docs/reference/core-library.md"
-      ],
-      "needsAcceptance": false,
-      "created": "2026-07-26T01:05:56.812Z",
-      "updated": "2026-11-13T01:54:51.903Z",
-      "updatedBy": "Main",
-      "tags": [
-        "retargeted",
-        "batch-jetpack-mcp",
-        "wayfinder:task"
-      ],
-      "parentId": "c0u5tm84",
-      "probe": null,
-      "visualMedia": [],
-      "goals": [
-        "G5"
-      ],
-      "criteriaLastN": 16
     },
     {
       "id": "c0wxdq1k",
@@ -63708,8 +63516,8 @@
       "title": "Scripts may read the file you name on the command line, and use a private temp folder, without a prompt",
       "body": "When you type `./wc.jet notes.txt`, you have already said which file the script may read. This card lets that act count as the permission: a `#CLI` field of type `Path` grants reading exactly the path you passed, and a private per-run temp folder (`files.temp_dir`) needs no prompt. Everything else still asks once, as owner ruling #5949 says. Ballot D-SCRIPT-DESIGNATE1, hosted here, decides; this card builds the winner.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T11 items 2 and 3 (the powerbox model: a file picker grants the file the user picked). Writes are not designated; they keep the #5949 prompt.\n\nRelated: #5949, D-SCRIPT-CONFIRM1=A (#3705), spec.md \"Command registry and typed inputs\" (`Path` is a supported #CLI scalar), core-library.md `temp_dir`.",
       "kind": "feature",
-      "track": "epoch",
-      "epoch": "e17",
+      "track": "sidequest",
+      "epoch": null,
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -63787,8 +63595,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:09.798Z",
-      "updated": "2026-11-13T02:05:20.928Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-14T02:25:16.743Z",
+      "updatedBy": "owner",
       "goals": [
         "G10"
       ]
@@ -98373,12 +98181,12 @@
         },
         {
           "n": 3,
-          "text": "[G5DevX-2] E2404`s Fix parenthesizes a union target: `impl (NetError | TaskFailure).From(ParseErr)`, with the form checked to compile. Proof: ui qualified_union_absent_member_reports_e2404.",
+          "text": "[G5DevX-2] E2404 never suggests an impl into an anonymous union target such as `impl NetError | TaskFailure.From(ParseErr)`. A conversion target is one named type (spec), and `impl (` is refused by the parser with E0003. For a union domain the Fix drops the impl suggestion. Proof: ui qualified_union_absent_member_reports_e2404 passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-14T02:02:07.720Z"
+          "at": "2026-11-14T02:32:43.480Z"
         },
         {
           "n": 4,
@@ -98542,7 +98350,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-14T02:22:44.879Z",
+      "updated": "2026-11-14T02:32:43.480Z",
       "updatedBy": "Main",
       "criteriaLastN": 20
     }
@@ -204885,6 +204693,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T02:32:43.480Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0oe96sn",
+      "note": "#3: G5DevX-2, 2026-11-14: the earlier text asked for `impl (A | B).From(X)`, which is not Jet syntax. Allowing it would be new syntax needing an owner ballot. 129ca67258 (batch 23) drops the suggestion instead.; was: [G5DevX-2] E2404`s Fix parenthesizes a union target: `impl (NetError | TaskFailure).From(ParseErr)`, with the form checked to compile. Proof: ui qualified_union_absent_member_reports_e2404."
+    },
+    {
+      "at": "2026-11-14T02:26:21.919Z",
+      "by": "owner",
+      "action": "card.delete",
+      "ref": "c06tpil4",
+      "note": "MCP SDK: client role"
+    },
+    {
+      "at": "2026-11-14T02:25:16.743Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0w8kkg9",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-11-14T02:25:13.109Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0w8kkg9",
+      "note": "track"
+    },
     {
       "at": "2026-11-14T02:25:07.887Z",
       "by": "Main",
