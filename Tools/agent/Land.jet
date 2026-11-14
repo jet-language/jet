@@ -607,11 +607,15 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
         subject: git(dir, [String]{"log", "-1", "--format=%h %s", tip}).output.trim()
         landed.push(subject)
     }
+    // The commits must carry exactly the checked worktree. The private index
+    // holds the tip's tree, files the patches add included (the worktree
+    // apply leaves those untracked), so the worktree is compared with it.
+    if failure == "" {
+        git_index(dir, index, [String]{"update-index", "-q", "--refresh"})
+        if git_index(dir, index, [String]{"diff", "--quiet", "--"}).code != 0 -> failure = "the commits do not match the checked worktree"
+    }
     files.remove(index) ?? ()
     if failure != "" -> return Err(LandError{message: failure})
-    // The commits must carry exactly the checked worktree.
-    worktree: git(dir, [String]{"diff", "--quiet", tip, "--"})
-    if worktree.code != 0 -> return Err(LandError{message: "the commits do not match the checked worktree"})
     moved: git(dir, [String]{"update-ref", "-m", "land: {pairs.len()} commit(s) on {pre.slice(0..<10)}", "HEAD", tip, pre})
     if moved.code != 0 -> return Err(LandError{message: "update-ref of HEAD {pre.slice(0..<10)} failed (HEAD moved?): {first_line(moved)}"})
     Ok(landed)
