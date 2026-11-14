@@ -4,7 +4,7 @@
   "cells": ["formats.csv-cli"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "go", "zig", "node", "c"],
+  "languages": ["jet", "rust", "python", "go", "zig", "node", "c", "lua", "luajit"],
   "spec": {
     "behavior": "Read sales.csv as RFC-4180 CSV, discard rows whose amount is not positive, group the remaining rows by region, and print ascending region counts and two-decimal sums followed by the overall count and sum.",
     "args": ["sales.csv"],
@@ -21,6 +21,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -30,7 +40,10 @@
     "go": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses Go's encoding/csv package."},
     "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig 0.16 std-only RFC-4180 field scanner and region aggregation."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node RFC-4180 parser and numeric aggregation over the same generated sales.csv fixture."},
-    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: a hand-written RFC-4180 field scanner (C has no CSV library), strtod amounts, qsort by region."}
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: a hand-written RFC-4180 field scanner (C has no CSV library), strtod amounts, qsort by region."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node RFC-4180 parser and numeric aggregation over the same generated sales.csv fixture."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Lua ships no CSV reader, so a small RFC-4180 record splitter handles quoted fields and doubled quotes, joining physical lines while a quote is open; tonumber parses amounts and a table groups them."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "ScriptAPI",

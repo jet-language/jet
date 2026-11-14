@@ -4,7 +4,7 @@
   "cells": ["text.script"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "rust", "python", "node"],
+  "languages": ["jet", "rust", "python", "node", "go", "lua", "luajit"],
   "spec": {
     "behavior": "Read notes.txt, discard blank lines, trim each remaining line, sort the cleaned lines lexicographically, and print the line count followed by the lines.",
     "args": ["notes.txt"],
@@ -21,13 +21,26 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
     "jet": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "One-shot text cleanup uses the existing line, trim, sort, and print surfaces."},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only line cleanup."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Stdlib line cleanup."},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node fs line cleanup rail with the same trim, sort, and output contract."}
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node fs line cleanup rail with the same trim, sort, and output contract."},
+    "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only line cleanup: bufio.Scanner, strings.TrimSpace, sort.Strings."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only line cleanup: file:lines(), a whitespace-trim pattern, table.sort."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "CorpusTextScript",

@@ -4,7 +4,7 @@
   "cells": ["numerics.script", "numerics.notebook"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "python", "rust", "node", "c", "zig"],
+  "languages": ["jet", "python", "rust", "node", "c", "zig", "go", "lua", "luajit"],
   "spec": {
     "behavior": "Read measurements.csv, group values by group name, and print sorted per-group count, mean, lower-middle median, index-based p95, and population standard deviation to two decimals, followed by the overall count and mean.",
     "args": ["measurements.csv"],
@@ -21,6 +21,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -29,7 +39,11 @@
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only hand-rolled CSV and statistics; no stats library."},
     "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node RFC-4180 parser and matching lower-middle, index-p95, and population statistics."},
     "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc and libm only: hand-rolled CSV split, strtod, qsort, sqrt; median and p95 per contract."},
-    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: splitScalar CSV, std.fmt.parseFloat, std.mem.sort, @sqrt; median and p95 per contract."}
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: splitScalar CSV, std.fmt.parseFloat, std.mem.sort, @sqrt; median and p95 per contract."},
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node RFC-4180 parser and matching lower-middle, index-p95, and population statistics."},
+    "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only: encoding/csv ReadAll with header lookup, strconv.ParseFloat, sort.Float64s, and the same lower-middle, index-p95, and population statistics in plain loops."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Lua ships no CSV reader, so a small RFC-4180 record splitter feeds header-indexed columns; table.sort orders a copy for the lower-middle median and index p95, and plain loops give the mean and population deviation."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "CorpusDatasummary",

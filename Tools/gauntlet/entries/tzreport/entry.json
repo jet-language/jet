@@ -4,7 +4,7 @@
   "cells": ["time.script", "time.notebook"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "python", "rust", "node"],
+  "languages": ["jet", "python", "rust", "node", "go", "lua", "luajit"],
   "spec": {
     "behavior": "Read named meetings with RFC3339 timestamps carrying explicit numeric offsets, normalize them to UTC, sort by UTC instant, print each meeting's UTC RFC3339 form, UTC weekday, and minute gap from its predecessor, then print total span and meeting count.",
     "args": ["meetings.txt"],
@@ -21,13 +21,26 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
     "jet": {"author": "luna-max", "turns": 7, "retries": 6, "diagnosticsHit": ["E2105: can't find the file `jet/main.jet`", "E0124: this `if`'s branches produce different types: Int (a whole number) and `Fraction`", "L0507: prefer an ordered arm table for this branch", "E0956: `for-in method collection` isn't supported by the current evaluator yet", "E3001: `panic: read meetings`", "E1803: application authority is undecided for `Env`", "E0956: ``core.time.parse_rfc3339()`` isn't supported by the current evaluator yet"], "notes": "AOT build and run pass expected.out. Default `jet run` remains blocked by evaluator E0956 on core.time.parse_rfc3339 after whole-file FS fallback fixed the streaming evaluator gap; no manual duplicate timestamp parser was added. sys.current_dir required Env authority."},
     "python": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Uses datetime.fromisoformat and timezone conversion."},
     "rust": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Hand-parses RFC3339 and implements civil-date conversion and weekday arithmetic because Rust std has no datetime API."},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node Date rail for offset normalization, UTC weekday output, and deterministic gaps."}
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in Node Date rail for offset normalization, UTC weekday output, and deterministic gaps."},
+    "go": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only: time.Parse with time.RFC3339, UTC normalization, and Format for the UTC form and weekday; sort.Slice orders by instant then name."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Lua's os.time and os.date read local time, so the RFC 3339 timestamp and its numeric offset are normalized through the civil-date day count and formatted back from it; the weekday comes from the same day number."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "ScriptAPI",
