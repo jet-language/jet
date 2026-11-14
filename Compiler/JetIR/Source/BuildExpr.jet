@@ -1066,11 +1066,12 @@ ir_assign_aggregate: fn(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns
 // evaluation-order pin): an alias of the place, which never owns the value. A
 // read aliases the place's value; a write aliases an aggregate's storage or the
 // address of a scalar, or of a handle or box that lives in other storage (a
-// List element, a struct member) (ir_scalar_window).
+// List element, a struct member) (ir_scalar_window). A write pin of a handle
+// or box variable aliases the variable's own slot, which the call's write
+// argument stores back into (ir_place_address).
 ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
-    init_ty: ir_ty(p, b, init)
     access: if ir_body_node(p, b, init).kind == .Borrow(_, borrowed) -> borrowed else -> AccessConvention.Read
-    if access == .Write && !local.deref && ir_body_node(p, b, init).kind == .Borrow(place, _) {
+    if access == .Write && ir_body_node(p, b, init).kind == .Borrow(place, _) {
         place_ty: ir_ty(p, b, place)
         row: ir_value_type(m, p, place_ty) ?? {
             _: ir_type_fail(b, span, place_ty)
@@ -1085,8 +1086,7 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     if ir_failed(b) || value < 0 -> return
     // A borrow of a temporary owns that temporary: the pin keeps it.
     if b.fresh[value] -> return ir_bind_local(m, p, b, local, value, span)
-    if access != .Read && ir_kind_of(m, b, value) != .Aggregate {
-        if local.deref -> return ir_fail(b, span, "write pin of {ir_type_name(init_ty)}")
+    if access != .Read && !local.deref && ir_kind_of(m, b, value) != .Aggregate {
         // A user binding of `&box` (an Option or enum box, written through its
         // payload) aliases the box itself, which the place keeps owning: the
         // place closes and drops it, never the alias (#6590: a switch on
