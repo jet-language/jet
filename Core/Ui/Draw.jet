@@ -569,6 +569,7 @@ draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size:
     if size < 1 || target.pixels.len() != target.width * target.height * 4 -> return none
     rgba: pack_rgba(color)
     if rgba.bit_and(255) == 0 -> return none
+    ramp: coverage_ramp(rgba)
     face: set.face
     px: Float{size}
     metrics: face.metrics(px)
@@ -587,7 +588,7 @@ draw_text: fn(target: &Image, set: &Typeset, text: String, x: Int, y: Int, size:
                 whole: floor_px(at)
                 mask: set.cache.glyph(face, glyph.id, px, at - Float{whole})
                 origin_y: baseline + round_px(glyph.y)
-                paint_mask(target, mask, whole, origin_y, rgba)
+                paint_mask(target, mask, whole, origin_y, ramp)
                 if mask.width > 0 && mask.height > 0 {
                     left: whole + mask.left
                     top: origin_y - mask.top
@@ -645,9 +646,27 @@ text_lines: fn(text: String) -> [String] {
     lines
 }
 
-// Blends a glyph mask whose origin, on the baseline, is pixel (x, y).
-paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, rgba: Int) {
-    if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height -> return
+// Each coverage's weight for the packed straight color `rgba` and the
+// color premultiplied by it, as blend_pixel weighs and premultiplies:
+// (weight << 24) + (red << 16) + (green << 8) + blue, one per coverage
+// 0 through 255.
+coverage_ramp: fn(rgba: Int) -> [Int] {
+    red: (rgba >> 24).bit_and(255)
+    green: (rgba >> 16).bit_and(255)
+    blue: (rgba >> 8).bit_and(255)
+    alpha: rgba.bit_and(255)
+    ramp := [Int]{}
+    loop cover in 0..<256 {
+        a: div255(cover * alpha + 127)
+        ramp.push((a << 24) + (div255(red * a + 127) << 16) + (div255(green * a + 127) << 8) + div255(blue * a + 127))
+    }
+    ramp
+}
+
+// Blends a glyph mask whose origin, on the baseline, is pixel (x, y), in
+// the color whose coverage_ramp is `ramp`.
+paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, ramp: [Int]) {
+    if mask.width <= 0 || mask.height <= 0 || mask.coverage.len() < mask.width * mask.height || ramp.len() < 256 -> return
     x0: x + mask.left
     y0: y - mask.top
     left: max_int(x0, 0)
@@ -655,20 +674,42 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, rgba: Int) 
     top: max_int(y0, 0)
     bottom: min_int(y0 + mask.height, target.height)
     if left >= right || top >= bottom -> return
-    red: (rgba >> 24).bit_and(255)
-    green: (rgba >> 16).bit_and(255)
-    blue: (rgba >> 8).bit_and(255)
-    alpha: rgba.bit_and(255)
+    // blend_pixel's sums, inlined as `fill` inlines them, on the pixels
+    // moved out of the image for the loop; a premultiplied channel at
+    // weight 255 is the channel itself.
+    pixels := target.pixels
+    target.pixels = [U8]{}
     loop row in top..<bottom {
         from := (row - y0) * mask.width + left - x0
         at := (row * target.width + left) * 4
         loop _ in left..<right {
-            cover: Int{mask.coverage[from]}
-            if cover != 0 -> blend_pixel(target.pixels, at, red, green, blue, div255(cover * alpha + 127))
+            source: ramp[Int{mask.coverage[from]}]
+            a: source >> 24
+            if {
+                a == 255 -> {
+                    pixels[at] = U8{(source >> 16).bit_and(255)}
+                    pixels[at + 1] = U8{(source >> 8).bit_and(255)}
+                    pixels[at + 2] = U8{source.bit_and(255)}
+                    pixels[at + 3] = U8{255}
+                }
+                a != 0 -> {
+                    rest: 255 - a
+                    r: Int{pixels[at]} * rest + 127
+                    g: Int{pixels[at + 1]} * rest + 127
+                    b: Int{pixels[at + 2]} * rest + 127
+                    o: Int{pixels[at + 3]} * rest + 127
+                    pixels[at] = U8{(source >> 16).bit_and(255) + ((r + 1 + (r >> 8)) >> 8)}
+                    pixels[at + 1] = U8{(source >> 8).bit_and(255) + ((g + 1 + (g >> 8)) >> 8)}
+                    pixels[at + 2] = U8{source.bit_and(255) + ((b + 1 + (b >> 8)) >> 8)}
+                    pixels[at + 3] = U8{a + ((o + 1 + (o >> 8)) >> 8)}
+                }
+                else -> {}
+            }
             from += 1
             at += 4
         }
     }
+    target.pixels = pixels
 }
 
 // The pixel at byte `at` src-over the straight color (red, green, blue) at
@@ -759,15 +800,22 @@ draw_rectangle_gradient_v: fn(target: &Image, x: Int, y: Int, width: Int, height
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> fill(target, box.left, box.top + k, span, 1, levels[k], false)
     }
+    across := [Float]{}
+    pixels := target.pixels
+    target.pixels = [U8]{}
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> next
+        if across.len() == 0 -> across = centers(box.left, box.right, rec.x, rec.width)
         row: box.top + k
         v: (Float{row} + 0.5 - rec.y) / rec.height
-        loop column in box.left..<box.right {
-            u: (Float{column} + 0.5 - rec.x) / rec.width
-            fill(target, column, row, 1, 1, gradient_rgba(first, last, last, first, u, v), false)
+        line: tie_line(tie_axis(first, last, v), v, across)
+        at := (row * target.width + box.left) * 4
+        loop rgba in line {
+            blend_pixel(pixels, at, (rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
+            at += 4
         }
     }
+    target.pixels = pixels
 }
 
 // A horizontal gradient: `left` along the left edge, `right` along
@@ -800,15 +848,23 @@ draw_rectangle_gradient_h: fn(target: &Image, x: Int, y: Int, width: Int, height
             }
         }
     }
+    across := [Float]{}
+    stride: target.width * 4
+    pixels := target.pixels
+    target.pixels = [U8]{}
     loop k in 0..<levels.len() {
         if levels[k] >= 0 -> next
+        if across.len() == 0 -> across = centers(box.top, box.bottom, rec.y, rec.height)
         column: box.left + k
         u: (Float{column} + 0.5 - rec.x) / rec.width
-        loop row in box.top..<box.bottom {
-            v: (Float{row} + 0.5 - rec.y) / rec.height
-            fill(target, column, row, 1, 1, gradient_rgba(first, first, last, last, u, v), false)
+        line: tie_line(tie_axis(first, last, u), u, across)
+        at := box.top * stride + column * 4
+        loop rgba in line {
+            blend_pixel(pixels, at, (rgba >> 24).bit_and(255), (rgba >> 16).bit_and(255), (rgba >> 8).bit_and(255), rgba.bit_and(255))
+            at += stride
         }
     }
+    target.pixels = pixels
 }
 
 // The pixels gradient_runs shades: those whose centers `rec` holds, clipped
@@ -836,8 +892,8 @@ gradient_box: fn(extent: Extent, rec: Rect) -> GradientBox {
 // computes the same blend over its two triangles, which with equal corners
 // on each side reduces to this one up to a few units in the last place
 // (each term is at most 255), so away from a tie both round alike and a row
-// (or column) of one gradient shares one color; on a tie the caller asks
-// gradient_rgba pixel by pixel.
+// (or column) of one gradient shares one color; on a tie the caller paints
+// the line pixel by pixel (tie_axis, tie_line).
 axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
     rgba := 0
     shift := 24
@@ -849,6 +905,87 @@ axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
         shift -= 8
     }
     rgba
+}
+
+// A row or column of an axis gradient on a rounding tie, as axis_rgba
+// reads it at the line's `t`.
+TieAxis: struct {
+    // The levels of the channels away from the tie, a tied channel's 0.
+    rgba: Int
+    // Each tied channel's shift in a packed color.
+    shifts: [Int]
+    // Each tied channel's whole level its sums lie next to.
+    near: [Int]
+    // The same levels as Floats.
+    edge: [Float]
+    // Each tied channel's first and last levels.
+    first: [Float]
+    last: [Float]
+}
+
+tie_axis: fn(first: Int, last: Int, t: Float) -> TieAxis {
+    rgba := 0
+    shifts := [Int]{}
+    near := [Int]{}
+    edge := [Float]{}
+    firsts := [Float]{}
+    lasts := [Float]{}
+    shift := 24
+    loop shift >= 0 {
+        from: Float{(first >> shift).bit_and(255)}
+        to: Float{(last >> shift).bit_and(255)}
+        level: from * (Float{1.0} - t) + to * t + 0.5
+        whole: core.math.floor(level)
+        if {
+            level - whole < 0.000000001 || whole + 1.0 - level < 0.000000001 -> {
+                whole_near: checked(Int{core.math.floor(level + 0.5)}) ?? 0
+                shifts.push(shift)
+                near.push(whole_near)
+                edge.push(Float{whole_near})
+                firsts.push(from)
+                lasts.push(to)
+            }
+            else -> rgba += clamp8(checked(Int{whole}) ?? 0) << shift
+        }
+        shift -= 8
+    }
+    TieAxis{rgba: rgba, shifts: shifts, near: near, edge: edge, first: firsts, last: lasts}
+}
+
+// gradient_rgba for each pixel of a tied line, the line at `t` along the
+// axis and its pixel centers at `across` over it. In gradient_h's frame,
+// u = t and v = across, the corners are first, first, last, last;
+// gradient_v's line is that blend transposed, (u, v) = (across, t) with
+// corners first, last, last, first, which gradient_rgba computes term for
+// term alike (on the diagonal both branches sum the same terms). A
+// channel away from the tie rounds alike on the whole line (see
+// axis_rgba), so only the tied channels take the pixel's own sum, and that
+// sum plus 1/2 lies next to the channel's near level: its floor is that
+// level or the one below.
+tie_line: fn(axis: TieAxis, t: Float, across: [Float]) -> [Int] {
+    line := [Int]{}
+    loop _ in across -> line.push(axis.rgba)
+    loop k in 0..<axis.shifts.len() {
+        first: axis.first[k]
+        last: axis.last[k]
+        near: axis.near[k]
+        edge: axis.edge[k]
+        shift: axis.shifts[k]
+        loop i in 0..<across.len() {
+            s: across[i]
+            level: if s >= t -> first * (Float{1.0} - s) + first * (s - t) + last * t else -> first * (Float{1.0} - t) + last * (t - s) + last * s
+            line[i] = line[i] + (clamp8(if level + 0.5 >= edge -> near else -> near - 1) << shift)
+        }
+    }
+    line
+}
+
+// The pixel centers start..<end of a rectangle at `origin`, `size` long,
+// in its unit coordinate.
+centers: fn(start: Int, end: Int, origin: Float, size: Float) -> [Float] {
+    out := [Float]{}
+    loop at in start..<end -> out.push((Float{at} + 0.5 - origin) / size)
+    out
 }
 
 // A four-corner gradient: the corner colors run counter-clockwise
@@ -2140,16 +2277,16 @@ coverage: fn(runs: [Run], width: Int, height: Int) -> [Int] {
     // (50 * 51 + 127) / 255 = 10, alpha 255.
     mask: font.GlyphMask{width: 2, height: 2, left: -1, top: 1, coverage: [U8]{255, 128, 0, 51}}
     drawn := gen_image_color(3, 2, color(0, 0, 0, 255))
-    paint_mask(drawn, mask, 2, 1, pack_rgba(color(200, 100, 50, 255)))
+    paint_mask(drawn, mask, 2, 1, coverage_ramp(pack_rgba(color(200, 100, 50, 255))))
     assert_eq(image_words(drawn), [Int]{3, 2, black, png_rgba(200, 100, 50, 255), png_rgba(100, 50, 25, 255), black, black, png_rgba(40, 20, 10, 255)})
     // At origin (0, 0) only the mask's bottom right pixel lands, on (0, 0).
     clipped := gen_image_color(2, 1, color(0, 0, 0, 255))
-    paint_mask(clipped, mask, 0, 0, pack_rgba(color(200, 100, 50, 255)))
+    paint_mask(clipped, mask, 0, 0, coverage_ramp(pack_rgba(color(200, 100, 50, 255))))
     assert_eq(image_words(clipped), [Int]{2, 1, png_rgba(40, 20, 10, 255), black})
     // A color at alpha 128 weighs coverage 255 as (255 * 128 + 127) / 255 =
     // 128, and the opaque image stays opaque.
     half := gen_image_color(1, 1, color(0, 0, 0, 255))
-    paint_mask(half, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, pack_rgba(color(200, 100, 50, 128)))
+    paint_mask(half, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, coverage_ramp(pack_rgba(color(200, 100, 50, 128))))
     assert_eq(image_words(half), [Int]{1, 1, png_rgba(100, 50, 25, 255)})
 }
 
@@ -2256,6 +2393,13 @@ axis_matches: fn(width: Int, height: Int, x: Int, y: Int, gw: Int, gh: Int, firs
     assert(axis_matches(4, 2, 0, 0, 4, 2, color(0, 0, 0, 255), color(2, 0, 0, 255)))
     assert(axis_matches(4, 4, 0, 0, 2, 4, color(0, 0, 0, 255), color(2, 0, 0, 255)))
     assert(axis_matches(40, 30, 1, 1, 4, 2, color(0, 0, 0, 120), color(2, 0, 0, 120)))
+    // A tie on one channel while the others are away from it, opaque and
+    // translucent, and one column in five tied, as across a 560-pixel
+    // panel header.
+    assert(axis_matches(40, 30, 3, 2, 2, 5, color(0, 10, 200, 255), color(2, 250, 20, 255)))
+    assert(axis_matches(40, 30, 3, 2, 2, 5, color(0, 10, 200, 120), color(2, 250, 20, 120)))
+    assert(axis_matches(600, 3, 0, 0, 560, 3, color(232, 35, 42, 255), color(120, 20, 26, 255)))
+    assert_eq(axis_rgba(0xE8232AFF, 0x78141AFF, Float{2.5} / Float{560.0}), -1)
 }
 
 checks_20x10: fn() -> Image {
