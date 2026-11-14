@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6844,
-    "rev": 102550,
+    "rev": 102551,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -94860,7 +94860,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c3 is wider than written (CardCloser-3 probe on gate-p131, 2026-11-14): a lambda stored in a struct field (h: Holder{action: fn() { k += 1 }}) or in a list silently loses even a plain k += 1 on a := Int, not only a &self method call. A lambda bound with := or passed as an argument does write through. So the loss follows storing the closure in an aggregate: the capture is copied at the aggregate store instead of referenced. This is a silent miscompile (I1 type/memory-safety class), G10 priority. The fix needs one capture-mode rule in sema (by-reference for mutated := captures, or refuse storing a mutating closure in an aggregate) and its IR lowering."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94898,7 +94904,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-14T23:16:00.902Z",
+      "updated": "2026-11-14T23:16:01.992Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -204979,6 +204985,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T23:16:01.992Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08zzpo5",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T23:16:00.902Z",
       "by": "Main",
