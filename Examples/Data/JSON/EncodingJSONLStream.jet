@@ -69,7 +69,8 @@ read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> 
     loop {
         _row: reader.next() ?? break
         count += 1
-        started.send(count)
+        // A refused send means the consumer is gone or this task was cancelled.
+        started.send(count) ?? break
         _: gate.receive() ?? 0
     }
     Ok(count)

@@ -22,7 +22,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     addr_text: net.socket_to_string(local)
     tcp_task: task {
         server := listener.move()
-        ready_tx.send(addr_text)
+        ready_tx.send(addr_text) ?? panic("ready")
         stream: server.accept() ?? panic("accept")
         msg: stream.read_text(8192) ?? panic("read")
         stream.write_all("tcp:{msg}".bytes()) ?? panic("write")
@@ -57,7 +57,7 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     unix_listener: net.unix_listen(path) ?? panic("unix listen")
     { sender: unix_tx, receiver: unix_rx }: channel<String>()
     unix_task: task {
-        unix_tx.send("ready")
+        unix_tx.send("ready") ?? panic("unix ready")
         s := net.unix_accept(unix_listener) ?? panic("unix accept")
         msg: net.unix_read(s) ?? panic("unix read")
         net.unix_write_all_bytes(s, "unix:{msg}".bytes()) ?? panic("unix write")
