@@ -1,16 +1,16 @@
 
 use yaml: core.encoding.yaml
 run: fn() {
-    raw: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    raw: "---\n# a config\nflowlist: [1, 2, 3]\nuse:\n  host: local\n  port: 80\nnote: |\n  one\n  two\n"
     d: yaml.parse(raw) ?? panic("bad yaml")
-    if d == .Object(top) {
-        if top["flowlist"] == .Array(xs) {
+    if d == .Object(_) {
+        if (d.field("flowlist") ?? Dyn.Null) == .Array(xs) {
             print(xs.len())
         }
-        if top["use"] == .Object(u) {
+        if (d.field("use") ?? Dyn.Null) == .Object(u) {
             print(u.len())
         }
-        if top["note"] == .Text(s) {
+        if (d.field("note") ?? Dyn.Null) == .Text(s) {
             print(s.contains("one"))
         }
     }

@@ -1,0 +1,9 @@
+
+use yaml: core.encoding.yaml
+run: fn() {
+    raw: "base: &b\n  host: local\n  port: 80\nuse: *b\n"
+    if yaml.parse(raw) == {
+        .Ok(_) -> print("parsed")
+        .Err(error) -> print(error.reason)
+    }
+}

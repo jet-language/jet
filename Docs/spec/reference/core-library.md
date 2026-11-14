@@ -4172,9 +4172,11 @@ is minimal rather than comment-preserving.
 ### `core.encoding.yaml` — bounded YAML input
 
 `core.encoding.yaml` accepts JSON-compatible YAML 1.2 plus simple block maps,
-lists, comments, and `|` or `>` block scalars. Unknown or unsupported syntax
-fails closed. This module is an input parser and does not expose a YAML
-serializer.
+lists, comments, `|` or `>` block scalars, a leading `---` document marker,
+and JSON flow collections (`[1, 2]`, `{"a": 1}`) as values. Unknown or
+unsupported syntax fails closed: anchors and aliases (`&name`, `*name`) and a
+flow collection that is not JSON are `Unsupported` errors that name them. This
+module is an input parser and does not expose a YAML serializer.
 
 | Function | Returns | Description |
 | --- | --- | --- |

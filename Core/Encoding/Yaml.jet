@@ -17,13 +17,20 @@ syntax_error: fn(format: EncodingFormat, offset: Int, line: Int, column: Int, pa
         cause: None,
     }
 }
+
+unsupported_error: fn(reason: String) -> EncodingError Never! {
+    error := syntax_error(EncodingFormat.YAML, 0, 1, 1, "", reason)
+    error.kind = EncodingErrorKind.Unsupported
+    error
+}
 use json: core.encoding.json
 
 // core.encoding.yaml — JSON-compatible YAML 1.2 plus simple block maps/lists.
 //
-// This source codec covers JSON, `key: value` maps, `- item` lists,
-// `|` / `>` folded scalars, comments, !!binary, and offset timestamps.
-// Unknown syntax fails closed rather than silently delegating.
+// This source codec covers JSON, `key: value` maps, `- item` lists, JSON
+// flow collections as values, a leading `---` document marker, `|` / `>`
+// folded scalars, comments, !!binary, and offset timestamps. Unknown syntax,
+// anchors and aliases included, fails closed rather than silently delegating.
 parse: fn(text: String) -> Dyn EncodingError! { parse_yaml(text) }
 
 decode: fn(text: String) -> Dyn EncodingError! { parse_yaml(text) }
@@ -84,6 +91,11 @@ parse_block: fn(text: String) -> Dyn EncodingError! {
     }
     if first.len() == 0 -> return Ok(Dyn.Null)
     first_body: trim_yaml(strip_inline_comment(first))
+    if first_body == "---" {
+        document := [String]{}
+        loop j in first_index + 1..<rows.len() -> document.push(rows[j].copy())
+        return parse_yaml(join_lines(document))
+    }
     if first_body == "|" || first_body == ">" || first_body == "!!binary |" || first_body == "!!binary >" {
         block: parse_block_scalar(rows, first_index, leading_spaces(first), first_body == ">" || first_body == "!!binary >")
         if first_body.starts_with("!!binary") -> return parse_scalar("!!binary {block.value}")
@@ -281,6 +293,9 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
 
 parse_scalar: fn(text: String) -> Dyn EncodingError! {
     clean: trim_yaml(strip_inline_comment(text))
+    if clean.starts_with("&") || clean.starts_with("*") {
+        return Err(unsupported_error("YAML anchors and aliases (&name, *name) are not supported"))
+    }
     stamp_text := clean
     if clean.starts_with("!!timestamp") -> stamp_text = unquote(trim_yaml(drop_prefix(clean, 11)))
     raw: stamp_text.bytes()
@@ -308,7 +323,9 @@ parse_scalar: fn(text: String) -> Dyn EncodingError! {
         }
         return Ok(Dyn.DateTime(z))
     }
-    if clean == "{{}}" -> return Ok(Dyn.object())
+    if clean.starts_with("[") || clean.starts_with("{{") {
+        return json.parse(clean) ?? return Err(unsupported_error("YAML flow collections must be JSON"))
+    }
     if clean.starts_with("\"") || clean.starts_with("'") -> return Ok(Dyn.Text(unquote(clean)))
     stamp: Dyn.Text(clean)
     if stamp.decode<ZonedDateTime>() == {
@@ -643,4 +660,20 @@ unquote: fn(text: String) -> String Never! {
     assert(to_string(Dyn.Text("a b")) == "a b")
     assert(to_string(Dyn.Text("a: b")) == "\"a: b\"")
     assert(to_string(Dyn.Array([Dyn]{})) == "{{}}")
+}
+
+#Test("YAML reads a document marker and JSON flow values, and refuses anchors") {
+    tree: parse("---\n# a config\nflowlist: [1, 2, 3]\nempty: {{}}\n") ?? panic("YAML")
+    assert_eq(json.to_string(tree) ?? panic("JSON"), "{{\"flowlist\":[1,2,3],\"empty\":{{}}}}")
+    if parse("base: &b\n  host: local\nuse: *b\n") == {
+        .Ok(_) -> panic("an anchor must fail closed")
+        .Err(error) -> {
+            assert(error.kind == EncodingErrorKind.Unsupported)
+            assert_eq(error.reason, "YAML anchors and aliases (&name, *name) are not supported")
+        }
+    }
+    if parse("items: [a, b]\n") == {
+        .Ok(_) -> panic("a non-JSON flow collection must fail closed")
+        .Err(error) -> assert_eq(error.reason, "YAML flow collections must be JSON")
+    }
 }
