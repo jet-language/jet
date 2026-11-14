@@ -670,9 +670,12 @@ sema_http_route_response_constructor: fn(name: String, args: [CallArg], environm
     status: sema_http_route_response_status(args[0].expr, environment, program, scopes, module_identity) ?? return None
     if status < 100 || status > 599 -> return None
     if name == "empty_response" && args.len() == 1 -> return Val(SemaHTTPRouteResponse{status: status, schema: None, content_type: None})
-    if (name == "response" || name == "json") && args.len() == 2 {
+    // `response(status, body)` takes its body as String, so its schema is
+    // String whatever expression computes the text.
+    if name == "response" && args.len() == 2 -> return Val(SemaHTTPRouteResponse{status: status, schema: Val("{{\"type\":\"string\"}}"), content_type: None})
+    if name == "json" && args.len() == 2 {
         schema: sema_http_route_schema_expr(args[1].expr, environment, program, module_identity, locals) ?? return None
-        return Val(SemaHTTPRouteResponse{status: status, schema: Val(schema), content_type: if name == "json" -> Val("application/json") else -> None})
+        return Val(SemaHTTPRouteResponse{status: status, schema: Val(schema), content_type: Val("application/json")})
     }
     None
 }

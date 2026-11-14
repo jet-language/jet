@@ -1,0 +1,24 @@
+use {
+    server: core.http.server
+    web: core.web
+}
+
+#Codable
+NewTask: struct { title: String, done: Bool }
+
+Tasks: struct {
+    #Server.Post("/tasks")
+    add: fn(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
+        input: request.json<NewTask>()
+        Ok(server.response(201, input.title))
+    }
+}
+
+run: fn() {
+    app: web.app()
+    app.get("/tasks/:id/label", fn(id: Int) { Ok(server.response(200, id.to_string())) })
+    app.mount(Tasks{})
+    schema: web.openapi(app) ?? panic("openapi: {err}")
+    print(schema.contains(`"/tasks":{"post"`) && schema.contains("\"201\""))
+    print(schema.contains(`"/tasks/{id}/label":{"get"`) && schema.contains("\"200\""))
+}
