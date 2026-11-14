@@ -1401,6 +1401,15 @@ convenience surface. `is_relative_to` is a lexical comparison; it does not
 resolve symlinks. Use `canonicalize` when the policy requires physical,
 existing-path containment.
 
+`path.is_within(base)` is the same lexical containment on the `Path` value:
+both sides are normalized (doubled and trailing separators dropped, `.`
+removed, `..` popping one component), then `base`'s components must prefix
+`path`'s, so `/srv/rooted` is not within `/srv/root`. A path is within
+itself, every rooted path is within `/`, a relative path is never within a
+rooted base, and a relative base rejects a path that climbs out with `..`. It
+is not symlink truth: a link inside `base` that points outside it still
+counts as within. Compare `canonicalize` results when links matter.
+
 ### `core.net.url` — RFC 3986 URL values
 
 `core.net.url` parses, constructs, joins, normalizes, and renders the `URL`

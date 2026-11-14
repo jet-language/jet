@@ -1,0 +1,22 @@
+# Path.is_within compares normalized lexical components: doubled and trailing
+# separators, `.` and `..`, a sibling sharing a name prefix, the filesystem
+# root and a relative `.` base. It is not symlink truth: a link inside the
+# base that points outside stays lexically within it, while the canonicalized
+# paths are not. Each tier prints the same lines.
+fixture: path_is_within_compares_lexical_components.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o1: jet run --optimize=basic --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step o2: jet run --optimize=full --allow=FS main.jet
+exit: 0
+stdout: = expected.out
+step: jet build --target web --allow=FS main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = expected.out

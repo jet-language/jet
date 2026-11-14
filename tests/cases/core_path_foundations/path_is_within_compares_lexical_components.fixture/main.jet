@@ -1,0 +1,38 @@
+use fs: core.files
+
+row: fn(path: String, base: String) {
+    print("{path} within {base}: {Path.from(path).is_within(Path.from(base))}")
+}
+
+run: fn() IOError! {
+    // Separators: doubled and trailing separators do not change a component.
+    row("/srv/root/file", "/srv/root")
+    row("/srv//root///file", "/srv/root/")
+    // A path is within itself.
+    row("/srv/root/", "/srv/root")
+    // Dot segments drop; dot-dot pops one component.
+    row("/srv/root/./a/./file", "/srv/root")
+    row("/srv/root/a/../file", "/srv/root")
+    row("/srv/root/../etc/passwd", "/srv/root")
+    // Components, not string prefixes: rooted is not root.
+    row("/srv/rooted/file", "/srv/root")
+    // Roots: everything rooted is within the root; relative never is.
+    row("/srv/root/file", "/")
+    row("/", "/srv/root")
+    row("srv/root/file", "/srv/root")
+    // A relative base accepts children but not an escape.
+    row("a/b", ".")
+    row("../a", ".")
+    row("./a/../../b", ".")
+    // Lexical, not symlink truth: a link inside the base that points outside
+    // is still within it; canonicalize resolves the link and says it is not.
+    outside := fs.temp_dir("within-outside") ?? return Err(err)
+    base := fs.temp_dir("within-base") ?? return Err(err)
+    link: "{base.path}/link"
+    fs.symlink(outside.path, link) ?? return Err(err)
+    lexical: Path.from("{link}/file").is_within(Path.from(base.path))
+    real_link: fs.canonicalize(link) ?? return Err(err)
+    real_base: fs.canonicalize(base.path) ?? return Err(err)
+    physical: Path.from("{real_link}/file").is_within(Path.from(real_base))
+    print("link lexical {lexical} physical {physical}")
+}
