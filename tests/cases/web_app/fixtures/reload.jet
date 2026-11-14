@@ -21,7 +21,7 @@ reload_env: fn(name: String) -> String {
 // listens on the port.
 reload_ask: fn(port: String) -> String? {
     stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     request: "GET /__jet/reload HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? return None
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return None

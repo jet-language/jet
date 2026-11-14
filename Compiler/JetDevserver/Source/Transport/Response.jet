@@ -4,6 +4,6 @@ MAX_RESPONSE_BODY_BYTES: 67108864
 // combined response.
 devserver_response_head: fn(status: String, content_type: String, body_length: Int) -> String DevserverTransportError! {
     if body_length > MAX_RESPONSE_BODY_BYTES -> return Err(.InvalidData{message: "devserver response exceeds the response budget"})
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR")
+    cr: "\r"
     Ok("HTTP/1.1 {status}{cr}\nContent-Type: {content_type}{cr}\nContent-Length: {body_length}{cr}\nCache-Control: no-store{cr}\nConnection: close{cr}\n{cr}\n")
 }

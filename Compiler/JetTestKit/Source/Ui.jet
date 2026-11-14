@@ -257,7 +257,7 @@ kit_ui_primary_source_headers: fn(shown: String, text: String) -> String {
 kit_ui_normalize: fn(shown: String, actual: String, root: String) -> String {
     text := actual.replace("{root}/", "")
     if shown.ends_with("/workspace.jet") -> text = text.replace(kit_steps_byte_slice(shown, 0, shown.count_bytes() - 14), "/tmp")
-    crlf: String.from_bytes([U8{13}, U8{10}]) ?? panic("CRLF is UTF-8")
+    crlf: "\r\n"
     lines: text.replace(crlf, "\n").split("\n").to_list()
     out := ""
     loop (index, line) in lines {

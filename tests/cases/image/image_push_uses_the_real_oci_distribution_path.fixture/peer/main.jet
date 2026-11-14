@@ -111,10 +111,10 @@ run: fn() {
         if method == "HEAD" -> status = 404
         else if method == "POST" {
             status = 202
-            extra = "Location: /test-upload{String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }"
+            extra = "Location: /test-upload\r\n"
         } else if method == "PUT" && (path.contains("/blobs/uploads/") || path.starts_with("/test-upload")) -> status = 201
         else if method == "PUT" && path.contains("/manifests/") -> status = 201
-        crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+        crlf: "\r\n"
         response: "HTTP/1.1 {status} Test{crlf}{extra}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
         net.tcp_write_text(stream, response) ?? panic("write registry response")
         net.tcp_close(stream) ?? panic("close registry connection")

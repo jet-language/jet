@@ -22,7 +22,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 
 // Host added for Main's strict Core framing cutover.
 #Test("request_and_query_policy") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     r: devserver_test_request("POST /x?q=a%20b HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 2{cr}\n{cr}\nok")
     assert_eq(r.method, "POST")
     assert_eq(r.target, "/x?q=a%20b")
@@ -34,7 +34,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 
 // Preserving the hostile metadata with a valid Host.
 #Test("malformed_request_metadata_fails_closed") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: nope{cr}\n{cr}\n"))
     assert(devserver_test_request_fails("GET /x{cr}\nHost: localhost{cr}\n{cr}\n"))
     assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: {MAX_REQUEST_BODY_BYTES + 1}{cr}\n{cr}\n"))
@@ -44,19 +44,19 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 // Original names retained; these exercise rejection, not allocator timing.
 // #4431 and DC1/DC2/DC5 gate before-proportional-allocation integration proof.
 #Test("request_lines_and_headers_are_bounded_before_allocation") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     assert(devserver_test_request_fails("GET /{"x".repeat(MAX_REQUEST_LINE_BYTES)} HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
     assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\nHost: localhost{cr}\nX-Hostile: {"x".repeat(MAX_REQUEST_LINE_BYTES)}{cr}\n{cr}\n"))
 }
 #Test("aggregate_request_headers_are_bounded_before_parse") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
     loop index in 0..<8 -> lines.push("X-Fill-{index}: {"x".repeat(4090)}{cr}\n")
     lines.push("{cr}\n")
     assert(devserver_test_request_fails(lines.join("")))
 }
 #Test("request_header_count_is_bounded_before_parse") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
     loop index in 0..<(MAX_REQUEST_HEADER_COUNT + 1) -> lines.push("X-Count-{index}: y{cr}\n")
     lines.push("{cr}\n")
@@ -64,7 +64,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 }
 
 #Test("request_uses_canonical_strict_core_framing") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     assert(if DevserverRequest.read([U8]{}) == {
         .Ok(value) -> if value == {
             .None -> true
@@ -95,7 +95,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 }
 
 #Test("request_adapter_rejects_duplicate_authorization_and_origin") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     names: [String]{"Authorization", "Origin"}
     loop name in names {
         raw: "GET / HTTP/1.1{cr}\nHost: localhost{cr}\n{name}: x{cr}\n{name}: y{cr}\n{cr}\n"
@@ -107,7 +107,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
 }
 
 #Test("core_refusals_are_not_suppressed_or_reparsed") {
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     messages: [String]{
         "GET / HTTP/1.1{cr}\nHost: localhost{cr}\nHost: localhost{cr}\n{cr}\n",
         "POST / HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 0{cr}\nContent-Length: 1{cr}\n{cr}\n",
@@ -141,7 +141,7 @@ devserver_test_header_error: fn(lines: [String]) -> String Never! {
     assert_eq(devserver_query_param("/x?q=%C3%28", "q"), Val("{r}("))
     assert_eq(devserver_query_param("/x?q=%E2%82%AC", "q"), Val("€"))
     assert_eq(devserver_query_param("/x?%71=x", "q"), None)
-    cr: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
+    cr: "\r"
     raw := "POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 3{cr}\n{cr}\n".bytes()
     raw.push(U8{0})
     raw.push(U8{255})

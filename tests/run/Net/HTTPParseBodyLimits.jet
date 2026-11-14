@@ -34,7 +34,7 @@ response_result: fn(raw: [U8]) -> String Never! {
 }
 
 run: fn() {
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     loop size in [0, 3, 1048576, 1048577] {
         request := "POST / HTTP/1.1{crlf}Host: example.test{crlf}Content-Length: {size}{crlf}{crlf}".bytes()
         response := "HTTP/1.1 200 OK{crlf}Content-Length: {size}{crlf}{crlf}".bytes()

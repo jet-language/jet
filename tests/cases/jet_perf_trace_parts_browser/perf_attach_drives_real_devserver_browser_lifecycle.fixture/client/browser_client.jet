@@ -18,7 +18,7 @@ s6_browser_env: fn(name: String) -> String {
 
 s6_browser_request: fn(port: String, method: String, path: String, body: String) -> S6BrowserReply? {
     stream := net.tcp_connect("127.0.0.1:{port}") ?? return None
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     request: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Content-Type: application/x-www-form-urlencoded{crlf}Content-Length: {body.bytes().len()}{crlf}Connection: close{crlf}{crlf}{body}"
     stream.write_all(request.bytes()) ?? return None
     raw := [U8]{}

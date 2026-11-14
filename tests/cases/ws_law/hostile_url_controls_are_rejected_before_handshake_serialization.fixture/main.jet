@@ -1,6 +1,6 @@
 use ws: core.net.ws
 run: fn() {
-    cr: String.from_bytes([U8]{13}) ?? panic("CR")
+    cr: "\r"
     hostiles: [String]{"ws://127.0.0.1/path{cr}\nInjected: yes", "ws://127.0.0.1{cr}\nInjected: yes/path"}
     loop hostile in hostiles {
         rejected: if ws.connect(hostile) == {

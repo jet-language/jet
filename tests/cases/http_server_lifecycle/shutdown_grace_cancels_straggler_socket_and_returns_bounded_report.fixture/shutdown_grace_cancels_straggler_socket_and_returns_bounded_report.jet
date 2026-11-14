@@ -20,7 +20,7 @@ use {
     addr: bound.local_addr() ?? panic("address")
     serving: task { bound.serve() ?? panic("server") }
     client: net.tcp_connect(addr) ?? panic("connect")
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     client.write_all("GET /slow HTTP/1.1{crlf}Host: local{crlf}{crlf}".bytes()) ?? panic("write")
     if {
         _signal, entered_rx -> {}

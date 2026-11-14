@@ -33,7 +33,7 @@ run: fn() {
     print(peer.verified_server_name)
     print(peer.leaf.der.len() > 0 && peer.certificate_chain.len() > 0 && peer.certificate_chain[0].sha256 == peer.leaf.sha256)
     print(if tls.is_tls13(peer.tls_version) -> "TLS13" else -> "TLS12")
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     secure.write_all("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request")
     _: secure.read(8192, deadline: budget) ?? panic("response")
     secure.close() ?? panic("close TLS")

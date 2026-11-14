@@ -445,7 +445,7 @@ progress: fn(label: String) IOError! -[IO, Time.Wait]> {
         return Ok()
     }
     terminal_write_preflight("stderr")
-    carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    carriage_return: "\r"
     cause: rt.terminal8_write_stderr("{carriage_return}{label}", true)
     if cause != None -> return Err(terminal_other(.Flush, Val("stderr"), cause))
     Ok()
@@ -516,12 +516,12 @@ decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     assert_eq(decode_key([U8]{3}, 1), Key.Ctrl('c'))
     assert_eq(decode_key([U8]{195, 169}, 1), Key.Char('é'))
     assert_eq(decode_key([U8]{195}, 1), Key.Unknown)
-    carriage_return: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    carriage_return: "\r"
     assert_eq(chomp("a{carriage_return}{carriage_return}\n"), "a")
 }
 
 #Test("input edit keeps each line ending and a missing final line break") {
-    cr: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
+    cr: "\r"
     assert_eq(__input_edit_text("a cat{cr}\nno\nlast cat", fn(line) { line.replace("cat", "dog") }), "a dog{cr}\nno\nlast dog")
     assert_eq(__input_edit_text("cat\n", fn(line) { line.upper() }), "CAT\n")
     assert_eq(__input_edit_text("", fn(line) { line.upper() }), "")

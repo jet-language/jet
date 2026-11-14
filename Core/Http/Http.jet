@@ -1624,7 +1624,7 @@ form_decode_strict: fn(text: String) -> Query FormDecodeError! { query_decode_st
 }
 
 #Test("a binary body stays bytes through parse_request, with_body, request_with and response_ok") {
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     raw := "POST / HTTP/1.1{crlf}Host: example{crlf}Content-Length: 2{crlf}{crlf}".bytes()
     raw.push(U8{255})
     raw.push(U8{0})

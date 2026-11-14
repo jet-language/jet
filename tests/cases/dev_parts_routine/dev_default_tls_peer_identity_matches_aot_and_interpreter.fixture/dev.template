@@ -17,7 +17,7 @@ run: fn() {
     print(peer.tls_version)
     if !peer.cipher_suite.starts_with("TLS13_") { panic("cipher") }
     if peer.tls_version != .TLS13 { panic("version") }
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     secure.write_all("GET / HTTP/1.0{crlf}Host: localhost{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request")
     // At most 8 * 512 bytes; preserve the marker across TLS read boundaries.
     response := ""

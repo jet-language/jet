@@ -19,7 +19,7 @@ use jet_cli.[
     if bytes != expected.bytes() -> panic("Rust remote binding record bytes")
     decoded: jet_cli_remote_parse(bytes, "builder") ?? panic("remote record parse")
     if decoded != binding -> panic("remote binding roundtrip")
-    carriage_return: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is valid UTF-8")
+    carriage_return: "\r"
     crlf: expected.replace("\n", "{carriage_return}\n")
     decoded_crlf: jet_cli_remote_parse(crlf.bytes(), "builder") ?? panic("remote registry accepts CRLF")
     if decoded_crlf != binding -> panic("remote CRLF preserves every binding field")

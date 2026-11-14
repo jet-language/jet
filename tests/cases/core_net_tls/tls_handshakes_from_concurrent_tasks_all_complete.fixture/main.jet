@@ -21,7 +21,7 @@ exchange: fn(addr: String, ca: String, index: Int) -> String {
     secure := tls.client(tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake {index}")
     peer: secure.peer_identity()
     version: if tls.is_tls13(peer.tls_version) -> "TLS13" else -> "TLS12"
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     secure.write_all("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request {index}")
     reply: secure.read(8192, deadline: budget) ?? panic("response {index}")
     secure.close() ?? panic("close TLS {index}")

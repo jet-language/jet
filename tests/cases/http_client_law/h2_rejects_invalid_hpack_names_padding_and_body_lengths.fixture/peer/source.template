@@ -3,7 +3,7 @@ use {
     files: core.files
     time: core.time
 }
-PEER_CRLF: #run { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF: "\r\n"
 publish: fn(listener: TCPListener, path: String) {
     address: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")

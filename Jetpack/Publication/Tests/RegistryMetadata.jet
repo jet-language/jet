@@ -144,7 +144,7 @@ publication_metadata_test_refusal: fn(text: String, detail: String) Never! {
     // Original cycle-kit publish/no-destination test below retains staging.
 }
 #Test("publication metadata canonical joins trimmed lines not JSON recoding") {
-    cr: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    cr: "\r"
     text: "  {{\n \"name\":\"rolekit\",{cr}\n \"version\":\"1.0.0\",\n \"unknown\": \"line\\nvalue\"\n }}  \n"
     model: publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") ?? panic("multiline")
     assert_eq(model.canonical(), "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"unknown\": \"line\\nvalue\"}}")

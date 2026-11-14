@@ -108,7 +108,7 @@ use text_width: core.text
     assert_eq(text_width.graphemes(""), [String]{})
     assert_eq(text_width.display_width(""), 0)
     crlf: String.from_bytes([U8]{97, 13, 10, 98}) ?? panic("CRLF fixture")
-    assert_eq(text_width.graphemes(crlf), [String]{"a", String.from_bytes([U8]{13, 10}) ?? panic("CRLF part"), "b"})
+    assert_eq(text_width.graphemes(crlf), [String]{"a", "\r\n", "b"})
     assert_eq(text_width.display_width(crlf), 2)
     bel_mark: String.from_bytes([U8]{7, 204, 129}) ?? panic("control mark fixture")
     assert_eq(text_width.graphemes(bel_mark), [String]{String.from_bytes([U8]{7}) ?? panic("BEL part"), "́"})

@@ -1837,7 +1837,7 @@ pathsep: fn() -[Env]> String Never! {
 }
 
 linesep: fn() -[Env]> String Never! {
-    if is_windows() -> return String.from_bytes([U8]{13, 10}) ?? ""
+    if is_windows() -> return "\r\n"
     "\n"
 }
 is_env_ident: fn(byte: U8) -> Bool {
@@ -2034,7 +2034,7 @@ command_fact: fn(argv: [String]) -[Exec, Time.Wait]> String Never! {
     assert_eq(release_field("PRETTY_NAME=\"\"\n", "PRETTY_NAME="), Val(""))
     assert_eq(release_field("VERSION_ID='literal'", "VERSION_ID="), Val("'literal'"))
     assert(release_field(" VERSION_ID=indented", "VERSION_ID=") == None)
-    carriage: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return")
+    carriage: "\r"
     assert_eq(release_field("VERSION_ID=\"6.1\"{carriage}\n", "VERSION_ID="), Val("6.1"))
     assert_eq(release_field("VERSION_ID=6.1{carriage}", "VERSION_ID="), Val("6.1{carriage}"))
 }

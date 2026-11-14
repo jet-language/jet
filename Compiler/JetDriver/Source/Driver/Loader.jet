@@ -319,7 +319,7 @@ jet_driver_parse_authority_needs: fn(source: String, tokens: [Token], tables: To
                     next
                 }
                 item: jet_driver_manifest_field_value(source, tokens, item_index)
-                name := item.text.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
+                name := item.text.trim().replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
                 if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) {
                     name = token_decoded(tables, tokens[item_index])
                 }
@@ -385,7 +385,7 @@ jet_driver_parse_authority_effect_list: fn(source: String, tokens: [Token], tabl
         item: jet_driver_manifest_field_value(source, tokens, item_index)
         // Layout whitespace goes; a scope argument (`FS.Read("my data/")`) keeps its text.
         written: effect_scope_split(item.text)
-        name := written.base.replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
+        name := written.base.replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
         if written.scope == .Val(scope) -> name = effect_scope_name(name, scope)
         if item.next_index == item_index + 1 && jet_driver_is_manifest_string(tokens[item_index].kind) -> name = token_decoded(tables, tokens[item_index])
         // A positive `Panic` entry is one E0751 at that entry and grants nothing.
@@ -753,7 +753,7 @@ jet_driver_top_level_commas: fn(body: String) -> [String] Never! {
 }
 
 jet_driver_parse_program_allocator: fn(value: String, span: Span, diagnostics: &[Diagnostic]) -> AllocatorPolicy? {
-    compact: value.trim().replace(" ", "").replace("\t", "").replace(String.from_bytes([U8]{U8{13}}) ?? "", "").replace("\n", "")
+    compact: value.trim().replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
     if compact == "mem.Heap" -> return Val(AllocatorPolicy.HostedDefault)
     prefix: "mem.Counting.over("
     if compact.starts_with(prefix) && compact.ends_with(")") {

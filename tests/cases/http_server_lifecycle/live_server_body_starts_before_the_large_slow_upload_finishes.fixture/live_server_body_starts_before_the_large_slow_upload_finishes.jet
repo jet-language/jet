@@ -28,7 +28,7 @@ use {
     serving: task { mux.serve_once(listener) ?? panic("serve") }
     length: 512 * 1024
     client: net.tcp_connect(addr) ?? panic("connect")
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     client.write_all("POST /slow HTTP/1.1{crlf}Host: local{crlf}Content-Length: {length}{crlf}Connection: close{crlf}{crlf}".bytes()) ?? panic("headers write")
     chunk := [U8]{}
     loop _ in 0..<4096 -> chunk.push(7)

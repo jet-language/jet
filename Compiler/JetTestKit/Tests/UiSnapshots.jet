@@ -28,7 +28,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     report: "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n"
     assert_eq(kit_ui_actual(call, kit_ui_test_run(1, report)), "Error [jet.OperatorTypeMismatch]: mismatch\n")
     assert_eq(kit_ui_rendered_only("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n"), "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n")
-    crlf: String.from_bytes([U8{13}, U8{10}]) ?? panic("CRLF")
+    crlf: "\r\n"
     assert_eq(kit_ui_normalize("tests/ui/project/workspace.jet", "/staged/tests/ui/project/member.jet{crlf}Blocking waiting for file lock on package cache\n", "/staged"), "/tmp/member.jet\n")
     lint: kit_ui_invocation("", "tests/ui_lint/one.jet", true)
     assert_eq(lint.argv, ["check", "--verbose", "tests/ui_lint/one.jet"])

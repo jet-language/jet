@@ -55,7 +55,7 @@ compose: fn(catalog: Catalog?, at: SourceLocation{#caller}) -> App? {
 // One GET over a fresh connection; the body of the answer.
 get: fn(addr: String, path: String) -> String NetError! {
     client: net.tcp_connect(addr) ?? return Err(err)
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     client.write_all("GET {path} HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}".bytes()) ?? return Err(err)
     parts := [String]{}
     loop {

@@ -6,7 +6,7 @@ use {
     txt: core.text.parse
 }
 
-http_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+http_crlf: fn() -> String { "\r\n" }
 http_read: fn(stream: &net.TCPStream) -> String {
     String.from_bytes(stream.read(4096, deadline: 5s) ?? panic("read request")) ?? panic("request UTF-8")
 }

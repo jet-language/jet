@@ -54,7 +54,7 @@ pkg_bridge_foreign_host_target: fn() -[Env]> String Never! {
 // stamps are themselves `key=value;...` records. A field with several values
 // is written as repeated rows, never as one value that holds line breaks.
 pkg_bridge_append_line: fn(text: &String, name: String, value: String) ForeignBridgeError! {
-    carriage_return: String.from_bytes([U8]{U8{13}}) ?? ""
+    carriage_return: "\r"
     if name == "" || name.contains("\n") || name.contains(carriage_return) || name.contains("=") -> return Err(pkg_bridge_error("bridge provenance field names must be non-empty and hold no line break or `=`"))
     if value == "" || value.contains("\n") || value.contains(carriage_return) -> return Err(pkg_bridge_error("bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"))
     text = "{text}{name}={value}\n"
@@ -193,7 +193,7 @@ pkg_bridge_parse_provenance: fn(path: String) -[FS]> ForeignProvenanceText Forei
 // `str::lines`: split on `\n`, drop one trailing `\r` per line, and drop the
 // empty tail after a final newline.
 pkg_bridge_text_lines: fn(text: String) -> [String] Never! {
-    carriage_return: String.from_bytes([U8]{U8{13}}) ?? ""
+    carriage_return: "\r"
     lines := [String]{}
     loop line in text.split("\n") -> lines.push(line.removesuffix(carriage_return))
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()

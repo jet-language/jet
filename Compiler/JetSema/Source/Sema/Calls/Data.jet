@@ -1690,7 +1690,7 @@ sema_data_analytics_sql_literal: fn(expression: Expr) -> String? {
 }
 
 sema_data_analytics_sql_columns: fn(sql: String) -> [String] Never! {
-    normalized := sql.replace("\n", " ").replace(String.from_bytes([U8]{13}) ?? "", " ").replace("\t", " ")
+    normalized := sql.replace("\n", " ").replace("\r", " ").replace("\t", " ")
     tokens := [String]{}
     loop token in normalized.split(" ") {
         value := token.trim()

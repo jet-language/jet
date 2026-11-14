@@ -106,7 +106,7 @@ jet_cli_remote_parse: fn(bytes: [U8], builder: String) -> JetCLIRemoteBinding Je
     text: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("remote binding record is not UTF-8"))
     fields := [String:String]{}
     lines: text.split("\n").to_list()
-    carriage_return: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is valid UTF-8")
+    carriage_return: "\r"
     loop (index, line) in lines {
         if index == lines.len() - 1 && line == "" -> next
         // Rust lines() strips the CR of CRLF, but interior control text fails.

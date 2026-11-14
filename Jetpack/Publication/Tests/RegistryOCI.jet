@@ -63,7 +63,7 @@ publication_oci_test_descriptors: fn() -> [PublicationOCIDescriptor] Never! {
     assert_eq(publication_oci_provenance_payload(entry) ?? panic("provenance"), "jet-oci-provenance-v1\nsubject={subject}\npackage=ref-kit#1.0.0\ncontent-hash={subject}\nfingerprint=sha256-fingerprint\ntier=core\ngate-status=signature=not-required;audit=not-required;name=not-required;liveness=not-required;review=passed\n")
     assert_eq(publication_oci_reproducibility_payload(entry) ?? panic("reproducibility"), "jet-oci-reproducibility-v1\nsubject={subject}\nsource-hash={subject}\nfingerprint=sha256-fingerprint\nstatus=verified\n")
     assert(publication_validate_evidence_value("no\n", "publisher key") == .Err(.InvalidInput(_)))
-    carriage: String.from_bytes([U8]{13}) ?? panic("CR fixture")
+    carriage: "\r"
     assert(publication_validate_evidence_value("no{carriage}", "publisher key") == .Err(.InvalidInput(_)))
     publication_validate_evidence_value("ok=é", "publisher key") ?? panic("allowed value")
     entry.name = "ref\nkit"

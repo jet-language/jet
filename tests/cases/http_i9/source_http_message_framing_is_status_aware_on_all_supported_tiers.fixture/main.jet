@@ -44,7 +44,7 @@ invalid_request_header: fn(name: String, value: String) -[Net, Time.Wait]> Strin
 }
 
 run: fn() -[IO, Net, Time.Wait]> {
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     bad_request: "POST /secret HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()
     good_request: "POST /safe HTTP/1.1{crlf}Host: local{crlf}Content-Length: 2{crlf}{crlf}ok".bytes()
     bad_response: "HTTP/1.1 200 OK{crlf}Content-Length: 2{crlf}Transfer-Encoding: chunked{crlf}{crlf}ok".bytes()

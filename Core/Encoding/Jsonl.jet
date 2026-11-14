@@ -211,7 +211,7 @@ is_blank: fn(text: String) -> Bool Never! {
 
 
 #Test("JSONL text cursor skips blank records and retains record order") {
-    cr: String.from_bytes([U8]{13}) ?? panic("CR text")
+    cr: "\r"
     cursor := records("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
     first: cursor.next() ?? panic("first record")
     assert_eq(json.to_string(first) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}")
@@ -235,7 +235,7 @@ is_blank: fn(text: String) -> Bool Never! {
 }
 
 #Test("JSONL only strips CR from LF-terminated records") {
-    cr: String.from_bytes([U8]{13}) ?? panic("CR text")
+    cr: "\r"
     assert_eq(count_rows("{cr}\n"), 0)
     assert_eq(count_rows(cr), 1)
     assert_eq(count_rows(" \t{cr}"), 1)

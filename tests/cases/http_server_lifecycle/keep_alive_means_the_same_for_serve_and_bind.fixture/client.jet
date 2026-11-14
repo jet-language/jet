@@ -29,7 +29,7 @@ run: fn() {
         }
     }
     stream := connected ?? panic("connected stream")
-    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    crlf: "\r\n"
     request: "GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: keep-alive{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? panic("request write")
     // A server that kept the connection open would leave this read waiting
