@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6839,
-    "rev": 101964,
+    "rev": 101971,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -3616,7 +3616,7 @@
           "at": "2026-09-12T16:54:32.922Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:32.922Z"
     },
     {
@@ -26453,7 +26453,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m25-http-service-runtime",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nImplement ratified D-ONE-LIFECYCLE1=A (shared operations with explicit policies). Readiness, stop-admission, finite drain and resource close compose in one App-owned order, using the existing HTTP server and DB pool owners. No universal Service, Resource or Async type is added. Separately, factor the repeated interpreter ambient registration without changing per-mode reset or retention.\n\n## Current state\n- The HTTP server already has bounded shutdown: `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2062` `jet_http_server_shutdown(server, grace)`, proven by `tests/http_server_lifecycle.rs:3666,3719,3855,3904`. Jet surface: `Examples/features/net/http_server_lifecycle.jet:1-17`.\n- The DB pool has its own lifecycle in `crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs`: `ready` (`:476`), `drain(deadline_ms)` (`:500`) and `mark_drained` (`:158`). Jet entry is `Core/db/db.jet:28` `pool(url, max)`.\n- Nothing composes the two. `Examples/features/net/backend_battery/run.jet:95,145-147` prints the pool report and calls `bound.shutdown(100ms)` independently, and it has no golden.\n- `Source/JitBackend.rs:61-67`, `:91-97` and `:133-139` repeat the same seven `register_*_interpreter_ambient` calls plus hardware registration in run, hot_swap and restart.\n\n## Changes\n1. Host (`Source/JitBackend.rs`, retained JIT host): extract one `install_interpreter_ambient(ambient, program)` used by all three modes. The existing per-mode reset and retention stay at the call sites. Ambient registration must be idempotent, so a repeated install leaves no stale rows.\n2. New `Examples/features/net/app_lifecycle.jet`. It opens a DB pool and checks `ready()` before `bind`, serves, then shuts down in order:\n   - `server.shutdown(grace)` stops admission;\n   - a blocked handler gets a finite outcome (cancelled count reported);\n   - `pool.drain(deadline)` runs and the pool closes.\n   It prints each transition. A required resource that is not ready must refuse to bind and must never print a ready line.\n3. Where the ordering needs an owner hook (for example, drain waits for leased connections held by in-flight handlers), fix it in the owning HTTPServer.rs or DbPool.rs leaf, not in a new lifecycle type.\n4. Update backend_battery to use the same order.\n\n## Proof\n- `jet test Compiler --profile golden net/app_lifecycle`: ready, serving, admission-stopped, drain-outcome and closed print in that order on O0, O1 and O2.\n- `jet test Compiler --profile cases http_server_lifecycle/` passes.\n- New `Tools/agent/jet-env cargo test --test output_callable -- interpreter_backend_run_hot_swap_restart_keep_persist_retention` passes. It drives InterpreterBackend through run, then hot_swap, then restart; `#Persist` counter prints 1, 2, 1, and no duplicate registrations occur.\n\n## Batch\nbatch-core-net: HTTP and DB lifecycle composition. The JitBackend refactor is a small host change riding the same build.\n\n## Dependencies\nNone.",
       "checkSteps": "1. Not ready before required resources are usable.\n2. Shutdown stops new admission before resource close.\n3. A blocked request/worker has a finite drain outcome and observable failure.\n4. No clean-exit claim hides unfinished tasks or leaked resource ownership.",
@@ -26701,13 +26701,14 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-11-14T01:01:16.946Z",
+      "updated": "2026-11-14T01:32:49.967Z",
       "updatedBy": "Main",
       "workOrder": 87,
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 16
+      "criteriaLastN": 16,
+      "completedAt": "2026-11-14T01:32:49.967Z"
     },
     {
       "id": "c0c4k3fw",
@@ -48886,7 +48887,7 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Reproduce per tier: a lambda-served program under a connection flood (thread count), a panicking handler, SIGTERM during a slow request, a port already in use, and fd exhaustion. 2. Route every serve spelling (lambda, router, mux) through one server runtime with bounded admission, panic page, keep-alive, graceful drain and a typed bind error returned to the caller. 3. One accept policy: classify transient errors (EMFILE, ENFILE, ECONNABORTED), back off with a cap and keep serving; fatal listener errors end the server with a report. 4. One reason table in Core: an unknown code gets an empty reason (valid per RFC 9112 s4), never another code's text. 5. Under the Rust freeze, land the policy in the Core/http Jet port (#3665) with Rust keeping only provider leaves, and delete the duplicate runtime in the same cutover.",
       "checkSteps": null,
@@ -49038,12 +49039,13 @@
       "parentId": "c086hhzb",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-14T01:17:33.375Z",
+      "updated": "2026-11-14T01:32:52.809Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 11
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-14T01:32:52.809Z"
     },
     {
       "id": "c0w1f3xa",
@@ -82000,7 +82002,7 @@
       "track": "epoch",
       "epoch": "e5",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -82028,8 +82030,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T08:42:24.273Z",
-      "updated": "2026-11-14T00:37:25.257Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-14T01:33:00.756Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-14T01:33:00.756Z"
     },
     {
       "id": "c0zn6gbs",
@@ -91331,7 +91334,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -91359,9 +91362,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T09:36:09.947Z",
-      "updated": "2026-11-14T01:17:59.751Z",
+      "updated": "2026-11-14T01:33:02.926Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T01:33:02.926Z"
     },
     {
       "id": "c09a7oci",
@@ -95074,7 +95078,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95102,9 +95106,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T11:38:32.483Z",
-      "updated": "2026-11-14T00:42:01.017Z",
+      "updated": "2026-11-14T01:33:05.082Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T01:33:05.082Z"
     },
     {
       "id": "c0ipht83",
@@ -95205,7 +95210,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95233,9 +95238,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T12:04:12.555Z",
-      "updated": "2026-11-14T00:42:02.097Z",
+      "updated": "2026-11-14T01:33:07.345Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T01:33:07.345Z"
     },
     {
       "id": "c0w8eeu5",
@@ -95294,7 +95300,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95331,9 +95337,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T12:28:14.104Z",
-      "updated": "2026-11-14T00:45:18.175Z",
+      "updated": "2026-11-14T01:33:09.774Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T01:33:09.774Z"
     },
     {
       "id": "c0awq7vy",
@@ -204612,6 +204619,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T01:33:09.774Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0098utl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:33:07.346Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ro7ubx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:33:05.082Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09oub4t",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:33:02.927Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rd97i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:33:00.756Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c035bwsi",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:32:52.809Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:32:49.968Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uasubv",
+      "note": "phase"
+    },
     {
       "at": "2026-11-14T01:31:19.369Z",
       "by": "Main",
