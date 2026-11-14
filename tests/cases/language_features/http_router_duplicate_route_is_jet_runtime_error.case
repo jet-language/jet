@@ -1,11 +1,19 @@
 # PORT tests/tir_language_features.rs:1154-1185.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Two rows of one method and address on the App's one route table stop with
+# E2804, which names both lines: literal patterns while checking, run-time
+# patterns when the second one registers.
 fixture: http_router_duplicate_route_is_jet_runtime_error.fixture
+step: jet check http_duplicate_literal.jet
+exit: nonzero
+stderr: ~ "Error [jet.AmbiguousRoute]: Two routes both match `GET /users/:name`." # E2804 while checking
+stderr: ~ "--> http_duplicate_literal.jet:11:15" # the second `routes.get` line
+stderr: ~ "--> http_duplicate_literal.jet:10:15" # the first `routes.get` line
+stderr: ~ "first registered here" # the first line is labelled as the other row
+stderr: ~ "More: jet-lang.dev/e/E2804"
 step: jet build --profile=debug http_duplicate_route.jet
 exit: 0
 step: built
 exit: nonzero
-stderr: ~ "Stop [E2804]: Two routes both match `GET /users/:name`; the other is `/users/:id` at " # original ed77c235f tests/tir_language_features.rs:1174 contains predicate, in the E2804 registry wording core.rt.__coded_stop renders, naming the other row
-stderr: ~ "http_duplicate_route.jet:10." # the first `router.get` line, which the stop names as the other row
-stderr: ~ "http_duplicate_route.jet:11" # original ed77c235f tests/tir_language_features.rs:1178 contains predicate; the second `router.get` line
+stderr: ~ "Stop [E2804]: Two routes both match `GET /users/:name`; the other is `/users/:id` at http_duplicate_route.jet:14." # original ed77c235f tests/tir_language_features.rs:1174 contains predicate, in the E2804 registry wording core.rt.__coded_stop renders, naming the first `routes.get` line
+stderr: ~ "--> http_duplicate_route.jet:15 in run" # original ed77c235f tests/tir_language_features.rs:1178 contains predicate; the second `routes.get` line
 stderr: !~ "thread 'main' panicked" # original ed77c235f tests/tir_language_features.rs:1182 not contains predicate

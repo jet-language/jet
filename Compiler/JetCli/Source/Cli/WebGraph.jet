@@ -571,6 +571,10 @@ jet_cli_web_struct_mount: fn(args: [CallArg], functions: [Func]) -> String? {
     if args.len() == 0 || args.len() > 2 -> return None
     value: args[args.len() - 1].expr
     if value == .StructLit(type_name, _, _, _, _, _, _, _) -> return Val(type_name)
+    // `Orders{}` parses as a literal headed by its type.
+    if value == .TypedLit(head, _, _, _) {
+        if head == .Val(written) && jet_cli_web_named(written) == .Val(name) -> return Val(name)
+    }
     if args.len() == 1 -> return Val("")
     if value == .Ident(name, _, _) && jet_cli_web_function(functions, name) == None -> return Val("")
     None

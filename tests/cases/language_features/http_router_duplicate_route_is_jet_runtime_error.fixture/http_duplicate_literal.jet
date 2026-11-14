@@ -1,0 +1,12 @@
+use {
+    web: core.web
+    server: core.http.server
+}
+handle: fn(id: String?, name: String?) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "ok"))
+}
+run: fn() {
+    routes: web.app()
+    _: routes.get("/users/:id", handle)
+    _: routes.get("/users/:name", handle)
+}
