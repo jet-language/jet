@@ -224,10 +224,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1528,
+  "total": 1530,
   "counts": {
     "Compiler": 791,
-    "Core": 181,
+    "Core": 183,
     "Docs": 10,
     "Examples": 42,
     "Jetpack": 8,
@@ -2331,49 +2331,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 180,
+      "line": 186,
       "column": 5,
       "reason": "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 192,
+      "line": 198,
       "column": 9,
       "reason": "path is a fresh private page; the executable is mapped read-only and only read"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 220,
+      "line": 226,
       "column": 5,
       "reason": "the trace made this mapping and holds no pointer into it past this call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 230,
+      "line": 236,
       "column": 5,
       "reason": "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 258,
+      "line": 264,
       "column": 9,
       "reason": "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 280,
+      "line": 286,
       "column": 9,
       "reason": "block + 12 is inside this block, which lies in the read-only table"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Fault.jet",
-      "line": 349,
+      "line": 355,
       "column": 5,
       "reason": "at lies in the executable's read-only mapping: its ELF header, section table or location table"
     },
@@ -5824,49 +5824,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 653,
+      "line": 652,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1194,
+      "line": 1193,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1221,
+      "line": 1220,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1527,
+      "line": 1526,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1625,
+      "line": 1624,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1634,
+      "line": 1633,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1640,
+      "line": 1639,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -6513,6 +6513,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 112,
       "column": 1,
       "reason": "`pointer` names `len` live, aligned Ts that outlive every use of the window"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 151,
+      "column": 1,
+      "reason": "`pointer` and the T `count` elements past it lie in one live allocation"
+    },
+    {
+      "package": "Core",
+      "file": "Core/Mem/Mem.jet",
+      "line": 155,
+      "column": 1,
+      "reason": "`pointer` and the address `bytes` past it lie in one live allocation"
     },
     {
       "package": "Core",
@@ -10940,13 +10954,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 791 |
-| Core | 181 |
+| Core | 183 |
 | Docs | 10 |
 | Examples | 42 |
 | Jetpack | 8 |
 | Tools | 6 |
 | tests | 490 |
-| **total** | **1528** |
+| **total** | **1530** |
 
 ### Regions
 
@@ -11251,13 +11265,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 96:5 | "stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 114:5 | "stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words" |
 | Compiler | Compiler/JetRuntime/Source/Fault.jet | 146:5 | "rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 180:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 192:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 220:5 | "the trace made this mapping and holds no pointer into it past this call" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 230:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 258:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 280:9 | "block + 12 is inside this block, which lies in the read-only table" |
-| Compiler | Compiler/JetRuntime/Source/Fault.jet | 349:5 | "at lies in the executable's read-only mapping: its ELF header, section table or location table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 186:5 | "stub is a fresh private page that holds `mov rax, rbp; ret` and becomes read+execute before the call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 198:9 | "path is a fresh private page; the executable is mapped read-only and only read" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 226:5 | "the trace made this mapping and holds no pointer into it past this call" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 236:5 | "image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 264:9 | "frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 286:9 | "block + 12 is inside this block, which lies in the read-only table" |
+| Compiler | Compiler/JetRuntime/Source/Fault.jet | 355:5 | "at lies in the executable's read-only mapping: its ELF header, section table or location table" |
 | Compiler | Compiler/JetRuntime/Source/FaultAllocation.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/FaultSchedule.jet | 32:9 | "an idempotent install: every writer stores the same code address" |
 | Compiler | Compiler/JetRuntime/Source/Fiber.jet | 108:5 | "the carrier saved its stack at carrier+16 when it switched to this fiber and runs nothing else until this switch resumes it" |
@@ -11750,13 +11764,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Crypto.jet | 298:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
 | Core | Core/Crypto/Crypto.jet | 303:5 | "vault key import: construct the typed recipient unlock request" |
 | Core | Core/Crypto/Crypto.jet | 308:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 653:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1194:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1221:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 1527:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 1625:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 1634:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 1640:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 652:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1193:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1220:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 1526:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 1624:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 1633:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 1639:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/Expert.jet | 293:1 | "crypto expert: the caller vouches for the password it hands the hash; its bytes stay in this call" |
 | Core | Core/Crypto/Expert.jet | 332:1 | "crypto expert: the caller takes custody of the secret's raw bytes and wipes them" |
 | Core | Core/Crypto/Expert.jet | 334:1 | "crypto expert: the caller takes custody of the shared secret's raw bytes and wipes them" |
@@ -11849,6 +11863,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Mem/Mem.jet | 94:13 | "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them" |
 | Core | Core/Mem/Mem.jet | 103:13 | "`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them" |
 | Core | Core/Mem/Mem.jet | 112:1 | "`pointer` names `len` live, aligned Ts that outlive every use of the window" |
+| Core | Core/Mem/Mem.jet | 151:1 | "`pointer` and the T `count` elements past it lie in one live allocation" |
+| Core | Core/Mem/Mem.jet | 155:1 | "`pointer` and the address `bytes` past it lie in one live allocation" |
 | Core | Core/Mem/Mem.jet | 164:1 | "the pages are fresh and private; the caller unmaps them once, with `__region_release` at the length it reserved" |
 | Core | Core/Mem/Mem.jet | 168:1 | "`address` and `bytes` are a mapping `__region_reserve` answered, and nothing reads or writes its pages again" |
 | Core | Core/Mem/Mem.jet | 188:9 | "the runtime maps fresh private pages that no other owner can see; the region unmaps them once, at close" |
