@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102464,
+    "rev": 102465,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73024,6 +73024,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "1a defects found by Speed-1 (2026-11-14, gate-p66). (1) The record is off inside any checkout: jet_cli_core_record (CoreRecordCheck.jet:211) returns None whenever jet_cli_toolchain_root finds a root, so examples, tests and every gauntlet entry compile Core from source and never use precompiled Core. Fix rule (Main): use the record whenever the Core being compiled matches the record's Core digest; source only on a mismatch; trace the choice. (2) With the record on, the RCC check loads in 10.0 s at 936 MB (peak 1.46 GB, wall 32 s), against about 2.6 s on the source path, which breaks c37. Both go to PrecompiledCore-2 ahead of further size work. With the record on, #6759 c1 (one landing child) and c5 (one precheck child) hold (traces: $JET_SCRATCH_ROOT/lanes/Speed-1/c1/jt-rec.json, rcc-rec.json)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-14): S7b-2b takes no header-only rows. Header-only rows would break every release/deep-check/coverage/comptime_values/non-Fatal-bounds build that calls the function, since those paths build bodies instead of binding (BuildCore ir_core_image_fits, ir_core_bound). Instead, the 64 MB total (record + Core code as shipped) comes from (1) shipping Core code once (the image and jet_core.o share one copy) and (2) compressed record body rows, decoded lazily per function. This supersedes the header-only part of the S7b-2 decision (rev 102442); option A's O2 Core object and static-link GC stand."
         },
         {
@@ -73660,7 +73665,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T15:59:37.892Z",
+      "updated": "2026-11-14T16:27:39.982Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -83224,129 +83229,6 @@
       "created": "2026-11-04T10:39:48.294Z",
       "updated": "2026-11-08T14:06:09.907Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0ewbkcj",
-      "num": 6561,
-      "title": "Types contain their impls: jet check --style flags a detached impl and jet fix --style moves it into the type body",
-      "body": "Owner direction: across all Jet code (Core libraries, the compiler, Jetpack, examples, tests and tools), a struct or enum contains its own impls. A separate top-level impl is allowed only when it has to be somewhere else. Struct and enum bodies already accept methods and nested `impl Trait { … }` blocks (Compiler/JetParser/Source/Parser/Items.jet:1947-1952 and :2035-2042), so this needs no new syntax.\n\nCensus at dev 2d8aea4762: 1,335 top-level impls sit in the same file as their own struct or enum, in 580 files. By tree: Compiler 282, Core 368, tests 436, Examples 179, Jetpack 42, Tools 27, Docs 1.\n\nAllowed exceptions (each must be named by the lint's own rule, not by an allow list): the type is declared in another file, module or package; an error conversion `impl A -> B`; a protocol side `impl X.Client` or `impl X.Server`; a target-specific impl; an impl a derive or generated source writes; an impl the type body cannot hold (for example `impl T.Trait using field` until the nested form accepts `using`).\n\nFlag: `--style` turns on opt-in style checks on `jet check` and applies their fixes on `jet fix`. Impl placement is the first member. The marker cutover on #6039 already writes markers in the nested form.",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "1. Parity: nested impl blocks accept everything a top-level impl does that a type body can hold (assoc types, constants, operator right-hand types, #Commutative, and `using` delegation if feasible). 2. Lint: a registered lint code with what/why/fix text and a UI snapshot. It is off by default and on under `jet check --style`, and it flags an `impl T` or `impl T.Trait` in the same file as `struct T` or `enum T` outside its body, unless an exception rule applies. 3. Fix: `jet fix --style` moves each flagged impl into the type body. Inherent methods become `fn` members and trait impls become nested `impl Trait { … }`, keeping comments and order. Re-check after the move, and skip it with a reason if checking fails. 4. Formatter keeps nested impls in place. 5. Sweep the whole tree with `jet fix --style` in collect-all mode, one commit per top-level tree. 6. One line of style guidance in Docs/spec/contributing/agent-engineering.md.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Every criterion met. The last was c6: the a0.0.44 admit compare showed golden and ui lost 0, and the one cases loss is rooted elsewhere (cf7dbdb374, fixed by G8Scope-18 under #6530 c7). c7 was removed as a paste-error duplicate of #6066 c11."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "c6 status 2026-11-11 (G6Decl, seed-t22 on dev 5747bd6167): jet check --style reports 0 L0535 detached_impl findings on Core (rc 0, no problems) and Compiler (rc 0; the 1407 warnings from other style lints belong to other cards). Jetpack, Tools, Examples and tests aren't workspace roots. The impl_placement guard is at 0 on every root. The remaining half, golden and cases losing 0 rows, is read from the a0.0.44 admit's full-suite compare after t23, with no separate run."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "t22 landed G1Lead-4-f1rb2 (8eaf6f17cc, part 2 of the c6 sweep): tests/guards/impl_placement passes 2/2, and `jet check --style Core` and the CoreCoverage ratchet pass. c6 also needs `jet check --style` at 0 on every other workspace root, so it stays open until that proof runs (G6Decl-24 brings the rest of the sweep)."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "t18a landed G6LeadF-1r (c2cecce162..0a995af312): c6 part 1 of 2. Every impl outside Core sits in its type's body, and jet check --style Compiler reports no L0535. c6 stays open for part 2. The c1 evidence moved to tests/cases/ui_lint_style/impl_placement.case and .warn."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "Main 2026-11-04: C4 retargeted as criterion 6 (jet check DIR checks only the entry, not every file). Prep finding: nested impl Trait {} blocks do not receive the trait's default methods (E0102) while the top-level form does (probe $JET_SCRATCH_ROOT/lanes/Main/prep/nested_parity.jet); the parity step must fix it before any sweep. The lint skips impl heads that already carry an error (E0321, E0003, E0908) as a named rule of the lint; this is covered by the card's own exception rule, so no ballot is needed."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A registered lint, off by default and on under `jet check --style`, flags every top-level `impl T` or `impl T.Trait` in the same file as `struct T` or `enum T` unless a named exception rule applies. It has what/why/fix text and a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-5. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts).",
-          "at": "2026-11-10T16:28:34.873Z"
-        },
-        {
-          "n": 2,
-          "text": "`jet fix --style` moves each flagged impl into its type body (inherent methods as `fn` members, trait impls as nested `impl Trait { … }`), keeping comments. The moved file checks, formats unchanged and runs the same, proven by a fixture test with a golden.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-6. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts).",
-          "at": "2026-11-10T16:28:39.471Z"
-        },
-        {
-          "n": 3,
-          "text": "Nested impl blocks accept every member a top-level impl accepts that a type body can hold, or the lint's exception rule names the missing one.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md). Proven on s1 jet 906f73d6451c5ab0 (= dev 0aa0e392b8 + batch 2): 4 nested_impls cases PASS (cases-b2q-cases).",
-          "at": "2026-11-04T17:46:19.487Z"
-        },
-        {
-          "n": 5,
-          "text": "Docs/spec/contributing/agent-engineering.md states the rule in one line and names `jet check --style` as its check.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-5. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts).",
-          "at": "2026-11-10T16:28:37.198Z"
-        },
-        {
-          "n": 6,
-          "text": "(replaces C4, which assumed jet check DIR checks every file; it checks only the package or workspace entry) After the sweep, the guard tests/guards/impl_placement.jet runs the same lint rule over every tracked .jet file under Compiler/, Core/, Jetpack/, Examples/, tests/ (tests/cases/cross excluded) and Tools/ and reports 0 findings; jet check --style on each workspace root reports 0; and the golden, UI and cases compares lose 0 rows. An impl whose head already carries an error from the same check is skipped by a named rule of the lint.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Compare half: a0.0.44 admit on 9755703c76 (released 2026-11-11 11:11; REPORT at $JET_STATE_ROOT/release/9755703c7670/REPORT.md). Against a0.0.43, golden lost 0 and ui lost 0. Cases lost 1 row, reader_region_tiers/reader_whole_byte_take_patterns…, and G8Scope traced it to a latent take_pattern gate that compared the spelling Reader instead of the handle, exposed by cf7dbdb374 (core.process now depends on core.term); not by this card's impl sweep. Its fix is G8Scope-18 under #6530 c7. The lint half (impl_placement guard 0 findings, L0535) was recorded earlier on this card.",
-          "at": "2026-11-11T16:15:32.727Z"
-        },
-        {
-          "n": 8,
-          "text": "An inherent impl that carries its own markers is not flattened into the type body, because its markers would become the type's markers. This covers markers above the impl, and #X: value lines inside it once #6562 lands. The lint's named exception rule (g) skips such an impl. A trait impl moves as a nested impl Trait { ... } that keeps its own markers where they were written, above it or inside it. A fixture covers both. Today the only marked impls are 18 #Target(OS.*) sites, already covered by exception rule (d); rule (g) applies to future code only. (D-MARKER-INBODY1 A, owner 2026-11-04: markers anywhere in the body.)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-6. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts).",
-          "at": "2026-11-10T16:28:41.589Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "owner-direction",
-        "style",
-        "jet-fix",
-        "audit-sweep"
-      ],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-04T11:57:35.608Z",
-      "updated": "2026-11-11T16:16:04.483Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 8,
-      "completedAt": "2026-11-11T16:16:04.483Z"
     },
     {
       "id": "c0gelll3",
@@ -205331,6 +205213,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T16:27:39.982Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T16:10:58.388Z",
       "by": "Main",
