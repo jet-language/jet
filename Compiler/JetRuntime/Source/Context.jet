@@ -48,8 +48,9 @@ CONTEXT_NODE_NEXT: I64{32}
 
 context_current: fn() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SLOT)) }
 
-// TCB bytes including the appended root record (Thread.jet).
-context_tcb_bytes: fn() -> I64 { CONTEXT_TCB_ROOT + CONTEXT_RECORD_BYTES }
+// TCB bytes including the appended root record and, after it, Alloc's kept
+// large-mapping rows (Thread.jet; Alloc.jet ALLOC_LARGE_ROWS).
+context_tcb_bytes: fn() -> I64 { ALLOC_LARGE_ROWS + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16}) }
 
 // A zeroed root record is the empty root context.
 context_tcb_install_root: fn(tcb: I64) { sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT) }

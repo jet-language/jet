@@ -8,7 +8,7 @@
 // path there. Word 208 holds the table of the 32 arenas (216 bytes each:
 // [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
-// the large-block cache owns lock 216, cached bytes 224 and 59 class heads
+// the large-block cache owns lock 216, cached bytes 224 (atomic) and 59 class heads
 // from 256; the slab regions own lock 736, cursor 744, end 752, the
 // free-slab stack 760 and the next region size 768 (alloc_slab_map); words
 // 232 and 240 are the page map's root and lock (ALLOC_PAGE_MAP).
@@ -51,9 +51,10 @@
 // slabs go on the process's free-slab stack, still mapped, for the next new
 // slab of any class (alloc_slab_map: slabs are carved from slab regions and
 // their pages never fault twice). Large mappings are rounded to a size class (at most 25% over
-// the page-rounded need) and a freed one is kept on its class list while the
-// cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
-// bound stays small), for the next allocation of that class instead of
+// the page-rounded need) and a freed one is kept, in a row of the freeing
+// thread's TCB (ALLOC_LARGE_ROWS) or on its class list, while the cache holds
+// at most ALLOC_LARGE_CACHE_BYTES in all (resident pages a compiler keeps, so
+// the bound stays small), for the next allocation of that class instead of
 // munmap + mmap; reused large blocks are not zeroed, as small blocks never
 // are. The state page, the arena table, the retained empty slabs and the
 // cached large mappings are bounded allocator-owned process-lifetime
@@ -879,8 +880,11 @@ alloc_cache_sync: fn(tcb: I64) {
 // A fiber switching in on the thread whose TCB is `tcb` (Fiber.jet
 // fiber_run) takes the thread's cached blocks, as only the running TCB
 // touches them, unless the thread's rows are blocked: those stay, and the
-// fiber starts empty. Then the fiber's rows follow its own record.
+// fiber starts empty. Then the fiber's rows follow its own record. The
+// thread's kept large mappings go to the fiber either way (they are no
+// payload a user allocator could own).
 alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
+    alloc_large_rows_move(tcb, fiber_tcb)
     if alloc_cache_blocked(tcb) {
         alloc_cache_set(fiber_tcb, I64{0}, I64{0})
     } else {
@@ -892,8 +896,10 @@ alloc_cache_lend: fn(tcb: I64, fiber_tcb: I64) {
 // The fiber on `fiber_tcb` switched out to the thread on `tcb`: its cached
 // blocks go back to the thread, or to their slabs when the thread's rows
 // are blocked. A blocked fiber holds none, and the thread's rows are then as
-// alloc_cache_lend left them.
+// alloc_cache_lend left them. Its kept large mappings always go back, so a
+// fiber that is not running holds none.
 alloc_cache_reclaim: fn(fiber_tcb: I64, tcb: I64) {
+    alloc_large_rows_move(fiber_tcb, tcb)
     if alloc_cache_blocked(fiber_tcb) -> return
     if !alloc_cache_blocked(tcb) {
         alloc_cache_move(fiber_tcb, tcb)
@@ -944,45 +950,166 @@ alloc_large_class: fn(bytes: I64) -> I64 Never! {
     class
 }
 
-// A cached mapping of `class`, unlinked from its list, or zero.
+// The bound on cached large mappings, shared and kept together (64 MiB):
+// resident pages a compiler keeps, so it stays small.
+ALLOC_LARGE_CACHE_BYTES: I64{67108864}
+
+// Each attached TCB keeps up to ALLOC_LARGE_ROW_COUNT freed class-sized
+// mappings of at most ALLOC_LARGE_ROW_LIMIT bytes in [mapping][bytes] rows
+// at ALLOC_LARGE_ROWS (Thread.jet), an empty row's bytes zero. A thread
+// takes and keeps them without the large-cache lock, so threads that free
+// and reallocate lists of like sizes no longer queue on that one lock (or
+// on munmap + mmap). A kept mapping counts in the cached bytes
+// (alloc_root + 224) as a shared one does, so ALLOC_LARGE_CACHE_BYTES bounds
+// both; that word is atomic because rows change it outside the lock. A
+// mapping is reachable from exactly one TCB or one class list: a fiber takes
+// its carrier's rows while it runs (alloc_cache_lend, alloc_cache_reclaim),
+// and thread exit shelves them (alloc_large_rows_flush).
+ALLOC_LARGE_ROWS: I64{504}
+ALLOC_LARGE_ROW_COUNT: I64{8}
+ALLOC_LARGE_ROW_LIMIT: I64{1048576}
+
+// The calling thread's first kept-mapping row, or zero without a TCB.
+alloc_large_rows: fn() -> I64 {
+    base: thread_base()
+    if (base == I64{0}) -> return I64{0}
+    wrapping(base + ALLOC_LARGE_ROWS)
+}
+
+// Counts `bytes` more cached bytes; false, counting nothing, when that
+// would pass ALLOC_LARGE_CACHE_BYTES.
+alloc_large_count: fn(bytes: I64) -> Bool {
+    total: wrapping(alloc_root + I64{224})
+    held: sync_add(total, bytes)
+    if (wrapping(held + bytes) <= ALLOC_LARGE_CACHE_BYTES) -> return true
+    _ := sync_add(total, wrapping(I64{0} - bytes))
+    false
+}
+
+// A mapping of exactly `bytes` the calling thread kept, out of its row and
+// the cached count, or zero.
+alloc_large_take: fn(bytes: I64) -> I64 {
+    if (bytes > ALLOC_LARGE_ROW_LIMIT) -> return I64{0}
+    rows: alloc_large_rows()
+    if (rows == I64{0}) -> return I64{0}
+    row := rows
+    loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
+        #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
+            if (os_load_i64(wrapping(row + I64{8})) == bytes) {
+                mapping: os_load_i64(row)
+                os_store_i64(row, I64{0})
+                os_store_i64(wrapping(row + I64{8}), I64{0})
+                _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
+                return mapping
+            }
+        }
+        row = wrapping(row + I64{16})
+    }
+    I64{0}
+}
+
+// Keeps counted mapping `mapping` of `bytes` in a free row of the calling
+// thread; false when it has none or the mapping is past the row limit.
+alloc_large_keep: fn(mapping: I64, bytes: I64) -> Bool {
+    if (bytes > ALLOC_LARGE_ROW_LIMIT) -> return false
+    rows: alloc_large_rows()
+    if (rows == I64{0}) -> return false
+    row := rows
+    loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
+        #Unsafe("row is one of the running TCB's kept-mapping rows, which only the thread running on it touches") {
+            if (os_load_i64(wrapping(row + I64{8})) == I64{0}) {
+                os_store_i64(row, mapping)
+                os_store_i64(wrapping(row + I64{8}), bytes)
+                return true
+            }
+        }
+        row = wrapping(row + I64{16})
+    }
+    false
+}
+
+// Links counted mapping `mapping` onto the list of its `class`.
+alloc_large_shelve: fn(mapping: I64, class: I64) {
+    lock: wrapping(alloc_root + I64{216})
+    head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
+    alloc_lock(lock)
+    #Unsafe("the large-cache lock owns every class list; the mapping's first word is no live payload once it is freed") {
+        os_store_i64(mapping, os_load_i64(head))
+        os_store_i64(head, mapping)
+    }
+    alloc_unlock(lock)
+}
+
+// Moves the kept-mapping rows of TCB `from` to TCB `to`, emptying `from`.
+alloc_large_rows_move: fn(from: I64, to: I64) {
+    at := ALLOC_LARGE_ROWS
+    loop at < wrapping(ALLOC_LARGE_ROWS + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
+        bytes: sync_load(wrapping(from + wrapping(at + I64{8})))
+        if (bytes != I64{0}) {
+            alloc_large_row_put(wrapping(to + at), sync_load(wrapping(from + at)), bytes)
+            sync_store(wrapping(from + at), I64{0})
+            sync_store(wrapping(from + wrapping(at + I64{8})), I64{0})
+        }
+        at = wrapping(at + I64{16})
+    }
+}
+
+// Puts counted mapping `mapping` of `bytes` in kept-mapping `row`; a row
+// still holding one is no target, so the mapping is shelved instead.
+alloc_large_row_put: fn(row: I64, mapping: I64, bytes: I64) {
+    if (sync_load(wrapping(row + I64{8})) != I64{0}) {
+        alloc_large_shelve(mapping, alloc_large_class(bytes))
+        return
+    }
+    sync_store(row, mapping)
+    sync_store(wrapping(row + I64{8}), bytes)
+}
+
+// Shelves every mapping the calling thread kept (still counted): thread
+// exit, before its TCB goes away. A thread without a TCB keeps none.
+alloc_large_rows_flush: fn() {
+    rows: alloc_large_rows()
+    if (rows == I64{0}) -> return
+    row := rows
+    loop row < wrapping(rows + wrapping(ALLOC_LARGE_ROW_COUNT * I64{16})) {
+        bytes: sync_load(wrapping(row + I64{8}))
+        if (bytes != I64{0}) {
+            alloc_large_shelve(sync_load(row), alloc_large_class(bytes))
+            sync_store(row, I64{0})
+            sync_store(wrapping(row + I64{8}), I64{0})
+        }
+        row = wrapping(row + I64{16})
+    }
+}
+
+// A cached mapping of `class`: one the calling thread kept, else one
+// unlinked from its class list, out of the cached count; or zero.
 alloc_large_cached: fn(class: I64) -> I64 {
+    bytes: wrapping(alloc_large_class_pages(class) * I64{4096})
+    kept: alloc_large_take(bytes)
+    if (kept != I64{0}) -> return kept
     lock: wrapping(alloc_root + I64{216})
     head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
     alloc_lock(lock)
     mapping := I64{0}
-    #Unsafe("the large-cache lock owns every class list, its link words and the cached byte count") {
+    #Unsafe("the large-cache lock owns every class list and its link words") {
         mapping = os_load_i64(head)
-        if (mapping != I64{0}) {
-            os_store_i64(head, os_load_i64(mapping))
-            total: wrapping(alloc_root + I64{224})
-            os_store_i64(total, wrapping(os_load_i64(total) - wrapping(alloc_large_class_pages(class) * I64{4096})))
-        }
+        if (mapping != I64{0}) -> os_store_i64(head, os_load_i64(mapping))
     }
     alloc_unlock(lock)
+    if (mapping != I64{0}) -> _ := sync_add(wrapping(alloc_root + I64{224}), wrapping(I64{0} - bytes))
     mapping
 }
 
-// Returns a freed large mapping to its class list while the cache holds at
-// most 64 MiB, else unmaps it. Mappings above the largest class are unmapped.
+// Keeps a freed class-sized large mapping (a row of the calling thread, else
+// its class list) while the cache holds at most ALLOC_LARGE_CACHE_BYTES,
+// else unmaps it. Mappings above the largest class are unmapped.
 alloc_large_free: fn(mapping: I64, bytes: I64) {
     class: alloc_large_class(bytes)
-    if (class >= I64{0} && wrapping(alloc_large_class_pages(class) * I64{4096}) == bytes) {
-        lock: wrapping(alloc_root + I64{216})
-        alloc_lock(lock)
-        cached := false
-        #Unsafe("the large-cache lock owns every class list and the cached byte count; the mapping's first word is no live payload once it is freed") {
-            total: wrapping(alloc_root + I64{224})
-            held: os_load_i64(total)
-            if (held <= wrapping(I64{67108864} - bytes)) {
-                head: wrapping(alloc_root + wrapping(I64{256} + wrapping(class * I64{8})))
-                os_store_i64(mapping, os_load_i64(head))
-                os_store_i64(head, mapping)
-                os_store_i64(total, wrapping(held + bytes))
-                cached = true
-            }
-        }
-        alloc_unlock(lock)
-        if cached -> return
+    if (class >= I64{0} && wrapping(alloc_large_class_pages(class) * I64{4096}) == bytes && alloc_large_count(bytes)) {
+        if alloc_large_keep(mapping, bytes) -> return
+        alloc_large_shelve(mapping, class)
+        return
     }
     alloc_unmap(mapping, bytes)
 }

@@ -123,6 +123,58 @@ alloc_test_large_reuse: fn() {
     jet_rt_free(second, I64{65537}, I64{8})
 }
 
+// The kept bytes of the calling thread's large row `index`, 0 when empty.
+alloc_test_large_row: fn(index: I64) -> I64 {
+    sync_load(wrapping(alloc_large_rows() + wrapping(wrapping(index * I64{16}) + I64{8})))
+}
+
+// A thread keeps its first ALLOC_LARGE_ROW_COUNT freed class mappings in its
+// rows and shelves the next on its class list, all counted as cached; thread
+// exit's flush shelves the kept ones, still counted. Every one then serves a
+// later allocation of the class: none was unmapped.
+alloc_test_large_rows: fn() {
+    alloc_large_rows_flush()
+    count: wrapping(ALLOC_LARGE_ROW_COUNT + I64{1})
+    held: jet_rt_alloc(wrapping(count * I64{8}), I64{8})
+    at := I64{0}
+    loop at < count {
+        sync_store(wrapping(held + wrapping(at * I64{8})), jet_rt_alloc(I64{65537}, I64{8}))
+        at = wrapping(at + I64{1})
+    }
+    cached: sync_load(wrapping(alloc_root + I64{224}))
+    at = I64{0}
+    loop at < count {
+        jet_rt_free(sync_load(wrapping(held + wrapping(at * I64{8}))), I64{65537}, I64{8})
+        at = wrapping(at + I64{1})
+    }
+    bytes: alloc_test_large_row(I64{0})
+    alloc_test_require(bytes > I64{65537} && alloc_test_large_row(wrapping(ALLOC_LARGE_ROW_COUNT - I64{1})) == bytes)
+    alloc_test_require(sync_load(wrapping(alloc_root + I64{224})) == wrapping(cached + wrapping(count * bytes)))
+    alloc_large_rows_flush()
+    alloc_test_require(alloc_test_large_row(I64{0}) == I64{0})
+    alloc_test_require(sync_load(wrapping(alloc_root + I64{224})) == wrapping(cached + wrapping(count * bytes)))
+    taken := I64{0}
+    loop taken < count {
+        again: jet_rt_alloc(I64{65537}, I64{8})
+        found := false
+        at = I64{0}
+        loop at < count {
+            if (sync_load(wrapping(held + wrapping(at * I64{8}))) == again) -> found = true
+            at = wrapping(at + I64{1})
+        }
+        alloc_test_require(found)
+        taken = wrapping(taken + I64{1})
+    }
+    alloc_test_require(sync_load(wrapping(alloc_root + I64{224})) == cached)
+    at = I64{0}
+    loop at < count {
+        jet_rt_free(sync_load(wrapping(held + wrapping(at * I64{8}))), I64{65537}, I64{8})
+        at = wrapping(at + I64{1})
+    }
+    jet_rt_free(held, wrapping(count * I64{8}), I64{8})
+    alloc_large_rows_flush()
+}
+
 alloc_test_full_slabs: fn() {
     // Class 4096 has 15 blocks/slab. The 16th block must come from a second
     // mapping. Keep our pointer chain inside owned payloads, not a Jet list.
@@ -453,6 +505,7 @@ alloc_tests: fn() {
     alloc_test_payload(I64{1}, I64{8192})
     alloc_test_payload(I64{65537}, I64{8192})
     alloc_test_large_reuse()
+    alloc_test_large_rows()
     alloc_test_reuse()
     alloc_test_full_slabs()
     alloc_test_slab_stack()
