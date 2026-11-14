@@ -1305,26 +1305,24 @@ jet_driver_comptime_function_closure: fn(
         // The visit settles the function's node when it is the same in
         // every closure (JetDriverComptimeClosureNode).
         node: jet_driver_comptime_node_id(index, current.module_identity, current.function_key)
-        // A settled foreign function's check reads only the graph: its row
-        // stands for a fresh one (an asm body's check reads its module's text).
-        if index.nodes[node].settled && index.nodes[node].foreign == .Val(settled_foreign) {
-            if settled_foreign.foreign == .Val(row) -> foreign.push(row.copy())
-            sema_comptime_failure_closure_add(graph, failure_closure, settled_foreign)
-            next
-        }
+        // A settled foreign function's check reads only the graph: its
+        // result stands for a fresh one (an asm body's check reads its
+        // module's text), ahead of any older waiting row.
+        settled_foreign: index.nodes[node].settled && index.nodes[node].foreign != None
         successors := [Int]{}
         obligation_mark: failure_closure.obligations.len()
         reused_row := -1
-        if index.checked_rows.get(checked_key) == .Val(row) {
+        if !settled_foreign && index.checked_rows.get(checked_key) == .Val(row) {
             if checked_functions[row].complete || checked_functions[row].obligations_pending -> reused_row = row
         }
         waiting_row := -1
-        if reused_row < 0 && index.waiting_rows.get(checked_key) == .Val(row) {
+        if !settled_foreign && reused_row < 0 && index.waiting_rows.get(checked_key) == .Val(row) {
             if !jet_driver_comptime_any_available(available, index.waiting_functions[row].waiting_dependencies) -> waiting_row = row
         }
-        fresh: reused_row < 0 && waiting_row < 0
+        fresh: !settled_foreign && reused_row < 0 && waiting_row < 0
         if fresh && memory_plan.len() == 0 -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
         checked := if {
+            settled_foreign -> index.nodes[node].foreign ?? panic("a settled foreign closure node lost its check")
             reused_row >= 0 -> checked_functions[reused_row]
             waiting_row >= 0 -> index.waiting_functions[waiting_row]
             else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
@@ -1342,7 +1340,7 @@ jet_driver_comptime_function_closure: fn(
             // An `#Import(c)`'s failure row (sema_check_comptime_function):
             // its callers' obligations against it settle over the closure.
             sema_comptime_failure_closure_add(graph, failure_closure, checked)
-            if checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, foreign: Val(checked.copy()), obligations: failure_closure.obligations.len() > obligation_mark}
+            if checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, foreign: Val(checked.move()), obligations: failure_closure.obligations.len() > obligation_mark}
             next
         }
         // A fresh check of a function with no row yet adds its row below,
@@ -1505,8 +1503,8 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
             if jet_driver_comptime_wait_row_find(rows, dependency) != None && jet_driver_comptime_wait_cycle_from(dependency, rows, path, finished) -> return true
         }
     }
-    _ := path.pop()
-    finished.push(key.copy())
+    // The key pushed above leaves the path for the finished list.
+    finished.push(path.pop() ?? panic("a wait-cycle path lost its key"))
     false
 }
 
