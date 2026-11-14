@@ -4,7 +4,7 @@
   "cells": ["netserv.client"],
   "mode": "batch",
   "perf": false,
-  "languages": ["jet", "rust", "python", "go", "node"],
+  "languages": ["jet", "rust", "python", "go", "node", "c", "zig"],
   "spec": {
     "behavior": "Use an HTTP client to GET a fixed JSON item list, print its count and total quantity, then GET item ids 2, 5, and 99 and print the two records plus a missing marker for the 404.",
     "args": ["http://127.0.0.1:18400"],
@@ -29,7 +29,9 @@
     "rust": {"author": "luna-max", "turns": 3, "retries": 1, "diagnosticsHit": ["error: couldn't read `rust/main.rs`: No such file or directory (os error 2)"], "notes": "Rust std has no HTTP or JSON client; hand-wrote HTTP/1.1 over TcpStream and fixed-schema JSON field extraction, including quantity summation."},
     "python": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["python3: can't open file `python/main.py`: [Errno 2] No such file or directory"], "notes": "Uses urllib and stdlib json."},
     "go": {"author": "luna-max", "turns": 2, "retries": 1, "diagnosticsHit": ["package `go/main.go` is not in std"], "notes": "Uses net/http and encoding/json."},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in fetch rail against the same peer, preserving item lines, 404 handling, and total quantity."}
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Added a built-in fetch rail against the same peer, preserving item lines, 404 handling, and total quantity."},
+    "c": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "libc only: getaddrinfo and POSIX sockets. C has no HTTP or JSON library, so, like the Rust rail, it hand-writes the HTTP/1.1 GET and the fixed-schema item field extraction. No vendored library."},
+    "zig": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Zig std only: std.http.Client fetch and std.json typed parsing."}
   },
   "rewrite_provenance": {
     "worker": "CorpusHttpClient",
