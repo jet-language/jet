@@ -509,9 +509,10 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
 
 // The list-index stop of compiled code (jet_runtime_stop): the IR's native word
 // index, reported as a `panic` is (JetIR ir_list_bounds_stop): at the
-// indexing file and line, then the report context (the `--> file:line in
-// function` heading and the source under its caret) and the frame's locals
-// line (trap_bounds_locals). `site` is the static descriptor JetIR
+// indexing file and line, then the report context (the `--> file:line:column
+// in function` heading and the source under its caret) and the frame's locals
+// line (trap_bounds_locals); `backtrace: off` prints neither (fault_frames_off).
+// `site` is the static descriptor JetIR
 // ir_bounds_site writes: five little-endian 32-bit fields (the line, the
 // lengths of the path, the context and the labels, and how many local words
 // are this call's own arguments), then the path, the context and the
@@ -535,9 +536,11 @@ trap_build_msg_list_noun: fn(builder: I64, len: I64) {
     trap_write(rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
     trap_msg_message_end()
-    trap_write(context, context_len)
-    area: if (trap_u32(wrapping(site + I64{16})) != I64{0}) -> I64{0} else -> first
-    trap_bounds_locals(area, first, second, third, wrapping(context + context_len), labels_len)
+    if !fault_frames_off() {
+        trap_write(context, context_len)
+        area: if (trap_u32(wrapping(site + I64{16})) != I64{0}) -> I64{0} else -> first
+        trap_bounds_locals(area, first, second, third, wrapping(context + context_len), labels_len)
+    }
     trap_footer(I64{1})
 }
 

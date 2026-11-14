@@ -9190,7 +9190,7 @@ ir_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ordinal: Int, message: In
     ir_emit(b.f, IROp.Store, -1, descriptor, 56, column, b.line)
     caret: ir_word_const(m, b, location.caret)
     ir_emit(b.f, IROp.Store, -1, descriptor, 64, caret, b.line)
-    context: ir_stop_context(location.file, location.line, location.source_line, location.column, location.caret, function_name)
+    context: ir_stop_context(location.file, location.line, 0, location.source_line, location.column, location.caret, function_name)
     ir_store_text(m, b, descriptor, 72, context)
     stop_ordinal: ir_word_const(m, b, ordinal)
     _: ir_runtime(m, b, "jet_rt_require_stop", [Int]{stop_ordinal, descriptor, message, left, right, locals}, -1)
@@ -9242,7 +9242,8 @@ ir_frame_name_at: fn(b: IRBuilder, rows: [Int], name: String) -> Int Never! {
 // The report context (ir_stop_context) of a stop the builder raises itself
 // at `span`: the builder's current line in its function, then the line's
 // source with a caret under `span` when the span starts on that line of a
-// checked source.
+// checked source. Then the heading names the caret's column too
+// (`path:line:column`), so the stop says which access on the line failed.
 ir_site_context: fn(p: IRProgram, b: IRBuilder, span: Span) -> String Never! {
     file: b.f.source_file
     if (ir_source_line_of(p, file, span.start) ?? -1) == b.line {
@@ -9252,10 +9253,10 @@ ir_site_context: fn(p: IRProgram, b: IRBuilder, span: Span) -> String Never! {
             // A span that runs past its first line is underlined to the line's end.
             rest: source.bytes().len() - (column - 1)
             caret: if span.end - span.start > rest -> rest else -> span.end - span.start
-            return ir_stop_context(file, b.line, source, column, caret, b.f.name)
+            return ir_stop_context(file, b.line, column, source, column, caret, b.f.name)
         }
     }
-    ir_stop_context(file, b.line, "", 0, 0, b.f.name)
+    ir_stop_context(file, b.line, 0, "", 0, 0, b.f.name)
 }
 
 // A static text's (address, length) pair at `offset` of the storage at `base`.
@@ -9266,12 +9267,14 @@ ir_store_text: fn(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, text: Str
 }
 
 // The report's static context, with the runtime's exact spacing: the
-// heading `path:line in function`, then `source_line` with `caret` carets
-// from `column` (1-based) when there is a source line.
-ir_stop_context: fn(path: String, line: Int, source_line: String, column: Int, caret: Int, function: String) -> String Never! {
+// heading `path:line in function` (`path:line:at` when `at` > 0), then
+// `source_line` with `caret` carets from `column` (1-based) when there is a
+// source line.
+ir_stop_context: fn(path: String, line: Int, at: Int, source_line: String, column: Int, caret: Int, function: String) -> String Never! {
     out := [U8]{}
     if path != "" {
-        heading: if function == "" -> "  --> {path}:{line}\n" else -> "  --> {path}:{line} in {function}\n"
+        place: if at > 0 -> "{path}:{line}:{at}" else -> "{path}:{line}"
+        heading: if function == "" -> "  --> {place}\n" else -> "  --> {place} in {function}\n"
         loop byte in heading.bytes() -> out.push(byte)
     }
     if source_line != "" {
