@@ -97,6 +97,7 @@ use {
         ENV_JET_DEV_PORT,
         ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT,
         ENV_JET_FUZZ_ITERATIONS,
+        ENV_JET_ICE_SELF_TEST,
         ENV_JET_OBSERVE,
         ENV_JET_PERF_MAP,
         ENV_JET_PROJECT_ROOT,
@@ -3684,8 +3685,10 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 // too, so its ICE exits 101. Only a failed verb's output depends on `--json`,
 // so only a failure reads the settings again.
 // This is round 3's entry shape: every seed (a0_001 included) checks and
-// lowers it.
+// lowers it. Under JET_ICE_SELF_TEST=1 it reports an internal compiler error
+// before it reads its command line, so the report is tested without a defect.
 jet_cli_main: fn(args: [String]) {
+    if (cli_sys.get(ENV_JET_ICE_SELF_TEST) ?? "") == "1" -> jet_cli_finish(jet_cli_ice("ICE self-test triggered by JET_ICE_SELF_TEST"))
     plan: jet_cli_front(args)
     recording := JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {

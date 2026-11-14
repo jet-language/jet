@@ -1,0 +1,14 @@
+# A Set displays as the List of its keys in key order, alone and as a
+# record's field: Int and String keys in their order, a Set of a small
+# fieldless enum (stored as bits) in case order, an empty Set as `[]`.
+fixture: a_set_displays_as_its_keys_on_every_tier/input
+env: NO_COLOR=1
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "Seen { ids: [1, 2, 3] }\nTagged { tags: [a, b] }\nTagged { tags: [] }\nPalette { hues: [Red, Blue] }\n[1, 2, 3]\n"
+step o1: jet run -O1 run.jet
+exit: 0
+stdout: = "Seen { ids: [1, 2, 3] }\nTagged { tags: [a, b] }\nTagged { tags: [] }\nPalette { hues: [Red, Blue] }\n[1, 2, 3]\n"
+step o2: jet run -O2 run.jet
+exit: 0
+stdout: = "Seen { ids: [1, 2, 3] }\nTagged { tags: [a, b] }\nTagged { tags: [] }\nPalette { hues: [Red, Blue] }\n[1, 2, 3]\n"

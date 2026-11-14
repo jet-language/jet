@@ -1925,7 +1925,8 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
         ir_render_list(m, p, b, builder, snapshot, element, mode, span)
         return
     }
-    // A native carrier (Set, Rank, Iter, Shared) renders through routes of
+    if ir_set_element(ty) != None && !ir_rank_type(ty) -> return ir_render_set(m, p, b, builder, slot, mode, span)
+    // Any other native carrier (Rank, Iter, Shared) renders through routes of
     // its own, never as the fields its declaration names.
     if ir_native_carrier(ty) -> return ir_fail(b, span, "display of {ir_type_name(ty)}")
     if kind == .Aggregate && ir_untag(ty) == .Tuple(fields) {

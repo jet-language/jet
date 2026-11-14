@@ -152,6 +152,7 @@ object. A URL's user and password never appear in that list.
 | `JET_FRAME_CAPTURE` | path | The file the gauntlet's game-frame entry writes its screen to, as a PAM image. Unset, no capture. |
 | `JET_FRONT_TIMEOUT_MS` | milliseconds | The timeout of each front-end command a compiler registry transport runs. Unset, 600000. |
 | `JET_GAUNTLET_*` |  | The gauntlet's settings (`Tools/gauntlet`): `TIMEOUT_MS` how long one run may take (unset, 300000), `TIER_TIMEOUT_MS` a tier's limit, `LAUNCHER` the launcher its timer runs (else one built from `harness/launch.c`), and `FIXTURE_CACHE` a directory of built fixtures staged instead of building them. |
+| `JET_ICE_SELF_TEST` | `1` | **Internal** check of the internal compiler error report: `jet` reports one before it reads its command line and exits 101, so a test proves the report without a defect in the compiler. |
 | `JET_MIN_FREE_MB` | megabytes | The available memory a compiler check of `Tools/agent/LaneCheck.jet` waits for before it starts. Unset, 8000. |
 | `JET_NATIVE_C_WRAPPER_ACTIVE` | `1` | **Set by** `Tools/packaging/NativeCCompiler.jet` for the C compiler it runs; a run that already has it stops with exit 2, since `CC` resolves back to the wrapper. |
 | `JET_ORCHESTRATOR_DIR` | path | The directory the orchestrator's batch tools (`Batch10.jet`, `Integrate10.jet`, `StreamB10.jet`) run `Integrate10.jet` from. Unset, the running tool's own directory. |
