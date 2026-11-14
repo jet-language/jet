@@ -474,11 +474,13 @@ sema_cli_entry_label: fn(input: SemaCLIInput) -> String Never! {
 // (sema_cli_entry_direct). Help and version print and run `help_end`. A
 // refusal prints to stderr and exits, or in a `projection` stores its text in
 // `__refusal` and returns `None` (sema_cli_entry_projections). `marks` records
-// which inputs argv named (`T.merge`).
-sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool) {
+// which inputs argv named (`T.merge`). With `argv_given` the vector is the
+// parser's `__argv` parameter, else the parse reads it.
+sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
     if spec.table == .Val(table) {
         lines.push(table.copy())
-        lines.push("    __parsed: __jet_cli_args.{spec.parse}(__spec, __jet_cli_args.__cli_argv())")
+        argv: if argv_given -> "__argv" else -> "__jet_cli_args.__cli_argv()"
+        lines.push("    __parsed: __jet_cli_args.{spec.parse}(__spec, {argv})")
         lines.push("    __status: __jet_cli_args.__cli_status(__parsed)")
         lines.push("    if __status == 0 {{")
         lines.push("        print(__jet_cli_args.__cli_message(__parsed))")
@@ -495,17 +497,18 @@ sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: Str
         lines.push("    }}")
         return
     }
-    sema_cli_entry_direct(lines, spec, help_end, projection, marks)
+    sema_cli_entry_direct(lines, spec, help_end, projection, marks, argv_given)
 }
 
 // The parser of a spec without commands, written for its root inputs. It
 // follows Args.jet cli_parse and cli_parse_level over the same spec, so its
 // help, refusals and exit codes are theirs. Input `slot` keeps its text in
 // `__v{slot}` (a flag in `__f{slot}`), the value of its variable in
-// `__e{slot}` and, with `marks`, whether argv named it in `__x{slot}`.
-sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool) {
+// `__e{slot}` and, with `marks`, whether argv named it in `__x{slot}`. With
+// `argv_given` the vector is the parser's `__argv` parameter.
+sema_cli_entry_direct: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool, argv_given: Bool) {
     root: spec.root
-    lines.push("    __argv: __jet_cli_args.__cli_argv()")
+    if !argv_given -> lines.push("    __argv: __jet_cli_args.__cli_argv()")
     lines.push("    __help: {sema_cli_entry_text(spec.help)}")
     names := [String]{}
     shorts := false
@@ -815,19 +818,23 @@ sema_cli_entry_source: fn(definition: StructDef, items: [Item], type_ref: String
         // entry passes a struct literal of the parsed fields, as the table
         // entry did: an inlined `run` then reads them from the entry's own
         // slots, not through the address of the call's result, which costs
-        // the hot loop a register (asm-parity collatz).
+        // the hot loop a register (asm-parity collatz). The entry reads argv
+        // and hands it to the parser: a parse that takes no run-time value
+        // would be an immutable local whose call reaches only code
+        // (LocalValues.jet), so every compile would stage it, fail to compute
+        // it while building, and check the whole program again.
         callee: if wrapped.module_alias == .Val(alias) -> "{alias}.{wrapped.function}" else -> wrapped.function.copy()
         parse: wrapped.wrapper.replace(SEMA_CLI_ENTRY_NAME, "__jet_cli_parse")
-        sema_cli_entry_parse(lines, spec, "__jet_cli_process.exit(0)", false, false)
+        sema_cli_entry_parse(lines, spec, "__jet_cli_process.exit(0)", false, false, true)
         sema_cli_entry_bind(lines, spec, type_ref)
         lines.push("    __args")
         copied := [String]{}
         loop field in definition.fields {
             if field.computed == None -> copied.push("{field.name}: __p.{field.name}")
         }
-        return Val("{parse}: fn() -> {type_ref} {{\n{lines.join("\n")}\n}}\n\n{wrapped.wrapper}: fn() {{\n    __p: {parse}()\n    {callee}({type_ref}{{{copied.join(", ")}}})\n}}\n")
+        return Val("{parse}: fn(__argv: [String]) -> {type_ref} {{\n{lines.join("\n")}\n}}\n\n{wrapped.wrapper}: fn() {{\n    __argv: __jet_cli_args.__cli_argv()\n    __p: {parse}(__argv)\n    {callee}({type_ref}{{{copied.join(", ")}}})\n}}\n")
     }
-    sema_cli_entry_parse(lines, spec, "return", false, false)
+    sema_cli_entry_parse(lines, spec, "return", false, false, false)
     sema_cli_entry_bind(lines, spec, type_ref)
     lines.push("    __command: __jet_cli_args.__cli_command_name(__parsed)")
     // One ordered table, so a program with many commands reads as a dispatch
@@ -859,14 +866,14 @@ sema_cli_entry_projections: fn(items: [Item]) -> [String] {
             spec: sema_cli_entry_spec(definition, items, definition.name) ?? next
             name: definition.name
             decode := [String]{}
-            sema_cli_entry_parse(decode, spec, "__jet_cli_process.exit(0)", true, false)
+            sema_cli_entry_parse(decode, spec, "__jet_cli_process.exit(0)", true, false, false)
             sema_cli_entry_bind(decode, spec, name)
             decode.push("    Val(__args)")
             sources.push(sema_cli_entry_refusing(name, SEMA_CLI_DECODE_METHOD, "", "{SEMA_CLI_DECODE_METHOD}_raw(__refusal)"))
             parsers.push("{name}.{SEMA_CLI_DECODE_METHOD}_raw: fn(__refusal: &String) -> {name}? {{\n{decode.join("\n")}\n}}\n")
             if sema_cli_entry_member_declared(items, definition, "merge") -> next
             merge := [String]{}
-            sema_cli_entry_parse(merge, spec, "__jet_cli_process.exit(0)", true, true)
+            sema_cli_entry_parse(merge, spec, "__jet_cli_process.exit(0)", true, true, false)
             fields: loop input in spec.inputs -> "{input.field}: if {input.explicit} -> args.{input.field} else -> settings.{input.field}"
             merge.push("    Val({name}{{{fields.join(", ")}}})")
             sources.push(sema_cli_entry_refusing(name, "merge", "args: {name}, settings: {name}", "__jet_cli_merge(args, settings, __refusal)"))
