@@ -5,16 +5,18 @@ package: {
 
 use time: core.time
 
-// A task carries the context it was spawned under, even after the spawning
-// `#Context` block ends; tasks spawned before or after the block do not.
+// A task carries the deadline it was spawned under, even after the spawning
+// `#Deadline` block ends; tasks spawned before or after the block do not.
+// The block's budget is short but not spent, so the spawn itself is within
+// it; the task's nap outlives it.
 
 nap: fn(value: Int) -> Int {
-    time.sleep(1ms)
+    time.sleep(50ms)
     value
 }
 
 spawn_expired: fn() -> Task<Int> {
-    #Deadline(0ms) { return task nap(0) }
+    #Deadline(20ms) { return task nap(0) }
     task nap(-1)
 }
 

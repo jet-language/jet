@@ -4,8 +4,11 @@ step: jet check main.jet
 exit: 0
 step: jet run main.jet
 exit: nonzero
-stdout: = "settled\n"
-stdout: !~ "caller" # original caller did not continue
+stdout: = ""
+# The original child printed "settled" before the group closed. A cancel now
+# reaches a loop that never waits at its next iteration, so the closing group
+# stops the child's busy loop before "settled", and the caller never
+# continues: nothing reaches stdout.
 stderr: ~ "E3003" # original diagnostic code membership
 # The Rust host's "run tier1 native" attribution line has no successor:
 # `jet run` builds the native executable and runs it on the caller's stdio

@@ -20,11 +20,15 @@ run: fn() {
     tasks.yield_now()
     print(me == tasks.current_task())
 
+    // A task that has not started yet is cancelled before it runs.
     t: task 7
     t.pause()
     t.resume()
     t.cancel()
-    print(t.join() ?? panic("cancelled task"))
+    if t.join() == {
+        .Ok(value) -> print(value)
+        .Err(_) -> print("cancelled before it ran")
+    }
 
     // A loop that never waits keeps running under `pause()`. The strong
     // pause holds it at the check each iteration starts with, and a cancel

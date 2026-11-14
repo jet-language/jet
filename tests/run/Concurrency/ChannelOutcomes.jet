@@ -1,6 +1,6 @@
 // CORE-F037 / card #3261: every channel edge outcome, recorded as observed.
-// A line ending in "(silent)" marks a value the channel dropped without any
-// signal to the sender; `-1` marks a receive that found the channel closed.
+// A refused send fails with `SendError`, whose `value` hands the payload
+// back; `-1` marks a receive that found the channel closed.
 package: {
     name: "channel_outcomes"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
@@ -50,19 +50,17 @@ run: fn() {
     print(filler.join() ?? -1)
     print(frx.try_receive() ?? -1)
 
-    // A send after close returns normally and the value is dropped.
+    // A send after close is refused and hands its value back.
     { sender: ctx, receiver: crx }: channel<Int>(capacity: 2)
     ctx.send(7)
     ctx.close()
-    ctx.send(8)
-    print("send after close returned (silent)")
+    ctx.send(8) ?? print("send after close refused {err.value}")
     print(crx.receive() ?? -1)
     print(crx.receive() ?? -1)
 
-    // A send whose receiver was dropped returns normally as well.
+    // A send whose receiver was dropped is refused as well.
     orphan: orphan_sender()
-    orphan.send(5)
-    print("send after receiver drop returned (silent)")
+    orphan.send(5) ?? print("send after receiver drop refused {err.value}")
 
     // A task parked on a full channel is cancelled at that wait point.
     { sender: btx, receiver: brx }: channel<Int>(capacity: 1)
