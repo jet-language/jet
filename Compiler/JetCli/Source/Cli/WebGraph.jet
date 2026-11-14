@@ -151,6 +151,25 @@ JetCLIWebRow: struct {
     mounted: String{""}
 }
 
+// An image asset node: a `web.image` call whose source is a literal path,
+// and the function it is written in.
+JetCLIWebImage: struct {
+    source: String
+    provenance: String
+    span: Span
+}
+
+// The `app.images(...)` settings as written: None leaves a setting at its
+// default. `literal` is false once an argument is not a literal, so the
+// variants can't be known before the app runs.
+JetCLIWebImageSettings: struct {
+    formats: [String]?{None}
+    widths: [Int]?{None}
+    quality: Int?{None}
+    enabled: Bool?{None}
+    literal: Bool{true}
+}
+
 JetCLIWebGraph: struct {
     entry: String
     hydration: String{"dev-overlay"}
@@ -168,6 +187,8 @@ JetCLIWebGraph: struct {
     a11y: [String]{[String]{}}
     adapters: [String]{[String]{}}
     table: [JetCLIWebRow]{[JetCLIWebRow]{}}
+    images: [JetCLIWebImage]{[JetCLIWebImage]{}}
+    image_settings: JetCLIWebImageSettings{JetCLIWebImageSettings{}}
 }
 
 // The builder walk: the graph so far, the render mode later routes take, the
@@ -715,6 +736,10 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         }
         return
     }
+    if on_app && method == "images" {
+        jet_cli_web_images_apply(args, walk.graph.image_settings)
+        return
+    }
     if method == "hydration_release" -> walk.graph.hydration = "release-keep-server"
     if method == "hydration_dev" -> walk.graph.hydration = "dev-overlay"
     value: jet_cli_web_const_text(args, 0) ?? return
@@ -726,6 +751,57 @@ jet_cli_web_apply: fn(method: String, args: [CallArg], span: Span, on_app: Bool,
         "a11y" -> walk.graph.a11y.push(value)
         "adapter" -> walk.graph.adapters.push(value)
         else -> {}
+    }
+}
+
+// The elements of a list literal, `[T]{...}` or `[...]`.
+jet_cli_web_list_elements: fn(expression: Expr) -> [Expr]? {
+    if expression == .ListLit(elements, _, _) -> return Val(elements)
+    if expression == .Paren(inner, _, _) -> return jet_cli_web_list_elements(inner)
+    if expression == .TypedLit(_, body, _, _) && body == .Elements(elements) -> return Val(elements)
+    None
+}
+
+// The variant an enum value spells: `.PNG` or `ImageFormat.PNG`.
+jet_cli_web_variant_name: fn(element: Expr) -> String? {
+    if element == .EnumLit(_, variant, _, args, _, _, _) && args.len() == 0 -> return Val(variant)
+    if element == .Field(_, member, _, _) -> return Val(member)
+    None
+}
+
+// The variant names a literal list of enum values spells.
+jet_cli_web_variant_names: fn(expression: Expr) -> [String]? {
+    elements: jet_cli_web_list_elements(expression) ?? return None
+    names := [String]{}
+    loop element in elements {
+        name: jet_cli_web_variant_name(element) ?? return None
+        names.push(name)
+    }
+    Val(names)
+}
+
+jet_cli_web_int_list: fn(expression: Expr) -> [Int]? {
+    elements: jet_cli_web_list_elements(expression) ?? return None
+    numbers := [Int]{}
+    loop element in elements {
+        number: jet_cli_web_const_int(element) ?? return None
+        numbers.push(number)
+    }
+    Val(numbers)
+}
+
+// `app.images(formats:, widths:, quality:, enabled:)` as written; a later
+// call overrides the settings it names, as it does when the app runs.
+jet_cli_web_images_apply: fn(args: [CallArg], settings: &JetCLIWebImageSettings) {
+    loop argument in args {
+        name: if argument.label == .Val(given) -> "{given.name}" else -> ""
+        if name == {
+            "formats" -> if jet_cli_web_variant_names(argument.expr) == .Val(names) -> settings.formats = Val(names) else -> settings.literal = false
+            "widths" -> if jet_cli_web_int_list(argument.expr) == .Val(widths) -> settings.widths = Val(widths) else -> settings.literal = false
+            "quality" -> if jet_cli_web_const_int(argument.expr) == .Val(quality) -> settings.quality = Val(quality) else -> settings.literal = false
+            "enabled" -> if argument.expr == .Bool(flag, _, _) -> settings.enabled = Val(flag) else -> settings.literal = false
+            else -> settings.literal = false
+        }
     }
 }
 
@@ -1143,11 +1219,13 @@ jet_cli_web_store: fn(expression: Expr, source: String) -> JetCLIWebStore? {
     Val(JetCLIWebStore{name: name, source: source, kind: found.kind, history_limit: limit})
 }
 
-// The query, store and form calls one walk over the user functions found.
+// The query, store, form and image calls one walk over the user functions
+// found.
 JetCLIWebUses: struct {
     queries: [JetCLIWebQuery]
     stores: [JetCLIWebStore]
     forms: [JetCLIWebForm]
+    images: [JetCLIWebImage]
 }
 
 jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDriverDocModule], functions: [Func], source: String) {
@@ -1156,10 +1234,13 @@ jet_cli_web_note_use: fn(uses: &JetCLIWebUses, expression: Expr, modules: [JetDr
     if expression == .Call(call, _) && (call.name == "form" || call.name == "web.form" || call.name == "core.web.form") {
         if jet_cli_web_form(modules, functions, call.args, source) == .Val(fact) -> uses.forms.push(fact)
     }
+    if expression == .Call(call, _) && (call.name == "web.image" || call.name == "core.web.image") {
+        if jet_cli_web_const_text(call.args, 0) == .Val(path) -> uses.images.push(JetCLIWebImage{source: path, provenance: source, span: call.name_span})
+    }
 }
 
 jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], graph: &JetCLIWebGraph) {
-    uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}}
+    uses := JetCLIWebUses{queries: [JetCLIWebQuery]{}, stores: [JetCLIWebStore]{}, forms: [JetCLIWebForm]{}, images: [JetCLIWebImage]{}}
     loop function in functions -> ast_visit_body(function.body, fn(expression: Expr) { jet_cli_web_note_use(uses, expression, modules, functions, function.name) }, true)
     queries := uses.queries
     stores := uses.stores
@@ -1187,6 +1268,14 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
     }
     kept.sort_by(fn(left: JetCLIWebForm, right: JetCLIWebForm) { (left.model <=> right.model).then(left.action <=> right.action).then(left.provenance <=> right.provenance) })
     graph.forms = kept
+    // One node per (source, function).
+    images := uses.images
+    images.sort_by(fn(left: JetCLIWebImage, right: JetCLIWebImage) { (left.source <=> right.source).then(left.provenance <=> right.provenance) })
+    loop fact in images {
+        last: graph.images.len() - 1
+        if last >= 0 && graph.images[last].source == fact.source && graph.images[last].provenance == fact.provenance -> next
+        graph.images.push(fact)
+    }
 }
 
 // The application graph of the checked entry, or None when the entry has no
@@ -1386,7 +1475,40 @@ jet_cli_web_graph_value: fn(graph: JetCLIWebGraph) -> JetCLIStatusValue {
         }))),
         jet_cli_status_field("routes_from", jet_cli_status_texts(loop root in graph.routes_from -> root.root)),
         jet_cli_status_field("policy", jet_cli_web_policy_value(graph)),
+        jet_cli_status_field("images", jet_cli_status_array(loop image in graph.images -> jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_web_text("source", image.source),
+            jet_cli_web_text("provenance", image.provenance),
+        }))),
+        jet_cli_status_field("image_settings", jet_cli_web_image_settings_value(graph.image_settings)),
     })
+}
+
+jet_cli_web_image_settings_value: fn(settings: JetCLIWebImageSettings) -> JetCLIStatusValue {
+    formats := JetCLIStatusValue.Null
+    if settings.formats == .Val(names) -> formats = jet_cli_status_texts(names)
+    widths := JetCLIStatusValue.Null
+    if settings.widths == .Val(numbers) -> widths = jet_cli_status_array(loop width in numbers -> jet_cli_status_int(width))
+    quality := JetCLIStatusValue.Null
+    if settings.quality == .Val(number) -> quality = jet_cli_status_int(number)
+    enabled := JetCLIStatusValue.Null
+    if settings.enabled == .Val(flag) -> enabled = jet_cli_status_bool(flag)
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("formats", formats),
+        jet_cli_status_field("widths", widths),
+        jet_cli_status_field("quality", quality),
+        jet_cli_status_field("enabled", enabled),
+        jet_cli_status_field("literal", jet_cli_status_bool(settings.literal)),
+    })
+}
+
+// The `images:` line: each setting as written, `default` where none is.
+jet_cli_web_image_settings_text: fn(settings: JetCLIWebImageSettings) -> String {
+    formats: if settings.formats == .Val(names) -> names.join(",") else -> "default"
+    widths: if settings.widths == .Val(numbers) -> (loop width in numbers -> "{width}").join(",") else -> "default"
+    quality: if settings.quality == .Val(number) -> "{number}" else -> "default"
+    enabled: if settings.enabled == .Val(flag) -> "{flag}" else -> "default"
+    written: if settings.literal -> "" else -> " (not all literal: the variants are known only when the app runs)"
+    "formats={formats} widths={widths} quality={quality} enabled={enabled}{written}"
 }
 
 // ---- text ----
@@ -1433,6 +1555,8 @@ jet_cli_web_lines: fn(graph: JetCLIWebGraph) -> [String] {
     if graph.cache.len() > 0 -> lines.push("  cache: {graph.cache.join(", ")}")
     if graph.a11y.len() > 0 -> lines.push("  a11y: {graph.a11y.join(", ")}")
     if graph.adapters.len() > 0 -> lines.push("  adapters: {graph.adapters.join(", ")}")
+    loop image in graph.images -> lines.push("  image {image.source} ({image.provenance})")
+    if graph.images.len() > 0 -> lines.push("  images: {jet_cli_web_image_settings_text(graph.image_settings)}")
     lines
 }
 
@@ -1568,6 +1692,8 @@ jet_cli_expand_web: fn(modules: [JetDriverDocModule], entry_identity: String, js
         jet_cli_status_field("mounts", jet_cli_status_array(mounts)),
         jet_cli_status_field("routes_from", jet_cli_status_array(roots)),
         jet_cli_status_field("policy", jet_cli_web_policy_value(graph)),
+        jet_cli_status_field("images", jet_cli_status_array(loop image in graph.images -> jet_cli_status_object([JetCLIStatusField]{jet_cli_web_text("source", image.source), jet_cli_web_text("provenance", image.provenance)}))),
+        jet_cli_status_field("image_settings", jet_cli_web_image_settings_value(graph.image_settings)),
     })
     [JetCLIExpandFact]{JetCLIExpandFact{source: graph.entry, offset: 0, name: "web", text: "web application graph — {graph.entry}", value: value}}
 }

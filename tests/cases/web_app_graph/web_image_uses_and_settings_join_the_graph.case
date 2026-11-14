@@ -1,0 +1,21 @@
+# Each literal web.image source a handler names, and app.images as written,
+# are facts of the web graph.
+fixture: web_image_uses_and_settings_join_the_graph.fixture
+step: jet explain --web-graph app.jet --json
+exit: 0
+json: stdout doc $.web_app.images #= 3
+json: stdout doc $.web_app.images[0].source = "Images/photo.jpg"
+json: stdout doc $.web_app.images[0].provenance = "about"
+json: stdout doc $.web_app.images[1].source = "Images/tile.png"
+json: stdout doc $.web_app.images[1].provenance = "about"
+json: stdout doc $.web_app.images[2].source = "Images/tile.png"
+json: stdout doc $.web_app.images[2].provenance = "home"
+json: stdout doc $.web_app.image_settings.formats = ["JPEG", "PNG"]
+json: stdout doc $.web_app.image_settings.widths = [320, 160]
+json: stdout doc $.web_app.image_settings.quality = 70
+json: stdout doc $.web_app.image_settings.literal = true
+step: jet explain --web-graph app.jet
+exit: 0
+stdout: ~ "  image Images/tile.png (home)" # one line per (source, function) use
+stdout: ~ "  image Images/photo.jpg (about)" # the other handler's source
+stdout: ~ "  images: formats=JPEG,PNG widths=320,160 quality=70 enabled=default" # the settings as written; enabled unset
