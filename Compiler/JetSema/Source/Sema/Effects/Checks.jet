@@ -2333,7 +2333,7 @@ sema_effect_record_intrinsic_effects: fn(environment: SemaScopeEnvironment, prog
     )
 }
 
-sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
+sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, tree: BodyTree, node_index: Int, expression: BodyNode, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
     // A call through a `:` local bound to a lambda written in this body adds
     // nothing: that lambda's effects are already this function's where it is
     // written (sema_effect_merge_lambda). The call node itself skips its fact
@@ -2391,9 +2391,30 @@ sema_effect_record_fact: fn(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex
     }
     // A callee with no body in this program has no effects: only its declared
     // row, recorded above, contributes. Its memory behavior stays unproven.
-    if callee_key != "" && !known_callee && !row_known {
+    // A trait method called through a trait value is no such callee: the
+    // call runs the implementations (sema_effect_dispatched_call).
+    if callee_key != "" && !known_callee && !row_known && !sema_effect_dispatched_call(facts, tree, expression) {
         sema_effect_record_memory_open(nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
+}
+
+// Whether `expression` calls a trait method through a trait value whose
+// implementations sema_effect_record_dispatch makes its call edges, so the
+// call runs those bodies and not the trait's bodiless declaration. A trait
+// under a `#FX` ceiling takes its row from the ceiling and has no edges.
+sema_effect_dispatched_call: fn(facts: SemaEffectCallIndex, tree: BodyTree, expression: BodyNode) -> Bool Never! {
+    if expression.kind == .MethodCall(receiver, method, _, _) {
+        trait_owner: method.trait_owner ?? return false
+        if body_type(tree, receiver) == .TraitObject(_) {
+            if facts.trait_caps.get(trait_owner.id) == .Val(found) {
+                if sema_effect_cap_ceiling(found.cap.cap) != None -> return false
+            }
+            trait_key: sema_effect_trait_cap_key(symbol_key(facts.symbols, tree.symbols, trait_owner))
+            impls: facts.dyn_impls.get("{trait_key}::{method.name}") ?? return false
+            return impls.len() > 0
+        }
+    }
+    false
 }
 
 // A callee declared in `core.db`. The key alone decides it
@@ -3364,7 +3385,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
                         diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
                     } else if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) {
                         if !sema_effect_record_static_dispatch(nodes, facts, node_index, tree, node, value) {
-                            sema_effect_record_fact(nodes, facts, tree, node_index, value, diagnostics)
+                            sema_effect_record_fact(nodes, facts, tree, node_index, node, value, diagnostics)
                             sema_effect_record_scope(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_dispatch(nodes, facts, node_index, tree, node, value)
                             sema_effect_record_instantiation(nodes, node_index, tree, node, value, facts.symbols)
@@ -3387,7 +3408,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
             found: sema_effect_find_exact_fact(facts, caller, node.span)
             if found == .Val(position) {
                 value: facts.modules[caller.module_index].facts[position]
-                if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) -> sema_effect_record_fact(nodes, facts, tree, node_index, value, diagnostics)
+                if !sema_effect_report_nondeterministic_intrinsic(nodes, node_index, value, node.span, diagnostics) -> sema_effect_record_fact(nodes, facts, tree, node_index, node, value, diagnostics)
             }
         }
     }
