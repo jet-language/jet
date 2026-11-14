@@ -771,27 +771,41 @@ jet_cli_foreign_cache_files: fn(root: String, caches: &[JetDriverAuthorizedSourc
 }
 
 // Read dependency declarations from the bytes already in the snapshot, never
-// by reopening the manifest. Inline Package carriers use the same model.
-jet_cli_root_dependencies: fn(root: JetDriverAuthorizedSourceRoot) -> [String: DepSpec] Never! {
+// by reopening the manifest. Inline Package carriers use the same model, and
+// the carrier is the one the driver selects (jet_driver_root_inline_carrier):
+// the entry file's own block (`entry`, the entry root's entry path; "" for a
+// dependency root), else the first stock entry's.
+jet_cli_root_dependencies: fn(root: JetDriverAuthorizedSourceRoot, entry: String) -> [String: DepSpec] Never! {
     loop file in root.files {
         if file.relative_path != "package.jet" -> next
         manifest: pkg_manifest_parse(file.path, file.source) ?? return [String: DepSpec]{}
         return manifest.dependencies
     }
+    loop file in root.files {
+        if file.path != entry -> next
+        if jet_cli_inline_dependencies(file) == .Val(dependencies) -> return dependencies
+    }
     loop relative in JET_CLI_STOCK_ENTRIES {
         loop file in root.files {
-            if file.relative_path != relative -> next
-            inline: if PackageFacts.parse_inline(file.source, file.path) == {
-                .Ok(value) -> value
-                .Err(_) -> { return [String: DepSpec]{} }
-            }
-            if inline == .Val(carrier) {
-                manifest: pkg_to_manifest(carrier.facts, file.source) ?? return [String: DepSpec]{}
-                return manifest.dependencies
-            }
+            if file.relative_path != relative || file.path == entry -> next
+            if jet_cli_inline_dependencies(file) == .Val(dependencies) -> return dependencies
         }
     }
     [String: DepSpec]{}
+}
+
+// The dependencies of `file`'s inline `package:` block: none for a malformed
+// block (the driver reports it), or None when the file carries no block.
+jet_cli_inline_dependencies: fn(file: JetDriverAuthorizedSourceFile) -> [String: DepSpec]? Never! {
+    inline: if PackageFacts.parse_inline(file.source, file.path) == {
+        .Ok(value) -> value
+        .Err(_) -> { return Val([String: DepSpec]{}) }
+    }
+    if inline == .Val(carrier) {
+        manifest: pkg_to_manifest(carrier.facts, file.source) ?? return Val([String: DepSpec]{})
+        return Val(manifest.dependencies)
+    }
+    None
 }
 
 jet_cli_dependency_within: fn(path: String, root: String) -> Bool Never! {
@@ -837,17 +851,18 @@ jet_cli_path_dependency_escape: fn(name: String, relative: String, parent: Strin
 }
 
 // Authorize each path root once, in dependency-name order, and each version
-// dependency's first-party battery (jet_cli_first_party_battery). The
-// driver's catalog still owns dependency binding and semantic diagnostics;
-// this host only reads trees the declared graph permits. No provider or
-// network is run.
-jet_cli_path_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
+// dependency's first-party battery (jet_cli_first_party_battery). The entry
+// root (roots[0]) declares its dependencies in package.jet or in the inline
+// block of `entry_path` or a stock entry. The driver's catalog still owns
+// dependency binding and semantic diagnostics; this host only reads trees the
+// declared graph permits. No provider or network is run.
+jet_cli_path_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], entry_path: String, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     entry: roots[0].canonical_path
-    root_reach: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0]))
+    root_reach: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0], entry_path))
     index := 0
     loop index < roots.len() {
         parent: roots[index].canonical_path
-        dependencies: jet_cli_root_dependencies(roots[index])
+        dependencies: jet_cli_root_dependencies(roots[index], if index == 0 -> entry_path else -> "")
         names := dependencies.keys().to_list()
         names.sort()
         loop name in names {
@@ -2063,7 +2078,7 @@ jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOve
     roots := [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}}
     script_dependencies := [JetDriverScriptDependency]{}
     if jet_cli_script_dependency_roots(roots, entry_path, script_dependencies, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
-    if jet_cli_path_dependency_roots(roots, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
+    if jet_cli_path_dependency_roots(roots, entry_path, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
     JetCLISnapshotted.Held{snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: roots,
         entry_root_identity: root_identity,

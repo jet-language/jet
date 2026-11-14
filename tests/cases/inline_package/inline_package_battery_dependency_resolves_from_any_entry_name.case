@@ -1,0 +1,15 @@
+# An entry whose own inline `package:` block names a first-party battery as a
+# version dependency (`font: "0.1.0"`) resolves it under any file name, not
+# only under the stock entry run.jet: the CLI authorizes the battery root from
+# the same carrier the driver reads, the entry file's block first.
+fixture: fixtures/battery_dependency_entry
+step: jet run typeface.jet
+exit: 0
+stdout: = "system-ui|14.0|3\n" # the battery's face and one glyph per scalar
+stderr: !~ "E0603" # the version dependency binds to the battery
+step o1: jet run --optimize=basic typeface.jet
+exit: 0
+stdout: = "system-ui|14.0|3\n"
+step o2: jet run --optimize=full typeface.jet
+exit: 0
+stdout: = "system-ui|14.0|3\n"
