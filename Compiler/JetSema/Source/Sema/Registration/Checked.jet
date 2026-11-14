@@ -3034,7 +3034,8 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
     derives := [String]{}
     // Rust reference lowering lower_struct/lower_enum: the declaration's
     // structural auto-derive selection (`TypeMetadata`) supplies the
-    // auto-Printable fact and the automatic Debug derive.
+    // auto-Printable fact, which a field that is not printable blocks
+    // (sema_comparability_printable_blocked), and the automatic Debug derive.
     auto_derives: sema_type_metadata_auto_derives(definition, module_row.declared_trait_impls)
     auto_printable := false
     auto_derive_default := false
@@ -3046,7 +3047,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
     if definition == {
         .Struct(value) -> {
             derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
-            auto_printable = auto_derives.printable
+            auto_printable = auto_derives.printable && !sema_comparability_printable_blocked(graph, module_row.module_identity, definition)
             auto_derive_default = value.auto_derive_default
             published_schema = value.is_published_schema || sema_checked_has_name(derives, "PublishedSchema")
             single_use = value.is_single_use
@@ -3064,7 +3065,7 @@ sema_checked_type_def: fn(graph: SemaRegistrationGraph, boxed: [String:[String]]
         }
         .Enum(value) -> {
             derives = sema_checked_type_derive_names(value.derives, definition, auto_derives.debug)
-            auto_printable = auto_derives.printable
+            auto_printable = auto_derives.printable && !sema_comparability_printable_blocked(graph, module_row.module_identity, definition)
             auto_derive_default = value.auto_derive_default
             single_use = value.is_single_use
             must_use = value.is_must_use
