@@ -1,0 +1,15 @@
+// Variants turned off: each image is its original alone.
+package: {
+    name: "image_settings_off"
+    authority: { allow: [Env, Net, FS.Read, Time] }
+}
+
+use web: core.web
+
+home: fn() -> WebPage {
+    web.page("Gallery", "{web.image("Public/hero.png", alt: "hero")}{web.image("Public/photo.jpg", alt: "photo")}")
+}
+
+run: fn() {
+    web.app().images(enabled: false).route("/", home).serve()
+}

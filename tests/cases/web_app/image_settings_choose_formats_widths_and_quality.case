@@ -1,0 +1,41 @@
+# app.images chooses the variant formats, widths and JPEG quality, and
+# enabled: false serves each original alone.
+fixture: image_settings_choose_formats_widths_and_quality.fixture
+step: jet run make_images.jet
+exit: 0
+spawn server: jet run app.jet
+env: JET_APP_PORT={free-port:app}
+step: jet run client.jet
+env: IMAGE_PAGE_PORT={free-port:app}
+env: IMAGE_PAGE_FILE=page.html
+exit: 0
+file: page.html ~ "<picture><source type=\"image/jpeg\" srcset=\"/a/Public/hero." # the PNG gets JPEG variants first, in the settings' order
+file: page.html ~ ".320.jpg 320w, /a/Public/hero." # widths sorted, the repeat dropped
+file: page.html ~ ".800.jpg 800w\"><source type=\"image/png\" srcset=\"/a/Public/hero." # one <source> per format; the JPEG list holds no PNG original
+file: page.html ~ ".800.png 800w, /a/Public/hero." # then its own format, the original last
+file: page.html ~ "<picture><source type=\"image/jpeg\" srcset=\"/a/Public/photo." # the JPEG's own format comes first because the settings list it first
+file: page.html ~ ".800.jpg 800w, /a/Public/photo." # the JPEG original is among the JPEG candidates
+stdout: ~ "hero 320w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 320x213"
+stdout: ~ "hero 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213"
+stdout: ~ "hero 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533"
+stdout: ~ "hero 800w png: 200 | image/png | public, max-age=31536000, immutable | 800x533"
+stdout: ~ "photo 320w png: 200 | image/png | public, max-age=31536000, immutable | 320x213"
+stdout: ~ "photo 800w jpg: 200 | image/jpeg | public, max-age=31536000, immutable | 800x533"
+stdout: !~ "w gif" # no format the settings left out
+stdout: !~ "640w" # no default width
+signal server: KILL
+wait: server
+exit: any # the case kills the server; its status is not part of this proof
+spawn plain: jet run off.jet
+env: JET_APP_PORT={free-port:off}
+step: jet run client.jet
+env: IMAGE_PAGE_PORT={free-port:off}
+env: IMAGE_PAGE_FILE=off.html
+exit: 0
+file: off.html ~ "<img src=\"/a/Public/hero." # the original alone
+file: off.html ~ "alt=\"hero\" width=\"1500\" height=\"1000\"><img src=\"/a/Public/photo."
+file: off.html !~ "<picture>" # no variants, no <picture>
+stdout: ~ "photo original: 200 | image/jpeg | public, max-age=31536000, immutable | 2000x1333"
+signal plain: KILL
+wait: plain
+exit: any # the case kills the server; its status is not part of this proof

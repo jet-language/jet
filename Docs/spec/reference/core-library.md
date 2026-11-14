@@ -5407,9 +5407,10 @@ hides. When an app's route returns the page, the app plans one asset node for
 the source:
 
 - The original, at `/a/<dir>/<stem>.<digest16>.<ext>`.
-- One variant for each width of 640, 1280 and 1920 below the source's own,
-  at `/a/<dir>/<stem>.<key16>.<width>.<ext>`. Variants keep the source's format.
-  The aspect ratio holds, and JPEG variants use quality 75.
+- One variant for each configured width below the source's own, in each
+  configured format, at `/a/<dir>/<stem>.<key16>.<width>.<ext>`. The aspect
+  ratio holds. The defaults are widths 640, 1280 and 1920, the source's own
+  format, and JPEG quality 75.
 
 The key is the SHA-256 of the source digest, width, format, quality and
 encoder version, so any change to them gives a new address and leaves the
@@ -5425,6 +5426,18 @@ the page reads the source each time, so an edited image gets new addresses.
 A source the app cannot read or decode fails the route with its error
 boundary. `App.serve` answers image addresses after the app's own routes, so
 a route of the app's own, including a root catch-all, takes precedence.
+
+`app.images(formats:, widths:, quality:, enabled:)` sets how variants are
+made. Every option is labelled and optional, and one left out keeps its
+setting:
+
+- `formats` is a list of `core.image.ImageFormat`. `.PNG` and `.JPEG` are the
+  formats core.image writes; `.GIF` stops the program. A repeated format
+  counts once, and the `<source>` elements follow the list's order.
+- `widths` is sorted and repeats are dropped. A width below 1 stops the
+  program.
+- `quality` is the JPEG quality, from 1 to 100.
+- `enabled: false` serves each original alone, as the `<img>` of its page.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.

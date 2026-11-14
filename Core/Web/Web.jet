@@ -418,6 +418,38 @@ App: struct {
         self.copy()
     }
 
+    // How `web.image` variants are made. `formats` lists the formats each
+    // source gets variants in (the default, none, is the source's own),
+    // `widths` the widths below a source's own, `quality` the JPEG quality
+    // on libjpeg's 1..100 scale, and `enabled: false` serves each original
+    // alone. An option left out keeps its setting.
+    images: fn(self, *, formats: [ImageFormat]?{None}, widths: [Int]?{None}, quality: Int?{None}, enabled: Bool?{None}) -> App Never! {
+        guard := self.__state.guard_edit()
+        if formats == .Val(chosen) {
+            kept := [ImageFormat]{}
+            loop format in chosen {
+                if format == .GIF -> panic("app.images: variants are PNG or JPEG; core.image does not write GIF")
+                if !kept.contains(format) -> kept.push(format.copy())
+            }
+            guard.value.image_settings.formats = kept
+        }
+        if widths == .Val(chosen) {
+            kept := [Int]{}
+            loop width in chosen {
+                if width < 1 -> panic("app.images: width {width} is no pixel count; a width is 1 or more")
+                if !kept.contains(width) -> kept.push(width)
+            }
+            kept.sort()
+            guard.value.image_settings.widths = kept
+        }
+        if quality == .Val(chosen) {
+            if chosen < 1 || chosen > 100 -> panic("app.images: quality {chosen} is outside libjpeg's 1..100")
+            guard.value.image_settings.quality = chosen
+        }
+        if enabled == .Val(chosen) -> guard.value.image_settings.enabled = chosen
+        self.copy()
+    }
+
     facts_json: fn(self) -> String Never! { __app_facts_json(self) }
 
     // Serve on 127.0.0.1 until the process stops, on the port __app_port

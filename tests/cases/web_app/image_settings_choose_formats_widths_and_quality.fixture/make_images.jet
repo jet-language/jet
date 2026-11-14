@@ -1,0 +1,37 @@
+// Writes the images the app places: a 1500x1000 PNG, a 2000x1333 JPEG and a
+// 64x64 PNG, each a smooth pattern so its variants are smaller than it.
+package: {
+    name: "image_page_sources"
+    authority: { allow: [FS.Write] }
+}
+
+use {
+    image: core.image
+    files: core.files
+}
+
+pattern: fn(width: Int, height: Int) -> image.Image {
+    pixels := [U8]{}
+    loop y in 0..<height {
+        loop x in 0..<width {
+            pixels.push(U8{x * 255 /% width})
+            pixels.push(U8{y * 255 /% height})
+            pixels.push(U8{(x + y) * 255 /% (width + height)})
+            pixels.push(U8{255})
+        }
+    }
+    image.Image{width: width, height: height, pixels: pixels}
+}
+
+write_image: fn(path: String, picture: image.Image, format: image.ImageFormat) {
+    limits: image.Limits{max_input_bytes: 100000000, max_pixels: 10000000, max_output_bytes: 100000000}
+    bytes: image.encode(picture, format, limits) ?? panic("encode {path}: {err:Debug}")
+    files.write_bytes(path, bytes) ?? panic("write {path}: {err}")
+}
+
+run: fn() {
+    files.create_dir_all("Public") ?? panic("mkdir Public: {err}")
+    write_image("Public/hero.png", pattern(1500, 1000), .PNG)
+    write_image("Public/photo.jpg", pattern(2000, 1333), .JPEG)
+    write_image("Public/icon.png", pattern(64, 64), .PNG)
+}
