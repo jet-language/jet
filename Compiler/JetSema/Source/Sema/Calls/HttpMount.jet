@@ -30,6 +30,7 @@ use jet_foundation.[
     expr_span,
     symbol_key_text,
     symbol_table_key,
+    diagnostic_registry_row,
     checked_symbol_local,
     type_name,
     ModuleID,
@@ -90,6 +91,60 @@ sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_iden
         return "#{marker.name}({args.join(", ")})"
     }
     ""
+}
+
+// `app.Remote<S>`, the app module's client of a service, and its private
+// field that holds the service.
+SEMA_APP_REMOTE: "Remote"
+SEMA_APP_REMOTE_SERVICE: "service"
+
+// Whether `ty`, a resolved type of one type argument, is `app.Remote<S>`.
+sema_app_is_remote: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    graph: program.registration_graph ?? return false
+    row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
+    graph.modules[row.module_index].module_name == SEMA_APP_MARKER_MODULE && graph.modules[row.module_index].nominals[row.row].symbol.name == SEMA_APP_REMOTE
+}
+
+// `remote.method(args…)` on an `app.Remote<S>`. A method of `S` that
+// `#App.SignedIn` or `#App.Public` marks checks as that method called on the
+// Remote's service. Any other method of `S` is server-only (E2812), and a
+// name `S` does not declare is no method of the Remote (E0102).
+sema_call_app_remote_method: fn(receiver: Expr, receiver_value: TExpr, service: Type, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    graph: program.registration_graph ?? return None
+    shown := "app.Remote<{type_name(service)}>"
+    declared := false
+    endpoint := false
+    if sema_type_resolve_nominal_row(graph, service, environment.module_identity) == .Val(row) {
+        shown = "app.Remote<{graph.modules[row.module_index].nominals[row.row].symbol.name}>"
+        if sema_http_route_find_struct(environment, program, service, environment.module_identity) == .Val(definition) {
+            loop declaration in definition.methods {
+                if declaration.name != method -> next
+                declared = true
+                loop marker in declaration.markers {
+                    if sema_app_endpoint_marker(marker, graph, graph.modules[row.module_index].module_identity) -> endpoint = true
+                }
+            }
+        }
+    }
+    if !endpoint {
+        if {
+            declared -> {
+                entry: diagnostic_registry_row("E2812") ?? panic("E2812 must have a registry row")
+                diagnostics.push(sema_error("E2812", method_span, entry.what.replace("{{remote}}", shown).replace("{{method}}", method), entry.why, entry.fix.replace("{{method}}", method)))
+            }
+            else -> diagnostics.push(sema_error("E0102", method_span, "`{shown}` has no method `{method}`", "`{shown}` offers only the methods of its service that `#App.SignedIn` or `#App.Public` marks", "call a marked method of the service"))
+        }
+        sema_data_check_discarded_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return None
+    }
+    // The service is the Remote's private field, which only this call reads.
+    generated: context.compiler_generated
+    context.compiler_generated = true
+    service_value: sema_expression_field_checked(receiver_value, SEMA_APP_REMOTE_SERVICE, expr_span(receiver), None, environment, program, scopes, context, diagnostics)
+    context.compiler_generated = generated
+    value: service_value ?? return None
+    place: Expr.Field{base: receiver, member: SEMA_APP_REMOTE_SERVICE, span: expr_span(receiver), id: AST_NODE_GENERATED}
+    sema_expr_check_declared_method(place, value, method, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // The module that declares the web markers. The web rules key on its

@@ -47,6 +47,20 @@ Public: struct {
     }
 }
 
+// A client of the service `S`. It offers only the methods of `S` that
+// `#App.SignedIn` or `#App.Public` marks: a call of any other method of `S`
+// is E2812, and the service itself stays out of reach. A call through the
+// Remote `remote` makes runs the method directly on that service.
+Remote: struct<S> {
+    priv service: S
+}
+
+// The Remote of a service the server holds: each call through it runs the
+// marked method on `service` directly.
+remote: fn<S>(service: &&S) -> Remote<S> Never! {
+    Remote<S>{service: service}
+}
+
 Auth: struct {
     users_table: String
     providers: [String]

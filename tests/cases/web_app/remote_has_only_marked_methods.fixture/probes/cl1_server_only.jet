@@ -1,0 +1,12 @@
+// CL1 probe. Must fail: a client calls server-only methods. Both calls
+// are errors, because app.Remote<Crew> has only the marked methods.
+use {
+    app
+    logic
+}
+
+steal: fn(crew: app.Remote<logic.Crew>, project: logic.ProjectID) -> Int logic.TaskError! {
+    _: crew.webhook_secret(project)
+    _: crew.tell_assignee(logic.new_task_id())
+    Ok(0)
+}

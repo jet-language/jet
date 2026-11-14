@@ -4266,6 +4266,10 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     // that shares its name with a method. Any other function value is called
     // with plain parentheses (E0802); it is still checked as that call.
     receiver_signature: sema_call_resolved_type(receiver_value.ty, environment, program)
+    // `app.Remote<S>` offers only the methods of `S` an endpoint marker marks.
+    if receiver_signature == .Apply(_, remote_args) {
+        if remote_args.len() == 1 && sema_app_is_remote(receiver_signature, environment, program) -> return sema_call_app_remote_method(receiver, receiver_value, remote_args[0], method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     if method == "call" && sema_call_type_is_function(receiver_signature) {
         if !sema_expr_names_shadowed_callable_field(receiver, receiver_value, environment, program) {
             // Spanned at `.call`, the text its fix removes: the receiver's

@@ -22083,6 +22083,24 @@ ImageSettingNotLiteral: struct {
     }
 }
 
+ServerOnlyMethod: struct {
+    remote: String
+    method: String
+
+    impl Diagnostic {
+        code: "E2812"
+        safety_class: .Soundness
+        safety_reason: "A client call to an unmarked method reaches code the service keeps on the server, such as a job, a webhook or a signing key."
+        expert_path: "none: a method is an endpoint only where its own marker says so"
+        stage: [.Compile]
+        meaning: "A call through `app.Remote` of a method that no endpoint marker marks"
+        detail: true
+        what: fn(self) -> String { "`{self.remote}` has no endpoint `{self.method}`: the method is server-only." }
+        why: fn(self) -> String { "A client reaches a service only through the methods marked `#App.SignedIn` or `#App.Public`; an unmarked method, a job, a webhook or a signing key stays on the server." }
+        fix: fn(self) -> String { "Mark `{self.method}` `#App.SignedIn` for signed-in callers or `#App.Public` for any caller, or call it from server code that holds the service." }
+    }
+}
+
 UnmountedHttpRoutes: struct {
     method: String
     type: String

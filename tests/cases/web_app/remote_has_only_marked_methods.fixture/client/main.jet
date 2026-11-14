@@ -1,0 +1,17 @@
+// The server's own Remote of a Crew: a call of a marked method runs it on
+// that Crew.
+use {
+    app
+    logic
+}
+
+move: fn(crew: app.Remote<logic.Crew>, id: logic.TaskID) -> Int logic.TaskError! {
+    moved: crew.move_task(id) ?? return Err(err)
+    Ok(moved)
+}
+
+run: fn() {
+    crew: app.remote(logic.Crew{name: "crew"})
+    print(crew.status())
+    print("{move(crew, logic.TaskID{value: 41}) ?? -1}")
+}

@@ -7682,9 +7682,10 @@ web, desktop and phones. A method of a mounted service is an endpoint only
 when it is marked `#App.SignedIn` (a signed-in caller reaches it) or
 `#App.Public` (any caller reaches it); Core's `app` module declares both
 markers. An unmarked method is server-only: a client call to it through
-`app.Remote<S>` fails to compile with an error that names the method. A call
-through `app.Remote<S>` is typed: direct on the server, a checked remote call
-elsewhere. `jet inspect choices` lists each marked method under its marker.
+`app.Remote<S>` fails to compile with E2812 (`jet.ServerOnlyMethod`), which
+names the method. A call through `app.Remote<S>` is typed: direct on the
+server, a checked remote call elsewhere. `jet inspect choices` lists each
+marked method under its marker.
 
 
 **D-ENTRY-VALUE1=B — the entry returns the program** *(card #1446)*: `run: fn`

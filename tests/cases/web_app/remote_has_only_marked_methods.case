@@ -1,0 +1,18 @@
+# A client reaches a service only through app.Remote<S>, which offers the
+# methods `#App.SignedIn` or `#App.Public` marks. The probe calls the signing
+# key and the job of Crew through app.Remote<Crew>: each call is E2812, which
+# names the method and suggests a marker. The client calls the marked methods
+# through the server's own Remote, which runs them on its Crew.
+fixture: remote_has_only_marked_methods.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check probes/cl1_server_only.jet
+exit: nonzero
+stderr: ~ "`app.Remote<Crew>` has no endpoint `webhook_secret`: the method is server-only." # the signing key
+stderr: ~ "cl1_server_only.jet:9:13" # at the signing key's call
+stderr: ~ "`app.Remote<Crew>` has no endpoint `tell_assignee`: the method is server-only." # the job
+stderr: ~ "cl1_server_only.jet:10:13" # at the job's call
+stderr: ~ "Mark `webhook_secret` `#App.SignedIn`" # the fix suggests a marker
+step: jet run client/main.jet
+exit: 0
+stdout: = "crew is up\n42\n"

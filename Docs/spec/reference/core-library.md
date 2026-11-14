@@ -5371,7 +5371,7 @@ choices, not implicit scheduler behavior. A scope owns the lifetime of its
 subscriptions.
 The event family is a typed Core value with no additional event syntax (`D-EVENT1`). Scope ownership, ordered dispatch, explicit cancellation, and bounded asynchronous pressure remain the governing rules (`D-EVENT2=A`; `D-EVENT-CONTINUE1=C`).
 
-### `app` — live bindings
+### `app` — live bindings and service clients
 
 `app` keeps the process-wide live-binding registry; inside `testing.world` it
 keeps the world's own registry instead, starting empty, so a world and its
@@ -5386,6 +5386,7 @@ tasks never read or change the process registry. The module source is
 | `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
 | `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
+| `remote(service: S) -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. |
 
 A source must be a named function, not a closure: its module path and name
 identify it on the wire. `T` and `E` must be `Encode` and `Decode`, and the
@@ -5397,6 +5398,15 @@ statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry
 lives in one module `Shared` cell of `app`'s source, and an invalidation goes
 to the WebSocket live hub as topic `live:<source>`.
+
+`Remote<S>` is the client of a service `S`. It offers only the methods of `S`
+that `#App.SignedIn` (a signed-in caller) or `#App.Public` (any caller)
+marks, and `jet inspect choices` lists those methods as endpoints. A call of
+any other method of `S` through a Remote, such as an unmarked method, a job,
+a webhook or a signing key, is E2812 (`jet.ServerOnlyMethod`): the report
+names the method and suggests a marker. The service is a private field of the
+Remote, which no code outside `app` reads. A call through the Remote that
+`remote(service)` makes runs the method on that service directly.
 
 ### `core.web` — server-rendered applications
 
