@@ -1320,7 +1320,9 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         return body
     }
     if tag_key == .Val(tag_name) {
-        tag_tree: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "field", [Expr]{sema_serde_items_string(tag_name, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: false, span: span, id: AST_NODE_GENERATED}
+        // `get` reads the tree in place; `field` hands a miss to the runtime
+        // route, which first rebuilds the whole tree.
+        tag_tree: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "get", [Expr]{sema_serde_items_string(tag_name, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: true, span: span, id: AST_NODE_GENERATED}
         tag_decode: sema_serde_items_under(tag_name, sema_serde_items_decode_call(tag_tree, Type.String, span), span)
         body.push(sema_serde_items_binding("tag_value", None, Expr.Try{value: tag_decode, span: span, conversion: TryConvert.NoConversion, context: None, id: AST_NODE_GENERATED}, false, span))
         loop variant in definition.variants {
@@ -1341,14 +1343,20 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         return body
     }
     // Externally tagged: a unit variant is its name as text; any other is a
-    // one-key object.
+    // one-key object. Every test reads the tree in place: a missing key
+    // (`field`) or a non-Text `decode<String>` takes the runtime route, which
+    // rebuilds the whole tree first, so each failed attempt cost the size of
+    // the tree and an AST decode grew with variants × nodes × depth.
     loop variant in definition.variants {
         wire: sema_serde_items_variant_key(variant, style)
         if variant.payload == .Unit {
             binding_name: "jet_serde_enum_variant_name_{sema_serde_items_stem(variant)}"
             decoded: sema_serde_items_decode_call(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), Type.String, span)
             matched: sema_serde_items_if(Expr.Binary{op: BinOp.Eq, left: sema_serde_items_ident(binding_name, span), right: sema_serde_items_string(wire, span), span: span, id: AST_NODE_GENERATED}, [Stmt]{sema_serde_items_return(Expr.Ok{value: sema_serde_items_enum_unit(definition.name, variant, span), span: span, id: AST_NODE_GENERATED}, span)}, span)
-            body.push(sema_serde_items_pattern_switch(decoded, "Ok", [String]{binding_name}, [Stmt]{matched}, Val([Stmt]{}), span))
+            named: sema_serde_items_pattern_switch(decoded, "Ok", [String]{binding_name}, [Stmt]{matched}, Val([Stmt]{}), span)
+            // An Object never decodes as text, so it skips the route.
+            object_test: Expr.PatternTest{subject: sema_serde_items_ident("tree", span), pattern: Pattern.Variant{variant: "Object", bindings: [PatSlot]{PatSlot.Wildcard}, leading_dot: true, span: span}, span: span, id: AST_NODE_GENERATED}
+            body.push(Stmt.Switch{subject: sema_serde_items_ident("tree", span), arms: [SwitchArm]{SwitchArm{cond: object_test, body: [Stmt]{}, span: span}}, else_body: Val([Stmt]{named}), span: span})
             next
         }
         // Each variant's attempt is its own scope: its candidate and field
@@ -1358,7 +1366,7 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         // pick the wrong variant, and through a recursive payload
         // (`Type.List(element: Type)`) recurse without end.
         candidate: "candidate_{sema_serde_items_stem(variant)}"
-        present: sema_serde_items_method_call(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "field", [Expr]{sema_serde_items_string(wire, span)}, span)
+        present: sema_serde_items_method_call(sema_serde_items_ident("tree", span), "get", [Expr]{sema_serde_items_string(wire, span)}, span)
         attempt := [Stmt]{}
         source: sema_serde_items_ident(candidate, span)
         if variant.payload == .Single(_, _) {
@@ -1368,7 +1376,7 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         } else {
             loop stmt in sema_serde_items_enum_decode_value(variant, source, definition.name, span) -> attempt.push(stmt)
         }
-        body.push(sema_serde_items_pattern_switch(present, "Ok", [String]{candidate}, attempt, Val([Stmt]{}), span))
+        body.push(sema_serde_items_pattern_switch(present, "Val", [String]{candidate}, attempt, Val([Stmt]{}), span))
     }
     body.push(sema_serde_items_no_matching_enum(span))
     body
@@ -1385,7 +1393,7 @@ sema_serde_items_enum_decode_value: fn(variant: Variant, source: Expr, type_name
     results := [String]{}
     loop field in fields {
         result: "jet_serde_enum_{stem}_decode_{field.name}"
-        subtree: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_copy(source, span), "field", [Expr]{sema_serde_items_string(field.name, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: false, span: span, id: AST_NODE_GENERATED}
+        subtree: Expr.OrFallback{value: sema_serde_items_method_call(source, "get", [Expr]{sema_serde_items_string(field.name, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: true, span: span, id: AST_NODE_GENERATED}
         body.push(sema_serde_items_binding(result, None, sema_serde_items_under(field.name, sema_serde_items_decode_call(subtree, field.ty, span), span), false, span))
         results.push(result)
     }
