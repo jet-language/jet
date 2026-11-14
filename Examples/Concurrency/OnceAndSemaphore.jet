@@ -1,0 +1,33 @@
+// Run-once work and a counting semaphore shared by tasks.
+package: {
+    name: "once_and_semaphore"
+    authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
+}
+
+use {
+    tasks: core.tasks
+}
+
+setup: fn() { print("setup ran") }
+
+// Every worker asks for the setup; only the first call runs it, and a worker
+// that arrives while it runs waits for it to finish.
+worker: fn(ready: tasks.Once, done: tasks.Semaphore, n: Int) -> Int {
+    _: ready.call(setup)
+    done.release()
+    n
+}
+
+run: fn() {
+    ready: tasks.Once.new()
+    done: tasks.Semaphore.new(0)
+    task.group workers {
+        first: task worker(ready, done, 1)
+        second: task worker(ready, done, 2)
+        print("workers {first.join() ?? -1} and {second.join() ?? -1}")
+    }
+    print("two units: {done.acquire()} {done.acquire()}, a third without waiting: {done.try_acquire()}")
+    print("setup done: {ready.is_done()}, runs again: {ready.call(setup)}")
+    done.release()
+    print("free units: {done.value()}")
+}

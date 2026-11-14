@@ -4701,6 +4701,14 @@ sendability rules. The implementation is in
 | `timeout(delay: Duration) -[Time.Wait]>` | — | Wait for a duration before returning. |
 | `sleep(ms: Int) -[Time.Wait]>` | — | Wait for `ms` milliseconds (none when negative) before returning. |
 | `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
+| `Once.new() -> Once` | once | Work that runs at most once across the tasks sharing it (`pthread_once`, `call_once`). |
+| `once.call(work: fn()) -> Bool` | ran | Run `work` unless this Once already ran it; `true` when this call ran it. A caller arriving while it runs waits for it. |
+| `once.is_done() -> Bool` | done | Whether the work has run. |
+| `Semaphore.new(count: Int) -> Semaphore` | semaphore | A counting semaphore holding `count` units (none when negative). |
+| `semaphore.acquire() -[Time.Wait]> Bool` | taken | Take a unit, waiting until one is free; `false` when the wait ends without one, as when the task is cancelled. |
+| `semaphore.try_acquire() -> Bool` | taken | Take a unit only when one is free. |
+| `semaphore.release()` | — | Return a unit and wake one waiting `acquire`. |
+| `semaphore.value() -> Int` | units | The free units at the moment of the read. |
 
 Every function here that waits, or reads the monotonic clock for a timer's
 deadline, declares the waiting leaf `Time.Wait`, and sema infers the same leaf
@@ -4716,6 +4724,14 @@ the time the task ran, on whichever carrier threads ran it, and stands still
 while the task is parked; on a plain thread it is the thread's CPU time. Only
 the difference of two reads by the same task means anything. A deterministic
 world has no CPU clock to control, so it rejects the read.
+
+`Once` and `Semaphore` are built from a `Shared<T>` cell and its guards, so a
+copy shares the original's state and either can cross a task boundary.
+`Once.call` holds the cell's edit guard while the work runs, so a caller that
+arrives meanwhile waits and then returns `false`; the work must not call the
+same Once. `Semaphore.acquire` waits on a `Condition` under the cell's edit
+guard. A `Shared<T>` cell is itself the reader-writer lock:
+`guard_read()` holds shared read access, `guard_edit()` exclusive write access.
 
 `TaskState` is the pure integer convenience queue; generic task and channel
 handles are compiler-owned scheduler surfaces. A capacity of zero means that

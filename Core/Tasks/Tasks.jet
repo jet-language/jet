@@ -87,6 +87,76 @@ TaskID: struct {
 
 current_task: fn() -> TaskID Never! { TaskID{value: core.tasks.__task_identity()} }
 
+/// Runs one piece of work at most once across every task that shares the Once
+/// (pthread_once, call_once); copies share one state. A caller that arrives
+/// while the work runs waits for it to finish, so after `call` returns the work
+/// has run.
+Once: struct {
+    priv done: Shared<Bool>
+
+    new: fn() -> Once Never! { {done: Shared{false}} }
+
+    /// Runs `work` unless this Once has already run it; true when this call
+    /// ran it. The work must not call the same Once.
+    call: fn(self, work: fn()) -> Bool Never! {
+        guard := self.done.guard_edit()
+        if guard.value -> return false
+        work()
+        guard.value = true
+        true
+    }
+
+    /// Whether the work has run.
+    is_done: fn(self) -> Bool Never! {
+        guard: self.done.guard_read()
+        guard.value
+    }
+}
+
+/// A counting semaphore shared by every task that holds a copy (sem_init,
+/// sem_wait, sem_trywait, sem_post, sem_getvalue). `acquire` takes a unit,
+/// waiting for one when none is free; `release` returns one and wakes one
+/// waiter.
+Semaphore: struct {
+    priv count: Shared<Int>
+    priv changed: Condition
+
+    /// A semaphore holding `count` units (none when `count` is negative).
+    new: fn(count: Int) -> Semaphore Never! {
+        {count: Shared{if count < 0 -> 0 else -> count}, changed: Condition.new()}
+    }
+
+    /// Takes a unit, waiting until one is free; false when the wait ends
+    /// without one, as when the task is cancelled.
+    acquire: fn(self) -[Time.Wait]> Bool Never! {
+        guard := self.count.guard_edit()
+        guard.wait(self.changed, fn(units) { units > 0 }) ?? return false
+        guard.value -= 1
+        true
+    }
+
+    /// Takes a unit when one is free, without waiting.
+    try_acquire: fn(self) -> Bool Never! {
+        guard := self.count.guard_edit()
+        if guard.value <= 0 -> return false
+        guard.value -= 1
+        true
+    }
+
+    /// Returns a unit and wakes one waiting `acquire`.
+    release: fn(self) Never! {
+        guard := self.count.guard_edit()
+        guard.value += 1
+        self.changed.notify_one()
+    }
+
+    /// The free units now; another task may change it at once.
+    value: fn(self) -> Int Never! {
+        guard: self.count.guard_read()
+        guard.value
+    }
+}
+
 /// The CPU time the running task has used, in nanoseconds. A task's clock
 /// counts only the time it ran, on whichever carrier threads ran it, and
 /// stands still while it is parked; on a plain thread it is the thread's CPU
@@ -247,6 +317,45 @@ spawn_name: fn(name: String) -> String Never! {
 }
 
 
+
+#Test("a Once runs its work once, however many tasks call it") {
+    once: Once.new()
+    hits: Shared{0}
+    // copy: the work's handle to the same cell, which the test reads after
+    counter: hits.copy()
+    assert(!once.is_done())
+    assert(once.call(fn() {
+        guard := counter.guard_edit()
+        guard.value += 1
+    }))
+    assert(!once.call(fn() { panic("a done Once ran its work again") }))
+    assert(once.is_done())
+    counted: hits.guard_read()
+    assert_eq(counted.value, 1)
+    shared: Once.new()
+    task.group callers {
+        first: task shared.call(fn() {})
+        second: task shared.call(fn() {})
+        assert((first.join() ?? false) != (second.join() ?? false))
+    }
+    assert(shared.is_done())
+}
+
+#Test("a Semaphore hands out its units and wakes a waiting acquire") {
+    units: Semaphore.new(1)
+    assert(units.try_acquire())
+    assert(!units.try_acquire())
+    task.group waiters {
+        waiter: task units.acquire()
+        units.release()
+        assert(waiter.join() ?? false)
+    }
+    assert_eq(units.value(), 0)
+    units.release()
+    units.release()
+    assert_eq(units.value(), 2)
+    assert_eq(Semaphore.new(-3).value(), 0)
+}
 
 #Test("a task's identity is stable and differs from another running task's") {
     mine: current_task()

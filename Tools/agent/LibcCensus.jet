@@ -9,8 +9,9 @@
 // a bare module) must be exported by Compiler/Prelude/Core.rows, as the
 // compiler declares it (`$JET inspect structure --core --json`),
 // `core.<module>.<Type>.<method>` must name a type that module exports and a
-// method its source declares, and `<Type>.<method>` must be a built-in method,
-// static or collection operation row. Every unresolved name is reported. With
+// method its source declares, `<Type>.<method>` must be a built-in method,
+// static or collection operation row, and `Shared.<method>` a method sema's
+// Shared owner dispatch names. Every unresolved name is reported. With
 // no argument the script checks the rows, then prints the census as Markdown:
 // the per-area summary, the gap list by area and every family. --check (and
 // this file's #Test) checks the rows only.
@@ -26,6 +27,7 @@ CORE_PRELUDE_PATH: "Compiler/Prelude/Core.rows"
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
+SHARED_OWNER_PATH: "Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet"
 USAGE: "usage: jet Tools/agent/LibcCensus.jet [--check]"
 
 #Error
@@ -302,15 +304,19 @@ FAMILIES: [Family]{
     {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_cond_init pthread_cond_destroy pthread_cond_wait pthread_cond_timedwait pthread_cond_clockwait pthread_cond_signal pthread_cond_broadcast", variants: "", jet: "core.tasks.notify core.tasks.wait", coverage: .Covered, note: ""},
     {area: "Threads", header: "threads.h", standard: C23, names: "cnd_init cnd_destroy cnd_wait cnd_timedwait cnd_signal cnd_broadcast", variants: "", jet: "core.tasks.notify core.tasks.wait", coverage: .Covered, note: ""},
     {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_condattr_init pthread_condattr_destroy pthread_condattr_getclock pthread_condattr_setclock pthread_condattr_getpshared pthread_condattr_setpshared", variants: "", jet: "", coverage: .Gap, note: "no clock choice or process sharing for conditions"},
-    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_rwlock_init pthread_rwlock_destroy pthread_rwlock_rdlock pthread_rwlock_tryrdlock pthread_rwlock_timedrdlock pthread_rwlock_clockrdlock pthread_rwlock_wrlock pthread_rwlock_trywrlock pthread_rwlock_timedwrlock pthread_rwlock_clockwrlock pthread_rwlock_unlock pthread_rwlockattr_init pthread_rwlockattr_destroy pthread_rwlockattr_getpshared pthread_rwlockattr_setpshared", variants: "", jet: "", coverage: .Gap, note: "no reader-writer lock"},
+    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_rwlock_init pthread_rwlock_destroy pthread_rwlock_rdlock pthread_rwlock_wrlock pthread_rwlock_unlock", variants: "", jet: "Shared.guard_read Shared.guard_edit", coverage: .Covered, note: "a Shared<T> cell is the reader-writer lock: guard_read holds shared read access and guard_edit exclusive write access, each released on every exit"},
+    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_rwlock_tryrdlock pthread_rwlock_timedrdlock pthread_rwlock_clockrdlock pthread_rwlock_trywrlock pthread_rwlock_timedwrlock pthread_rwlock_clockwrlock", variants: "", jet: "", coverage: .Gap, note: "no try or timed acquisition of a Shared guard"},
+    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_rwlockattr_init pthread_rwlockattr_destroy pthread_rwlockattr_getpshared pthread_rwlockattr_setpshared", variants: "", jet: "", coverage: .Gap, note: "no process-shared reader-writer lock"},
     {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_spin_init pthread_spin_destroy pthread_spin_lock pthread_spin_trylock pthread_spin_unlock", variants: "", jet: "", coverage: .Gap, note: "no spin lock"},
     {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_barrier_init pthread_barrier_destroy pthread_barrier_wait pthread_barrierattr_init pthread_barrierattr_destroy pthread_barrierattr_getpshared pthread_barrierattr_setpshared", variants: "", jet: "core.tasks.waitall", coverage: .Partial, note: "waiting for a set of tasks; no reusable barrier"},
-    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_once", variants: "", jet: "", coverage: .Gap, note: "no run-once primitive"},
-    {area: "Threads", header: "threads.h", standard: C23, names: "call_once", variants: "", jet: "", coverage: .Gap, note: "no run-once primitive"},
-    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_key_create pthread_key_delete pthread_getspecific pthread_setspecific", variants: "", jet: "", coverage: .Gap, note: "no task-local storage"},
-    {area: "Threads", header: "threads.h", standard: C23, names: "tss_create tss_delete tss_get tss_set", variants: "", jet: "", coverage: .Gap, note: "no task-local storage"},
+    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_once", variants: "", jet: "core.tasks.Once.new core.tasks.Once.call", coverage: .Covered, note: ""},
+    {area: "Threads", header: "threads.h", standard: C23, names: "call_once", variants: "", jet: "core.tasks.Once.new core.tasks.Once.call", coverage: .Covered, note: ""},
+    {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_key_create pthread_key_delete pthread_getspecific pthread_setspecific", variants: "", jet: "", coverage: .Language, note: "a `#ContextKey name: default` constant is a task-scoped key: `#Context(name: value)` sets it for a block and the tasks spawned inside it, and `context.get(name)` reads the current task's value; a value is set for a block, not for the rest of the task, and no destructor runs at task exit"},
+    {area: "Threads", header: "threads.h", standard: C23, names: "tss_create tss_delete tss_get tss_set", variants: "", jet: "", coverage: .Language, note: "`#ContextKey`, `#Context(...)` and `context.get`, as for the pthread keys"},
     {area: "Threads", header: "pthread.h", standard: POSIX, names: "pthread_atfork", variants: "", jet: "", coverage: .Gap, note: ""},
-    {area: "Threads", header: "semaphore.h", standard: POSIX, names: "sem_init sem_destroy sem_open sem_close sem_unlink sem_wait sem_trywait sem_timedwait sem_clockwait sem_post sem_getvalue", variants: "", jet: "", coverage: .Gap, note: "no counting or named semaphore"},
+    {area: "Threads", header: "semaphore.h", standard: POSIX, names: "sem_init sem_destroy sem_wait sem_trywait sem_post sem_getvalue", variants: "", jet: "core.tasks.Semaphore.new core.tasks.Semaphore.acquire core.tasks.Semaphore.try_acquire core.tasks.Semaphore.release core.tasks.Semaphore.value", coverage: .Covered, note: "shared by the tasks that hold a copy"},
+    {area: "Threads", header: "semaphore.h", standard: POSIX, names: "sem_timedwait sem_clockwait", variants: "", jet: "", coverage: .Gap, note: "no timed acquire"},
+    {area: "Threads", header: "semaphore.h", standard: POSIX, names: "sem_open sem_close sem_unlink", variants: "", jet: "", coverage: .Gap, note: "no named, process-shared semaphore"},
     // ---- Atomics ----
     {area: "Atomics", header: "stdatomic.h", standard: C23, names: "atomic_init atomic_load atomic_store atomic_compare_exchange_strong atomic_compare_exchange_weak atomic_fetch_add atomic_is_lock_free", variants: "", jet: "core.mem.Atomic Atomic.load Atomic.store Atomic.compare_exchange AtomicAdd.add", coverage: .Covered, note: "Atomic holds only lock-free scalars"},
     {area: "Atomics", header: "stdatomic.h", standard: C23, names: "atomic_load_explicit atomic_store_explicit atomic_compare_exchange_strong_explicit atomic_compare_exchange_weak_explicit atomic_fetch_add_explicit", variants: "", jet: "Atomic.observe Atomic.publish", coverage: .Partial, note: "acquire and release through observe and publish; no relaxed or consume order"},
@@ -497,8 +503,10 @@ METHOD_RECEIVERS: [String: [String]]{
     "AtomicAdd": [String]{"AtomicAdd"},
 }
 
-// Whether `owner.method` is a built-in method, static or collection operation.
-builtin_resolves: fn(owner: String, method: String, methods: String, statics: String, collections: String) -> Bool Never! {
+// Whether `owner.method` is a built-in method, static or collection operation,
+// or a `Shared<T>` method that sema dispatches.
+builtin_resolves: fn(owner: String, method: String, methods: String, statics: String, collections: String, shared: String) -> Bool Never! {
+    if owner == "Shared" -> return shared.contains("method == \"{method}\"")
     receivers: METHOD_RECEIVERS.get(owner) ?? [String]{}
     loop receiver in receivers {
         if methods.contains("receiver: BuiltinMethodReceiver.{receiver}, name: \"{method}\"") -> return true
@@ -512,6 +520,7 @@ unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [S
     methods: files.read(BUILTIN_METHODS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_METHODS_PATH}: {err}"))
     statics: files.read(BUILTIN_STATICS_PATH) ?? return Err(census_fail("cannot read {BUILTIN_STATICS_PATH}: {err}"))
     collections: files.read(COLLECTIONS_PATH) ?? return Err(census_fail("cannot read {COLLECTIONS_PATH}: {err}"))
+    shared: files.read(SHARED_OWNER_PATH) ?? return Err(census_fail("cannot read {SHARED_OWNER_PATH}: {err}"))
     problems := [String]{}
     loop family in FAMILIES {
         if family.coverage == .NotNeeded && !family.note.contains(OWNER_RULING) -> problems.push("{family.names}: a not-needed family's note does not cite the {OWNER_RULING}")
@@ -553,7 +562,7 @@ unresolved: fn(exports: [String: [String]], sources: [String: String]) -[FS]> [S
                 problems.push("{family.names}: {claim} is neither core.<module>.<member> nor <Type>.<method>")
                 next
             }
-            if !builtin_resolves(claim.slice(0, dot), claim.slice(dot + 1, claim.len()), methods, statics, collections) -> problems.push("{family.names}: {claim} is not a built-in method, static or collection operation")
+            if !builtin_resolves(claim.slice(0, dot), claim.slice(dot + 1, claim.len()), methods, statics, collections, shared) -> problems.push("{family.names}: {claim} is not a built-in method, static or collection operation, or a Shared method")
         }
     }
     seen := [String: String]{}
