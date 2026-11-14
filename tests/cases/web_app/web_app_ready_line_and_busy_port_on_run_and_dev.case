@@ -41,3 +41,22 @@ signal server: KILL
 wait: server
 exit: any # the case kills the server; its status is not part of this proof
 file: server.stdout = "serving http://127.0.0.1:{free-port:app}\n" # the `jet run` ready line, and nothing else
+# The built program prints the same ready line: it comes from the app's own
+# listen step, not from the `jet` command that ran it.
+step: jet build app.jet
+exit: 0
+spawn built-server: built
+env: JET_APP_PORT={free-port:aot}
+stdout: file built.stdout
+stderr: file built.stderr
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:aot}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/built.http
+exit: 0
+file: built.http ^= "HTTP/1.1 200" # the built app answers once its ready line is out
+signal built-server: KILL
+wait: built-server
+exit: any # the case kills the built server; its status is not part of this proof
+file: built.stdout = "serving http://127.0.0.1:{free-port:aot}\n" # the built program's ready line, and nothing else
