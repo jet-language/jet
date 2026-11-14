@@ -1,0 +1,11 @@
+// `authority.allow` takes a scoped grant such as `FS.Read("data/")`, but a
+// memory bound is a denial, not a grant: `Mem.Alloc(above: 65536)` belongs
+// in `authority.deny`.
+package: {
+    name: "memory_bound_in_allow"
+    authority: { allow: [IO, Mem.Alloc(above: 65536)] }
+}
+
+run: fn() {
+    print("bounded")
+}
