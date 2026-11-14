@@ -1,0 +1,50 @@
+# D-TASK-SLICE1=A: a native artifact that registers `process.on_signal(.Term)`
+# drains on SIGTERM even while a handler task is busy in a loop that never
+# waits. The signal cancels every task: the busy handler stops at the check
+# its next iteration starts with, its deferred close runs, and its join
+# reports the cancel. The artifact prints both and exits 0 within a second,
+# at O0, O1 and O2. Each tier builds into the default directory and its
+# session runs that build, before the next tier replaces it.
+requires: os:unix
+fixture: sigterm_stops_a_busy_handler_through_its_cleanup.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step: jet build --optimize=none --allow=Exec,Time,IO main.jet
+exit: 0
+
+session o0 raw: built
+recv o0 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o0: TERM
+repeat while process {pid:o0} alive timeout 1s every 10ms fail "the O0 artifact did not drain within 1 s of SIGTERM"
+end repeat
+close o0
+exit: 0
+stdout: = "close the busy handler's marker\nbusy handler: cancelled\n"
+
+step: jet build --optimize=basic --allow=Exec,Time,IO main.jet
+exit: 0
+
+session o1 raw: built
+recv o1 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o1: TERM
+repeat while process {pid:o1} alive timeout 1s every 10ms fail "the O1 artifact did not drain within 1 s of SIGTERM"
+end repeat
+close o1
+exit: 0
+stdout: = "close the busy handler's marker\nbusy handler: cancelled\n"
+
+step: jet build --optimize=full --allow=Exec,Time,IO main.jet
+exit: 0
+
+session o2 raw: built
+recv o2 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o2: TERM
+repeat while process {pid:o2} alive timeout 1s every 10ms fail "the O2 artifact did not drain within 1 s of SIGTERM"
+end repeat
+close o2
+exit: 0
+stdout: = "close the busy handler's marker\nbusy handler: cancelled\n"

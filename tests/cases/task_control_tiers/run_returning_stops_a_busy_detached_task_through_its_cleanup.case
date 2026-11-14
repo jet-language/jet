@@ -1,0 +1,24 @@
+# D-EXIT-TASKS1 with D-TASK-SLICE1=A: when `run` returns, the runtime cancels
+# every live task, and a detached task busy in a loop that never waits stops
+# at the check its next iteration starts with, so its deferred close runs
+# before the process exits 0, on every optimization level and the built
+# artifact. Without the delivery the task is abandoned after a second and the
+# close never prints.
+fixture: run_returning_stops_a_busy_detached_task_through_its_cleanup.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "run returns\nclose the spinner's marker\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "run returns\nclose the spinner's marker\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "run returns\nclose the spinner's marker\n"
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "run returns\nclose the spinner's marker\n"

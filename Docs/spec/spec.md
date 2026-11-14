@@ -3799,8 +3799,9 @@ the clock at the check each loop iteration or recursive call starts with.
 When `run` returns, the runtime cancels every live task, however many there
 are, and keeps running them until none is queued, ready or running, or until
 1 s of monotonic time has passed; the process then exits with `run`'s status.
-A task waiting at that point unwinds at its wait and runs its cleanup. A task
-that reaches no wait point within the second is abandoned, and the process
+A task waiting at that point unwinds at its wait, and a task busy in a loop or
+a recursion at its next check; each runs its cleanup. A task that reaches
+neither a wait point nor a check within the second is abandoned, and the process
 exits around it. Leaving tasks parked at exit is not an error. An explicit
 `process.exit` or a fatal stop neither cancels nor waits (D-EXIT-TASKS1=A).
 
@@ -4122,10 +4123,9 @@ outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
 **E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both
 arguments may be given, in either order, at most once each
 (D-THREAD-STACK1=A). The group owns and joins every child created in its
-body. When the task that opened a group is cancelled outside `#Shield`, the
-closing brace cancels the group's unfinished children, waits for all of them,
-and then the task unwinds as `Cancelled`; a group opened inside `#Shield` waits
-for its children as before (D-GROUP-CANCEL1=A). A `Group`
+body. A cancel of the task that opened a group reaches the group's unfinished
+children (see the cancellation rules above); the closing brace waits for all
+of them, and then the task unwinds as `Cancelled`. A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet

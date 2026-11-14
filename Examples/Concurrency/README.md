@@ -8,7 +8,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 
 - [AllFailFast](AllFailFast.jet) — All fail-fast cancels siblings when one task panics.
 - [BusyTurns](BusyTurns.jet) — A task that never waits gives its thread to waiting tasks at its next loop iteration once its time slice is up.
-- [CancelCleanup](CancelCleanup.jet) — Cancellation is preemptive at wait points.
+- [CancelCleanup](CancelCleanup.jet) — Cancellation is preemptive at wait points and at loop checks.
 - [ChannelBuiltin1560](ChannelBuiltin1560.jet) — channel<T>() is a builtin value with no import.
 - [ContextTaskInherit](ContextTaskInherit.jet)
 - [DeadlineContext](DeadlineContext.jet)

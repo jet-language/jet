@@ -1,0 +1,69 @@
+// D-TASK-SLICE1=A: a task busy in a loop that never waits still stops on
+// time. `task.any` returns its first result and `task.all` fails fast although
+// the other branch only computes, and a `#Deadline` block that passes inside
+// a busy task stops it with the deadline failure, through its deferred close.
+use time: core.time
+
+// A close that shows the stopped task's cleanup ran.
+Marker: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+// Counts with no call and no wait point: only the check each iteration
+// starts with can stop it.
+spin: fn(counter: Atomic<Int>) -> Int {
+    n := 0
+    loop n >= 0 {
+        n += 1
+        if n % 4096 == 0 -> counter.store(n)
+    }
+    n
+}
+
+seven: fn() -> Int { 7 }
+
+// Stops after a short wait unless `n` is negative: the branch `task.all`
+// fails fast on.
+broken: fn(n: Int) -> Int {
+    time.sleep(10ms)
+    assert(n < 0, "broken")
+    n
+}
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+run: fn() {
+    // The busy branch stops at its next iteration once the combinator decides.
+    any_counter: Atomic<Int>.try_new(0) ?? return
+    print(task.any {spin(any_counter), seven()} ?? panic("any failed"))
+    all_counter: Atomic<Int>.try_new(0) ?? return
+    results: (task.all {spin(all_counter), broken(1)}) ?? []
+    print(results.len())
+
+    // The handler shares the owner's counter, so it runs in a group the
+    // counter outlives.
+    counter: Atomic<Int>.try_new(0) ?? return
+    task.group handlers {
+        handler: task {
+            marker: Marker{name: "the handler's marker"}
+            defer close(marker)
+            #Deadline(20ms) {
+                print(spin(counter))
+            }
+        }
+        if handler.join() == {
+            .Ok(_) -> print("the handler finished")
+            .Err(error) -> print("the handler: {failure_label(error)}")
+        }
+    }
+}

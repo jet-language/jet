@@ -1297,8 +1297,9 @@ from its creation until its last reference drops, so the cancel reaches every
 task, not only the at most `OBSERVE_TASK_CAP` the observe registry holds
 (`Task.jet` `jet_rt_task_exit_settle`). It then runs the scheduler until no task
 is queued, ready or running, or until 1 s of monotonic time has passed, and the
-process exits with `run`'s status. A waiting task unwinds at its wait and runs
-its cleanup; a task that reaches no wait point in that time is abandoned, and
+process exits with `run`'s status. A waiting task unwinds at its wait, and a
+busy one at its next loop or recursion check; each runs its cleanup. A task
+that reaches neither in that time is abandoned, and
 the process exits around it rather than returning to a loaded-image host. An
 explicit or fatal exit neither cancels nor waits. A direct named task call uses
 that function name plus the spawn site for identity; an arbitrary task
