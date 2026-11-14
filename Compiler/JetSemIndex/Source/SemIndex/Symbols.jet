@@ -215,7 +215,7 @@ semindex_language_symbols: fn() -> [SemSymbol] Never! {
     loop source in BUILTIN_NUMERIC_SOURCES {
         loop target in SEMINDEX_SYMBOL_NUMERIC_TARGETS {
             ret: semindex_symbol_conversion_return(target, source.method) ?? next
-            result: if semindex_symbol_is_result(Val(ret)) -> "{target} !String" else -> target
+            result: if semindex_symbol_is_result(Val(ret)) -> "{target} String!" else -> target
             qualified_name: "{target}.{source.method}"
             symbols.push(semindex_symbol_builtin("builtin:method:{qualified_name}", source.method, qualified_name, Val(target), "core.numeric", SemSymbolKind.Member, "{target}.{source.method}(value: {source.source}) -> {result}", "Converts {source.source} to {target}.", no_examples))
         }
@@ -342,7 +342,7 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
     loop conversion in conversions {
         fallible: checked_text_error != None || ranged || semindex_symbol_is_result(semindex_symbol_distinct_conversion_return(base_name, conversion.method))
         qualified_name: "{owner}.{conversion.method}"
-        failure: if fallible -> " !String" else -> ""
+        failure: if fallible -> " String!" else -> ""
         signature := "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}{failure}"
         summary := "Converts {conversion.source} to {owner}."
         if checked_text_error == .Val(error) {
