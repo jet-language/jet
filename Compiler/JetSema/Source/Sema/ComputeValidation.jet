@@ -21,15 +21,29 @@ SemaAutodiffObligation: struct {
 // One checked function's proof obligations that only the whole program can
 // discharge: its compute/autodiff facts, and the task crossings its type
 // parameters reach with the generic calls that decide them
-// (Ownership/GenericCrossings.jet).
+// (Ownership/GenericCrossings.jet). No field has a default, so a builder that
+// spells the struct field by field can't leave one of them out.
 SemaComputeFunctionFacts: struct {
     function_key: String
     compute_calls: [SemaComputeCallFact]
     autodiff_obligations: [SemaAutodiffObligation]
     autodiff_safe_panic: Bool
     autodiff_unsafe_panic: Bool
-    generic_crossings: [SemaGenericCrossing]{[SemaGenericCrossing]{}}
-    generic_calls: [SemaGenericCall]{[SemaGenericCall]{}}
+    generic_crossings: [SemaGenericCrossing]
+    generic_calls: [SemaGenericCall]
+}
+
+// The facts of a body that was not checked, or whose facts were not kept.
+sema_compute_facts_empty: fn(function_key: String) -> SemaComputeFunctionFacts Never! {
+    SemaComputeFunctionFacts{
+        function_key: function_key,
+        compute_calls: [SemaComputeCallFact]{},
+        autodiff_obligations: [SemaAutodiffObligation]{},
+        autodiff_safe_panic: false,
+        autodiff_unsafe_panic: false,
+        generic_crossings: [SemaGenericCrossing]{},
+        generic_calls: [SemaGenericCall]{},
+    }
 }
 
 // Positions loan the already solved module products; no function body or
