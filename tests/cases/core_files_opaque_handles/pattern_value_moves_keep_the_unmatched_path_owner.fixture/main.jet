@@ -38,9 +38,10 @@ alternative_value: fn(&&l: FileLock, r: Reading) -[FS]> Int {
     0 + held()
 }
 
-// A list item's value is compared only once the length fits.
+// A list item's value is compared only once the length fits. The rest
+// marks the brackets a pattern: `[f(x)]` alone is a list value, built whole.
 list_value: fn(&&l: FileLock, xs: [Int]) -[FS]> Int {
-    if xs == [consume_lock(l.move())] -> return 1
+    if xs == [consume_lock(l.move()), ..] -> return 1
     0 + held()
 }
 
@@ -58,6 +59,6 @@ run: fn() -[IO, FS, Env]> {
     print("alternative value, first matched {a2} {held()}")
     l1: list_value(lock("e.lk"), [1])
     print("list value, matched {l1} {held()}")
-    l2: list_value(lock("f.lk"), [1, 2])
+    l2: list_value(lock("f.lk"), [Int]{})
     print("list value, length differs {l2} {held()}")
 }
