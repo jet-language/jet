@@ -1070,7 +1070,8 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
     }
     // An unannotated callee keeps the default `Err!` until the bundle failure
     // solve settles it, so before the solve its call is computed like any
-    // other and a failure while building is reported below as one.
+    // other, `result` holds its success value, and a failure while building
+    // is reported below as one.
     unsettled: failure_contract_of_function(func.return_type, func.return_type_span) == .Default(_, _) && !sema_failure_solved(program)
     if !unsettled && sema_contract_result_mode(sema_effective_return_type(func.return_type), sema_contract_success_type(func.return_type)) != TContractResultMode.Direct {
         sema_contract_required_unanswered("#Post", func.name, "`result` names the success value of a call that can fail, which building does not compute", call_span, diagnostics)
@@ -1086,7 +1087,8 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         }
     }
     sema_scope_enter(scopes, state, owner)
-    result_symbol: sema_contract_result_binding_symbol(environment, program, context, owner, written.result_type, call_span)
+    result_type: if unsettled -> sema_contract_success_type(func.return_type) else -> written.result_type
+    result_symbol: sema_contract_result_binding_symbol(environment, program, context, owner, result_type, call_span)
     result_key: sema_symbol_key(program, context, result_symbol.id)
     if !sema_scope_declare_local(scopes, result_symbol, result_key, false, AccessConvention.Read, None, false) {
         diagnostics.push(sema_already_defined("result", call_span))
@@ -1106,7 +1108,7 @@ sema_contract_required_post_holds: fn(func: Func, clause: ContractClause, recall
         args: loop param in func.params -> CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: param.name, span: call_span, id: AST_NODE_GENERATED}, span: call_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         // copy: the staged call owns its type arguments; the call site keeps the written ones.
         again: Expr.Call{call: Call{name: written.call.name, name_span: written.call.name_span, type_args: written.call.type_args.copy(), args: args}, id: AST_NODE_GENERATED}
-        _ := sema_comptime_body_capture(context, environment, program, scopes, "#Post", again, written.result_type, clause.span, call_span)
+        _ := sema_comptime_body_capture(context, environment, program, scopes, "#Post", again, result_type, clause.span, call_span)
     }
     if holds && has_call -> holds = sema_contract_required_holds("#Post", func.name, clause, call_span, environment, program, scopes, context, diagnostics)
     sema_scope_leave(scopes, state)
