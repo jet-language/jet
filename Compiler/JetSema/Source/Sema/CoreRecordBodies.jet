@@ -1,4 +1,4 @@
-// The Core record's body packets (its section 5, schema `jet.core/v12`). The
+// The Core record's body packets (its section 5, schema `jet.core/v13`). The
 // record is written from a finalized Core check, whose module rows hold every
 // checked body with the facts all of them recorded, merged. At write time
 // each row is split: every body becomes one packet, a
@@ -24,7 +24,7 @@
 // taken body names is read when it is first named and mapped into the
 // graph's table (sema_core_body_rebase_tree), and no other row is read.
 use {
-    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclRow, DeclTable, FnBody, NameTable, NodeKind, RecordReader, RecordTreeView, Span, SymbolID, SymbolTable, body_tree_pack, body_tree_unpack, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, name_find, name_index, name_intern, name_table, record_tree_row, symbol_find, symbol_table_key]
+    jet_foundation.[BodyFnValueKind, BodyHostCall, BodyTree, DeclID, DeclRow, DeclTable, FnBody, ModuleID, NameTable, NodeKind, RecordReader, RecordTreeView, Span, SymbolID, SymbolTable, body_tree_pack, body_tree_unpack, decl_id_index, decl_table_add_row, decl_table_find, decl_table_index, name_find, name_index, name_intern, name_table, record_tree_row, symbol_find, symbol_table_key]
 }
 
 // `moved` split into one packet per body of `bodies` (the module's checked
@@ -185,8 +185,8 @@ sema_core_body_packet_take: fn(row: &SemaGraphModuleResult, packet: &&SemaCompti
     row.exact_int_reachable = row.exact_int_reachable || owned.exact_int_reachable
 }
 
-// The body packets a graph takes from its Core record, filled by the driver
-// that opened it (sema_core_body_store_new).
+// The body packets and taint crossing rows a graph takes from its Core
+// record, filled by the driver that opened it (sema_core_body_store_new).
 SemaCoreBodyStore: struct {
     reader: RecordReader
     // Where the record's tree tables lie (JetFoundation RecordTree.jet).
@@ -199,6 +199,11 @@ SemaCoreBodyStore: struct {
     // (sema_finalize_seeded_taken), by the function's SymbolID.
     rows: [U32:SemaCoreBodyRow]
     rebase: SemaCoreDeclRebase
+    // The record section that holds the crossing rows (Taint.jet
+    // SemaCoreCrossingResult), and the element of each taken module's, by
+    // its module identity.
+    crossing_section: Int
+    crossings: [U32:Int]
     // This finalization's: the functions it takes up front, in record
     // order, and every function it took (sema_core_body_begin).
     eager: [SymbolID]{[SymbolID]{}}
@@ -228,9 +233,24 @@ SemaCoreDeclRebase: struct {
 
 // A store over the packets `rows` of `reader`'s section `section`, tree rows
 // of the tables `tree` places, whose bodies name the `decl_count`
-// declaration rows of its section `decl_section`.
-sema_core_body_store_new: fn(reader: RecordReader, tree: RecordTreeView, section: Int, rows: [U32:SemaCoreBodyRow], decl_section: Int, decl_count: Int) -> SemaCoreBodyStore Never! {
-    SemaCoreBodyStore{reader: reader, tree: tree, section: section, rows: rows, decl_section: decl_section, rebase: sema_core_decl_rebase_new(decl_count)}
+// declaration rows of its section `decl_section`, and over the crossing rows
+// `crossings` of its section `crossing_section`.
+sema_core_body_store_new: fn(reader: RecordReader, tree: RecordTreeView, section: Int, rows: [U32:SemaCoreBodyRow], decl_section: Int, decl_count: Int, crossing_section: Int, crossings: [U32:Int]) -> SemaCoreBodyStore Never! {
+    SemaCoreBodyStore{reader: reader, tree: tree, section: section, rows: rows, decl_section: decl_section, rebase: sema_core_decl_rebase_new(decl_count), crossing_section: crossing_section, crossings: crossings}
+}
+
+// The crossing rows of the taken module `module_identity`, read from the
+// graph's Core record; None when the graph took no such module from one. A
+// row that doesn't read is a record that doesn't match this compiler.
+sema_core_crossing_read: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> SemaCoreCrossingResult? {
+    if graph.core_bodies == .Val(store) {
+        element: store.crossings.get(module_identity.id) ?? return None
+        read: record_tree_row(store.reader, store.tree, store.crossing_section, element)
+        value: read.value ?? panic("the Core record has no crossing row {element}")
+        crossings: value.decode<SemaCoreCrossingResult>() ?? panic("the Core record's crossing row {element} doesn't decode: {sema_core_record_field_errors(err)}")
+        return Val(crossings)
+    }
+    None
 }
 
 // A rebase of a record with `count` declaration rows that maps no row yet.

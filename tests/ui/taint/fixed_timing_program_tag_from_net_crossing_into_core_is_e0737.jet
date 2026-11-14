@@ -1,0 +1,8 @@
+use net: core.net
+// A program tag whose `from` is Net tags what a Core network read returns,
+// and that value steers the Core function it is passed to.
+Key: tag { deny: [Exec], timing: .Fixed, from: [Net] }
+lookup: fn() -[Net, Time.Wait]> Int NetError! {
+    host: net.gethostbyname("example.com")
+    net.getservbyname(host)
+}

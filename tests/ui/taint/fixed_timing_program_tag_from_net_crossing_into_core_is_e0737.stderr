@@ -1,0 +1,8 @@
+Error [jet.FixedTimingSteer]: A `Key` value decides how `getservbyname` runs (its parameter `name` is untagged)
+  --> tests/ui/taint/fixed_timing_program_tag_from_net_crossing_into_core_is_e0737.jet:7:23
+    |
+  7 |     net.getservbyname(host)
+    |                       ^^^^
+ Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it, and this call carries it into `getservbyname`, where a `Key` value decides a branch that can't be masked (an arm returns, breaks, calls, can stop or writes memory)
+ Fix: Tag the parameter `#Key` and keep that code in fixed time, or reveal the value through a `#Scrub(Key)` function first
+More: jet-lang.dev/e/E0737

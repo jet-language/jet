@@ -2,15 +2,15 @@
 // check (every Core body of the Prelude, as `jet self devtools core-record`
 // checks it) decodes: each row reads back from its record tree (JetFoundation
 // RecordTree.jet) and encodes to the tree it was read from, it holds every
-// comptime value the check landed on a Core module and each Core module's
-// Core usage as the check walked it, and each symbol range reads back with
-// the keys the check reserved.
+// comptime value the check landed on a Core module, each Core module's
+// Core usage as the check walked it and each Core module's taint crossings,
+// and each symbol range reads back with the keys the check reserved.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_body_key, jet_driver_core_record_module,
         jet_driver_core_record_module_first_body, jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_symbol_keys,
-        jet_driver_core_record_symbol_rows, jet_driver_core_record_symbols, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
+        jet_driver_core_record_crossings, jet_driver_core_record_symbol_rows, jet_driver_core_record_symbols, jet_driver_core_record_usage, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -77,6 +77,19 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
         at: usage_at.get(record.module_identities[index].id) ?? panic("module {index} has no Core usage in the check")
         assert_eq("{usage:Debug}", "{inputs.core_usage[at]:Debug}")
     }
+    crossing_at := [U32:Int]{}
+    loop (index, crossings) in inputs.core_crossings -> crossing_at[crossings.module_identity.id] = index
+    crossed := 0
+    loop index in 0..<record.module_names.len() {
+        crossings: jet_driver_core_record_crossings(record, index) ?? panic("module {index}'s crossing row doesn't decode: {err}")
+        at: crossing_at.get(record.module_identities[index].id) ?? panic("module {index} has no taint crossings in the check")
+        assert_eq("{crossings:Debug}", "{inputs.core_crossings[at]:Debug}")
+        assert(crossings.tags.contains("Secret"))
+        crossed += crossings.rows.len()
+    }
+    // Some Core function branches on a parameter, so a fixed value passed
+    // there has a path.
+    assert(crossed > 0)
     symbols: jet_driver_core_record_symbols(record, recorded) ?? panic("the record's symbol keys don't read: {err}")
     assert_eq(symbols.len(), reserved.len())
     loop (index, keys) in reserved {

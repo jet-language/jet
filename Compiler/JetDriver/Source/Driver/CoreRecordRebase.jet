@@ -92,10 +92,11 @@ jet_driver_core_record_seeds: fn(modules: &[JetDriverLoadedModule], record_modul
 
 // Gives the seeded modules of `graph` (its first `seeded` rows, the ones
 // jet_driver_core_record_seeds took from `record`) their finalized results,
-// their Core usage and the store their bodies are taken from: each result is
-// the record's module row with its module indexes rebased to the graph, each
-// usage the record's usage row, and the store keys the body packets of those
-// modules by function SymbolID (SemaRegistrationGraph.seeded_results,
+// their Core usage and the store their bodies and taint crossings are taken
+// from: each result is the record's module row with its module indexes
+// rebased to the graph, each usage the record's usage row, and the store
+// keys the body packets of those modules by function SymbolID and their
+// crossing rows by module identity (SemaRegistrationGraph.seeded_results,
 // .seeded_core_usage, .core_bodies). Finalization then takes the seeded
 // modules as they are and checks or walks none of their bodies.
 // The seeded modules' comptime values (section 8) are pushed to `values`, in
@@ -108,10 +109,13 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
     graph_modules := [Int]{}
     loop _ in 0..<record.module_names.len() -> graph_modules.push(-1)
     positions := [Int]{}
+    crossings := [U32:Int]{}
     loop index in 0..<graph.seeded {
         position: record.module_rows.get(graph.modules[index].module_identity.id) ?? return Err("seeded module `{graph.modules[index].module_name}` isn't one of the Core record's")
         graph_modules[position] = index
         positions.push(position)
+        // A taken module's crossing rows are read on its first crossing.
+        crossings[graph.modules[index].module_identity.id] = position
     }
     results := [SemaGraphModuleResult]{}
     usage := [SemaCoreModuleUsageResult]{}
@@ -147,7 +151,7 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
     // The store reads a declaration row (section 7) only when a taken body
     // first names it.
     decls: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_DECL_ROWS)
-    graph.core_bodies = Val(sema_core_body_store_new(record.reader, record.tree, JET_CORE_RECORD_BODY_ROWS, rows.move(), JET_CORE_RECORD_DECL_ROWS, decls))
+    graph.core_bodies = Val(sema_core_body_store_new(record.reader, record.tree, JET_CORE_RECORD_BODY_ROWS, rows.move(), JET_CORE_RECORD_DECL_ROWS, decls, JET_CORE_RECORD_CROSSING_ROWS, crossings.move()))
     Ok(keyed)
 }
 

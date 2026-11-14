@@ -36,6 +36,7 @@ use jet_foundation.[
     expr_binary_operands,
     expr_optional_method_call_as_call,
     expr_span,
+    module_is_core,
     module_is_none,
     module_none,
     name_find,
@@ -51,6 +52,10 @@ SEMA_TAINT_ORIGIN_FS: "$origin.fs"
 SEMA_TAINT_ORIGIN_ENV: "$origin.env"
 SEMA_TAINT_ORIGIN_PROCESS: "$origin.process"
 SEMA_TAINT_ORIGIN_FFI: "$origin.ffi"
+// The tag a Core crossing row (SemaCoreCrossingRow) is written for when it is
+// none of the fixed tags Core names: a caller's own tag, which no walk of a
+// Core body sees, put in for it when the row is read (sema_taint_seeded_crossing).
+SEMA_TAINT_ANY_TAG: "$tag"
 
 SemaTaintTagFact: struct {
     name: String
@@ -114,6 +119,12 @@ SemaTaintCatalog: struct {
     // by bare name (the first struct of that name); its fields follow it.
     struct_field_slots: SemaTaintSlots
     known_source_slots: SemaTaintSlots
+    // The by-name slots of the Core modules' rows alone: a walk of a Core
+    // body resolves a name only to Core, which names no type of a program's
+    // (sema_taint_find_callable, sema_taint_find_field, sema_taint_struct_fixed).
+    core_callable_name_slots: SemaTaintSlots
+    core_field_name_slots: SemaTaintSlots
+    core_struct_field_slots: SemaTaintSlots
 }
 
 // The first row of each key: `keys` interns the key (an open-addressing
@@ -205,10 +216,22 @@ SemaTaintFlowState: struct {
     // body steers on it ("": none, also while that body is being walked).
     crossed: [String]{[String]{}}
     crossed_paths: [String]{[String]{}}
+    // Where the keys of the walk in progress start in `crossed`: a Core
+    // crossing walked alone sees none before (sema_taint_core_root_path).
+    cross_from: Int{0}
     // The current walk's first crossing report: its index in `diagnostics`
     // (-1: none yet) and its path, which a caller's path continues.
     cross_at: Int{-1}
     cross_path: String{""}
+    // The paths of the crossings from outside Core into a Core function
+    // (sema_taint_core_crossing), keyed as `crossed`: each is walked alone,
+    // so its path is the same whatever the program walked before it.
+    core_crossed: [String:String]{[String:String]{}}
+    // The Core record's crossing rows of the taken modules read so far
+    // (sema_taint_seeded_crossing): each path by its `crossed` key, and the
+    // fixed tags each read module's rows name, by module identity.
+    seeded_paths: [String:String]{[String:String]{}}
+    seeded_tags: [U32:[String]]{[U32:[String]]{}}
 }
 
 // The E0307 reports of `diagnostics`: all that settles switch coverage for
@@ -394,7 +417,7 @@ sema_taint_add_builtin_tags: fn(catalog: &SemaTaintCatalog) Never! {
 }
 
 sema_taint_catalog_init: fn() -> SemaTaintCatalog Never! {
-    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), struct_field_slots: sema_taint_slots(), known_source_slots: sema_taint_slots()}
+    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), struct_field_slots: sema_taint_slots(), known_source_slots: sema_taint_slots(), core_callable_name_slots: sema_taint_slots(), core_field_name_slots: sema_taint_slots(), core_struct_field_slots: sema_taint_slots()}
     sema_taint_add_builtin_tags(catalog)
     catalog
 }
@@ -562,6 +585,15 @@ sema_taint_index_callable: fn(catalog: &SemaTaintCatalog, module_identity: Modul
     _: sema_taint_slot_add(catalog.callable_slots, exact, slot)
     loose: "{owner}|{name}"
     _: sema_taint_slot_add(catalog.callable_name_slots, loose, slot)
+    if sema_taint_core_fact(module_identity) {
+        _: sema_taint_slot_add(catalog.core_callable_name_slots, loose, slot)
+    }
+}
+
+// Whether a walk of a Core body may resolve a name to a row of
+// `module_identity`: a Core module's, or one no module declares.
+sema_taint_core_fact: fn(module_identity: ModuleID) -> Bool Never! {
+    module_is_core(module_identity) || module_is_none(module_identity)
 }
 
 sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, module_alias: String, owner: String, function: Func) Never! {
@@ -601,6 +633,10 @@ sema_taint_add_field: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, 
     _: sema_taint_slot_add(catalog.field_name_slots, loose, slot)
     _: sema_taint_slot_add(catalog.struct_field_slots, "{module_identity.id}|{owner}", slot)
     _: sema_taint_slot_add(catalog.struct_field_slots, owner, slot)
+    if sema_taint_core_fact(module_identity) {
+        _: sema_taint_slot_add(catalog.core_field_name_slots, loose, slot)
+        _: sema_taint_slot_add(catalog.core_struct_field_slots, owner, slot)
+    }
 }
 sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
     loop module_row_index in 0..<graph.modules.len() {
@@ -662,8 +698,9 @@ sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph,
 }
 
 // The callable `name` of `owner` declared in `module_identity`, else, for a
-// method, the first `name` of any type called `owner`. A function (owner "")
-// resolves only exactly: sema_taint_bare_callable and
+// method, the first `name` of any type called `owner` (of a Core module's
+// when `module_identity` is Core's: Core names no type of a program's). A
+// function (owner "") resolves only exactly: sema_taint_bare_callable and
 // sema_taint_method_callable find its module.
 sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, name: String) -> SemaTaintCallableFact? {
     exact: sema_taint_slot(catalog.callable_slots, "{module_identity.id}|{owner}|{name}")
@@ -672,7 +709,14 @@ sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleI
         return Val(callable)
     }
     if owner == "" -> return None
-    loose: sema_taint_slot(catalog.callable_name_slots, "{owner}|{name}") ?? return None
+    key: "{owner}|{name}"
+    found := Int?{None}
+    if module_is_core(module_identity) {
+        found = sema_taint_slot(catalog.core_callable_name_slots, key)
+    } else {
+        found = sema_taint_slot(catalog.callable_name_slots, key)
+    }
+    loose: found ?? return None
     callable := catalog.callables[loose]
     Val(callable)
 }
@@ -725,7 +769,8 @@ sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCa
 }
 
 // A field of `owner` declared in `module_identity` (or with no declaring
-// module, id 0), else the first field of that name on any `owner`.
+// module, id 0), else the first field of that name on any `owner` (a Core
+// module's when `module_identity` is Core's, as sema_taint_find_callable).
 sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, field: String) -> SemaTaintFieldFact? {
     local: sema_taint_slot(catalog.field_slots, "{module_identity.id}|{owner}|{field}")
     unowned: sema_taint_slot(catalog.field_slots, "{module_none().id}|{owner}|{field}")
@@ -741,7 +786,14 @@ sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, 
         fact := catalog.fields[slot]
         return Val(fact)
     }
-    loose: sema_taint_slot(catalog.field_name_slots, "{owner}|{field}") ?? return None
+    key: "{owner}|{field}"
+    found := Int?{None}
+    if module_is_core(module_identity) {
+        found = sema_taint_slot(catalog.core_field_name_slots, key)
+    } else {
+        found = sema_taint_slot(catalog.field_name_slots, key)
+    }
+    loose: found ?? return None
     fact := catalog.fields[loose]
     Val(fact)
 }
@@ -837,9 +889,15 @@ sema_taint_get_binding: fn(state: SemaTaintFlowState, name: String) -> SemaTaint
     state.bindings[index]
 }
 
+// The tags whose `from` covers a call to one of `destinations`. In a Core
+// body only the builtin tags and Core's own count: a program's tag is the
+// program's, put on what a Core call returns into its code (where the walk
+// of that code calls this), never on a value inside Core.
 sema_taint_source_tags: fn(state: SemaTaintFlowState, destinations: [String]) -> [String] Never! {
     tags := [String]{}
+    closed: module_is_core(state.module_identity)
     loop fact in state.catalog.tags {
+        if closed && !sema_taint_core_fact(fact.module_identity) -> next
         loop source in fact.from {
             covered := false
             loop destination in destinations {
@@ -1732,11 +1790,20 @@ sema_taint_check_struct_compare: fn(state: &SemaTaintFlowState, op: BinOp, left:
 }
 
 // The fixed tag a struct-typed `value` brings to a comparison: one a field of
-// its type declares, else its own.
+// its type declares, else its own. The type is the walked module's, else the
+// first of that name (a Core module's in a Core body, as
+// sema_taint_find_callable).
 sema_taint_struct_fixed: fn(state: &SemaTaintFlowState, value: Expr) -> String? {
     owner: sema_taint_type_of_expr(state, value) ?? return None
-    local: sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity.id}|{owner}")
-    first: local ?? sema_taint_slot(state.catalog.struct_field_slots, owner) ?? return None
+    found := sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity.id}|{owner}")
+    if found == None {
+        if module_is_core(state.module_identity) {
+            found = sema_taint_slot(state.catalog.core_struct_field_slots, owner)
+        } else {
+            found = sema_taint_slot(state.catalog.struct_field_slots, owner)
+        }
+    }
+    first: found ?? return None
     at := first
     loop at < state.catalog.fields.len() && state.catalog.fields[at].owner_type == owner && state.catalog.fields[at].module_identity == state.catalog.fields[first].module_identity {
         declared: sema_taint_fixed_of(state, state.catalog.fields[at].tags)
@@ -1884,8 +1951,8 @@ sema_taint_clause: fn(what: String) -> String Never! {
 // body is being walked and adds nothing, since that walk covers the body.
 sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
     key := "{module_identity.id}|{owner}|{callee.name}|{index}|{tag_value}"
-    loop (seen, crossed) in state.crossed {
-        if crossed == key -> return state.crossed_paths[seen].copy()
+    loop seen in state.cross_from..<state.crossed.len() {
+        if state.crossed[seen] == key -> return state.crossed_paths[seen].copy()
     }
     state.crossed.push(key.move())
     state.crossed_paths.push("")
@@ -1959,20 +2026,79 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
 }
 
 // E0737 at `span` when the `tag_value` value passed there to the untagged
-// parameter `index` of `callee` is steered on in its body.
+// parameter `index` of `callee` is steered on in its body. A call from
+// outside Core into Core is checked by sema_taint_core_crossing.
 sema_taint_check_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String, span: Span) {
-    if index >= callee.params.len() || callee.body.len() == 0 -> return
+    if index >= callee.params.len() -> return
     parameter: callee.params[index]
     loop declared in sema_taint_type_tags(parameter.ty) {
         if declared == tag_value || sema_taint_has(state.fixed_tags, declared) -> return
     }
-    path: sema_taint_crossing_path(graph, state, module_identity, owner, callee, index, tag_value)
+    path := ""
+    if module_is_core(module_identity) && !module_is_core(state.module_identity) {
+        path = sema_taint_core_crossing(graph, state, module_identity, owner, callee, index, tag_value)
+    } else if callee.body.len() > 0 {
+        path = sema_taint_crossing_path(graph, state, module_identity, owner, callee, index, tag_value)
+    }
     if path == "" -> return
     if state.cross_at < 0 {
         state.cross_at = state.diagnostics.len()
         state.cross_path = path.copy()
     }
     state.diagnostics.push(sema_error("E0737", span, "a `{tag_value}` value decides how `{callee.name}` runs (its parameter `{parameter.name}` is untagged)", "`{tag_value}` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it, and this call carries it into {path}", "tag the parameter `#{tag_value}` and keep that code in fixed time, or reveal the value through a `#Scrub({tag_value})` function first"))
+}
+
+// The path on which the Core function `callee` steers on a `tag_value` value
+// a program passes to its parameter `index` (sema_taint_crossing_path), the
+// same in every program, walk order and thread: the Core record's row when
+// the record seeded the module (sema_taint_seeded_crossing), else the body
+// walked alone (sema_taint_core_root_path). A Core body sees no type, field
+// or tag of a program's (sema_taint_find_callable, sema_taint_source_tags),
+// so neither depends on the program.
+sema_taint_core_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
+    key: "{module_identity.id}|{owner}|{callee.name}|{index}|{tag_value}"
+    if state.core_crossed.get(key) == .Val(known) -> return known
+    seeded: sema_taint_seeded_crossing(graph, state, module_identity, owner, callee.name, index, tag_value)
+    walk: seeded == None && callee.body.len() > 0
+    path := seeded ?? ""
+    if walk -> path = sema_taint_core_root_path(graph, state, module_identity, owner, callee, index, tag_value)
+    state.core_crossed[key] = path
+    state.core_crossed.get(key) ?? ""
+}
+
+// sema_taint_crossing_path of the Core function `callee` walked alone: from
+// no key an earlier walk left (a key of a recursive cycle that walk was still
+// in reads as no path), and with the keys it walks dropped after. A Core body
+// reads no switch coverage report of the program's
+// (sema_taint_switch_exhaustive).
+sema_taint_core_root_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
+    saved_from: state.cross_from
+    start: state.crossed.len()
+    state.cross_from = start
+    path: sema_taint_crossing_path(graph, state, module_identity, owner, callee, index, tag_value)
+    loop state.crossed.len() > start {
+        _ := state.crossed.pop()
+        _ := state.crossed_paths.pop()
+    }
+    state.cross_from = saved_from
+    path
+}
+
+// The Core record's path for the crossing into `name` (of `owner`) of the
+// module `module_identity`, when the record seeded that module; None for any
+// other module. The module's rows are read on its first crossing. A tag Core
+// names reads its own row; any other reads the row written for
+// SEMA_TAINT_ANY_TAG, with `tag_value` put in. No row: no path.
+sema_taint_seeded_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, name: String, index: Int, tag_value: String) -> String? {
+    if state.seeded_tags.get(module_identity.id) == None {
+        read: sema_core_crossing_read(graph, module_identity) ?? return None
+        loop row in read.rows -> state.seeded_paths["{module_identity.id}|{row.owner}|{row.name}|{row.index}|{row.tag}"] = row.path
+        state.seeded_tags[module_identity.id] = read.tags
+    }
+    named: state.seeded_tags.get(module_identity.id) ?? return None
+    if named.contains(tag_value) -> return Val(state.seeded_paths.get("{module_identity.id}|{owner}|{name}|{index}|{tag_value}") ?? "")
+    path: state.seeded_paths.get("{module_identity.id}|{owner}|{name}|{index}|{SEMA_TAINT_ANY_TAG}") ?? return Val("")
+    Val(path.replace(SEMA_TAINT_ANY_TAG, tag_value))
 }
 
 // The crossing checks of a call's arguments into `callee`, whose
@@ -2421,7 +2547,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             }
             if else_body == {
                 .Val(body) -> paths.push(sema_taint_walk_path(graph, state, before, body))
-                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> paths.push(before.copy())
+                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span, module_is_core(state.module_identity)) -> paths.push(before.copy())
             }
             loop state.under.len() > under -> _ := state.under.pop()
             sema_taint_merge_paths(state, before, paths)
@@ -2562,7 +2688,11 @@ sema_taint_same_span: fn(left: Span?, right: Span?) -> Bool Never! {
     }
 }
 
-sema_taint_switch_exhaustive: fn(arms: [SwitchArm], diagnostics: [Diagnostic], span: Span) -> Bool Never! {
+// Whether the switch at `span` with `arms` covers every value: an arm that
+// tests no pattern does not, nor does one a report of `diagnostics` (the
+// bundle's E0307s) names. A Core body (`core_body`) is in no report, since
+// Core's check is clean, so none of a program's reports is read for it.
+sema_taint_switch_exhaustive: fn(arms: [SwitchArm], diagnostics: [Diagnostic], span: Span, core_body: Bool) -> Bool Never! {
     if arms.len() == 0 -> return false
     loop arm in arms {
         if arm.cond == {
@@ -2570,6 +2700,7 @@ sema_taint_switch_exhaustive: fn(arms: [SwitchArm], diagnostics: [Diagnostic], s
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> return false
         }
     }
+    if core_body -> return true
     loop diagnostic in diagnostics {
         if diagnostic.code == "E0307" && sema_taint_same_span(diagnostic.span, Val(span)) -> return false
     }
@@ -2763,6 +2894,97 @@ sema_taint_prepare: fn(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
         prepared.weights.push(weight)
     }
     prepared
+}
+
+// One crossing of a Core module's row: the path sema_taint_core_crossing
+// gives for a value of the fixed tag `tag` (SEMA_TAINT_ANY_TAG: any tag
+// Core does not name) passed to parameter `index` of the function `name` of
+// `owner` ("": a function).
+SemaCoreCrossingRow: struct {
+    owner: String
+    name: String
+    index: Int
+    tag: String
+    path: String
+}
+
+// A Core module's crossings, as the Core record holds them (its section 17):
+// the fixed tags Core names, each with rows of its own, and every crossing
+// with a path; a crossing with no row has none.
+SemaCoreCrossingResult: struct {
+    module_identity: ModuleID
+    tags: [String]
+    rows: [SemaCoreCrossingRow]
+}
+
+// The crossing rows of each module of `graph`, for the Core record: for each
+// Core function with a body, as sema_taint_body_of finds it, each parameter
+// and each fixed tag Core names, and once for any other tag, the path
+// sema_taint_core_crossing gives. A module outside Core has no rows. A
+// compile that takes a module the record seeds reads its rows instead of
+// walking its bodies (sema_taint_seeded_crossing).
+sema_taint_core_crossings: fn(graph: SemaRegistrationGraph) -> [SemaCoreCrossingResult] {
+    prepared := sema_taint_prepare(graph)
+    state := SemaTaintFlowState{catalog: prepared.catalog.move(), module_identity: module_none(), bindings: [SemaTaintBindingFact]{}, imports: [SemaTaintImportAlias]{}, callable_scope: sema_taint_slots(), diagnostics: [Diagnostic]{}, coverage_reports: [Diagnostic]{}, fixed_tags: [String]{}}
+    results := [SemaCoreCrossingResult]{}
+    loop module_row in graph.modules {
+        identity: module_row.module_identity
+        tags: sema_taint_core_fixed_tags(state.catalog)
+        rows := [SemaCoreCrossingRow]{}
+        seen := [String:Bool]{}
+        if module_is_core(identity) {
+            loop item in module_row.program.items {
+                if item == {
+                    .Func(function) -> sema_taint_core_crossing_rows(graph, state, identity, "", function, tags, seen, rows)
+                    .Struct(definition) -> {
+                        loop method in definition.methods -> sema_taint_core_crossing_rows(graph, state, identity, definition.name, method, tags, seen, rows)
+                        loop trait_impl in definition.trait_impls {
+                            loop method in trait_impl.methods -> sema_taint_core_crossing_rows(graph, state, identity, definition.name, method, tags, seen, rows)
+                        }
+                    }
+                    .Enum(definition) -> loop method in definition.methods -> sema_taint_core_crossing_rows(graph, state, identity, definition.name, method, tags, seen, rows)
+                    .Impl(definition) -> loop method in definition.methods -> sema_taint_core_crossing_rows(graph, state, identity, definition.type_name, method, tags, seen, rows)
+                    .Test(_) | .ErrorConv(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+                }
+            }
+        }
+        results.push(SemaCoreCrossingResult{module_identity: identity, tags: tags, rows: rows.move()})
+    }
+    results
+}
+
+// The fixed tags Core names: `Secret`, and each fixed tag a Core module
+// declares.
+sema_taint_core_fixed_tags: fn(catalog: SemaTaintCatalog) -> [String] Never! {
+    tags := [String]{"Secret"}
+    loop fact in catalog.tags {
+        if fact.fixed && module_is_core(fact.module_identity) -> sema_taint_add(tags, fact.name)
+    }
+    tags
+}
+
+// The rows of the Core function `function` of `owner`, unless an earlier
+// item of the module gave that name its rows (sema_taint_body_of finds the
+// first). A derived method is never walked (sema_taint_check_method_crossing),
+// and a parameter tagged with a fixed tag is checked by its own body's walk.
+sema_taint_core_crossing_rows: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, function: Func, tags: [String], seen: &[String:Bool], rows: &[SemaCoreCrossingRow]) {
+    callee: "{owner}|{function.name}"
+    if seen.get(callee) != None -> return
+    seen[callee] = true
+    if function.body.len() == 0 || (owner != "" && function.compiler_generated) -> return
+    loop index in 0..<function.params.len() {
+        declared: sema_taint_type_tags(function.params[index].ty)
+        if declared.contains("Secret") -> next
+        loop tag_value in tags {
+            if !declared.contains(tag_value) -> sema_taint_core_crossing_row(graph, state, module_identity, owner, function, index, tag_value, rows)
+        }
+        sema_taint_core_crossing_row(graph, state, module_identity, owner, function, index, SEMA_TAINT_ANY_TAG, rows)
+    }
+}
+
+sema_taint_core_crossing_row: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, function: Func, index: Int, tag_value: String, rows: &[SemaCoreCrossingRow]) {
+    path: sema_taint_core_root_path(graph, state, module_identity, owner, function, index, tag_value)
+    if path != "" -> rows.push(SemaCoreCrossingRow{owner: owner, name: function.name, index: index, tag: tag_value, path: path})
 }
 
 // One walked module's reports, masked branches and fixed tags

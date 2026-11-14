@@ -1,0 +1,15 @@
+use net: core.net
+Key: tag { deny: [Exec], timing: .Fixed, from: [Net] }
+// A program type named like the Core type `getservbyname` builds its error
+// from, with a fixed-tagged field and a method named like its fields: a walk
+// of that Core body sees only Core's own, so the crossing below is the same
+// as in a program without it.
+NetErrorDetail: struct {
+    operation: String
+    message: #Key String
+    address: fn(self) -> String { self.operation }
+}
+lookup: fn() -[Net, Time.Wait]> Int NetError! {
+    host: net.gethostbyname("example.com")
+    net.getservbyname(host)
+}

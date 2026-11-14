@@ -1,4 +1,4 @@
-// The precompiled Core record, schema `jet.core/v12`: Core and the Prelude
+// The precompiled Core record, schema `jet.core/v13`: Core and the Prelude
 // checked alone as one closed program (`jet self devtools core-record`), in
 // the compiler's one record format (JetFoundation RecordCodec.jet). Each row
 // element is a record tree row (JetFoundation RecordTree.jet) of a checked
@@ -56,7 +56,7 @@
 //     tree row per range (JetDriverCoreRecordSymbolRows), each key as its
 //     parts, an owner that is an earlier key of the range named by its row
 //  12 tree strings, 13 tree shapes, 14 tree nodes: the tables the rows of
-//     sections 3, 5 to 8, 11 and 15 name (RecordTree.jet)
+//     sections 3, 5 to 8, 11 and 15 to 17 name (RecordTree.jet)
 //  15 usage rows: the Core usage of each module key (SemaCoreModuleUsageResult:
 //     the Core names its bodies reach, the first span of each, its FFI
 //     callback keys), as the check's walk of its bodies noted it, so a
@@ -67,6 +67,12 @@
 //     takes the module loads the Core modules its bodies name (a
 //     `core.encoding.__dyn_kind` path, a `.decode<T>()` call) as a compile
 //     of its source does; a Prelude module sema injects has an empty one
+//  17 crossing rows: the taint crossings of each module key
+//     (SemaCoreCrossingResult: for each parameter of each of its functions,
+//     the path on which the body steers on a fixed value passed there, by
+//     fixed tag), so a compile that takes the module walks none of its
+//     bodies for a call that carries a fixed value into them (JetSema
+//     Taint.jet sema_taint_seeded_crossing)
 // A row names another module by its module key position (section 2), not by
 // the check's graph index, and a body names declarations by section 7's
 // rows; a graph that takes a row rebases its module indexes
@@ -74,10 +80,10 @@
 // CoreRecordBodies.jet).
 use {
     jet_foundation.[DeclRow, DeclTable, FnBody, ModuleID, ModuleTable, RecordField, RecordReader, RecordReaderResult, RecordSection, RecordTreeView, RecordValue, SymbolKeys, decl_table_add_row, decl_table_index, module_count, module_find, module_index, module_intern, module_table, module_text, record_element, record_encode, record_key_digest, record_open_schema, record_open_schema_trusted, record_section_elements, record_section_index, record_tree_add, record_tree_difference, record_tree_row, record_tree_tables, record_tree_view, record_tree_writer, record_value_as_bool, record_value_as_int, record_value_as_str, record_value_field, symbol_keys, symbol_keys_find, symbol_keys_intern]
-    jet_sema.[JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaCoreModuleUsageResult, SemaGraphModuleResult, SemaRegistrationExport, SemaRegistrationModule, sema_core_body_packet_stored, sema_core_body_packets, sema_core_record_field_errors, sema_incremental_optional_item_header, sema_registration_reserved_symbols]
+    jet_sema.[JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaCoreCrossingResult, SemaCoreModuleUsageResult, SemaGraphModuleResult, SemaRegistrationExport, SemaRegistrationModule, sema_core_body_packet_stored, sema_core_body_packets, sema_core_record_field_errors, sema_incremental_optional_item_header, sema_registration_reserved_symbols]
 }
 
-JET_CORE_RECORD_SCHEMA: "jet.core/v12"
+JET_CORE_RECORD_SCHEMA: "jet.core/v13"
 JET_CORE_RECORD_HEADER: 1
 JET_CORE_RECORD_MODULE_KEYS: 2
 JET_CORE_RECORD_MODULE_ROWS: 3
@@ -94,6 +100,7 @@ JET_CORE_RECORD_TREE_SHAPES: 13
 JET_CORE_RECORD_TREE_NODES: 14
 JET_CORE_RECORD_USAGE_ROWS: 15
 JET_CORE_RECORD_MODULE_DEMANDS: 16
+JET_CORE_RECORD_CROSSING_ROWS: 17
 
 // An open record: its verified reader, where its tree tables lie, and its
 // module keys, in element order, with each module key's position by ModuleID
@@ -435,6 +442,16 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         if inputs.modules[index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY -> return Err("Core module {module_text(inputs.module_table, identity)} is checked but has no identifier demand")
         demand_rows.push(record_tree_add(writer, jet_driver_empty_core_identifier_demand().encode()))
     }
+    // Each Core module's taint crossings, as walking its bodies gives them
+    // to any program (the entry's are not Core's).
+    crossing_at := [U32:Int]{}
+    loop (index, crossings) in inputs.core_crossings -> crossing_at[crossings.module_identity.id] = index
+    crossing_rows := [[U8]]{}
+    loop index in module_order {
+        identity: inputs.modules[index].module_identity
+        at: crossing_at.get(identity.id) ?? return Err("Core module {module_text(inputs.module_table, identity)} is checked but has no crossing row")
+        crossing_rows.push(record_tree_add(writer, inputs.core_crossings[at].encode()))
+    }
     body_keys := [RecordValue]{}
     body_rows := [[U8]]{}
     loop (position, index) in body_order {
@@ -469,9 +486,10 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordField{name: "decls", value: RecordValue.Int{value: decls}},
         RecordField{name: "values", value: RecordValue.Int{value: core_values}},
     }}
-    tables := record_tree_tables(writer.move(), [[[U8]]]{module_rows.move(), body_rows.move(), registration_rows.move(), decl_rows.move(), value_rows.move(), symbol_rows.move(), usage_rows.move(), demand_rows.move()})
+    tables := record_tree_tables(writer.move(), [[[U8]]]{module_rows.move(), body_rows.move(), registration_rows.move(), decl_rows.move(), value_rows.move(), symbol_rows.move(), usage_rows.move(), demand_rows.move(), crossing_rows.move()})
     if tables.problem == .Val(problem) -> return Err("the Core record's rows have no tree form: {problem}")
     // Taken back in the reverse of the order they went in.
+    crossing_elements: tables.rows.pop() ?? [RecordValue]{}
     demand_elements: tables.rows.pop() ?? [RecordValue]{}
     usage_elements: tables.rows.pop() ?? [RecordValue]{}
     symbol_elements: tables.rows.pop() ?? [RecordValue]{}
@@ -497,6 +515,7 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordSection{id: JET_CORE_RECORD_TREE_NODES, elements: tables.nodes.move()},
         RecordSection{id: JET_CORE_RECORD_USAGE_ROWS, elements: usage_elements.move()},
         RecordSection{id: JET_CORE_RECORD_MODULE_DEMANDS, elements: demand_elements.move()},
+        RecordSection{id: JET_CORE_RECORD_CROSSING_ROWS, elements: crossing_elements.move()},
     }
     encoded: record_encode(JET_CORE_RECORD_SCHEMA, sections)
     bytes: encoded.bytes ?? return Err(encoded.problem ?? "the Core record has no byte form")
@@ -528,7 +547,7 @@ jet_driver_core_record_digest: fn(inputs: JetDriverLoweringInputs, entry_file: S
     record_key_digest(fields)
 }
 
-// Opens a `jet.core/v12` record: the format and checksum are verified, the
+// Opens a `jet.core/v13` record: the format and checksum are verified, the
 // header, the module keys and the module table are read, and the tree tables
 // placed. No other row is decoded.
 jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
@@ -586,6 +605,7 @@ jet_driver_core_record_read: fn(opened: RecordReaderResult) -> JetDriverCoreReco
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_VALUE_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of value rows")
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_USAGE_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of usage rows")
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_DEMANDS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of module demands")
+    if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_CROSSING_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of crossing rows")
     Ok(record)
 }
 
@@ -739,6 +759,13 @@ jet_driver_core_record_demand: fn(record: JetDriverCoreRecord, index: Int) -> Je
     Ok(demand)
 }
 
+// The taint crossings of the record's module `index` (in module key order),
+// as walking its bodies gave them.
+jet_driver_core_record_crossings: fn(record: JetDriverCoreRecord, index: Int) -> SemaCoreCrossingResult Err! {
+    tree: jet_driver_core_record_tree(record, JET_CORE_RECORD_CROSSING_ROWS, index) ?? return Err(err)
+    crossings: tree.decode<SemaCoreCrossingResult>() ?? return Err("Core module `{record.module_names[index]}` has a crossing row that doesn't decode: {sema_core_record_field_errors(err)}")
+    Ok(crossings)
+}
 // Reads every row of `bytes` back and encodes it again: each must give the
 // tree it was read from (record_tree_difference, which holds a float the
 // same by its bits, so a NaN constant reads back as itself), and each key
@@ -808,6 +835,12 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
         demand: jet_driver_core_record_demand(record, index) ?? return Err(err)
         stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_MODULE_DEMANDS, index) ?? return Err(err)
         if record_tree_difference(demand.encode(), stored) == .Val(difference) -> return Err("Core module `{record.module_names[index]}`'s module demand encodes to another tree after a read, at row{difference}")
+    }
+    loop index in 0..<record.module_names.len() {
+        crossings: jet_driver_core_record_crossings(record, index) ?? return Err(err)
+        if crossings.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its crossing row is {module_text(record.module_table, crossings.module_identity)}'s")
+        stored: jet_driver_core_record_tree(record, JET_CORE_RECORD_CROSSING_ROWS, index) ?? return Err(err)
+        if record_tree_difference(crossings.encode(), stored) == .Val(difference) -> return Err("Core module `{record.module_names[index]}`'s crossing row encodes to another tree after a read, at row{difference}")
     }
     symbols: jet_driver_core_record_symbols(record, record.module_identities) ?? return Err(err)
     loop index in 0..<symbols.len() {
