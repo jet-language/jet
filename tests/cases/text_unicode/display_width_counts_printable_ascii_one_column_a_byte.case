@@ -1,0 +1,13 @@
+# Card #6793 c6: core.text.display_width counts printable ASCII text (space
+# through `~`) one column a byte without its grapheme and width table
+# lookups (Core/Text/Text.jet printable_ascii). The diagnostic renderer
+# measures every snippet line with it. Text with any other byte still
+# goes through the grapheme widths: a tab, a CR LF pair and DEL are zero
+# columns, `é` is one and `中` two. The comptime evaluator agrees with the
+# compiled program.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use text: core.text\n\nCOMPTIME_ASCII: #run text.display_width(\"jet ~\")\n\nrun: fn() {\n    print(text.display_width(\"jet\"))\n    print(text.display_width(\"\"))\n    print(text.display_width(\" ~\"))\n    print(text.display_width(\"a\\tb\"))\n    print(text.display_width(\"a\\r\\nb\"))\n    delete: String.from_bytes([U8]{U8{120}, U8{127}, U8{121}}) ?? return\n    print(text.display_width(delete))\n    print(text.display_width(\"café\"))\n    print(text.display_width(\"中a\"))\n    print(COMPTIME_ASCII)\n}\n"
+step: jet run main.jet
+exit: 0
+stdout: = "3\n0\n2\n2\n2\n2\n4\n3\n5\n"
