@@ -173,6 +173,10 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == ENV_JET_COMPILER_EXTENSION -> None
         // Every build under test runs IR Lint after each optimizer pass.
         name == "NO_COLOR" || name == ENV_JET_RECEIPT_BYPASS || name == "JET_OPT_VERIFY" -> Val("1")
+        // Any other compiler control (KIT_CONTROL_VARIABLES), or a compiler
+        // identity, in the caller's shell would change what every row checks or
+        // which compiler it names: a row runs under one only when its case sets it.
+        name == ENV_JET_COMPILER_IDENTITY || KIT_CONTROL_VARIABLES.contains(name) -> None
         name == "CLICOLOR" -> Val("0")
         name == "TERM" -> Val("dumb")
         name == ENV_JET_REPL_HISTORY -> Val("off")
@@ -201,7 +205,8 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
     }
 }
 
-// Inherit the caller's environment, removing only the compiler-extension hook.
+// Inherit the caller's environment, removing the compiler-extension hook, the
+// compiler identity and every compiler control the kit does not set itself.
 // Cache roots are run-wide; temporary, schema, jetpack and home roots are
 // case-local. Callers check kit_exec_home_refusal before spawning. Output is
 // streamed, not text-captured: a child may write any bytes, so the kit reads
@@ -210,7 +215,9 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
     spec := process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear()
     else {
-        spec = spec.env_remove(ENV_JET_COMPILER_EXTENSION)
+        spec = spec.env_remove(ENV_JET_COMPILER_EXTENSION).env_remove(ENV_JET_COMPILER_IDENTITY)
+        loop variable in KIT_CONTROL_VARIABLES -> spec = spec.env_remove(variable)
+        spec = spec
             .env("NO_COLOR", kit_exec_base_value("NO_COLOR", env, scratch) ?? "")
             .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
             .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
