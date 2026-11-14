@@ -102,6 +102,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_label,
     diagnostic_with_edit_grade,
+    diagnostic_with_structured_edit,
     checked_persistent_local,
 ]
 
@@ -855,7 +856,7 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment
         if lint {
             if sema_stmt_redundant_arm_table_edit(statements[count - 2], statements[count - 1], environment, program) == .Val(edit) {
                 lint_row: sema_lint("L0513", table_span, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm")
-                diagnostics.push(diagnostic_with_edit_grade(lint_row, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
+                diagnostics.push(diagnostic_with_structured_edit(lint_row, edit))
             }
         }
     }

@@ -5,8 +5,13 @@
 # pass and traces the reason. The pass already ran, so the first body pass
 # after finalization takes its run (JetDriver BodyComptime.jet
 # jet_driver_comptime_body_run) instead of building the same program again.
+# JET_RECHECK_VERIFY stays off: under it the body pass runs again instead of
+# taking the kept run, so the taken-run counter this case reads is not
+# traced. The same program under JET_RECHECK_VERIFY=1 is
+# a_refused_local_value_pass_matches_the_same_pass_run_again.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=0
 write: main.jet = "use {\n    parse: core.text.parse\n}\n\nparts: fn(text: String) -> Int {\n    parse.split(text, \",\").len()\n}\n\nrun: fn() {\n    count: parts(\"a,b,c\")\n    print(\"{count}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
