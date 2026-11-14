@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102363,
+    "rev": 102375,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18280,7 +18280,17 @@
           "text": "Plan audit: replaced thin generic gates with intent, production-path, failure, and targeted-proof criteria."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 6,
+          "text": "Superseded: the Epoch 5 gate is replaced by the goal-model closure rule, and examples and goldens are a standing gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T13:08:22.021Z"
+        }
+      ],
       "refs": [
         "docs/plans/epoch-4/world-class-package-manager.md",
         "docs/spec/roadmap.md",
@@ -18289,7 +18299,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:08.533Z",
-      "updated": "2026-11-13T01:54:47.992Z",
+      "updated": "2026-11-14T13:08:22.021Z",
       "updatedBy": "Main",
       "tags": [
         "p0-proof",
@@ -18300,7 +18310,7 @@
       "probe": null,
       "visualMedia": [],
       "goals": [],
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0x2g69u",
@@ -22107,7 +22117,7 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": "e11-m02-fast-compiler-loop",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nCoordinate the automatic-build-optimization epic (`Docs/proposals/automatic-build-optimization.md`, 2026-09-01): one content-addressed action graph, hidden units inside declared package boundaries, and one store. It closes when every child card is integrated and the legacy mechanisms are gone. The epic does not implement or measure anything itself.\n\n## Current state\n- Done children: #2515, #2516, #2518, #2535, #2536.\n- Open children: #2517, #2519-#2534 (#2519 is retargeted to the self-hosted JetDriver/JetCodegen unit emission) and the measurement gate #2859.\n- Legacy names still present: `Source/ReceiptStore.rs:1933` and `Source/CmdCompile.rs:465,5547,5756` (`JET_RECEIPT_BYPASS`), `Source/RunCache.rs` (`JET_RUN_CACHE_DIR`/`JET_RUN_TRACE`), and the Tools/ callers `Tools/perf/dashboard.sh:1040-1041`, `Tools/ci/compiled-workload-runner.mjs:1037` and `Tools/agent-eval/selfhost/run.mjs:224`.\n- Criterion 3 is marked met, but `tests/hostile_invalidation.rs` does not exist (#2531 is open). That status is unsupported by the tree and should be reopened.\n\n## Changes\n1. Integrate children in proposal III.7 order:\n   - determinism, store and persisted checks (#2517);\n   - hidden units (#2519, #2520);\n   - sealed sets (#2521), ThinLTO (#2522), fast lens (#2523), run artifacts (#2524), prebuilt runtime (#2525);\n   - scheduler (#2526), board (#2527), explain-build (#2528), session (#2529);\n   - benchmark, hostile matrix (#2531), web graph, codegen, cleanup (#2534).\n\n   Each child owns its paths, proof and deletions.\n2. #2859 alone owns compiler-speed measurement and may refresh criteria 2 and 3.\n3. Criterion 4 is a source census after #2517, #2524 and #2534 land.\n\nInvariants I1/I2/I3/I4/I5/I6/I9 apply; package boundaries, authority, visibility, outputs and dependency edges never change.\n\n## Proof\n- Criterion 4: a `grep` for `BuildCache|RuntimeCache|RunCache|ReceiptStore|BuildPlanReplay|JET_TIMING|JET_RUN_TRACE|JET_RECEIPT_BYPASS|\\.jet/build-cache` over `Source/ crates/ Tools/ Docs/spec/` returns nothing.\n- `Tools/agent/jet-env cargo test --test hostile_invalidation` passes (backs criterion 3).\n- The #2859 build matrix passes against out-of-box and tuned Cargo.\n\n## Batch\nbatch-host-cli: coordination of the retained build host. Each child lands in its own batch.\n\n## Dependencies\n#2534 (cleanup) is real. So are every open child and #2859.\n",
       "checkSteps": null,
@@ -22187,19 +22197,21 @@
           "n": 2,
           "text": "The matched Cargo build matrix (tools/perf build-matrix) reports Jet/peer < 1.00 on wall clock for every cell against both the out-of-box and the tuned Cargo columns on the real-program corpus, or the owner has ratified a named exception per cell.",
           "status": "met",
-          "metBy": "fable-orchestrator",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Moved to testing card #2859 per owner instruction 2026-09-03: criteria that only need a measurement, census, suite, or review run are consolidated there; failures found by that run are fixed under #2859 or re-carded.",
-          "at": "2026-09-03T10:48:53.537Z"
+          "evidence": "Obsolete (CardCloser-1, verified by Main on dev 26afb1a0e6): the Cargo build matrix was carried to #2859 (merged into #2858) and dropped there, item #59: Tools/perf/build-matrix.sh and its Cargo matrix no longer exist; the Rust implementation was deleted by c9129d174d (R7a).",
+          "at": "2026-11-14T13:08:18.637Z",
+          "closure": "obsolete"
         },
         {
           "n": 3,
           "text": "The hostile invalidation suite (30 cases, proposal III.3) passes on AOT release, AOT debug, default jet run, and jet run --interpret with identical outputs and diagnostics.",
           "status": "met",
-          "metBy": "fable-orchestrator",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Moved to testing card #2859 per owner instruction 2026-09-03: criteria that only need a measurement, census, suite, or review run are consolidated there; failures found by that run are fixed under #2859 or re-carded.",
-          "at": "2026-09-03T10:48:54.277Z"
+          "evidence": "Obsolete (CardCloser-1, verified by Main): hostile_invalidation was carried to #2859 (merged into #2858) and dropped there, item #56: owner ruling, no cross-run compile cache (AGENTS.md Performance gate, landed 6714384b6e on dev).",
+          "at": "2026-11-14T13:08:19.565Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -22215,12 +22227,13 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-02T03:37:13.935Z",
-      "updated": "2026-11-13T01:55:37.910Z",
+      "updated": "2026-11-14T13:08:21.155Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
       "goals": [],
-      "criteriaLastN": 21
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-14T13:08:21.155Z"
     },
     {
       "id": "c03y4hd0",
@@ -46362,7 +46375,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -46371,15 +46384,28 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Obsolete: no NixOS backend exists to default boot.kernel.profile.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete (CardCloser-1, verified by Main on dev 26afb1a0e6): crates/jetpack/src/JetOS/nixos_backend.rs was deleted in c9129d174d (R7a); git grep -il nixos Jetpack/JetOS/Source and git grep boot.kernel.profile Jetpack both empty. D-NIX-FREE1=A rules out Nix; D-JOS-BOOTKERNEL2=B owns the kernel default.",
+          "at": "2026-11-14T13:08:26.929Z",
+          "closure": "obsolete"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-03T17:00:27.393Z",
-      "updated": "2026-10-03T17:00:27.393Z",
-      "updatedBy": "Pip",
-      "goals": []
+      "updated": "2026-11-14T13:08:28.514Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:28.514Z"
     },
     {
       "id": "c0eo2mnm",
@@ -57995,7 +58021,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -58004,15 +58030,28 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Duplicate of #5455 (direction 2: the security update lane).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): the security update lane is #5455 direction 2 plus its owner question on automatic vs opt-in updates (a ballot); the built half is frozen #845 (D-JOS-LIFECYCLE1=A).",
+          "at": "2026-11-14T13:08:30.355Z",
+          "closure": "duplicate"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:31.463Z",
-      "updated": "2026-10-23T08:10:31.463Z",
-      "updatedBy": "agent",
-      "goals": []
+      "updated": "2026-11-14T13:08:31.987Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:31.987Z"
     },
     {
       "id": "c0nr5mre",
@@ -58201,15 +58240,27 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Duplicate of #4268 c20, c23, c24 and #5455 direction 5.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): per-program authority is #4268 c20/c23/c24 (the declared fs/process/network/device policy enforced by the platform backend; agent_executor shares one policy digest and fails closed); sandbox-by-default for agent sessions is #5455 direction 5 (ballot).",
+          "at": "2026-11-14T13:08:33.925Z",
+          "closure": "duplicate"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:39.884Z",
-      "updated": "2026-10-23T08:10:39.884Z",
-      "updatedBy": "agent",
-      "goals": []
+      "updated": "2026-11-14T13:08:33.925Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "criteriaLastN": 1
     },
     {
       "id": "c0he880u",
@@ -205359,6 +205410,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T13:08:33.925Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pqgjqc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T13:08:32.876Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pqgjqc",
+      "note": "#1 Duplicate of #4268 c20, c23, c24 and #5455 direction 5."
+    },
+    {
+      "at": "2026-11-14T13:08:31.987Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uh3nvf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:08:30.355Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uh3nvf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T13:08:29.367Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uh3nvf",
+      "note": "#1 Duplicate of #5455 (direction 2: the security update lane)."
+    },
+    {
+      "at": "2026-11-14T13:08:28.514Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqxcv5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:08:26.929Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0aqxcv5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T13:08:25.974Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0aqxcv5",
+      "note": "#1 Obsolete: no NixOS backend exists to default boot.kernel.pro"
+    },
+    {
+      "at": "2026-11-14T13:08:22.021Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00de14z",
+      "note": "#6 Superseded: the Epoch 5 gate is replaced by the goal-model c"
+    },
+    {
+      "at": "2026-11-14T13:08:21.156Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rak5ve",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T13:08:19.565Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rak5ve",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-14T13:08:18.637Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rak5ve",
+      "note": "#2"
+    },
     {
       "at": "2026-11-14T13:04:29.087Z",
       "by": "Main",
