@@ -7,6 +7,7 @@ use {
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
+    cli_runtime: jet.runtime.sys
     cli_term: core.term
     cli_tasks: core.tasks
     cli_time: core.time
@@ -15,6 +16,7 @@ use {
         LINK_RUN_BASE,
         LINK_RUN_LOW_BASE,
         X64Executable,
+        X64ImagePart,
         X64Launch,
         x64_bind_runtime_image,
         x64_executable_add_section,
@@ -27,6 +29,7 @@ use {
         x64_file_exec,
         x64_image_exec,
         x64_image_file_read,
+        x64_image_part_file,
         x64_image_perf_map,
         x64_image_spawn,
         x64_image_unload,
@@ -663,18 +666,83 @@ JET_CLI_MAIN_ROUTES: [String]{"jet_rt_host_main_arguments", "jet_rt_host_program
 // first, one name per line (jet_cli_hot_text).
 JET_CLI_HOT_TEXT_FILE: "hot-text.list"
 
-// jet-runtime/ beside the `jet` executable.
+// The runtime files the compiler build adds to jet as image parts
+// (CoreRecordCheck.jet `--embed`), each named JET_CLI_RUNTIME_PART_PREFIX
+// then the file's name: every runtime file jet reads, and IDENTITY, the
+// identity of the jet-bare that lowered the runtime, which the release gate
+// holds the runtime's provenance to (Tools/release Gate.jet).
+JET_CLI_RUNTIME_PART_FILES: [String]{
+    JET_CLI_RUNTIME_KEY_FILE, JET_CLI_RUNTIME_EXPORTS_FILE, JET_CLI_RUNTIME_THREADS_FILE,
+    JET_CLI_RUNTIME_IMAGE_FILE, JET_CLI_RUNTIME_PACK_FILE, JET_CLI_RUNTIME_OBJECT_FILE,
+    JET_CLI_RUNTIME_WEB_FILE, JET_CLI_RUNTIME_WEB_RECEIPT_FILE, JET_CLI_IDENTITY_FILE,
+}
+JET_CLI_RUNTIME_PART_PREFIX: "jet.runtime/"
+// The part holding the identity of the jet that carries it, the file's last
+// bytes (CoreRecordCheck.jet `--embed`).
+JET_CLI_IDENTITY_PART: "jet.identity"
+// The path a jet opens its own file at, to map its runtime image part
+// (JetBackend Image/Loader.jet x64_image_part_file): the kernel's link to
+// the running executable, which names no toolchain path.
+JET_CLI_SELF_EXECUTABLE: "/proc/self/exe"
+
+// jet-runtime/ beside the `jet` executable. Only a jet that doesn't carry
+// its runtime (jet_cli_runtime_embedded), jet-bare, reads it.
 jet_cli_runtime_dir: fn() -[Env]> String Never! {
     parts := cli_sys.executable().split("/").to_list()
     _ := parts.pop()
     "{parts.join("/")}/jet-runtime"
 }
 
-// The runtime key the toolchain build recorded beside this compiler. Consumer
+// Whether this jet carries its runtime as image parts: every jet the
+// compiler build ships does, as it carries its Core record part
+// (CoreRecordCheck.jet `--embed` adds both); jet-bare, which has neither,
+// reads the files in jet-runtime/ beside it.
+jet_cli_runtime_embedded: fn() -[Env]> Bool Never! {
+    cli_runtime.image_part_size(JET_CLI_CORE_RECORD_PART) != None
+}
+
+// The runtime file `name` as this jet's image part, lent from its mapped
+// image with no file read. A jet that carries its runtime but lacks the
+// part was not built by the compiler build: an internal error.
+jet_cli_runtime_part: fn(name: String) -[Env]> [U8] Never! {
+    part: "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
+    size: cli_runtime.image_part_size(part) ?? panic("this jet carries its Core record but not its runtime part `{part}`; the compiler build adds both")
+    cli_runtime.image_part(part, 0, size) ?? panic("the runtime part `{part}` has a size but no bytes")
+}
+
+// This jet's identity, its JET_CLI_IDENTITY_PART part, lent from its mapped
+// image with no file read; None for jet-bare, which carries no part. A jet
+// that carries its runtime but lacks the part is an internal error.
+jet_cli_identity_part: fn() -[Env]> String? Never! {
+    if !jet_cli_runtime_embedded() -> return None
+    size: cli_runtime.image_part_size(JET_CLI_IDENTITY_PART) ?? panic("this jet carries its Core record but not its identity part `{JET_CLI_IDENTITY_PART}`; the compiler build adds both")
+    bytes: cli_runtime.image_part(JET_CLI_IDENTITY_PART, 0, size) ?? panic("the identity part `{JET_CLI_IDENTITY_PART}` has a size but no bytes")
+    identity: String.from_bytes(bytes) ?? panic("the identity part `{JET_CLI_IDENTITY_PART}` is not UTF-8")
+    Val(identity)
+}
+
+// The bytes of the runtime file `name`: this jet's part of it when it
+// carries its runtime (jet_cli_runtime_part), else the file in
+// `runtime_dir`; else why the file can't be read.
+jet_cli_runtime_bytes: fn(runtime_dir: String, name: String) -[FS, Env]> [U8] JetCLIReadError! {
+    if jet_cli_runtime_embedded() -> return Ok(jet_cli_runtime_part(name))
+    path: "{runtime_dir}/{name}"
+    bytes: cli_files.read_bytes(path) ?? return Err(jet_cli_read_error("couldn't read {path}: {jet_cli_io_error_text(err)}"))
+    Ok(bytes)
+}
+
+// How link diagnostics name the runtime file `name`: its part, or its path.
+jet_cli_runtime_label: fn(runtime_dir: String, name: String) -[Env]> String Never! {
+    if jet_cli_runtime_embedded() -> return "{JET_CLI_RUNTIME_PART_PREFIX}{name}"
+    "{runtime_dir}/{name}"
+}
+
+// The runtime key the toolchain build recorded for this compiler. Consumer
 // source and build profile do not enter it; no toolchain probes are needed
-// here. None when the file is missing, unreadable, or not one word.
-jet_cli_runtime_key: fn(runtime_dir: String) -[FS]> String? Never! {
-    text: cli_files.read("{runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}") ?? return None
+// here. None when it is missing, unreadable, or not one word.
+jet_cli_runtime_key: fn(runtime_dir: String) -[FS, Env]> String? Never! {
+    bytes: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_KEY_FILE) ?? return None
+    text: String.from_bytes(bytes) ?? return None
     key: text.trim()
     if key.len() == 0 || key == "." || key == ".." || key.split("/").to_list().len() != 1 -> return None
     Val(key)
@@ -876,15 +944,15 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
         // init/fini arrays, an import the image lacks) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
-        bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_gap_at, realized.runtime_gap, debug_info)
+        bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)
         if trace_sink == .Val(sink) -> sink.end("native.link", 2)
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
             return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
         }
         // The image moved into the bind; the full link reads the pack.
-        runtime_path = "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
-        runtime = cli_files.read_bytes(runtime_path) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime {runtime_path}: {err}"}}
+        runtime_path = jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_PACK_FILE)
+        runtime = jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_PACK_FILE) ?? return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime: {err.message}"}}
     }
     // Input names appear only in link diagnostics; the image is a function of
     // the bytes and their order. The object and runtime move in, uncopied; the
@@ -997,17 +1065,19 @@ jet_cli_symbols_file: fn(root: String, executable: X64Executable) -[FS]> JetCLIN
 // The program's C closure as its own thread realized it
 // (jet_cli_native_foreign_realize): the link inputs, else why it failed;
 // then the runtime the link reads from `runtime_path` (the prelinked runtime
-// image when `bound`, its file's identity `runtime_stamp` the same before and
-// after the read, else empty, and without its bytes
-// [runtime_gap_at, runtime_gap_at + runtime_gap), Image/Loader.jet
-// x64_image_file_read; else the Jet-only object for a platform closure, else
-// the pack), else why reading it failed.
+// image when `bound`: the part of the file `runtime_path` at `runtime_at`,
+// its identity `runtime_stamp` the same before and after the read, else
+// empty, and without its bytes [runtime_gap_at, runtime_gap_at +
+// runtime_gap), Image/Loader.jet x64_image_file_read and x64_image_part_file;
+// else the Jet-only object for a platform closure, else the pack), else why
+// reading it failed.
 JetCLIForeignRealized: struct {
     inputs: JetCLIForeignInputs?
     error: String
     runtime: [U8]?
     runtime_path: String
     runtime_stamp: [Int]
+    runtime_at: Int
     runtime_gap_at: Int
     runtime_gap: Int
     runtime_error: String
@@ -1019,9 +1089,11 @@ JetCLIForeignRealized: struct {
 // as the link would read it.
 // `bind`: a program with no closure at all binds to the pack's prelinked
 // runtime image (Image/MemoryLink.jet), so only the image is read; a pack
-// without one is read whole, as before.
+// without one is read whole, as before. A jet that carries its runtime
+// (jet_cli_runtime_embedded) lends its image part, which the loader maps
+// from the jet's own file, and reads no file but that file's part table.
 jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper: String?, sources: JetCLIForeignSources, runtime_dir: String, runtime_key: String?, bind: Bool) -[FS, Env, Exec, Time.Wait]> JetCLIForeignRealized {
-    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_gap_at: 0, runtime_gap: 0, runtime_error: "", bound: false}
+    realized := JetCLIForeignRealized{inputs: None, error: "", runtime: None, runtime_path: "", runtime_stamp: [Int]{}, runtime_at: 0, runtime_gap_at: 0, runtime_gap: 0, runtime_error: "", bound: false}
     platform := false
     no_closure := false
     if jet_cli_native_c_inputs(facts, rust_helper, sources) == {
@@ -1037,6 +1109,20 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
     }
     if runtime_key == None -> return realized
     if bind && no_closure && !platform {
+        if jet_cli_runtime_embedded() {
+            image: jet_cli_runtime_part(JET_CLI_RUNTIME_IMAGE_FILE)
+            // Mapped from this jet's file when the part found there is the
+            // one lent here; else the loader copies the lent bytes.
+            part := x64_image_part_file(JET_CLI_SELF_EXECUTABLE, "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_IMAGE_FILE}") ?? X64ImagePart{at: 0, size: -1, stamp: [Int]{}}
+            if part.size == image.len() {
+                realized.runtime_at = part.at
+                realized.runtime_stamp = part.stamp.move()
+            }
+            realized.runtime = Val(image)
+            realized.runtime_path = JET_CLI_SELF_EXECUTABLE
+            realized.bound = true
+            return realized
+        }
         image_path: "{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}"
         // The loader maps the image part from this file when it is still
         // the one read here (Image/Loader.jet x64_executable_load).
@@ -1052,10 +1138,10 @@ jet_cli_native_foreign_realize: fn(facts: JetDriverForeignLinkFacts, rust_helper
         }
     }
     runtime_file: if platform -> JET_CLI_RUNTIME_OBJECT_FILE else -> JET_CLI_RUNTIME_PACK_FILE
-    realized.runtime_path = "{runtime_dir}/{runtime_file}"
-    if cli_files.read_bytes(realized.runtime_path) == {
+    realized.runtime_path = jet_cli_runtime_label(runtime_dir, runtime_file)
+    if jet_cli_runtime_bytes(runtime_dir, runtime_file) == {
         .Ok(bytes) -> realized.runtime = Val(bytes)
-        .Err(err) -> realized.runtime_error = "couldn't read the Jet runtime {realized.runtime_path}: {err}"
+        .Err(err) -> realized.runtime_error = "couldn't read the Jet runtime: {err.message}"
     }
     realized
 }
@@ -1071,11 +1157,10 @@ JetCLIRuntimeExports: struct {
     failure: JetCLINativeFailure?
 }
 
-jet_cli_runtime_exports: fn(runtime_dir: String) -[FS]> JetCLIRuntimeExports Never! {
-    key: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {runtime_dir}/{JET_CLI_RUNTIME_KEY_FILE}"})}
-    exports_path: "{runtime_dir}/{JET_CLI_RUNTIME_EXPORTS_FILE}"
-    exports: cli_files.read_bytes(exports_path) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports {exports_path}: {err}"})}
-    threads: cli_files.read_bytes("{runtime_dir}/{JET_CLI_RUNTIME_THREADS_FILE}") ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
+jet_cli_runtime_exports: fn(runtime_dir: String) -[FS, Env]> JetCLIRuntimeExports Never! {
+    key: jet_cli_runtime_key(runtime_dir) ?? return JetCLIRuntimeExports{key: "", exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.RuntimeKey{what: "couldn't read the Jet runtime key {jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_KEY_FILE)}"})}
+    exports: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_EXPORTS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: [U8]{}, threads: None, failure: Val(JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime exports: {err.message}"})}
+    threads: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_THREADS_FILE) ?? return JetCLIRuntimeExports{key: key, exports: exports, threads: None, failure: None}
     JetCLIRuntimeExports{key: key, exports: exports, threads: Val(threads), failure: None}
 }
 

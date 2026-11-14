@@ -97,7 +97,7 @@ use {
         jet_eval_default_config,
         jet_eval_native_session,
     ]
-    jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
+    jet_backend.[x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack]
     jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent]
@@ -319,8 +319,9 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
 // Unset, the tree is found (jet_cli_toolchain_root); with no tree, jet
 // compiles against the Core sources built into it (jet_cli_core_sources).
 JET_CLI_TOOLCHAIN_ROOT_ENV: ENV_JET_TOOLCHAIN_ROOT
-// This compiler's identity (`name@version#<source id>`). Unset, it is read from
-// the IDENTITY file beside the jet executable (jet_cli_compiler_identity).
+// This compiler's identity (`name@version#<source id>`). Unset, it is the
+// jet's identity part, else the IDENTITY file beside the jet executable
+// (jet_cli_compiler_identity).
 JET_CLI_COMPILER_IDENTITY_ENV: ENV_JET_COMPILER_IDENTITY
 // Beside the jet executable: the file holding its identity on one line.
 JET_CLI_IDENTITY_FILE: "IDENTITY"
@@ -330,10 +331,13 @@ jet_cli_executable_dir: fn() -[Env]> String Never! {
     jet_cli_parent(cli_sys.executable()) ?? "/"
 }
 
-// The running compiler's identity: JET_COMPILER_IDENTITY, else the one line of
-// the IDENTITY file beside the executable; None when neither names one.
+// The running compiler's identity: JET_COMPILER_IDENTITY, else its identity
+// part (jet_cli_identity_part: every jet the compiler build ships carries
+// one, so a run reads no file for it), else the one line of the IDENTITY
+// file beside the executable; None when none names one.
 jet_cli_compiler_identity: fn() -> String? Never! {
     if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
+    if jet_cli_identity_part() == .Val(own) -> return Val(own)
     text: cli_files.read(jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)) ?? return None
     identity: text.trim()
     if identity == "" || identity.contains("\n") -> return None
@@ -1337,25 +1341,37 @@ jet_cli_eval_config: fn() -> JetEvalConfig Never! {
     config
 }
 
-// The compile's native children over the runtime image beside the pack,
-// read only when compile-time code first runs; None when this toolchain
-// has none.
+// The compile's native children over the runtime image (this jet's part of
+// it, else the file beside the pack), read only when compile-time code first
+// runs; None when this toolchain has none.
 jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
     jet_cli_native_session_at(jet_cli_runtime_dir())
 }
 
-// The native session over the runtime pack directory `runtime_dir`; None when
-// it records no runtime key.
+// The native session over the runtime pack directory `runtime_dir`, or this
+// jet's own image part when it carries its runtime; None when it records no
+// runtime key.
 jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSession>? Never! {
     if jet_cli_runtime_key(runtime_dir) == None -> return None
-    Val(jet_eval_native_session("{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
+    if jet_cli_runtime_embedded() -> return Val(jet_eval_native_session(JET_CLI_SELF_EXECUTABLE, JetCLINativeImageReader{part: "{JET_CLI_RUNTIME_PART_PREFIX}{JET_CLI_RUNTIME_IMAGE_FILE}"}))
+    Val(jet_eval_native_session("{runtime_dir}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{part: ""}))
 }
 
-// The CLI's read of the runtime image for jet_eval_native_session.
+// The CLI's read of the runtime image for jet_eval_native_session: the image
+// part `part` of the executable file read (JetBackend Image/Loader.jet
+// x64_image_part_file), or the whole file when `part` is "".
 JetCLINativeImageReader: struct {
+    part: String
+
     impl JetEvalNativeImageReader {
         read: fn(self, file: String) -[FS.Read]> [U8]? {
-            bytes: cli_files.read_bytes(file) ?? return None
+            if self.part == "" {
+                whole: cli_files.read_bytes(file) ?? return None
+                return Val(whole)
+            }
+            found: x64_image_part_file(file, self.part) ?? return None
+            bytes: cli_files.read_at(file, found.at, found.size) ?? return None
+            if bytes.len() != found.size -> return None
             Val(bytes)
         }
     }

@@ -1494,14 +1494,27 @@ value into Core. So are its effect facts: each Core function's `#FX(…)`
 regions, loop spans, `assume_deterministic` spans and pending
 `#Kernel(.parallel)` obligations, so a compile that takes the record walks no
 Core body for the effect check either.
-`--embed <image> <out>` writes the executable `image` to `out` with the
-record added as its `jet.core` part; the compiler build runs it with the jet it
-just linked. The record names the compiler `JET_COMPILER_IDENTITY` names;
-unset, it names this jet by the sha256 of its own executable
-(`jet@<release>#<sha256>`), never by an `IDENTITY` file beside it, because
-the jet the build just linked has no identity yet. `--embedded` reads that
-part from the running jet's mapped image, with no file read, and checks it as
-`--write` does.
+`--embed <image> <runtime-dir> <out> <identity>` writes the executable
+`image` to `out` with the record added as its `jet.core` part and, in the
+same pass, each runtime file of `runtime-dir` (the key, export and thread
+lists, the prelinked image, the pack, the Jet-only object, the web partition
+and its receipt, and `IDENTITY`, the identity of the jet that lowered the
+runtime) as its `jet.runtime/<file>` part, and last its own identity as its
+`jet.identity` part, which it also writes to `identity`. A jet's identity is
+`jet@<release>#<digest>`, the digest the sha256 of the jet's bytes with its
+`jet.identity` part's bytes zeroed: the sha256 of the file for a jet without
+that part. The compiler build runs it with the `jet-bare` it just linked and
+the `jet-runtime/` folder its `runtime` step built with that `jet-bare`, so
+the `jet` it ships reads no runtime or identity file: it maps its runtime
+image from its own executable and lends the other parts from its mapped
+image. Only `jet-bare`, which carries no part, reads `jet-runtime/` and the
+`IDENTITY` file beside it; a jet that carries the record but lacks a runtime
+or identity part stops with an internal error. The record names the compiler
+`JET_COMPILER_IDENTITY` names; unset, it names this jet by its identity part,
+else by the sha256 of its own executable, never by an `IDENTITY` file, and
+the runtime's `IDENTITY` must name that same compiler. `--embedded` reads the
+record part from the running jet's mapped image, with no file read, and
+checks it as `--write` does.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.

@@ -64,7 +64,10 @@ Release: struct {
     // "build" or "admitted".
     kind: String
     identity: String
+    // The sha256 of jet's file, and the digest its identity names
+    // (identity_digest).
     jet_sha256: String
+    identity_sha256: String
     commit: String
     seed: String
     // An admitted release keeps the name `admit` gave it.
@@ -79,6 +82,10 @@ Release: struct {
     runtime_key: String
     runtime_provenance_sha256: String
     runtime_compiler_sha256: String
+    // The identity of the jet that lowered the runtime, as jet's
+    // RUNTIME_PACKER_PART records it; "" for a jet without that part, whose
+    // runtime it lowered itself.
+    runtime_packer: String
     admission: Dyn
     problems: [Problem]
 }
@@ -135,6 +142,80 @@ is_hex: fn(text: String, length: Int) -> Bool Never! {
 // The part of `identity` (`jet@VERSION#SHA256`) after the `#`.
 identity_sha: fn(identity: String) -> String Never! {
     identity.partition("#").tail.copy()
+}
+
+// The executable part that holds a jet's identity, and the one that holds
+// the identity of the jet that lowered its runtime (Compiler/JetCli
+// CoreRecordCheck.jet `--embed`).
+IDENTITY_PART: "jet.identity"
+RUNTIME_PACKER_PART: "jet.runtime/IDENTITY"
+// The note type of an executable part (Compiler/JetBackend ELF.jet
+// ELF64_JET_PART_NOTE), and its owner, "Jet", as a little-endian word.
+PART_NOTE: 1246056449
+PART_OWNER: 0x0074654a
+
+// The little-endian number of `count` bytes at `at` of `bytes`.
+le_number: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
+    value := 0
+    loop k in 0..<count -> value = value + Int{bytes[at + k]} * (1 << (8 * k))
+    value
+}
+
+// Where the bytes of the part `name` of the executable `image` start and how
+// many there are; None without that part. A part is a PT_NOTE whose one note
+// has owner "Jet" and type PART_NOTE and whose descriptor is the part's name,
+// NUL-padded to eight bytes, then its bytes (Compiler/JetBackend ELF.jet
+// x64_executable_add_parts).
+image_part: fn(image: [U8], name: String) -> (at: Int, size: Int)? Never! {
+    if image.len() < 64 -> return None
+    phoff: le_number(image, 32, 8)
+    phnum: le_number(image, 56, 2)
+    if phoff < 0 || phoff + phnum * 56 > image.len() -> return None
+    label: name.bytes()
+    descriptor: (label.len() + 8) /% 8 * 8
+    loop k in 0..<phnum {
+        row: phoff + k * 56
+        if le_number(image, row, 4) != 4 -> next
+        from: le_number(image, row + 8, 8)
+        size: le_number(image, row + 32, 8)
+        if from < 0 || size < 16 + descriptor || from + size > image.len() -> next
+        if le_number(image, from, 4) != 4 || le_number(image, from + 8, 4) != PART_NOTE || le_number(image, from + 12, 4) != PART_OWNER -> next
+        length: le_number(image, from + 4, 4)
+        if length < descriptor || 16 + length > size || image[from + 16 + label.len()] != 0 -> next
+        named := true
+        loop index in 0..<label.len() {
+            if image[from + 16 + index] != label[index] -> named = false
+        }
+        if named -> return Val((at: from + 16 + descriptor, size: length - descriptor))
+    }
+    None
+}
+
+// The text of the part `name` of `image`, "" without one.
+image_part_text: fn(image: [U8], name: String) -> String Never! {
+    found: image_part(image, name) ?? return ""
+    String.from_bytes_lossy(image[found.at..<found.at + found.size])
+}
+
+// The digest a jet's identity names (`jet@VERSION#<digest>`): the sha256 of
+// its bytes with the bytes of its IDENTITY_PART zeroed, so the jet can carry
+// its own identity, which is the sha256 of the file for a jet without that
+// part (Compiler/JetCli CoreRecordCheck.jet `--embed` takes it the same way).
+identity_digest: fn(image: [U8]) -> String Never! {
+    found: image_part(image, IDENTITY_PART) ?? return sha256_hex(image)
+    zeros := [U8]{}
+    loop _ in 0..<found.size -> zeros.push(U8{0})
+    hasher := crypto.Hasher.new()
+    hasher.update(image[0..<found.at])
+    hasher.update(zeros)
+    hasher.update(image[found.at + found.size..<image.len()])
+    hasher.digest()
+}
+
+// identity_digest of the jet at `path`, "" when it can't be read.
+identity_digest_file: fn(path: String) -[FS]> String Never! {
+    bytes: files.read_bytes(path) ?? return ""
+    identity_digest(bytes)
 }
 
 read_text: fn(path: String) -[FS]> String? Never! {
@@ -203,7 +284,7 @@ first_line: fn(text: String) -> String Never! {
 // Reads `dir`. Missing or malformed inputs become problems, so one run
 // reports all of them.
 read_release: fn(dir: String) -[FS]> Release Never! {
-    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", commit: "", seed: "", name: "", target: "", version_stamp: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", admission: Dyn.Null, problems: [Problem]{}}
+    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", identity_sha256: "", commit: "", seed: "", name: "", target: "", version_stamp: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", runtime_packer: "", admission: Dyn.Null, problems: [Problem]{}}
     admitted: files.exists(files.join(dir, "RELEASE.json"))
     release.kind = if admitted -> "admitted" else -> "build"
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
@@ -216,6 +297,8 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     release.version_stamp = first_line(read_text(files.join(dir, "VERSION")) ?? "")
     jet: files.read_bytes(files.join(dir, "jet")) ?? [U8]{}
     release.jet_sha256 = sha256_hex(jet)
+    release.identity_sha256 = identity_digest(jet)
+    release.runtime_packer = image_part_text(jet, RUNTIME_PACKER_PART).trim().copy()
     release.shipped = shipped_artifacts(dir)
     release.sums = read_text(files.join(dir, "SHA256SUMS")) ?? ""
     release.runtime_key = first_line(read_text(files.join(dir, "jet-runtime/native.key")) ?? "")

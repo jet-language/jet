@@ -12,9 +12,9 @@ A seed is one directory:
 | Entry | Holds |
 |---|---|
 | `jet` | The compiler, a static x86-64 Linux executable |
-| `jet-runtime/` | The prebuilt runtime pack the compiler links programs against; it must sit beside `jet` |
+| `jet-runtime/` | The prebuilt runtime pack; `jet` carries it built in, and only an unembedded `jet-bare` reads it |
 | `jetpack` | The package-manager engine built by the same compiler (when the release has one) |
-| `IDENTITY` | `jet@a0.0.N#<sha256 of jet>`, the identity the compiler reports and stamps into builds |
+| `IDENTITY` | `jet@a0.0.N#<digest>`, the identity the compiler reports and stamps into builds, which `jet` also carries; the digest is the sha256 of `jet` with its `jet.identity` part zeroed ([`core-record --embed`](../reference/cli.md)) |
 | `VERSION` | `a0.0.N <commit> <YYYY-MM-DD>`, the release stamp `jet --version` reports |
 | `SHA256SUMS` | The digest of every file above |
 
@@ -70,12 +70,14 @@ Releases tagged before the key was committed (a0_030 and earlier) don't carry
 it; check those with the key file of a later checkout.
 
 `jet` reads the Core library from the checkout that holds its input (outside
-a checkout, from the Core sources built into it), and its identity from the
-`IDENTITY` file beside it; `JET_TOOLCHAIN_ROOT` and
+a checkout, from the Core record built into it), and its identity from the
+one built into it; `JET_TOOLCHAIN_ROOT` and
 `JET_COMPILER_IDENTITY` override both ([Environment
-variables](../reference/environment.md)). `jet build Compiler` builds the
-compiler and then, with it, the runtime pack it lowers (`jet-runtime/`) and
-its `IDENTITY`. The pack holds no C, and the build compiles no C. The testkit
+variables](../reference/environment.md)). `jet build Compiler` builds
+`jet-bare`, with it the runtime pack it lowers (`jet-runtime/`), and then
+`jet`: `jet-bare` with the Core record, the runtime and its identity built
+in, and that identity in `IDENTITY` beside it. The pack holds no C, and the
+build compiles no C. The testkit
 keeps its scratch in `$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
 
 A seed released before these defaults finds neither; run its build with
@@ -106,7 +108,7 @@ mkdir -p "$WORK" && cp -r Compiler/JetCli/.jet/build "$WORK/s1"
 "$WORK/s1/jet" build --optimize=basic Compiler  # s2, built by s1 with s1's own runtime pack
 ```
 
-The build writes `IDENTITY` (`jet@a0.0.N#<sha256 of jet>`) beside the
+The build writes `IDENTITY` (`jet@a0.0.N#<digest>`) beside the
 compiler it makes, so each stage runs under its own identity. Copy `s2` out
 the same way and build `s3` with it. The build is trusted when `s2` and `s3`
 are byte-identical, and the runtime pack `s2` builds is byte-identical to the

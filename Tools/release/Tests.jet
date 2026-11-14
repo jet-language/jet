@@ -464,6 +464,46 @@ texts: fn(items: [Dyn]) -> [String] Never! {
     assert_eq(gh_log(rebuilt), [String]{})
 }
 
+// A one-part executable: its program header table holds one PT_NOTE row, and
+// the note is the part `name` holding `payload` (Compiler/JetBackend ELF.jet
+// x64_executable_add_parts).
+part_image: fn(name: String, payload: [U8]) -> [U8] Never! {
+    label: name.bytes()
+    descriptor: (label.len() + 8) /% 8 * 8
+    image := [U8]{}
+    loop _ in 0..<120 + 16 + descriptor -> image.push(U8{0})
+    put_le(image, 32, 64, 8)
+    put_le(image, 56, 1, 2)
+    put_le(image, 64, 4, 4)
+    put_le(image, 72, 120, 8)
+    put_le(image, 96, 16 + descriptor + payload.len(), 8)
+    put_le(image, 120, 4, 4)
+    put_le(image, 124, descriptor + payload.len(), 4)
+    put_le(image, 128, PART_NOTE, 4)
+    put_le(image, 132, PART_OWNER, 4)
+    loop (index, byte) in label -> image[136 + index] = byte
+    loop byte in payload -> image.push(byte)
+    image
+}
+
+put_le: fn(bytes: &[U8], at: Int, value: Int, count: Int) Never! {
+    loop k in 0..<count -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+}
+
+#Test("a jet's identity digest is the sha256 of its bytes with its identity part zeroed") {
+    identity: "jet@a0.0.26#{"5".repeat(64)}"
+    zeros := [U8]{}
+    loop _ in 0..<identity.len() -> zeros.push(U8{0})
+    carried: part_image(IDENTITY_PART, identity.bytes())
+    assert_eq(image_part_text(carried, IDENTITY_PART), identity)
+    assert_eq(identity_digest(carried), sha256_hex(part_image(IDENTITY_PART, zeros)))
+    assert(identity_digest(carried) != sha256_hex(carried))
+    packer: part_image(RUNTIME_PACKER_PART, identity.bytes())
+    assert_eq(image_part_text(packer, RUNTIME_PACKER_PART), identity)
+    assert_eq(image_part_text(packer, IDENTITY_PART), "")
+    assert_eq(identity_digest(packer), sha256_hex(packer))
+}
+
 #Test("a signing failure blocks: no key, a key pair that does not match, a record signed by another key") {
     missing := new_fixture("sign-missing")
     missing.signer.seed_path = files.join(missing.scratch, "keys/absent.ed25519")

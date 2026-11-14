@@ -15,7 +15,8 @@
 // runs in the export as its working directory, so the images record source
 // directories relative to it. OUT (new or empty, outside the checkout and
 // /tmp) receives s2 as the release: jet, its aliases, jet-runtime/, IDENTITY
-// (`jet@<JET_VERSION>#<sha256 of jet>`, the one the runtime step wrote),
+// (`jet@<JET_VERSION>#<digest>`, the one the core-record step wrote and jet
+// carries: Release.jet identity_digest),
 // COMMIT, VERSION (`<JET_VERSION> <commit> <date>`), SEED (the seed's identity),
 // BUILD.json (the runner target and the identities of s1, s2 and s3) and
 // SHA256SUMS. A shipped file that names this machine's personal information
@@ -129,7 +130,7 @@ build_stage: fn(run: BuildRun, name: String, builder: String, identity: String) 
     copy_file(built, files.join(dir, "jet"), true) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}: {err}"}
     if !copy_tree(built_pack, files.join(dir, "jet-runtime")) -> return Stage{dir: "", identity: "", error: "{name}: cannot copy {built_pack}"}
     own: (read_text(built_identity) ?? "").trim().copy()
-    if !own.starts_with("jet@") || own.partition("#").tail != sha256_file(files.join(dir, "jet")) -> return Stage{dir: "", identity: "", error: "{name}: {built_identity} `{own}` does not name the built jet"}
+    if !own.starts_with("jet@") || own.partition("#").tail != identity_digest_file(files.join(dir, "jet")) -> return Stage{dir: "", identity: "", error: "{name}: {built_identity} `{own}` does not name the built jet"}
     say("build", "", "{name}: {own} ({result.wall}s)")
     Stage{dir: dir, identity: own, error: ""}
 }
@@ -149,8 +150,8 @@ build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wai
     if missing.len() > 0 -> return build_fail(2, "seed {seed} lacks {missing.join(", ")}")
     seed_identity: (read_text(files.join(seed, "IDENTITY")) ?? "").trim().copy()
     version: seed_identity.partition("#").head
-    seed_sha: sha256_file(files.join(seed, "jet"))
-    if !version.starts_with("jet@") || version.len() < 5 || version.contains(" ") || seed_identity.partition("#").tail != seed_sha -> return build_fail(2, "seed IDENTITY {seed_identity} does not name the seed's jet (sha256 {short(seed_sha, 16)})")
+    seed_digest: identity_digest_file(files.join(seed, "jet"))
+    if !version.starts_with("jet@") || version.len() < 5 || version.contains(" ") || seed_identity.partition("#").tail != seed_digest -> return build_fail(2, "seed IDENTITY {seed_identity} does not name the seed's jet (identity digest {short(seed_digest, 16)})")
     admission: preflight_gate("publish-release", root, seed, sha)
     if !admission.admitted {
         term.eprint(admission.text)

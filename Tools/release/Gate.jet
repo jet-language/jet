@@ -99,14 +99,18 @@ contains_text: fn(list: [String], text: String) -> Bool Never! {
 }
 
 // The release directory itself: identity, checksums, runtime pack and the
-// fixed point of the bootstrap chain.
+// fixed point of the bootstrap chain. The identity names jet's bytes with its
+// identity part zeroed (Release.jet identity_digest); the runtime was lowered
+// by the jet its packer part names, else, without that part, by jet itself.
 release_problems: fn(release: Release) -> [Problem] Never! {
     problems := [Problem]{}
     if !release.identity.starts_with("jet@") || !is_hex(identity_sha(release.identity), 64) -> problems.push(problem(INPUT, "IDENTITY `{release.identity}` is not jet@VERSION#SHA256"))
-    if identity_sha(release.identity) != release.jet_sha256 -> problems.push(problem(STALE, "IDENTITY {release.identity} does not name jet (sha256 {release.jet_sha256})"))
+    if identity_sha(release.identity) != release.identity_sha256 -> problems.push(problem(STALE, "IDENTITY {release.identity} does not name jet (identity digest {release.identity_sha256}, sha256 {release.jet_sha256})"))
     if release.sums != sums_text(release.shipped) -> problems.push(problem(STALE, "SHA256SUMS does not match the shipped files"))
     if release.runtime_key == "" -> problems.push(problem(INPUT, "jet-runtime/native.key is missing"))
-    if release.runtime_compiler_sha256 != release.jet_sha256 -> problems.push(problem(STALE, "jet-runtime/provenance.json says the runtime was packed by jet {release.runtime_compiler_sha256}, not by this jet ({release.jet_sha256})"))
+    packer: if release.runtime_packer != "" -> identity_sha(release.runtime_packer) else -> release.jet_sha256
+    packer_text: if release.runtime_packer != "" -> "the jet that lowered jet's runtime ({release.runtime_packer}, jet's part `{RUNTIME_PACKER_PART}`)" else -> "this jet ({release.jet_sha256})"
+    if release.runtime_compiler_sha256 != packer -> problems.push(problem(STALE, "jet-runtime/provenance.json says the runtime was packed by jet {release.runtime_compiler_sha256}, not by {packer_text}"))
     if !is_hex(release.commit, 40) -> problems.push(problem(INPUT, "the commit `{release.commit}` is not a full sha"))
     if !release.seed.starts_with("jet@") -> problems.push(problem(INPUT, "the seed identity `{release.seed}` is not jet@VERSION#SHA256"))
     if release.target == "" -> problems.push(problem(MATRIX, "the release names no target"))
@@ -183,7 +187,10 @@ receipt_problems: fn(release: Release, receipts: [Receipt], matrix: [MatrixRow])
         problems.extend(receipt.problems)
         if receipt.target != "" && !contains_text(targets, receipt.target) -> problems.push(problem(MATRIX, "{receipt.file} ran on {receipt.target}, which {SUPPORT_MATRIX_PATH} does not support"))
         if receipt.head != release.commit -> problems.push(problem(STALE, "{receipt.file} is pinned to {receipt.head}, not {release.commit}"))
-        if receipt.jet_sha256 != "" && receipt.jet_sha256 != release.jet_sha256 -> problems.push(problem(STALE, "{receipt.file} ran jet {receipt.jet_sha256}, not the release's jet ({release.jet_sha256})"))
+        // `admit`'s receipt names the jet it ran by its identity; a verify-full
+        // receipt by its file's sha256.
+        ran: if receipt.kind == "release-compiler" -> release.identity_sha256 else -> release.jet_sha256
+        if receipt.jet_sha256 != "" && receipt.jet_sha256 != ran -> problems.push(problem(STALE, "{receipt.file} ran jet {receipt.jet_sha256}, not the release's jet ({ran})"))
         if receipt.rows.len() == 0 -> problems.push(problem(SKIPPED, "{receipt.file} has no rows: the gate ran nothing"))
         if receipt.status != "PASS" && row_class(receipt.status) != "" -> problems.push(problem(row_class(receipt.status), "{receipt.file} status is {receipt.status}, not PASS"))
         shard_key: "{receipt.target}\t\tshard {receipt.shard}"

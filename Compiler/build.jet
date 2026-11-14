@@ -3,23 +3,26 @@
 // them). The `prelude-sources` and `lexer-keywords` steps first regenerate
 // the sources that copy or project other sources (Toolchain/PreludeSources.jet,
 // Toolchain/LexerKeywordRows.jet); git keeps them, so a stale one is
-// rewritten and a hand edit is refused. That compile is `jet-bare`; the
-// `core-record` step runs it to check Core and the Prelude and writes `jet`,
-// the same executable with their precompiled record added as a part it maps
-// at load (JetCli CoreRecordCheck.jet), so the record is the Core of that
-// very compiler, and a compile outside a toolchain tree takes its Core
-// modules from the record, not from Core's sources. jet-bare has no
-// runtime image yet, so the step can't run Core code at compile time: every
+// rewritten and a hand edit is refused. That compile is `jet-bare`. The
+// `runtime` step lowers jet's runtime pack with it into jet-runtime/
+// (Toolchain/RuntimePack.jet), with IDENTITY, jet-bare's identity: its
+// bytes name the compiler, and no C compiler runs. It also fails when the
+// jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
+// disagrees with the one the runtime source renders. The `core-record` step
+// then runs jet-bare to check Core and the Prelude and writes `jet`, the same
+// executable with their precompiled record, each runtime file and jet's own
+// identity added as parts it maps at load (JetCli CoreRecordCheck.jet
+// `--embed`), and that identity to IDENTITY beside it for the tools that
+// name a jet without running it. So the record is the Core of that very
+// compiler, a compile outside a toolchain tree takes its Core modules from
+// the record, not from Core's sources, and jet reads no runtime or identity
+// file: only jet-bare reads jet-runtime/. jet-bare has no
+// runtime image, so neither step can run Core code at compile time: every
 // Core module value must be a constant the compiler folds, and one that
 // calls Core code is E0643 here (Core/Ui Draw.jet's built-in face is a
-// `#Memo` function for this). The `runtime` step puts jet's runtime pack and
-// IDENTITY beside it (Toolchain/RuntimePack.jet): the jet the `core-record`
-// step wrote lowers the runtime, its bytes, the record included, are jet's
-// identity, and no C compiler runs. It also fails when the
-// jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
-// disagrees with the one the runtime source renders. The pack carries no C or
-// libc: a program's C closure links the musl sysroot of jet's C toolchain
-// pack (JetCli ForeignLink.jet). The Core library (jet_core.o, core.exports,
+// `#Memo` function for this). The pack carries no C or libc: a program's C
+// closure links the musl sysroot of jet's C toolchain pack (JetCli
+// ForeignLink.jet). The Core library (jet_core.o, core.exports,
 // core.threads: jet's embedded Core as global symbols) is off until #5479
 // S7b binds programs to it (Toolchain/RuntimePack.jet CORE_LIBRARY); S7b
 // adds its three files here when it turns it on.
@@ -64,29 +67,34 @@ build: fn(b: Build) -[Exec, FS]> {
         loop source in KEYWORD_SOURCES -> keywords.reads(source)
         keywords.writes("JetLexer/Source/Lexer/KeywordSpans.jet", kept: true)
         bare: b.add_executable("jet-bare", ["JetCli/run.jet"], [prelude, keywords])
-        core: b.run("core-record", b.host(bare), ["Exec", "FS"])
-        core.arg("self")
-        core.arg("devtools")
-        core.arg("core-record")
-        core.arg("--embed")
-        core.file(b.host(bare))
-        jet: core.output("JetCli/.jet/build/jet")
-        // Checking every Core body takes most of it (a v5 write took 14 min).
-        core.timeout(30min)
         runtime: b.run("runtime", b.jet(), ["Exec", "FS"])
         runtime.arg("run")
         runtime.arg("--allow=Env,Exec,FS")
         runtime.input("Toolchain/RuntimePack.jet")
         runtime.arg("--")
         runtime.arg("pack")
-        runtime.file(jet, flag: "--jet=")
+        runtime.file(b.host(bare), flag: "--jet=")
         loop tree in RUNTIME_TREES -> runtime.file(b.folder(tree), flag: "--tree=")
         runtime.reads("JetFoundation/Source/Registry/RuntimeInterface.jet")
         runtime.arg("--out={RUNTIME_DIR}")
         loop file in RUNTIME_FILES -> runtime.writes("{RUNTIME_DIR}/{file}")
-        runtime.output("JetCli/.jet/build/IDENTITY", flag: "--identity=")
+        runtime.output("{RUNTIME_DIR}/IDENTITY", flag: "--identity=")
         runtime.timeout(10min)
-        toolchain: b.add_install("toolchain", [], [core, runtime], [bare])
+        core: b.run("core-record", b.host(bare), ["Exec", "FS"])
+        core.arg("self")
+        core.arg("devtools")
+        core.arg("core-record")
+        core.arg("--embed")
+        core.file(b.host(bare))
+        // The runtime step's folder: the step reads each file it embeds.
+        core.arg(RUNTIME_DIR)
+        loop file in RUNTIME_FILES -> core.reads("{RUNTIME_DIR}/{file}")
+        core.reads("{RUNTIME_DIR}/IDENTITY")
+        core.output("JetCli/.jet/build/jet")
+        core.output("JetCli/.jet/build/IDENTITY")
+        // Checking every Core body takes most of it (a v5 write took 14 min).
+        core.timeout(30min)
+        toolchain: b.add_install("toolchain", [], [runtime, core], [bare])
         b.default(toolchain)
     }
 }

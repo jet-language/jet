@@ -26,7 +26,7 @@ use {
 }
 
 // The runtime partition and its receipt beside the runtime pack
-// (Compiler/build.jet).
+// (Compiler/build.jet), parts of every jet the compiler build ships.
 JET_CLI_RUNTIME_WEB_FILE: "jet_runtime.wasm"
 JET_CLI_RUNTIME_WEB_RECEIPT_FILE: "jet_runtime.wasm.tsv"
 
@@ -45,10 +45,9 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     runtime_dir: jet_cli_runtime_dir()
     runtime: jet_cli_runtime_exports(runtime_dir)
     if runtime.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
-    partition_path: "{runtime_dir}/{JET_CLI_RUNTIME_WEB_FILE}"
-    partition: cli_files.read_bytes(partition_path) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web partition {partition_path}: {err}"}, color)
-    receipt_path: "{runtime_dir}/{JET_CLI_RUNTIME_WEB_RECEIPT_FILE}"
-    receipt: cli_files.read(receipt_path) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web receipt {receipt_path}: {err}"}, color)
+    partition: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_WEB_FILE) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web partition: {err.message}"}, color)
+    receipt_bytes: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime's web receipt: {err.message}"}, color)
+    receipt: String.from_bytes(receipt_bytes) ?? return jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "the Jet runtime's web receipt {jet_cli_runtime_label(runtime_dir, JET_CLI_RUNTIME_WEB_RECEIPT_FILE)} is not UTF-8"}, color)
     census := [JetDriverIceRow]{}
     built := jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
     if built.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)

@@ -208,7 +208,7 @@ git clone --branch "$TAG" https://github.com/jet-language/jet && cd jet
 gh release download "$TAG" --repo jet-language/jet --pattern "jet-$TAG-linux-x64.tar.gz*" --dir ../release
 (cd ../release && sha256sum -c "jet-$TAG-linux-x64.tar.gz.sha256")
 mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed
-../seed/jet build Compiler        # jet, its runtime pack and IDENTITY
+../seed/jet build Compiler        # jet, its runtime and IDENTITY built in
 export PATH="$PWD/Compiler/JetCli/.jet/build:$PATH"
 ```
 

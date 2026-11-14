@@ -382,20 +382,21 @@ x64_image_load: fn(bytes: [U8]) -> X64LoadedImage {
 }
 
 // Map the linked executable `exe` at its link addresses, as x64_image_load
-// maps its file. A bound executable's image part comes from the pack file
-// itself, mapped copy-on-write: only the pages the program touches are
-// read in, and only the ones it (or the patching here) writes are copied.
-// Only the program part is copied in. When the pack file is gone or no
-// longer the one `exe.image` was read from, the file's bytes are put
-// together and loaded as x64_image_load loads them; an image part read
-// without its loaded segments (x64_image_file_read) can't be, and the load
-// fails.
+// maps its file. A bound executable's image part comes from the file
+// holding it (the image file, or the executable it is a part of from the
+// page-aligned offset `image_at`), mapped copy-on-write: only the pages
+// the program touches are read in, and only the ones it (or the patching
+// here) writes are copied. Only the program part is copied in. When that
+// file is gone or no longer the one `exe.image` was read from, or the part
+// starts off a page, the file's bytes are put together and loaded as
+// x64_image_load loads them; an image part read without its loaded
+// segments (x64_image_file_read) can't be, and the load fails.
 x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     if exe.image_end == 0 -> return x64_image_load(exe.tail)
     // The file is opened between two checks of its identity, so the
     // descriptor is the file the image was read from.
     file := -1
-    if loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
+    if exe.image_at % OS_PAGE_SIZE == 0 && loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
         file = loader_open(exe.image_path)
         if file >= 0 && !loader_same_stamp(loader_file_stamp(exe.image_path), exe.image_stamp) {
             loader_close(file)
@@ -427,7 +428,7 @@ x64_executable_load: fn(exe: X64Executable) -> X64LoadedImage {
     loop segment in plan.segments {
         if failure != "" -> break
         failure = if {
-            segment.offset + segment.file_size <= exe.image_end -> loader_map_file(file, segment)
+            segment.offset + segment.file_size <= exe.image_end -> loader_map_file(file, exe.image_at, segment)
             segment.offset >= exe.tail_at -> loader_pread(memfd, segment.vaddr, segment.file_size, segment.offset - exe.tail_at)
             else -> "PT_LOAD at {loader_hex(segment.vaddr)} lies across the image and the program"
         }
@@ -485,16 +486,17 @@ loader_protect: fn(plan: X64Segments) -> String {
 }
 
 // Map the PT_LOAD `segment` of a bound executable's image part from the
-// pack file `fd` over its reserved pages, private and writable until
-// loader_protect. A segment with zero-filled memory after its file bytes
-// (bss) gets zeros after them in its last file page, as execve gives it.
-loader_map_file: fn(fd: Int, segment: X64Segment) -> String {
+// file `fd`, which holds the image from offset `image_at` on, over its
+// reserved pages, private and writable until loader_protect. A segment
+// with zero-filled memory after its file bytes (bss) gets zeros after them
+// in its last file page, as execve gives it.
+loader_map_file: fn(fd: Int, image_at: Int, segment: X64Segment) -> String {
     start: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
     end: os_page_round(segment.vaddr + segment.file_size)
     if end == start -> return ""
     mapped := 0
     #Unsafe("MAP_FIXED replaces only the image's own reserved pages") {
-        mapped = os_syscall(OS_SYS_MMAP, start, end - start, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, fd, segment.offset - segment.vaddr % OS_PAGE_SIZE)
+        mapped = os_syscall(OS_SYS_MMAP, start, end - start, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, fd, image_at + segment.offset - segment.vaddr % OS_PAGE_SIZE)
     }
     if os_failed(mapped) -> return "mapping the runtime image file failed (errno {-mapped})"
     if segment.memory_size > segment.file_size {
@@ -519,8 +521,8 @@ loader_patch: fn(exe: X64Executable, delta: Int, from: Int, to: Int) {
 }
 
 // The read-only view of the whole file of `exe` (LOADER_AT_IMAGE) into
-// image.file: the image part from the pack file `file`, patched, zeros up
-// to the program part, which comes from `memfd`.
+// image.file: the image part from the file `file` (from exe.image_at on),
+// patched, zeros up to the program part, which comes from `memfd`.
 loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: Int) -> String {
     view: os_map(image.file_size, OS_PROT_READ + OS_PROT_WRITE)
     if os_failed(view) -> return "mapping the image file view failed (errno {-view})"
@@ -528,7 +530,7 @@ loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: In
     head: os_page_round(exe.image_end)
     mapped := 0
     #Unsafe("MAP_FIXED replaces only the view's own fresh pages") {
-        mapped = os_syscall(OS_SYS_MMAP, view, head, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, file, 0)
+        mapped = os_syscall(OS_SYS_MMAP, view, head, OS_PROT_READ + OS_PROT_WRITE, OS_MAP_PRIVATE + OS_MAP_FIXED, file, exe.image_at)
     }
     if os_failed(mapped) -> return "mapping the runtime image file failed (errno {-mapped})"
     #Unsafe("the bytes lie in the view's last image page, mapped private and writable above") {
@@ -546,13 +548,13 @@ loader_view: fn(image: &X64LoadedImage, exe: X64Executable, file: Int, memfd: In
     ""
 }
 
-// A runtime image file as read: its bytes and, when the file had the same
-// identity before and after the read, that identity (x64_executable_load
-// maps the file only while it still has it), else empty; `failure` is ""
-// or why it couldn't be read. The bytes leave out the file's
-// [gap_at, gap_at + gap): the loaded segments past the first page, which
-// neither the bind (Image/MemoryLink.jet) nor the mapping reads (gap 0 when
-// the file was read whole).
+// A runtime image as read: its bytes and, when the file holding it had
+// the same identity before and after the read, that identity
+// (x64_executable_load maps the file only while it still has it), else
+// empty; `failure` is "" or why it couldn't be read. The bytes leave out
+// the image's [gap_at, gap_at + gap): the loaded segments past the first
+// page, which neither the bind (Image/MemoryLink.jet) nor the mapping
+// reads (gap 0 when the image was read whole).
 X64ImageFile: struct {
     bytes: [U8]
     stamp: [Int]
@@ -586,21 +588,58 @@ x64_image_file_read: fn(path: String) -> X64ImageFile {
             }
         }
     }
-    loader_image_file_whole(path)
+    loader_image_file_whole(path, 0, -1)
 }
 
-// Names the kept form (x64_executable_keep): "JETKEEP1".
-LOADER_KEPT_MAGIC: 0x315045454b54454a
+// Where the part `name` of the executable file `path` lies (Image/ELF.jet
+// x64_executable_add_parts): its bytes' file offset and length, and the
+// file's identity, the same before and after the reads of its ELF header,
+// program headers and note heads. None when it has no such part, can't be
+// read or changed meanwhile.
+X64ImagePart: struct {
+    at: Int
+    size: Int
+    stamp: [Int]
+}
+
+x64_image_part_file: fn(path: String, name: String) -> X64ImagePart? {
+    before: loader_file_stamp(path)
+    if before.len() == 0 -> return None
+    header: loader_files.read_at(path, 0, 64) ?? return None
+    if header.len() < 64 -> return None
+    phoff: loader_u64(header, 32)
+    phnum: loader_u16(header, 56)
+    table: loader_files.read_at(path, phoff, phnum * 56) ?? return None
+    if table.len() < phnum * 56 -> return None
+    label: name.bytes()
+    descriptor: (label.len() + 8) /% 8 * 8
+    loop k in 0..<phnum {
+        if loader_u32(table, k * 56) != 4 -> next
+        at: loader_u64(table, k * 56 + 8)
+        size: loader_u64(table, k * 56 + 32)
+        if size < 16 + descriptor || at + size > before[2] -> next
+        note: loader_files.read_at(path, at, 16 + descriptor) ?? return None
+        if x64_part_note(note, 0, size, label) == .Val(length) {
+            if !loader_same_stamp(loader_file_stamp(path), before) -> return None
+            return Val(X64ImagePart{at: at + 16 + descriptor, size: length, stamp: before})
+        }
+    }
+    None
+}
+
+// Names the kept form (x64_executable_keep): "JETKEEP2".
+LOADER_KEPT_MAGIC: 0x325045454b54454a
 
 // Write `exe` to `path` (a new file) in the kept form, in which JetCli
 // ScriptCache.jet keeps `jet run` programs; "" or why not. The form holds
-// all but the image part, which x64_executable_kept maps from the runtime
-// image file again, so keeping a program writes its program part and
-// patches, not a copy of the pack. Little-endian words: the magic,
-// image_end, tail_at, the patch count, the program part's length, the image
-// file's identity's length and its path's length; that identity; the path;
-// each patch's offset and length, then its bytes; then the program part.
-// Each byte run is padded to a word. An executable whose image part was not
+// all but the image part, which x64_executable_kept maps from the file
+// holding the runtime image again, so keeping a program writes its
+// program part and patches, not a copy of the pack. Little-endian words:
+// the magic, image_end, tail_at, the patch count, the program part's
+// length, the image file's identity's length, its path's length, the
+// image's file offset and its length; that identity; the path; each
+// patch's offset and length, then its bytes; then the program part. Each
+// byte run is padded to a word. An executable whose image part was not
 // read from a file is kept whole (image_end 0, all program part).
 x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end > 0 && exe.image_stamp.len() == 0 {
@@ -613,7 +652,8 @@ x64_executable_keep: fn(exe: X64Executable, path: String) -> String {
     out := [U8]{}
     image_path: if exe.image_end > 0 -> exe.image_path.bytes() else -> [U8]{}
     stamp: if exe.image_end > 0 -> exe.image_stamp.copy() else -> [Int]{}
-    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len()}
+    image_size: if exe.image_end > 0 -> exe.image.len() + exe.image_gap else -> 0
+    words: [Int]{LOADER_KEPT_MAGIC, exe.image_end, exe.tail_at, exe.patch_at.len(), exe.tail.len(), stamp.len(), image_path.len(), exe.image_at, image_size}
     loop value in words -> loader_kept_word(out, value)
     loop value in stamp -> loader_kept_word(out, value)
     loader_kept_run(out, image_path)
@@ -641,10 +681,10 @@ loader_kept_run: fn(out: &[U8], bytes: [U8]) Never! {
 }
 
 // The executable kept in the file `path` (x64_executable_keep), bound to
-// the runtime image file it names again: only that file's first page (the
-// ELF header) is read, while the file has the identity it had when the
-// program was kept. None when the file can't be read or is not in the kept
-// form, or the image file changed since.
+// the runtime image it names again: only the image's first page (its ELF
+// header) is read, while the file holding it has the identity it had when
+// the program was kept. None when the file can't be read or is not in the
+// kept form, or the image's file changed since.
 x64_executable_kept: fn(path: String) -> X64Executable? {
     bytes: loader_files.read_bytes(path) ?? return None
     reader := LoaderKeptReader{bytes: bytes, at: 0, failed: false}
@@ -655,6 +695,8 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     tail_len: loader_kept_next(reader)
     stamp_len: loader_kept_next(reader)
     path_len: loader_kept_next(reader)
+    image_at: loader_kept_next(reader)
+    image_size: loader_kept_next(reader)
     if reader.failed || patches > reader.bytes.len() || stamp_len > 8 -> return None
     stamp := [Int]{}
     loop _ in 0..<stamp_len -> stamp.push(loader_kept_next(reader))
@@ -669,10 +711,11 @@ x64_executable_kept: fn(path: String) -> X64Executable? {
     tail: loader_kept_take(reader, tail_len)
     if reader.failed || reader.at != reader.bytes.len() -> return None
     if image_end == 0 -> return Val(x64_executable_whole(tail))
-    if tail_at < image_end || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
-    head: loader_files.read_at(image_path, 0, OS_PAGE_SIZE) ?? return None
+    if tail_at < image_end || image_size < image_end || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
+    first: if image_size < OS_PAGE_SIZE -> image_size else -> OS_PAGE_SIZE
+    head: loader_files.read_at(image_path, image_at, first) ?? return None
     if head.len() < 64 || !loader_same_stamp(loader_file_stamp(image_path), stamp) -> return None
-    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_end: image_end, image_gap_at: head.len(), image_gap: stamp[2] - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail, debug_file: [U8]{}, build_id: [U8]{}})
+    Val(X64Executable{image: head, image_path: image_path, image_stamp: stamp, image_at: image_at, image_end: image_end, image_gap_at: head.len(), image_gap: image_size - head.len(), patch_at: patch_at, patch_bytes: patch_bytes, tail_at: tail_at, tail: tail, debug_file: [U8]{}, build_id: [U8]{}})
 }
 
 // A cursor over a kept form's bytes; `failed` once a read ran past the end.
@@ -705,12 +748,19 @@ loader_kept_take: fn(reader: &LoaderKeptReader, size: Int) -> [U8] Never! {
     taken
 }
 
-// Read the runtime image file `path` whole.
-loader_image_file_whole: fn(path: String) -> X64ImageFile {
+// Read the `size` bytes of the runtime image at file offset `at` of the
+// file `path`, or the whole file when `size` is negative.
+loader_image_file_whole: fn(path: String, at: Int, size: Int) -> X64ImageFile {
     before: loader_file_stamp(path)
-    bytes: loader_files.read_bytes(path) ?? return loader_image_file_failed("{err}")
+    bytes := [U8]{}
+    if size < 0 {
+        bytes = loader_files.read_bytes(path) ?? return loader_image_file_failed("{err}")
+    } else {
+        bytes = loader_files.read_at(path, at, size) ?? return loader_image_file_failed("{err}")
+    }
+    if size >= 0 && bytes.len() != size -> return loader_image_file_failed("the file ends before the image's {size} bytes from offset {at}")
     after: loader_file_stamp(path)
-    X64ImageFile{bytes: bytes, stamp: if loader_same_stamp(before, after) -> after else -> [Int]{}, gap_at: 0, gap: 0, failure: ""}
+    X64ImageFile{bytes: bytes.move(), stamp: if loader_same_stamp(before, after) -> after else -> [Int]{}, gap_at: 0, gap: 0, failure: ""}
 }
 
 loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
@@ -718,11 +768,11 @@ loader_image_file_failed: fn(failure: String) -> X64ImageFile Never! {
 }
 
 // Give `exe` its whole image part when x64_image_file_read left out the
-// loaded segments: the file is read again, whole, while it still has the
-// identity it had then; "" or why not.
+// loaded segments: the image is read again, whole, while its file still
+// has the identity it had then; "" or why not.
 x64_executable_complete: fn(exe: &X64Executable) -> String {
     if exe.image_gap == 0 -> return ""
-    whole := loader_image_file_whole(exe.image_path)
+    whole := loader_image_file_whole(exe.image_path, exe.image_at, exe.image.len() + exe.image_gap)
     if whole.failure != "" -> return "couldn't read the runtime image {exe.image_path}: {whole.failure}"
     if !loader_same_stamp(whole.stamp, exe.image_stamp) -> return "the runtime image {exe.image_path} changed while jet ran"
     exe.image = whole.bytes.move()
@@ -737,13 +787,14 @@ x64_executable_complete: fn(exe: &X64Executable) -> String {
 // The patches and the zeros after the image part go over the copy, then the
 // program part and debug tail. The file is the bytes x64_executable_bytes
 // gives. A runtime image file that would run on past the end of the program
-// part (nothing here truncates) is written from memory.
+// part (nothing here truncates), or an image that is a part of a larger
+// file, is written from memory.
 x64_executable_write: fn(exe: X64Executable, path: String) -> String {
     if exe.image_end == 0 {
         loader_files.write_bytes(path, exe.tail) ?? return "{err}"
         return ""
     }
-    if exe.image_stamp.len() == 0 || exe.image_stamp[2] > exe.tail_at + exe.tail.len() {
+    if exe.image_stamp.len() == 0 || exe.image_at != 0 || exe.image_stamp[2] != exe.image.len() + exe.image_gap || exe.image_stamp[2] > exe.tail_at + exe.tail.len() {
         // copy: the caller's executable stays whole to run.
         whole := exe.copy()
         complete: x64_executable_complete(whole)

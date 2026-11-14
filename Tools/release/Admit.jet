@@ -76,7 +76,7 @@
 // registries suite, speed and throughput run in full on every unfiltered run.
 //
 // Pass: assembles SEEDS/a0.0.N (the next number) with jet (its Core sources built in),
-// jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<sha256 of jet>`), RELEASE, VERSION
+// jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<digest>`, Release.jet identity_digest), RELEASE, VERSION
 // (`a0.0.N COMMIT <date>`, which `jet --version` prints), the C toolchain pack, the pinned
 // bubblewrap (`jet-bwrap-<arch>-linux`),
 // SOURCE, SHA256SUMS, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and evidence/, then
@@ -692,7 +692,8 @@ no_seed: fn(error: String) -> SeedRelease Never! {
 }
 
 // The seed in `dir`. Its jet is genuine when SHA256SUMS lists its sha256 for
-// `jet`, IDENTITY ends in that sha256, and RELEASE.json records that
+// `jet`, IDENTITY ends in its identity digest (Release.jet identity_digest),
+// and RELEASE.json records that
 // identity and the commit SOURCE names: only then is the export of that
 // commit the tree this jet reads its Core from.
 seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
@@ -723,7 +724,7 @@ seed_info: fn(dir: String) -[FS]> SeedRelease Never! {
     commit: text_field(recorded, "commit")
     problems := [String]{}
     if !has_line(read_text(files.join(dir, "SHA256SUMS")) ?? "", "{info.jet_sha}  jet") -> problems.push("SHA256SUMS does not list its jet ({short(info.jet_sha, 16)})")
-    if identity_sha(info.identity) != info.jet_sha -> problems.push("IDENTITY {info.identity} does not name its jet")
+    if identity_sha(info.identity) != identity_digest_file(info.jet) -> problems.push("IDENTITY {info.identity} does not name its jet")
     if identity != info.identity -> problems.push("RELEASE.json records identity {if identity == "" -> "none" else -> identity}")
     if commit != info.commit -> problems.push("RELEASE.json records commit {if commit == "" -> "none" else -> short(commit, 10)}, SOURCE {short(info.commit, 10)}")
     info.genuine = problems.join("; ")

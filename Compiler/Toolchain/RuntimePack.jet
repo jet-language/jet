@@ -13,7 +13,7 @@
 // the same wherever the package sits.
 //
 // `pack` lowers Compiler/JetRuntime/sources.list and lifecycle.list as one
-// object with JET, the jet this build made: its native library hook writes
+// object with JET, the jet-bare this build made: its native library hook writes
 // the object, the prelinked pack and image, and the web partition. With
 // CORE_LIBRARY it also writes the Core library (jet_core.o, core.exports,
 // core.threads: every non-generic function of JET's embedded Core as a
@@ -35,7 +35,11 @@
 // identity. FILE gets JET's identity, `jet@<JET_VERSION>#<sha256 of JET>`:
 // the version JET names in `jet --version --json` (its `release`) and the
 // bytes JET lowers the runtime under. The step declares each file, so the
-// build publishes the pack and IDENTITY beside jet.
+// build publishes the pack and IDENTITY in jet-runtime/, where jet-bare reads
+// the pack, and the `core-record` step adds them to jet as parts (JetCli
+// CoreRecordCheck.jet `--embed`), which checks that IDENTITY names the jet
+// that writes the Core record. The release gate holds provenance.json's
+// compilerSha256 to that part (Tools/release Gate.jet).
 //
 // `unit` writes the runtime's one-namespace unit, OUT/unit.jet, and its
 // OUT/package.jet, then prints OUT/unit.jet: each sources.list source after a

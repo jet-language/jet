@@ -96,9 +96,11 @@ JetCLIScriptToolchain: struct {
 // The toolchain a kept program was built with, or None when its runtime can't
 // be read. The executable and the runtime pack are named by their file
 // identities (size, modification time, device, inode), as `make` names its
-// inputs. They are not hashed: a rerun compares them with the record's. The
-// Core files are not named here: a compile reads only the few its imports
-// reach, so the record names those (jet_cli_script_core_rows).
+// inputs. They are not hashed: a rerun compares them with the record's. A
+// jet that carries its runtime (jet_cli_runtime_embedded) has no pack file:
+// its executable's row names it. The Core files are not named here: a
+// compile reads only the few its imports reach, so the record names those
+// (jet_cli_script_core_rows).
 jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: String) -> JetCLIScriptToolchain? {
     core_root: if jet_cli_toolchain_root(entry) == {
         .Found(root) -> root
@@ -106,8 +108,12 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
     }
     runtime_dir: jet_cli_runtime_dir()
     if jet_cli_runtime_key(runtime_dir) == None -> return None
-    pack: "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
-    pack_stat: cli_files.stat(pack) ?? return None
+    runtime_row := "runtime built in"
+    if !jet_cli_runtime_embedded() {
+        pack: "{runtime_dir}/{JET_CLI_RUNTIME_PACK_FILE}"
+        pack_stat: cli_files.stat(pack) ?? return None
+        runtime_row = "{pack} {jet_cli_script_file_identity(pack_stat)}"
+    }
     executable: cli_sys.executable()
     executable_stat: cli_files.stat(executable) ?? return None
     core_row: if core_root == "" -> "core built in" else -> "core {core_root}"
@@ -116,7 +122,7 @@ jet_cli_script_toolchain: fn(identity: String, options: BuildOptions, entry: Str
         "{executable} {jet_cli_script_file_identity(executable_stat)}",
         jet_cli_host_triple(cli_sys.arch(), cli_sys.name()),
         build_options_key(options),
-        "{pack} {jet_cli_script_file_identity(pack_stat)}",
+        runtime_row,
         core_row,
     }
     Val(JetCLIScriptToolchain{rows: rows.join("\n"), core_root: core_root})

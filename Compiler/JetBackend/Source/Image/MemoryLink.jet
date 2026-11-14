@@ -405,16 +405,18 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
 // with each `patch_bytes[k]` written at file offset `patch_at[k]`, zeros up
 // to `tail_at`, then `tail`: the program part and the debug tail. The
 // image part is the pack's own bytes, so Image/Loader.jet maps it from the
-// pack file `image_path` (x64_executable_load) instead of copying it, when
+// file `image_path` (x64_executable_load) instead of copying it, when
 // the file still has the identity `image_stamp` (x64_image_file_read) it
-// had when `image` was read from it. `image` lacks the file's bytes
+// had when `image` was read from it: the image file itself (`image_at` 0)
+// or the executable holding it as a part from file offset `image_at` on
+// (Image/Loader.jet x64_image_part_file). `image` lacks the image's bytes
 // [image_gap_at, image_gap_at + image_gap) when x64_image_file_read left
 // them out (image_gap 0 when it holds them all): the mapping reads only the
 // ELF header, and Image/Loader.jet x64_executable_complete reads the rest
 // for whoever needs the whole file. A whole executable is all `tail`
 // (image_end and tail_at 0). A kept program (Image/Loader.jet
-// x64_executable_kept) is bound to its pack file again, its `image` that
-// file's first page. x64_executable_bytes puts the file together. A split
+// x64_executable_kept) is bound to its image file again, its `image` that
+// image's first page. x64_executable_bytes puts the file together. A split
 // link's executable (x64_executable_split) also has its side debug file
 // `debug_file` and the build id `build_id` both files' notes hold; others
 // have both empty.
@@ -422,6 +424,7 @@ X64Executable: struct {
     image: [U8]
     image_path: String
     image_stamp: [Int]
+    image_at: Int
     image_end: Int
     image_gap_at: Int
     image_gap: Int
@@ -435,7 +438,7 @@ X64Executable: struct {
 
 // The executable whose file is `bytes`.
 x64_executable_whole: fn(bytes: &&[U8]) -> X64Executable Never! {
-    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: bytes.move(), debug_file: [U8]{}, build_id: [U8]{}}
+    X64Executable{image: [U8]{}, image_path: "", image_stamp: [Int]{}, image_at: 0, image_end: 0, image_gap_at: 0, image_gap: 0, patch_at: [Int]{}, patch_bytes: [[U8]]{}, tail_at: 0, tail: bytes.move(), debug_file: [U8]{}, build_id: [U8]{}}
 }
 
 // The executable a split link wrote (x64_link_executable_split).
@@ -467,15 +470,17 @@ X64BindResult: struct {
 
 // Bind the program object `program` (named `name` in reports) to the
 // runtime image `image`, read from the file `image_path` with identity
-// `image_stamp` ("" and empty when it came from elsewhere) and without its
-// bytes [gap_at, gap_at + gap) (Image/Loader.jet x64_image_file_read): a
-// static executable at the image's base, in parts, whose debug tail holds
-// `.debug_*` sections only under `debug_info` (link_debug_sections).
-x64_bind_runtime_image: fn(name: String, program: &&[U8], image: &&[U8], image_path: String, image_stamp: [Int], gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
+// `image_stamp` ("" and empty when it came from elsewhere), from its file
+// offset `image_at` on, and without its bytes [gap_at, gap_at + gap)
+// (Image/Loader.jet x64_image_file_read): a static executable at the
+// image's base, in parts, whose debug tail holds `.debug_*` sections only
+// under `debug_info` (link_debug_sections).
+x64_bind_runtime_image: fn(name: String, program: &&[U8], image: &&[U8], image_path: String, image_stamp: [Int], image_at: Int, gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
     bound := link_bind_image(name, program, image, gap_at, gap, None, debug_info)
     if bound.errors.len() == 0 {
         bound.executable.image_path = image_path
         bound.executable.image_stamp = image_stamp
+        bound.executable.image_at = image_at
     }
     bound
 }
