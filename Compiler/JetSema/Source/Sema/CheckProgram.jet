@@ -1210,6 +1210,11 @@ sema_function_result: fn(value: &&FnBody?, function_key: String, context: &&Sema
             autodiff_obligations: context.autodiff_obligations.move(),
             autodiff_safe_panic: context.autodiff_safe_panic,
             autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+            // The crossings the body's type parameters reach and its generic
+            // calls (sema_generic_crossings_validate); without them no generic
+            // call is checked for what it sends.
+            generic_crossings: context.generic_crossings.move(),
+            generic_calls: context.generic_calls.move(),
         },
         failure: Val(SemaFunctionFailureFacts{
             function_key: function_key,
