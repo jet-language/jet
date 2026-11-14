@@ -17,6 +17,8 @@ Jet copy. The bootstrap inventory contract checks their sole authored owner.
 Run `jet help <command>` for the complete options for one command; do not infer an
 option from an older guide.
 
+Vocabulary: [Jet vocabulary](../vocabulary.md).
+
 Help and version are human renderables, not machine records: `jet help --json`
 and `jet version --json` succeed with no output. Diagnostic essays instead
 use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
