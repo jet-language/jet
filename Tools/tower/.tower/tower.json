@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6837,
-    "rev": 101916,
+    "nextNum": 6838,
+    "rev": 101919,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98177,6 +98177,47 @@
       "updated": "2026-11-14T00:49:40.846Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0pc0jb9",
+      "num": 6837,
+      "title": "A task spawned with an Atomic argument gets a copy of the word, so its stores are invisible to the caller",
+      "body": "Found by G3Core-2 on 2026-11-13 behind the Examples Concurrency/BusyTurns TIMEOUT on the batch-15 jet. A task spawned with an Atomic<Bool> argument copies the word, so the task`s store(true) never reaches main, which prints \"main sees false\", and the spinners never stop. An Atomic is an inline word borrowed by address (BuildTypes.jet:430), but task-spawn argument lowering copies it by value. This is a semantics defect (shared-state atomics), not a stale example.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A task spawned with an Atomic argument shares the caller`s atomic (borrowed by address), so a store in either is seen by the other, on o0, o1 and o2. Proof: a run case where a spawned task stores true and main loads true, and golden Concurrency/BusyTurns passes 3/3 with no TIMEOUT.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T01:12:26.044Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T01:12:16.479Z",
+      "updated": "2026-11-14T01:12:28.468Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -204496,6 +204537,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T01:12:28.469Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pc0jb9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-14T01:12:26.044Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pc0jb9",
+      "note": "#1 A task spawned with an Atomic argument shares the caller`s a"
+    },
+    {
+      "at": "2026-11-14T01:12:16.480Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pc0jb9",
+      "note": "A task spawned with an Atomic argument gets a copy of the word, so its stores are invisible to the caller"
+    },
     {
       "at": "2026-11-14T01:01:58.421Z",
       "by": "Main",
