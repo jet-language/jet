@@ -142,6 +142,8 @@ SemaGraphScan: struct {
     table: SemaStateTable?
     // Every graph module's qualified keys, once found.
     qualified: SemaQualifiedJobs?
+    // A divergence wave's function rows.
+    divergence: SemaDivergenceWave?
 }
 
 // A graph scan's results: the graph, the checked modules, the rows, their
@@ -160,11 +162,12 @@ SemaGraphScanFound: struct {
     comptime: SemaComptimeUseScanned?
     diagnostics: [Diagnostic]
     qualified: SemaQualifiedFound?
+    divergence: SemaDivergenceWalked?
 }
 
 // A scan over `rows`, claimed in `order`, with no inputs yet.
 sema_graph_scan_new: fn(graph: &&SemaRegistrationGraph, modules: &&[SemaGraphModuleResult], rows: &&[Int], order: &&[Int]) -> SemaGraphScan Never! {
-    SemaGraphScan{graphs: [SemaRegistrationGraph]{graph}, modules: modules, rows: rows, order: order, queue: SemaFinalizeCoreQueue{next: 0}, own_callees: None, table: None, qualified: None}
+    SemaGraphScan{graphs: [SemaRegistrationGraph]{graph}, modules: modules, rows: rows, order: order, queue: SemaFinalizeCoreQueue{next: 0}, own_callees: None, table: None, qualified: None, divergence: None}
 }
 
 // Runs `scan` over its rows on `workers` threads, the calling thread alone
@@ -186,15 +189,17 @@ sema_graph_scan: fn(scan: &&SemaGraphScan, workers: Int) -> SemaGraphScanDone {
 }
 
 // One row's scan, by the input its scan reads: the `#run fn` callees for a
-// `#run use` scan, the state table for a typestate scan, and else the
-// qualified-type scan, which finds each module's keys before it has any
-// (`qualified` None) and then rewrites with every module's.
+// `#run use` scan, the state table for a typestate scan, a wave's function
+// rows for a divergence scan, and else the qualified-type scan, which finds
+// each module's keys before it has any (`qualified` None) and then rewrites
+// with every module's.
 sema_graph_scan_row: fn(scan: SemaGraphScan, position: Int) -> SemaGraphScanFound {
     row: scan.rows[position]
-    found := SemaGraphScanFound{position: position, comptime: None, diagnostics: [Diagnostic]{}, qualified: None}
+    found := SemaGraphScanFound{position: position, comptime: None, diagnostics: [Diagnostic]{}, qualified: None, divergence: None}
     if {
         scan.own_callees == .Val(callees) -> found.comptime = Val(sema_comptime_use_scan_module(scan.graphs[0], row, callees))
         scan.table == .Val(table) -> found.diagnostics = sema_typestate_check_module(scan.graphs[0], table, scan.modules[row])
+        scan.divergence == .Val(wave) -> found.divergence = Val(sema_divergence_walk(scan.graphs[0], row, wave.functions[position]))
         else -> found.qualified = Val(sema_registration_qualified_scan(scan.graphs[0], row, scan.qualified))
     }
     found

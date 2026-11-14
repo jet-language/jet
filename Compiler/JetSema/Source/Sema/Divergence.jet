@@ -15,6 +15,7 @@ use {
     jet_foundation.[
         BinOp,
         CallArg,
+        CompilerThreads,
         Expr,
         ForKind,
         LValue,
@@ -25,6 +26,8 @@ use {
         SwitchArm,
         SymbolKind,
         TypedLitBody,
+        compiler_threads_admit,
+        compiler_threads_heaviest_first,
         name_rows_hash,
         module_is_core,
     ]
@@ -59,33 +62,60 @@ SemaDivergenceRow: struct {
 // walk found not yet diverging joins the set. The set only grows, and a
 // callee that joins only ends more of a caller's paths, so walking in this
 // order reaches the fixed point that rounds over the whole graph reached,
-// without walking every body again each round.
-sema_divergence_solve: fn(graph: &SemaRegistrationGraph) Never! {
-    loop module_index in 0..<graph.modules.len() {
-        loop row in 0..<graph.modules[module_index].functions.len() {
-            if sema_function_promises_never(graph.modules[module_index].functions[row].declaration) -> sema_divergence_mark(graph, module_index, row)
+// without walking every body again each round. The walks run in waves: each
+// wave's walks read the graph and the set as the waves before left them and
+// write only their own findings, so they run as a graph scan
+// (sema_graph_scan), and the functions a wave finds diverging join the set
+// after it. The set is the same for any thread count.
+sema_divergence_solve: fn(graph: &&SemaRegistrationGraph, threads: CompilerThreads) -> SemaRegistrationGraph {
+    owned := graph.move()
+    loop module_index in 0..<owned.modules.len() {
+        loop row in 0..<owned.modules[module_index].functions.len() {
+            if sema_function_promises_never(owned.modules[module_index].functions[row].declaration) -> sema_divergence_mark(owned, module_index, row)
         }
     }
     rows := [SemaDivergenceRow]{}
-    loop module_index in 0..<graph.modules.len() {
-        if module_is_core(graph.modules[module_index].module_identity) -> next
-        loop row in 0..<graph.modules[module_index].functions.len() -> rows.push(SemaDivergenceRow{module_index: module_index, row: row})
+    weights := [Int]{}
+    loop module_index in 0..<owned.modules.len() {
+        if module_is_core(owned.modules[module_index].module_identity) -> next
+        loop row in 0..<owned.modules[module_index].functions.len() {
+            rows.push(SemaDivergenceRow{module_index: module_index, row: row})
+            span: owned.modules[module_index].functions[row].declaration.span
+            weights.push(1 + span.end - span.start)
+        }
     }
     // The rows (by index into `rows`) waiting on each callee symbol.
     waiting_by_callee := [U32:Int]{}
     waiting := [[Int]]{}
-    queue := (loop slot in 0..<rows.len() -> slot)
-    queued := 0
-    loop queued < queue.len() {
-        slot: queue[queued]
-        queued += 1
-        module_index: rows[slot].module_index
-        row: rows[slot].row
-        if graph.modules[module_index].functions[row].declaration.diverges -> next
-        scope := SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
-        flow: sema_divergence_body(graph, scope, graph.modules[module_index].functions[row].declaration.body)
-        if !sema_divergence_definitely(flow) {
-            loop callee in scope.consulted {
+    queued := loop _ in rows -> false
+    wave := [Int]{}
+    loop slot in 0..<rows.len() {
+        if !owned.modules[rows[slot].module_index].functions[rows[slot].row].declaration.diverges -> wave.push(slot)
+    }
+    loop wave.len() > 0 {
+        modules := [Int]{}
+        functions := [Int]{}
+        wave_weights := [Int]{}
+        work := 0
+        loop slot in wave {
+            modules.push(rows[slot].module_index)
+            functions.push(rows[slot].row)
+            wave_weights.push(weights[slot])
+            work += weights[slot]
+        }
+        workers: compiler_threads_admit(threads, wave.len(), work, SEMA_DIVERGENCE_MIN_BYTES_PER_THREAD, 0, 0)
+        scan := sema_graph_scan_new(owned, [SemaGraphModuleResult]{}, modules, compiler_threads_heaviest_first(wave_weights))
+        scan.divergence = Val(SemaDivergenceWave{functions: functions.move()})
+        done := sema_graph_scan(scan, workers)
+        owned = done.graph.move()
+        walks: sema_divergence_take(done.found)
+        // A walk that found a callee not yet diverging waits on it before
+        // any function of the wave joins, so a callee joining in the same
+        // wave still wakes it.
+        loop (position, walked) in walks {
+            if walked.diverges -> next
+            slot: wave[position]
+            loop callee in walked.consulted {
                 if waiting_by_callee.get(callee) == None {
                     waiting_by_callee[callee] = waiting.len()
                     waiting.push([Int]{})
@@ -95,12 +125,64 @@ sema_divergence_solve: fn(graph: &SemaRegistrationGraph) Never! {
                 if waiting[group].len() > 0 && waiting[group][waiting[group].len() - 1] == slot -> next
                 waiting[group].push(slot)
             }
-            next
         }
-        sema_divergence_mark(graph, module_index, row)
-        group: waiting_by_callee.get(graph.modules[module_index].functions[row].symbol.id.id) ?? next
-        loop caller in waiting[group] -> queue.push(caller)
+        next_wave := [Int]{}
+        loop (position, walked) in walks {
+            if !walked.diverges -> next
+            module_index: rows[wave[position]].module_index
+            row: rows[wave[position]].row
+            sema_divergence_mark(owned, module_index, row)
+            group: waiting_by_callee.get(owned.modules[module_index].functions[row].symbol.id.id) ?? next
+            loop caller in waiting[group] {
+                if queued[caller] -> next
+                queued[caller] = true
+                next_wave.push(caller)
+            }
+        }
+        wave = [Int]{}
+        loop caller in next_wave {
+            queued[caller] = false
+            if !owned.modules[rows[caller].module_index].functions[rows[caller].row].declaration.diverges -> wave.push(caller)
+        }
     }
+    owned
+}
+
+// A wave with less body source per admitted thread walks on the calling
+// thread.
+SEMA_DIVERGENCE_MIN_BYTES_PER_THREAD: 65536
+
+// What a wave's walks read besides the graph: each walk's function row, by
+// position (the graph scan's rows hold its graph module).
+SemaDivergenceWave: struct {
+    functions: [Int]
+}
+
+// One function's walk: whether every path of its body stops, and each callee
+// it found not yet diverging.
+SemaDivergenceWalked: struct {
+    diverges: Bool
+    consulted: [U32]
+}
+
+// Walks function `row` of graph module `module_index` against the set so far.
+sema_divergence_walk: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaDivergenceWalked Never! {
+    scope := SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params), consulted: [U32]{}}
+    flow: sema_divergence_body(graph, scope, graph.modules[module_index].functions[row].declaration.body)
+    SemaDivergenceWalked{diverges: sema_divergence_definitely(flow), consulted: scope.consulted.move()}
+}
+
+// A graph scan's walks, by position.
+sema_divergence_take: fn(found: &&[SemaGraphScanFound?]) -> [SemaDivergenceWalked] {
+    slots := found.move()
+    slots.reverse()
+    taken := [SemaDivergenceWalked]{}
+    loop slots.len() > 0 {
+        slot := slots.pop() ?? break
+        row := slot.move() ?? panic("a function's divergence walk left its slot")
+        taken.push(row.divergence.move() ?? panic("a divergence scan found no walk"))
+    }
+    taken
 }
 
 // The one writer of `Func.diverges` and of the graph's diverging set.
