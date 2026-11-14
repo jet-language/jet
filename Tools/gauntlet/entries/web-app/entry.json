@@ -4,9 +4,11 @@
   "cells": ["webfront.app"],
   "mode": "web-app",
   "perf": false,
-  "languages": ["jet", "js", "node"],
+  "languages": ["jet", "js", "node", "go", "rust", "python", "lua", "luajit"],
   "build": {
-    "jet": ["build", "--target=web", "--release", "run.jet"]
+    "jet": ["build", "--target=web", "--release", "run.jet"],
+    "go": ["sh", "-c", "cp -f \"$(go env GOROOT)/lib/wasm/wasm_exec.js\" . && env GOOS=js GOARCH=wasm GO111MODULE=off GOCACHE=\"$PWD/go-cache\" go build -o main.wasm main.go"],
+    "rust": ["rustc", "--target", "wasm32-unknown-unknown", "-O", "--crate-type", "cdylib", "main.rs", "-o", "main.wasm"]
   },
   "spec": {
     "behavior": "Mount a long-lived DOM counter with a count display initially showing `count: 0`, an increment button, and a reset button. Replay three increment clicks, read the display, click reset, and read the display again.",
@@ -16,7 +18,10 @@
     "run": {
       "jet": ["node", "runner.mjs"],
       "js": ["node", "runner.mjs"],
-      "node": ["node", "main.mjs"]
+      "node": ["node", "main.mjs"],
+      "python": ["python3", "main.py"],
+      "lua": ["lua", "main.lua"],
+      "luajit": ["luajit", "main.lua"]
     }
   },
   "metric_applicability": {
@@ -24,6 +29,18 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail runs through the host Node interpreter and has no entry-local compile phase.", "evidence": "The harness invokes node runner.mjs directly for the declared JS app rail and produces no JavaScript executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "The JavaScript app rail has no entry-local executable artifact.", "evidence": "The harness run command is node runner.mjs; no JavaScript binary is built or measured."}
+    },
+    "python": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Python runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes python3 main.py directly and produces no Python executable artifact."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."}
     }
   },
   "authoring": {
@@ -53,6 +70,41 @@
       "retries": 0,
       "diagnosticsHit": [],
       "notes": "Mirrors the JS DOM interaction replay with an in-process counter."
+    },
+    "go": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "GOOS=js GOARCH=wasm: main mounts the display and buttons through syscall/js with js.FuncOf click handlers, then parks; runner.mjs loads it with Go's own wasm_exec.js (copied from GOROOT by the build) into the same DOM shim as the JS rail and replays the clicks."
+    },
+    "rust": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "A #![no_std] wasm32-unknown-unknown cdylib owns the counter state (increment, reset, count exports over an AtomicI32), as the Rust web-widget rail exports its kernel; with no wasm-bindgen, runner.mjs mounts the DOM shim's display and buttons and its click handlers call the exports."
+    },
+    "python": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the Node rail's in-process counter replay; Python has no browser runtime for the DOM half."
+    },
+    "lua": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Mirrors the Node rail's in-process counter replay; Lua has no browser runtime for the DOM half."
+    },
+    "luajit": {
+      "author": "GoalsB-3",
+      "turns": 1,
+      "retries": 0,
+      "diagnosticsHit": [],
+      "notes": "Runs lua/main.lua."
     }
   },
   "rewrite_provenance": {
