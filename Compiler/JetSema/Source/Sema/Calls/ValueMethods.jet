@@ -10,6 +10,7 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
     BuiltinMethodLowering,
+    BuiltinMethodReceiver,
     BuiltinMethodRow,
     CallArg,
     Diagnostic,
@@ -331,7 +332,13 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
     }
     if !labels_valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
-    ownership := sema_ownership_check_method_call(state, "{owner}.{method}", receiver, row.access, params, updated_args, scopes, span, diagnostics)
+    // Rust `builtin_receiver_borrow`: a String edit reserves its receiver
+    // two-phase, so `s.insert(s.len(), "]")` reads `s` before the edit
+    // begins (JetIR evaluates the arguments before it takes the place); its
+    // arguments retain no call loan.
+    callee: "{owner}.{method}"
+    two_phase: row.access == AccessConvention.Write && row.receiver == BuiltinMethodReceiver.String
+    ownership := if two_phase -> sema_ownership_check_two_phase_method_call(state, callee, sema_ownership_receiver_consumer(callee), receiver, row.access, false, params, updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call(state, callee, receiver, row.access, params, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, effect_row, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
