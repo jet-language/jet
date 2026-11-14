@@ -15,16 +15,16 @@
 // that differ: copies that only reach copies of each other stay one. A
 // function whose address is taken keeps it.
 
-use jet_foundation.[name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_value]
 
 // Folds the copies among `m.functions`' bodies `functions`; returns how many
 // functions nothing reaches any more.
-ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! {
+ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction], threads: CompilerThreads) -> Int Never! {
     count: functions.len()
     first := [Int]{}
     lowest := -1
     loop f in functions {
-        candidate: f.source_file == "" && f.asm == None && f.op.len() > 0
+        candidate: ir_opt_fold_candidate(f)
         if candidate && lowest < 0 -> lowest = first.len()
         first.push(if candidate -> 0 else -> -1)
     }
@@ -32,10 +32,10 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
         if first[id] == 0 -> first[id] = lowest
     }
     classes := if lowest < 0 -> 0 else -> 1
-    rows: ir_opt_fold_rows(m)
     // Each candidate's body is spelled once, as its shape: everything but
     // the functions it reaches, which a round reads by their class. Bodies
     // of one shape number the same.
+    found := ir_opt_fold_shapes(m, functions, threads)
     shapes := [String:Int]{}
     shape_of := [Int]{}
     reached := [[Int]]{}
@@ -45,14 +45,13 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
             reached.push([Int]{})
             next
         }
-        found := ir_opt_fold_shape(m, functions[id], rows)
-        known := shapes.get(found.text) ?? -1
+        known := shapes.get(found[id].text) ?? -1
         if known < 0 {
             known = shapes.len()
-            shapes[found.text] = known
+            shapes[found[id].text] = known
         }
         shape_of.push(known)
-        reached.push(found.reached.move())
+        reached.push(compiler_take_rows<Int>(found[id].reached))
     }
     loop classes > 0 {
         seen := [String:Int]{}
@@ -82,6 +81,99 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction]) -> Int Never! 
         m.types[row].clone = ir_opt_fold_name(m, functions, m.types[row].clone, first)
     }
     folded
+}
+
+// Whether ir_opt_fold_identical may fold `f`: a body the build made itself.
+ir_opt_fold_candidate: fn(f: IRFunction) -> Bool Never! {
+    f.source_file == "" && f.asm == None && f.op.len() > 0
+}
+
+// Each body's shape (ir_opt_fold_shape; none for a body that is no
+// candidate). A shape reads only its body and the module's rows, which the
+// threads read lent (ir_opt_lend), so the bodies split into consecutive
+// parts (compiler_threads_partition by size), one thread each, joined in
+// part order: the shapes are the same for any thread count.
+ir_opt_fold_shapes: fn(m: &IRModule, functions: &[IRFunction], threads: CompilerThreads) -> [IROptFoldShape] Never! {
+    rows: ir_opt_fold_rows(m)
+    count: functions.len()
+    weights := [Int]{}
+    total := 0
+    loop f in functions {
+        weight: if ir_opt_fold_candidate(f) -> 1 + f.op.len() else -> 1
+        weights.push(weight)
+        total += weight
+    }
+    found := [IROptFoldShape]{}
+    workers: compiler_threads_admit(threads, count, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop f in functions -> found.push(ir_opt_fold_shape_of(m, f, rows))
+        return found
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    // Parts leave the list last-first: part `workers - 1` pops first.
+    slots := [Shared<IROptFoldPart>]{}
+    part := workers - 1
+    loop part >= 0 {
+        bodies := [IRFunction]{}
+        loop functions.len() > bounds[part] {
+            body: functions.pop() ?? panic("the IR optimizer lost a function to its folding")
+            bodies.push(body)
+        }
+        bodies.reverse()
+        slots.push(Shared{IROptFoldPart{functions: bodies.move(), shapes: [IROptFoldShape]{}}})
+        part -= 1
+    }
+    slots.reverse()
+    lent: ir_opt_lend(m)
+    shared: Shared{IROptFoldView{views: [IRModule]{lent.move()}, rows: rows.move()}}
+    _: ir_opt_fold_shapers(slots, shared, 0) ?? panic("the IR folding threads failed")
+    loop slot in slots {
+        held := slot.guard_edit()
+        functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
+        found.extend(compiler_take_rows<IROptFoldShape>(held.value.shapes))
+    }
+    held := shared.guard_edit()
+    ir_opt_lend_into(m, held.value.views[0])
+    found
+}
+
+// Body `f`'s shape when it is a candidate, else an empty one.
+ir_opt_fold_shape_of: fn(m: IRModule, f: IRFunction, rows: [Int]) -> IROptFoldShape Never! {
+    if !ir_opt_fold_candidate(f) -> return IROptFoldShape{text: "", reached: [Int]{}}
+    ir_opt_fold_shape(m, f, rows)
+}
+
+// The functions of one thread of ir_opt_fold_shapes, in order, and their
+// shapes.
+IROptFoldPart: struct {
+    functions: [IRFunction]
+    shapes: [IROptFoldShape]
+}
+
+// What every thread of ir_opt_fold_shapes reads: the module's lent rows
+// (ir_opt_lend), in a list of one, and each type row's layout number.
+IROptFoldView: struct {
+    views: [IRModule]
+    rows: [Int]
+}
+
+// Runs a shape thread per slot from `at`; returns the functions they read.
+ir_opt_fold_shapers: fn(slots: [Shared<IROptFoldPart>], shared: Shared<IROptFoldView>, at: Int) -> Int {
+    if at >= slots.len() -> return 0
+    read := 0
+    task.group ir_opt_fold_group {
+        head: task ir_opt_fold_part(slots[at], shared)
+        read = ir_opt_fold_shapers(slots, shared, at + 1)
+        read += head.join() ?? ir_opt_prepare_stopped(err)
+    }
+    read
+}
+
+ir_opt_fold_part: fn(slot: Shared<IROptFoldPart>, shared: Shared<IROptFoldView>) -> Int {
+    reads: shared.guard_read()
+    held := slot.guard_edit()
+    loop row in 0..<held.value.functions.len() -> held.value.shapes.push(ir_opt_fold_shape_of(reads.value.views[0], held.value.functions[row], reads.value.rows))
+    held.value.functions.len()
 }
 
 // The key of the function a row's routine `name` names once copies are
@@ -196,4 +288,22 @@ ir_opt_fold_key: fn(first: [Int], id: Int, shape: Int, reached: [Int]) -> String
     parts := [String]{"{first[id]}", "{shape}"}
     loop callee in reached -> parts.push("{ir_opt_fold_callee(first, callee)}")
     parts.join("|")
+}
+
+#Test("Folding finds the same copies for any thread count") {
+    one := ir_opt_slot_test_wide(12, false)
+    eight := ir_opt_slot_test_wide(12, false)
+    // The callers of make are the same body, built by the build.
+    loop id in 1..<one.functions.len() {
+        one.functions[id].source_file = ""
+        eight.functions[id].source_file = ""
+    }
+    alone := [IRFunction]{}
+    compiler_transfer_rows<IRFunction>(alone, one.functions)
+    shared := [IRFunction]{}
+    compiler_transfer_rows<IRFunction>(shared, eight.functions)
+    assert_eq(ir_opt_fold_identical(one, alone, compiler_threads_single()), 11)
+    assert_eq(ir_opt_fold_identical(eight, shared, CompilerThreads{cap: Val(8), cores: 8, memory_available: None}), 11)
+    assert_eq(shared.len(), alone.len())
+    loop id in 0..<alone.len() -> assert_eq(ir_function_text(eight, shared[id]), ir_function_text(one, alone[id]))
 }

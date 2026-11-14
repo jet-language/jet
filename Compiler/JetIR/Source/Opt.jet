@@ -262,7 +262,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
     }
     if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, functions, options, entry_lint, threads, report)
     if level >= 1 && ir_opt_enabled(options, "reduce") {
-        reduced: ir_opt_reduce_module(m, functions, report)
+        reduced: ir_opt_reduce_module(m, functions, threads, report)
         if options.verify && reduced.len() > 0 {
             // The leaf is new: IR Lint reads its signature from the module,
             // for these bodies and every later pass.
@@ -279,7 +279,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
         }
     }
     if ir_opt_enabled(options, "stops") -> ir_opt_stop_facts(m, functions, threads)
-    if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions)
+    if ir_opt_enabled(options, "fold") -> _ := ir_opt_fold_identical(m, functions, threads)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
     ir_opt_dump(m, names, "after", report)
     report

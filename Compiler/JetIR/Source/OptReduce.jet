@@ -94,7 +94,7 @@
 
 use {
     jet_backend.[X64_INT_SUM_DECLINED, X64_R8, X64_RAX, X64_RCX, X64_RDI, X64_RDX, X64_RSI, x64_count_code, x64_fill_code, x64_int_sum_code]
-    jet_foundation.[name_rows_set, name_rows_value]
+    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, name_rows_set, name_rows_value]
 }
 
 // The leaves, as an IRReduceLoop's `kind`: the int sum; the counts of
@@ -158,20 +158,168 @@ ir_reduce_width: fn(kind: Int) -> Int Never! {
 // after the last body). The report gets one note per Loop with an Int
 // total fed by a load or by an equality test of a loaded element, and per
 // Loop that stores one value. Returns the bodies the pass changed.
-ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptReport) -> [Int] Never! {
+//
+// Each body's Loops are found on their own (ir_opt_reduce_loops), then the
+// leaves get their rows in the order the bodies first call them, then each
+// body is rewritten on its own (ir_opt_reduce_rewrite). So both split the
+// bodies into consecutive parts (compiler_threads_partition by size), one
+// thread each, joined in part order: every body, every row and the report
+// are the same for any thread count.
+ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], threads: CompilerThreads, report: &IROptReport) -> [Int] Never! {
     word_row: ir_word_row(m)
-    // Per kind its leaf's function row (-1 until a Loop calls it); `made`
-    // the kinds whose leaf is new, in the order of their rows.
+    bodies: functions.len()
+    weights := [Int]{}
+    total := 0
+    loop f in functions {
+        weights.push(1 + f.op.len())
+        total += 1 + f.op.len()
+    }
+    taken := [[IRReduceLoop]]{}
+    workers: compiler_threads_admit(threads, bodies, total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
+    if workers <= 1 {
+        loop id in 0..<bodies -> taken.push(ir_opt_reduce_loops(m, functions[id], report))
+        leaves: ir_opt_reduce_leaves(m, taken)
+        loop id in 0..<bodies -> ir_opt_reduce_rewrite(functions[id], taken[id], leaves, word_row)
+        ir_opt_reduce_add_leaves(m, functions, leaves, bodies, word_row)
+        return ir_opt_reduce_changed(taken)
+    }
+    bounds: compiler_threads_partition(weights, workers)
+    // Parts leave the list last-first: part `workers - 1` pops first.
+    slots := [Shared<IROptReducePart>]{}
+    part := workers - 1
+    loop part >= 0 {
+        rows := [IRFunction]{}
+        loop functions.len() > bounds[part] {
+            row: functions.pop() ?? panic("the IR optimizer lost a function to its reductions")
+            rows.push(row)
+        }
+        rows.reverse()
+        slots.push(Shared{IROptReducePart{functions: rows.move(), start: bounds[part], taken: [[IRReduceLoop]]{}, report: ir_opt_report(0)}})
+        part -= 1
+    }
+    slots.reverse()
+    lent: ir_opt_lend(m)
+    shared: Shared{IROptReduceView{views: [IRModule]{lent.move()}, word_row: word_row, leaves: [Int]{}, taken: [[IRReduceLoop]]{}}}
+    _: ir_opt_reducers(slots, shared, 0) ?? panic("the IR reduction threads failed")
+    loop slot in slots {
+        held := slot.guard_edit()
+        taken.extend(compiler_take_rows<[IRReduceLoop]>(held.value.taken))
+        ir_opt_report_add(report, held.value.report)
+    }
+    ir_opt_reduce_unlend(m, shared)
+    leaves: ir_opt_reduce_leaves(m, taken)
+    changed: ir_opt_reduce_changed(taken)
+    if changed.len() > 0 {
+        ir_opt_reduce_publish(shared, leaves, taken)
+        _: ir_opt_reducers(slots, shared, 0) ?? panic("the IR reduction threads failed")
+    }
+    loop slot in slots {
+        held := slot.guard_edit()
+        functions.extend(compiler_take_rows<IRFunction>(held.value.functions))
+    }
+    ir_opt_reduce_add_leaves(m, functions, leaves, bodies, word_row)
+    changed
+}
+
+// The functions of one thread of ir_opt_reduce_module, in order, from
+// function `start`, with the Loops its search found in each
+// (ir_opt_reduce_loops) and its notes.
+IROptReducePart: struct {
+    functions: [IRFunction]
+    start: Int
+    taken: [[IRReduceLoop]]
+    report: IROptReport
+}
+
+// What every thread of ir_opt_reduce_module reads: the module's lent rows
+// (ir_opt_lend), in a list of one, the word row, and once the search is
+// done the leaves' rows (ir_opt_reduce_leaves) and every body's Loops a
+// leaf takes.
+IROptReduceView: struct {
+    views: [IRModule]
+    word_row: Int
+    leaves: [Int]
+    taken: [[IRReduceLoop]]
+}
+
+// Runs a reduction thread per slot from `at`; returns the functions they
+// read.
+ir_opt_reducers: fn(slots: [Shared<IROptReducePart>], shared: Shared<IROptReduceView>, at: Int) -> Int {
+    if at >= slots.len() -> return 0
+    rows := 0
+    task.group ir_opt_reduce_group {
+        head: task ir_opt_reduce_part(slots[at], shared)
+        rows = ir_opt_reducers(slots, shared, at + 1)
+        rows += head.join() ?? ir_opt_prepare_stopped(err)
+    }
+    rows
+}
+
+// One thread's functions: their search before the leaves have rows, their
+// rewrite after.
+ir_opt_reduce_part: fn(slot: Shared<IROptReducePart>, shared: Shared<IROptReduceView>) -> Int {
+    reads: shared.guard_read()
+    held := slot.guard_edit()
+    count: held.value.functions.len()
+    if reads.value.leaves.len() == 0 {
+        loop row in 0..<count -> held.value.taken.push(ir_opt_reduce_loops(reads.value.views[0], held.value.functions[row], held.value.report))
+        return count
+    }
+    start: held.value.start
+    loop row in 0..<count -> ir_opt_reduce_rewrite(held.value.functions[row], reads.value.taken[start + row], reads.value.leaves, reads.value.word_row)
+    count
+}
+
+// Moves the module's rows back from the threads' view.
+ir_opt_reduce_unlend: fn(m: &IRModule, shared: Shared<IROptReduceView>) Never! {
+    held := shared.guard_edit()
+    ir_opt_lend_into(m, held.value.views[0])
+}
+
+// Gives the threads the leaves' rows and the Loops they take, for the
+// rewrite.
+ir_opt_reduce_publish: fn(shared: Shared<IROptReduceView>, leaves: [Int], taken: &&[[IRReduceLoop]]) Never! {
+    held := shared.guard_edit()
+    loop row in leaves -> held.value.leaves.push(row)
+    held.value.taken = taken.move()
+}
+
+// The bodies some Loop of which (`taken`, by body) calls a leaf.
+ir_opt_reduce_changed: fn(taken: [[IRReduceLoop]]) -> [Int] Never! {
+    changed := [Int]{}
+    loop (id, plans) in taken {
+        if plans.len() > 0 -> changed.push(id)
+    }
+    changed
+}
+
+// Per kind its leaf's function row: the module's when it has one, else
+// the next row after the bodies (one per entry of `taken`) in the order
+// the Loops (`taken`, by body) first call it; -1 when none does.
+ir_opt_reduce_leaves: fn(m: IRModule, taken: [[IRReduceLoop]]) -> [Int] Never! {
     leaves := [Int]{}
     loop kind in 0..<IR_REDUCE_KINDS -> leaves.push(name_rows_value(m.function_rows, ir_reduce_key(kind)) ?? -1)
-    made := [Int]{}
-    bodies: functions.len()
-    changed := [Int]{}
-    loop id in 0..<bodies {
-        if functions[id].asm != None -> next
-        if ir_opt_reduce_loops(m, functions[id], leaves, made, bodies, word_row, report) > 0 -> changed.push(id)
+    row := taken.len()
+    loop plans in taken {
+        loop plan in plans {
+            if leaves[plan.kind] < 0 {
+                leaves[plan.kind] = row
+                row += 1
+            }
+        }
     }
-    loop kind in made {
+    leaves
+}
+
+// Appends, after the module's `bodies`, the leaves the Loops call that it
+// did not have, at their rows (ir_opt_reduce_leaves).
+ir_opt_reduce_add_leaves: fn(m: &IRModule, functions: &[IRFunction], leaves: [Int], bodies: Int, word_row: Int) Never! {
+    loop row in bodies..<bodies + IR_REDUCE_KINDS {
+        kind := -1
+        loop k in 0..<IR_REDUCE_KINDS {
+            if leaves[k] == row -> kind = k
+        }
+        if kind < 0 -> break
         name: ir_reduce_leaf_name(kind)
         f := ir_function_new(name, ir_reduce_key(kind), "jet_{name}__asm", "", 0)
         fill: ir_reduce_is_fill(kind)
@@ -193,13 +341,14 @@ ir_opt_reduce_module: fn(m: &IRModule, functions: &[IRFunction], report: &IROptR
         name_rows_set(m.function_rows, ir_reduce_key(kind), functions.len())
         functions.push(f)
     }
-    changed
 }
 
-// The Loops of `f` a leaf takes, each with its leaf call in front; returns
-// how many. A leaf no Loop called before gets the next row after the
-// module's `bodies` (`leaves`, `made`).
-ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int], bodies: Int, word_row: Int, report: &IROptReport) -> Int Never! {
+// The Loops of `f` a leaf takes, in order, with a note in the report per
+// Loop it counts (ir_opt_reduce_module); `f` comes out compacted when it
+// has a Loop.
+ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, report: &IROptReport) -> [IRReduceLoop] Never! {
+    taken := [IRReduceLoop]{}
+    if f.asm != None -> return taken
     has_loop := false
     loop op in f.op {
         if op == .Loop {
@@ -207,7 +356,7 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
             break
         }
     }
-    if !has_loop -> return 0
+    if !has_loop -> return taken
     ir_opt_compact(f)
     // Per slot the first and last instruction naming it.
     first := [Int]{}
@@ -227,7 +376,6 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
             if k > latest[slot] -> latest[slot] = k
         }
     }
-    taken := [IRReduceLoop]{}
     loop at in 0..<f.op.len() {
         if f.op[at] != .Loop -> next
         found: ir_reduce_loop(m, f, at, first, latest)
@@ -240,16 +388,18 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
             taken.push(found.plan)
             report.reduced += 1
             report.reductions.push("{what} reduction {f.name}: vectorized")
-            if leaves[found.plan.kind] < 0 {
-                leaves[found.plan.kind] = bodies + made.len()
-                made.push(found.plan.kind)
-            }
         } else if found.reason != "-" {
             report.reductions_declined += 1
             report.reductions.push("{what} reduction {f.name}: declined ({found.reason})")
         }
     }
-    if taken.len() == 0 -> return 0
+    taken
+}
+
+// Puts the leaf call (`leaves`, by kind) in front of each Loop of `f` in
+// `taken`.
+ir_opt_reduce_rewrite: fn(f: &IRFunction, taken: [IRReduceLoop], leaves: [Int], word_row: Int) Never! {
+    if taken.len() == 0 -> return
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     pending := 0
     loop at in 0..<f.op.len() {
@@ -266,7 +416,6 @@ ir_opt_reduce_loops: fn(m: IRModule, f: &IRFunction, leaves: &[Int], made: &[Int
     f.c = code.c.move()
     f.code_line = code.line.move()
     ir_opt_compact(f)
-    taken.len()
 }
 
 // What ir_reduce_loop found: `reason` "" when the leaf takes the Loop,
