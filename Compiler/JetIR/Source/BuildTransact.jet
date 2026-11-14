@@ -425,7 +425,9 @@ ir_context_key_word: fn(key: String) -> Int Never! {
 // (one owner at 0, no code at 8, the release helper at 16 that drops the
 // value and frees the node), the key word at 24, the chain link at 32 and
 // the value at 40. jet_ctx_value_push links it in front of the current
-// task's chain (Runtime Context.jet).
+// task's chain (Runtime Context.jet). A stop handler's push first installs
+// the stop door's call of it (jet_ctx_on_stop_arm), so only a program that
+// sets one links the handler's run.
 ir_context_push_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, value: Int) Never! {
     pointer_row: ir_pointer_row(m)
     captures := [IRCaptureSlot]{}
@@ -443,6 +445,9 @@ ir_context_push_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String
     ir_emit(b.f, IROp.Store, -1, node, 32, zero, b.line)
     ir_store_at(m, p, b, node, 40, value)
     if value >= 0 -> b.fresh[value] = false
+    if key == CONTEXT_ON_STOP_KEY {
+        _: ir_runtime(m, b, "jet_ctx_on_stop_arm", [Int]{}, -1)
+    }
     _: ir_runtime(m, b, "jet_ctx_value_push", [Int]{node}, -1)
 }
 

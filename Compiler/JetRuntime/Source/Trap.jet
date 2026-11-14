@@ -143,12 +143,17 @@ trap_defect_exit: fn(status: I64) {
 // `d` the direction, 0 left), 3 list bounds, 4 require, 5 todo) and never
 // comes back, so no served stop is published to the serve entry's root and
 // answered as the call's value. Any other program runs the context's stop
-// handler (Context.jet context_on_stop_run) and returns to the caller's
+// handler (Context.jet jet_rt_context_on_stop, once a `#Context(on_stop:)`
+// push installed context_on_stop_rail_code) and returns to the caller's
 // runtime path.
 trap_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     code: comptime_serve_stop_code
     if (code == I64{0}) {
-        context_on_stop_run(kind, a, b, c, d)
+        rail: context_on_stop_rail_code
+        if (rail == I64{0}) -> return
+        #Unsafe("jet_ctx_on_stop_arm installed jet_rt_context_on_stop, a runtime export whose System V signature takes these five words") {
+            _ := os_call5_i64(rail, kind, a, b, c, d)
+        }
         return
     }
     #Unsafe("the serve entry installed jet_rt_comptime_serve_stop, a runtime export whose System V signature takes these five words") {

@@ -270,8 +270,34 @@ context_values_release: fn(node: I64) {
 // under it.
 CONTEXT_ON_STOP_KEY: I64{1}
 
+// The stop rail's handler half (jet_rt_context_on_stop), installed by the
+// first `#Context(on_stop:)` push (jet_ctx_on_stop_arm, which IR
+// BuildTransact.jet ir_context_push_value calls before it pushes a stop
+// handler). The stop door (Trap.jet trap_stop) calls through it, so a
+// program that never sets a stop handler links none of the handler's run:
+// its stops build no `Stop` and drop no message.
+context_on_stop_rail_code := I64{0}
+
+rt_context_on_stop_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+#Export(c) jet_ctx_on_stop_arm: fn() {
+    if (context_on_stop_rail_code != I64{0}) -> return
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        context_on_stop_rail_code = rt_context_on_stop_address()
+    }
+}
+
+// The rail's entry: trap_stop's five words, answered with 0.
+#Export(c) jet_rt_context_on_stop: fn(kind: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    context_on_stop_run(kind, a, b, c, d)
+    I64{0}
+}
+
 // The stop door's call of the context's stop handler (Trap.jet trap_stop,
-// for every stop outside served comptime code): when a `#Context(on_stop:)`
+// for every stop outside served comptime code, through
+// context_on_stop_rail_code): when a `#Context(on_stop:)`
 // block of this task, or of a task it was spawned from, set one, it runs
 // once with a fresh core.debug `Stop` it borrows, laid out as message@0 and
 // kind@8, the StopKind's declaration index (Panic 0, Assert 1, Contract 2,

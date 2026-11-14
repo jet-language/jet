@@ -772,6 +772,13 @@ scheduler_control_interrupt: fn(control: I64) {
     scheduler_control_cancel(control)
 }
 scheduler_control_pause: fn(control: I64, mode: I64) {
+    // The park is installed before the bit is raised, so a poll that sees
+    // the bit finds it (scheduler_check_loops).
+    if (mode == I64{1} && scheduler_pause_park_rail_code == I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            scheduler_pause_park_rail_code = rt_scheduler_pause_park_address()
+        }
+    }
     scheduler_attention_set(control, SCHEDULER_ATTEND_PAUSE, mode == I64{1})
     sync_store(wrapping(control + I64{8}), I64{1})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{3}, I64{-1})
@@ -809,6 +816,22 @@ scheduler_wait_while_paused: fn() -> I64 {
     jet_scheduler_native_propagate()
 }
 
+// The strong pause's park (jet_rt_scheduler_pause_park), installed by the
+// first `pause(mode: .CheckLoops)` (scheduler_control_pause). The stop polls
+// call through it (scheduler_check_loops), so a program that never asks for a
+// strong pause links no park at its polls, and so no deadline or clock read:
+// a stop or a drop's poll never starts the host clock (HostTime.jet).
+scheduler_pause_park_rail_code := I64{0}
+
+rt_scheduler_pause_park_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The rail's entry: 1 while scheduler_park_while_paused answers true.
+#Export(c) jet_rt_scheduler_pause_park: fn(control: I64) -> I64 {
+    if scheduler_park_while_paused(control) -> I64{1} else -> I64{0}
+}
+
 // A control's attention (scheduler_attention_set) is taken at every stop
 // poll: the check each loop iteration starts with and the poll after a call
 // (JetIR Build.jet ir_loop_check, ir_stop_check), outside a shield only. A
@@ -821,7 +844,11 @@ scheduler_wait_while_paused: fn() -> I64 {
 scheduler_check_loops: fn(control: I64) {
     attention: sync_load(wrapping(control + I64{24}))
     if (attention == I64{0}) || scheduler_shielded() -> return
-    if (attention.bit_and(SCHEDULER_ATTEND_PAUSE) != I64{0}) && !scheduler_park_while_paused(control) -> return
+    if (attention.bit_and(SCHEDULER_ATTEND_PAUSE) != I64{0}) {
+        // The bit is raised only after a strong pause installed the park.
+        park: scheduler_pause_park_rail_code
+        if (park != I64{0} && coll_call1(park, control) == I64{0}) -> return
+    }
     if (sync_load(wrapping(control + I64{24})).bit_and(SCHEDULER_ATTEND_CANCEL) != I64{0}) {
         scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, false)
         if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
