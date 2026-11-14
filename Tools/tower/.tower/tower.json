@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6841,
-    "rev": 102350,
+    "rev": 102352,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73333,6 +73333,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "c22 stack proof (Lander5, s3proofs, gate-p62 jet against gate-p60, full suites). ui: new-not-base is empty. cases: 4 new against base. (1) cli_runtime/devtools_core_record_takes_check: wording; the --embedded record exits 0 at 64.8 MB. G12Docs-c22-embed-speed (batch 52) fixes it. (2) fiber_liveness/para_map_limit_bounds_items_in_flight_not_carriers: one line, \"busy items: at most 2 at once false\", likely load under the full parallel run, for the sweep. (3) and (4) are browser_bidi native_bidi_* UNEXPECTED-PASS, which pass only by timing (privacy_receipt was UP on base and not on new), so their known-failing rows stay. Five base reds went green. Golden comparison is still running."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-13, S7b plan by G12Docs-5): (1) The about 14.2 MB hand-optimized ceiling covers all of precompiled Core, record and code parts together; it is measured and reported. The gauntlet-rerun gate is 64 MB for the same total. Today it is about 60.9 MB of record plus about 8 MB of code, so S7b-2 (bound functions drop their checked bodies from the record, header-only rows) lands before the rerun. (2) Core code ships per package by a general rule: a package ships as machine code when programs reach it, by reach counts over Examples and the gauntlet programs. The rest take the per-program lowering path that generic instances already use (no second mechanism). Measured at O1 on sweep2: the 56.4 MB jet_core.o is .text 26.5 MB; db, crypto, net, encoding, ui, http, service, web, archive, browser and compute are 19.4 MB of it. (3) The shipped code is built at whichever of O1 or O2 is smaller (S7b-0 measures O2); bound Core callees are opaque on every level, so one meaning holds (I9). Slices: runtime-parts, S7b-0 (an O2 per-package size diag), S7b-1 (the consumer plus turning the runtime step back on, and the c22 rows), S7b-2."
         },
         {
@@ -73921,6 +73926,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-14T04:26:23.112Z"
+        },
+        {
+          "n": 37,
+          "text": "Precompiled Core makes every compile faster, never slower: outside the toolchain tree, `jet check hello.jet` and `jet run hello.jet` with the jet that carries the Core record take no more wall time and no more peak RSS than with jet-bare (Core from sources), median of 3. On gate-p62 the record jet took 22.1-24.4 s at 1.68 GB against 0.76-1.5 s at 185 MB (G11Speed-5, 2026-11-14): RecordTree string decoding re-decoded front-coded blocks for every string and key (57% of busy CPU), and loads pulled 67 modules from the record against 35 parsed from source. The gauntlet rerun (#6834 c5) waits on this.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-14T09:21:09.895Z"
         }
       ],
       "refs": [],
@@ -73931,9 +73945,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T07:34:43.870Z",
+      "updated": "2026-11-14T09:21:09.895Z",
       "updatedBy": "Main",
-      "criteriaLastN": 36
+      "criteriaLastN": 37
     },
     {
       "id": "c0l7lwif",
@@ -205344,6 +205358,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T09:21:09.895Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08r6ogl",
+      "note": "#37 Precompiled Core makes every compile faster, never slower: o"
+    },
+    {
+      "at": "2026-11-14T09:11:39.620Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T09:03:26.705Z",
       "by": "Main",
