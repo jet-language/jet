@@ -2317,6 +2317,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             explicit_move := sema_expression_lambda_name_contains(lambda_work.meta.moved_captures, binding.symbol.name)
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
             borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move
+            atomic_walk := [String]{}
             if {
                 // Escaping captures: a task group may flow only through a
                 // direct `Group` parameter (E1110). Rust's lambda span ends
@@ -2335,6 +2336,12 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 // `Fixed` over its frame's backing) is refused there too
                 // (E1102), not moved into the task first.
                 task_body && sema_expression_lambda_view_crossing(capture_ty, environment, program, lambda_scopes, context) -> {}
+                // An Atomic cell a task does not take is neither copied nor
+                // moved into it: the task holds the owner's cell by address
+                // (ir_lambda_box), and the crossing check admits that borrow
+                // for a `task.group` child or refuses it (E1102,
+                // sema_taskgroup_check_lambda_captures).
+                task_body && !explicit_move && sema_taskgroup_holds_atomic(capture_ty, environment, program, atomic_walk) -> {}
                 !escapes -> {
                     if explicit_move -> sema_expression_lambda_append_name(lambda_work.meta.moved_captures, binding.symbol.name) else -> sema_expression_lambda_append_name(lambda_work.meta.frozen_captures, binding.symbol.name)
                 }
