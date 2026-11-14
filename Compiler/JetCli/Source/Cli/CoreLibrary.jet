@@ -12,7 +12,7 @@
 use {
     core_library_files: core.files
     jet_driver.[jet_driver_checked_declarations]
-    jet_foundation.[CompilerThreads, compiler_take_rows, compiler_transfer_rows]
+    jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_transfer_rows, symbol_table]
     jet_ir.[ir_build_core_library, ir_core_exports_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
 }
 
@@ -38,6 +38,18 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
     loop failure in library.failures -> issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     // The memory term is read now: the front end before this holds most of it.
     threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    // What the library build left of the Core check (its modules, its
+    // declaration table, its module table) is never read again: it drops on
+    // a detached task while the library is linted, optimized and compiled,
+    // not on this thread as the function returns. The task owns it alone; a
+    // process that exits first hands its pages back to the kernel. The rows
+    // the build took are refilled empty, so the rest moves whole.
+    inputs.functions = [FnBody]{}
+    inputs.symbols = symbol_table()
+    inputs.sources = [String:String]{}
+    checked_rest: inputs.move()
+    released: task &&checked_rest { checked_rest.modules.len() }
+    released.detach()
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.build", threads) -> issues.push(jet_cli_runtime_lint_issue(finding))
