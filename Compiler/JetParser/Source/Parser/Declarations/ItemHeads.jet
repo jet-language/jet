@@ -40,7 +40,8 @@ parser_item_declaration_ahead_at: fn(state: &JetParserState, offset: Int) -> Boo
             if parser_c_module_ahead_at(state, offset) -> return true
             if marker_name == {
                 "UnitFamily" -> parser_kind_at(state, offset + 2) == TOKEN_LPAREN
-                "Test" -> true
+                // `#Test.X` is a qualified marker (parser_test_ahead), not a test.
+                "Test" -> parser_kind_at(state, offset + 2) != TOKEN_DOT
                 else -> false
             }
         }
