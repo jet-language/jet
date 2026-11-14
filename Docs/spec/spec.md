@@ -3882,6 +3882,10 @@ Wait and I/O points inherit it, including task joins, channel receive,
 `time.sleep`, and network reads and writes. An expired wait whose operation
 returns a typed error (a network read, an HTTP request) returns it; any other
 wait emits **E3003** and exits with the runtime error code (D-DEADLINE1).
+A typed timeout delivers that deadline. The loop and call checks
+(D-TASK-SLICE1) do not deliver it again, so the code can handle the error.
+A later wait point still does, and so does a deadline that is set or
+restored after it.
 
 Code reads the task context as `context.<field>` (D-CONTEXT1).
 `context.deadline` is the installed absolute wall-millisecond deadline as an

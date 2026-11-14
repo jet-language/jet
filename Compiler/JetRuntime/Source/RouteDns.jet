@@ -30,7 +30,12 @@ dns_cause: fn(prefix: I64, code: I64) -> I64 {
 }
 
 dns_cancelled: fn(name: I64, error: I64) -> I64 { dns_fail(error, dns_named(rt_static_text("network operation cancelled during DNS lookup for `"), name, rt_static_text("`"))) }
-dns_timed_out: fn(name: I64, error: I64) -> I64 { dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`"))) }
+// A lookup's typed timeout, which delivers the deadline in force when that
+// deadline ended it (scheduler_deadline_reported).
+dns_timed_out: fn(name: I64, error: I64) -> I64 {
+    scheduler_deadline_reported()
+    dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`")))
+}
 
 // jet_net_dns_remaining: the remaining nanoseconds, or 0 with the cancelled
 // or timed-out message.
@@ -63,7 +68,7 @@ dns_lookup_deadline: fn(milliseconds: I64, name: I64, error: I64) -> I64 {
     timeout := milliseconds
     if jet_ctx_deadline_present() {
         remaining: jet_deadline_remaining_ms()
-        if (remaining <= I64{0}) -> return dns_fail(error, dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`")))
+        if (remaining <= I64{0}) -> return dns_timed_out(name, error)
         if (remaining < timeout) -> timeout = remaining
     }
     dns_deadline_after(timeout, error)

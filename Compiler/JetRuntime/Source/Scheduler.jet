@@ -85,6 +85,18 @@ scheduler_deadline_attend: fn() {
     if (control != I64{0}) -> scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
 }
 
+// A wait that returns its typed timeout (D-DEADLINE1) has delivered the
+// deadline in force when that deadline is what ended it: the stop polls leave
+// it to the wait points until a deadline is set or restored again
+// (scheduler_deadline_attend). A wait counts on its own clock, which can end
+// a slice (10 ms) ahead of the context's; a timeout from the wait's own
+// shorter limit delivers nothing.
+scheduler_deadline_reported: fn() {
+    control: scheduler_control_current()
+    if (control == I64{0}) || !jet_ctx_deadline_present() || (jet_deadline_remaining_ms() > I64{10}) -> return
+    scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, false)
+}
+
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 scheduler_text_new: fn(length: I64) -> I64 {
     capacity: (length + I64{7}).bit_and(I64{-8})

@@ -157,7 +157,10 @@ net_route_errno: fn(operation: I64, address: I64, code: I64, error: I64) -> I64 
     host_errno_cause_append(text, code)
     net_route_fail_take(net_route_errno_kind(code), operation, address, jet_rt_string_builder_finish(text), code, error)
 }
+// A network wait's typed timeout, which delivers the deadline in force when
+// that deadline ended it (scheduler_deadline_reported).
 net_route_timeout: fn(operation: I64, error: I64) -> I64 {
+    scheduler_deadline_reported()
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("deadline exceeded while waiting in "))
     jet_rt_string_builder_push(text, operation)
