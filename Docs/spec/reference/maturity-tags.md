@@ -23,7 +23,7 @@ hardened_label: fn() -> String { "hard" }
 ```
 
 Attach the same metadata to public API declarations. Fallible declarations
-retain the current `-> Type !Error` ordering; the metadata does not change the
+retain the current `-> Type Error!` ordering; the metadata does not change the
 function signature.
 
 These values are closed:

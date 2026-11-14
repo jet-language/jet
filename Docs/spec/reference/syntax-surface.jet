@@ -273,9 +273,9 @@ nested: fn(r: Shape Err!) -> Bool {
 // ============================================================================
 // ERRORS, RESULT & OPTION
 // ============================================================================
-// Failure-returning types use prefix roles: `?Success`, `!NamedError`, and
-// `!(E1 | E2)`. The ordinary fallible route omits the default `Err` contract;
-// present/absent optionals are written `?T` (S32).
+// Failure-returning types use suffix marks: `Success?`, `NamedError!`, and
+// `(E1 | E2)!`. The ordinary fallible route omits the default `Err` contract;
+// present/absent optionals are written `T?` (S32).
 
 ParseError: enum { Empty }
 
@@ -298,7 +298,7 @@ handle_result: fn(value: Int ParseError!) -> String { if value == { .Ok(_) -> "o
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
 optionals: fn(user: User?) -> String {
-    city: user?.address?.city               // optional chaining produces ?T (S71)
+    city: user?.address?.city               // optional chaining produces T? (S71)
     name: user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
 }
@@ -312,7 +312,7 @@ impl Err.From(FileErr) {
 impl Err.From(String) {
     from: fn(text: String) -> Err { return Err(text) }
 }
-// load: fn() !Config {
+// load: fn() Config! {
 //     return Err("bad config", code: "CFG404", cause: io_err)
 // }
 // run: fn() {
@@ -380,7 +380,7 @@ collections: fn() {
 
      fruits := [String:Float]{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
-    got: fruits.get("limes")                  // safe access produces ?V (S39)
+    got: fruits.get("limes")                  // safe access produces V? (S39)
 
     // map entry iteration yields a named entry value (S66)
     loop e in fruits {

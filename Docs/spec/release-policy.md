@@ -121,7 +121,7 @@ reads the Windows environment block after a Jet mutation sees the original
 host value. Pass changed values to foreign APIs explicitly: mutating a
 process-global environment while foreign threads may read it cannot meet Jet's
 memory-safety guarantee. Existing editions keep `core.sys.set ()`; changing its
-fallible `!EnvError` signature requires a major release and edition opt-in.
+fallible `EnvError!` signature requires a major release and edition opt-in.
 
 ### TLS security gate (D-TLS1)
 

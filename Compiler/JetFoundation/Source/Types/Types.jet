@@ -1016,8 +1016,8 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
 
 // A member's identity inside an Option, Result or union: a function, Result
 // or union is grouped, since its identity has no end of its own
-// (`?(fn(String) => String) ! Err`, a Result of an optional function, is not
-// `?(fn(String) => String ! Err)`, an optional fallible function).
+// (a Result whose success is an optional function keeps an identity apart
+// from an optional fallible function's).
 type_carrier_identity_grouped: fn(ty: Type) -> String Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) | .Result(_, _) | .Union(_) -> "({type_carrier_identity(ty)})"

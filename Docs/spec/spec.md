@@ -436,7 +436,7 @@ not a list or destructure (D-EACH1=C, D-FENCE-GLYPH1=A, D-FENCE-RANGE1,
 D-FENCE2=A).
 
 `#Track name: value` and `#Track name := value` attach the origin fact. Read
-that fact as `value.reflect().origin -> ?OriginInfo`; there is no runtime origin
+that fact as `value.reflect().origin -> OriginInfo?`; there is no runtime origin
 projection (D-TRACK-ORIGIN1=A).
 
 Arithmetic `+`, `-`, `*`, and the numeric division operations use the registered
@@ -471,7 +471,7 @@ The explicit `core.term.print` and `core.term.eprint` operations each take one
 `-5`. `input` is every line of the program's input, a lazy `Iter<String>`:
 the lines of the files its arguments name, in order, else of standard input
 (`loop line in input { … }`). `core.term.readline(prompt)` reads one line,
-removes its trailing newline, and returns `String !IOError`; use `??` to
+removes its trailing newline, and returns `String IOError!`; use `??` to
 handle the error. `panic` is the
 bug-stop builtin; `assert` and `assert_eq` are registered assertion builtins.
 Other readable aliases are `Clock`, `Instant`, `Date`, `Duration`, `Path`,
@@ -1498,21 +1498,21 @@ The lambda diagnostics are covered by `tests/ui/lambda_*.jet` and
 
 A fallible value has one shared result carrier. A success type `T` uses the
 implicit default error family `Err` when it is used in a fallible context. Add
-`?` before the success type when success may be absent, and add `!` before a
+`?` after the success type when success may be absent, and add `!` after a
 named error domain. The supported forms are:
 
 - `T` — a non-optional success with the implicit `Err` failure route;
-- `?T !E` — an optional success with error `E`;
-- `T !E` — a non-optional success with error `E`;
-- `!E` — unit success with error `E`.
-- `T !(E1 | E2)` — an explicit error union; prefix the success type for
-  `?T !(E1 | E2)`. (D-UNIONTYPE1=A)
+- `T? E!` — an optional success with error `E`;
+- `T E!` — a non-optional success with error `E`;
+- `E!` — unit success with error `E`.
+- `T (E1 | E2)!` — an explicit error union; mark the success type optional for
+  `T? (E1 | E2)!`. (D-UNIONTYPE1=A)
 
 The explicit `!` must name an error domain; ordinary failure leaves the error
 contract implicit. The entry function `run: fn()` has the default fallible
 `Result<(), Err>` carrier, so it may propagate a standard-library failure
 without writing a return annotation. Pin an entry to an application error with
-`run: fn() !StoreError { ... }` when that distinction is part of the interface.
+`run: fn() StoreError! { ... }` when that distinction is part of the interface.
 (D-FAILURE-FOUNDATION1, D-FAIL-EXIT1)
 
 Construct the two sides with `Ok(value)` and `Err(error)`. These are contextual
@@ -2140,7 +2140,7 @@ synchronized cross-boundary state (D-LOCALCELL1=A).
 `Pool<T>` is a generational arena and `ID<T>` is copyable index-plus-generation
 data. The pool owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
 returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
-entries. Removing an entry bumps its generation and returns `?T`. Indexing a
+entries. Removing an entry bumps its generation and returns `T?`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
 storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
 writable pool: a `:=` binding or a `&` parameter. Through an unmarked
@@ -2278,8 +2278,8 @@ run: fn() {
 }
 ```
 
-An access marker composes with the optional prefix: `&?User` is write access to
-an optional `User`, and `&&?Texture` takes an optional `Texture`. A marker both
+An access marker composes with the optional mark: `&User?` is write access to
+an optional `User`, and `&&Texture?` takes an optional `Texture`. A marker both
 before the parameter name and on its type is E0029:
 
 ```text
@@ -3763,7 +3763,7 @@ and `freeze_capture.out`; UI fixtures are
 
 ### Task completion and cancellation
 
-`handle.join()` consumes a task handle and returns `T !TaskFailure`. Calling
+`handle.join()` consumes a task handle and returns `T TaskFailure!`. Calling
 `join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
 result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
 `.Cancelled`, or `.DeadlineBlown`. An error that leaves a task body whose element
@@ -3845,7 +3845,7 @@ value: rx.receive() ?? panic("channel closed")
 
 A second sender is made with `tx.copy()`; there is no combined channel value from
 which to fetch one. `send` moves its value into the channel, and
-`receive() -> T !Closed` waits until a value arrives or all senders close.
+`receive() -> T Closed!` waits until a value arrives or all senders close.
 A send the channel refuses, because every receiver has closed or the waiting
 sender was cancelled, fails with core.prelude's `SendError<T> { value: T }`,
 which hands the unsent value back: `tx.send(job) ?? retry(err.value)`. A bare
@@ -4165,7 +4165,7 @@ lambda parameter, alias, or aggregate. A lambda cannot capture the group
 handle. A method receiver does not retain the group, and a spawn through a
 `Group` parameter still owns its captures (D-CONC-GROUP1=A).
 
-`join()` is `Task<T>.join() -> T !TaskFailure`; its failures are `.Cancelled`,
+`join()` is `Task<T>.join() -> T TaskFailure!`; its failures are `.Cancelled`,
 `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`,
 `.trace()`, and `.exception()` are not part of this interface.
 
@@ -4246,7 +4246,7 @@ user-facing module and signature index. Compiler-known `core.*` namespaces
 cover file, terminal, environment, process, math, random, time, arguments,
 numeric, and encoding operations. `core.encoding` uses one `Dyn` value for
 JSON, CSV, TOML, and YAML and supports `#Codable`. Every fallible call returns
-`T !E`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
+`T E!`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
 a core namespace does not by itself emit every helper: code generation keeps
 the helpers a program calls (D-CORENS1, D-CORENS-CANON1).
 
@@ -4350,7 +4350,7 @@ closure that consumes the object it must subsequently render.
 checked SQL. `data.query(rows)` and the SQL form produce the same carrier;
 `collect` materializes an ordinary `[T]`. Query operations retain typed
 callbacks and plan order. `inner_join` preserves duplicate-key multiplicity;
-`left_join` preserves every left row and uses `?R`; `group_by` produces one
+`left_join` preserves every left row and uses `R?`; `group_by` produces one
 `Group<K, V>` per key, in ascending key order, so `K` must be Comparable.
 `DataStream<T>` is one-shot and fallible, and `DataLoader<T>` is
 stateful and typed. There is no public `Table<T>`, `Series<T>`, `LazyFrame<T>`,
@@ -4493,7 +4493,7 @@ The end-to-end C binding checks are in
 uses a clang AST and a content-addressed C-ABI shim. The target, clang path,
 and archiver path are required and absolute. Namespace selection is explicit;
 public scalar classes become owned opaque handles, exceptions become checked
-`T !CppError` results, and pure named callbacks retain a checked C ABI. Template
+`T CppError!` results, and pure named callbacks retain a checked C ABI. Template
 instantiations are emitted only for explicit `--instantiate` requests. Include
 paths, library paths, and link libraries are part of binding provenance and are
 reused at final link. Unsupported layouts or callbacks fail binding rather than
@@ -4868,7 +4868,7 @@ and one matrix output. Multiple outputs, `varargin`, duplicate names, and
 non-identifiers are rejected before a bridge is emitted.
 
 **Boundary.** The generated `octave.<lib>` surface accepts a rank-two `Tensor`
-and returns a rank-two `Tensor !OctaveError -[FFI.Octave, GPU]>`. The wire value
+and returns a rank-two `Tensor OctaveError! -[FFI.Octave, GPU]>`. The wire value
 carries exact shape and column-major flat data. Jet checks rank, dimensions,
 width, finiteness, and real numeric output; frames and responses are capped at
 1 MiB. A generation-tagged 32-session supervisor enforces deadlines and
@@ -4941,8 +4941,8 @@ operations:
 - `host.on(target, event, handler)` registers a DOM event handler. The handler
   receives `WebEvent`; a handler that does not need it can ignore the argument.
 - `host.value(target) -> String` reads the selected input or element value.
-- `core.browser.storage.local.get(key) -> ?String` and
-  `core.browser.storage.session.get(key) -> ?String` read origin-local and
+- `core.browser.storage.local.get(key) -> String?` and
+  `core.browser.storage.session.get(key) -> String?` read origin-local and
   tab-scoped storage. `set`, `remove`, and `clear` mutate the corresponding
   namespace, and `get_or` composes a missing key with a fallback.
 
@@ -5011,7 +5011,7 @@ aggregation belongs to the asynchronous event surface. (D-EVENT1,
 D-EVENT2)
 
 `event.async_result<T, E>(policy, failures)` returns
-`AsyncEvent<T, E> !EventConfigError`. Its policy has a positive queue capacity
+`AsyncEvent<T, E> EventConfigError!`. Its policy has a positive queue capacity
 and one overflow mode: `Block`, `DropNewest`, or `DropOldest`. Its failure
 policy is `StopFirst`, `Collect`, `Log`, or `Ignore`. `on`, `once`, and
 `on_priority` handlers may return unit or `Result<(), E>`; `emit_async` returns
@@ -5776,7 +5776,7 @@ The registered lenses are `inline`, `memory`, `web`, `effects`, `layout`,
   steps into a user call.
 - `layout` reports target-aware size, alignment, stride, and field offsets when
   the compiler has a physical layout; absent optional facts retain their reason.
-- `origin` reports typed `#Track` provenance from the checked `?OriginInfo`
+- `origin` reports typed `#Track` provenance from the checked `OriginInfo?`
   projection; it adds no runtime metadata channel.
 - `derive` reports behavior already attached to checked types and spans.
 - `templates` reports checked `@loop` marker expansions, including `impl`,
@@ -6080,7 +6080,7 @@ shapes are:
 | Field shape | Named form | Bare form | Missing value |
 | --- | --- | --- | --- |
 | `Bool` | `--name` | none | `false` |
-| `?T` for a supported scalar | `--name VALUE` | none | `None` |
+| `T?` for a supported scalar | `--name VALUE` | none | `None` |
 | scalar with `{expr}` | `--name VALUE` | none | `expr` |
 | required scalar with `#Arg(flag_only: true)` | `--name VALUE` | rejected | runtime `core.args` error |
 | other supported scalar | `--name VALUE` | declaration-order positional | runtime `core.args` error |

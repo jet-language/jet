@@ -318,7 +318,7 @@ vocabulary.
 `BudgetReport` is exactly
 `{schema:Text="jet.budget-report",version:Int=1,report_id:Hex64,content:ReportContent}`.
 `AcceptanceAudit` is exactly
-`{audit_id:Hex64,accepted_at:RFC3339UTC,kind:"pass"|"bootstrap"|"exception",actor_label:Text="local",reason:?Text,flags:{bootstrap:Bool,accept_regression:Bool},prior_state_id:?Hex64,prior_head_report_id:?Hex64,report_id:Hex64}`.
+`{audit_id:Hex64,accepted_at:RFC3339UTC,kind:"pass"|"bootstrap"|"exception",actor_label:Text="local",reason:Text?,flags:{bootstrap:Bool,accept_regression:Bool},prior_state_id:Hex64?,prior_head_report_id:Hex64?,report_id:Hex64}`.
 Plain `jet budget update` writes `kind=pass`, a null reason, and both flags
 false. `--bootstrap --reason R` writes `kind=bootstrap`, normalized `R`,
 `bootstrap=true`, and `accept_regression=false`.
@@ -400,7 +400,7 @@ only for bootstrap or unavailable evidence, and otherwise its history equals
 
 `Statistics` is
 `{count,sorted_samples,p50,p90,p95,p99,p999,mean,mad}`. `Trend` is
-`{label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:?Rational}`
+`{label:"improving"|"stable"|"regressing"|"insufficient",report_ids:[Hex64],estimators:[Quantity],score:Rational?}`
 with oldest-first, index-aligned inputs. `Decision` is
 `{evidence,reason,point,lower95,upper95,trend,policy_outcome}`. Comparison is
 exactly one of `absolute {kind,limit:Quantity,direction}`, `absolute_from

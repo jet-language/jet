@@ -1009,7 +1009,7 @@ sema_taskgroup_is_canonical_task: fn(ty: Type, environment: SemaScopeEnvironment
 }
 
 // `Task<T>.join()` and `.detach()` consume the handle.
-// join returns `T !TaskFailure` and blocks (`Time.Wait`). The element T is
+// join returns `T TaskFailure!` and blocks (`Time.Wait`). The element T is
 // retained even when it is itself an outcome; only the task's wait failure
 // occupies the outer rail. A detach returns nothing.
 sema_taskgroup_check_task_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

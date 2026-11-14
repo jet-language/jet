@@ -618,7 +618,7 @@ sema_derive_literal_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
         .Str(text) -> Val(Expr.Str{parts: [StrPart.Lit{text: text}], span: span, id: AST_NODE_GENERATED})
         .Char(character) -> Val(Expr.Char{value: "{character}", span: span, id: AST_NODE_GENERATED})
         .Unit -> Val(Expr.Unit{span: span, id: AST_NODE_GENERATED})
-        // An absent reflected member (`?T` None) is a typed clean failure,
+        // An absent reflected member (`T?` None) is a typed clean failure,
         // which sema checks from the embedded value.
         .Failed(_) -> Val(Expr.ComptimeName{name: "", span: span, value: Val(value), id: AST_NODE_GENERATED})
         .Enum(_, _, args) -> {

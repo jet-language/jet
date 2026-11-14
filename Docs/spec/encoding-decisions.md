@@ -99,7 +99,7 @@ Typed `decode<T>` remains the existing target-directed compiler lowering.
 `EncodingLimits` has these fields:
 
 - `buffer_bytes`, `max_depth`, `max_item_bytes`,
-  `max_total_bytes: ?Int`;
+  `max_total_bytes: Int?`;
 - `max_expansion_depth` and `max_expansion_bytes`.
 
 `EncodingLimits.safe()` is `{buffer_bytes: 65536, max_depth: 256,
@@ -130,9 +130,9 @@ to caller ownership. Counting-allocator tests cover adversarial nesting,
 items, and entities at every legal limit endpoint. (D-ENCSTREAM-SURFACE1=A)
 
 `EncodingError` contains `format: EncodingFormat`, `kind: EncodingErrorKind`,
-`byte_offset: Int`, `line: ?Int`, `column: ?Int`, `path: String`,
-`reason: String`, and `cause: ?EncodingCause`. `EncodingCause` is a `Clone`
-+ `Eq` snapshot `{kind: String, os_code: ?Int, message: String}`. It is not
+`byte_offset: Int`, `line: Int?`, `column: Int?`, `path: String`,
+`reason: String`, and `cause: EncodingCause?`. `EncodingCause` is a `Clone`
++ `Eq` snapshot `{kind: String, os_code: Int?, message: String}`. It is not
 `IOError` and carries no host handle. `EncodingError` and `EncodingCause`
 derive `Clone` and `Eq`; `cause` is `Val` only for kind `IO`, otherwise
 `None`, and `cause()` returns that snapshot.
@@ -232,9 +232,9 @@ already-reserved frame storage to preserve its path.
   rule. Their object keys must be text; non-text map keys are `Unsupported`,
   never stringified. Characters use JSON string quoting, including lowercase
   `\u00xx` escapes for C0 controls without a short JSON escape.
-- JSONL readers return `?Dyn`, writers accept `Dyn`, and each
+- JSONL readers return `Dyn?`, writers accept `Dyn`, and each
   non-empty record contains one complete value.
-- CSV readers return `?CSVRow`, writers accept `[String]`, and each record
+- CSV readers return `CSVRow?`, writers accept `[String]`, and each record
   follows RFC 4180, including quoted newlines. `CSVRow` has `fields: [String]`
   and the one-based physical opening `line`. Delimiter, `header`, and
   `skip_blank` options have the same defaults and semantics as
@@ -343,9 +343,9 @@ projection; never regroup `$content`. XML names cannot begin with `@`, `$`, or
 ```text
 XMLError{
     kind: XMLReason,
-    byte_offset: ?Int,
-    line: ?Int,
-    column: ?Int,
+    byte_offset: Int?,
+    line: Int?,
+    column: Int?,
     path: String,
     reason: String,
 }

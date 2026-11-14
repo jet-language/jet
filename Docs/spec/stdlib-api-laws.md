@@ -54,7 +54,7 @@ the host range stops with the same arithmetic failure as an oversized exact
 removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or `remove_at`
 spellings. Prefix Boolean predicates (`is_empty`, `has_prefix`); use
 `contains` when the job is content search. A failure-returning variant adds no
-name suffix: its `!Error` contract signals failure.
+name suffix: its `Error!` contract signals failure.
 
 Use these constructor forms (D-API-CTOR1=A):
 
@@ -89,7 +89,7 @@ the same conversion.
 
 ## Law 2 — Fallibility
 
-Return `T !E` when an operation can legitimately fail; do not panic for an
+Return `T E!` when an operation can legitimately fail; do not panic for an
 expected failure. For example, a parser returns a typed error rather than
 using a sentinel or terminating the process. Reserve panics for programmer
 errors such as indexing outside a known-size slice.
@@ -164,7 +164,7 @@ must be able to observe or bound the allocation.
 
 ## Law 6 — Diagnostics and fix hints
 
-Every fallible API writes an explicit success/error contract (`T !E`, or `!E`
+Every fallible API writes an explicit success/error contract (`T E!`, or `E!`
 for a no-value success path) or deliberately uses the language's implicit
 `Err` contract. Contextual propagation uses `?(text)` where a call-site reason
 is needed. Each expected misuse has a corresponding UI snapshot showing the
@@ -266,8 +266,8 @@ receipts.
 | D2 | Every magic default has one row here and an explicit override. |
 | D3 | Defaulted labeled options replace option-only overloads. |
 | D4 | Every policy option is a dedicated enum; no Boolean or bare-string flag remains. |
-| F1 | Expected failure is `T !E`, and contextual propagation is `?(text)`. |
-| F2 | Every lookup returns `?T`; no sentinel, empty-status, or follow-up status check remains. |
+| F1 | Expected failure is `T E!`, and contextual propagation is `?(text)`. |
+| F2 | Every lookup returns `T?`; no sentinel, empty-status, or follow-up status check remains. |
 | F3 | Every failure says what happened, why, and how to fix it. |
 | T1 | Domain values use domain types while obvious beginner literals work at the boundary. |
 | T2 | Core values are immutable; mutation belongs to containers. |
@@ -358,8 +358,8 @@ laws above.
 | D2 | Every magic default appears in the defaults table and has an explicit override. |
 | D3 | Defaulted options replace overload families. |
 | D4 | Options use dedicated enums; Core does not use Boolean or bare-string policy flags. |
-| F1 | Expected failure is `T !E`; contextual propagation uses `?(text)`. |
-| F2 | A lookup returns `?T`; sentinel values are not an API contract. |
+| F1 | Expected failure is `T E!`; contextual propagation uses `?(text)`. |
+| F2 | A lookup returns `T?`; sentinel values are not an API contract. |
 | F3 | Every failure message states what happened, why, and how to fix it. |
 | T1 | Domain values use domain types while beginner literals remain accepted at the boundary. |
 | T2 | Core values are immutable; mutation belongs to containers. |
@@ -419,7 +419,7 @@ find_or_minus_one(items, needle) // returns Int; -1 means absent
 Carry absence in the type instead:
 
 ```jet
-items.find(needle) // illustrative result: ?Item
+items.find(needle) // illustrative result: Item?
 ```
 
 The caller handles `None` as absence or propagates it through the ordinary

@@ -8074,7 +8074,7 @@ sema_stmt_return_expr_is_carrier: fn(value: Expr, return_type: Type?, environmen
         // Rust `check_return_expr` checks a value `if` against the whole
         // return type. A `T?` slot lifts each plain arm itself, so any value
         // `if` there is checked as the carrier (an arm may be a bound `T?`
-        // local, a `Val(x)`, a `None`, or a plain `x`). A `T !E` slot checks
+        // local, a `Val(x)`, a `None`, or a plain `x`). A `T E!` slot checks
         // the carrier when some decision level builds it and every other arm
         // already has the carrier's type (Rust lifts that table into the
         // carrier, so it is this body's own failure source); a table of plain
@@ -8135,12 +8135,12 @@ sema_stmt_return_expr_is_carrier: fn(value: Expr, return_type: Type?, environmen
     known_type: sema_stmt_return_known_type(value, environment, scopes) ?? return false
     if sema_stmt_return_types_are_carriers(known_type, required) -> return true
     // A call root propagates its failure so a
-    // `T? !E` callee (`T? Never!` included) meets a `T?` slot with its own
+    // `T? E!` callee (`T? Never!` included) meets a `T?` slot with its own
     // `T?` success, as Rust `check_return_expr` infers it against the slot.
     if normalized == .Option(_) && sema_expression_propagating_call(value, scopes) && sema_expr_unwrap_tag(known_type) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok) == .Option(_)
     false
 }
-// A value `if` that builds the `T !E` carrier on some arm, through nested
+// A value `if` that builds the `T E!` carrier on some arm, through nested
 // decision levels and grouping.
 sema_stmt_return_if_builds_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
     if value == {
@@ -8169,7 +8169,7 @@ sema_stmt_return_if_arms_fit_carrier: fn(value: Expr, return_type: Type?, enviro
     if sema_stmt_type_is_fallible_result(required) && !sema_stmt_type_is_fallible_result(known_type) -> return false
     sema_stmt_return_types_are_carriers(known_type, required)
 }
-// A value `if` in a `T !E` slot that builds the carrier on some arm while
+// A value `if` in a `T E!` slot that builds the carrier on some arm while
 // another arm is a plain success value (`.Int(_) -> Val(n)` beside
 // `else -> Err(…)`). Rust `check_return_expr` infers the table against the
 // whole carrier and lifts each plain arm into it through `Ok`.
@@ -8422,7 +8422,7 @@ sema_callback_return_mismatch: fn(row: Type, got: Type, span: Span) -> Diagnosti
     sema_error("E0113", span, "this callback returns {sema_type_show(row)} elsewhere, but this value is {sema_type_show(got)}", "every `return` and the last line of a callback hand back one type", sema_return_value_fix(row, got))
 }
 
-// The declared return type is a `T !E` carrier.
+// The declared return type is a `T E!` carrier.
 sema_stmt_return_type_is_result: fn(return_type: Type?) -> Bool Never! {
     declared: return_type ?? return false
     declared == .Result(_, _)
@@ -8460,9 +8460,9 @@ sema_stmt_value_return_mismatch: fn(value: Expr, return_type: Type?, diagnostic_
 
 // Rust `check_return_expr` infers the value against the whole return type,
 // so a value whose own type already is the carrier (`list[i]` of `[T?]`,
-// `row.field` of `T !E`, `map.get(key)` or `list.pop() ?? None` of `T?`)
+// `row.field` of `T E!`, `map.get(key)` or `list.pop() ?? None` of `T?`)
 // returns as-is. The syntactic carrier test above cannot see such a value's
-// type, so it is inferred here on its own. A `T !E` slot keeps method and
+// type, so it is inferred here on its own. A `T E!` slot keeps method and
 // value calls on the payload route, where their failure propagates.
 sema_stmt_return_probed_carrier: fn(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     if !sema_stmt_return_is_carrier(return_type) -> return false
@@ -8815,7 +8815,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
     previous_failure_carrier := scopes.failure_carrier
     previous_loop_depth := scopes.loop_depth
     // A nested block keeps the carrier its owner established (a lambda's is
-    // not the implicit `!Err` of a function); only a new return type, or a
+    // not the implicit `Err!` of a function); only a new return type, or a
     // root with no carrier outside an open callback, derives it.
     if return_type != previous_return_type || (previous_failure_carrier == None && !context.failure_inference) -> scopes.failure_carrier = Val(sema_failure_carrier(return_type))
     scopes.return_type = return_type
