@@ -32,6 +32,9 @@ use jet_foundation.[
     is_compute_tensor_family,
     measure_expression,
     measure_literal_value,
+    name_index,
+    name_intern,
+    name_table,
     owned_trait_bundle_marker,
     type_identity_equal,
     type_name,
@@ -705,7 +708,9 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
     lowered := [TMapEntry]{}
     inferred_key := Type?{None}
     inferred_value := Type?{None}
-    written := [String:Int]{}
+    // Each written key's spelling by name id, and its first entry.
+    written := name_table()
+    first_at := [Int?]{None}
     position := 0
     loop entry in entries {
         key: if expected_key != None -> sema_check_expression(entry.key, expected_key, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(entry.key, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -744,11 +749,13 @@ sema_expression_map: fn(expr: Expr, entries: [ExprPair], span: Span, expected: T
             }
         }
         if sema_map_written_key(checked_key, context) == .Val(same) {
-            if written.get(same) == {
+            id: name_index(name_intern(written, same))
+            if id == first_at.len() -> first_at.push(None)
+            if first_at[id] == {
                 .Val(first) -> {
                     diagnostics.push(sema_map_duplicate_key(entries[first].key, entry.key, same))
                 }
-                .None -> written[same] = position
+                .None -> first_at[id] = Val(position)
             }
         }
         lowered.push(TMapEntry{key: checked_key, value: checked_value})

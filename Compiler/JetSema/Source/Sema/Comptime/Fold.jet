@@ -46,6 +46,9 @@ use jet_foundation.[
     Type,
     body_type_id,
     checked_comptime_integer_key,
+    name_index,
+    name_intern,
+    name_table,
     symbol_key,
 ]
 
@@ -334,12 +337,15 @@ sema_comptime_fold_list: fn(tree: BodyTree, elements: [Int], values: [SemaCompti
 // so the evaluator's later-entry-wins insert decides it.
 sema_comptime_fold_map: fn(tree: BodyTree, entries: [BodyMapEntry], values: [SemaComptimeItemValue], symbols: SymbolTable) -> TComptimeValue? Never! {
     folded := [TComptimeMapEntry]{}
-    seen := [String: Bool]{}
+    // Each key's spelling by name id, and whether an entry wrote it.
+    spellings := name_table()
+    taken := [Bool]{false}
     loop entry in entries {
         key: sema_comptime_fold_key(sema_comptime_fold(tree, entry.key, values, symbols) ?? return None) ?? return None
-        spelled: sema_comptime_fold_key_text(key)
-        if seen.get(spelled) != None -> return None
-        seen[spelled] = true
+        id: name_index(name_intern(spellings, sema_comptime_fold_key_text(key)))
+        if id == taken.len() -> taken.push(false)
+        if taken[id] -> return None
+        taken[id] = true
         folded.push(TComptimeMapEntry{key: key, value: sema_comptime_fold(tree, entry.value, values, symbols) ?? return None})
     }
     Val(TComptimeValue.Map{entries: folded})

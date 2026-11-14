@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, policy_gate_allows, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -118,10 +118,17 @@ jet_driver_build_load_checks: fn(request: JetDriverCompileRequest, load: JetDriv
 // subject as jet_driver_build_check_nodes sorts them.
 jet_driver_build_bundle_checks: fn(owned_staged: &&[BuildGraphNode], owned_loaded: &&[BuildGraphNode]) -> [BuildGraphNode] Never! {
     checks := owned_staged.move()
-    staged := [String: Bool]{}
-    loop node in checks -> staged[node.subject] = true
+    // The staged subjects by name id, and whether a staged node has each.
+    subjects := name_table()
+    staged := [Bool]{false}
+    loop node in checks {
+        id: name_index(name_intern(subjects, node.subject))
+        if id == staged.len() -> staged.push(true) else -> staged[id] = true
+    }
     loop node in owned_loaded.move() {
-        if staged.get(node.subject) != None -> next
+        if name_find(subjects, node.subject) == .Val(found) {
+            if staged[name_index(found)] -> next
+        }
         checks.push(node)
     }
     checks.sort_by(fn(left: BuildGraphNode, right: BuildGraphNode) { (left.subject <=> right.subject).then(left.key <=> right.key) })
