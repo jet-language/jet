@@ -7,7 +7,6 @@
 // for both loops to reach LIMIT.
 use time: core.time
 
-BUSY: 2
 LIMIT: 2000000000
 
 busy: fn(counter: Atomic<Int>, done: Atomic<Bool>) -> Int {
@@ -21,46 +20,43 @@ busy: fn(counter: Atomic<Int>, done: Atomic<Bool>) -> Int {
 
 // Runs once a busy task gives up its carrier: records the most turns either
 // busy loop had counted, then stops them.
-quick: fn(counters: [Atomic<Int>], done: Atomic<Bool>) -> Int {
-    most := 0
-    loop counter in counters {
-        count: counter.load()
-        if count > most -> most = count
-    }
+quick: fn(first: Atomic<Int>, second: Atomic<Int>, done: Atomic<Bool>) -> Int {
+    a: first.load()
+    b: second.load()
+    most: if a > b -> a else -> b
     done.store(true)
     most
 }
 
-counting: fn(counters: [Atomic<Int>]) -> Bool {
-    loop counter in counters {
-        if counter.load() == 0 -> return false
-    }
-    true
+counting: fn(first: Atomic<Int>, second: Atomic<Int>) -> Bool {
+    first.load() != 0 && second.load() != 0
 }
 
+// The tasks share the owner's cells, so they run in a group the cells
+// outlive.
 run: fn() {
     done: Atomic<Bool>.try_new(false) ?? return
-    counters := [Atomic<Int>]{}
-    handles := [Task<Int>]{}
-    loop _ in 0..<BUSY {
-        counter: Atomic<Int>.try_new(0) ?? return
-        handles.push(task busy(counter, done))
-        counters.push(counter)
+    first: Atomic<Int>.try_new(0) ?? return
+    second: Atomic<Int>.try_new(0) ?? return
+    task.group carriers {
+        handles := [Task<Int>]{}
+        handles.push(task busy(first, done))
+        handles.push(task busy(second, done))
+        tries := 0
+        loop !counting(first, second) && tries < 5000 {
+            time.sleep(1ms)
+            tries += 1
+        }
+        start: time.instant()
+        one: task quick(first, second, done)
+        most: one.join() ?? LIMIT
+        latency: time.instant() - start
+        stopped := 0
+        loop handle in handles {
+            if (handle.join() ?? LIMIT) < LIMIT -> stopped += 1
+        }
+        print("quick task ran with every busy loop below {LIMIT} turns: {most < LIMIT}")
+        print("{stopped} busy tasks stopped before {LIMIT} turns")
+        print("quick task under 10 s {latency.in(.Seconds) < 10}")
     }
-    tries := 0
-    loop !counting(counters) && tries < 5000 {
-        time.sleep(1ms)
-        tries += 1
-    }
-    start: time.instant()
-    one: task quick(counters, done)
-    most: one.join() ?? LIMIT
-    latency: time.instant() - start
-    stopped := 0
-    loop handle in handles {
-        if (handle.join() ?? LIMIT) < LIMIT -> stopped += 1
-    }
-    print("quick task ran with every busy loop below {LIMIT} turns: {most < LIMIT}")
-    print("{stopped} busy tasks stopped before {LIMIT} turns")
-    print("quick task under 10 s {latency.in(.Seconds) < 10}")
 }

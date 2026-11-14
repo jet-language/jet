@@ -531,6 +531,20 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
         taken := sema_ownership_crossing_capture_taken(lambda, capture, environment, program, context.generic_params)
         frozen := sema_taskgroup_contains_name(lambda.capture_facts.frozen, capture.source)
         materialized := sema_taskgroup_contains_name(lambda.capture_facts.materialized, capture.source)
+        // An Atomic cell the task does not take stays the owner's one cell,
+        // and the task holds it by address (ir_lambda_box). A lexical
+        // `task.group` child borrows it until the join, as it borrows any other
+        // place, and the rest of the value still crosses as below; any other
+        // task could outlive the cell, so it must take it.
+        if !sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source) && sema_taskgroup_holds_atomic(capture.ty, environment, program, [String]{}) {
+            admitted: sema_taskgroup_admit_cell_borrow(capture, span, scopes, state, context, diagnostics)
+            if admitted == (Val(false)) -> next
+            if admitted == None {
+                diagnostics.push(sema_error("E1102", span, "`{capture.source}` cannot be shared into this task: it holds an Atomic cell that does not live long enough", "the task holds the cell by address, and a task outside a `task.group` can outlive the block that owns the cell", "spawn the task in a `task.group` the cell outlives, give the cell to the task with `task &&{capture.source}`, or share it with `Shared{{…}}`"))
+                next
+            }
+            sema_taskgroup_note_detach_problem(context, true)
+        }
         borrowed := Bool?{None}
         // A view or write window cannot be copied, but a `task.group` child
         // that does not move it borrows the place it looks into until the
@@ -638,6 +652,48 @@ sema_taskgroup_admit_capture_borrow: fn(capture: TCapture, facts: TCaptureFacts,
     admitted: sema_taskgroup_admit_scoped_borrow(context, name, place ?? SemaOwnershipPlace{root: name, root_key: "", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}, access, window, span, scopes, diagnostics)
     sema_taskgroup_publish_loans(context, state)
     admitted
+}
+
+// A task's borrow of the local Atomic cell (or holder of one) `capture`
+// names: admitted as a `task.group` child's read loan, refused (false) for an
+// overlapping write loan, None outside a lexical group or for a cell declared
+// inside it.
+sema_taskgroup_admit_cell_borrow: fn(capture: TCapture, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
+    places: sema_ownership_places_from_expr_in_state(Expr.Ident{name: capture.source, span: span, id: AST_NODE_GENERATED}, scopes, state)
+    if places.len() == 0 -> return None
+    admitted: sema_taskgroup_admit_scoped_borrow(context, capture.source, places[0], AccessConvention.Read, false, span, scopes, diagnostics)
+    sema_taskgroup_publish_loans(context, state)
+    admitted
+}
+
+// Whether a value of `ty` holds an Atomic cell inline: the cell itself, or a
+// tuple or struct field that holds one. A Shared, List or other handle keeps
+// its cells behind a pointer, so a copy of it reaches the same cells.
+// `active` holds the structs being walked, so a recursive struct ends.
+sema_taskgroup_holds_atomic: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, active: [String]) -> Bool Never! {
+    if ty == .Apply(name, _) {
+        if sema_atomic_type_name(sema_ownership_crossing_type_leaf(name)) -> return true
+    }
+    if ty == .Tuple(fields) {
+        loop field in fields {
+            if sema_taskgroup_holds_atomic(field.ty, environment, program, active) -> return true
+        }
+        return false
+    }
+    graph: program.registration_graph ?? return false
+    row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct || active.contains(nominal.identity_key) -> return false
+    type_args: if ty == .Apply(_, args) -> args else -> [Type]{}
+    if nominal.generic_params.len() != type_args.len() -> return false
+    bindings: sema_inference_bindings_for_type_args(sema_inference_registration_params(nominal.generic_params), type_args)
+    // copy: the walk's own list of the structs it is inside
+    inside := active.copy()
+    inside.push(nominal.identity_key)
+    loop field in nominal.fields {
+        if sema_taskgroup_holds_atomic(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, field.ty), bindings), environment, program, inside) -> return true
+    }
+    false
 }
 
 sema_taskgroup_admit_scoped_borrow: fn(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, window: Bool, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {

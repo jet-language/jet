@@ -41,24 +41,28 @@ run: fn() {
     // stops at its next call.
     print(task.race {burn(90), seven()} ?? panic("race failed"))
 
+    // The burner shares the owner's flag, so it runs in a group the flag
+    // outlives.
     started: Atomic<Int>.try_new(0) ?? return
-    burner: task {
-        marker := Marker{name: "the burner's marker"}
-        defer close(marker)
-        started.store(1)
-        burn(90)
-    }
-    tries := 0
-    loop started.load() == 0 && tries < 2000 {
-        time.sleep(1ms)
-        tries += 1
-    }
-    time.sleep(5ms)
-    // No pause: a plain cancel stops the busy recursion, and its cleanup runs.
-    burner.cancel()
-    if burner.join() == {
-        .Ok(_) -> print("the burner finished")
-        .Err(error) -> print("the burner: {failure_label(error)}")
+    task.group burners {
+        burner: task {
+            marker := Marker{name: "the burner's marker"}
+            defer close(marker)
+            started.store(1)
+            burn(90)
+        }
+        tries := 0
+        loop started.load() == 0 && tries < 2000 {
+            time.sleep(1ms)
+            tries += 1
+        }
+        time.sleep(5ms)
+        // No pause: a plain cancel stops the busy recursion, and its cleanup runs.
+        burner.cancel()
+        if burner.join() == {
+            .Ok(_) -> print("the burner finished")
+            .Err(error) -> print("the burner: {failure_label(error)}")
+        }
     }
 
     // A deadline passes while the task only computes through a function

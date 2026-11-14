@@ -1,0 +1,73 @@
+// A `task.group` child shares the Atomic cells it reads with their owner: an
+// Atomic argument, one several tasks add to, an Atomic a task block captures
+// and the Atomics a struct holds inline are each the one cell the owner
+// reads after the join. A task that takes its cell (`task &&cell`) owns it,
+// and a Shared cell is shared through its handle by any task. A task outside
+// a group can't borrow a cell (tests/ui/atomic_task_capture_outlives_its_cell).
+package: {
+    name: "atomic_task_share"
+    authority: { allow: [IO, Mem.Alloc, Mem.Rc] }
+}
+
+Flags: struct {
+    done: Atomic<Bool>
+    count: Atomic<Int>
+}
+
+Counter: struct {
+    hits: Int
+}
+
+raise: fn(flag: Atomic<Bool>) -> Int {
+    flag.store(true)
+    1
+}
+
+add: fn(count: Atomic<Int>, by: Int) -> Int {
+    _: count.add(by)
+    by
+}
+
+mark: fn(flags: Flags) -> Int {
+    flags.done.store(true)
+    _: flags.count.add(5)
+    1
+}
+
+bump: fn(counter: Shared<Counter>) -> Int {
+    counter.hits += 1
+    1
+}
+
+run: fn() {
+    flag: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    count: Atomic<Int>.try_new(0) ?? panic("no count")
+    captured: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    flags: Flags{done: false, count: 0}
+    task.group shared {
+        raised: task raise(flag)
+        print("argument: joined {raised.join() ?? -1}, owner sees {flag.load()}")
+
+        adders := [Task<Int>]{}
+        loop by in 1..<5 -> adders.push(task add(count, by))
+        loop adder in adders -> _: adder.join() ?? -1
+        print("four tasks: owner sees {count.load()}")
+
+        block: task { raise(captured) }
+        print("task block: joined {block.join() ?? -1}, owner sees {captured.load()}")
+
+        marked: task mark(flags)
+        print("struct member: joined {marked.join() ?? -1}, owner sees {flags.done.load()} and {flags.count.load()}")
+    }
+
+    word: Atomic<Int>.try_new(3) ?? panic("no word")
+    owned: task &&word {
+        _: word.add(4)
+        word.load()
+    }
+    print("taken: the task's own cell holds {owned.join() ?? -1}")
+
+    counter: Shared{Counter{hits: 0}}
+    bumped: task bump(counter)
+    print("shared: joined {bumped.join() ?? -1}, owner sees {counter.hits}")
+}

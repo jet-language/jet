@@ -7342,9 +7342,15 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
 // address: its variable becomes a frame cell from the closure's creation
 // on. A written alias of another holder's storage (a write window or write
 // parameter) is held by address too, so a scoped task's writes land on the
-// owner. Any other capture is a copy the box owns until its release helper
-// drops it; an escaping lambda's writes stay in that copy, which outlives
-// the frame. A task body owns its copies instead (ir_lambda_box).
+// owner. An Atomic word, or a value that holds one inline, is held by address
+// in a task body or a non-escaping lambda unless the lambda takes it: its
+// operations borrow the cell in its place, so a copy would be a second cell
+// the owner never sees. Sema admits that borrow in a task only for a
+// `task.group` child the cell outlives (sema_taskgroup_check_lambda_captures).
+// Any other capture is a copy the box owns until its
+// release helper drops it; an escaping lambda's writes stay in that copy,
+// which outlives the frame. A task body owns its copies instead
+// (ir_lambda_box).
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -7366,8 +7372,10 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
     offset := if task_body -> IR_TASK_STARTED + 8 else -> 24
     loop capture in lambda.captures {
         binding: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(b, span, "capture of unknown local {capture.source}")
-        by_ref: (!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name))
+        moved: lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name)
         value_row: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
+        shares_cell: (task_body || !lambda.capture_facts.escapes) && !moved && ir_holds_atomic(m, p, value_row)
+        by_ref: shares_cell || ((!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name)))
         size: if by_ref -> 8 else -> ir_align8(m.types[value_row].size)
         owned_row := -1
         // A window sema materialized for the lambda (it outlives the window's
@@ -7432,6 +7440,18 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
     ir_emit(b.f, IROp.FunctionAddress, code, id, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, boxed, 8, code, b.line)
     boxed
+}
+
+// Whether a value of type row `row` holds an Atomic word inline: the word
+// itself, or a tuple or struct member not behind a box that holds one.
+ir_holds_atomic: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if ir_atomic_scalar(m.types[row].ty) != None -> return true
+    if m.types[row].kind != .Aggregate || ir_counted_entry(m, p, row) != None -> return false
+    members: ir_inline_members(m, p, row) ?? return false
+    loop member in members {
+        if !member.boxed && ir_holds_atomic(m, p, member.ty) -> return true
+    }
+    false
 }
 
 // The window in `window` copied into a fresh List of row `list_row`: the

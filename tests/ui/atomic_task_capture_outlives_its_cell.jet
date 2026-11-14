@@ -1,0 +1,13 @@
+raise: fn(flag: Atomic<Bool>) -> Int {
+    flag.store(true)
+    1
+}
+
+spawn_raise: fn() -> Task<Int> {
+    flag: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    task raise(flag)
+}
+
+run: fn() {
+    print(spawn_raise().join() ?? -1)
+}

@@ -36,33 +36,37 @@ run: fn() {
     raced: Atomic<Int>.try_new(0) ?? return
     print(task.race {spin(raced), seven()} ?? panic("race failed"))
 
+    // The spinners share the owner's counters, so they run in a group the
+    // counters outlive.
     counter: Atomic<Int>.try_new(0) ?? return
-    spinner: task {
-        marker := Marker{name: "the spinner's marker"}
-        defer close(marker)
-        spin(counter)
-    }
-    tries := 0
-    loop counter.load() == 0 && tries < 2000 {
-        time.sleep(1ms)
-        tries += 1
-    }
-    // No pause: a plain cancel stops the busy loop, and its cleanup runs.
-    spinner.cancel()
-    if spinner.join() == {
-        .Ok(_) -> print("the spinner finished")
-        .Err(error) -> print("the spinner: {failure_label(error)}")
-    }
-
-    // A deadline passes while the task only computes: its next iteration
-    // stops it with the deadline failure.
     timed_counter: Atomic<Int>.try_new(0) ?? return
-    timed: task {
-        task.timeout(20ms)
-        spin(timed_counter)
-    }
-    if timed.join() == {
-        .Ok(_) -> print("the timed spinner finished")
-        .Err(error) -> print("the timed spinner: {failure_label(error)}")
+    task.group spinners {
+        spinner: task {
+            marker := Marker{name: "the spinner's marker"}
+            defer close(marker)
+            spin(counter)
+        }
+        tries := 0
+        loop counter.load() == 0 && tries < 2000 {
+            time.sleep(1ms)
+            tries += 1
+        }
+        // No pause: a plain cancel stops the busy loop, and its cleanup runs.
+        spinner.cancel()
+        if spinner.join() == {
+            .Ok(_) -> print("the spinner finished")
+            .Err(error) -> print("the spinner: {failure_label(error)}")
+        }
+
+        // A deadline passes while the task only computes: its next iteration
+        // stops it with the deadline failure.
+        timed: task {
+            task.timeout(20ms)
+            spin(timed_counter)
+        }
+        if timed.join() == {
+            .Ok(_) -> print("the timed spinner finished")
+            .Err(error) -> print("the timed spinner: {failure_label(error)}")
+        }
     }
 }

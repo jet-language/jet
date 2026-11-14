@@ -21,16 +21,20 @@ finish: fn(done: Atomic<Bool>) -> Int {
     1
 }
 
+// The tasks share `done`, the owner's one flag, so they run in a group the
+// flag outlives.
 run: fn() {
     done: Atomic<Bool>.try_new(false) ?? panic("no flag")
     busy: os.cpu_count() * 2 + 2
-    handles := [Task<Int>]{}
-    loop _ in 0..<busy -> handles.push(task spin(done))
-    last: task finish(done)
-    print(last.join() ?? panic("the last task failed"))
-    stopped := 0
-    loop handle in handles {
-        if (handle.join() ?? -1) >= 0 -> stopped += 1
+    task.group turns {
+        handles := [Task<Int>]{}
+        loop _ in 0..<busy -> handles.push(task spin(done))
+        last: task finish(done)
+        print(last.join() ?? panic("the last task failed"))
+        stopped := 0
+        loop handle in handles {
+            if (handle.join() ?? -1) >= 0 -> stopped += 1
+        }
+        print(stopped == busy)
     }
-    print(stopped == busy)
 }

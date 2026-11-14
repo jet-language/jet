@@ -4401,6 +4401,10 @@ reject the declaration rather than silently using a lock fallback.
 These operations borrow the cell in its checked place. A borrow-only read
 and its synthetic cleanup do not materialize or destroy a second cell; an
 explicit consuming or copying operation keeps its separate ownership meaning.
+A task that reads a cell without taking it borrows that same cell. Only a
+lexical `task.group` child the cell outlives may do so (D-TASKBORROW1=A).
+Any other task must take the cell (`task &&cell`) or share it through
+`Shared<T>`, and a borrow outside a group is E1102.
 
 **D-LAYOUT-ALIGN1=A — Portable and target alignment modes** *(ratified)*:
 `align(N)` is the portable profile rule; `align(target, N)` is source-local
