@@ -1,0 +1,26 @@
+#Error
+// A payload-bound arm keeps the full coverage check: `.Stopped(.Term)` and
+// `.Stopped(.Kill)` bind the payload, so the table must name every Signal
+// under Stopped. A tag-only `.Stopped(_)` would cover the variant alone.
+Signal: enum {
+    Term
+    Kill
+    Hangup
+}
+
+Session: enum {
+    Idle
+    Stopped(Signal)
+}
+
+describe: fn(session: Session) -> String {
+    if session == {
+        .Idle -> "idle"
+        .Stopped(.Term) -> "stopped by term"
+        .Stopped(.Kill) -> "stopped by kill"
+    }
+}
+
+run: fn() {
+    print(describe(.Stopped(.Hangup)))
+}

@@ -1,0 +1,63 @@
+// Tag-only arms (`.Exited(_)`, `_` in every payload slot) over variants whose
+// payloads are a struct, a list, a String, a Float and a nested enum: the
+// arms bind no payload, so the table covers each variant by its tag and
+// lowers without the payload types' own coverage. The last table binds a
+// payload and still names every case of it.
+Exit: struct {
+    code: Int
+    note: String
+}
+
+Signal: enum {
+    Term
+    Kill
+}
+
+Session: enum {
+    Idle
+    Running([String])
+    Exited(Exit)
+    Failed(String)
+    Load(Float)
+    Stopped(Signal)
+}
+
+state: fn(session: Session) -> String {
+    if session == {
+        .Idle -> "idle"
+        .Running(_) -> "running"
+        .Exited(_) -> "exited"
+        .Failed(_) -> "failed"
+        .Load(_) -> "load"
+        .Stopped(_) -> "stopped"
+    }
+}
+
+busy: fn(session: Session) -> Bool {
+    if session == {
+        .Running(_) | .Load(_) -> true
+        .Idle | .Exited(_) | .Failed(_) | .Stopped(_) -> false
+    }
+}
+
+stop: fn(session: Session) -> String {
+    if session == {
+        .Stopped(.Term) -> "stopped by term"
+        .Stopped(.Kill) -> "stopped by kill"
+        .Idle | .Running(_) | .Exited(_) | .Failed(_) | .Load(_) -> "not stopped"
+    }
+}
+
+run: fn() {
+    sessions: [Session]{
+        .Idle,
+        .Running(["serve", "--port", "80"]),
+        .Exited(Exit{code: 3, note: "done"}),
+        .Failed("no such file"),
+        .Load(0.5),
+        .Stopped(.Kill),
+    }
+    loop session in sessions {
+        print("{state(session)} busy={busy(session)} {stop(session)}")
+    }
+}

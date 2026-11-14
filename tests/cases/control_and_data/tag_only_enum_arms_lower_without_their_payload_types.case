@@ -1,0 +1,23 @@
+# Tag-only arms (`.Exited(_)`, an or-pattern of them) over enum variants with
+# struct, list, String, Float and enum payloads cover each variant by its tag:
+# the table needs no coverage of the payload types it never binds, and it
+# lowers and runs the same at every tier. A payload-bound arm keeps the full
+# check (tests/ui/enum_payload_arm_not_exhaustive).
+fixture: tag_only_enum_arms_lower_without_their_payload_types.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = tag_only_enum_arms_lower_without_their_payload_types.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = tag_only_enum_arms_lower_without_their_payload_types.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = tag_only_enum_arms_lower_without_their_payload_types.out
+step: jet build --release main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: = tag_only_enum_arms_lower_without_their_payload_types.out
