@@ -74,6 +74,11 @@ sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSe
 SemaCrossingWalk: struct {
     active: [String]
     finished: NameTable
+    // The walk keys of `active`, in step. A nominal met while active under
+    // another instantiation is assumed sendable unwalked; `widened` records
+    // that the walk did so, and its finished set then serves no other query.
+    active_keys: [String]{[String]{}}
+    widened: Bool{false}
     // The checked function's own type parameters the walk reached: what
     // crosses there is decided by each call's type argument
     // (Ownership/GenericCrossings.jet).
@@ -184,11 +189,17 @@ sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, cr
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     key: sema_ownership_crossing_walk_key(nominal.identity_key, type_args)
-    if walk.active.contains(nominal.identity_key) || name_find(walk.finished, key) != None -> return None
+    if walk.active.contains(nominal.identity_key) {
+        if !walk.active_keys.contains(key) -> walk.widened = true
+        return None
+    }
+    if name_find(walk.finished, key) != None -> return None
     walk.active.push(nominal.identity_key)
+    walk.active_keys.push(key)
     found: sema_ownership_crossing_members(nominal, type_args, crossing, strict_callable, cell_only, environment, program, context, walk)
     _ := walk.active.pop()
-    _ := name_intern(walk.finished, key)
+    finished_key: walk.active_keys.pop() ?? panic("a walked nominal left no active key")
+    _ := name_intern(walk.finished, finished_key)
     found
 }
 
@@ -408,6 +419,36 @@ sema_ownership_crossing_problem: fn(ty: Type, crossing: SemaSendCrossing, closur
     cell_only := crossing == SemaSendCrossing.SharedStorage
     walk := SemaCrossingWalk{active: [String]{}, finished: name_table_sized(16)}
     sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, program, context, walk)
+}
+
+// The walks a checked body's generic calls make at one crossing
+// (GenericCrossings.jet). A walk that found no problem and assumed no other
+// instantiation of an active nominal sendable finished only instantiations
+// that are sendable there under the body's environment and type parameters,
+// so the body's later walks at that crossing start from them.
+SemaCrossingBodyWalk: struct {
+    crossing: SemaSendCrossing
+    walk: SemaCrossingWalk
+}
+
+// sema_ownership_crossing_problem for a type argument of a call in the body
+// `context` checks, starting from the body's clean walk at `crossing`. Any
+// other walk is dropped: what it finished may reach its problem, or an
+// instantiation it assumed sendable.
+sema_ownership_crossing_body_problem: fn(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) -> SemaSendabilityProblem? {
+    walk := SemaCrossingWalk{active: [String]{}, finished: name_table_sized(16)}
+    others := [SemaCrossingBodyWalk]{}
+    loop context.crossing_walks.len() > 0 {
+        row: context.crossing_walks.pop() ?? panic("a nonempty crossing walk list failed to pop")
+        if row.crossing == crossing -> walk = row.walk.move() else -> others.push(row)
+    }
+    context.crossing_walks = others
+    problem: sema_ownership_crossing_type_inner(ty, crossing, closure_taken, sema_ownership_crossing_strict_callable(crossing), crossing == SemaSendCrossing.SharedStorage, environment, program, context, walk)
+    if problem == None && !walk.widened {
+        walk.generic = [SemaCrossingGenericReach]{}
+        context.crossing_walks.push(SemaCrossingBodyWalk{crossing: crossing, walk: walk.move()})
+    }
+    problem
 }
 
 // The checked function's own type parameters that `ty` reaches crossing
