@@ -25,6 +25,24 @@ box_value: fn(box: Box?) -> Int {
     (box ?? Box{v: 0}).v
 }
 
+// An enum payload, a map value and an `Ok(...)` success payload are slots
+// too, and `?? return` hands back a plain value that the `Int?` result lifts.
+Slot: enum {
+    Held(Int?)
+    Empty
+}
+
+first_byte: fn(bytes: [U8]) -> U8? Err! {
+    byte: bytes.first()
+    if byte == None -> return Ok(None)
+    Ok(byte)
+}
+
+doubled: fn(n: Int) -> Int? {
+    m: find(n) ?? return None
+    return m * 2
+}
+
 run: fn() {
     limit := Val(10)          // no expected type: Val still infers Int?
     cfg: Config{limit: 5}
@@ -46,4 +64,11 @@ run: fn() {
     print(box_value(held))
     print(Config{limit: find(4)}.limit ?? 0)
     print(Config{limit: box_value(make_box(9))}.limit ?? 0)
+    slot: Slot.Held(4)
+    if slot == .Held(inner) -> print("held {inner ?? 0}")
+    table: [String: Int?]{"a": 1, "b": None}
+    print(table["a"] ?? 0)
+    if first_byte([U8]{7, 8}) == .Ok(b) -> print("byte {b ?? 0}")
+    print(doubled(6) ?? 0)
+    print(doubled(-1) ?? -1)
 }
