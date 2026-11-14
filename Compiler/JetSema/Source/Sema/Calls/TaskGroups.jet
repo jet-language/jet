@@ -536,7 +536,8 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
         // `task.group` child borrows it until the join, as it borrows any other
         // place, and the rest of the value still crosses as below; any other
         // task could outlive the cell, so it must take it.
-        if !sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source) && sema_taskgroup_holds_atomic(capture.ty, environment, program, [String]{}) {
+        walked := [String]{}
+        if !sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source) && sema_taskgroup_holds_atomic(capture.ty, environment, program, walked) {
             admitted: sema_taskgroup_admit_cell_borrow(capture, span, scopes, state, context, diagnostics)
             if admitted == (Val(false)) -> next
             if admitted == None {
@@ -669,8 +670,9 @@ sema_taskgroup_admit_cell_borrow: fn(capture: TCapture, span: Span, scopes: Sema
 // Whether a value of `ty` holds an Atomic cell inline: the cell itself, or a
 // tuple or struct field that holds one. A Shared, List or other handle keeps
 // its cells behind a pointer, so a copy of it reaches the same cells.
-// `active` holds the structs being walked, so a recursive struct ends.
-sema_taskgroup_holds_atomic: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, active: [String]) -> Bool Never! {
+// `active` holds the structs being walked, so a recursive struct ends; each
+// struct's key is pushed for its fields' walk and popped after it.
+sema_taskgroup_holds_atomic: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, active: &[String]) -> Bool Never! {
     if ty == .Apply(name, _) {
         if sema_atomic_type_name(sema_ownership_crossing_type_leaf(name)) -> return true
     }
@@ -687,13 +689,16 @@ sema_taskgroup_holds_atomic: fn(ty: Type, environment: SemaScopeEnvironment, pro
     type_args: if ty == .Apply(_, args) -> args else -> [Type]{}
     if nominal.generic_params.len() != type_args.len() -> return false
     bindings: sema_inference_bindings_for_type_args(sema_inference_registration_params(nominal.generic_params), type_args)
-    // copy: the walk's own list of the structs it is inside
-    inside := active.copy()
-    inside.push(nominal.identity_key)
+    active.push(nominal.identity_key)
+    found := false
     loop field in nominal.fields {
-        if sema_taskgroup_holds_atomic(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, field.ty), bindings), environment, program, inside) -> return true
+        if sema_taskgroup_holds_atomic(sema_inference_substitute_type_bindings(sema_type_resolve_member_type(program.registration_graph, nominal, field.ty), bindings), environment, program, active) {
+            found = true
+            break
+        }
     }
-    false
+    _: active.pop()
+    found
 }
 
 sema_taskgroup_admit_scoped_borrow: fn(context: &SemaCheckContext, name: String, place: SemaOwnershipPlace, access: AccessConvention, window: Bool, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool? {
