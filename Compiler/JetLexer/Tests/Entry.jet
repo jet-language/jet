@@ -40,7 +40,7 @@ use {
 
 lexer_test_raw: fn(source: String) -> Lexed { lex_payload(source.bytes(), false) }
 
-// Rust inputs contain byte 13; Jet deliberately has no \r string escape.
+// Rust inputs contain a raw byte 13 in the source text.
 lexer_test_cr: fn() -> String Never! { String.from_bytes([U8]{13}) ?? panic("ASCII carriage return") }
 
 // The spelling of a name of `lexed`'s table (token text, decoded value, part text).
@@ -249,6 +249,57 @@ lexer_test_first_head_string: fn(source: String) -> String Never! {
         if diagnostic.what.contains("isn't an escape") -> rejected = true
     }
     assert(rejected)
+}
+
+// Whether `lexed` reports an E0001 at exactly `start..<end`, from the lexer
+// or from either reading of a string.
+lexer_test_escape_error_at: fn(lexed: Lexed, start: Int, end: Int) -> Bool Never! {
+    reported := lexer_test_reported(lexed)
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_STRING -> next
+        literal: lexer_test_literal(lexed, token)
+        if literal.head < 0 -> next
+        head: lexed.tables.literals[literal.head]
+        loop diagnostic in text_reading_diagnostics(head.deferred, head.escapes) -> reported.push(diagnostic.move())
+    }
+    loop diagnostic in reported {
+        span: diagnostic.span ?? Span{start: -1, end: -1}
+        if diagnostic.code == "E0001" && span.start == start && span.end == end -> return true
+    }
+    false
+}
+
+// `\u{H}` names one Unicode scalar in quoted, triple-quoted and character
+// literals, beside `\r`; its braces open no hole.
+#Test("scalar_escapes_decode_in_text_and_characters") {
+    expected: String.from_bytes([U8]{97, 195, 169, 98, 240, 159, 152, 128, 0, 13}) ?? panic("UTF-8 text")
+    assert_eq(lexer_test_first_string(`"a\u{e9}b\u{1F600}\u{0}\r"`), expected)
+    assert_eq(lexer_test_first_string("x: \"\"\"\n\\u{{E9}}\n\"\"\""), String.from_bytes([U8]{195, 169}) ?? panic("UTF-8 text"))
+    lexed: lexer_test_raw(`c: '\u{1F600}'`)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop token in lexed.tokens {
+        if token.kind == TOKEN_CHAR && lexer_test_name(lexed, token.decoded) == (String.from_bytes([U8]{240, 159, 152, 128}) ?? "") -> found = true
+    }
+    assert(found)
+}
+
+// A surrogate, a value past 10FFFF, empty braces, seven digits, a missing
+// brace and an unclosed one are each an E0001 at the escape's exact span.
+#Test("bad_scalar_escapes_report_their_exact_spans") {
+    lexed: lexer_test_raw(`x: "\u{D800}\u{110000}\u{}\u{1234567}\u12"`)
+    assert(lexer_test_escape_error_at(lexed, 4, 12))
+    assert(lexer_test_escape_error_at(lexed, 12, 22))
+    assert(lexer_test_escape_error_at(lexed, 22, 26))
+    assert(lexer_test_escape_error_at(lexed, 26, 37))
+    assert(lexer_test_escape_error_at(lexed, 37, 39))
+    assert(lexer_test_escape_error_at(lexer_test_raw(`y: "\u{12"`), 4, 9))
+    assert(lexer_test_escape_error_at(lexer_test_raw(`c: '\u{DFFF}'`), 4, 12))
+}
+
+// A byte literal takes `\r` but no scalar escape, which it reports whole.
+#Test("byte_literals_take_no_scalar_escape") {
+    assert(lexer_test_escape_error_at(lexer_test_raw(`x: [U8]{"a\u{41}\r"}`), 10, 16))
 }
 
 // Reuses origin/port/compiler Payload01.jet and Strings.jet Scan controls.

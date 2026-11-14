@@ -76,8 +76,8 @@ add_diagnostic: fn(diagnostics: &[Diagnostic], code: String, start: Int, end: In
 
 // E0001 for the escape `\{escape_text}` at `start..<end`, which Jet doesn't know.
 add_unknown_escape: fn(diagnostics: &[Diagnostic], start: Int, end: Int, escape_text: String) {
-    what := "`\\{escape_text}` isn't an escape Jet knows"
-    why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+    what: "`\\{escape_text}` isn't an escape Jet knows"
+    why: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash), `\\u{{H}}` (the Unicode scalar with hexadecimal value H)"
     add_diagnostic(diagnostics, "E0001", start, end, what, why, "write `\\\\` for a real backslash")
 }
 
@@ -235,6 +235,68 @@ escape_value: fn(value: Int) -> Int Never! {
 hex_value: fn(value: Int) -> Int Never! {
     digit: digit_value(value)
     if digit >= 0 && digit < 16 -> digit else -> -1
+}
+
+// A `\u{H}` escape whose backslash is at `at`, read up to `limit`: one to
+// six hexadecimal digits naming a Unicode scalar, any value up to 10FFFF but
+// the surrogates D800-DFFF. `end` is the index after the escape. `scalar` is
+// -1 when it names none, with an E0001 at the escape's exact span; `origin`
+// places `source` in the file.
+read_scalar_escape: fn(source: [U8], at: Int, limit: Int, origin: Int, diagnostics: &[Diagnostic]) -> (scalar: Int, end: Int) {
+    why: "`\\u{{H}}` names one Unicode scalar by one to six hexadecimal digits, up to 10FFFF and not a surrogate (D800-DFFF)"
+    fix: "write the scalar's hexadecimal value in braces, for example `\\u{{e9}}`"
+    if at + 2 >= limit || byte_at(source, at + 2) != 123 {
+        add_diagnostic(diagnostics, "E0001", origin + at, origin + at + 2, "`\\u` needs a scalar in braces", why, fix)
+        return (scalar: -1, end: at + 2)
+    }
+    cursor := at + 3
+    value := 0
+    loop cursor < limit && hex_value(byte_at(source, cursor)) >= 0 {
+        // Seven digits are already too many; the value stops growing there.
+        if cursor - at - 3 < 7 -> value = value * 16 + hex_value(byte_at(source, cursor))
+        cursor += 1
+    }
+    if cursor >= limit || byte_at(source, cursor) != 125 {
+        add_diagnostic(diagnostics, "E0001", origin + at, origin + cursor, "this `\\u{{` never gets its closing `}}`", why, fix)
+        return (scalar: -1, end: cursor)
+    }
+    digits: cursor - at - 3
+    end: cursor + 1
+    text: bytes_text(source, at, end)
+    what: if {
+        digits == 0 -> "`{text}` has no digits"
+        digits > 6 -> "`{text}` has more than six digits"
+        value > 1114111 -> "`{text}` is past 10FFFF, the last Unicode scalar"
+        value >= 55296 && value <= 57343 -> "`{text}` is a surrogate, not a Unicode scalar"
+        else -> ""
+    }
+    if what != "" {
+        add_diagnostic(diagnostics, "E0001", origin + at, origin + end, what, why, fix)
+        return (scalar: -1, end: end)
+    }
+    (scalar: value, end: end)
+}
+
+// The UTF-8 bytes of the Unicode scalar `scalar`.
+push_scalar: fn(out: &[U8], scalar: Int) Never! {
+    if {
+        scalar < 128 -> out.push(U8{scalar})
+        scalar < 2048 -> {
+            out.push(U8{192 + (scalar /% 64)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        }
+        scalar < 65536 -> {
+            out.push(U8{224 + (scalar /% 4096)})
+            out.push(U8{128 + (scalar /% 64).bit_and(63)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        }
+        else -> {
+            out.push(U8{240 + (scalar /% 262144)})
+            out.push(U8{128 + (scalar /% 4096).bit_and(63)})
+            out.push(U8{128 + (scalar /% 64).bit_and(63)})
+            out.push(U8{128 + scalar.bit_and(63)})
+        }
+    }
 }
 
 previous_code_index: fn(facts: [Int], index: Int) -> Int Never! {
@@ -711,6 +773,24 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
                 cursor += 2
                 next
             }
+            if next_value == 117 {
+                // A byte literal holds bytes, so a scalar escape has no place
+                // in one; it still spans its braces, which open no hole.
+                if byte_head {
+                    skipped := [Diagnostic]{}
+                    escape: read_scalar_escape(source, cursor, end, 0, skipped)
+                    add_diagnostic(diagnostics, "E0001", cursor, escape.end, "a byte literal has no `\\u{{…}}` escape", "a byte literal holds bytes, and `\\u{{H}}` names a Unicode scalar, which can take several bytes", "write each byte as `\\xNN`, or use a String")
+                    cursor = escape.end
+                    next
+                }
+                escape: read_scalar_escape(source, cursor, end, 0, diagnostics)
+                if escape.scalar >= 0 {
+                    push_scalar(literal, escape.scalar)
+                    push_scalar(decoded, escape.scalar)
+                }
+                cursor = escape.end
+                next
+            }
             escaped: escape_value(next_value)
             escape_width: utf8_width(source, cursor + 1)
             escape_end := cursor + 1 + escape_width
@@ -898,23 +978,34 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
     escape_width := 0
     if raw.len() > 2 -> escape_width = utf8_width(raw, 2)
     escape_end := 2 + escape_width
-    escaped := -1
-    if escape_width > 0 {
-        escaped = if (Int{raw[2]}) == 39 -> 39 else -> escape_value(Int{raw[2]})
-    }
-    if escaped < 0 {
-        escape_text: bytes_text(raw, 2, escape_end)
-        what := "`\\{escape_text}` isn't an escape Jet knows"
-        why: "inside a character literal, `\\` starts an escape: `\\n`, `\\r`, `\\t`, `\\'`, `\\\\`"
-        add_diagnostic(diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
+    scalar := -1
+    if {
+        escape_width > 0 && (Int{raw[2]}) == 117 -> {
+            escape: read_scalar_escape(raw, 1, raw.len(), source_start, diagnostics)
+            escape_end = escape.end
+            scalar = escape.scalar
+        }
+        else -> {
+            if escape_width > 0 {
+                scalar = if (Int{raw[2]}) == 39 -> 39 else -> escape_value(Int{raw[2]})
+            }
+            if scalar < 0 {
+                escape_text: bytes_text(raw, 2, escape_end)
+                what: "`\\{escape_text}` isn't an escape Jet knows"
+                why: "inside a character literal, `\\` starts an escape: `\\n`, `\\r`, `\\t`, `\\\"`, `\\'`, `\\\\`, `\\u{{H}}`"
+                add_diagnostic(diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
+            }
+        }
     }
     if byte_at(raw, escape_end) != 39 {
         span_end := source_start + escape_end
         if span_end > source_start + raw.len() -> span_end = source_start + raw.len()
         add_diagnostic(diagnostics, "E0002", source_start, span_end, "a character literal must be exactly one character", "write `'x'` with a single character between the quotes", "use a String for longer text")
     }
-    if escaped < 0 -> return "?"
-    String.from_bytes([U8]{U8{escaped}}) ?? ""
+    if scalar < 0 -> return "?"
+    out := [U8]{}
+    push_scalar(out, scalar)
+    String.from_bytes(out) ?? ""
 }
 
 numeric_payload: fn(kind: Int, source: [U8], start: Int, end: Int, tables: &TokenTables, diagnostics: &[Diagnostic]) -> (decoded: Name, literal: Int) {

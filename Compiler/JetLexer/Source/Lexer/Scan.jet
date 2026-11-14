@@ -312,6 +312,7 @@ scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never
         if {
             value == 92 -> {
                 if {
+                    !raw_head && byte_at(source, i + 1) == 117 -> i = scan_scalar_escape_end(source, i)
                     !raw_head || byte_at(source, i + 1) == 34 || byte_at(source, i + 1) == 92 -> {
                         if i + 1 < source.len() -> i += 2 else -> i += 1
                     }
@@ -395,6 +396,7 @@ scan_triple_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Neve
         if depth == 0 {
             if value == 92 {
                 if {
+                    !raw_head && byte_at(source, i + 1) == 117 -> i = scan_scalar_escape_end(source, i)
                     !raw_head || byte_at(source, i + 1) == 34 || byte_at(source, i + 1) == 92 -> {
                         if i + 1 < source.len() -> i += 2 else -> i += 1
                     }
@@ -501,6 +503,18 @@ scan_raw_foreign_string_end: fn(source: [U8], start: Int) -> Int Never! {
         i += 1
     }
     -(source.len() + 1)
+}
+
+// The index after a `\u{H}` escape whose backslash is at `at`: its digits
+// and closing brace, so that brace opens no hole. Malformed escapes end where
+// they stop, and the payload pass reports them.
+scan_scalar_escape_end: fn(source: [U8], at: Int) -> Int Never! {
+    i := at + 2
+    if byte_at(source, i) != 123 -> return i
+    i += 1
+    loop hex_value(byte_at(source, i)) >= 0 -> i += 1
+    if byte_at(source, i) == 125 -> i += 1
+    i
 }
 
 scan_char_end: fn(source: [U8], start: Int) -> Int Never! {

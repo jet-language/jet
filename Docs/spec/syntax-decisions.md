@@ -92,6 +92,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `{ … }` | typed anonymous value |
 | <code>`</code> | raw ordinary String fence |
 | `"""` | multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted) |
+| `\u{H}` | Unicode scalar escape in quoted text and character literals, beside `\n`, `\r`, `\t`, `\"` and `\\`: one to six hexadecimal digits up to 10FFFF, never a surrogate (D800-DFFF); byte literals have none and write `\xNN` |
 | `,` | separator with optional trailing item in every comma list |
 | `Type{field: pattern, ..}` | named struct pattern; fields bind or test nested shapes |
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker |
@@ -1983,6 +1984,24 @@ TOML inline-table fixtures escape their data braces this way, so the
 contents are parsed as TOML rather than Jet interpolation expressions.
 Character literals additionally accept `\'` for the apostrophe delimiter;
 this character-only escape does not extend quoted-text escapes.
+
+**D-STR-ESCAPE1=A — Carriage return and Unicode escapes** *(ratified
+2026-10-07, card #4631; amends S20)*: quoted text, triple-quoted text and
+character literals take `\r` (character 13) and `\u{H}`, where H is one to six
+hexadecimal digits naming any Unicode scalar (`"\u{200b}"`, `'\u{e9}'`). A
+surrogate (D800-DFFF), a value above 10FFFF, empty braces, seven or more
+digits, a missing `{` and an unclosed brace are each an E0001 at the escape's
+exact span. Character literals also take `\'`, and each E0001 why-text lists
+the escapes its literal really takes. Byte literals take `\r` through the
+shared table and keep `\xNN` for other bytes; `\u{…}` in a byte literal is an
+E0001. The braces of `\u{…}` never open an interpolation. Raw backtick strings
+and typed text heads are unchanged (D-RAWSTR1, D-BOUND-RAW1). Debug prints only
+`\n` `\t` `\r` `\"` `\'` `\\` and `\u{…}`, NUL as `\u{0}`, so every escape it
+prints reads back as the same text; braces still print as themselves. `jet fmt`
+rewrites `\u{a}`, `\u{9}` and `\u{d}` to `\n`, `\t` and `\r` and writes other
+hex in lowercase without leading zeros, so each character keeps one spelling
+in formatted code. The lexer escapes are built; the `jet fmt` rewrite is not
+yet built, and card #4631 tracks it.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
