@@ -300,10 +300,10 @@ function shellQuote(value) {
 }
 
 function parseArgs(argv) {
-  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null, dryRun: false };
+  const options = { runs: null, entry: null, jetBin: null, entriesDir: null, axis: null, ceilingResults: null, languages: null, merge: null, dryRun: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis" || arg === "--ceiling-results") {
+    if (arg === "--entry" || arg === "--jet-bin" || arg === "--runs" || arg === "--entries-dir" || arg === "--axis" || arg === "--ceiling-results" || arg === "--languages" || arg === "--merge") {
       if (i + 1 >= argv.length) throw new Error(`${arg} needs a value`);
       const value = argv[++i];
       if (arg === "--entry") options.entry = value;
@@ -312,6 +312,8 @@ function parseArgs(argv) {
       if (arg === "--runs") options.runs = Number.parseInt(value, 10);
       if (arg === "--axis") options.axis = value;
       if (arg === "--ceiling-results") options.ceilingResults = value;
+      if (arg === "--languages") options.languages = sortedUnique(value.split(",").map((language) => language.trim()).filter(Boolean));
+      if (arg === "--merge") options.merge = value;
       continue;
     }
     if (arg === "--dry-run") {
@@ -319,7 +321,7 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node Tools/gauntlet/harness/run.mjs [--dry-run] [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json]");
+      console.log("usage: node Tools/gauntlet/harness/run.mjs [--dry-run] [--entry name] [--jet-bin path] [--runs n] [--entries-dir path] [--axis live_reload|memory_safety_fuzz|compile_throughput] [--ceiling-results asm-parity/results.json] [--languages jet,c,... [--merge earlier-results.json]]");
       process.exit(0);
     }
     throw new Error(`unknown argument: ${arg}`);
@@ -330,6 +332,13 @@ function parseArgs(argv) {
   if (options.axis !== null && !["live_reload", "memory_safety_fuzz", "compile_throughput"].includes(options.axis)) {
     throw new Error("--axis must be live_reload, memory_safety_fuzz or compile_throughput");
   }
+  if (options.languages !== null) {
+    if (options.languages.length === 0) throw new Error("--languages needs at least one language");
+    const unknown = options.languages.filter((language) => !LANGUAGE_FILES[baseLanguage(language)]);
+    if (unknown.length) throw new Error(`--languages names unknown languages: ${unknown.join(", ")}`);
+    if (options.axis !== null) throw new Error("--languages selects entry rows; an --axis run has none");
+  }
+  if (options.merge !== null && options.languages === null) throw new Error("--merge needs --languages: it supplies the rows this run does not measure");
   return options;
 }
 
@@ -2453,8 +2462,14 @@ function settleRunTier(tierRow, metric, sourceMetrics, verificationKind) {
 // `standings_rows`, which the scoreboard and status never read, and every
 // measured row also counts its cycles and an interpreted row its script
 // bytes. Without it (null) the entry stages its declared rows alone.
-async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, standings = null) {
+// `measure`, on a --languages run, is the set of rows (languages, standings
+// peers, and asm for the ceiling) the run measures; every other row that has
+// a program is recorded unmeasured (`not_measured`, with its program's tree
+// hash) and Jet's tiers too when Jet is not in it, for mergeEarlierResult to
+// fill from an earlier run. Null measures every row.
+async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, standings = null, measure = null) {
   const entryStage = path.join(runDir, entry.name);
+  const notMeasured = measure ? `not measured: this run measures ${[...measure].join(", ")} only` : null;
   const languages = entry.languages ?? [];
   const provenance = {
     entry_json_sha256: await fileSha256(path.join(entryDir, "entry.json")),
@@ -2546,6 +2561,14 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
       row.disqualified = true;
       continue;
     }
+    const sourceTreeSha256 = await treeSha256(sourceDir);
+    if (measure && !measure.has(language)) {
+      row.status = "unavailable";
+      row.reason = notMeasured;
+      row.not_measured = true;
+      row.provenance = { source_tree_sha256: sourceTreeSha256, base_language: baseLanguage(language) };
+      continue;
+    }
     const stagedSource = path.join(entryStage, language);
     await fs.cp(sourceDir, stagedSource, { recursive: true });
     const fixtureState = path.join(stagedSource, "fixture-state");
@@ -2587,6 +2610,7 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
     row.provenance = {
       source: path.relative(language === "asm" ? repoDir : entryDir, path.join(sourceDir, sourceFile)).replaceAll(path.sep, "/"),
       source_sha256: row.metrics.source_sha256,
+      source_tree_sha256: sourceTreeSha256,
       base_language: baseLanguage(language),
       authoring: entry.authoring?.[language] ?? entry.expert?.[language] ?? null,
       peer_script: entry.spec?.peer?.script ?? null,
@@ -2798,6 +2822,10 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
 
   for (const tier of Object.keys(tierPolicy(entry.mode))) {
     const policy = tierPolicy(entry.mode)[tier];
+    if (measure && !measure.has("jet")) {
+      tiers[tier] = { ...unavailableTier(policy.required, notMeasured), not_measured: true };
+      continue;
+    }
     if (tier === "dev" && !dev) {
       tiers[tier] = unavailableTier(policy.required, "jet dev is unavailable");
       continue;
@@ -2914,11 +2942,71 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev, st
   } finally {
     await stopJetPeer();
   }
+  return finish({ entry, status: entryStatus(entry, languages, rows, tiers), stage: entryStage, languages, rows, ...(standings ? { standings_rows: standingsRows } : {}), comparisons: comparisons(entry, languages, rows, tiers), jet_tiers: tiers });
+}
+
+// An entry is ok when every declared row is ok or not applicable and every
+// required Jet tier is ok.
+function entryStatus(entry, languages, rows, tiers) {
   const requiredTiersReady = Object.entries(tierPolicy(entry.mode))
     .filter(([, policy]) => policy.required)
     .every(([tier]) => tiers[tier]?.status === "ok");
-  const status = languages.every((language) => ["ok", "not_applicable"].includes(rows[language]?.status)) && requiredTiersReady ? "ok" : "broken";
-  return finish({ entry, status, stage: entryStage, languages, rows, ...(standings ? { standings_rows: standingsRows } : {}), comparisons: comparisons(entry, languages, rows, tiers), jet_tiers: tiers });
+  return languages.every((language) => ["ok", "not_applicable"].includes(rows[language]?.status)) && requiredTiersReady ? "ok" : "broken";
+}
+
+// A --languages run's result with every unmeasured row taken from `earlier`,
+// the same entry's result in an earlier run's report (`source`, from
+// loadMergeSource): declared rows, standings rows and the asm ceiling, and
+// Jet's tiers with its row. A row carries over only when the earlier run
+// measured the same thing: the same program tree, and the entry's mode, spec,
+// expected output and fixture unchanged; a carried row names the run it came
+// from. Any other unmeasured row stays unavailable with the reason.
+function mergeEarlierResult(result, earlier, source) {
+  const entry = result.entry;
+  const inputsReason = !earlier
+    ? `the merged run ${source.run_id} has no ${entry.name} entry`
+    : earlier.entry?.mode !== entry.mode || JSON.stringify(earlier.entry?.spec ?? null) !== JSON.stringify(entry.spec ?? null) ||
+      earlier.provenance?.expected_sha256 !== result.provenance?.expected_sha256 || earlier.provenance?.fixture_sha256 !== result.provenance?.fixture_sha256
+      ? `${entry.name}'s mode, spec, expected output or fixture changed since the merged run ${source.run_id}`
+      : null;
+  const carry = (row) => {
+    if (!row?.not_measured) return row;
+    const previous = earlier?.rows?.[row.language] ?? earlier?.standings_rows?.[row.language] ?? null;
+    const reason = inputsReason ??
+      (!previous || previous.not_measured ? `the merged run ${source.run_id} did not measure ${row.language}` :
+        previous.provenance?.source_tree_sha256 !== row.provenance.source_tree_sha256 ? `the ${row.language} program changed since the merged run ${source.run_id}` : null);
+    return reason ? { ...row, reason: `${row.reason}; not carried: ${reason}` } : { ...previous, carried_from: source.run_id };
+  };
+  const carryMap = (map) => Object.fromEntries(Object.entries(map).map(([language, row]) => [language, carry(row)]));
+  const rows = carryMap(result.rows ?? {});
+  const standingsRows = result.standings_rows ? carryMap(result.standings_rows) : null;
+  const jetCarried = Boolean(result.rows?.jet?.not_measured) && Boolean(rows.jet?.carried_from);
+  const tiers = jetCarried
+    ? Object.fromEntries(Object.entries(earlier.jet_tiers ?? {}).map(([tier, row]) => [tier, { ...row, carried_from: source.run_id }]))
+    : result.jet_tiers;
+  const languages = result.languages ?? [];
+  return {
+    ...result,
+    status: entryStatus(entry, languages, rows, tiers),
+    rows,
+    ...(standingsRows ? { standings_rows: standingsRows } : {}),
+    comparisons: comparisons(entry, languages, rows, tiers),
+    jet_tiers: tiers,
+  };
+}
+
+// The earlier run a --merge names: its report, indexed by entry name.
+async function loadMergeSource(file) {
+  const report = JSON.parse(await fs.readFile(file, "utf8"));
+  if (report?.contract !== "gauntlet-report-v1" || !Array.isArray(report.entries)) throw new Error(`--merge ${file} is not a gauntlet report`);
+  return {
+    path: file,
+    run_id: report.run_id ?? null,
+    generated: report.generated ?? null,
+    jet_binary_sha256: report.provenance?.jet_binary_sha256 ?? null,
+    toolchains: report.provenance?.toolchains ?? null,
+    entries: new Map(report.entries.map((result) => [result.entry?.name, result])),
+  };
 }
 
 // Comparison entries (ENTRY_MODES) go to `loaded`; tool entries (TOOL_MODE)
@@ -4574,7 +4662,11 @@ async function main() {
   if (options.dryRun) return dryRun(options, matrix, entriesDir);
   const defaultEntriesDir = path.resolve(path.join(repoDir, "Tools/gauntlet/entries"));
   const axisOnly = options.axis !== null;
-  const fullScope = !axisOnly && entriesDir === defaultEntriesDir && options.entry === null;
+  // A --languages run measures some rows only; merged into an earlier run's
+  // other rows (--merge) it is a whole report again and publishes as one.
+  const measure = options.languages === null ? null : new Set(options.languages);
+  const mergeSource = options.merge === null ? null : await loadMergeSource(path.resolve(process.cwd(), options.merge));
+  const fullScope = !axisOnly && entriesDir === defaultEntriesDir && options.entry === null && (measure === null || mergeSource !== null);
   const manifestPath = path.join(repoDir, "Tools/gauntlet/measurement-manifest.json");
   const sourceManifest = entriesDir === defaultEntriesDir
     ? JSON.parse(await fs.readFile(manifestPath, "utf8"))
@@ -4610,7 +4702,8 @@ async function main() {
   for (const item of loaded) {
     console.error(`gauntlet: entry ${item.entry.name} [${(item.entry.languages ?? []).join(",")}] ...`);
     try {
-      results.push(await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev, plans.find((plan) => plan.item === item).stage));
+      const result = await stageEntry(item.dir, item.entry, runDir, jetBin, options.runs, dev, plans.find((plan) => plan.item === item).stage, measure);
+      results.push(mergeSource ? mergeEarlierResult(result, mergeSource.entries.get(item.entry.name) ?? null, mergeSource) : result);
     } catch (error) {
       console.error(`gauntlet: entry ${item.entry.name} CRASHED: ${error.message}`);
       results.push({
@@ -4684,7 +4777,8 @@ async function main() {
     contract: "gauntlet-report-v1",
     generated: new Date().toISOString(),
     run_id: runId,
-    options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, ceiling_results: options.ceilingResults, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
+    options: { entry: options.entry, axis: options.axis, jet_bin: jetBin, runs: options.runs, ceiling_results: options.ceilingResults, languages: options.languages, merge: options.merge, scope: axisOnly ? `axis_${options.axis}` : (fullScope ? "full_matrix" : "partial_entry") },
+    ...(mergeSource ? { merged_from: { path: mergeSource.path, run_id: mergeSource.run_id, generated: mergeSource.generated, jet_binary_sha256: mergeSource.jet_binary_sha256, toolchains: mergeSource.toolchains } } : {}),
     matrix_version: matrix.version,
     matrix_rails: matrix.rails,
     strict_performance_policy: STRICT_PERFORMANCE_POLICY,
@@ -4730,14 +4824,18 @@ async function main() {
     entries: results,
     tools: toolResults,
   };
-  // One file per run. Full-matrix runs own the bare <date>.json; partial and
+  // One file per run. Full-matrix runs own the bare <date>.json, and a merged
+  // run <date>-merged-<languages>.json beside the run it merged; partial and
   // axis runs carry their scope so a later partial run never overwrites the
   // day's full report (status.mjs merges every file in this directory).
   const resultDir = path.join(repoDir, "Tools/gauntlet/results");
   await fs.mkdir(resultDir, { recursive: true });
+  const languagesTag = options.languages === null ? null : `languages-${options.languages.join("-")}`;
   const resultName = axisOnly
     ? `${dateStamp()}-axis-${options.axis}.json`
-    : (fullScope ? `${dateStamp()}.json` : `${dateStamp()}-${options.entry}.json`);
+    : fullScope
+      ? `${dateStamp()}${mergeSource ? `-merged-${languagesTag}` : ""}.json`
+      : `${dateStamp()}-${[options.entry, languagesTag].filter(Boolean).join("-")}.json`;
   const resultPath = path.join(resultDir, resultName);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`);
   const statusPath = path.join(repoDir, "Tools/gauntlet/status.json");
@@ -4806,7 +4904,13 @@ async function main() {
     }
   }
   const toolsPass = toolResults.every((tool) => tool.status === "pass");
-  const rowsOk = results.every((result) => result.status !== "broken" && (result.languages ?? []).every((language) => result.rows?.[language]?.status === "ok"));
+  // A --languages run answers only for the rows it measured: a row it left
+  // unmeasured or carried from --merge is no verdict of this run.
+  const measuredHere = (row) => measure === null || !(row?.not_measured || row?.carried_from);
+  const tiersReady = (result) => Object.entries(tierPolicy(result.entry.mode))
+    .every(([tier, policy]) => !policy.required || !measuredHere(result.jet_tiers?.[tier]) || result.jet_tiers?.[tier]?.status === "ok");
+  const rowsOk = results.every((result) => (measure === null ? result.status !== "broken" : !result.reason && tiersReady(result)) &&
+    (result.languages ?? []).every((language) => !measuredHere(result.rows?.[language]) || result.rows?.[language]?.status === "ok"));
   if (toolOnly) process.exitCode = toolsPass ? 0 : 1;
   else if (partial) process.exitCode = validationIssues.length === 0 && skipped.length === 0 && results.length > 0 && rowsOk && toolsPass ? 0 : 1;
   else if (!publication.complete || !toolsPass) process.exitCode = 1;
@@ -4824,6 +4928,7 @@ export {
   ratioVerdict,
   metricApplicability,
   validateEntryShape,
+  mergeEarlierResult,
   validateResultShape,
   buildScoreboard,
   publicationState,

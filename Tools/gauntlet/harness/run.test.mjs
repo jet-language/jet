@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { promisify } from "node:util";
 
-import { loadEntries, probeAxisTools, runToolEntry, stageEntry } from "./run.mjs";
+import { loadEntries, mergeEarlierResult, probeAxisTools, runToolEntry, stageEntry } from "./run.mjs";
 
 const scratchRoot = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const execFileAsync = promisify(execFile);
@@ -375,5 +375,79 @@ test("the jet a tool case's scripts run is the --jet-bin compiler", stagedEntryT
     await fs.writeFile(path.join(entryDir, "expected", "lines.out"), `inner ${jetBin}\n`);
     const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
     assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
+  });
+});
+
+// An entry with a Jet row and a Node twin, both printing `expected`.
+async function writeNodePeerEntry(root, name, expected) {
+  const files = await writeEntry(root, name, { expected, fakeJet: fakeJetSource({ expected }) });
+  await fs.mkdir(path.join(files.entryDir, "node"), { recursive: true });
+  await fs.writeFile(path.join(files.entryDir, "node", "main.mjs"), `process.stdout.write(${JSON.stringify(expected)});\n`);
+  return { ...files, entry: { name, mode: "batch", languages: ["jet", "node"], spec: { args: [] } } };
+}
+
+test("a Jet-only run leaves the peer rows unmeasured and a merge takes them from the earlier run", stagedEntryTestOptions, async () => {
+  await withScratch("languages-merge", async (root) => {
+    const { entryDir, jetBin, entry } = await writeNodePeerEntry(root, "languages-merge-fixture", "ok\n");
+    const earlier = await stageEntry(entryDir, entry, path.join(root, "full"), jetBin, 1, true);
+    assert.equal(earlier.status, "ok");
+    assert.equal(earlier.rows.node.status, "ok");
+
+    const jetOnly = await stageEntry(entryDir, entry, path.join(root, "jet-only"), jetBin, 1, true, null, new Set(["jet"]));
+    assert.equal(jetOnly.rows.jet.status, "ok");
+    assert.equal(jetOnly.rows.node.status, "unavailable");
+    assert.equal(jetOnly.rows.node.not_measured, true);
+    assert.equal(jetOnly.rows.node.runtime, undefined);
+    assert.equal(jetOnly.status, "broken");
+
+    const merged = mergeEarlierResult(jetOnly, earlier, { run_id: "earlier-run" });
+    assert.equal(merged.status, "ok");
+    assert.equal(merged.rows.jet, jetOnly.rows.jet);
+    assert.equal(merged.rows.node.carried_from, "earlier-run");
+    assert.deepEqual(merged.rows.node.metrics, earlier.rows.node.metrics);
+    assert.equal(merged.comparisons.node.status, "ok");
+    assert.equal(merged.jet_tiers, jetOnly.jet_tiers);
+  });
+});
+
+test("a merge carries no row whose program changed since the earlier run, and a peer-only run carries Jet's tiers", stagedEntryTestOptions, async () => {
+  await withScratch("languages-stale", async (root) => {
+    const { entryDir, jetBin, entry } = await writeNodePeerEntry(root, "languages-stale-fixture", "ok\n");
+    const earlier = await stageEntry(entryDir, entry, path.join(root, "full"), jetBin, 1, true);
+    assert.equal(earlier.status, "ok");
+
+    const nodeOnly = await stageEntry(entryDir, entry, path.join(root, "node-only"), jetBin, 1, true, null, new Set(["node"]));
+    assert.equal(nodeOnly.rows.jet.not_measured, true);
+    assert.ok(Object.values(nodeOnly.jet_tiers).every((tier) => tier.not_measured === true && tier.status === "unavailable"));
+    const carried = mergeEarlierResult(nodeOnly, earlier, { run_id: "earlier-run" });
+    assert.equal(carried.status, "ok");
+    assert.equal(carried.rows.jet.carried_from, "earlier-run");
+    assert.deepEqual(Object.keys(carried.jet_tiers), Object.keys(earlier.jet_tiers));
+    assert.ok(Object.values(carried.jet_tiers).every((tier) => tier.carried_from === "earlier-run" && tier.status === "ok"));
+
+    await fs.appendFile(path.join(entryDir, "node", "main.mjs"), "// edited after the earlier run\n");
+    const jetOnly = await stageEntry(entryDir, entry, path.join(root, "jet-only"), jetBin, 1, true, null, new Set(["jet"]));
+    const stale = mergeEarlierResult(jetOnly, earlier, { run_id: "earlier-run" });
+    assert.equal(stale.rows.node.status, "unavailable");
+    assert.equal(stale.rows.node.carried_from, undefined);
+    assert.match(stale.rows.node.reason, /not carried: the node program changed since the merged run earlier-run/);
+    assert.equal(stale.status, "broken");
+
+    const missing = mergeEarlierResult(jetOnly, null, { run_id: "earlier-run" });
+    assert.match(missing.rows.node.reason, /the merged run earlier-run has no languages-stale-fixture entry/);
+  });
+});
+
+test("the bun standings row runs the entry's node program under bun", stagedEntryTestOptions, async () => {
+  await withScratch("bun-row", async (root) => {
+    const { entryDir, jetBin, entry } = await writeNodePeerEntry(root, "bun-row-fixture", "ok\n");
+    // The program answers only under bun, so a pass proves bun ran it.
+    await fs.writeFile(path.join(entryDir, "node", "main.mjs"), "process.stdout.write(typeof Bun === 'undefined' ? 'node\\n' : 'ok\\n');\n");
+    const result = await stageEntry(entryDir, { ...entry, languages: ["jet"] }, path.join(root, "run"), jetBin, 1, true, { peers: ["bun"], ceiling: null });
+    const bun = result.standings_rows.bun;
+    assert.equal(bun.status, "ok", bun.reason);
+    assert.deepEqual(bun.command, ["bun", "main.mjs"]);
+    assert.equal(bun.provenance.source, "node/main.mjs");
+    assert.equal(bun.provenance.base_language, "bun");
   });
 });
