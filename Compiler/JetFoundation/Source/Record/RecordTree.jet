@@ -16,23 +16,30 @@
 // An item, the unit of a row and of a node, is a tag byte and its payload,
 // every integer an unsigned LEB128 `uvarint` in its minimal form:
 //
-//   0 null, 1 false, 2 true
+//   0 null, 1 false, 2 true (no payload)
 //   3 int: zigzag uvarint, for an int in the i64 range
 //   4 float: zigzag uvarint of its IEEE 754 binary64 bits
 //   5 text: uvarint string id
 //   6 bytes: uvarint length, the bytes
 //   7 array: uvarint count, count items
-//   8 object: uvarint shape id, one item per key of the shape
+//   8 object: uvarint shape id, the payload of each value, in key order
 //   9 node: uvarint node id
 //   10 wide int: an int past the i64 range (a u64 above i64's maximum, or
 //      a wider Int), as core.encoding.cbor's bignum: 0 for n >= 0 and 1
 //      below, the uvarint length of the magnitude (n, or -1 - n below zero)
 //      and its big-endian bytes with no leading zero
+//   11 typed array: uvarint count, the tag its items share (one with a
+//      payload), then each item's payload
+//
+// An object's shape names its keys and the tag of each value, so its values
+// are payloads alone: a null or bool value takes no byte at all. Objects of
+// one key list with other value tags have shapes of their own.
 //
 // Each of the three tables is two `Bytes` elements of one record section:
 // the end of each entry as a little-endian u32 (entry `n` starts where entry
-// `n - 1` ends), then the entries back to back. A shape entry is its key
-// string ids (uvarints). The node table's entry is a block of
+// `n - 1` ends), then the entries back to back. A shape entry is, per key,
+// its uvarint string id and its value's tag byte. The writer gives the most
+// written shapes the smallest ids. The node table's entry is a block of
 // RECORD_TREE_NODE_BLOCK nodes (the last block may hold fewer), node `n` the
 // `n % RECORD_TREE_NODE_BLOCK`th of block `n / RECORD_TREE_NODE_BLOCK`, each
 // node its item's uvarint length and its item, so a reader steps over the
@@ -62,6 +69,7 @@ RECORD_TREE_ARRAY: 7
 RECORD_TREE_OBJECT: 8
 RECORD_TREE_NODE: 9
 RECORD_TREE_WIDE_INT: 10
+RECORD_TREE_TYPED_ARRAY: 11
 
 // A row nests at most this deep: a checked row nests as deep as its source
 // does (core.encoding.cbor's own depth ceiling).
@@ -264,12 +272,26 @@ RecordTreeTables: struct {
 
 // Where each interned node goes: its id in the node table when it is stored
 // there, else -1 (written in place); the stored nodes in stored id order;
+// how many times each node's entry is written (once when it is stored);
 // each interned string's written id; and the strings in written id order.
 RecordTreeLayout: struct {
     stored: [Int]
     order: [Int]
+    writes: [Int]
     strings: [Int]
     string_order: [Int]
+}
+
+// The typed shapes of a layout: each object node's written shape id and
+// each array node's shared item tag (-1 for another node, or an array whose
+// items' tags differ or have no payload); the typed shapes interned as
+// their key-list shape id (uvarint) and value tags (a byte each), and their
+// interned ids in written id order, the most written first.
+RecordTreeTyping: struct {
+    shapes: [Int]
+    items: [Int]
+    table: RecordTreeTable
+    order: [Int]
 }
 
 // The tables of `writer` and the rows `sections` (each section's rows from
@@ -278,12 +300,13 @@ RecordTreeLayout: struct {
 record_tree_tables: fn(writer: &&RecordTreeWriter, sections: [[[U8]]]) -> RecordTreeTables Never! {
     if writer.problem != None -> return RecordTreeTables{strings: [RecordValue]{}, shapes: [RecordValue]{}, nodes: [RecordValue]{}, rows: [[RecordValue]]{}, problem: writer.problem.move()}
     layout: record_tree_layout(writer, sections)
+    typing: record_tree_typing(writer, layout)
     node_ends := [Int]{}
     node_data := [U8]{}
     loop (position, id) in layout.order {
         if position > 0 && position % RECORD_TREE_NODE_BLOCK == 0 -> node_ends.push(node_data.len())
         entry := [U8]{}
-        record_tree_emit_node(writer, layout, id, entry)
+        record_tree_emit_node(writer, layout, typing, id, true, entry)
         record_put_uvarint(node_data, entry.len())
         node_data.extend(entry)
     }
@@ -293,16 +316,22 @@ record_tree_tables: fn(writer: &&RecordTreeWriter, sections: [[[U8]]]) -> Record
         written := [RecordValue]{}
         loop row in section {
             out := [U8]{}
-            record_tree_emit_items(writer, layout, row, 0, 1, out)
+            record_tree_emit_items(writer, layout, typing, row, 0, 1, true, out)
             written.push(RecordValue.Bytes{value: out})
         }
         rows.push(written)
     }
     shape_ends := [Int]{}
     shape_data := [U8]{}
-    loop id in 0..<writer.shapes.ends.len() {
-        keys := RecordCursor{at: record_tree_table_start(writer.shapes, id), end: writer.shapes.ends[id], problem: None}
-        loop keys.at < keys.end -> record_put_uvarint(shape_data, layout.strings[record_read_uvarint(writer.shapes.bytes, keys)])
+    loop typed in typing.order {
+        tags := RecordCursor{at: record_tree_table_start(typing.table, typed), end: typing.table.ends[typed], problem: None}
+        shape: record_read_uvarint(typing.table.bytes, tags)
+        keys := RecordCursor{at: record_tree_table_start(writer.shapes, shape), end: writer.shapes.ends[shape], problem: None}
+        loop keys.at < keys.end {
+            record_put_uvarint(shape_data, layout.strings[record_read_uvarint(writer.shapes.bytes, keys)])
+            shape_data.push(typing.table.bytes[tags.at])
+            tags.at += 1
+        }
         shape_ends.push(shape_data.len())
     }
     string_ends := [Int]{}
@@ -366,10 +395,12 @@ record_tree_layout: fn(writer: RecordTreeWriter, sections: [[[U8]]]) -> RecordTr
     // item it holds; parents first (a parent's id is above its children's).
     // A string's uses count each text item so written and each shape key.
     items := (loop id in 0..<count -> writer.uses[id])
+    writes := (loop _ in 0..<count -> 0)
     texts := (loop _ in 0..<writer.strings.ends.len() -> 0)
     loop step in 0..<count {
         id: count - 1 - step
         written: if stored[id] >= 0 -> 1 else -> items[id]
+        writes[id] = written
         start: record_tree_table_start(writer.nodes, id)
         loop child in record_tree_node_children(writer, start, writer.nodes.ends[id]) -> items[child] = items[child] + written - 1
         record_tree_count_texts(writer, start, writer.nodes.ends[id], written, texts)
@@ -403,7 +434,7 @@ record_tree_layout: fn(writer: RecordTreeWriter, sections: [[[U8]]]) -> RecordTr
     }
     strings := (loop _ in 0..<texts.len() -> 0)
     loop (written, id) in string_order -> strings[id] = written
-    RecordTreeLayout{stored: stored, order: order, strings: strings, string_order: string_order}
+    RecordTreeLayout{stored: stored, order: order, writes: writes, strings: strings, string_order: string_order}
 }
 
 // Adds `written` to `texts` at each string id a text item of node entry
@@ -467,22 +498,104 @@ record_tree_skip_scalar: fn(bytes: [U8], cursor: &RecordCursor) Never! {
     if kind == RECORD_TREE_INT || kind == RECORD_TREE_FLOAT || kind == RECORD_TREE_TEXT -> _: record_read_uvarint(bytes, cursor)
 }
 
-// Node `id`'s entry with each child in place or named by its stored id.
-record_tree_emit_node: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, id: Int, out: &[U8]) Never! {
+// Each node's typed shape or shared item tag, in id order (a child's id is
+// below its parent's, so its written tag is known first), and the typed
+// shapes' ids by how often they are written.
+record_tree_typing: fn(writer: RecordTreeWriter, layout: RecordTreeLayout) -> RecordTreeTyping Never! {
+    count: writer.uses.len()
+    table := record_tree_table()
+    shapes := [Int]{}
+    items := [Int]{}
+    uses := [Int]{}
+    loop id in 0..<count {
+        cursor := RecordCursor{at: record_tree_table_start(writer.nodes, id), end: writer.nodes.ends[id], problem: None}
+        kind: record_read_byte(writer.nodes.bytes, cursor)
+        head: record_read_uvarint(writer.nodes.bytes, cursor)
+        tags: record_tree_item_tags(writer, layout, items, cursor, if kind == RECORD_TREE_OBJECT -> writer.shape_keys[head] else -> head)
+        if kind == RECORD_TREE_OBJECT {
+            key := [U8]{}
+            record_put_uvarint(key, head)
+            loop written in tags -> key.push(U8{written})
+            known: uses.len()
+            typed: record_tree_table_intern(table, key)
+            if typed == known -> uses.push(0)
+            uses[typed] = uses[typed] + layout.writes[id]
+            shapes.push(typed)
+            items.push(-1)
+            next
+        }
+        // A null or bool item has no payload, so its typed array would hold
+        // only a count.
+        shared := if tags.len() >= 2 && tags[0] > RECORD_TREE_TRUE -> tags[0] else -> -1
+        loop written in tags {
+            if written != shared -> shared = -1
+        }
+        shapes.push(-1)
+        items.push(shared)
+    }
+    order := (loop typed in 0..<uses.len() -> typed)
+    order.sort_by(fn(left: Int, right: Int) { (uses[right] <=> uses[left]).then(left <=> right) })
+    ranks := (loop _ in 0..<uses.len() -> 0)
+    loop (rank, typed) in order -> ranks[typed] = rank
+    loop id in 0..<count {
+        if shapes[id] >= 0 -> shapes[id] = ranks[shapes[id]]
+    }
+    RecordTreeTyping{shapes: shapes, items: items, table: table, order: order}
+}
+
+// The written tag of each of the `count` items of a node entry from
+// `cursor`, `items` holding the shared item tag of each node below it.
+record_tree_item_tags: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, items: [Int], cursor: &RecordCursor, count: Int) -> [Int] Never! {
+    bytes: writer.nodes.bytes
+    tags := [Int]{}
+    loop _ in 0..<count {
+        item: record_read_byte(bytes, cursor)
+        if item == RECORD_TREE_NODE {
+            child: record_read_uvarint(bytes, cursor)
+            tags.push(if {
+                layout.stored[child] >= 0 -> RECORD_TREE_NODE
+                items[child] >= 0 -> RECORD_TREE_TYPED_ARRAY
+                else -> Int{bytes[record_tree_table_start(writer.nodes, child)]}
+            })
+        } else {
+            cursor.at -= 1
+            record_tree_skip_scalar(bytes, cursor)
+            tags.push(item)
+        }
+    }
+    tags
+}
+
+// Node `id`'s item with each child in place or named by its stored id; its
+// tag only when `tagged` (a value of an object, or an item of a typed
+// array, is its payload alone).
+record_tree_emit_node: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, typing: RecordTreeTyping, id: Int, tagged: Bool, out: &[U8]) Never! {
     start: record_tree_table_start(writer.nodes, id)
     bytes: writer.nodes.bytes
     cursor := RecordCursor{at: start, end: writer.nodes.ends[id], problem: None}
     kind: record_read_byte(bytes, cursor)
-    out.push(U8{kind})
     head: record_read_uvarint(bytes, cursor)
+    if kind == RECORD_TREE_OBJECT {
+        if tagged -> out.push(U8{RECORD_TREE_OBJECT})
+        record_put_uvarint(out, typing.shapes[id])
+        return record_tree_emit_items(writer, layout, typing, bytes, cursor.at, writer.shape_keys[head], false, out)
+    }
+    shared: typing.items[id]
+    if shared < 0 {
+        if tagged -> out.push(U8{RECORD_TREE_ARRAY})
+        record_put_uvarint(out, head)
+        return record_tree_emit_items(writer, layout, typing, bytes, cursor.at, head, true, out)
+    }
+    if tagged -> out.push(U8{RECORD_TREE_TYPED_ARRAY})
     record_put_uvarint(out, head)
-    count: if kind == RECORD_TREE_OBJECT -> writer.shape_keys[head] else -> head
-    record_tree_emit_items(writer, layout, bytes, cursor.at, count, out)
+    out.push(U8{shared})
+    record_tree_emit_items(writer, layout, typing, bytes, cursor.at, head, false, out)
 }
 
 // `count` items of `bytes` from `at`, each node item written in place or
-// as its stored id and each text item naming its written string id.
-record_tree_emit_items: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, bytes: [U8], at: Int, count: Int, out: &[U8]) Never! {
+// as its stored id and each text item naming its written string id; each
+// with its tag only when `tagged`.
+record_tree_emit_items: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, typing: RecordTreeTyping, bytes: [U8], at: Int, count: Int, tagged: Bool, out: &[U8]) Never! {
     cursor := RecordCursor{at: at, end: bytes.len(), problem: None}
     loop _ in 0..<count {
         start: cursor.at
@@ -491,18 +604,19 @@ record_tree_emit_items: fn(writer: RecordTreeWriter, layout: RecordTreeLayout, b
             child: record_read_uvarint(bytes, cursor)
             stored: layout.stored[child]
             if stored < 0 {
-                record_tree_emit_node(writer, layout, child, out)
+                record_tree_emit_node(writer, layout, typing, child, tagged, out)
             } else {
-                out.push(U8{RECORD_TREE_NODE})
+                if tagged -> out.push(U8{RECORD_TREE_NODE})
                 record_put_uvarint(out, stored)
             }
         } else if item == RECORD_TREE_TEXT {
-            out.push(U8{RECORD_TREE_TEXT})
+            if tagged -> out.push(U8{RECORD_TREE_TEXT})
             record_put_uvarint(out, layout.strings[record_read_uvarint(bytes, cursor)])
         } else {
             cursor.at = start
             record_tree_skip_scalar(bytes, cursor)
-            out.extend(bytes[start..<cursor.at])
+            from: if tagged -> start else -> start + 1
+            out.extend(bytes[from..<cursor.at])
         }
     }
 }
@@ -666,12 +780,17 @@ record_tree_string: fn(bytes: [U8], view: RecordTreeView, id: Int, cursor: &Reco
 }
 
 record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, depth: Int) -> Dyn Never! {
+    kind: record_read_byte(bytes, cursor)
+    if cursor.problem != None -> return Dyn.Null
+    record_tree_read_as(bytes, view, kind, cursor, depth)
+}
+
+// The payload at `cursor` of an item tagged `kind`.
+record_tree_read_as: fn(bytes: [U8], view: RecordTreeView, kind: Int, cursor: &RecordCursor, depth: Int) -> Dyn Never! {
     if depth > RECORD_TREE_MAX_DEPTH {
         record_malformed(cursor, "tree nesting is too deep")
         return Dyn.Null
     }
-    kind: record_read_byte(bytes, cursor)
-    if cursor.problem != None -> return Dyn.Null
     if kind == {
         RECORD_TREE_NULL -> Dyn.Null
         RECORD_TREE_FALSE -> Dyn.Bool(false)
@@ -692,12 +811,25 @@ record_tree_read: fn(bytes: [U8], view: RecordTreeView, cursor: &RecordCursor, d
             }
             Dyn.Array(items)
         }
+        RECORD_TREE_TYPED_ARRAY -> {
+            count: record_read_len(bytes, cursor)
+            shared: record_read_byte(bytes, cursor)
+            if cursor.problem == None && shared <= RECORD_TREE_TRUE -> record_malformed(cursor, "tree typed array's items have no payload")
+            items := [Dyn]{}
+            loop _ in 0..<count {
+                if cursor.problem != None -> break
+                items.push(record_tree_read_as(bytes, view, shared, cursor, depth + 1))
+            }
+            Dyn.Array(items)
+        }
         RECORD_TREE_OBJECT -> {
             keys := record_tree_entry(bytes, view.shapes, record_read_uvarint(bytes, cursor), cursor)
             entries := [(key: String, value: Dyn)]{}
             loop keys.at < keys.end && keys.problem == None && cursor.problem == None {
                 key: record_tree_string(bytes, view, record_read_uvarint(bytes, keys), cursor)
-                entries.push((key: key, value: record_tree_read(bytes, view, cursor, depth + 1)))
+                value_kind: record_read_byte(bytes, keys)
+                if keys.problem != None -> break
+                entries.push((key: key, value: record_tree_read_as(bytes, view, value_kind, cursor, depth + 1)))
             }
             if cursor.problem == None && keys.problem != None -> cursor.problem = keys.problem.move()
             Dyn.Object(entries)

@@ -131,6 +131,28 @@ record_tree_test_reader: fn(tables: &&RecordTreeTables, broken: Bool) -> RecordR
     assert_eq(record_tree_difference(read.value ?? panic("the row reads"), rows[0]), None)
 }
 
+#Test("a record tree writes an object's values as payloads alone and an array of one tag as a typed array") {
+    rows: [Dyn]{
+        Dyn.Object([(key: String, value: Dyn)]{(key: "flag", value: Dyn.Bool(true)), (key: "none", value: Dyn.Null)}),
+        Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Int(2), Dyn.Int(3)}),
+        // Items with no payload stay a plain array.
+        Dyn.Array([Dyn]{Dyn.Bool(true), Dyn.Bool(false)}),
+    }
+    tables := record_tree_test_tables(rows)
+    assert_eq(tables.problem, None)
+    // The shape names both values' tags, so the object is its shape id.
+    if tables.rows[0][0] == .Bytes(object) -> assert_eq(object, [U8]{8, 0}) else -> panic("a tree row is bytes")
+    if tables.rows[0][1] == .Bytes(ints) -> assert_eq(ints, [U8]{11, 3, 3, 2, 4, 6}) else -> panic("a tree row is bytes")
+    if tables.rows[0][2] == .Bytes(flags) -> assert_eq(flags, [U8]{7, 2, 2, 1}) else -> panic("a tree row is bytes")
+    reader: record_tree_test_reader(tables.move(), false)
+    view: record_tree_view(reader, 2, 3, 4).view ?? panic("the tree view opens")
+    loop (index, row) in rows {
+        read: record_tree_row(reader, view, 1, index)
+        assert_eq(read.problem, None)
+        assert_eq(record_tree_difference(read.value ?? panic("row {index} reads"), row), None)
+    }
+}
+
 #Test("a record tree difference names the first path where two trees differ") {
     rows: record_tree_test_rows()
     loop row in rows -> assert_eq(record_tree_difference(row, row), None)
