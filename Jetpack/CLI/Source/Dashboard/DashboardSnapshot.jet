@@ -137,6 +137,13 @@ cli_dashboard_send_result: fn(sender: Sender<DashboardLoadResult>, result: &&Das
     sender.send(result)
 }
 
+// The background load task: one snapshot load, sent to its loader. The load
+// reads through `ledger`, a copy of the owner sharing its locked ledger.
+cli_dashboard_load_and_send: fn(sender: Sender<DashboardLoadResult>, ledger: &&StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> {
+    verification := ledger
+    cli_dashboard_send_result(sender, cli_dashboard_load_snapshot(verification)).drop("a superseded load has no reader")
+}
+
 // One typed character: a single byte keeps its raw meaning (ESC, Ctrl-C,
 // Ctrl-D), anything wider is a character key.
 cli_dashboard_key_for_text: fn(text: String) -> DashboardKey Never! {
@@ -187,8 +194,8 @@ DashboardLoader: struct {
         (sender, receiver): channel<DashboardLoadResult>(capacity: 1)
         // A borrowed owner cannot cross into the detached task; a copy of the
         // owner shares its locked verification ledger.
-        ledger := verification.copy()
-        task &&ledger { cli_dashboard_send_result(sender, cli_dashboard_load_snapshot(ledger)).drop("a superseded load has no reader") }
+        ledger: verification.copy()
+        task cli_dashboard_load_and_send(sender, ledger)
         DashboardLoader{result: receiver, held: None}
     }
 
