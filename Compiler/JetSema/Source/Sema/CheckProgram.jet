@@ -360,7 +360,7 @@ SemaComptimeItemSource: struct {
     // A FieldDefault of a struct that bakes its defaults (Codable, Decode,
     // Encode, CLI): a default that cannot be evaluated reports E2414.
     baked_default: Bool{false}
-    // An immutable module-level `NAME: expr` whose value is not literal data:
+    // A module-level `NAME: expr` or `name := expr` whose value is not literal data:
     // computed while building when its evaluation is pure and succeeds, and
     // refused otherwise (E0643, jet_driver_module_value_refused).
     module_value: Bool{false}
@@ -8921,8 +8921,8 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
     loop constant in source_module.constants {
         if sema_output_metadata_binding(constant.declaration) -> next
         if constant.declaration.ct != None -> next
-        // Registration reports a mutable or `#Persist` binding whose value is
-        // not a literal (E0622); it is never evaluated.
+        // Registration reports a `#Persist` binding whose value is not a
+        // literal (E0622); it is never evaluated.
         module_value: sema_checked_module_value_computed(constant.declaration)
         if !module_value && !sema_checked_module_value_evaluates(constant.declaration) -> next
         expression := constant.declaration.value

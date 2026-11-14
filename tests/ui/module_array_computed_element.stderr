@@ -1,8 +1,8 @@
-Error [jet.ModuleGlobalNotLiteral]: A module binding's value must be a literal
-  --> tests/ui/module_array_computed_element.jet:1:14
+Error [jet.ModuleGlobalNotLiteral]: A `#Persist` binding's value must be a literal
+  --> tests/ui/module_array_computed_element.jet:1:23
     |
-  1 | bad_table := [Int]{1 + 2}
-    |              ^^^^^^^^^^^^
- Why: A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`
- Fix: Use an integer, float, or bool literal, or keep struct and list values in an unmarked `:` constant
+  1 | #Persist bad_table := [Int]{1 + 2}
+    |                       ^^^^^^^^^^^^
+ Why: A `#Persist` module global is hot-reload state, which every execution tier initializes from a scalar literal before `run: fn`
+ Fix: Use an integer, float, or bool literal, or drop `#Persist` so the build computes the global's starting value
 More: jet-lang.dev/e/E0622

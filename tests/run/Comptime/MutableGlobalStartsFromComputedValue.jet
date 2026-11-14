@@ -1,0 +1,55 @@
+// A mutable module global starts from any value the build computes: a
+// `[U8]` from a call, a `[String]` and a map literal, and a struct holding a
+// `[U8]`. The program starts holding each as data, with no copy at startup,
+// and every assignment replaces the global's value for every function. One
+// task runs, so its plain writes sit in `#Unsafe`.
+Sprite: struct {
+    pixels: [U8]
+    name: String
+}
+
+ramp: fn(count: Int, step: Int) -> [U8] {
+    bytes := [U8]{}
+    loop index in 0..<count -> bytes.push(U8.from_int(index * step) ?? U8{0})
+    bytes
+}
+
+with_byte: fn(bytes: [U8], at: Int, value: U8) -> [U8] {
+    changed := [U8]{}
+    loop (index, byte) in bytes -> changed.push(if index == at -> value else -> byte)
+    changed
+}
+
+frame := ramp(6, 40)
+
+names := [String]{"imp", "demon"}
+
+scores := [String:Int]{"imp": 1, "demon": 3}
+
+player := Sprite{pixels: ramp(3, 100), name: "marine"}
+
+paint: fn(at: Int, value: U8) {
+    #Unsafe("one task writes the frame") { frame = with_byte(frame, at, value) }
+}
+
+run: fn() {
+    print(frame)
+    print(names)
+    print(scores["demon"])
+    print(player.pixels)
+    print(player.name)
+    loop tick in 0..<3 -> paint(tick, U8.from_int(250 - tick) ?? U8{0})
+    print(frame)
+    #Unsafe("one task writes the globals") {
+        frame = with_byte(frame, 5, U8{7})
+        print(frame)
+        names = [String]{names[1], "baron"}
+        print(names)
+        scores = [String:Int]{"imp": scores["imp"] + 10}
+        print(scores["imp"])
+        print(scores.len())
+        player = Sprite{pixels: with_byte(player.pixels, 0, U8{9}), name: "{player.name}2"}
+        print(player.pixels)
+        print(player.name)
+    }
+}

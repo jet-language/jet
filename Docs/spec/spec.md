@@ -358,11 +358,18 @@ an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
 At ordinary file scope, `name: value` declares an immutable module global and
-`name := value` declares a mutable module global. A mutable or `#Persist`
-global's initializer is a tier-stable scalar literal; any other initializer is
-E0622. An immutable global's initializer is any expression, computed while
-building and stored in the program, and every read is an ordinary copy
-(D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
+`name := value` declares a mutable module global. Either initializer is any
+expression, computed while building and stored in the program
+(D-MODULE-VALUE1, D-MODULE-BUILD1). Every read of an immutable global is an
+ordinary copy. A mutable global starts from its computed value, which may be
+any storable value, `[U8]`, `[T]`, maps (tuple keys included) and structs
+holding them included: the program starts holding it as data, with no copy at
+startup, and an assignment replaces it (D-JAI-COMPTIME1=A). A starting value
+the build can't lay out as data (a runtime handle such as a `Shared` cell, or
+an exact Int beyond a machine word) is built once, on the global's first use,
+from the value computed while building. A
+`#Persist` global's initializer is a tier-stable scalar literal; any other
+initializer is E0622. No code runs before `run: fn`: an
 initializer that stops, reaches the outside world, reads the task context
 (`context.<field>`, itself or through any function it calls), or can't run
 while building is a build error (E0643), the same on every tier, and so are
@@ -370,13 +377,15 @@ initializers that read each other in a cycle, one that reads itself included
 (E0338). A context read would see the build's root context, not the reader's,
 so no such value is ever stored. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
-literal data, and every read shares the one cell. Only an explicit
+literal data, and every read shares the one cell; a mutable
+`name := Shared{value}` global holds such a cell until an assignment replaces
+it. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
-checked scalar type in module storage (D-BIND-BARE1); the inner value must still
-be literal data, not a call or arithmetic expression.
+checked scalar type in module storage (D-BIND-BARE1); in a `#Persist` global the
+inner value must still be literal data, not a call or arithmetic expression.
 Inside a function, the same spellings are local bindings. A `#run { … }` inside a function runs
 while building, before any call, so it reads the function's prepared `#run` locals but not its
 run-time locals or parameters (E0640).

@@ -67,7 +67,9 @@ jet_eval_ir_comptime_build: fn(functions: &&[FnBody], decls: DeclTable, symbols:
 jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: &&[FnBody], decls: DeclTable, symbols: SymbolTable, item_keys: [String], landed: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], taken: &[String:Bool]) -> JetEvalIRComptime {
     program := jet_eval_ir_program_take(declared)
     program.comptime_values = true
-    if symbol_table_count(program.symbols) != symbol_table_count(symbols) -> program.symbols = symbols.copy()
+    if symbol_table_count(program.symbols) != symbol_table_count(symbols) {
+        program.symbols = symbols.copy()
+    }
     loop definition in landed.move() -> ir_program_put_constant(program, definition, taken)
     ir_program_bind(program, functions, decls)
     ir_foreign_index(program, foreign, decls)
@@ -112,7 +114,9 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
         .Int -> {
             value: jet_eval_ir_int_value(s, word) ?? return None
             // An Int outside 64 bits is a BigInt decimal.
-            if !jet_eval_ir_in_range(value, 64, true) -> return Val(TComptimeValue.BigInt{decimal: "{value}"})
+            if !jet_eval_ir_in_range(value, 64, true) {
+                return Val(TComptimeValue.BigInt{decimal: "{value}"})
+            }
             return Val(TComptimeValue.Int{value: value})
         }
         .Char -> return Val(TComptimeValue.Char{value: word})
@@ -125,7 +129,9 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
         .Word -> {
             // An inline Option: the niche word is None, any other its payload's.
             if checked == .Option(inner) && ir_option_inline(m, row) {
-                if word == IR_OPTION_INT_NONE -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                if word == IR_OPTION_INT_NONE {
+                    return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                }
                 inner_row: ir_value_type(m, p, inner) ?? return jet_eval_ir_transport_fail(s, checked)
                 value: jet_eval_ir_data(m, p, s, word, inner_row) ?? return None
                 return Val(TComptimeValue.Present{value: value})
@@ -145,7 +151,9 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
         .Pointer -> {
             if checked == .Option(inner) {
                 inner_row: ir_value_type(m, p, inner) ?? return jet_eval_ir_transport_fail(s, checked)
-                if word == 0 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                if word == 0 {
+                    return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                }
                 payload: jet_eval_ir_member_word(m, s, word, 0, inner_row) ?? return None
                 value: jet_eval_ir_data(m, p, s, payload, inner_row) ?? return None
                 return Val(TComptimeValue.Present{value: value})
@@ -243,7 +251,7 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 // A hashed Map keeps entries it gained after its last
                 // rebuild out of key order.
                 if ir_map_row_hashed(m, p, row) {
-                    order: ir_static_map_order(shape.kind, entries) ?? return jet_eval_ir_transport_fail(s, checked)
+                    order: ir_static_map_order(m, p, shape, entries) ?? return jet_eval_ir_transport_fail(s, checked)
                     ordered := [TComptimeMapEntry]{}
                     loop at in order -> ordered.push(entries[at].copy())
                     return Val(TComptimeValue.Map{entries: ordered})
@@ -258,7 +266,9 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
             name: if checked == {
                 .Named(name) -> name
                 .Apply(name, _) -> name
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return jet_eval_ir_transport_fail(s, checked) }
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
+                    return jet_eval_ir_transport_fail(s, checked)
+                }
             }
             definition: ir_type_def(p, name) ?? return jet_eval_ir_transport_fail(s, checked)
             members: ir_struct_members(m, p, definition, ir_type_args(checked)) ?? return jet_eval_ir_transport_fail(s, checked)
@@ -299,29 +309,45 @@ jet_eval_ir_err_data: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int)
         if has_span != 0 {
             start: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_START}) ?? return None
             end: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_END}) ?? return None
-            source_span = TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
-                {name: "start", value: TComptimeValue.Int{value: start}},
-                {name: "end", value: TComptimeValue.Int{value: end}},
-            }}}
+            source_span = TComptimeValue.Present{
+                value: TComptimeValue.Struct{
+                    type_name: "__jet_ErrorSpan",
+                    fields: [TComptimeField]{
+                        {name: "start", value: TComptimeValue.Int{value: start}},
+                        {name: "end", value: TComptimeValue.Int{value: end}},
+                    },
+                },
+            }
         }
-        details = TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
-            {name: "variant", value: variant},
-            {name: "fields", value: fields},
-            {name: "source_span", value: source_span},
-        }}}
+        details = TComptimeValue.Present{
+            value: TComptimeValue.Struct{
+                type_name: "__jet_ErrorDetails",
+                fields: [TComptimeField]{
+                    {name: "variant", value: variant},
+                    {name: "fields", value: fields},
+                    {name: "source_span", value: source_span},
+                },
+            },
+        }
     }
-    metadata: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
-        {name: "typed_identity", value: identity},
-        {name: "context_frames", value: frames},
-        {name: "conversion_history", value: conversions},
-        {name: "details", value: details},
-    }}
-    Val(TComptimeValue.Struct{type_name: type_name(ty), fields: [TComptimeField]{
-        {name: "message", value: message},
-        {name: "code", value: code},
-        {name: "cause", value: cause},
-        {name: "__jet___memo_error_metadata", value: metadata},
-    }})
+    metadata: TComptimeValue.Struct{
+        type_name: "__jet_ErrorMetadata",
+        fields: [TComptimeField]{
+            {name: "typed_identity", value: identity},
+            {name: "context_frames", value: frames},
+            {name: "conversion_history", value: conversions},
+            {name: "details", value: details},
+        },
+    }
+    Val(TComptimeValue.Struct{
+        type_name: type_name(ty),
+        fields: [TComptimeField]{
+            {name: "message", value: message},
+            {name: "code", value: code},
+            {name: "cause", value: cause},
+            {name: "__jet___memo_error_metadata", value: metadata},
+        },
+    })
 }
 
 // The String whose header word is at byte `offset` of `base`.
@@ -334,7 +360,9 @@ jet_eval_ir_err_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptim
 // The `String?` whose header word (0: none) is at byte `offset` of `base`.
 jet_eval_ir_err_optional_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
     header: jet_eval_ir_read_word(s, base + Int{offset}) ?? return None
-    if header == 0 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}})
+    if header == 0 {
+        return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}})
+    }
     text: jet_eval_ir_text(s, header) ?? return None
     Val(TComptimeValue.Present{value: TComptimeValue.String{value: text}})
 }
@@ -388,9 +416,13 @@ jet_eval_ir_err_word: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, value: TCom
     identity: jet_eval_ir_err_member(s, metadata, "typed_identity") ?? return None
     if !jet_eval_ir_err_put_optional_text(s, error + Int{ERR_IDENTITY}, identity) -> return None
     frames: jet_eval_ir_err_member(s, metadata, "context_frames") ?? return None
-    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, frames, [String]{"text", "file"}, Val("line")) -> return None
+    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, frames, [String]{"text", "file"}, Val("line")) {
+        return None
+    }
     conversions: jet_eval_ir_err_member(s, metadata, "conversion_history") ?? return None
-    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, conversions, [String]{"source", "target"}, None) -> return None
+    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, conversions, [String]{"source", "target"}, None) {
+        return None
+    }
     details: jet_eval_ir_err_member(s, metadata, "details") ?? return None
     if details == .Failed(_) -> return Val(error)
     holder: jet_eval_ir_err_details(s, details) ?? return None
@@ -406,14 +438,18 @@ jet_eval_ir_err_details: fn(s: &JetEvalIRState, value: TComptimeValue) -> Int? {
     variant: jet_eval_ir_err_member(s, details, "variant") ?? return None
     if !jet_eval_ir_err_put_text(s, holder + Int{ERR_DETAILS_VARIANT}, variant) -> return None
     rows: jet_eval_ir_err_member(s, details, "fields") ?? return None
-    if !jet_eval_ir_err_put_rows(s, holder + Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, rows, [String]{"name", "value"}, None) -> return None
+    if !jet_eval_ir_err_put_rows(s, holder + Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, rows, [String]{"name", "value"}, None) {
+        return None
+    }
     located: jet_eval_ir_err_member(s, details, "source_span") ?? return None
     if located == .Failed(_) -> return Val(holder)
     bounds_value: if located == .Present(inner) -> inner else -> located
     bounds: jet_eval_ir_err_record(s, bounds_value) ?? return None
     start: jet_eval_ir_err_int(s, bounds, "start") ?? return None
     end: jet_eval_ir_err_int(s, bounds, "end") ?? return None
-    if !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_HAS_SPAN}, 8, 1) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_START}, 8, start) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_END}, 8, end) -> return None
+    if !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_HAS_SPAN}, 8, 1) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_START}, 8, start) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_END}, 8, end) {
+        return None
+    }
     Val(holder)
 }
 
@@ -477,7 +513,9 @@ jet_eval_ir_err_put_rows: fn(s: &JetEvalIRState, list: Int, stride: Int, value: 
     }
     data := 0
     if rows.len() > 0 -> data = jet_eval_native_alloc(s, rows.len() * stride, 8) ?? return false
-    if !jet_eval_ir_write(s, list, 8, rows.len()) || !jet_eval_ir_write(s, list + 8, 8, rows.len()) || !jet_eval_ir_write(s, list + 16, 8, data) -> return false
+    if !jet_eval_ir_write(s, list, 8, rows.len()) || !jet_eval_ir_write(s, list + 8, 8, rows.len()) || !jet_eval_ir_write(s, list + 16, 8, data) {
+        return false
+    }
     loop (index, row) in rows {
         fields: jet_eval_ir_err_record(s, row) ?? return false
         base: data + index * stride

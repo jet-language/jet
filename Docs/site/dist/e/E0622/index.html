@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0622</h1>
-<p>A module binding&#39;s value must be a literal</p>
+<p>A `#Persist` binding&#39;s value must be a literal</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">A module binding&#39;s value must be a literal</p>
+<p class="diag-copy what" data-registry-field="what">A `#Persist` binding&#39;s value must be a literal</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`. An immutable `:` constant may compute its value, which the build works out and stores in the program.</p>
+<p class="diag-copy why" data-registry-field="why">A `#Persist` module global is hot-reload state, which every execution tier initializes from a scalar literal before `run: fn`. A plain mutable global or an immutable `:` constant may compute its value, which the build works out and stores in the program.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use an integer, float, or bool literal, or keep a computed value in an immutable `:` constant.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use an integer, float, or bool literal, or drop `#Persist` so the build computes the global&#39;s starting value.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0622</code>: <code>tests/ui/module_array_computed_element.stderr</code>.</p>
-<pre class="diag">Error [jet.ModuleGlobalNotLiteral]: A module binding&#39;s value must be a literal
-  --&gt; tests/ui/module_array_computed_element.jet:1:14
+<pre class="diag">Error [jet.ModuleGlobalNotLiteral]: A `#Persist` binding&#39;s value must be a literal
+  --&gt; tests/ui/module_array_computed_element.jet:1:23
     |
-  1 | bad_table := [Int]{1 + 2}
-    |              ^^^^^^^^^^^^
- Why: A mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `run: fn`
- Fix: Use an integer, float, or bool literal, or keep struct and list values in an unmarked `:` constant
+  1 | #Persist bad_table := [Int]{1 + 2}
+    |                       ^^^^^^^^^^^^
+ Why: A `#Persist` module global is hot-reload state, which every execution tier initializes from a scalar literal before `run: fn`
+ Fix: Use an integer, float, or bool literal, or drop `#Persist` so the build computes the global&#39;s starting value
 More: jet-lang.dev/e/E0622
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
