@@ -1,0 +1,130 @@
+// Mutable module globals whose starting values hold an exact Int beyond a
+// machine word, or a map keyed by an enum or a struct, start from static
+// data laid out while compiling. `Tier`'s own compare orders its keys
+// (highest first), which the compile-time run applied. Only `score`, a
+// `Shared` cell, is built on first use. One task runs, so its plain writes
+// sit in `#Unsafe`.
+Shade: enum {
+    Red
+    Green
+    Blue
+}
+
+Spot: struct {
+    row: Int
+    col: Int
+}
+
+Tier: struct {
+    level: Int
+
+    impl Comparable {
+        compare: fn(self, rhs: Tier) -> Ordering {
+            if self.level > rhs.level -> return Ordering.Less
+            if self.level < rhs.level -> return Ordering.Greater
+            return Ordering.Equal
+        }
+    }
+}
+
+Count: struct {
+    hits: Int
+}
+
+shades: fn() -> [Shade:String] {
+    made := [Shade:String]{}
+    made[Shade.Blue] = "blue"
+    made[Shade.Red] = "red"
+    made
+}
+
+spots: fn() -> [Spot:Int] {
+    made := [Spot:Int]{}
+    made[Spot{row: 2, col: 1}] = 21
+    made[Spot{row: 1, col: 5}] = 15
+    made[Spot{row: 1, col: 2}] = 12
+    made
+}
+
+tiers: fn() -> [Tier:String] {
+    made := [Tier:String]{}
+    made[Tier{level: 1}] = "low"
+    made[Tier{level: 3}] = "high"
+    made[Tier{level: 2}] = "middle"
+    made
+}
+
+power: fn(base: Int, exponent: Int) -> Int {
+    result := 1
+    loop _ in 0..<exponent -> result *= base
+    result
+}
+
+far_keys: fn() -> [Int:String] {
+    made := [Int:String]{}
+    made[power(2, 65)] = "far"
+    made[0 - power(2, 66)] = "below"
+    made[3] = "near"
+    made
+}
+
+with_shade: fn(table: [Shade:String], key: Shade, value: String) -> [Shade:String] {
+    changed := table.copy()
+    changed[key] = value
+    changed
+}
+
+with_spot: fn(table: [Spot:Int], key: Spot, value: Int) -> [Spot:Int] {
+    changed := table.copy()
+    changed[key] = value
+    changed
+}
+
+with_tier: fn(table: [Tier:String], key: Tier, value: String) -> [Tier:String] {
+    changed := table.copy()
+    changed[key] = value
+    changed
+}
+
+with_far: fn(table: [Int:String], key: Int, value: String) -> [Int:String] {
+    changed := table.copy()
+    changed[key] = value
+    changed
+}
+
+huge := power(2, 70)
+
+shade_names := shades()
+
+spot_marks := spots()
+
+far_names := far_keys()
+
+tier_names := tiers()
+
+score := Shared{Count{hits: 0}}
+
+show_laid_out: fn() {
+    print(huge)
+    loop (_, name) in shade_names -> print(name)
+    loop (spot, mark) in spot_marks -> print("{spot.row} {spot.col} {mark}")
+    loop (key, name) in far_names -> print("{key} {name}")
+    loop (tier, name) in tier_names -> print("{tier.level} {name}")
+}
+
+show_shared: fn() { print(score.hits) }
+
+run: fn() {
+    show_laid_out()
+    show_shared()
+    #Unsafe("one task writes the globals") {
+        huge *= 3
+        shade_names = with_shade(shade_names, Shade.Green, "green")
+        spot_marks = with_spot(spot_marks, Spot{row: 0, col: 9}, 9)
+        far_names = with_far(far_names, power(2, 64), "edge")
+        tier_names = with_tier(tier_names, Tier{level: 5}, "top")
+        score = Shared{Count{hits: score.hits + 1}}
+    }
+    show_laid_out()
+    show_shared()
+}

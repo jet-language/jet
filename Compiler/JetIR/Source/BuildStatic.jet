@@ -15,10 +15,11 @@
 // fix-up; a position-independent image applies them as relative
 // relocations at load.
 //
-// A value the build cannot freeze (a nominal Map key, or a runtime handle)
-// keeps the constant on ir_comptime, built at each read, and module storage
-// on its start helper, built once on first use (ir_storage_start).
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value, sha256_hex]
+// A value the build cannot freeze (one holding a runtime handle, which can't
+// exist while compiling) keeps the constant on ir_comptime, built at each
+// read, and module storage on its start helper, built once on first use
+// (ir_storage_start).
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value, sha256_hex]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
@@ -203,10 +204,9 @@ ir_static_literal_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
 // (ir_static_into): a List, Map, String or box it holds is a static object,
 // which a write first copies and a drop leaves alone, so the program starts
 // holding it with no copy. Each assignment drops the value it replaces
-// (ir_storage_assign). A starting value the build cannot lay out (a Map
-// whose key order it does not reproduce, an exact Int beyond the inline
-// range, a runtime handle) leaves the row zeroed, and the first use builds
-// it there (ir_storage_start). -1 on failure.
+// (ir_storage_assign). A starting value that holds a runtime handle (a
+// `Shared` cell), which can't exist while compiling, leaves the row zeroed,
+// and the first use builds it there (ir_storage_start). -1 on failure.
 ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
     row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
     kind: m.types[row].kind
@@ -221,10 +221,9 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         cell: ir_static_new(s, size)
         // A `Shared{X}` binding's value is its payload, which a new cell
-        // holds; a static Int node could never be dropped by the cell's next
-        // write.
-        frozen := if ir_untag(definition.ty) == .Shared(_) -> false else -> ir_static_into(m, p, s, cell, 0, definition.ty, row, definition.value)
-        if kind == .Int && s.bytes.len() != 1 -> frozen = false
+        // holds. An exact Int node is static data a write's drop leaves
+        // alone (IR_STATIC_INT_COUNT).
+        frozen: if ir_untag(definition.ty) == .Shared(_) -> false else -> ir_static_into(m, p, s, cell, 0, definition.ty, row, definition.value)
         if !frozen {
             s = IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
             _: ir_static_new(s, size)
@@ -597,11 +596,10 @@ ir_static_struct: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int,
 // The positions of a Map constant's `entries` in the order its Map keeps
 // them (ir_comptime_map's map.set): ascending keys (BuildMaps ir_map_order),
 // a later duplicate key's value replacing the earlier one. None for a key
-// order this does not reproduce (a nominal key, or one holding an exact Int
-// beyond 64 bits).
+// this does not order.
 ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: [TComptimeMapEntry]) -> [Int]? Never! {
     kind: shape.kind
-    if kind == "order" -> return ir_static_tuple_order(m, p, shape.key.ty, entries)
+    if kind == "order" -> return ir_static_compound_order(m, p, shape.key.ty, entries)
     if kind != "int" && kind != "word" && kind != "uword" && kind != "string" -> return None
     // Each key with its position; ordering the pairs by key, then position,
     // makes the last of a run the later duplicate. A key beyond 64 bits (an
@@ -618,7 +616,8 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
             }
             .Bool(flag) -> words.push((key: if flag -> 1 else -> 0, at: index))
             .String(text) -> texts.push((key: text, at: index))
-            .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> return None
+            .Enum(_, variant) -> words.push((key: ir_static_variant_word(m, p, shape.key.ty, variant) ?? return None, at: index))
+            .Tuple(_) | .Struct(_, _) -> return None
         }
     }
     kept := [Int]{}
@@ -640,11 +639,17 @@ ir_static_map_order: fn(m: &IRModule, p: IRProgram, shape: IRMapShape, entries: 
     Val(kept)
 }
 
-// The positions of a tuple-keyed Map constant's `entries` (key type row
-// `key_row`) in its Map's order: each key's members in the order
-// ir_order_into compares them, the later of two equal keys kept. None when
-// a key holds a member this does not order.
-ir_static_tuple_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
+// The positions of a tuple- or struct-keyed Map constant's `entries` (key
+// type row `key_row`) in its Map's order: each key's members in the order
+// ir_order_into compares them, the later of two equal keys kept. A key type
+// a written Comparable impl orders keeps the entries' own order: the
+// compile-time run built the Map with that impl's compare and read it back
+// in its order (jet_eval_ir_data), each key once. None when a key holds a
+// member this does not order.
+ir_static_compound_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TComptimeMapEntry]) -> [Int]? Never! {
+    if ir_static_written_order(m, p, key_row) {
+        return Val(loop index in 0..<entries.len() -> index)
+    }
     keys := [(key: [(n: Int, s: String)], at: Int)]{}
     loop (index, entry) in entries {
         atoms := [(n: Int, s: String)]{}
@@ -660,11 +665,39 @@ ir_static_tuple_order: fn(m: &IRModule, p: IRProgram, key_row: Int, entries: [TC
     Val(kept)
 }
 
+// Whether a written Comparable impl orders keys of type row `row`, the type's
+// own or a member's (ir_compare_impl, ir_order_nominal). A payload-free enum
+// orders by variant index whatever its impl (ir_order_into).
+ir_static_written_order: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if m.types[row].kind == .Word -> return false
+    ty: ir_untag(m.types[row].ty)
+    if ty == .Tuple(declared) {
+        tuple_members: ir_tuple_members(m, p, declared) ?? return false
+        return ir_static_written_members(m, p, tuple_members)
+    }
+    nominal: ir_nominal_name(ty) ?? return false
+    definition: ir_type_def(p, nominal) ?? return false
+    selected: if p.render_impls.len() == 0 -> None else -> p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}")
+    if selected == .Val(index) && !p.functions[index].synthetic -> return true
+    members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
+    ir_static_written_members(m, p, members)
+}
+
+// Whether a written Comparable impl orders any of `members`
+// (ir_static_written_order).
+ir_static_written_members: fn(m: &IRModule, p: IRProgram, members: [IRMember]) -> Bool Never! {
+    loop member in members {
+        if ir_static_written_order(m, p, member.ty) -> return true
+    }
+    false
+}
+
 // Appends the scalars of map key `key` of type row `row` to `atoms` in the
-// order ir_order_into compares them: an Int, Char or fixed-width word by its
-// value, a Bool as 0 or 1, a String by its text, a tuple member by member.
-// false for a key it does not order (a nominal, or an exact Int beyond 64
-// bits).
+// order ir_order_into compares them: an Int (exact, however wide), Char or
+// fixed-width word by its value, a Bool as 0 or 1, a String by its text, a
+// payload-free enum by its variant's index, a tuple or struct member by
+// member. false for a key it does not order (a struct with a written
+// Comparable impl).
 ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey, atoms: &[(n: Int, s: String)]) -> Bool Never! {
     kind: m.types[row].kind
     if key == {
@@ -673,6 +706,11 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
                 return false
             }
             atoms.push((n: value, s: ""))
+            true
+        }
+        .BigInt(decimal) -> {
+            if kind != .Int && kind != .Word -> return false
+            atoms.push((n: Int.parse(decimal) ?? return false, s: ""))
             true
         }
         .Bool(flag) -> {
@@ -685,24 +723,76 @@ ir_static_key_atoms: fn(m: &IRModule, p: IRProgram, row: Int, key: TComptimeKey,
             atoms.push((n: 0, s: text))
             true
         }
+        .Enum(_, variant) -> {
+            atoms.push((n: ir_static_variant_word(m, p, row, variant) ?? return false, s: ""))
+            true
+        }
         .Tuple(fields) -> {
             declared: if ir_untag(m.types[row].ty) == .Tuple(declared_fields) -> declared_fields else -> {
                 return false
             }
             members: ir_tuple_members(m, p, declared) ?? return false
             loop member in members {
-                found := false
-                loop field in fields {
-                    if field.name != member.name -> next
-                    if !ir_static_key_atoms(m, p, member.ty, field.key, atoms) -> return false
-                    found = true
+                if !ir_static_member_atoms(m, p, members, member.name, fields, atoms) {
+                    return false
                 }
-                if !found -> return false
             }
             true
         }
-        .BigInt(_) | .Struct(_, _) | .Enum(_, _) -> false
+        .Struct(_, fields) -> {
+            ty: ir_untag(m.types[row].ty)
+            nominal: ir_nominal_name(ty) ?? return false
+            definition: ir_type_def(p, nominal) ?? return false
+            members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
+            // ir_order_into runs the type's Comparable impl when it has one
+            // (ir_compare_impl): a derived impl compares the declared fields
+            // in order; a written one runs code this does not. With none, the
+            // order helper compares the members in turn (ir_order_nominal).
+            selected: if p.render_impls.len() == 0 -> None else -> p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}")
+            if selected == .Val(index) {
+                if !p.functions[index].synthetic -> return false
+                if p.types[definition].kind == .Struct(declared, _) {
+                    loop field in declared {
+                        if field.computed -> next
+                        if !ir_static_member_atoms(m, p, members, field.name, fields, atoms) {
+                            return false
+                        }
+                    }
+                    return true
+                }
+                return false
+            }
+            loop member in members {
+                if !ir_static_member_atoms(m, p, members, member.name, fields, atoms) {
+                    return false
+                }
+            }
+            true
+        }
     }
+}
+
+// Appends the atoms (ir_static_key_atoms) of key field `name` of `fields`,
+// typed as the member of `members` with that name. false when either is
+// missing.
+ir_static_member_atoms: fn(m: &IRModule, p: IRProgram, members: [IRMember], name: String, fields: [TComptimeKeyField], atoms: &[(n: Int, s: String)]) -> Bool Never! {
+    loop member in members {
+        if member.name != name -> next
+        loop field in fields {
+            if field.name == name -> return ir_static_key_atoms(m, p, member.ty, field.key, atoms)
+        }
+        return false
+    }
+    false
+}
+
+// The word a payload-free enum key of type row `row` holds: its variant's
+// index (ir_static_enum), which ir_order_into compares as a word.
+ir_static_variant_word: fn(m: &IRModule, p: IRProgram, row: Int, variant: String) -> Int? Never! {
+    if m.types[row].kind != .Word -> return None
+    nominal: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
+    definition: ir_type_def(p, nominal) ?? ir_enum_def(m, p, row) ?? return None
+    ir_variant_index(p, definition, variant)
 }
 
 // The members of the tuple or struct type row `row` (ir_member_of).

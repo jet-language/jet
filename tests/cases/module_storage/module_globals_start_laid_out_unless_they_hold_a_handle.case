@@ -1,0 +1,33 @@
+# A mutable module global whose starting value holds an exact Int beyond a
+# machine word, or a map keyed by an enum or a struct (one ordered by its own
+# written compare included), is laid out as static data while compiling: a
+# function reading those globals calls no first-use start helper and loads
+# no ready word (`jet inspect decisions` prints its slot IR). A `Shared` cell
+# is a runtime handle, so `score` alone is built on first use. Every tier
+# starts from the same values and sees each write.
+fixture: module_globals_start_laid_out_unless_they_hold_a_handle.fixture
+env: NO_COLOR=1
+step: jet inspect decisions --optimize=basic main.jet
+env: JET_OPT_DUMP=show_laid_out
+exit: 0
+stdout: ~ "before fn show_laid_out" # the dump names the function reading the laid-out globals
+stdout: count "storage.start" = 0 # no first-use helper for the laid-out globals
+stdout: count "jet_rt_atomic_i64_load" = 0 # and no ready word to check
+step: jet inspect decisions --optimize=basic main.jet
+env: JET_OPT_DUMP=show_shared
+exit: 0
+stdout: ~ "storage.start" # the Shared cell is built by its start helper
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = module_globals_start_laid_out_unless_they_hold_a_handle.out

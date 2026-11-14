@@ -362,12 +362,14 @@ At ordinary file scope, `name: value` declares an immutable module global and
 expression, computed while building and stored in the program
 (D-MODULE-VALUE1, D-MODULE-BUILD1). Every read of an immutable global is an
 ordinary copy. A mutable global starts from its computed value, which may be
-any storable value, `[U8]`, `[T]`, maps (tuple keys included) and structs
-holding them included: the program starts holding it as data, with no copy at
-startup, and an assignment replaces it (D-JAI-COMPTIME1=A). A starting value
-the build can't lay out as data (a runtime handle such as a `Shared` cell, or
-an exact Int beyond a machine word) is built once, on the global's first use,
-from the value computed while building. A
+any storable value, `[U8]`, `[T]`, maps (tuple, enum and struct keys
+included, a key type's written `Comparable` order applied while building),
+structs holding them and exact Ints beyond a machine word included: the
+program starts holding it as data laid out while building, with no copy at
+startup, and an assignment replaces it (D-JAI-COMPTIME1=A). Only a starting
+value that holds a runtime handle such as a `Shared` cell, which can't exist
+while building, is built once, on the global's first use, from the value
+computed while building. A
 `#Persist` global's initializer is a tier-stable scalar literal; any other
 initializer is E0622. No code runs before `run: fn`: an
 initializer that stops, reaches the outside world, reads the task context
