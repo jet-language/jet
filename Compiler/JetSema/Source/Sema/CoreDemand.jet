@@ -214,6 +214,12 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     }
     if graph.core_demand_rows.len() == 0 && !sema_core_body_pending(graph) -> return graph.move()
     tally.demanded = true
+    // The trace times the round's seeds from the comptime functions
+    // (`sema.core_demand.seeds`) and the naming of each wave
+    // (`sema.core_demand.name`), which reads the bodies checked since the
+    // last one on this thread: the first round's first wave reads every body
+    // of the finalization.
+    if trace_sink == .Val(sink) -> sink.begin("sema.core_demand.seeds", "", -1, -1)
     seeds := [String]{}
     if graph.core_lowering_roots != None {
         loop result in comptime_functions {
@@ -224,12 +230,15 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
             }
         }
     }
+    if trace_sink == .Val(sink) -> sink.end("sema.core_demand.seeds", seeds.len())
     loop {
+        if trace_sink == .Val(sink) -> sink.begin("sema.core_demand.name", "", -1, -1)
         wave := [String:Bool]{}
         affected := [Int]{}
         loop key in seeds -> sema_core_demand_key(graph, modules, key, wave, affected)
         seeds = [String]{}
         sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, wave, affected)
+        if trace_sink == .Val(sink) -> sink.end("sema.core_demand.name", wave.len())
         if wave.len() == 0 -> break
         graph.core_wave_rows = wave.move()
         checked_graph := sema_core_demand_pass(graph, affected, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, tally, carried, modules)

@@ -11250,8 +11250,10 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
 // The shared state of one body pass over `graph`, which moves into the
 // pass's program tables: the pass environment, the program tables and the
 // memory plan, built from `carried` (its one row) when it holds the graph's
-// pass facts, else computed here.
+// pass facts, else computed here. The opening is traced (`sema.pass_open`),
+// the pass facts it computes as its own span inside.
 sema_finalize_pass_open: fn(graph: &&SemaRegistrationGraph, values: [SemaComptimeItemValue], checked_types: [TTypeDef], threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts]) -> Shared<SemaCheckShared> {
+    if trace_sink == .Val(sink) -> sink.begin("sema.pass_open", "", -1, -1)
     fresh: carried.len() == 0
     facts := carried.pop() ?? sema_pass_facts_new()
     if fresh && trace_sink == .Val(sink) -> sink.begin("sema.pass_facts", "", -1, -1)
@@ -11281,6 +11283,7 @@ sema_finalize_pass_open: fn(graph: &&SemaRegistrationGraph, values: [SemaComptim
     environment.copy_facts = sema_copy_facts_table_empty()
     shared_state: Shared{SemaCheckShared{environments: [SemaScopeEnvironment]{}, programs: [SemaProgramTables]{}, memory_plans: [SemaFunctionMemoryPlan]{}}}
     sema_check_shared_fill(shared_state, environment, program, memory_plan)
+    if trace_sink == .Val(sink) -> sink.end("sema.pass_open", values.len())
     shared_state
 }
 

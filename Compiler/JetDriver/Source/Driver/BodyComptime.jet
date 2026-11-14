@@ -598,12 +598,19 @@ jet_driver_land_local_values: fn(
     tried := [String:Bool]{}
     loop {
         // Every exit but the one with no site pending stops the landing.
+        // The trace times the landing's steps on this thread
+        // (`comptime.land.*`) around the run's and the splice's own spans.
         landing.stopped = true
-        if !jet_driver_local_values_open(bodies, stage, functions) -> break
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.land.open")
+        open: jet_driver_local_values_open(bodies, stage, functions)
         pending := [SemaComptimeBodySource]{}
-        loop source in jet_driver_pending_comptime_body_sources(bodies.modules, values) {
-            if taken.get(source.module_identity.id) == None -> pending.push(source.copy())
+        if open {
+            loop source in jet_driver_pending_comptime_body_sources(bodies.modules, values) {
+                if taken.get(source.module_identity.id) == None -> pending.push(source.copy())
+            }
         }
+        jet_driver_trace_step_end(request.trace_sink, "comptime.land.open", pending.len())
+        if !open -> break
         if pending.len() == 0 {
             landing.stopped = false
             break
@@ -642,16 +649,22 @@ jet_driver_land_local_values: fn(
             sema_graph_trail_undo(registration, run.trail)
             break
         }
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.land.splice")
         splice := sema_local_value_land(registration, run.trail, bodies.modules, into, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
         registration = splice.graph.move()
+        jet_driver_trace_step_end(request.trace_sink, "comptime.land.splice", body_sources.len())
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.land.undo")
         sema_graph_trail_undo(registration, run.trail)
+        jet_driver_trace_step_end(request.trace_sink, "comptime.land.undo", 1)
         if !splice.spliced -> break
         // The closures the pass adds are demanded in the next round of the
         // Core demand, after the bodies whose sites they serve.
+        jet_driver_trace_step_begin(request.trace_sink, "comptime.land.carry")
         loop index in functions.len()..<run.functions.len() -> run.functions[index].demand_round = bodies.core_tally.rounds
         values = run.values.move()
         functions = run.functions.move()
         jet_driver_comptime_trace_append(trace, run.trace)
+        jet_driver_trace_step_end(request.trace_sink, "comptime.land.carry", values.len())
     }
     registration
 }
