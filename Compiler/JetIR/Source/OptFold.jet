@@ -1,8 +1,8 @@
 // Identical glue (O1, O2, once every body is optimized): the functions the
 // build makes itself (drop, copy and unique glue, map and order helpers: no
 // source file) are built per checked type, and
-// rows that differ only in the type they spell (`[String: Int]`,
-// `[Name: Int]`) have the same layout, so their glue comes out the same,
+// rows that differ only in the type they spell (a map keyed by a string and
+// one keyed by a Name) have the same layout, so their glue comes out the same,
 // instruction for instruction. Such copies become one: every direct call of
 // a copy and every row whose drop or clone routine is a copy name the first
 // of them instead, and the object writer keeps only what its entry reaches
@@ -15,7 +15,7 @@
 // that differ: copies that only reach copies of each other stay one. A
 // function whose address is taken keeps it.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_rows_value]
+use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_partition, compiler_threads_single, compiler_transfer_rows, name_index, name_intern, name_rows_value, name_table]
 
 // Folds the copies among `m.functions`' bodies `functions`; returns how many
 // functions nothing reaches any more.
@@ -34,9 +34,9 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction], threads: Compi
     classes := if lowest < 0 -> 0 else -> 1
     // Each candidate's body is spelled once, as its shape: everything but
     // the functions it reaches, which a round reads by their class. Bodies
-    // of one shape number the same.
+    // of one shape number the same: the shape's id in `shapes`.
     found := ir_opt_fold_shapes(m, functions, threads)
-    shapes := [String:Int]{}
+    shapes := name_table()
     shape_of := [Int]{}
     reached := [[Int]]{}
     loop id in 0..<count {
@@ -45,30 +45,28 @@ ir_opt_fold_identical: fn(m: &IRModule, functions: &[IRFunction], threads: Compi
             reached.push([Int]{})
             next
         }
-        known := shapes.get(found[id].text) ?? -1
-        if known < 0 {
-            known = shapes.len()
-            shapes[found[id].text] = known
-        }
-        shape_of.push(known)
+        shape_of.push(name_index(name_intern(shapes, found[id].text)))
         reached.push(compiler_take_rows<Int>(found[id].reached))
     }
     loop classes > 0 {
-        seen := [String:Int]{}
+        // Each key's first body, by the key's id in `seen`; NameTable id 0
+        // is the empty key, which no body has.
+        seen := name_table()
+        first_of := [Int]{-1}
         split := [Int]{}
         loop id in 0..<count {
             if first[id] < 0 {
                 split.push(-1)
                 next
             }
-            key: ir_opt_fold_key(first, id, shape_of[id], reached[id])
-            known: seen.get(key) ?? -1
-            if known < 0 -> seen[key] = id
-            split.push(if known < 0 -> id else -> known)
+            key: name_index(name_intern(seen, ir_opt_fold_key(first, id, shape_of[id], reached[id])))
+            if key == first_of.len() -> first_of.push(id)
+            split.push(first_of[key])
         }
         first = split
-        if seen.len() == classes -> break
-        classes = seen.len()
+        found_classes: first_of.len() - 1
+        if found_classes == classes -> break
+        classes = found_classes
     }
     folded := 0
     loop id in 0..<count {
@@ -200,20 +198,12 @@ ir_opt_fold_callee: fn(first: [Int], callee: Int) -> Int Never! {
     first[callee]
 }
 
-// Per type row of `m`, its layout (ir_opt_fold_row) as a number: rows of
-// the same layout share one.
+// Per type row of `m`, its layout (ir_opt_fold_row) as a number, its id in
+// `layouts`: rows of the same layout share one.
 ir_opt_fold_rows: fn(m: IRModule) -> [Int] Never! {
-    layouts := [String:Int]{}
+    layouts := name_table()
     rows := [Int]{}
-    loop ty in m.types {
-        layout: ir_opt_fold_row(m, ty)
-        known := layouts.get(layout) ?? -1
-        if known < 0 {
-            known = layouts.len()
-            layouts[layout] = known
-        }
-        rows.push(known)
-    }
+    loop ty in m.types -> rows.push(name_index(name_intern(layouts, ir_opt_fold_row(m, ty))))
     rows
 }
 

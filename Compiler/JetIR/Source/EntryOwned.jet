@@ -163,8 +163,13 @@ IR_ENTRY_QUIET_ROUTES: #run { [String]{
 // stop edge. Returns "" when the program can own its main.
 ir_entry_root_need: fn(m: IRModule) -> String Never! {
     if m.entry < 0 -> return "the module has no program entry"
-    free := [String:Bool]{}
-    loop route in IR_ROOT_FREE_ROUTES -> free[route.copy()] = true
+    // Per name of `m`, whether it is a root-free route.
+    free := [Bool]{}
+    loop _ in 0..<m.names.len() -> free.push(false)
+    loop route in IR_ROOT_FREE_ROUTES {
+        row: name_rows_value(m.name_rows, route) ?? -1
+        if row >= 0 -> free[row] = true
+    }
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     turn: name_rows_value(m.function_rows, IR_STOP_TURN_KEY) ?? -1
@@ -175,8 +180,7 @@ ir_entry_root_need: fn(m: IRModule) -> String Never! {
         if f.asm != None -> next
         loop at in 0..<f.op.len() {
             if f.op[at] == .CallRuntime {
-                symbol: m.names[f.a[at]]
-                if free.get(symbol) == None -> return "`{f.name}` calls the runtime route `{symbol}`"
+                if !free[f.a[at]] -> return "`{f.name}` calls the runtime route `{m.names[f.a[at]]}`"
                 next
             }
             if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap && f.a[at] != turn) -> next
