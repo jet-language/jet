@@ -33,12 +33,16 @@ name_table: fn() -> NameTable Never! {
     name_table_sized(NAME_TABLE_INITIAL_SLOTS)
 }
 
-// An empty table of `slots` slots (a power of two) to start; it grows as
+// An empty table of at least `slots` slots to start; it grows as
 // `name_table` does. A small table (a body's own symbol keys) starts small.
+// A probe steps through the slots masked by their count less one, which
+// visits every slot only for a power of two: `slots` rounds up to one.
 name_table_sized: fn(slots: Int) -> NameTable Never! {
+    capacity := 2
+    loop capacity < slots -> capacity *= 2
     initial := [Int]{}
-    loop _ in 0..<slots -> initial.push(0)
-    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: initial, mask: slots - 1}
+    loop _ in 0..<capacity -> initial.push(0)
+    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: initial, mask: capacity - 1}
     name_intern_bytes(table, [U8]{}, 0, 0)
     table
 }
