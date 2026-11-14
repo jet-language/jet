@@ -149,7 +149,22 @@ with_stem: fn(path: Path, stem: String) -> Path Never! { Path{raw: files.with_na
 with_segments: fn(path: Path, segments: [String]) -> Path Never! { from_parts(segments) }
 
 
-parts: fn(path: Path) -> [String] Never! { files.split_slash(path.raw) }
+// The anchor (drive and root, when the path has one), then each named
+// component, as pathlib's `parts`: the empty components of doubled or
+// trailing separators and every `.` drop, and `..` stays (that is
+// `collapse`'s job). `from_parts(parts(p))` spells the same path.
+parts: fn(path: Path) -> [String] Never! {
+    out := [String]{}
+    head: anchor(path)
+    if head.bytes().len() > 0 -> out.push(head)
+    raw: path.raw.bytes()
+    rest: files_slice(raw, drive(path).bytes().len(), raw.len())
+    loop component in files.split_slash(rest) {
+        if component == "" || component == "." -> next
+        out.push(component)
+    }
+    out
+}
 
 
 is_letter: fn(b: U8) -> Bool {

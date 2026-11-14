@@ -1386,7 +1386,10 @@ constructor (D-FILES-APPEND1). See the [bounded buffering law](../spec.md#bounde
 metadata queries carry filesystem effects. `Path.from(value)` (the checked
 constructor used by the feature examples), `Path.of`, and `Path.path` create a
 portable value. `join` removes duplicate separators, and `collapse` handles
-`.` and `..`; Windows drive letters count as absolute.
+`.` and `..`; Windows drive letters count as absolute. `parts` lists the
+anchor (`/`, or `C:/` for a drive) and then each named component, as
+pathlib does: doubled and trailing separators and `.` drop, `..` stays, and
+`from_parts(parts(p))` spells the same path.
 
 Use `Path.join`, `parent`, `parents`, `name`, `stem`, `suffix`, `suffixes`,
 `parts`, `is_absolute`, `is_relative`, `as_posix`, `as_windows`, `collapse`,
