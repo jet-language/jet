@@ -69,15 +69,13 @@ s6_head_assert: fn(response: String, status: String, length: Int) {
     assert(framed.before.starts_with("HTTP/1.1 204 No Content"), no_content)
     assert(!framed.before.to_lower().contains("content-length:"), no_content)
     assert(framed.after == "", no_content)
+    // One request per connection: the pipelined GET gets no response, and
+    // the HEAD response ends at its head.
     pipelined: s6_head_exchange(addr, [String]{"HEAD /implicit HTTP/1.1", "Host: local", "", "GET /implicit HTTP/1.1", "Host: local", "Connection: close", "", ""})
-    relative: pipelined.slice(1..<pipelined.len()).index_of("HTTP/1.1 200 OK")
-    assert(relative >= 0, "second response")
-    second: relative + 1
-    first_response: pipelined.slice(0..<second)
-    assert(first_response.contains("Content-Length: 5{crlf}"), pipelined)
-    assert(first_response.ends_with("{crlf}{crlf}"), "HEAD body shifted pipeline: {pipelined}")
-    assert(pipelined.slice(second..<pipelined.len()).ends_with("{crlf}{crlf}hello"), "GET response missing after HEAD: {pipelined}")
-    assert(calls.value == 5)
+    assert(pipelined.count("HTTP/1.1") == 1, "a second response followed HEAD: {pipelined}")
+    s6_head_assert(pipelined, "HTTP/1.1 200 OK", 5)
+    assert(pipelined.contains("Connection: close{crlf}"), "HEAD did not close its connection: {pipelined}")
+    assert(calls.value == 4)
     report: bound.shutdown(30s) ?? panic("shutdown")
     serving.join() ?? panic("server join")
     assert(report.accepted == 7)

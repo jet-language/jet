@@ -43,15 +43,17 @@ s6_invalid_exchange: fn(addr: String, lines: [String]) -> String {
     serving: task { bound.serve() ?? panic("server") }
     crlf: s6_invalid_crlf()
     paths: [String]{"/low", "/high"}
+    // One request per connection: the generic 500 is the only response, and
+    // the pipelined `/next` is never dispatched.
     loop path in paths {
         response: s6_invalid_exchange(addr, [String]{"GET {path} HTTP/1.1", "Host: local", "", "GET /next HTTP/1.1", "Host: local", "Connection: close", "", ""})
         assert(response.starts_with("HTTP/1.1 500 Internal Server Error"), "invalid status reached wire: {response}")
         assert(response.contains("Content-Length: 25{crlf}"), "invalid status did not use generic 500 framing: {response}")
         assert(!response.contains("secret-status"), "invalid response body leaked: {response}")
-        assert(response.count("HTTP/1.1") == 2, "invalid status broke response boundary: {response}")
-        assert(response.ends_with("{crlf}{crlf}next"), "successor response misaligned: {response}")
+        assert(response.count("HTTP/1.1") == 1, "a second response followed the 500: {response}")
+        assert(response.ends_with("{crlf}{crlf}500 Internal Server Error"), "500 body misframed: {response}")
     }
-    assert(calls.value == 4)
+    assert(calls.value == 2)
     report: bound.shutdown(30s) ?? panic("shutdown")
     serving.join() ?? panic("server join")
     assert(report.accepted == 2)

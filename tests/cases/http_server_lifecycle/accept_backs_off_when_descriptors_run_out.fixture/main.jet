@@ -36,6 +36,12 @@ finish: fn(stream: TCPStream) -> String {
     status_of(stream)
 }
 
+// Closes the last filler when this call returns: popped in `run`, it would
+// stay open until `run` ends, so the waiting connect would find no descriptor.
+close_one: fn(&fillers: [FileReader]) {
+    _: fillers.pop()
+}
+
 run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
     app: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) })
     listening: app.bind("127.0.0.1:0")
@@ -57,7 +63,9 @@ run: fn() (HTTPError | IOError | NetError | TaskFailure)! {
             .Err(_) -> break
         }
     }
-    _: fillers.pop()
+    // One descriptor is closed now, for the waiting connection; the next
+    // accept then finds none.
+    close_one(fillers)
     waiting: net.tcp_connect(addr)
     waiting.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
     time.sleep(300ms)

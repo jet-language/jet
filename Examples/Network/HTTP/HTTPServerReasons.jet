@@ -1,7 +1,8 @@
 // A response's status line takes its reason text from the one registered
 // table, `http.reason_phrase`: a handler that returns 503, 429 or 422 sends
 // the registered reason, a code the table does not register sends an empty
-// reason, and the server's own 404 page uses the same table.
+// reason, and the server's own 404 page and the writer that refuses a request
+// it cannot read (here, HTTP/2.0 is 505) use the same table.
 // app.serve_once keeps golden output order fixed.
 package: {
     name: "http_server_reasons"
@@ -25,11 +26,12 @@ status_of: fn(path: String) -> Int Never! {
     }
 }
 
-// The raw response to one GET, so the status line shows exactly as sent.
-fetch: fn(addr: String, path: String) -> String {
+// The raw response to one request line, so the status line shows exactly as
+// sent.
+fetch: fn(addr: String, request_line: String) -> String {
     wire: net.tcp_connect(addr) ?? panic("connect failed")
     request := "".bytes()
-    loop line in ["GET {path} HTTP/1.1", "Host: local", "Connection: close", ""] {
+    loop line in [request_line, "Host: local", "Connection: close", ""] {
         loop byte in line.bytes() -> request.push(byte)
         request.push(13)
         request.push(10)
@@ -53,16 +55,18 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         app.get(path, fn(_req: HTTPRequest) { Ok(server.response(code, "status {code}")) })
     }
     t: task {
-        loop _ in 0..<C_PATHS.len() {
+        loop _ in 0..<(C_PATHS.len() + 1) {
             app.serve_once(listener) ?? panic("serve failed")
         }
     }
     loop path in C_PATHS {
-        raw: fetch(addr, path)
+        raw: fetch(addr, "GET {path} HTTP/1.1")
         line: raw.split("\r\n").to_list()[0]
         print("{path}: [{line}]")
         if path == "/missing" -> print("{path} body: {raw.split("\r\n\r\n").to_list()[1]}")
     }
+    refused: fetch(addr, "GET /busy HTTP/2.0")
+    print("HTTP/2.0: [{refused.split("\r\n").to_list()[0]}]")
     print("table 503: {http.reason_phrase(503)}")
     print("table 299: [{http.reason_phrase(299)}]")
     t.join() ?? panic("server failed")
