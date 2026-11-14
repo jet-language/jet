@@ -10,7 +10,7 @@ Sprite: struct {
 
 ramp: fn(count: Int, step: Int) -> [U8] {
     bytes := [U8]{}
-    loop index in 0..<count -> bytes.push(U8.from_int(index * step) ?? U8{0})
+    loop index in 0..<count -> bytes.push(U8{index * step})
     bytes
 }
 
@@ -38,7 +38,7 @@ run: fn() {
     print(scores["demon"])
     print(player.pixels)
     print(player.name)
-    loop tick in 0..<3 -> paint(tick, U8.from_int(250 - tick) ?? U8{0})
+    loop tick in 0..<3 -> paint(tick, U8{250 - tick})
     print(frame)
     #Unsafe("one task writes the globals") {
         frame = with_byte(frame, 5, U8{7})
