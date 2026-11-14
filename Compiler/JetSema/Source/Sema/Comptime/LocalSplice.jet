@@ -81,6 +81,7 @@ use jet_foundation.[
     TTestFact,
     Type,
     compiler_take_rows,
+    compiler_threads_admit,
 ]
 
 // The rows of one module result that its function checks fill, moved out so
@@ -270,6 +271,29 @@ sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], index: Int, row
     }
 }
 
+// What a splice is done with: the earlier check's rows, the pass's bodies of
+// functions that are no owners, the finalized owner bodies the pass's
+// replace, and the landed sources. Their trees are large, so they drop on a
+// detached task while the compile goes on (sema_local_splice_release).
+SemaLocalSpliceAside: struct {
+    rows: [SemaModuleBodyRows]
+    functions: [FnBody]
+    sources: [SemaComptimeBodySource]
+}
+
+sema_local_splice_aside: fn() -> SemaLocalSpliceAside Never! {
+    SemaLocalSpliceAside{rows: [SemaModuleBodyRows]{}, functions: [FnBody]{}, sources: [SemaComptimeBodySource]{}}
+}
+
+// Drops `aside` on a detached task when the compiler may use a second
+// thread, else here. The task owns the rows alone, and nothing reads them.
+sema_local_splice_release: fn(aside: &&SemaLocalSpliceAside, threads: CompilerThreads) {
+    held: aside.move()
+    if compiler_threads_admit(threads, 2, 2, 1, 0, 0) < 2 -> return
+    released: task &&held { held.rows.len() + held.functions.len() + held.sources.len() }
+    released.detach()
+}
+
 // The first merged row the whole-program passes read that differs between
 // `old` and `new`, named for the refusal's trace counter
 // (sema_local_splice_refused), or None when they all agree: all but the
@@ -339,20 +363,8 @@ sema_local_splice_drop_diagnostics: fn(diagnostics: &[Diagnostic], dropped: [Str
     }
 }
 
-// The position of the one function `key` in `functions`; None when there is
-// none or more than one.
-sema_local_splice_slot: fn(functions: [FnBody], key: String) -> Int? Never! {
-    found := Int?{None}
-    loop index in 0..<functions.len() {
-        if functions[index].key != key -> next
-        if found != None -> return None
-        found = Val(index)
-    }
-    found
-}
-
-// sema_local_splice_slot for every key of `functions` at once: the position
-// of the one function of each key, -1 for a key more than one function has.
+// The position of the one function of each key of `functions`, -1 for a key
+// more than one function has.
 sema_local_splice_slots: fn(functions: [FnBody]) -> [String:Int] Never! {
     slots := [String:Int]{}
     loop index in 0..<functions.len() {
@@ -383,14 +395,26 @@ sema_local_splice_settle: fn(body: &FnBody, finalized: FnBody) Never! {
 }
 
 // Drops the landed sources from `sources` (`landed` holds their
-// `module\nkey`).
-sema_local_splice_unlanded: fn(sources: &[SemaComptimeBodySource], landed: [String:Bool]) Never! {
+// `module\nkey`) into `aside`.
+sema_local_splice_unlanded: fn(sources: &[SemaComptimeBodySource], landed: [String:Bool], aside: &[SemaComptimeBodySource]) Never! {
     held := compiler_take_rows<SemaComptimeBodySource>(sources)
     held.reverse()
     loop held.len() > 0 {
         source := held.pop() ?? break
-        if landed.get("{source.module_identity.id}\n{source.key}") == None -> sources.push(source.move())
+        if landed.get("{source.module_identity.id}\n{source.key}") == None -> sources.push(source.move()) else -> aside.push(source.move())
     }
+}
+
+// Whether `sources` less the landed ones (`landed` holds their
+// `module\nkey`) are `kept`, in order, compared in place.
+sema_local_splice_same_unlanded: fn(sources: [SemaComptimeBodySource], kept: [SemaComptimeBodySource], landed: [String:Bool]) -> Bool Never! {
+    at := 0
+    loop source in sources {
+        if landed.get("{source.module_identity.id}\n{source.key}") != None -> next
+        if at >= kept.len() || source != kept[at] -> return false
+        at += 1
+    }
+    at == kept.len()
 }
 
 // The sites of `landed` (`module\nkey`) that leave the source rows of the
@@ -417,8 +441,9 @@ sema_local_splice_valued: fn(landed: [String:Bool], after: [SemaModuleBodyRows])
 // body there. `replayed` holds the texts of the diagnostics the pass's
 // comptime results bring (sema_local_splice_diagnostic_texts): a diagnostic
 // only the first check reports must be one of them, and of its owner
-// module's; `dropped` gets, per owner module, those its rows drop.
-sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], computed: [String:Bool], replayed: [String], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: &[[String]]) -> String? Never! {
+// module's; `dropped` gets, per owner module, those its rows drop. The
+// earlier check's rows it compared go to `aside`.
+sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], computed: [String:Bool], replayed: [String], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows], into: SemaLocalSpliceInto, dropped: &[[String]], aside: &[SemaModuleBodyRows]) -> String? Never! {
     stamped: sema_local_splice_stamped(into)
     before := earlier.move()
     unclaimed := replayed.copy()
@@ -443,26 +468,24 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         // A value keeps only the effects of the call at its own span. A
         // failure keeps the initializer as run-time code, calls and all.
         if stamped && sema_local_splice_inner_call(old, computed) -> return Val("inner_call")
-        sema_local_splice_unlanded(old.comptime_body_sources, landed)
-        if old.comptime_body_sources != new.comptime_body_sources -> return Val("sources")
+        if !sema_local_splice_same_unlanded(old.comptime_body_sources, new.comptime_body_sources, landed) -> return Val("sources")
         if old.functions.len() != new.functions.len() -> return Val("bodies")
-        checked := old.functions.move()
         slots: sema_local_splice_slots(modules[module_index].functions)
-        index := checked.len()
-        loop checked.len() > 0 {
+        index := old.functions.len()
+        loop index > 0 {
             index -= 1
-            function := checked.pop() ?? break
-            if new.functions[index].key != function.key -> return Val("bodies")
-            if owners.get(function.key) == None {
-                if function != new.functions[index] -> return Val("bodies")
+            if new.functions[index].key != old.functions[index].key -> return Val("bodies")
+            if owners.get(old.functions[index].key) == None {
+                if old.functions[index] != new.functions[index] -> return Val("bodies")
                 next
             }
-            slot: slots.get(function.key) ?? -1
+            slot: slots.get(old.functions[index].key) ?? -1
             if slot < 0 -> return Val("bodies")
-            if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
-            if function != modules[module_index].functions[slot] -> return Val("finalized_bodies")
+            if stamped -> sema_local_splice_settle(old.functions[index], modules[module_index].functions[slot])
+            if old.functions[index] != modules[module_index].functions[slot] -> return Val("finalized_bodies")
             settled_owners += 1
         }
+        aside.push(old.move())
     }
     if settled_owners != owners.len() -> return Val("owners")
     None
@@ -554,6 +577,11 @@ SemaLocalValueSplice: struct {
     valued: [String:Bool]
 }
 
+// A splice that does not land: the graph comes back, no site valued.
+sema_local_splice_none: fn(graph: &&SemaRegistrationGraph) -> SemaLocalValueSplice {
+    SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+}
+
 // The `module\nkey` of every site of `landed`; None when one is neither a
 // local value nor an explicit `name: #run value` local (local_binding).
 sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> [String:Bool]? Never! {
@@ -610,8 +638,8 @@ sema_local_value_splice: fn(
     trace_sink: CompilerTraceSink?,
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
-    if !finalized.complete || landed.len() == 0 -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
-    landed_keys := sema_local_splice_landed_keys(landed) ?? return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    if !finalized.complete || landed.len() == 0 -> return sema_local_splice_none(graph)
+    landed_keys := sema_local_splice_landed_keys(landed) ?? return sema_local_splice_none(graph)
     // The comptime function results bring the finalization's diagnostics. A
     // lint on Core source only rides the list until sema_finalize_graph
     // drops it, so the functions a pass adds may bring those.
@@ -619,10 +647,14 @@ sema_local_value_splice: fn(
     earlier_complete: sema_comptime_function_diagnostics(earlier_functions, earlier_diagnostics)
     pass_diagnostics := [Diagnostic]{}
     pass_complete: sema_comptime_function_diagnostics(comptime_functions, pass_diagnostics)
-    if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics) != sema_local_splice_kept_diagnostics(pass_diagnostics) -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
-    if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) || sema_local_splice_binding_failed(landed, values) -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    if earlier_complete != pass_complete || sema_local_splice_kept_diagnostics(earlier_diagnostics) != sema_local_splice_kept_diagnostics(pass_diagnostics) -> return sema_local_splice_none(graph)
+    if sema_local_splice_demands_core(graph, comptime_functions) || sema_local_splice_holds_host_value(values, landed_keys) || sema_local_splice_binding_failed(landed, values) -> return sema_local_splice_none(graph)
     splice := sema_local_splice_owners(graph, trail, finalized.modules, landed_keys, SemaLocalSpliceInto.Finalized, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
-    if splice.spliced -> sema_local_splice_unlanded(finalized.comptime_body_sources, splice.valued)
+    if splice.spliced {
+        aside := sema_local_splice_aside()
+        sema_local_splice_unlanded(finalized.comptime_body_sources, splice.valued, aside.sources)
+        sema_local_splice_release(aside, threads)
+    }
     splice
 }
 
@@ -671,15 +703,15 @@ sema_local_value_land: fn(
     trace_sink: CompilerTraceSink?,
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
-    if landed.len() == 0 -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
-    landed_keys := sema_local_splice_landed_keys(landed) ?? return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    if landed.len() == 0 -> return sema_local_splice_none(graph)
+    landed_keys := sema_local_splice_landed_keys(landed) ?? return sema_local_splice_none(graph)
     if sema_local_splice_holds_host_value(values, landed_keys) {
         sema_local_splice_refused(trace_sink, "host_value", landed_keys.len())
-        return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+        return sema_local_splice_none(graph)
     }
     if sema_local_splice_binding_failed(landed, values) {
         sema_local_splice_refused(trace_sink, "binding_failed", landed_keys.len())
-        return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+        return sema_local_splice_none(graph)
     }
     sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
 }
@@ -705,19 +737,31 @@ sema_local_splice_owners: fn(
 ) -> SemaLocalValueSplice {
     graph := resolved.move()
     owners := [String:Bool]{}
-    owner_modules := [Int]{}
+    owner_module := loop _ in modules -> false
     found := [String:Bool]{}
     loop module_index in 0..<modules.len() {
         loop source in modules[module_index].comptime_body_sources {
             site: "{source.module_identity.id}\n{source.key}"
             if landed.get(site) == None -> next
-            if source.function_key == "" -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+            if source.function_key == "" -> return sema_local_splice_none(graph)
             found[site] = true
             owners[source.function_key] = true
-            if !owner_modules.contains(module_index) -> owner_modules.push(module_index)
+            owner_module[module_index] = true
         }
     }
-    if found.len() != landed.len() -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+    if found.len() != landed.len() -> return sema_local_splice_none(graph)
+    // The module rows of each module identity, and the function slots
+    // (sema_local_splice_slots) of a module once a result names it.
+    identity_rows := [U32:[Int]]{}
+    module_slots := [[String:Int]]{}
+    slots_built := [Bool]{}
+    loop module_index in 0..<modules.len() {
+        identity: modules[module_index].module_identity.id
+        if !identity_rows.has_key(identity) -> identity_rows[identity] = [Int]{}
+        identity_rows[identity].push(module_index)
+        module_slots.push([String:Int]{})
+        slots_built.push(false)
+    }
     // A function the pass checked to run while compiling is not checked as a
     // body again: the body pass takes the pass's result for it
     // (sema_comptime_find_checked_function), with its facts, pending
@@ -729,15 +773,21 @@ sema_local_splice_owners: fn(
     earlier_rows: sema_comptime_checked_function_rows(earlier_functions)
     loop result in comptime_functions {
         if earlier_rows.get("{result.module_identity.id}\n{result.function_key}") != None || owners.get(result.function_key) != None -> next
-        loop module_index in 0..<modules.len() {
-            if modules[module_index].module_identity != result.module_identity -> next
-            if sema_local_splice_slot(modules[module_index].functions, result.function_key) == None -> next
-
+        named_rows: identity_rows.get(result.module_identity.id) ?? next
+        loop module_index in named_rows {
+            if !slots_built[module_index] {
+                module_slots[module_index] = sema_local_splice_slots(modules[module_index].functions)
+                slots_built[module_index] = true
+            }
+            if (module_slots[module_index].get(result.function_key) ?? -1) < 0 -> next
             owners[result.function_key] = true
-            if !owner_modules.contains(module_index) -> owner_modules.push(module_index)
+            owner_module[module_index] = true
         }
     }
-    owner_modules.sort()
+    owner_modules := [Int]{}
+    loop (module_index, owned) in owner_module {
+        if owned -> owner_modules.push(module_index)
+    }
     // As sema_finalize_graph: no lookup counting across the body threads.
     trail.entries.push(SemaGraphUndo.Counting{old: graph.counting})
     graph.counting = false
@@ -790,15 +840,16 @@ sema_local_splice_owners: fn(
     _: sema_comptime_function_diagnostics(comptime_functions, replayed_diagnostics)
     dropped := [[String]]{}
     loop _ in owner_modules -> dropped.push([String]{})
+    aside := sema_local_splice_aside()
     refusal: if {
         !same_named -> Val("named_core")
         !same_demand -> Val("demand")
-        else -> sema_local_splice_holds(modules, owner_modules, owners, valued, computed, sema_local_splice_diagnostic_texts(replayed_diagnostics), before, after, into, dropped)
+        else -> sema_local_splice_holds(modules, owner_modules, owners, valued, computed, sema_local_splice_diagnostic_texts(replayed_diagnostics), before, after, into, dropped, aside.rows)
     }
     if trace_sink == .Val(sink) -> sink.end("sema.local_values.compare", owners.len())
     if refusal == .Val(reason) {
         sema_local_splice_refused(trace_sink, reason, owners.len())
-        return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
+        return sema_local_splice_none(graph)
     }
     if trace_sink == .Val(sink) -> sink.progress("counters.sema.local_values_spliced", owners.len(), -1)
     if trace_sink == .Val(sink) -> sink.begin("sema.local_values.splice", "", -1, -1)
@@ -809,18 +860,41 @@ sema_local_splice_owners: fn(
         rows := after.pop() ?? break
         module_index: owner_modules[row]
         checked := rows.functions.move()
+        rows.functions = [FnBody]{}
         slots: sema_local_splice_slots(modules[module_index].functions)
+        // The pass's owner bodies by slot; each takes its finalized body's
+        // place, and the finalized body goes aside.
+        spliced := loop _ in modules[module_index].functions -> FnBody?{None}
         loop checked.len() > 0 {
             function := checked.pop() ?? break
-            if owners.get(function.key) == None -> next
+            if owners.get(function.key) == None {
+                aside.functions.push(function.move())
+                next
+            }
             slot: slots.get(function.key) ?? -1
             if slot < 0 -> panic("a spliced local value lost its owner function")
             if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
-            modules[module_index].functions[slot] = function.move()
+            spliced[slot] = Val(function.move())
         }
+        finalized := compiler_take_rows<FnBody>(modules[module_index].functions)
+        kept := [FnBody]{}
+        loop finalized.len() > 0 {
+            body: finalized.pop() ?? break
+            replacement: spliced.pop() ?? panic("a spliced local value lost its owner slot")
+            if replacement == None {
+                kept.push(body.move())
+                next
+            }
+            aside.functions.push(body.move())
+            kept.push(replacement.move())
+        }
+        kept.reverse()
+        modules[module_index].functions = kept.move()
+        aside.rows.push(rows.move())
         sema_local_splice_drop_diagnostics(modules[module_index].diagnostics, dropped[row])
-        sema_local_splice_unlanded(modules[module_index].comptime_body_sources, valued)
+        sema_local_splice_unlanded(modules[module_index].comptime_body_sources, valued, aside.sources)
     }
+    sema_local_splice_release(aside, threads)
     if trace_sink == .Val(sink) -> sink.end("sema.local_values.splice", owners.len())
     SemaLocalValueSplice{graph: graph.move(), spliced: true, valued: valued.move()}
 }
