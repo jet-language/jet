@@ -182,7 +182,7 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
             short: jet_cli_import_split_top(line, ":=")
             assignment: if short == .Val(pair) -> Val(pair) else -> jet_cli_import_split_top(line, "=")
             if assignment == .Val(pair) {
-                left: pair.left.trim().copy()
+                left := pair.left.trim().copy()
                 name := ""
                 if short != None {
                     name = jet_cli_import_canonical_identifier(left)
@@ -192,7 +192,7 @@ jet_cli_import_translate_foreign_body: fn(language: String, function: JetCLIImpo
                     if local == .Val(local_name) -> name = local_name.copy()
                     else {
                         if !jet_cli_import_identifier(left) -> return Err(JetCLIImportBodyError{line: row.line, message: "assignment or declaration has no safe scalar mapping"})
-                        name = left.copy()
+                        name = left.move()
                     }
                 }
                 converted: jet_cli_import_foreign_expression(language, pair.right, float_literals) ?? return Err(JetCLIImportBodyError{line: row.line, message: err.message.copy()})

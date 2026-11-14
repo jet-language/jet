@@ -3553,7 +3553,7 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
         label := exit
         bare: pad.end == pad.at + 2 && f.op[pad.at + 1] == .Return && f.a[pad.at + 1] < 0
         if !bare {
-            key: ir_x64_pad_key(f, al, pad, pad.at + 1, -1)
+            key := ir_x64_pad_key(f, al, pad, pad.at + 1, -1)
             hash: ir_x64_key_hash(key)
             known: seen.get(hash) ?? [Int]{}
             label = -1
@@ -3588,7 +3588,7 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
                     grown := known.copy()
                     grown.push(keys.len())
                     seen[hash] = grown.move()
-                    keys.push(key.copy())
+                    keys.push(key.move())
                     labels.push(label)
                     e.open = pad.open
                     e.heads = pad.heads
@@ -3618,13 +3618,13 @@ ir_x64_pads: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
                     if token >= 0 {
                         loop from in (pad.at + 1)..<stop {
                             if ir_x64_tail_entry(f, al, pad, from, token) {
-                                tail: ir_x64_pad_key(f, al, pad, from, token)
+                                tail := ir_x64_pad_key(f, al, pad, from, token)
                                 tail_hash: ir_x64_key_hash(tail)
                                 listed: tail_seen.get(tail_hash) ?? [Int]{}
                                 extended := listed.copy()
                                 extended.push(tail_keys.len())
                                 tail_seen[tail_hash] = extended.move()
-                                tail_keys.push(tail.copy())
+                                tail_keys.push(tail.move())
                                 tail_labels.push(offsets[from - pad.at - 1])
                                 tail_tokens.push(token)
                                 tail_pads.push(nth)

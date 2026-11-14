@@ -3739,7 +3739,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
             moves.push(false)
             next
         }
-        param_ty: ir_callee_fact(p, b, row, type_args, params[index].ty, span)
+        param_ty := ir_callee_fact(p, b, row, type_args, params[index].ty, span)
         if ir_failed(b) -> return -1
         param_row: ir_value_type(m, p, param_ty) ?? return ir_fail_slot(b, span, "argument type {ir_type_name(param_ty)}")
         slot := -1
@@ -3753,7 +3753,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
             // callee's signature added. Sema spells the widening in the
             // caller's scope, where a member's bare name can name another
             // type (`Path` in core.files.path, `String | Path` in core.files).
-            target: if ir_untag(param_ty) == .Union(_) -> param_ty.copy() else -> ir_fact(p, b, union_ty, span)
+            target: if ir_untag(param_ty) == .Union(_) -> param_ty.move() else -> ir_fact(p, b, union_ty, span)
             if ir_failed(b) -> return -1
             slot = if lend -> ir_widen_union_lent(m, p, b, arg.value, target, lends, span) else -> ir_widen_union_to(m, p, b, arg.value, target, span)
         } else if lend && ir_lent_carrier_arg(p, b, arg.value) && (ir_value_type(m, p, ir_ty(p, b, arg.value)) ?? -1) == param_row {
@@ -7920,7 +7920,7 @@ ir_comptime_answered_member: fn(ty: Type, field: String) -> Bool Never! {
 // the context frame and conversion rows, and the details box.
 ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, fields: [TComptimeField], span: Span) -> Int Never! {
     if ir_default_err_drift(p, ty) == .Val(drift) -> return ir_fail_slot(b, span, "the default Err declaration against the native JetErr: {drift}")
-    absent_text: TComptimeValue.Failed{report: .Clean{ty: Type.String}}
+    absent_text := TComptimeValue.Failed{report: .Clean{ty: Type.String}}
     message_value: ir_comptime_field(fields, "message") ?? return ir_fail_slot(b, span, "default Err constant without a message")
     message: ir_comptime(m, p, b, Type.String, message_value, span)
     code: ir_comptime(m, p, b, Type.Option{inner: Type.String}, ir_comptime_field(fields, "code") ?? absent_text.copy(), span)
@@ -7945,7 +7945,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
             .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}") }
         }
         holder: ir_list_buffer_alloc(m, b, Int{ERR_DETAILS_BYTES})
-        variant: ir_comptime_field(details, "variant") ?? absent_text.copy()
+        variant: ir_comptime_field(details, "variant") ?? absent_text.move()
         ir_comptime_err_text(m, p, b, holder, Int{ERR_DETAILS_VARIANT}, variant, span)
         detail_fields: ir_comptime_field(details, "fields") ?? TComptimeValue.List{values: []}
         ir_comptime_err_rows(m, p, b, holder, Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, detail_fields, [String]{"name", "value"}, None, span)

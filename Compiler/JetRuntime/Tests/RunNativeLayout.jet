@@ -162,7 +162,7 @@ run: fn() {
     source: files.read("{root}/{TEXT}") ?? fail("cannot read {TEXT}: {err}")
     bad: literal_departures(literal_block(source))
     if bad.len() > 0 -> fail("Layout literal {bad[0]} bytes/length mismatch")
-    vectors_path: "{root}/{HERE}/LayoutVectors.txt"
+    vectors_path := "{root}/{HERE}/LayoutVectors.txt"
     vectors: files.read_bytes(vectors_path) ?? fail("cannot read LayoutVectors.txt: {err}")
     seed_text: files.read("{root}/{HERE}/LayoutSeed.json") ?? fail("cannot read LayoutSeed.json: {err}")
     seed: json.parse(seed_text) ?? fail("LayoutSeed.json is not JSON: {err}")
@@ -176,7 +176,7 @@ run: fn() {
     cc_args.extend([String]{"-lm", "-pthread", "-o", binary.copy()})
     built: logged(native_cc(load_policy(root), cc_args).cwd(root.copy()), "{out}/native-link.log")
     if built.signal != None || built.code != 0 -> fail("native-link: exit {built.code}; see {out}/native-link.log")
-    executed: logged(process.cmd([String]{binary.copy(), vectors_path.copy()}).cwd(root.copy()).output_limit(16777216), "{out}/native-execute.log")
+    executed: logged(process.cmd([String]{binary.copy(), vectors_path.move()}).cwd(root.copy()).output_limit(16777216), "{out}/native-execute.log")
     if executed.signal != None || executed.code != 0 -> fail("native-execute: exit {executed.code}; see {out}/native-execute.log")
     actual := executed.output.trim().split("\n").to_list()
     if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP -> fail("ownership witness did not complete")

@@ -26,13 +26,13 @@ Built: struct {
 }
 
 build: fn(jet: String, scratch: String, name: String, source: String) -> Built {
-    folder: "{scratch}/{name}"
+    folder := "{scratch}/{name}"
     files.create_dir_all(folder.copy()) ?? fail("cannot create {folder}: {err}")
     files.write("{folder}/main.jet", source.copy()) ?? fail("cannot write {folder}/main.jet: {err}")
     manifest: "name: \"{name}\"\nversion: \"0.0.1\"\nauthority: {{ allow: [FFI.C, IO, Mem.Alloc] }}\n"
     files.write("{folder}/package.jet", manifest) ?? fail("cannot write {folder}/package.jet: {err}")
     receipt: process.cmd([String]{jet.copy(), "build", "main.jet"}).cwd(folder.copy()).env("NO_COLOR", "1").run() ?? fail("jet build failed to start: {err}")
-    Built{folder: folder.copy(), code: receipt.code, signal: receipt.signal ?? 0, errors: "{receipt.output}{receipt.errors}"}
+    Built{folder: folder.move(), code: receipt.code, signal: receipt.signal ?? 0, errors: "{receipt.output}{receipt.errors}"}
 }
 
 run: fn() {

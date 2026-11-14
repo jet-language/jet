@@ -678,8 +678,8 @@ jet_cli_repl_parse_outcome: fn(session: JetCLIReplSession, stdout: String, stder
         body_end: newline + 1 + count
         if body_end > rest.count_bytes() -> break
         values.push(JetCLIReplValue{index: index, shown: jet_cli_repl_bytes(rest, newline + 1, body_end)})
-        tail: jet_cli_repl_bytes(rest, body_end, rest.count_bytes())
-        records = if tail.starts_with("\n") -> jet_cli_repl_bytes(tail, 1, tail.count_bytes()) else -> tail.copy()
+        tail := jet_cli_repl_bytes(rest, body_end, rest.count_bytes())
+        records = if tail.starts_with("\n") -> jet_cli_repl_bytes(tail, 1, tail.count_bytes()) else -> tail.move()
     }
     turn_err: jet_cli_repl_after(stderr, "{mark}turn\n") ?? stderr.copy()
     if code != 0 {

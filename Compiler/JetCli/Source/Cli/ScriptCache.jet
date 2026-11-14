@@ -496,7 +496,7 @@ jet_cli_script_kept_run: fn(keep: JetCLIScriptKeep, file: String, source: String
     stopped: jet_cli_effect_notice(file, source, authority, invocation, color, json)
     if stopped.move() == .Val(output) -> return Val(JetCLIRunStep.Output{output: output})
     jet_cli_script_used(record, text)
-    Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: authority.read_scope.copy(), verbose: false, color: color})
+    Val(JetCLIRunStep.Launch{executable: executable.move(), file: file, binary: binary, program_args: program_args, options: options, invocation: invocation, read_scope: authority.read_scope.move(), verbose: false, color: color})
 }
 
 // Whether the complete slot record `rows` names exactly `keep`'s sources and

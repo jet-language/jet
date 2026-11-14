@@ -32,10 +32,10 @@ JetCLIEnvVar: struct {
 // receipt's identity is its entry, source, closure, arguments and target, so
 // one failure of one run writes one receipt wherever it runs.
 jet_cli_production_receipt_env: fn(file: String, program_args: [String]) -> [JetCLIEnvVar] {
-    cwd: cli_sys.current_dir() ?? "."
+    cwd := cli_sys.current_dir() ?? "."
     source_file: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
     cache := WorkspaceDeclarationCache.new()
-    root: jet_cli_selected_project_root(cache, jet_cli_parent(source_file) ?? ".") ?? cwd.copy()
+    root: jet_cli_selected_project_root(cache, jet_cli_parent(source_file) ?? ".") ?? cwd.move()
     entry: jet_cli_production_entry(source_file, root)
     source_digest: jet_cli_source_hash(cli_files.read_bytes(source_file) ?? [U8]{})
 

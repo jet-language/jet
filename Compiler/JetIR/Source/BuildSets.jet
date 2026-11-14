@@ -24,13 +24,13 @@ use jet_foundation.[Span, Type, jet_layout_one_bit_shift, name_rows_set, name_ro
 // The entry layout of the Set type row `set_row`: the key at offset 0 of a
 // key-sized entry; None when its keys have no order the builder knows.
 ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
-    elem: ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
+    elem := ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
     if ir_bit_set_def(p, m.types[set_row].ty) != None -> return None
     key_row: ir_value_type(m, p, elem) ?? return None
     kind: ir_map_key_kind(m, key_row)
     if kind == "" -> return None
     member: IRMember{name: "key", offset: 0, ty: key_row}
-    Val(IRMapShape{entry: key_row, entry_ty: elem.copy(), key: member.copy(), value: member, value_ty: Type.Named{name: "Unit"}, stride: ir_list_stride(m, key_row), kind: kind})
+    Val(IRMapShape{entry: key_row, entry_ty: elem.move(), key: member.copy(), value: member, value_ty: Type.Named{name: "Unit"}, stride: ir_list_stride(m, key_row), kind: kind})
 }
 
 // Whether `ty` is a Rank, whose header carries an order word at 24.
@@ -997,7 +997,7 @@ ir_bit_set_from_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int
 
 // A Set builtin on a Set stored as bits (ir_set_builtin's symbols).
 ir_bit_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, symbol: String, set_row: Int, definition: Int, subject: Int, operands: [Int], span: Span) -> Int? Never! {
-    elem: ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
+    elem := ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
     elem_row: ir_value_type(m, p, elem) ?? return Val(ir_type_fail(b, span, elem))
     cases: ir_bit_set_cases(p, definition)
     int_row: ir_type_row(m, Type.Int) ?? 0
@@ -1100,7 +1100,7 @@ ir_bit_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rout
     if symbol == "jet_set_insert" -> return Val(ir_bool_op(m, b, IROp.Eq, held, zero))
     if symbol == "jet_set_remove" -> return Val(-1)
     // pop and replace give back the key the Set held.
-    option_row: ir_value_type(m, p, Type.Option{inner: elem.copy()}) ?? return Val(ir_fail_slot(b, span, "Set builtin {route} result"))
+    option_row: ir_value_type(m, p, Type.Option{inner: elem.move()}) ?? return Val(ir_fail_slot(b, span, "Set builtin {route} result"))
     result: ir_fresh_temp(m, b, option_row)
     ir_option_none(m, b, result)
     ir_open_if(b.f, present, b.line)

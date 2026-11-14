@@ -475,13 +475,13 @@ jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIRevi
     new_counts: jet_cli_review_key_counts(new_defs)
     loop (index, fact) in old_defs {
         if matched_before.has_key(index) -> next
-        identity: jet_cli_review_identity(old_claims, fact)
-        operations.push(JetCLIReviewOp{kind: "removed", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: Val(identity.copy()), after: None, before_identity: Val(identity.copy()), after_identity: None, alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, true), source_operation: None})
+        identity := jet_cli_review_identity(old_claims, fact)
+        operations.push(JetCLIReviewOp{kind: "removed", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: Val(identity.copy()), after: None, before_identity: Val(identity.move()), after_identity: None, alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, true), source_operation: None})
     }
     loop (index, fact) in new_defs {
         if matched_after.has_key(index) -> next
-        identity: jet_cli_review_identity(new_claims, fact)
-        operations.push(JetCLIReviewOp{kind: "added", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: None, after: Val(identity.copy()), before_identity: None, after_identity: Val(identity.copy()), alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, false), source_operation: None})
+        identity := jet_cli_review_identity(new_claims, fact)
+        operations.push(JetCLIReviewOp{kind: "added", stable_id: fact.stable_id.copy(), identity: identity.copy(), before: None, after: Val(identity.copy()), before_identity: None, after_identity: Val(identity.move()), alignment: jet_cli_review_unmatched_alignment(fact, old_counts, new_counts, false), source_operation: None})
     }
     jet_cli_review_effect_ops(operations, before.effects, after.effects)
     jet_cli_review_sort(operations, false)
@@ -615,8 +615,8 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
     loop receipt in receipts {
         if receipt.kind != "rename" && receipt.kind != "move" && receipt.kind != "moved" -> next
         is_move: receipt.kind == "move" || receipt.kind == "moved"
-        before_name: if receipt.targets.len() > 0 -> Val(receipt.targets[0].before.copy()) else -> receipt.from.copy()
-        after_name: if receipt.targets.len() > 0 -> Val(receipt.targets[0].after.copy()) else -> receipt.to.copy()
+        before_name := if receipt.targets.len() > 0 -> Val(receipt.targets[0].before.copy()) else -> receipt.from.copy()
+        after_name := if receipt.targets.len() > 0 -> Val(receipt.targets[0].after.copy()) else -> receipt.to.copy()
         old_candidates: jet_cli_review_candidates(old_defs, receipt, before_name, true)
         new_candidates: jet_cli_review_candidates(new_defs, receipt, after_name, false)
         old_index: if old_candidates.len() == 1 -> old_candidates[0] else -> -1
@@ -647,14 +647,14 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
         } else if old_candidates.len() == 0 {
             alignment = "unmatched_before"
         }
-        stable_id: if {
+        stable_id := if {
             new_index >= 0 -> new_defs[new_index].stable_id.copy()
             old_index >= 0 -> old_defs[old_index].stable_id.copy()
             receipt.targets.len() > 0 -> receipt.targets[0].stable_id.copy()
             else -> "{receipt.kind}:unresolved"
         }
-        before_identity: if old_index >= 0 -> Val(old_defs[old_index].human_identity.copy()) else -> before_name.copy()
-        after_identity: if new_index >= 0 -> Val(new_defs[new_index].human_identity.copy()) else -> after_name.copy()
+        before_identity := if old_index >= 0 -> Val(old_defs[old_index].human_identity.copy()) else -> before_name.move()
+        after_identity := if new_index >= 0 -> Val(new_defs[new_index].human_identity.copy()) else -> after_name.move()
         identity := "unknown"
         if before_identity == .Val(name) -> identity = name.copy()
         if after_identity == .Val(name) -> identity = name.copy()
@@ -665,21 +665,21 @@ jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLIS
             new_payload = if new_index >= 0 -> Val(new_defs[new_index].module_path.copy()) else -> None
         }
         source: receipt.rule_id ?? receipt.kind
-        operation: JetCLIReviewOp{
+        operation := JetCLIReviewOp{
             kind: if is_move -> "moved" else -> "renamed",
-            stable_id: stable_id.copy(),
-            identity: identity.copy(),
+            stable_id: stable_id.move(),
+            identity: identity.move(),
             before: old_payload.move(),
             after: new_payload.move(),
-            before_identity: before_identity.copy(),
-            after_identity: after_identity.copy(),
-            alignment: alignment.copy(),
+            before_identity: before_identity.move(),
+            after_identity: after_identity.move(),
+            alignment: alignment.move(),
             source_operation: Val(source.copy()),
         }
-        key: jet_cli_review_op_key(operation)
+        key := jet_cli_review_op_key(operation)
         if recorded.has_key(key) -> next
-        recorded[key.copy()] = true
-        operations.push(operation.copy())
+        recorded[key.move()] = true
+        operations.push(operation.move())
     }
     filtered := [JetCLIReviewOp]{}
     loop operation in operations {
@@ -806,9 +806,9 @@ jet_cli_review_authority_diff: fn(before: [JetCLIReviewFact], after: [JetCLIRevi
         new_index: new_at.get(key)
         old: if old_index == .Val(at) -> before[at].copy() else -> empty.copy()
         new: if new_index == .Val(at) -> after[at].copy() else -> empty.copy()
-        status: jet_cli_review_classify(old, new, old_index != None, new_index != None) ?? next
+        status := jet_cli_review_classify(old, new, old_index != None, new_index != None) ?? next
         changes.push(JetCLIReviewAuthorityChange{
-            status: status.copy(),
+            status: status.move(),
             key: key.copy(),
             before: if old_index == None -> None else -> Val(old.display.join(" | ")),
             after: if new_index == None -> None else -> Val(new.display.join(" | ")),
@@ -884,7 +884,7 @@ jet_cli_review_parse_identity: fn(object: Dyn) -> JetCLIReviewIdentity JetCLIRea
 
 // `parse_derivation_claim`.
 jet_cli_review_parse_derivation: fn(object: Dyn) -> JetCLIReviewDerivation JetCLIReadError! {
-    id: jet_cli_review_text_field(object, "id") ?? return Err(jet_cli_read_error("derivation has no id"))
+    id := jet_cli_review_text_field(object, "id") ?? return Err(jet_cli_read_error("derivation has no id"))
     event := String?{None}
     counterexample := String?{None}
     if jet_cli_sem_json_field(object, "observation") == .Val(observation) {
@@ -895,7 +895,7 @@ jet_cli_review_parse_derivation: fn(object: Dyn) -> JetCLIReviewDerivation JetCL
         }
     }
     Ok(JetCLIReviewDerivation{
-        id: id.copy(),
+        id: id.move(),
         subject: jet_cli_review_text_field(object, "subject") ?? "",
         claim: jet_cli_review_text_field(object, "claim") ?? "",
         producer: jet_cli_review_text_field(object, "producer") ?? "",
@@ -965,7 +965,7 @@ jet_cli_review_observation: fn(object: Dyn, derivation: JetCLIReviewDerivation?,
     if event == None -> event = held.counterexample.copy()
     if event == None -> event = jet_cli_review_text_field(object, "event")
     if event == None -> event = jet_cli_review_text_field(object, "observation")
-    source: if jet_cli_sem_json_field(object, "source") == .Val(value) -> jet_cli_review_canonical(value) else -> ""
+    source := if jet_cli_sem_json_field(object, "source") == .Val(value) -> jet_cli_review_canonical(value) else -> ""
     Val(JetCLIReviewObservation{
         contract: contract.move(),
         inputs: inputs.move(),
@@ -973,7 +973,7 @@ jet_cli_review_observation: fn(object: Dyn, derivation: JetCLIReviewDerivation?,
         premises: premises.join(","),
         event: event.move(),
         result: "{outcome}:{state}",
-        source: source.copy(),
+        source: source.move(),
         identity: Val(held.identity.copy()),
         order: order,
     })
@@ -1024,10 +1024,10 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
     file: path ?? return Ok(JetCLIReviewReceipt{recorded: false, claims: [JetCLIReviewClaim]{}, claim_key: None, proof: None})
     raw: cli_files.read(file) ?? return Err(jet_cli_read_error("could not read receipt `{file}`: {jet_cli_io_error_text(err)}"))
     proof: JetCLIReviewProof{path: file.copy(), digest: sha256_hex(raw)}
-    root: jet_cli_status_tree_parse(raw) ?? return Err(jet_cli_read_error("could not parse receipt `{file}`: {err.message}"))
+    root := jet_cli_status_tree_parse(raw) ?? return Err(jet_cli_read_error("could not parse receipt `{file}`: {err.message}"))
     report: jet_cli_review_first_field(root, [String]{"proofReport", "proof_report"}) ?? root.copy()
     claim_key := String?{None}
-    holders: [Dyn]{root.copy(), report.copy()}
+    holders: [Dyn]{root.move(), report.copy()}
     names: [String]{"claim_key", "claimKey"}
     loop holder in holders {
         loop name in names {
@@ -1055,7 +1055,7 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
     seen := [String:Bool]{}
     loop (order, item) in items {
         if !jet_cli_review_is_object(item) -> return Err(jet_cli_read_error("receipt `{file}` has invalid evidence item: expected an object"))
-        key: jet_cli_review_claim_key(item)
+        key := jet_cli_review_claim_key(item)
         if seen.has_key(key) -> return Err(jet_cli_read_error("receipt `{file}` has duplicate evidence claim `{key}`"))
         seen[key.copy()] = true
         outcome := jet_cli_review_text_field(item, "outcome") ?? jet_cli_review_text_field(item, "result") ?? "unknown"
@@ -1066,11 +1066,11 @@ jet_cli_review_read_receipt: fn(path: String?) -> JetCLIReviewReceipt JetCLIRead
                 if jet_cli_review_text_field(completeness, "state") == .Val(found) -> state = found.copy()
             }
         }
-        label: jet_cli_review_text_field(item, "claimId") ?? jet_cli_review_text_field(item, "claim") ?? jet_cli_review_text_field(item, "id") ?? jet_cli_review_text_field(item, "property") ?? key.copy()
+        label := jet_cli_review_text_field(item, "claimId") ?? jet_cli_review_text_field(item, "claim") ?? jet_cli_review_text_field(item, "id") ?? jet_cli_review_text_field(item, "property") ?? key.copy()
         derivation: jet_cli_review_evidence_derivation(item, derivations)
         claims.push(JetCLIReviewClaim{
-            key: key.copy(),
-            label: label.copy(),
+            key: key.move(),
+            label: label.move(),
             outcome: outcome.copy(),
             state: state.copy(),
             proven: jet_cli_review_proven(derivation),
@@ -1273,9 +1273,9 @@ jet_cli_review_receipt_diff: fn(before: JetCLIReviewReceipt, after: JetCLIReview
             } else {
                 diff.changed += 1
             }
-            change: JetCLIReviewChange{status: word.copy(), key: key.copy(), before: old.copy(), after: new.copy()}
+            change := JetCLIReviewChange{status: word.copy(), key: key.copy(), before: old.copy(), after: new.copy()}
             diff.changed_contracts.push(change.copy())
-            diff.changes.push(change.copy())
+            diff.changes.push(change.move())
             next
         }
         diff.retained += 1
@@ -1580,7 +1580,7 @@ jet_cli_review_diagnostics: fn(argv: [String], json: Bool, color: Bool) -> JetDr
 // loading; it is valid when complete and error-free.
 jet_cli_review_diagnostic_load: fn(path: String) -> JetCLIReviewDiagnosticLoaded {
     source: cli_files.read(path) ?? return JetCLIReviewDiagnosticLoaded.Failed{message: "could not read `{path}`: {jet_cli_io_error_text(err)}"}
-    source_hash: sha256_hex(source)
+    source_hash := sha256_hex(source)
     if jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> return JetCLIReviewDiagnosticLoaded.Refused{output: output.move()}
         .Compiled(result, snapshot) -> {
@@ -1597,7 +1597,7 @@ jet_cli_review_diagnostic_load: fn(path: String) -> JetCLIReviewDiagnosticLoaded
             }
             return JetCLIReviewDiagnosticLoaded.Loaded{side: JetCLIReviewDiagnosticSide{
                 path: path.copy(),
-                source_hash: source_hash.copy(),
+                source_hash: source_hash.move(),
                 scope_root: scope_root.copy(),
                 entry_scope: jet_cli_review_scope_key(path, scope_root),
                 revisions: revisions.move(),
@@ -1631,9 +1631,9 @@ jet_cli_review_occurrences: fn(side: JetCLIReviewDiagnosticSide) -> [JetCLIRevie
         if diagnostic.origin == .Val(origin) {
             if origin.path != "" -> origin_path = origin.path.copy()
         }
-        scope: jet_cli_review_scope_key(origin_path, side.scope_root)
+        scope := jet_cli_review_scope_key(origin_path, side.scope_root)
         identity: if diagnostic.span == .Val(span) -> Val("{diagnostic.code}|{scope}|{span.start}:{span.end}") else -> None
-        occurrences.push(JetCLIReviewOccurrence{index: index, code: diagnostic.code.copy(), scope: scope.copy(), identity: identity.move()})
+        occurrences.push(JetCLIReviewOccurrence{index: index, code: diagnostic.code.copy(), scope: scope.move(), identity: identity.move()})
     }
     occurrences
 }
@@ -1677,8 +1677,8 @@ jet_cli_review_unmatched: fn(at: Int, occurrence: JetCLIReviewOccurrence, side_c
     base: if status == "resolved" -> Val(at) else -> None
     head: if status == "new" -> Val(at) else -> None
     if reason != "" -> return JetCLIReviewRelation{status: "unknown", reason: reason.copy(), base: base, head: head}
-    present: if status == "new" -> "diagnostic is present only on the reviewed side" else -> "diagnostic is present only on the baseline side"
-    JetCLIReviewRelation{status: status.copy(), reason: present.copy(), base: base, head: head}
+    present := if status == "new" -> "diagnostic is present only on the reviewed side" else -> "diagnostic is present only on the baseline side"
+    JetCLIReviewRelation{status: status.copy(), reason: present.move(), base: base, head: head}
 }
 
 // `compare_diagnostics`: occurrences pair by identity; a unique pair is
@@ -1726,8 +1726,8 @@ jet_cli_review_diagnostic_compare: fn(base: JetCLIReviewDiagnosticSide, head: Je
         } else {
             loop at in new {
                 head_seen[at] = true
-                relation: jet_cli_review_unmatched(at, head_occurrences[at], head.complete, base.complete, base_occurrences, jet_cli_review_input_changed(head_occurrences[at], head, base), "new")
-                if relation.status == "new" -> diff.new.push(relation.copy()) else -> diff.unknown.push(relation.copy())
+                relation := jet_cli_review_unmatched(at, head_occurrences[at], head.complete, base.complete, base_occurrences, jet_cli_review_input_changed(head_occurrences[at], head, base), "new")
+                if relation.status == "new" -> diff.new.push(relation.move()) else -> diff.unknown.push(relation.move())
             }
         }
     }
@@ -1757,8 +1757,8 @@ jet_cli_review_cause_json: fn(cause: DiagnosticCause) -> String Never! {
 jet_cli_review_diagnostic_value: fn(diagnostic: Diagnostic, side: JetCLIReviewDiagnosticSide) -> String Never! {
     severity: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "warning"
     span: if diagnostic.span == .Val(value) -> jet_cli_review_span_json(value.start, value.end) else -> "null"
-    inferred: "{{\"display\":{jet_cli_json_string(side.path)},\"path\":{jet_cli_json_string(side.path)},\"revision\":{jet_cli_json_string(side.source_hash)},\"inferred\":true}}"
-    origin: if diagnostic.origin == .Val(value) -> "{{\"display\":{jet_cli_json_string(value.display)},\"path\":{jet_cli_json_string(value.path)},\"revision\":{jet_cli_json_string(value.revision)},\"inferred\":false}}" else if diagnostic.span != None -> inferred.copy() else -> "null"
+    inferred := "{{\"display\":{jet_cli_json_string(side.path)},\"path\":{jet_cli_json_string(side.path)},\"revision\":{jet_cli_json_string(side.source_hash)},\"inferred\":true}}"
+    origin: if diagnostic.origin == .Val(value) -> "{{\"display\":{jet_cli_json_string(value.display)},\"path\":{jet_cli_json_string(value.path)},\"revision\":{jet_cli_json_string(value.revision)},\"inferred\":false}}" else if diagnostic.span != None -> inferred.move() else -> "null"
     detail: if diagnostic.detail == .Val(text) -> jet_cli_json_string(text) else -> "null"
     causes: loop cause in diagnostic.cause -> jet_cli_review_cause_json(cause)
     "{{\"code\":{jet_cli_json_string(diagnostic.code)},\"severity\":{jet_cli_json_string(severity)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)},\"span\":{span},\"origin\":{origin},\"cause\":[{causes.join(",")}],\"detail\":{detail}}}"

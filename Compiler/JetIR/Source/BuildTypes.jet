@@ -2371,11 +2371,11 @@ ir_fixed_power: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: 
 ir_time_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
     duration_ty: Type.Named{name: "Duration"}
     duration_row: ir_value_type(m, p, duration_ty) ?? return ir_type_fail(b, span, duration_ty)
-    duration_record: ir_word_record(m, p, duration_row) ?? return ir_fail_slot(b, span, "Duration without its word record")
+    duration_record := ir_word_record(m, p, duration_row) ?? return ir_fail_slot(b, span, "Duration without its word record")
     left_duration: left_record.constructor == duration_record.constructor
     right_duration: right_record.constructor == duration_record.constructor
     result_row := duration_row
-    result_record := duration_record.copy()
+    result_record := duration_record.move()
     if left_duration && !right_duration {
         if op == .Sub -> return ir_fail_slot(b, span, "operator {op} with a Duration on the left")
         result_row = b.f.slot_type[right]

@@ -79,10 +79,10 @@ JetCLIReportBase: struct {
 // `file`, else the working directory's.
 jet_cli_report_base: fn(file: String) -[FS, Env]> JetCLIReportBase? Never! {
     cwd: jet_cli_report_cwd()
-    absolute: jet_cli_report_path(cwd, file)
+    absolute := jet_cli_report_path(cwd, file)
     start := cwd ?? ""
     if absolute.starts_with("/") {
-        start = if cli_files.is_dir(absolute) -> absolute.copy() else -> jet_cli_parent(absolute) ?? absolute.copy()
+        start = if cli_files.is_dir(absolute) -> absolute.move() else -> jet_cli_parent(absolute) ?? absolute.move()
     }
     if start.len() == 0 -> return Val(JetCLIReportBase{cwd: cwd, root: None})
     Val(JetCLIReportBase{cwd: cwd, root: jet_cli_report_root(start)})

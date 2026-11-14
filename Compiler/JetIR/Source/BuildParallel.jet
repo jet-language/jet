@@ -18,8 +18,8 @@ IRParaSignature: struct {
 
 ir_para_signature: fn(ty: Type) -> IRParaSignature? Never! {
     if ir_untag(ty) == .Fn(params, _, _, _, _, _) {
-        result: ir_callback_result(ty) ?? return None
-        return Val(IRParaSignature{params: params.copy(), result: result.copy()})
+        result := ir_callback_result(ty) ?? return None
+        return Val(IRParaSignature{params: params.copy(), result: result.move()})
     }
     None
 }

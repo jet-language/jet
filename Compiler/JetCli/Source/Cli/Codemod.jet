@@ -1164,7 +1164,7 @@ jet_cli_codemod_index_unit: fn(entry: String, files: JetCLICodemodFiles, inputs:
 jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -[FS, Env]> JetCLICodemodBatch JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     if jet_cli_codemod_take_number(object, "version") != 2 -> return Err(jet_cli_codemod_error("batch codemod requires `version: 2`"))
-    name: jet_cli_codemod_take_string(object, "name")
+    name := jet_cli_codemod_take_string(object, "name")
     if name.trim() == "" -> return Err(jet_cli_codemod_error("codemod name cannot be empty"))
     project_raw: jet_cli_codemod_take_string(object, "project")
     if project_raw.starts_with("/") -> return Err(jet_cli_codemod_error("project must be resolved relative to the codemod object"))
@@ -1189,36 +1189,36 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
     rules := [JetCLICodemodRule]{}
     loop rule_value in values {
         rule := jet_cli_codemod_object(rule_value, "rule must be an object")
-        id: jet_cli_codemod_take_string(rule, "id")
+        id := jet_cli_codemod_take_string(rule, "id")
         if ids.contains(id) -> return Err(jet_cli_codemod_error("duplicate rule id `{id}`"))
         ids.push(id.copy())
-        kind: jet_cli_codemod_take_string(rule, "kind")
+        kind := jet_cli_codemod_take_string(rule, "kind")
         matches: jet_cli_codemod_take_number(rule, "matches")
         allow_zero: jet_cli_codemod_take_bool(rule, "allow_zero", false)
         if matches == 0 && !allow_zero -> return Err(jet_cli_codemod_error("rule `{id}` declares zero matches without `allow_zero: true`"))
         if kind == "symbol_rename" {
             from := jet_cli_codemod_take_object(rule, "from")
-            symbol: jet_cli_codemod_take_string(from, "name")
-            symbol_kind: jet_cli_codemod_take_string(from, "symbol_kind")
+            symbol := jet_cli_codemod_take_string(from, "name")
+            symbol_kind := jet_cli_codemod_take_string(from, "symbol_kind")
             defined_raw: jet_cli_codemod_take_string_opt(from, "defined_in")
             defined_in := String?{None}
             if defined_raw == .Val(raw) -> defined_in = Val(jet_cli_codemod_secure_existing(project, raw, false))
             jet_cli_codemod_reject_unknown(from, "symbol selector")
-            to: jet_cli_codemod_take_string(rule, "to")
+            to := jet_cli_codemod_take_string(rule, "to")
             jet_cli_codemod_validate_ident(symbol)
             jet_cli_codemod_validate_ident(to)
             jet_cli_codemod_reject_unknown(rule, "symbol_rename rule")
-            rules.push(JetCLICodemodRule{id: id.copy(), kind: kind.copy(), name: symbol.copy(), symbol_kind: symbol_kind.copy(), defined_in: defined_in, to: to.copy(), node: "", pattern: [JetCLICodemodAtom]{}, replacement: [JetCLICodemodAtom]{}, matches: matches, allow_zero: allow_zero})
+            rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: symbol.move(), symbol_kind: symbol_kind.move(), defined_in: defined_in, to: to.move(), node: "", pattern: [JetCLICodemodAtom]{}, replacement: [JetCLICodemodAtom]{}, matches: matches, allow_zero: allow_zero})
         } else if kind == "ast_rewrite" {
-            node: jet_cli_codemod_take_string(rule, "node")
+            node := jet_cli_codemod_take_string(rule, "node")
             if node != "expr" && node != "stmt" && node != "item" && node != "type" -> return Err(jet_cli_codemod_error("rule `{id}` has unknown node class `{node}`"))
-            pattern: jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "match"))
-            replacement: jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "replace"))
+            pattern := jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "match"))
+            replacement := jet_cli_codemod_parse_template(jet_cli_codemod_take_string(rule, "replace"))
             jet_cli_codemod_validate_templates(id, pattern, replacement)
             jet_cli_codemod_validate_typed_template(id, node, pattern, "match")
             jet_cli_codemod_validate_typed_template(id, node, replacement, "replace")
             jet_cli_codemod_reject_unknown(rule, "ast_rewrite rule")
-            rules.push(JetCLICodemodRule{id: id.copy(), kind: kind.copy(), name: "", symbol_kind: "", defined_in: None, to: "", node: node.copy(), pattern: pattern.copy(), replacement: replacement.copy(), matches: matches, allow_zero: allow_zero})
+            rules.push(JetCLICodemodRule{id: id.move(), kind: kind.move(), name: "", symbol_kind: "", defined_in: None, to: "", node: node.move(), pattern: pattern.move(), replacement: replacement.move(), matches: matches, allow_zero: allow_zero})
         } else {
             return Err(jet_cli_codemod_error("unknown codemod rule kind `{kind}`"))
         }
@@ -1249,7 +1249,7 @@ jet_cli_codemod_parse_batch: fn(value: JetCLIStatusValue, object_path: String) -
         }
     }
     jet_cli_codemod_reject_unknown(object, "batch codemod")
-    Ok(JetCLICodemodBatch{name: name.copy(), project: project, roots: roots, rules: rules, snapshots: snapshots})
+    Ok(JetCLICodemodBatch{name: name.move(), project: project, roots: roots, rules: rules, snapshots: snapshots})
 }
 
 jet_cli_codemod_insert_unit: fn(units: &[JetCLICodemodUnit], path: String, fixture: Bool) JetCLIReadError! {
@@ -1397,13 +1397,13 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
             if rule.defined_in == .Val(selected) {
                 if jet_cli_codemod_physical(indexed, def.module_path) != jet_cli_codemod_canonicalish(selected) -> next
             }
-            anchor: jet_cli_codemod_anchor(def)
+            anchor := jet_cli_codemod_anchor(def)
             known := false
             loop existing in anchors {
                 if jet_cli_codemod_same_anchor(existing, anchor) -> known = true
             }
             if known -> next
-            anchors.push(anchor.copy())
+            anchors.push(anchor.move())
             if jet_cli_codemod_definition_fact(indexed.index, def) == .Val(fact) -> targets.push(jet_cli_codemod_target(fact, rule.to))
         }
     }
@@ -1633,16 +1633,16 @@ jet_cli_codemod_run_v2: fn(batch: JetCLICodemodBatch, apply: Bool, yes: Bool, ru
 jet_cli_codemod_parse_v1: fn(value: JetCLIStatusValue, path: String) -> JetCLICodemodV1 JetCLIReadError! {
     object := jet_cli_codemod_object(value, "expected JSON object")
     _: jet_cli_codemod_take_number_opt(object, "version")
-    name: jet_cli_codemod_take_string_opt(object, "name") ?? "Codemod"
+    name := jet_cli_codemod_take_string_opt(object, "name") ?? "Codemod"
     entry: jet_cli_codemod_resolve_against(jet_cli_parent(path), jet_cli_codemod_take_string(object, "entry"))
     operation: jet_cli_codemod_take_string(object, "operation")
     if operation != "rename" -> return Err(jet_cli_codemod_error("version 1 supports only `rename`"))
-    from: jet_cli_codemod_take_string(object, "from")
-    to: jet_cli_codemod_take_string(object, "to")
+    from := jet_cli_codemod_take_string(object, "from")
+    to := jet_cli_codemod_take_string(object, "to")
     jet_cli_codemod_reject_unknown(object, "version 1 codemod")
     jet_cli_codemod_validate_ident(from)
     jet_cli_codemod_validate_ident(to)
-    Ok(JetCLICodemodV1{name: name.copy(), entry: entry, from: from.copy(), to: to.copy()})
+    Ok(JetCLICodemodV1{name: name.move(), entry: entry, from: from.move(), to: to.move()})
 }
 
 // Rust managed_project_for_entry: the directory holding the entry's
@@ -1798,14 +1798,14 @@ jet_cli_codemod_undo_v2: fn(value: JetCLIStatusValue, path: String, project: Str
     paths := [String]{}
     loop row_value in rows {
         row := jet_cli_codemod_object(row_value, "replay log file must be object")
-        file: jet_cli_codemod_take_string(row, "path")
+        file := jet_cli_codemod_take_string(row, "path")
         before_hash: jet_cli_codemod_take_string(row, "before_hash")
         after_hash: jet_cli_codemod_take_string(row, "after_hash")
         before: jet_cli_codemod_unhex(jet_cli_codemod_take_string(row, "before_bytes"))
         after: jet_cli_codemod_unhex(jet_cli_codemod_take_string(row, "after_bytes"))
         jet_cli_codemod_reject_unknown(row, "replay log file")
         if jet_cli_source_hash(before) != before_hash || jet_cli_source_hash(after) != after_hash -> return Err(jet_cli_codemod_error("replay log byte hash mismatch for `{file}`"))
-        paths.push(file.copy())
+        paths.push(file.move())
     }
     any_path: operation == "fix"
     jet_cli_codemod_validate_destinations(project, paths, any_path)
@@ -1822,17 +1822,17 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     decoded := [JetCLICodemodReplayRow]{}
     loop file_value in files {
         row := jet_cli_codemod_object(file_value, "expected JSON object")
-        file: jet_cli_codemod_take_string(row, "path")
-        before_hash: jet_cli_codemod_take_string(row, "before_hash")
-        after_hash: jet_cli_codemod_take_string(row, "after_hash")
-        before_bytes: jet_cli_codemod_take_string_opt(row, "before_bytes")
+        file := jet_cli_codemod_take_string(row, "path")
+        before_hash := jet_cli_codemod_take_string(row, "before_hash")
+        after_hash := jet_cli_codemod_take_string(row, "after_hash")
+        before_bytes := jet_cli_codemod_take_string_opt(row, "before_bytes")
         inverse := [JetCLIStatusValue]{}
         if before_bytes == None {
             inverse = jet_cli_codemod_take_array(row, "inverse_edits")
         } else {
             _: jet_cli_codemod_take_array_opt(row, "inverse_edits")
         }
-        decoded.push(JetCLICodemodReplayRow{path: file.copy(), before_hash: before_hash.copy(), after_hash: after_hash.copy(), before_bytes: before_bytes.copy(), inverse_edits: inverse})
+        decoded.push(JetCLICodemodReplayRow{path: file.move(), before_hash: before_hash.move(), after_hash: after_hash.move(), before_bytes: before_bytes.move(), inverse_edits: inverse})
     }
     paths: loop row in decoded -> row.path.copy()
     jet_cli_codemod_validate_destinations(project_path, paths, false)
@@ -1843,7 +1843,7 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
     jet_cli_transaction_recover(project, journal)
     changes := [JetCLISourceChange]{}
     loop row in decoded {
-        current: jet_cli_codemod_read_destination(project_path, row.path) ?? return Err(jet_cli_codemod_error("could not read `{row.path}`: {err.message}"))
+        current := jet_cli_codemod_read_destination(project_path, row.path) ?? return Err(jet_cli_codemod_error("could not read `{row.path}`: {err.message}"))
         if jet_cli_source_hash(current) != row.after_hash -> return Err(jet_cli_codemod_error("checkpoint mismatch for `{row.path}`; refusing undo"))
         before := [U8]{}
         if row.before_bytes == .Val(hex) {
@@ -1854,15 +1854,15 @@ jet_cli_codemod_undo_v1: fn(value: JetCLIStatusValue, path: String, project_path
                 edit := jet_cli_codemod_object(edit_value, "legacy inverse edit must be an object")
                 start: jet_cli_codemod_take_number(edit, "start")
                 end: jet_cli_codemod_take_number(edit, "end")
-                new_text: jet_cli_codemod_take_string(edit, "new_text")
-                edits.push(TextEdit{span: Span{start: start, end: end}, new_text: new_text.copy()})
+                new_text := jet_cli_codemod_take_string(edit, "new_text")
+                edits.push(TextEdit{span: Span{start: start, end: end}, new_text: new_text.move()})
             }
             source: String.from_bytes(current) ?? return Err(jet_cli_codemod_error("legacy codemod file is not UTF-8"))
             restored: jet_driver_apply_edits(source, edits) ?? return Err(jet_cli_codemod_error("legacy codemod inverse edits overlap"))
             before = restored.bytes()
         }
         if jet_cli_source_hash(before) != row.before_hash -> return Err(jet_cli_codemod_error("undo result mismatch for `{row.path}`; refusing undo"))
-        changes.push(JetCLISourceChange{path: row.path.copy(), before: current.copy(), after: before})
+        changes.push(JetCLISourceChange{path: row.path.copy(), before: current.move(), after: before})
     }
     undo_name: jet_cli_codemod_with_extension(jet_cli_file_name(path), "undo.log.json")
     marker: "{{\"schema\":2,\"name\":{foundation_json_quote("{name}-undo")},\"files\":[]}}\n"

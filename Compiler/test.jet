@@ -349,11 +349,11 @@ JetpackPrep: struct {
 jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
     scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
     prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get(ENV_JETPACK_BIN) ?? "", build: None, error: ""}
-    assembled: jetpack_assemble(setup, scratch, "aot") ?? {
+    assembled := jetpack_assemble(setup, scratch, "aot") ?? {
         prep.error = err.message.copy()
         return prep
     }
-    prep.assembled = assembled.copy()
+    prep.assembled = assembled.move()
     prep.map = jetpack_map(files.join(scratch, "aot/jetpack.map.json")) ?? {
         prep.error = err.message.copy()
         return prep

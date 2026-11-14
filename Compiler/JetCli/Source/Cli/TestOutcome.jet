@@ -261,7 +261,7 @@ jet_cli_claims_floor_fix: fn(grade: ClaimsGrade, required: ClaimsGrade, target: 
 // The claims floor fails the run only through E2942 (`below`), which a run
 // with failing evidence never gets.
 jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptions, wires: [String], tests: [JetCLITestClaim], contracts: [JetNativeTestContract], ran_ok: Bool, floor: ClaimsGrade?) -> JetCLITestOutcome Err! {
-    source_revision: jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
+    source_revision := jet_cli_test_env(EVIDENCE_SOURCE_REVISION_ENV, receipt_crypto.sha256(source.bytes()).hex())
     revision_bytes: source_revision.bytes()
     short: if revision_bytes.len() > 16 -> jet_cli_test_text(revision_bytes, 0, 16) else -> source_revision.copy()
     // The run, not only its source, names the report: two runs of one file
@@ -276,7 +276,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     }
     build_revision: jet_cli_test_env(EVIDENCE_BUILD_REVISION_ENV, receipt_crypto.sha256("jet-test-build-v1:{source_revision}:{profile_tag}".bytes()).hex())
     run_revision: jet_cli_test_env(EVIDENCE_REVISION_ENV, receipt_crypto.sha256("jet-test-mir-v1:{source_revision}:{profile_tag}".bytes()).hex())
-    revision: EvidenceRevision{source: source_revision.copy(), build: build_revision, revision: run_revision}
+    revision: EvidenceRevision{source: source_revision.move(), build: build_revision, revision: run_revision}
     report := evidence_report_new(report_id.copy(), EvidenceProducerKind.Test, EvidenceSource{path: file.copy(), line: U32{0}, column: U32{1}}, build.copy(), revision.copy())
     tally := JetCLITestTally{passed: 0, failed: 0, skipped: 0, expected_failures: 0, unexpected_passes: 0}
     loop (index, wire) in wires {

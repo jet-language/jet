@@ -117,16 +117,16 @@ JetCLITestRowsDiff: struct {
 // profile nor an output is refused. `flags` are the run's flag layer.
 jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_default: Bool, flags: [TestSetting], color: Bool, quiet: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
     if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None || show_default -> return None
-    named: jet_cli_profile_name(jet_argv)
+    named := jet_cli_profile_name(jet_argv)
     package_target: positionals.len() == 0 || cli_files.is_dir(positionals[0])
     if named == "" && !package_target -> return None
     start := if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0].copy()
     if !package_target -> start = jet_cli_parent(start) ?? "."
-    root: jet_cli_manifest_root(start) ?? return None
+    root := jet_cli_manifest_root(start) ?? return None
     manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
     source: cli_files.read(manifest) ?? return None
     facts: PackageFacts.parse_uncomposed(source, manifest) ?? return None
-    chosen := named.copy()
+    chosen := named.move()
     from_default: chosen == ""
     if from_default -> chosen = facts.defaults.get("test") ?? return None
     profile: facts.test_profile(chosen) ?? {
@@ -188,7 +188,7 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
             runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: args.move(), suite: suite.copy()})
         }
     }
-    Val(JetCLIPlan.TestProfile{profile: chosen.copy(), root: root.copy(), settings: settings, runs: runs, update: test_settings_on(settings, "update_snapshots"), quiet: quiet})
+    Val(JetCLIPlan.TestProfile{profile: chosen.move(), root: root.move(), settings: settings, runs: runs, update: test_settings_on(settings, "update_snapshots"), quiet: quiet})
 }
 
 // Runs a profile: its `tests` children (jet_cli_test_profile_runs), then its
@@ -533,7 +533,7 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String: St
     loop line in text.split("\n").to_list() {
         if line == "" -> next
         parts: line.split("\t").to_list()
-        id: parts[0].copy()
+        id := parts[0].copy()
         at := -1
         loop (seen, known) in ids {
             if known == id {
@@ -546,7 +546,7 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String: St
             details[at] = "duplicate row id"
             next
         }
-        ids.push(id.copy())
+        ids.push(id.move())
         states.push(if parts.len() > 1 -> parts[1].copy() else -> "")
         details.push(if parts.len() > 2 -> parts[2].copy() else -> "")
     }

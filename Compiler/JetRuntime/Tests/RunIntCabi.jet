@@ -134,7 +134,7 @@ value_row: fn(label: String, expression: String, expected: Int) -> String {
 corpus: fn() -> Corpus {
     statements := [String]{}
     count := 0
-    values: [Int]{0, 1, -1, pow2(62) - 1, 0 - pow2(62), pow2(62), 0 - pow2(62) - 1, pow2(63) - 1, 0 - pow2(63), pow2(64), 0 - pow2(64), Int.parse("123456789012345678901234567890123456789") ?? 0}
+    values := [Int]{0, 1, -1, pow2(62) - 1, 0 - pow2(62), pow2(62), 0 - pow2(62) - 1, pow2(63) - 1, 0 - pow2(63), pow2(64), 0 - pow2(64), Int.parse("123456789012345678901234567890123456789") ?? 0}
     loop i in 0..<values.len() {
         a: values[i]
         rows := [String]{value_row("parse-{i}", raw(a), a), value_row("clone-{i}", "jet_rt_int_clone({raw(a)})", a)}
@@ -184,7 +184,7 @@ corpus: fn() -> Corpus {
     // The Float inputs: the values, then the edges, then every rounding
     // position (both parity ties, just below and above ties), both signs;
     // each text once, at its first place.
-    candidates := values.copy()
+    candidates := values.move()
     loop a in ([Int]{pow2(53) - 1, pow2(53), pow2(53) + 1, pow2(63), (pow2(53) - 1) << 971, pow2(1024), power(10, 450)}) {
         candidates.push(a)
         candidates.push(0 - a)

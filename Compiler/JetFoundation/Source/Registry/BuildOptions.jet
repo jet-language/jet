@@ -678,7 +678,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
     flags := [BuildOptionChoice]{}
     loop argument in argv {
         if argument == "--" -> break
-        row: build_option_flag_row(argument) ?? next
+        row := build_option_flag_row(argument) ?? next
         flag: build_option_flag(row.name)
         bare: argument == flag && row.kind == BuildOptionKind.Bool
         if !bare && !argument.starts_with("{flag}=") -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{flag}` needs a value", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
@@ -698,7 +698,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
         loop earlier in flags {
             if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}
         }
-        flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
+        flags.push(BuildOptionChoice{name: row.name.move(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
     }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: "", profile: "", written: flags, values: [BuildOptionChoice]{}}, notes: [String]{}}
 }

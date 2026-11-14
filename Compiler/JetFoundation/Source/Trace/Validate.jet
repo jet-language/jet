@@ -137,14 +137,14 @@ jettrace_validate_capture_policy: fn(value: CanonicalJSON) -> JetTraceCaptureLim
     allowlist: jettrace_array(fields[jettrace_get(fields, "allowlist")].value, "capture_policy.allowlist")
     prior := String?{None}
     loop item in allowlist {
-        text: jettrace_text(item, "capture_policy.allowlist item")
+        text := jettrace_text(item, "capture_policy.allowlist item")
         if prior == {
             .Val(previous) -> {
                 if previous > text -> return Err(jettrace_error("capture_policy.allowlist is not sorted"))
             }
             .None -> {}
         }
-        prior = Val(text.copy())
+        prior = Val(text.move())
     }
     Ok(JetTraceCaptureLimits{browser_rows: 4096, io_rows: 4096, native_rows: 4096, span_rows: 4096, task_rows: 4096})
 }
@@ -267,18 +267,18 @@ jettrace_validate_receipt_section: fn(value: CanonicalJSON, label: String) -> St
     Ok(name)
 }
 trace_receipt_section_from_json_at: fn(value: CanonicalJSON, label: String) -> TraceReceiptSection JetTraceError! {
-    name: jettrace_validate_receipt_section(value, label)
+    name := jettrace_validate_receipt_section(value, label)
     fields: jettrace_object_keys(value, label, [String]{"digest", "name", "type_name", "value"})
-    type_name: jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
-    digest: jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
-    Ok(TraceReceiptSection{name: name.copy(), type_name: type_name.copy(), value: fields[jettrace_get(fields, "value")].value.copy(), digest: digest.copy()})
+    type_name := jettrace_text(fields[jettrace_get(fields, "type_name")].value, "{label}.type_name")
+    digest := jettrace_text(fields[jettrace_get(fields, "digest")].value, "{label}.digest")
+    Ok(TraceReceiptSection{name: name.move(), type_name: type_name.move(), value: fields[jettrace_get(fields, "value")].value.copy(), digest: digest.move()})
 }
 jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {
     items: jettrace_array(value, "content.receipt_sections")
     prior := String?{None}
     loop index in 0..<items.len() {
         label: "content.receipt_sections[{index}]"
-        name: jettrace_validate_receipt_section(items[index], label)
+        name := jettrace_validate_receipt_section(items[index], label)
         if prior == {
             .Val(previous) -> {
                 if previous > name -> return Err(jettrace_error("content.receipt_sections is not sorted by name"))
@@ -286,7 +286,7 @@ jettrace_validate_receipt_sections: fn(value: CanonicalJSON) JetTraceError! {
             }
             .None -> {}
         }
-        prior = Val(name.copy())
+        prior = Val(name.move())
     }
     return
 }
@@ -304,11 +304,11 @@ jettrace_validate_source_identity: fn(value: CanonicalJSON) JetTraceError! {
         loop j in 0..<symbols.len() {
             slabel: "{label}.symbols[{j}]"
             sfields: jettrace_object_keys(symbols[j], slabel, [String]{"kind", "name"})
-            kind: jettrace_text(sfields[jettrace_get(sfields, "kind")].value, "{slabel}.kind")
-            name: jettrace_text(sfields[jettrace_get(sfields, "name")].value, "{slabel}.name")
+            kind := jettrace_text(sfields[jettrace_get(sfields, "kind")].value, "{slabel}.kind")
+            name := jettrace_text(sfields[jettrace_get(sfields, "name")].value, "{slabel}.name")
             if j > 0 && (prior_name > name || (prior_name == name && prior_kind > kind)) -> return Err(jettrace_error("{label}.symbols is not sorted"))
-            prior_name = name.copy()
-            prior_kind = kind.copy()
+            prior_name = name.move()
+            prior_kind = kind.move()
         }
     }
     return
@@ -321,14 +321,14 @@ jettrace_validate_source_maps: fn(value: CanonicalJSON) JetTraceError! {
         fields: jettrace_object_keys(items[index], label, [String]{"kind", "map", "path", "sha256"})
         kind: jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind")
         if kind != "jet" && kind != "js" -> return Err(jettrace_error("{label}.kind must be jet or js"))
-        path: jettrace_text(fields[jettrace_get(fields, "path")].value, "{label}.path")
+        path := jettrace_text(fields[jettrace_get(fields, "path")].value, "{label}.path")
         if prior == {
             .Val(previous) -> {
                 if previous > path -> return Err(jettrace_error("content.source_maps is not sorted by path"))
             }
             .None -> {}
         }
-        prior = Val(path.copy())
+        prior = Val(path.move())
         // Match the retained node directly: returning the potentially large map
         // string from jettrace_text would make an unnecessary owned copy.
         if fields[jettrace_get(fields, "map")].value == {
@@ -349,8 +349,8 @@ jettrace_validate_toolchain: fn(value: CanonicalJSON) JetTraceError! {
     keys: [String]{"compiler_build_id", "jet_version", "runner_id", "stdlib_id"}
     body_fields := [CanonicalJSONField]{}
     loop key in keys {
-        text: jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
-        body_fields.push(jettrace_field(key.copy(), .String(text.copy())))
+        text := jettrace_text(fields[jettrace_get(fields, key)].value, "toolchain.{key}")
+        body_fields.push(jettrace_field(key.copy(), .String(text.move())))
     }
     digest: jettrace_text(fields[jettrace_get(fields, "digest")].value, "toolchain.digest")
     if !jettrace_hex64(digest) -> return Err(jettrace_error("toolchain.digest is not lowercase Hex64"))

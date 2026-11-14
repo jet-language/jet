@@ -139,7 +139,7 @@ signal_name: fn(number: Int) -> String Never! {
 // spawnSync does: no status after a signal, a timeout or a spawn failure, and
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
-    none: [U8]{}
+    none := [U8]{}
     if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     argv := [String]{binary.copy()}
     loop arg in args {
@@ -154,7 +154,7 @@ run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO
         }
         .Err(error) -> {
             code: if error == .PermissionDenied(_) -> "EACCES" else if error == .NotFound(_) -> "ENOENT" else -> "{error}"
-            Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
+            Outcome{stdout: none.copy(), stderr: none.move(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
         }
     }
 }
@@ -293,12 +293,12 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             return fail("{item.name}: expected exit{spec.exit_gap}{item.status}, got {status}/{shown_signal}/{outcome.error}")
         }
         golden_path: "{cwd}/{GOLDENS}/{item.golden}"
-        expected: if files.read_bytes(golden_path) == {
+        expected := if files.read_bytes(golden_path) == {
             .Ok(value) -> value
             .Err(_) -> { return fail("ENOENT: no such file or directory, open '{golden_path}'") }
         }
         want_stdout: if item.status == 0 -> expected.copy() else -> [U8]{}
-        want_stderr: if item.status == 0 -> [U8]{} else -> expected.copy()
+        want_stderr: if item.status == 0 -> [U8]{} else -> expected.move()
         if !same_bytes(outcome.stdout, want_stdout) || !same_bytes(outcome.stderr, want_stderr) -> return fail("{item.name}: {OUTPUT_MISMATCH}")
     }
     print(spec.done)

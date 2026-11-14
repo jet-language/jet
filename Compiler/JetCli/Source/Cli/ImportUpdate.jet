@@ -201,7 +201,7 @@ jet_cli_import_indexed_comparison: fn(index: JetCLIRecordIndex, root: String, cw
 
 // Rust `accept_update_replacement`.
 jet_cli_import_accept_update_replacement: fn(plan: &JetCLIImportPlan, cwd: String) -[FS, Time.Wait, Env]> ForeignSourceReceipt JetCLIImportPlanError! {
-    boundary: plan.boundary.copy()
+    boundary := plan.boundary.copy()
     if !boundary.has_complete_artifact_coverage() -> return Err(jet_cli_import_update_error("source import replacement coverage is incomplete"))
     files := [String]{}
     jet_cli_import_collect_sources(plan.source, plan.source, plan.language, files) ?? return Err(err)
@@ -211,7 +211,7 @@ jet_cli_import_accept_update_replacement: fn(plan: &JetCLIImportPlan, cwd: Strin
     index: jet_cli_record_index_load(cwd) ?? return Err(jet_cli_import_update_error("cannot load indexed reasoning records: {err.message}"))
     prior: jet_cli_import_indexed_import_evidence(index, cwd, cwd, boundary, plan.boundary_digest, plan.source_digest, plan.replacement_digest) ?? return Err(err)
     comparison: jet_cli_import_indexed_comparison(index, cwd, cwd, boundary, plan.boundary_digest) ?? return Err(err)
-    accepted := boundary.copy()
+    accepted := boundary.move()
     current_identity: accepted.identity.copy()
     current_coverage: accepted.artifact_coverage.copy()
     replacement_identity: current_identity.overlay.copy()

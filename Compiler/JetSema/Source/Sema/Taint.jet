@@ -1284,9 +1284,9 @@ sema_taint_mask_arms: fn(state: &SemaTaintFlowState, subject: Expr, arms: [Switc
     tests := [String]{}
     first := -1
     loop index in 0..<arms.len() {
-        test: sema_taint_fixed_in(state, arms[index].cond) ?? ""
+        test := sema_taint_fixed_in(state, arms[index].cond) ?? ""
         if test != "" && first < 0 -> first = index
-        tests.push(test.copy())
+        tests.push(test.move())
     }
     if first < 0 -> return tests
     total := sema_taint_is_true(subject)
@@ -1564,11 +1564,11 @@ sema_taint_note_guard: fn(state: &SemaTaintFlowState, statement: Stmt, params: [
         if arms[0].body[0] == .Return(_, _) {
             if arms[0].cond == .Binary(op, left, right, _, _) {
                 if op != .Ne -> return
-                first: sema_taint_length_of(left) ?? return
-                second: sema_taint_length_of(right) ?? return
+                first := sema_taint_length_of(left) ?? return
+                second := sema_taint_length_of(right) ?? return
                 if !sema_taint_has(params, first) || !sema_taint_has(params, second) -> return
-                state.tail_same.push(first.copy())
-                state.tail_same.push(second.copy())
+                state.tail_same.push(first.move())
+                state.tail_same.push(second.move())
             }
         }
     }
@@ -1625,7 +1625,7 @@ sema_taint_tail_stmt: fn(state: &SemaTaintFlowState, statement: Stmt) -> Bool {
                 }
                 held: state.tail_loops.len()
                 state.tail_loops.push(counter.copy())
-                state.tail_loops.push(bound.copy())
+                state.tail_loops.push(bound.move())
                 total: sema_taint_tail_block(state, body)
                 loop state.tail_loops.len() > held -> _ := state.tail_loops.pop()
                 return total
@@ -1883,11 +1883,11 @@ sema_taint_clause: fn(what: String) -> String Never! {
 // walked once per module walk; a recursive call meets the key while its
 // body is being walked and adds nothing, since that walk covers the body.
 sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
-    key: "{module_identity.id}|{owner}|{callee.name}|{index}|{tag_value}"
+    key := "{module_identity.id}|{owner}|{callee.name}|{index}|{tag_value}"
     loop (seen, crossed) in state.crossed {
         if crossed == key -> return state.crossed_paths[seen].copy()
     }
-    state.crossed.push(key.copy())
+    state.crossed.push(key.move())
     state.crossed_paths.push("")
     slot: state.crossed.len() - 1
     saved_module: state.module_identity

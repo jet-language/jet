@@ -17,11 +17,11 @@ copy_tree: fn(from: String, to: String) {
     loop entry in entries {
         if entry.name == ".jet" -> next
         source: "{from}/{entry.name}"
-        target: "{to}/{entry.name}"
+        target := "{to}/{entry.name}"
         if entry.is_dir {
             copy_tree(source, target)
         } else {
-            files.copy(source.copy(), target.copy()) ?? fail("cannot copy {source}: {err}")
+            files.copy(source.copy(), target.move()) ?? fail("cannot copy {source}: {err}")
         }
     }
 }

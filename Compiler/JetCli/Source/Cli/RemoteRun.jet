@@ -234,9 +234,9 @@ jet_cli_remote_run_fetch: fn(url: String, host: String, parsed: remote_run_url.U
     port: parsed.port() ?? (parsed.default_port() ?? 443)
     transport: JetCLIBuildHTTPInputs{}
     addresses: transport.resolve(host, port) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
-    response: transport.get(url, addresses, port, JET_CLI_REMOTE_RUN_TIMEOUT_MS, JET_CLI_REMOTE_RUN_MAX_BYTES) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
+    response := transport.get(url, addresses, port, JET_CLI_REMOTE_RUN_TIMEOUT_MS, JET_CLI_REMOTE_RUN_MAX_BYTES) ?? return Err(JetCLIRemoteRunError{message: err.message.copy()})
     if response.status != 200 -> return Err(JetCLIRemoteRunError{message: "the server answered {response.status}"})
-    Ok(response.body.copy())
+    Ok(response.body.move())
 }
 
 // `sha256-<hex>` of the file at `path`, or None when it can't be read.

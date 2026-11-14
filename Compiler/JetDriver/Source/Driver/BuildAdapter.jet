@@ -129,10 +129,10 @@ jet_driver_build_host_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // A `Compiler` value carries its build's checked program (the `program` of
 // the `Build` it was made from), which `meta.events` watches.
 jet_driver_build_compiler_value: fn(handle: TComptimeValue, context: TComptimeValue) -> TComptimeValue Never! {
-    program: jet_eval_build_field(context, "program") ?? return handle.copy()
+    program := jet_eval_build_field(context, "program") ?? return handle.copy()
     if handle == .Struct(name, fields) {
         carried := fields.copy()
-        carried.push(TComptimeField{name: "program", value: program.copy()})
+        carried.push(TComptimeField{name: "program", value: program.move()})
         return TComptimeValue.Struct{type_name: name.copy(), fields: carried}
     }
     handle.copy()

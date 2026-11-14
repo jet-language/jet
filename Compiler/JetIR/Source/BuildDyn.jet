@@ -870,9 +870,9 @@ ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, 
     source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 -> return -1
     value_ty: ir_ty(p, b, value)
-    local: checked_generated_local("{stem}_{source}", span, value_ty)
+    local := checked_generated_local("{stem}_{source}", span, value_ty)
     owned: b.fresh[source] && ir_has_drop(m, b, source)
-    b.bindings.push(IRBinding{name: local.name.copy(), slot: source, owned: owned})
+    b.bindings.push(IRBinding{name: local.name.move(), slot: source, owned: owned})
     b.fresh[source] = false
     source
 }

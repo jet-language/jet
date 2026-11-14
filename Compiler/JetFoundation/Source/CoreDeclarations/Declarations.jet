@@ -474,7 +474,7 @@ core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, cons
     if kind == "receiver" && written_module != "-" -> return Err(core_decl_fail("receiver dispatcher row must use `-` for its module"))
     if kind != "receiver" && !core_decl_is_name(module_name, ".") -> return Err(core_decl_fail("invalid dispatcher module `{module_name}`"))
     if !core_decl_is_name(member, "!?") -> return Err(core_decl_fail("invalid dispatcher member `{member}`"))
-    evaluated: core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
+    evaluated := core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
     record: evaluated.record.copy()
     expected: core_decl_dispatcher_member(member, constants)
     matches: if module_name != "" -> record.module_name == module_name && record.member == expected else -> record.module_name == "" && (record.member == expected || record.receiver_types.contains(member) || record.receiver_types.contains(expected))
@@ -483,7 +483,7 @@ core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, cons
         emitted: if record.module_name == "" -> "-" else -> record.module_name.copy()
         return Err(core_decl_fail("dispatcher row identity disagrees with emitted adapter: DSL {shown}.{member} vs {evaluated.constructor} {emitted}.{record.member}"))
     }
-    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.copy(), record: record.copy()})
+    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.move(), record: record.copy()})
 }
 
 core_decl_position: fn(values: [String], value: String) -> Int Never! {

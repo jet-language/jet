@@ -150,7 +150,7 @@ body_index_identity_and_lifecycle: fn() {
     environment.source_file = "replacement.jet"
     duplicate: sema_comptime_body_capture(context, environment, program, scopes, "different", Expr.Bool{value: true, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
     body_index_require(duplicate == first && context.comptime_body_sources.len() == 1, "duplicate capture returns the entire first row, including file/name/expression/type")
-    variants: [SemaComptimeBodyValue]{
+    variants := [SemaComptimeBodyValue]{
         body_index_value("mod::one", "function::one", source, site, 1),
         body_index_value("mod::two", "function::one", source, site, 2),
         body_index_value("mod::one", "function::two", source, site, 3),
@@ -173,7 +173,7 @@ body_index_identity_and_lifecycle: fn() {
     body_index_query(context, "mod::one", "function::one", Span{start: 10, end: 21}, site)
     body_index_query(context, "mod::one", "function::one", source, Span{start: 4, end: 7})
     body_index_query(context, "mod::one", "function::one", source, Span{start: 3, end: 8})
-    replacements := variants.copy()
+    replacements := variants.move()
     replacements[0] = body_index_value("mod::two", "function::two", source, site, 9)
     sema_comptime_body_values_replace(context, replacements)
     body_index_require(sema_comptime_body_value_find(context, body_index_module("mod::one"), "function::one", source, site) == None, "same-length replacement drops the old key")

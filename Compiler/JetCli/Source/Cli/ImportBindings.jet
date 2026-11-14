@@ -28,8 +28,8 @@ jet_cli_import_collect_foreign_body: fn(lines: [String], open_line: Int) -> JetC
         fragment: if index == open_line -> jet_cli_import_byte_slice(raw.bytes(), open + 1, raw.bytes().len()) else -> raw.copy()
         before: level
         delta: jet_cli_import_brace_delta(fragment)
-        content: jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
-        if !content.is_empty() && (index != open_line || before > 0 || delta < 0) -> body.push(JetCLIImportBodyLine{line: index + 1, text: content.copy()})
+        content := jet_cli_import_strip_unquoted_braces(fragment).trim().copy()
+        if !content.is_empty() && (index != open_line || before > 0 || delta < 0) -> body.push(JetCLIImportBodyLine{line: index + 1, text: content.move()})
         level += delta
         if index == open_line -> level += 1
         if level == 0 -> return Ok(JetCLIImportCollectedBody{body: body, end: index})
@@ -315,9 +315,9 @@ jet_cli_import_enterprise_unit_name: fn(language: String, raw: String, source: S
         bytes_tail: tail.bytes()
         end := 0
         loop end < bytes_tail.len() && (jet_cli_import_alpha(bytes_tail[end]) || jet_cli_import_digit(bytes_tail[end]) || bytes_tail[end] == (U8{95}) || bytes_tail[end] == (U8{46})) -> end += 1
-        name: jet_cli_import_byte_slice(bytes_tail, 0, end)
+        name := jet_cli_import_byte_slice(bytes_tail, 0, end)
         dot: jet_cli_import_find_bytes(name.bytes(), ".", true)
-        last: if dot == .Val(at) -> jet_cli_import_byte_slice(name.bytes(), at + 1, name.bytes().len()) else -> name.copy()
+        last: if dot == .Val(at) -> jet_cli_import_byte_slice(name.bytes(), at + 1, name.bytes().len()) else -> name.move()
         if !last.is_empty() -> return Val(last)
     }
     None

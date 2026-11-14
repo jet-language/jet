@@ -123,7 +123,7 @@ br_content: fn() -> CanonicalJSON Never! {
 }
 br_phases: fn(ns: Int) -> CanonicalJSON Never! { CanonicalJSON.Array([CanonicalJSON]{br_o([CanonicalJSONField]{br_f("name", br_s("check")), br_f("ns", br_i(ns))})}) }
 br_compile: fn() -> CanonicalJSON Never! {
-    identity: [CanonicalJSONField]{br_f("backend", br_s("fixture")), br_f("cache_state", br_s("Clean")), br_f("clock", br_s("process_cpu")), br_f("compiler_digest", br_s(br_zero_hash())), br_f("core_digest", br_s(br_zero_hash())), br_f("edit_bytes", br_i(0)), br_f("host", br_s("linux")), br_f("linker", br_s("fixture")), br_f("profile", br_s("debug")), br_f("source_tree_sha256", br_s(br_zero_hash())), br_f("target", br_s("native")), br_f("workload_bytes", br_i(100))}
+    identity := [CanonicalJSONField]{br_f("backend", br_s("fixture")), br_f("cache_state", br_s("Clean")), br_f("clock", br_s("process_cpu")), br_f("compiler_digest", br_s(br_zero_hash())), br_f("core_digest", br_s(br_zero_hash())), br_f("edit_bytes", br_i(0)), br_f("host", br_s("linux")), br_f("linker", br_s("fixture")), br_f("profile", br_s("debug")), br_f("source_tree_sha256", br_s(br_zero_hash())), br_f("target", br_s("native")), br_f("workload_bytes", br_i(100))}
     record_fields := identity.copy()
     record_fields.push(br_f("elapsed_ns", br_i(9)))
     record_fields.push(br_f("peak_rss_bytes", br_i(10)))
@@ -131,7 +131,7 @@ br_compile: fn() -> CanonicalJSON Never! {
     record: br_o(record_fields)
     records := [CanonicalJSON]{}
     loop _ in 0..<20 -> records.push(record.copy())
-    root := identity.copy()
+    root := identity.move()
     additions: [CanonicalJSONField]{br_f("edit_sha256", br_s(br_zero_hash())), br_f("peak_rss_bytes", br_i(10)), br_f("phase_totals", br_phases(160)), br_f("sample_records", CanonicalJSON.Array(records)), br_f("samples", br_i(20)), br_f("variance", br_q(0)), br_f("warmups", br_i(1))}
     loop field in additions -> root.push(field)
     br_o(root)

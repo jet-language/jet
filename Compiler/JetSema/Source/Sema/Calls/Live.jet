@@ -103,7 +103,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
         diagnostics.push(sema_error("E0104", span, "`{callee}` needs a source function", sema_live_shape(member), "pass the source function first, then its arguments"))
         return sema_live_rejected()
     }
-    source: sema_live_source(positional[0].expr, member, environment, program, scopes, diagnostics) ?? return sema_live_rejected()
+    source := sema_live_source(positional[0].expr, member, environment, program, scopes, diagnostics) ?? return sema_live_rejected()
     supplied: positional.len() - 1
     if member == "push" && value == None {
         diagnostics.push(sema_error("E0104", span, "`{callee}` needs the pushed value", sema_live_shape(member), "add `value: ...` after the source's arguments"))
@@ -172,7 +172,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
     lowered: if member == {
         "live" -> sema_live_module_call(alias, "__live_bind", [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(run, span)}, span)
         "subscribe" -> sema_live_module_call(alias, "__live_poll", [Type]{source.ok.copy(), source.err.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(every ?? Expr.Absent{span: span, id: AST_NODE_GENERATED}, span), sema_live_arg(run, span)}, span)
-        "push" -> sema_live_module_call(alias, "__live_push", [Type]{source.ok.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
+        "push" -> sema_live_module_call(alias, "__live_push", [Type]{source.ok.move()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
         else -> if whole_source -> sema_live_module_call(alias, "__live_invalidate_all", [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span) else -> sema_live_module_call(alias, "__live_invalidate", [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
     }
     checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {

@@ -734,7 +734,7 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
         return failed
     }
     at: span.start
-    finding_name: "__jet_report_finding_{at}"
+    finding_name := "__jet_report_finding_{at}"
     place_name: "__jet_report_at_{at}"
     return_type: scopes.return_type.copy()
     mark: sema_scope_mark(scopes)
@@ -761,7 +761,7 @@ sema_call_compiler_report: fn(receiver: Expr, args: [CallArg], span: Span, expec
         sema_scope_leave(scopes, state)
         return failed
     }
-    finding: Expr.Ident{name: finding_name.copy(), span: span, id: AST_NODE_GENERATED}
+    finding: Expr.Ident{name: finding_name.move(), span: span, id: AST_NODE_GENERATED}
     texts := [CallArg]{
         sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: facts.code}}, span: span, id: AST_NODE_GENERATED}, span),
         sema_compiler_events_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: facts.tier}}, span: span, id: AST_NODE_GENERATED}, span),
@@ -938,10 +938,10 @@ sema_compiler_report_callable_type: fn(written: Expr, environment: SemaScopeEnvi
     }
     // The check only reads the name's type; what it reports is dropped.
     unreported := [Diagnostic]{}
-    checked: sema_check_expression(written, None, environment, program, scopes, state, tail_store, context, unreported) ?? return None
+    checked := sema_check_expression(written, None, environment, program, scopes, state, tail_store, context, unreported) ?? return None
     if unreported.len() > 0 -> return None
-    // copy: the checked expression's type outlives the dropped expression.
-    if checked.ty == .Fn(_, _, _, _, _, _) -> return Val(checked.ty.copy())
+    // The checked expression's type moves out; the expression itself is dropped.
+    if checked.ty == .Fn(_, _, _, _, _, _) -> return Val(checked.ty.move())
     None
 }
 
@@ -1299,7 +1299,7 @@ sema_call_try_build_step_method: fn(receiver: Expr, receiver_value: TExpr, metho
     } else {
         // The session reads the values in this order: the positional ones,
         // then `flag:`'s String, then `kept:`'s Bool.
-        checked := positional.copy()
+        checked := positional.move()
         required_types := contract.parameters.copy()
         if flag == .Val(labelled) {
             checked.push(labelled.copy())

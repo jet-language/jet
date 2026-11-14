@@ -704,7 +704,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
     loop group in groups {
         if !group.has_tests -> next
         entry: members[group.entry].copy()
-        unavailable: JetCLIProveTestItem{
+        unavailable := JetCLIProveTestItem{
             id: jet_cli_prove_evidence_id(identity, "unit", entry.path, "0:0-0:0", "producer unavailable"),
             kind: 0,
             state: 3,
@@ -736,11 +736,11 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         if journal.capture != "" -> spec = spec.env(JET_CLI_REPLAY_CAPTURE_ENV, journal.capture).stdin(.Inherit)
         if journal.records != "" -> spec = spec.env(JET_CLI_REPLAY_RECORDS_ENV, journal.records).env(JET_CLI_REPLAY_TRACE_ENV, journal.trace)
         receipt: spec.run() ?? {
-            items.push(unavailable.copy())
+            items.push(unavailable.move())
             next
         }
         if receipt.timed_out {
-            items.push(unavailable.copy())
+            items.push(unavailable.move())
             next
         }
         child_exit: if receipt.signal != None -> JET_CLI_EXIT_ICE else -> jet_cli_prove_child_exit(receipt.code)
@@ -1641,11 +1641,11 @@ jet_cli_prove_artifact_folders_safe: fn(root: String, parts: [String]) JetCLIPro
 
 // The sanitized target name: the root's stem with `.` as `_`, or the kind.
 jet_cli_prove_artifact_name: fn(identity: JetCLIProveIdentity) -> String Never! {
-    base: jet_cli_file_name(identity.root)
+    base := jet_cli_file_name(identity.root)
     if base == "" || base == "." || base == ".." -> return identity.kind.copy()
     stem := base.copy()
     if base.rindex(".") == .Val(at) {
-        if at > 0 -> stem = String.from_bytes(base.bytes().slice(0, at)) ?? base.copy()
+        if at > 0 -> stem = String.from_bytes(base.bytes().slice(0, at)) ?? base.move()
     }
     stem.replace(".", "_")
 }

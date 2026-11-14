@@ -1406,7 +1406,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         .Missing -> {}
     }
     if command == "build" && web {
-        written_as: if {
+        written_as := if {
             os_web -> "the web preview of `jet dev`"
             marked -> "the file's `#Target(Web)`"
             else -> "--target web"
@@ -1414,7 +1414,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         loop flag in flags {
             if flag.name == "os" && flag.value != "web" -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{flag.written}` and {written_as} disagree", jet_cli_why("E2104"), "pass one of them", color, JET_DRIVER_EXIT_USAGE)}
         }
-        written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: written_as.copy(), site: "", pinned: false})
+        written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: written_as.move(), site: "", pinned: false})
     }
     if build_options_resolve(command, profile, written) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
@@ -1492,10 +1492,10 @@ jet_cli_gate_flags: fn(jet_argv: [String], color: Bool) -> JetCLIGateFlags Never
 // which `jet build` writes as a side debug file beside the image. The stock
 // `hardened` profile (`name`) has the same options.
 jet_cli_stock_release_choices: fn(name: String) -> [BuildOptionChoice] Never! {
-    site: "of the stock `{name}` profile"
+    site := "of the stock `{name}` profile"
     [BuildOptionChoice]{
         {name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: site.copy(), pinned: false},
-        {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.copy(), pinned: false},
+        {name: "debug_info", value: "split", layer: BuildOptionLayer.Profile, written: "debug_info: split", site: site.move(), pinned: false},
     }
 }
 

@@ -565,8 +565,8 @@ sema_expr_precise_complex: fn(value: TExpr, span: Span, line: Int, context: &Sem
 // The owned operator trait a binary operator calls (`Equatable` for `!=`),
 // read from the operator symbols OWNED_TRAITS declares.
 sema_expr_operator_trait: fn(op: BinOp) -> String? {
-    owned: owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
-    Val(owned.name.copy())
+    owned := owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
+    Val(owned.name.move())
 }
 
 // The hook method of that trait: `equal` for `!=`.
@@ -6043,11 +6043,11 @@ sema_expr_copy_fork_body: fn(subject: Expr, ty: Type, row: SemaRegistrationRowRe
 // tuple or struct keys of those), so keeping the keys forks nothing away.
 sema_expr_copy_fork_map: fn(subject: Expr, depth: Int, span: Span) -> Expr Never! {
     made: "__fork_map{depth}"
-    key: "__fork_key{depth}"
+    key := "__fork_key{depth}"
     read: Expr.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
     write: Stmt.Assign{target: LValue.Index{base: sema_expr_copy_fork_name(made, span), index: sema_expr_copy_fork_name(key, span), span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: sema_expr_copy_fork_part(read, span)}
     keys: Expr.MethodCall{receiver: sema_expr_copy_fork_name(made, span), method: "keys", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-    each: Stmt.For{var: key.copy(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
+    each: Stmt.For{var: key.move(), var_span: span, var2: None, kind: ForKind.In{collection: keys, step: None}, body: [Stmt]{write}, span: span, arrow_body: true, label: None, auto_vectorization: None}
     sema_expr_copy_fork_over_share(made, subject, each, span)
 }
 

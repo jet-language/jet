@@ -127,10 +127,10 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
     loop binary in [env.jet, env.jetpack] {
         if binary != "" && !kit_expect_named(subjects, binary) -> subjects.push(binary)
     }
-    launcher: kit_no_nix_launcher(env, bootstrap) ?? return Err(err)
+    launcher := kit_no_nix_launcher(env, bootstrap) ?? return Err(err)
     result := [String]{launcher, "--outer", bootstrap, helpers[0], "--user", "--map-root-user", "--mount", "--propagation", "private"}
     if network == "disabled" -> result.push("--net")
-    result.push(launcher.copy())
+    result.push(launcher.move())
     result.push(bootstrap.copy())
     loop helper in helpers -> result.push(helper)
     loop image in images -> result.push(image)

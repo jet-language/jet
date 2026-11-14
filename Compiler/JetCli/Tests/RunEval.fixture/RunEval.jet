@@ -30,8 +30,8 @@ Ran: struct {
 jet_run: fn(jet: String, repo: String, work: String, cache: String, args: [String]) -> Ran {
     argv := [String]{jet.copy()}
     loop arg in args -> argv.push(arg.copy())
-    receipt: process.cmd(argv).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {args.join(" ")} failed to start: {err}")
-    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.copy(), errors: receipt.errors.copy()}
+    receipt := process.cmd(argv).cwd(work.copy()).env("JET_TOOLCHAIN_ROOT", repo.copy()).env("XDG_CACHE_HOME", cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {args.join(" ")} failed to start: {err}")
+    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.move(), errors: receipt.errors.move()}
 }
 
 // One finished `jet -e CODE`.

@@ -684,7 +684,7 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
     // trait's name.
     segments: symbol_table_key(graph.symbols, bound).split(":").to_list()
     trait_name: segments[segments.len() - 1]
-    builtin: sema_type_builtin_trait_symbol(trait_name) ?? return None
+    builtin := sema_type_builtin_trait_symbol(trait_name) ?? return None
     if builtin.id != bound -> return None
     owned: owned_trait(trait_name) ?? return None
     wanted := OwnedMethod?{None}
@@ -731,7 +731,7 @@ sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: 
     variadic: loop _ in 0..<count -> false
     metadata: FunctionCallMetadata{names: names, defaults: defaults, variadic: variadic, conventions: conventions, policies: CallablePolicyChain{policies: [CallablePolicy]{}}}
     SemaCallMethodCandidate{
-        method: TMethodRef{symbol: symbol_builtin_method(trait_name, method) ?? return None, name: method, mangled: false, trait_owner: Val(builtin.id.copy()), operator_identity: None},
+        method: TMethodRef{symbol: symbol_builtin_method(trait_name, method) ?? return None, name: method, mangled: false, trait_owner: Val(builtin.id.move()), operator_identity: None},
         signature: Type.Fn{params: params.move(), ret: ret, effect_bound: None, param_contract: None, call_metadata: Val(metadata), return_view_provenance: None},
         receiver_type: Val(receiver_type.copy()),
         receiver_convention: convention,

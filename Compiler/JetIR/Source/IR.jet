@@ -514,14 +514,14 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
             if m.types[index].kind == row.kind && m.types[index].size == row.size && m.types[index].bits == row.bits && m.types[index].signed == row.signed -> return index
         }
     }
-    full: "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
+    full := "{ir_kind_name(row.kind)}:{row.size}:{row.bits}:{row.signed}:{key}"
     full_hash: name_rows_hash(full)
     found := name_rows_get(m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
         m.types.push(row.copy())
-        m.type_keys.push(full.copy())
         name_rows_set_hashed(m.type_rows, full, full_hash, found)
+        m.type_keys.push(full.move())
     }
     if listed >= 0 {
         m.key_lists[listed].push(found)

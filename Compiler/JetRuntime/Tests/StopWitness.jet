@@ -85,7 +85,7 @@ signal_name: fn(number: Int) -> String Never! {
 // spawnSync does: no status after a signal, a timeout or a spawn failure, and
 // spawn failures and timeouts as an error message.
 run_binary: fn(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome Never! {
-    none: [U8]{}
+    none := [U8]{}
     if !files.exists(binary) -> return Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} ENOENT"}
     if process.cmd([String]{binary.copy(), mode.copy()}).timeout(30s).run() == {
         .Ok(receipt) -> {
@@ -96,7 +96,7 @@ run_binary: fn(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome
         }
         .Err(error) -> {
             code: if error == .PermissionDenied(_) -> "EACCES" else if error == .NotFound(_) -> "ENOENT" else -> "{error}"
-            Outcome{stdout: none.copy(), stderr: none.copy(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
+            Outcome{stdout: none.copy(), stderr: none.move(), status: 0, exited: false, signal: "", error: "spawnSync {binary} {code}"}
         }
     }
 }

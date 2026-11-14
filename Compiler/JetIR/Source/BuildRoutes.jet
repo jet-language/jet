@@ -2521,9 +2521,9 @@ ir_closure_list_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
         // the List of their copies.
         .Scan -> {
             if operands.len() != 2 -> return ir_fail_slot(b, span, "scan without an initial value")
-            state_ty: ir_iter_element(ty) ?? return ir_fail_slot(b, span, "scan producing {ir_type_name(ty)}")
+            state_ty := ir_iter_element(ty) ?? return ir_fail_slot(b, span, "scan producing {ir_type_name(ty)}")
             state_row: ir_value_type(m, p, state_ty) ?? return ir_type_fail(b, span, state_ty)
-            steps_ty: Type.List{element: state_ty.copy()}
+            steps_ty: Type.List{element: state_ty.move()}
             steps_row: ir_value_type(m, p, steps_ty) ?? return ir_type_fail(b, span, steps_ty)
             accumulator: ir_temp(m, b, state_row)
             initial: ir_adapt(m, p, b, operands[0], state_row, span)

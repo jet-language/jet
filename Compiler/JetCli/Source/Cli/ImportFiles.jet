@@ -176,7 +176,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                         }
                     }
                     function_name: header.function.name
-                    canonical_name: jet_cli_import_canonical_identifier(function_name)
+                    canonical_name := jet_cli_import_canonical_identifier(function_name)
                     if names.has_key(canonical_name) {
                         if rendered_by_name.remove(canonical_name) == .Val(index) {
                             if rendered[index] == .Val(prior) {
@@ -200,7 +200,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                                 tests += 1
                                 marker = "#Test "
                             }
-                            rendered_by_name[canonical_name.copy()] = rendered.len()
+                            rendered_by_name[canonical_name.move()] = rendered.len()
                             text: "// Source span: {source}:{at + 1}-{end_line + 1}\n{jet_cli_import_render_function(marker, header.function, converted)}"
                             rendered.push(Val(JetCLIImportRenderedFunction{carried_test: carried_test, text: text}))
                             functions += 1

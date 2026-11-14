@@ -39,8 +39,8 @@ Ran: struct {
 run_words: fn(live: Live, words: [String]) -> Ran {
     argv := [String]{live.jet.copy()}
     loop word in words -> argv.push(word.copy())
-    receipt: process.cmd(argv).cwd(live.work.copy()).env("JET_TOOLCHAIN_ROOT", live.root.copy()).env("XDG_CACHE_HOME", live.cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {words.join(" ")} failed to start: {err}")
-    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.copy(), errors: receipt.errors.copy()}
+    receipt := process.cmd(argv).cwd(live.work.copy()).env("JET_TOOLCHAIN_ROOT", live.root.copy()).env("XDG_CACHE_HOME", live.cache.copy()).env("NO_COLOR", "1").run() ?? fail("jet {words.join(" ")} failed to start: {err}")
+    Ran{code: receipt.code, signal: receipt.signal ?? 0, output: receipt.output.move(), errors: receipt.errors.move()}
 }
 
 // A run that must succeed and print `expected`.

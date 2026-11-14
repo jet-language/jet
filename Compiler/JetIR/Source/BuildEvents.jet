@@ -240,10 +240,10 @@ ir_async_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Typ
     event_ty: ir_event_ok_type(result_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(result_ty)}")
     row: ir_event_family_row(m, p, event_ty) ?? return ir_fail_slot(b, span, "AsyncEvent.new producing {ir_type_name(event_ty)}")
     if args.len() != 2 -> return ir_fail_slot(b, span, "AsyncEvent.new with {args.len()} arguments")
-    failure_ty: ir_type_args(ir_untag(event_ty))[1].copy()
+    failure_ty := ir_type_args(ir_untag(event_ty))[1].copy()
     e_meta: ir_lazy_meta(m, p, b, failure_ty, span)
     if e_meta < 0 -> return -1
-    handled_ty: Type.Result{ok: Type.Named{name: "Unit"}, err: failure_ty.copy()}
+    handled_ty: Type.Result{ok: Type.Named{name: "Unit"}, err: failure_ty.move()}
     r_meta: ir_lazy_meta(m, p, b, handled_ty, span)
     if r_meta < 0 -> return -1
     policy: ir_expr(m, p, b, args[0])

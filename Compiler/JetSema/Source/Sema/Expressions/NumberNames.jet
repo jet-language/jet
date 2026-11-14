@@ -116,7 +116,7 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     // A literal's check opens no statement tail.
     tail_store := sema_statement_tail_store_init()
     trial := [Diagnostic]{}
-    fitted: sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
+    fitted := sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
     if sema_has_error_since(trial, 0) -> return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
     binding: scopes.bindings[index].symbol.span
     if scopes.bindings[index].mutable {
@@ -126,8 +126,8 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
                 return SemaNumberNameRead{handled: true, value: None}
             }
         }
-        // copy: the probe's type is recorded for the next pass; the probe's result is dropped.
-        context.number_retypes_found.push(SemaNumberRetype{binding: binding, ty: fitted.ty.copy(), use_span: span})
+        // The probe's type is recorded for the next pass; the probe's result is dropped.
+        context.number_retypes_found.push(SemaNumberRetype{binding: binding, ty: fitted.ty.move(), use_span: span})
         return unhandled
     }
     if !noted {
@@ -295,10 +295,10 @@ sema_expr_number_target_retype: fn(index: Int, offered: Type, name_span: Span, e
     // A literal's check opens no statement tail.
     tail_store := sema_statement_tail_store_init()
     trial := [Diagnostic]{}
-    fitted: sema_probe_expression(literal, Val(offered), environment, program, scopes, state, tail_store, context, trial) ?? return
+    fitted := sema_probe_expression(literal, Val(offered), environment, program, scopes, state, tail_store, context, trial) ?? return
     if sema_has_error_since(trial, 0) -> return
-    // copy: the probe's type is recorded for the next pass; the probe's result is dropped.
-    context.number_retypes_found.push(SemaNumberRetype{binding: scopes.bindings[index].symbol.span, ty: fitted.ty.copy(), use_span: name_span})
+    // The probe's type is recorded for the next pass; the probe's result is dropped.
+    context.number_retypes_found.push(SemaNumberRetype{binding: scopes.bindings[index].symbol.span, ty: fitted.ty.move(), use_span: name_span})
 }
 
 // The type an earlier pass decided for the `:=` number binding `binding`, or

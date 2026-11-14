@@ -192,8 +192,8 @@ kit_steps_line_value: fn(text: String, prefix: String, substring: String, tail: 
         end := start
         loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
         content_end: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
-        line: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
-        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.copy())
+        line := String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
+        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.move())
         start = end + 1
     }
     None

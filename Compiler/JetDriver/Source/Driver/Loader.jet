@@ -3773,16 +3773,15 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.send_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.channel_send = true
             if name == names.timeout_name && index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.task_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && !demand.source_modules.contains("core.time") -> demand.source_modules.push("core.time")
             if name == names.input_name && index + 2 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) {
-                method: token_decoded(tables, tokens[index + 2])
-                if !demand.input_methods.contains(method) -> demand.input_methods.push(method.copy())
+                method := token_decoded(tables, tokens[index + 2])
+                if !demand.input_methods.contains(method) -> demand.input_methods.push(method.move())
             }
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
-                path: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
-                if !demand.core_paths.contains(path) -> demand.core_paths.push(path.copy())
-                if index + 6 < to && tokens[index + 5].kind == TOKEN_DOT && tokens[index + 6].kind == TOKEN_IDENT {
-                    nested: "{path}.{token_decoded(tables, tokens[index + 4])}"
-                    if !demand.core_paths.contains(nested) -> demand.core_paths.push(nested)
-                }
+                path := "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
+                // The nested path is spelled from `path` before `path` moves in.
+                nested: if index + 6 < to && tokens[index + 5].kind == TOKEN_DOT && tokens[index + 6].kind == TOKEN_IDENT -> "{path}.{token_decoded(tables, tokens[index + 4])}" else -> ""
+                if !demand.core_paths.contains(path) -> demand.core_paths.push(path.move())
+                if nested != "" && !demand.core_paths.contains(nested) -> demand.core_paths.push(nested)
             }
             if collect_bare {
                 row: if name >= 0 && name < names.bare_rows.len() -> names.bare_rows[name] else -> -2

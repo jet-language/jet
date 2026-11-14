@@ -283,7 +283,7 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
 // the runtime's alone.
 jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?) -> JetDriverCompileResult {
     if cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) == .Val(pack_path) {
-        linked: x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
+        linked := x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
@@ -302,7 +302,7 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
                 }
                 prelinked = both.bytes.move()
             } else {
-                prelinked = linked.bytes.copy()
+                prelinked = linked.bytes.move()
             }
             image: x64_link_runtime_image(pack_path, prelinked.move())
             if image.errors.len() > 0 {

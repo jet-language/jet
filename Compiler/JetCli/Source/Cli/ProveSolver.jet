@@ -235,7 +235,7 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
     keyed := [JetCLISolverKeyed]{}
     nodes := [JetCLISolverBool]{}
     loop child in children {
-        normal: jet_cli_solver_normalize(child)
+        normal := jet_cli_solver_normalize(child)
         flat := [JetCLISolverBool]{}
         if normal == {
             .Constant(value) -> {
@@ -243,7 +243,7 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
             }
             .And(inner) -> if conj -> flat = inner.copy() else -> flat.push(normal.copy())
             .Or(inner) -> if conj -> flat.push(normal.copy()) else -> flat = inner.copy()
-            .Atom(_) -> flat.push(normal.copy())
+            .Atom(_) -> flat.push(normal.move())
         }
         loop item in flat {
             text: jet_cli_solver_bool_json(item)

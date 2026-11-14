@@ -350,9 +350,9 @@ pack: fn(args: [String]) {
     jet: absolute(flag(flags, "jet"))
     tool: Toolchain{root: root, jet: jet.copy(), version: "jet@{built_version(jet)}", out: absolute(flag(flags, "out"))}
     manifest: files.read(at(root, RUNTIME_SOURCES)) ?? fail("cannot read `{RUNTIME_SOURCES}`: {err}")
-    sources: runtime_sources(manifest)
+    sources := runtime_sources(manifest)
     source_paths := [String]{RUNTIME_SOURCES, RUNTIME_PACKAGE}
-    source_paths.extend(sources.copy())
+    source_paths.extend(sources.move())
     in_package: fn(path: String) { at(root, path) }
     source: inventory(source_paths, in_package)
     backend_paths := [String]{}
@@ -462,7 +462,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
     exports: export_names(files.read("{prefix}.exports") ?? fail("cannot read the runtime exports: {err}"))
     if symbols != exports -> fail("runtime ABI and checked exports disagree")
-    abi_sha256: sha256_file("{prefix}.abi.json")
+    abi_sha256 := sha256_file("{prefix}.abi.json")
     // The thread receipt (Request.jet ir_thread_exports): the exports that can
     // start a second thread, or `*` when a lifecycle hook can.
     threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
@@ -481,7 +481,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         copy_into("{prefix}.interface.jet", stale)
         fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
     }
-    threads_sha256: sha256_file("{prefix}.threads")
+    threads_sha256 := sha256_file("{prefix}.threads")
     // With CORE_LIBRARY, the Core object's, export list's and thread
     // receipt's digests; "" without it.
     core_sha256: if CORE_LIBRARY -> "{sha256_file("{core}.o")} {sha256_file("{core}.exports")} {sha256_file("{core}.threads")}" else -> ""
@@ -510,8 +510,8 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         "webSha256": Dyn.Text(sha256_file("{web}.wasm")),
         "rustObjects": Dyn.Int(0),
         "llvmObjects": Dyn.Int(0),
-        "abiSha256": Dyn.Text(abi_sha256.copy()),
-        "threadsSha256": Dyn.Text(threads_sha256.copy()),
+        "abiSha256": Dyn.Text(abi_sha256.move()),
+        "threadsSha256": Dyn.Text(threads_sha256.move()),
         "source": inventory_value(source),
         "backendInputs": inventory_value(backend),
         "lifecycle": inventory_value(lifecycle),
@@ -642,7 +642,7 @@ compose_unit: fn(root: String, out: String, fragments: [String]) -> String {
     // Any fragment makes a test package.
     package: if fragments.len() > 0 -> test_package(root) else -> files.read(at(root, RUNTIME_PACKAGE)) ?? fail("`{RUNTIME_PACKAGE}` cannot be read: {err}")
     files.create_dir_all(out) ?? fail("`{out}` cannot be created: {err}")
-    unit := uses.copy()
+    unit := uses.move()
     unit.push("")
     unit.extend(bodies)
     unit_path: files.join(out, "unit.jet")
@@ -680,10 +680,10 @@ unit_check: fn(root: String, out: String) -> Int {
     }
     fragments.sort()
     if fragments.len() == 0 -> fail("`{RUNTIME_FRAGMENTS}` holds no fragment")
-    unit_path: compose_unit(root, out, fragments)
+    unit_path := compose_unit(root, out, fragments)
     unit: files.read(unit_path) ?? fail("`{unit_path}` cannot be read: {err}")
     jet: process.env_get("JET") ?? "jet"
-    receipt: process.cmd([String]{jet.copy(), "check", unit_path.copy()}).cwd(out).env("JET_KEEP_GOING", "1").output_limit(1073741824).run() ?? fail("{jet} check cannot run: {err}")
+    receipt: process.cmd([String]{jet.copy(), "check", unit_path.move()}).cwd(out).env("JET_KEEP_GOING", "1").output_limit(1073741824).run() ?? fail("{jet} check cannot run: {err}")
     sources := [String]{}
     owners := [String]{}
     current := ""

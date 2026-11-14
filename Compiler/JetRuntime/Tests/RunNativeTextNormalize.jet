@@ -102,16 +102,16 @@ run: fn() {
     if args.len() < 2 || args[0] == "" -> fail("usage: RunNativeTextNormalize.jet OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
     out: resolve(root, args[0])
     files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
-    kat: "{root}/{KAT}"
+    kat := "{root}/{KAT}"
     bytes: files.read_bytes(kat) ?? fail("cannot read {KAT}: {err}")
     if crypto.sha256(bytes.copy()).hex() != KAT_SHA256 -> fail("NormalizationTest17 checksum mismatch")
     if data_rows(String.from_bytes_lossy(bytes)) != KAT_ROWS -> fail("NormalizationTest17 row count mismatch")
-    binary: "{out}/native-nfc"
+    binary := "{out}/native-nfc"
     cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "{root}/{HERE}/NativeTextNormalizeWitness.c"}
     loop input in args[1..<args.len()] -> cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
     cc_args.extend([String]{"-lm", "-pthread", "-o", binary.copy()})
     _: logged(native_cc(load_policy(root), cc_args).cwd(root.copy()), "native-link", "{out}/native-link.log")
-    executed: logged(process.cmd([String]{binary.copy(), kat.copy()}).cwd(root.copy()), "native-execute", "{out}/native-execute.log")
+    executed: logged(process.cmd([String]{binary.move(), kat.move()}).cwd(root.copy()), "native-execute", "{out}/native-execute.log")
     expected: files.read("{root}/{HERE}/NativeTextNormalizeWitness.stdout") ?? fail("cannot read NativeTextNormalizeWitness.stdout: {err}")
     if executed.output != expected || executed.errors != "" -> fail("native witness stdout mismatch")
     print("NFC2 Unicode17 {KAT_ROWS} rows / both routes / ownership OK")

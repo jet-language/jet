@@ -96,14 +96,14 @@ sema_call_histories_args: fn(args: [CallArg], type_args: [Type], span: Span, env
     variants_text := "[String]{{}}"
     make_text := "[fn(Int, [Int], [Bool], [String]) -[]> {type_name(type_args[0])} Never!]{{}}"
     if !has_strategy {
-        derived: sema_call_histories_derive(written, command_type, environment, program)
+        derived := sema_call_histories_derive(written, command_type, environment, program)
         if derived.unsupported != "" {
             call_args.push(sema_call_devtools_text_arg("__unsupported", derived.unsupported, span))
         } else {
             rows := [String]{}
             loop row in derived.variants -> rows.push("\"{row}\"")
             variants_text = "[String]{{{rows.join(", ")}}}"
-            make_text = derived.make.copy()
+            make_text = derived.make.move()
         }
     }
     variants: sema_call_histories_parse_expr(variants_text, span.start) ?? return call_args

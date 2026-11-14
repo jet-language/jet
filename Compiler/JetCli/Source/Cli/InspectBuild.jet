@@ -567,9 +567,9 @@ JetCLISettingsPackage: struct {
 jet_cli_settings_package: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> JetCLISettingsPackage? Never! {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
-        facts: jet_cli_root_package_facts(root) ?? return None
+        facts := jet_cli_root_package_facts(root) ?? return None
         if facts.settings.len() == 0 -> return None
-        return Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.copy()})
+        return Val(JetCLISettingsPackage{root: root.canonical_path.copy(), name: facts.name.move()})
     }
     None
 }
