@@ -48,16 +48,23 @@
 // of this fails, or a site is not a local value, the caller finalizes again.
 //
 // Run before the whole-program half of a finalization (sema_local_value_land),
-// after its body half and Core demand, the splice lands a pass in those
-// modules, and the whole-program half runs once, over every value. That
-// half reads the pass's comptime functions itself and stamps every body,
-// its effects solved from the spliced bodies included, so only the owner
-// checks and their demand must hold there, against the unstamped bodies,
-// which the pass's bodies replace as checked, and a landed initializer may
-// be any call. In a compile that lowers, a comptime function the pass adds
-// must name no Core body that waits for demand: the full recheck's first
-// demand wave checks what it names, where the landing's demand would check
-// it after the waves the finalization ran, in another order.
+// the splice lands a pass in the modules of its body half, and the
+// whole-program half runs once, over every value. That half reads the pass's
+// comptime functions itself and stamps every body, its effects solved from
+// the spliced bodies included, so only the owner checks and their demand
+// must hold there, against the unstamped bodies, which the pass's bodies
+// replace as checked, and a landed initializer may be any call. A landing
+// before the finalization's Core demand (SemaLocalSpliceInto.Undemanded)
+// leaves that demand to run after it, seeded from every comptime function and
+// reading the spliced bodies, as the full recheck's does, so the comptime
+// functions and owner bodies may name any Core body that waits for demand.
+// A landing after it (`Unstamped`, for the sites of the Core bodies the
+// demand checked) must leave that demand as it is: the owner bodies must
+// name the same Core bodies that wait for demand, and in a compile that
+// lowers, a comptime function the pass adds must name none, since the full
+// recheck's first demand wave checks what it names, where the landing's
+// demand would check it after the waves the finalization ran, in another
+// order.
 use jet_foundation.[
     symbol_find,
     symbol_is_local,
@@ -94,12 +101,15 @@ SemaModuleBodyRows: struct {
 }
 
 // Where sema_local_splice_owners lands the owner bodies: in a finalized
-// result, whose bodies carry the whole-program passes' stamps, or in the
-// checked bodies of a finalization whose whole-program half has not run and
-// stamps them afresh.
+// result, whose bodies carry the whole-program passes' stamps; in the
+// checked bodies of a finalization after its Core demand
+// (sema_finalize_demand), whose whole-program half has not run and stamps
+// them afresh; or in those of its body half (sema_finalize_bodies), before
+// that demand too.
 SemaLocalSpliceInto: enum {
     Finalized
     Unstamped
+    Undemanded
 }
 
 // Whether the bodies a splice lands in (`into`) carry the whole-program
@@ -111,7 +121,19 @@ SemaLocalSpliceInto: enum {
 sema_local_splice_stamped: fn(into: SemaLocalSpliceInto) -> Bool Never! {
     if into == {
         .Finalized -> true
-        .Unstamped -> false
+        .Unstamped | .Undemanded -> false
+    }
+}
+
+// Whether the Core demand waves (sema_core_demand_waves) ran over the bodies
+// a splice lands in (`into`). Only then must the splice leave the Core
+// demand as the full recheck makes it; before them, the waves read the
+// spliced bodies and seed from every comptime function, the full recheck's
+// way.
+sema_local_splice_demanded: fn(into: SemaLocalSpliceInto) -> Bool Never! {
+    if into == {
+        .Finalized | .Unstamped -> true
+        .Undemanded -> false
     }
 }
 
@@ -602,19 +624,21 @@ sema_local_values_blocked: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 
 // Lands the pass's local values in `modules`, the checked bodies of a
 // finalization over `earlier_values` and `earlier_functions` after its body
-// half and Core demand (sema_finalize_bodies, sema_finalize_demand), before
-// its whole-program half (sema_finalize_program) runs once over them with
+// half (sema_finalize_bodies), and after its Core demand
+// (sema_finalize_demand) as well unless `into` is `Undemanded`, before its
+// whole-program half (sema_finalize_program) runs once over them with
 // `values` and `comptime_functions`. That half reads the pass's comptime
 // functions itself, their diagnostics included, and it puts its stamps on
 // every body, so of the file comment's conditions only the owner checks'
-// and their demand must hold, against the unstamped bodies; in a compile
-// that lowers, the comptime functions the pass adds must name no Core body
-// that waits for demand. The graph moves in and comes back with its edits
-// on `trail`; `landed` are the pass's sites.
+// and their demand must hold, against the unstamped bodies; after the Core
+// demand, in a compile that lowers, the comptime functions the pass adds
+// must name no Core body that waits for demand. The graph moves in and comes
+// back with its edits on `trail`; `landed` are the pass's sites.
 sema_local_value_land: fn(
     resolved: &&SemaRegistrationGraph,
     trail: &SemaGraphTrail,
     modules: &[SemaGraphModuleResult],
+    into: SemaLocalSpliceInto,
     landed: [SemaComptimeItemSource],
     earlier_values: [SemaComptimeItemValue],
     earlier_functions: [SemaComptimeFunctionResult],
@@ -631,11 +655,11 @@ sema_local_value_land: fn(
         sema_local_splice_refused(trace_sink, "host_value", landed_keys.len())
         return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     }
-    if graph.core_lowering_roots != None && sema_local_splice_demands_core(graph, comptime_functions, sema_comptime_checked_function_rows(earlier_functions)) {
+    if sema_local_splice_demanded(into) && graph.core_lowering_roots != None && sema_local_splice_demands_core(graph, comptime_functions, sema_comptime_checked_function_rows(earlier_functions)) {
         sema_local_splice_refused(trace_sink, "core_demand", landed_keys.len())
         return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     }
-    sema_local_splice_owners(graph, trail, modules, landed_keys, SemaLocalSpliceInto.Unstamped, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
+    sema_local_splice_owners(graph, trail, modules, landed_keys, into, earlier_values, earlier_functions, values, comptime_functions, host_hooks, threads, trace_sink)
 }
 
 // Checks the owner functions of the landed sites (`landed`, by
@@ -735,7 +759,8 @@ sema_local_splice_owners: fn(
     // only the sites that got values leave the source rows.
     valued := sema_local_splice_valued(landed, after)
     computed: sema_local_splice_computed(valued, values)
-    same_named: sema_local_splice_same_keys(sema_local_splice_named_core(graph, before, owners), sema_local_splice_named_core(graph, after, owners))
+    // Before the Core demand, the demand waves read the spliced bodies.
+    same_named: !sema_local_splice_demanded(into) || sema_local_splice_same_keys(sema_local_splice_named_core(graph, before, owners), sema_local_splice_named_core(graph, after, owners))
     same_demand: sema_local_splice_same_demand(earlier_demand, pass_demand)
     // The diagnostics the whole-program half reports from the pass's
     // comptime results.

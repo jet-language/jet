@@ -1,11 +1,13 @@
 # Card #6759 c1: the local values of the Core bodies a program reaches land
-# in the first finalization with the program's own, after its Core demand and
-# before its whole-program passes (JetDriver BodyComptime.jet
-# jet_driver_land_local_values), so no body comptime site is left for a pass
-# after it and the program is not checked again. `count` is the program's;
-# the Path literal reaches core.files `path_component_encode`, whose `hex` is
-# Core's. The step checks without lowering: a compile that lowers refuses a
-# pass whose comptime functions name a Core body that waits for demand, as
+# in the first finalization with the program's own, before its whole-program
+# passes (JetDriver BodyComptime.jet jet_driver_land_local_values), so no
+# body comptime site is left for a pass after it and the program is not
+# checked again. `count` is the program's; the Path literal reaches
+# core.files `path_component_encode`, whose `hex` is Core's. The step checks
+# without lowering, so no Core body waits for demand and both land in one
+# pass. A compile that lowers lands the Core bodies' sites after its Core
+# demand and refuses such a pass when its comptime functions name a Core body
+# that waits for demand, as
 # a_local_value_that_cannot_land_keeps_its_run_for_the_body_pass shows.
 # JET_RECHECK_VERIFY=1 checks the whole program again anyway and stops the
 # compile on any difference.

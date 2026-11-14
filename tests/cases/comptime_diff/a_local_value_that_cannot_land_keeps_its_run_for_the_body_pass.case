@@ -1,21 +1,25 @@
-# Card #6759 c1 (fin1): in a compile that lowers, a local value cannot land
-# before the whole-program passes when the comptime function its pass adds
-# names a Core body that waits for demand: `parts`, checked to run while
-# compiling, names core.text.parse `split`. sema_local_value_land refuses the
-# pass and traces the reason. The pass already ran, so the first body pass
-# after finalization takes its run (JetDriver BodyComptime.jet
-# jet_driver_comptime_body_run) instead of building the same program again.
-# JET_RECHECK_VERIFY stays off: under it the body pass runs again instead of
-# taking the kept run, so the taken-run counter this case reads is not
-# traced. The same program under JET_RECHECK_VERIFY=1 is
-# a_refused_local_value_pass_matches_the_same_pass_run_again.
+# Card #6759 c1 (fin1): in a compile that lowers, the local values of the
+# Core bodies the finalization's Core demand checks land after that demand
+# (JetDriver BodyComptime.jet jet_driver_land_local_values), and such a pass
+# cannot land when a comptime function it adds names a Core body that waits
+# for demand. The Path literal reaches core.files `path_component_encode`,
+# whose `hex` is one of those sites. sema_local_value_land refuses the pass
+# and traces the reason. The pass already ran, so the first body pass after
+# finalization takes its run (jet_driver_comptime_body_run) instead of
+# building the same program again. JET_RECHECK_VERIFY stays off: under it
+# the body pass runs again instead of taking the kept run, so the taken-run
+# counter this case reads is not traced. The same program under
+# JET_RECHECK_VERIFY=1 is
+# a_refused_local_value_pass_matches_the_same_pass_run_again. A program
+# body's local value lands before the Core demand instead:
+# a_local_value_whose_closure_names_a_waiting_core_body_lands_before_the_demand.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=0
-write: main.jet = "use {\n    parse: core.text.parse\n}\n\nparts: fn(text: String) -> Int {\n    parse.split(text, \",\").len()\n}\n\nrun: fn() {\n    count: parts(\"a,b,c\")\n    print(\"{count}\")\n}\n"
+write: main.jet = "run: fn() {\n    name: \"a b/c\"\n    path: Path{\"/tmp/{name}\"}\n    print(\"{path}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
-stdout: = "3\n"
-stderr: ~ "# sema.local_values_refused = " # the pass's value cannot land before the whole-program passes
+stdout: = "/tmp/a%20b%2Fc\n"
+stderr: ~ "# sema.local_values_refused_core_demand = " # the Core sites' pass cannot land after the Core demand
 stderr: ~ "# comptime.refused_pass_taken = " # the body pass takes the refused pass's run, counted by its sites
 stderr: ~ "# comptime.bodies_pending = 0\n" # the taken run leaves no body site behind

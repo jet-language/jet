@@ -7,10 +7,10 @@
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
-write: main.jet = "use {\n    parse: core.text.parse\n}\n\nparts: fn(text: String) -> Int {\n    parse.split(text, \",\").len()\n}\n\nrun: fn() {\n    count: parts(\"a,b,c\")\n    print(\"{count}\")\n}\n"
+write: main.jet = "run: fn() {\n    name: \"a b/c\"\n    path: Path{\"/tmp/{name}\"}\n    print(\"{path}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
-stdout: = "3\n"
+stdout: = "/tmp/a%20b%2Fc\n"
 stderr: ~ "# sema.local_values_refused = " # the pass is refused, as without the verify
 stderr: !~ "# comptime.refused_pass_taken" # the verify runs the pass again instead of taking it
 stderr: !~ "JET_RECHECK_VERIFY" # the refused run is the one the body pass makes

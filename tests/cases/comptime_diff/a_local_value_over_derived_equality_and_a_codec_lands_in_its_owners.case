@@ -6,12 +6,11 @@
 # demand their checks recorded (SemaDemandCapture), so each owner demands
 # what the finalization's check did. Under JET_RECHECK_VERIFY=1 the compile
 # also checks the whole program again and stops on any difference.
-# A compile that lowers refuses the pass instead (its closure names Core
-# bodies that wait for demand), and since that closure demands a generated
-# codec, the run is not kept for the body pass (JetDriver BodyComptime.jet
-# jet_driver_run_demands_generated): the whole-program half generates the
-# codec's body, so the pass run after it checks another closure. Whether
-# `text` is computed while compiling is
+# A compile that lowers lands the pass the same way: `text` is in a program
+# body, so it lands before the finalization's Core demand
+# (JetDriver BodyComptime.jet jet_driver_land_local_values), and the demand
+# then checks the Core bodies the pass's closure names, as the full recheck
+# does. Whether `text` is computed while compiling is
 # a_local_value_over_derived_equality_and_a_codec_is_computed_while_compiling.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -24,5 +23,5 @@ stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
 step: jet run --trace main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
-stderr: ~ "# sema.local_values_refused_core_demand = " # a compile that lowers refuses the pass whose closure names Core bodies that wait for demand
-stderr: !~ "JET_RECHECK_VERIFY" # the pass run again matches its full recheck
+stderr: !~ "# sema.local_values_refused" # the pass lands before the Core demand, so a closure that names Core bodies no longer sends it back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

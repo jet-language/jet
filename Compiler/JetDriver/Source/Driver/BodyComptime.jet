@@ -20,6 +20,7 @@ use {
         SemaGraphModuleResult,
         SemaGraphResult,
         SemaLocalSpliceDemand,
+        SemaLocalSpliceInto,
         SemaRegistrationGraph,
         sema_comptime_body_item_source,
         sema_comptime_function_diagnostics,
@@ -389,6 +390,15 @@ JetDriverRefusedPass: struct {
     trace: JetDriverCompileTrace
 }
 
+// What the first finalization's landings (jet_driver_land_local_values) hand
+// on: whether a landing ended with a site pending, after which no later
+// landing runs, and the pass a landing refused, for the first body pass
+// after finalization to take.
+JetDriverLanding: struct {
+    stopped: Bool
+    refused: JetDriverRefusedPass?
+}
+
 // `refused`, moved out, when its pass is the one a body pass over `sources`
 // runs from `values` and `functions`: the same sites, from the same values
 // and closures. Otherwise None, and `refused` is dropped.
@@ -658,47 +668,59 @@ jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, bo
 }
 
 // Lands each body comptime pass whose pending sites are all local values in
-// the modules of the first finalization (`bodies`) after its body half and
-// Core demand (sema_finalize_bodies, sema_finalize_demand) and before its
-// whole-program half (sema_finalize_program), so that half runs once, over
-// every value, instead of once before the pass and again after it
-// (sema_local_value_land). The sites of user and Core bodies land in one
-// pass, and only a pass whose values change no Core demand. A pass that cannot
-// land cleanly (an error other than a failure obligation or an incomplete
-// check so far, a site that is not a local value or that an earlier pass
-// already took, a run that reports anything, stops, does not complete or
-// adds no value, or a splice that does not hold) is dropped, and the body
-// passes after finalization (jet_driver_orchestrate_comptime_bodies) take
-// its sites as before. A clean run whose splice does not hold goes to
-// `refused`, so the first of those passes takes its results instead of
-// running it again, unless its closures demand a generated body
-// (jet_driver_run_demands_generated). A taken seeded module's sites
-// (sema_finalize_seeded_taken) are the Core record's, final as taken: none
-// lands again. The registration graph moves in and comes back with no edit;
-// `values`, `functions` and `trace` take what the landed passes add.
+// the modules of the first finalization (`bodies`) before its whole-program
+// half (sema_finalize_program), so that half runs once, over every value,
+// instead of once before the pass and again after it
+// (sema_local_value_land). The driver lands twice (`into`): first after the
+// body half (sema_finalize_bodies, `Undemanded`), where the Core demand
+// (sema_finalize_demand) that follows reads the landed bodies and every
+// comptime function, as the full recheck's does, so a pass may name any Core
+// body; then after that demand (`Unstamped`), for the sites of the Core
+// bodies it checked, where only a pass whose values change no Core demand
+// lands. A pass that cannot land cleanly (an error other than a failure
+// obligation or an incomplete check so far, a site that is not a local value
+// or that an earlier pass already took, a run that reports anything, stops,
+// does not complete or adds no value, or a splice that does not hold) is
+// dropped, and the body passes after finalization
+// (jet_driver_orchestrate_comptime_bodies) take its sites as before. A clean
+// run whose splice does not hold goes to `landing.refused`, so the first of
+// those passes takes its results instead of running it again, unless its
+// closures demand a generated body (jet_driver_run_demands_generated). A
+// landing that ends with a site pending stops `landing`, and a stopped
+// landing runs no pass: the later landing's pass would hold the earlier's
+// sites again. A taken seeded module's sites (sema_finalize_seeded_taken)
+// are the Core record's, final as taken: none lands again. The registration
+// graph moves in and comes back with no edit; `values`, `functions` and
+// `trace` take what the landed passes add.
 jet_driver_land_local_values: fn(
     graph: &&SemaRegistrationGraph,
     bodies: &SemaFinalizeBodies,
+    into: SemaLocalSpliceInto,
     stage: SemaComptimeDeclarationStage,
     values: &[SemaComptimeItemValue],
     functions: &[SemaComptimeFunctionResult],
     trace: &JetDriverCompileTrace,
     request: JetDriverCompileRequest,
-    refused: &JetDriverRefusedPass?,
+    landing: &JetDriverLanding,
 ) -> SemaRegistrationGraph {
     registration := graph.move()
-    // The `module\nkey` of every site a pass took: a site pending again
-    // ends the landing, so it ends.
-    tried := [String:Bool]{}
+    if landing.stopped -> return registration
     taken := [U32:Bool]{}
     loop index in 0..<sema_finalize_seeded_taken(registration) -> taken[bodies.modules[index].module_identity.id] = true
+    tried := [String:Bool]{}
     loop {
+        // Every exit but the one with no site pending stops the landing.
+        landing.stopped = true
         if !jet_driver_local_values_open(bodies, stage, functions) -> break
         pending := [SemaComptimeBodySource]{}
         loop source in jet_driver_pending_comptime_body_sources(bodies.modules, values) {
             if taken.get(source.module_identity.id) == None -> pending.push(source.copy())
         }
-        if pending.len() == 0 -> break
+        if pending.len() == 0 {
+            landing.stopped = false
+            break
+        }
+        // A site pending again ends the landing, so it ends.
         again := false
         loop source in pending {
             site: "{source.module_identity.id}\n{source.key}"
@@ -724,7 +746,7 @@ jet_driver_land_local_values: fn(
             sema_graph_trail_undo(registration, run.trail)
             break
         }
-        splice := sema_local_value_land(registration, run.trail, bodies.modules, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+        splice := sema_local_value_land(registration, run.trail, bodies.modules, into, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
         registration = splice.graph.move()
         sema_graph_trail_undo(registration, run.trail)
         if !splice.spliced {
@@ -735,7 +757,7 @@ jet_driver_land_local_values: fn(
             if !jet_driver_run_demands_generated(run.functions) {
                 sites := [String:Bool]{}
                 loop source in body_sources -> sites["{source.module_identity.id}\n{source.key}"] = true
-                refused = Val(JetDriverRefusedPass{sites: sites, base_values: values.len(), base_functions: functions.len(), values: run.values.move(), functions: run.functions.move(), trace: run.trace.move()})
+                landing.refused = Val(JetDriverRefusedPass{sites: sites, base_values: values.len(), base_functions: functions.len(), values: run.values.move(), functions: run.functions.move(), trace: run.trace.move()})
             }
             break
         }

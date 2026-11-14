@@ -10468,10 +10468,10 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
 // The Core demand of a finalization over the `bodies` of
 // sema_finalize_bodies (sema_core_demand_waves), checked against `values`
 // and `comptime_functions`. A caller may land body comptime values in those
-// bodies after it, before the whole-program half (the driver's
-// jet_driver_land_local_values), when the landing demands nothing new
-// (sema_local_value_land). The graph moves in and comes back with its edits
-// on `trail`.
+// bodies before it, which it then reads as the full recheck's does, and
+// after it, before the whole-program half, when the landing demands nothing
+// new (the driver's jet_driver_land_local_values, sema_local_value_land).
+// The graph moves in and comes back with its edits on `trail`.
 sema_finalize_demand: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &SemaFinalizeBodies) -> SemaRegistrationGraph {
     graph := owned.move()
     hook_access: sema_host_hook_access(host_hooks)
