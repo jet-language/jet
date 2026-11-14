@@ -280,11 +280,19 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     // Ascending rounds, widening late phi growth. A value is evaluated again
     // only once a range it reads changed (`stale`, ir_range_readers) or its
     // last union would still change its mark: any other evaluation finds
-    // what it found before and changes nothing, so the rounds, and every
-    // range they reach, are those of evaluating every value each round.
+    // what it found before (`found`) and changes nothing, so the rounds, and
+    // every range they reach, are those of evaluating every value each
+    // round.
     readers: ir_range_readers(f, s, r, count)
     stale := [Bool]{}
     loop _ in 0..<count -> stale.push(true)
+    found := IRRangeFound{known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, inline: [Bool]{}}
+    loop _ in 0..<count {
+        found.known.push(false)
+        found.lo.push(0)
+        found.hi.push(0)
+        found.inline.push(false)
+    }
     round := 0
     changed := true
     loop changed && round < IR_RANGE_ROUNDS {
@@ -293,6 +301,7 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
             if !stale[value] || !r.ranged[value] || ir_ssa_find(s, value) != value -> next
             stale[value] = false
             got: ir_range_eval(f, s, r, value)
+            ir_range_found_set(found, value, got)
             if !got.known -> next
             if !r.known[value] {
                 r.known[value] = true
@@ -322,9 +331,13 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     }
     if changed -> return 0
     // Descending rounds from the post-fixpoint, and again from the bounds
-    // of the counted loops' accumulators.
-    ir_range_descend(f, s, r, count)
-    if ir_range_counted(f, s, r) -> ir_range_descend(f, s, r, count)
+    // of the counted loops' accumulators. No value is stale now: each one's
+    // `found` is what evaluating it again would give.
+    ir_range_descend(f, s, r, count, readers, found, stale)
+    if ir_range_counted(f, s, r) {
+        loop value in 0..<count -> stale[value] = true
+        ir_range_descend(f, s, r, count, readers, found, stale)
+    }
     ir_range_rewrite(m, f, s, r)
 }
 
@@ -416,17 +429,43 @@ ir_range_changed: fn(r: IRRanges, readers: IRRangeReaders, stale: &[Bool], value
     if (ir_range_inline(ir_range_so_far(r, value)) && ir_range_inline(got)) != r.inline[value] -> stale[value] = true
 }
 
-ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int) Never! {
+// What each value's last evaluation found (ir_range_eval).
+IRRangeFound: struct {
+    known: [Bool]
+    lo: [Int]
+    hi: [Int]
+    inline: [Bool]
+}
+
+ir_range_found_set: fn(found: &IRRangeFound, value: Int, got: IRRange) Never! {
+    found.known[value] = got.known
+    found.lo[value] = got.lo
+    found.hi[value] = got.hi
+    found.inline[value] = got.inline
+}
+
+// Descending rounds: each value's range narrowed to what it evaluates to.
+// Only a `stale` value (one a range it reads changed since its last
+// evaluation) is evaluated again; any other gives what it `found`.
+ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int, readers: IRRangeReaders, found: &IRRangeFound, stale: &[Bool]) Never! {
     loop _ in 0..<IR_RANGE_NARROW {
         loop value in 0..<count {
             if !r.ranged[value] || !r.known[value] || ir_ssa_find(s, value) != value -> next
-            got: ir_range_eval(f, s, r, value)
-            if !got.known || got.lo > got.hi -> next
+            if stale[value] {
+                stale[value] = false
+                ir_range_found_set(found, value, ir_range_eval(f, s, r, value))
+            }
+            if !found.known[value] || found.lo[value] > found.hi[value] -> next
+            got: IRRange{known: true, lo: found.lo[value], hi: found.hi[value], inline: found.inline[value]}
             // The intersection: inline when either side is.
             mark: ir_range_inline(ir_range_so_far(r, value)) || ir_range_inline(got)
-            if got.lo > r.lo[value] -> r.lo[value] = got.lo
-            if got.hi < r.hi[value] -> r.hi[value] = got.hi
+            lo: if got.lo > r.lo[value] -> got.lo else -> r.lo[value]
+            hi: if got.hi < r.hi[value] -> got.hi else -> r.hi[value]
+            if lo == r.lo[value] && hi == r.hi[value] && mark == r.inline[value] -> next
+            r.lo[value] = lo
+            r.hi[value] = hi
             r.inline[value] = mark
+            loop k in readers.start[value]..<readers.start[value + 1] -> stale[readers.rows[k]] = true
         }
     }
 }
