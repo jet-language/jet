@@ -1041,13 +1041,23 @@ kit_steps_policy: fn(step: KitStep, env: KitEnv) -> KitEnv? {
 }
 
 kit_steps_failure: fn(step: KitStep, result: KitRun) -> KitVerdict? {
-    if step.limit_time > 0 && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
+    if step.limit_time > 0 && result.limit_hit != "cpu" && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
     if step.limit_memory > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: memory={step.limit_memory}KiB"))
     if step.limit_resident > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: resident={step.limit_resident}KiB"))
     isolated: kit_no_nix_failure(step, result)
     if isolated != None -> return isolated
     if result.code == KIT_EXIT_ICE && (Int.parse(step.exit) ?? -1) == KIT_EXIT_ICE && result.error == "" && !result.timed_out && result.signal == None -> return None
-    kit_exec_process_failure(result)
+    failure: kit_exec_process_failure(result) ?? return None
+    if failure.status != "TIMEOUT" -> return Val(failure)
+    Val(kit_expect_verdict("TIMEOUT", "{failure.detail}; step {kit_steps_timeout_name(step)}"))
+}
+
+// The step a TIMEOUT names: its label, else its command, cut at 120 bytes.
+kit_steps_timeout_name: fn(step: KitStep) -> String {
+    if step.label != "" -> return "{step.label}"
+    command: step.argv.join(" ")
+    if command.count_bytes() > 120 -> return "`{kit_steps_byte_slice(command, 0, 120)}…`"
+    "`{command}`"
 }
 
 kit_steps_normalize: fn(text: String, env: KitEnv, work: String, scratch: String, normalize: [String], built: String, source_name: String) -> String {

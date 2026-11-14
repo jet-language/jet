@@ -85,7 +85,7 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
         invoked: kit_steps_hook_invoke(hooks, attempt, index, context, state)
         state = invoked.state
         if invoked.verdict.status != "PASS" -> return invoked
-        if state.last.timed_out -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        if state.last.timed_out && state.last.limit_hit != "cpu" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
         failure: kit_steps_failure(attempt, state.last)
         if failure == {
             .Val(verdict) -> {

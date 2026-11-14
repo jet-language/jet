@@ -5,11 +5,16 @@ use {
     time: core.time
 }
 
-// A step that runs longer than a minute declares its own `limit: time=`.
+// Each step's process tree may use `--timeout` (60) seconds of CPU time on
+// each core; a step that must finish in a wall time of its own declares
+// `limit: time=`.
 kit_exec_defaults: fn() -> KitOptions {
     KitOptions{suite: "golden", jet: sys.get("JET") ?? "", jetpack: "", tiers: (loop tier in kit_golden_tiers() -> tier.name), filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 60, scratch: "", results: "", list: false, coverage: false, bless: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
 }
 
+// The wall-clock guard is this many times `--timeout`: a hang guard only, so
+// a loaded host that slows a working step never reaches it.
+KIT_WALL_GUARD: 10
 
 // The corpus ids `options` selects of `all_ids`. A `cases` file names only
 // corpus ids, unless others_selected lets it name the run's other tests too.
@@ -280,15 +285,22 @@ kit_exec_receipt: fn(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Stri
 // A child that exits before reading its input breaks the pipe; name its exit
 // and first stderr line so the row shows why it stopped reading.
 kit_exec_input_detail: fn(error: String, code: Int, errors: String) -> String {
-    first := ""
-    loop line in errors.lines() {
-        if line.trim() == "" -> next
-        first = line.trim().copy()
-        break
-    }
-    if first.count_bytes() > 160 -> first = kit_steps_byte_slice(first, 0, 160)
+    first: kit_exec_first_line(errors)
     if first == "" -> return "{error}; child exited {code} without reading it"
     "{error}; child exited {code} without reading it: {first}"
+}
+
+// The first nonblank line of a child's stderr, cut at 160 bytes; "" when it
+// wrote none.
+kit_exec_first_line: fn(errors: String) -> String {
+    loop line in errors.lines() {
+        if line.trim() == "" -> next
+        // copy: the trimmed line is returned past the loop's borrow of `errors`.
+        first: line.trim().copy()
+        if first.count_bytes() > 160 -> return kit_steps_byte_slice(first, 0, 160)
+        return first
+    }
+    ""
 }
 
 kit_exec_invoke_with_env: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar]) -> KitRun {
@@ -331,6 +343,8 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     // counts them beside the child's resident memory.
     files_in_memory: if env.scratch_memory -> scratch.copy() else -> ""
     watched := KitResident{pid: if env.resident_limit > 0 -> child.id() else -> 0, limit: env.resident_limit, tree: env.resident_tree, due: 0, killed: false, peak: 0, scratch: files_in_memory, scratch_due: 0, scratch_bytes: 0}
+    cpu_limit: if env.cpu_limit == .Val(limit) -> limit.ns else -> 0
+    spent := KitCPU{pid: if cpu_limit > 0 -> child.id() else -> 0, limit: cpu_limit, due: 0, used: 0, killed: false}
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
@@ -344,7 +358,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         .Val(shape) -> {
             eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
             loop event in kit_exec_terminal_order(shape.events) {
-                kit_exec_wait(child, watched, started, event.at)
+                kit_exec_wait(child, watched, spent, started, event.at)
                 if event.kind == "resize" {
                     session: child.terminal ?? {
                         if input_error == "" -> input_error = "terminal resize: no terminal session"
@@ -368,7 +382,7 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         }
         .None -> child.stdin.close()
     }
-    kit_exec_wait(child, watched, started, -1)
+    kit_exec_wait(child, watched, spent, started, -1)
     // Every output byte, read before the wait detaches the readers.
     output := [U8]{}
     errors := [U8]{}
@@ -391,6 +405,16 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     run.stdout_bytes = Val(output)
     run.stderr_bytes = Val(errors)
     if watched.killed -> run.limit_hit = "memory"
+    // The receipt counts the children the child waited for; a sample also
+    // counts descendants still live when it was taken.
+    waited: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0)
+    run.cpu_ns = if spent.used > waited -> spent.used else -> waited
+    run.cpu_limit_ns = cpu_limit
+    run.wall_limit_ns = env.timeout.ns
+    if spent.killed {
+        run.timed_out = true
+        run.limit_hit = "cpu"
+    }
     run
 }
 
@@ -446,10 +470,10 @@ kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
 
 // Waits on this task until the child exits or, when `until` is not negative,
 // until `until` ns after spawn, polling the child and sampling its resident
-// memory meanwhile. A watcher task of its own would need a second scheduler
-// worker beside this waiting one: a pool whose workers all wait on watchers
-// that never get a worker stops.
-kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, started: time.Instant, until: Int) {
+// memory and its tree's CPU time meanwhile. A watcher task of its own would
+// need a second scheduler worker beside this waiting one: a pool whose
+// workers all wait on watchers that never get a worker stops.
+kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, spent: &KitCPU, started: time.Instant, until: Int) {
     pause := 1
     loop {
         at: started.elapsed().ns
@@ -457,9 +481,50 @@ kit_exec_wait: fn(child: ProcessChild, watched: &KitResident, started: time.Inst
         exited: child.exited() ?? return
         if exited -> return
         kit_exec_watch_resident(watched, at)
+        kit_exec_watch_cpu(spent, at)
         time.sleep(if until >= 0 && until - at < pause * 1000000 -> time.duration_ns(until - at) else -> time.duration_ms(pause))
         if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
     }
+}
+
+// The CPU limit on one child: the child (`pid` 0 is unwatched), the CPU time
+// in ns its whole process tree may use, when it samples next in ns after
+// spawn, the tree's CPU time at the last sample, and whether it stopped the
+// tree.
+KitCPU: struct {
+    pid: Int
+    limit: Int
+    due: Int
+    used: Int
+    killed: Bool
+}
+
+// Samples the tree's CPU time every 100 ms (`at` is ns after spawn) and
+// stops the child and its live descendants once it passes the limit. CPU
+// time is what the step's own work costs: a host busy with other work slows
+// the step's wall time, not this.
+kit_exec_watch_cpu: fn(spent: &KitCPU, at: Int) Never! {
+    if spent.pid <= 0 || spent.killed || at < spent.due -> return
+    spent.due = at + 100000000
+    used: sys.tree_cpu_time(spent.pid) ?? return
+    spent.used = used.ns
+    if spent.used <= spent.limit -> return
+    pids := [Int]{}
+    _: kit_exec_tree_resident(spent.pid, true, pids)
+    if !kit_exec_stop_tree(spent.pid, pids) -> return
+    spent.killed = true
+}
+
+// Kills `pid` and the descendants listed beside it in `pids`; false when
+// `pid` itself could not be signalled.
+kit_exec_stop_tree: fn(pid: Int, pids: [Int]) -> Bool Never! {
+    #Unsafe("the testkit stops its own step child at a resource guard") {
+        sys.kill(pid, 9) ?? return false
+        loop descendant in pids {
+            if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
+        }
+    }
+    true
 }
 
 // The resident-memory guard on one child: the child (`pid` 0 is unwatched),
@@ -500,12 +565,7 @@ kit_exec_watch_resident: fn(watched: &KitResident, at: Int) Never! {
     if pids.len() == 0 -> return
     if used > watched.peak -> watched.peak = used
     if used + watched.scratch_bytes <= watched.limit -> return
-    #Unsafe("the testkit stops its own step child at the resident-memory guard") {
-        sys.kill(watched.pid, 9) ?? return
-        loop descendant in pids {
-            if descendant != watched.pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
-        }
-    }
+    if !kit_exec_stop_tree(watched.pid, pids) -> return
     watched.killed = true
 }
 
@@ -641,7 +701,7 @@ kit_exec_invoke: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, s
 kit_exec_process_failure: fn(run: KitRun) -> KitVerdict? {
     if run.refused -> return Val(kit_expect_verdict("REFUSED", run.error))
     if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
-    if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
+    if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", kit_exec_timeout_detail(run)))
     if run.limit_hit == "memory" -> return Val(kit_expect_verdict("ERROR", "memory limit hit"))
     if run.signal != None -> return Val(kit_expect_verdict("ERROR", "child terminated by signal"))
     if run.code == KIT_EXIT_ICE -> return Val(kit_expect_verdict("ERROR", kit_exec_ice_detail()))
@@ -651,6 +711,20 @@ kit_exec_process_failure: fn(run: KitRun) -> KitVerdict? {
 // An ERROR verdict's detail for a child that ended with the ICE status.
 kit_exec_ice_detail: fn() -> String { "internal compiler error (exit {KIT_EXIT_ICE})" }
 
+// A TIMEOUT's reason: the limit it hit and the CPU and wall seconds the
+// step's processes used.
+kit_exec_timeout_detail: fn(run: KitRun) -> String {
+    used: "used {kit_exec_seconds(run.cpu_ns)}s CPU in {kit_exec_seconds(run.elapsed_ns)}s wall"
+    if run.limit_hit == "cpu" -> return "cpu limit {kit_exec_seconds(run.cpu_limit_ns)}s: {used}"
+    if run.wall_limit_ns <= 0 -> return "wall-clock limit: {used}"
+    "wall-clock guard {kit_exec_seconds(run.wall_limit_ns)}s: {used}"
+}
+
+// Nanoseconds as seconds to a tenth, rounded down.
+kit_exec_seconds: fn(ns: Int) -> String {
+    tenths: if ns < 0 -> 0 else -> ns /% 100000000
+    "{tenths /% 10}.{tenths % 10}"
+}
 kit_exec_write: fn(path: String, contents: String) {
     files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
     files.write(path, contents) ?? panic("write {path}: {err}")

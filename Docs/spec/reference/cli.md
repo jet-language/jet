@@ -1122,7 +1122,9 @@ UNEXPECTED-PASS, UNSUPPORTED, SKIP-HOST, OPT-IN, REFUSED, ERROR, TIMEOUT) and a
 summary. Row IDs are relative to the deepest directory holding the package and
 every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
 `list`, `optimize` and `diagnostic_coverage` settings steer the pool;
-`time_limit` bounds each step; the `baseline:` ledger
+`time_limit` bounds each step's process tree to that much CPU time on each
+core, which the host's other load does not move, with a wall-clock hang
+guard at ten times it; the `baseline:` ledger
 (`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
 every selected row's snapshots. A sharded or filtered run never writes a
 baseline and compares only the baseline rows it reported; code suites run in shard 1.

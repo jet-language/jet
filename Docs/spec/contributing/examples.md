@@ -210,8 +210,16 @@ entry's own claim and never above that room; a case's `limit: resident=`
 tightens it. Each entry's verdict diffs and rows
 print as soon as it finishes; the results file stays in corpus order and
 records every entry's `wall_ms` and `peak_kib`.
-`--timeout SEC` is each child's step timeout, 60 s by default; a step that
-needs longer declares `limit: time=SEC`, which also makes the overrun a
+`--timeout SEC` (60 s by default) bounds each step by the CPU time of its
+whole process tree (`core.sys.tree_cpu_time`): SEC seconds on each core,
+all the work SEC seconds of wall time hold on an idle host. Other load on
+the host does not move that count, so a loaded host never turns a slow step
+into a failed one. The wall clock stays only as a hang guard at ten times
+SEC. A hit on either reports TIMEOUT with the limit's kind (`cpu limit` or
+`wall-clock guard`), the CPU and wall seconds the step used, and the step;
+so does a deadline inside the harness, such as the free-port probe or a
+host-port lock. A step that must finish within a wall time of its own
+declares `limit: time=SEC`, which also makes the overrun a
 failure of that step. Timeouts must be positive seconds within `Duration`'s
 representable range; out-of-range values are refused before corpus discovery
 with exit code 2. A known-failing case waits at most 10 s for each answer

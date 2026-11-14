@@ -148,6 +148,35 @@ kit_test_core_scratch: fn(label: String) -> String {
     assert_eq((kit_exec_process_failure(spawn) ?? panic("spawn")).status, "ERROR")
 }
 
+#Test("a step past its CPU limit is TIMEOUT (cpu) and a sleeping step past its wall-clock guard is TIMEOUT (wall)") {
+    root: cases_test_root("cpu-limit")
+    busy: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, cpu_limit: Val(1s), memory_limit: 0}
+    // The loop runs in a grandchild: only the process tree's count sees it.
+    spinning: kit_exec_invoke(busy, ["/bin/sh", "-c", "sh -c 'while :; do :; done'; true"], root, root, "")
+    assert(spinning.timed_out)
+    assert_eq(spinning.limit_hit, "cpu")
+    assert(spinning.cpu_ns > 1000000000, "cpu ns: {spinning.cpu_ns}")
+    assert(spinning.elapsed_ns < 25000000000)
+    cpu: kit_exec_process_failure(spinning) ?? panic("cpu timeout")
+    assert_eq(cpu.status, "TIMEOUT")
+    assert(cpu.detail.starts_with("cpu limit 1.0s: used "), "detail: {cpu.detail}")
+    assert(cpu.detail.contains("s CPU in "))
+    asleep: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 1s, cpu_limit: Val(30s), memory_limit: 0}
+    sleeping: kit_exec_invoke(asleep, ["/bin/sh", "-c", "sleep 20"], root, root, "")
+    assert(sleeping.timed_out)
+    assert(sleeping.limit_hit != "cpu")
+    assert(sleeping.cpu_ns < 1000000000, "cpu ns: {sleeping.cpu_ns}")
+    wall: kit_exec_process_failure(sleeping) ?? panic("wall timeout")
+    assert_eq(wall.status, "TIMEOUT")
+    assert(wall.detail.starts_with("wall-clock guard 1.0s: used 0."), "detail: {wall.detail}")
+    // A step's TIMEOUT names the step after the reason.
+    step: kit_steps_parse_case("step: sleep 20\n").steps[0]
+    named: kit_steps_failure(step, sleeping) ?? panic("step timeout")
+    assert_eq(named.status, "TIMEOUT")
+    assert(named.detail.ends_with("; step `sleep 20`"), "detail: {named.detail}")
+    files.remove_all(root) ?? panic("remove cpu limit scratch")
+}
+
 #Test("the resident guard reads VmRSS and names a memory kill") {
     assert_eq(kit_exec_resident_bytes("Name:\tjet\nVmSize:\t 8388608 kB\nVmRSS:\t   20480 kB\nThreads:\t33\n"), 20971520)
     assert_eq(kit_exec_resident_bytes("Name:\tjet\nState:\tZ (zombie)\n"), 0)

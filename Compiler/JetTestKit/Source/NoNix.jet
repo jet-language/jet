@@ -96,10 +96,14 @@ kit_no_nix_launcher: fn(env: KitEnv, bootstrap: String) -> String Err! {
     build := env
     build.env_clear = false
     build.memory_limit = 0
-    build.timeout = 600s
+    // A build is a minute of CPU or more on a cold cache: ten minutes of
+    // CPU, and the wall-clock guard ten times that.
+    build.cpu_limit = Val(600s)
+    build.timeout = 6000s
     result: kit_exec_invoke(build, [env.jet, "build", files.join(directory, "no_nix.jet"), "--output-dir={output}"], directory, bootstrap, "")
-    if result.code != 0 || kit_exec_process_failure(result) != None || !files.is_file(launcher) {
-        return Err("no-nix launcher build failed (exit {result.code}): {result.error} {result.stderr}")
+    if kit_exec_process_failure(result) == .Val(failure) -> return Err("no-nix launcher build: {failure.status} {failure.detail}")
+    if result.code != 0 || !files.is_file(launcher) {
+        return Err("no-nix launcher build failed (exit {result.code}): {kit_exec_first_line(result.stderr)}")
     }
     Ok(launcher)
 }

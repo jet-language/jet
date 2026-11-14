@@ -124,29 +124,38 @@ use {
     files.remove_all(root) ?? panic("remove template free-port scratch")
 }
 
-#Test("a free-port probe past the step limit is TIMEOUT with its reason and a failed probe is ERROR with its exit") {
-    root: cases_test_root("host-slow-ports")
-    loop name in ["slow", "failing"] -> cases_test_source(root, name, "step: printf \"%s\" {{free-port:app}}\nstdout: is-u32 # a port\n")
+#Test("a free-port probe past its deadline is TIMEOUT naming the probe, its limit and the time it used") {
+    root: cases_test_root("host-free-port-deadline")
+    kit_exec_write(files.join(root, "Compiler/JetTestKit/Probes/package.jet"), "package: {{ name: \"free_port\" }}\n")
+    kit_exec_write(files.join(root, "Compiler/JetTestKit/Probes/free_port.jet"), "run: fn() {{}}\n")
+    // A compiler that never answers stands in for a probe build stalled by a loaded host.
+    stalled: files.join(root, "stalled-jet")
+    kit_exec_write(stalled, "#!/bin/sh\nexec sleep 30\n")
+    files.chmod(stalled, 493) ?? panic("chmod stalled compiler: {err}")
+    cases_test_source(root, "stalled", "step: printf \"%s\" {{free-port:web}}\nstdout: is-u32 # a port\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = stalled
+    context.env.timeout = 1s
+    verdict: kit_cases_run(cases_test_entry("stalled"), context)[0].verdict
+    assert_eq(verdict.status, "TIMEOUT")
+    assert(verdict.detail.starts_with("free-port probe: wall-clock guard 1.0s: used "), "detail: {verdict.detail}")
+    files.remove_all(root) ?? panic("remove stalled free-port scratch")
+}
+
+#Test("a free-port probe that fails is ERROR with its exit and first stderr line") {
+    root: cases_test_root("host-failing-ports")
+    cases_test_source(root, "failing", "step: printf \"%s\" {{free-port:app}}\nstdout: is-u32 # a port\n")
     context := cases_test_context(root, files.join(root, "scratch"))
     context.env.root = files.cwd() ?? panic("free-port probe source root")
-    context.env.timeout = 1s
-    slow: files.join(root, "slow-jet")
-    kit_exec_write(slow, "#!/bin/sh\nexec sleep 30\n")
-    files.chmod(slow, 493) ?? panic("chmod slow probe: {err}")
-    context.env.jet = slow
-    timed: kit_cases_run(cases_test_entry("slow"), context)[0].verdict
-    assert_eq(timed.status, "TIMEOUT")
-    assert_eq(timed.detail, "free-port probe ran past the step limit of 1000ms")
     failing: files.join(root, "failing-jet")
     kit_exec_write(failing, "#!/bin/sh\necho no ports >&2\nexit 3\n")
     files.chmod(failing, 493) ?? panic("chmod failing probe: {err}")
     context.env.jet = failing
     failed: kit_cases_run(cases_test_entry("failing"), context)[0].verdict
     assert_eq(failed.status, "ERROR")
-    assert(failed.detail.starts_with("free-port probe failed (exit 3)"))
-    files.remove_all(root) ?? panic("remove slow free-port scratch")
+    assert_eq(failed.detail, "free-port probe failed (exit 3): no ports")
+    files.remove_all(root) ?? panic("remove failing free-port scratch")
 }
-
 #Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
     plan: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
     assert_eq(plan.error, "")
@@ -162,11 +171,11 @@ use {
     // Its steps run while the lock is held.
     cases_test_source(root, "held", "host-port: {port}\nrequires: tool:flock\nstep: flock -n {kit_steps_host_port_path(port)} true\nexit: 1\n")
     assert_eq(kit_cases_run(cases_test_entry("held"), context)[0].verdict.status, "PASS")
-    // The finished case released the lock, and a case waits only one step timeout for a held port.
+    // The finished case released the lock, and a case waits only the wall-clock guard for a held port.
     held: files.lock(kit_steps_host_port_path(port), timeout: Val(1s)) ?? panic("the finished case still holds its host port lock: {err}")
     waited: kit_cases_run(cases_test_entry("bound"), context)[0].verdict
-    assert_eq(waited.status, "ERROR")
-    assert(waited.detail.contains("host port {port} lock"))
+    assert_eq(waited.status, "TIMEOUT")
+    assert(waited.detail.starts_with("host port {port} lock: another run still held it after the 5.0s wall-clock guard"), "detail: {waited.detail}")
     close(held)
     files.remove_all(root) ?? panic("remove host port scratch")
 }

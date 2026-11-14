@@ -13,7 +13,13 @@ KitEnv: struct {
     scratch: String
     jet: String
     jetpack: String
+    // The wall-clock hang guard on each child: KIT_WALL_GUARD times
+    // `--timeout`, far past what a loaded host adds to a working step.
     timeout: Duration
+    // The step limit: the CPU time a child's whole process tree may use
+    // (core.sys.tree_cpu_time), which other load on the host does not raise.
+    // None leaves only the wall-clock guard.
+    cpu_limit: Duration?{None}
     // A case's `limit: memory=`, Core memory_limit semantics; 0 is none.
     memory_limit: Int
     // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none. A case's
@@ -72,7 +78,14 @@ KitRun: struct {
     timed_out: Bool
     error: String
     elapsed_ns: Int{0}
+    // `time` (the wall-clock guard or a `limit: time=`), `cpu` (the step's CPU
+    // limit), `memory`, `open-files` or `output`; "" when no limit stopped it.
     limit_hit: String{""}
+    // The CPU time the child's process tree used, and the two limits it ran
+    // under (0 is none), so a TIMEOUT names what it hit and what it used.
+    cpu_ns: Int{0}
+    cpu_limit_ns: Int{0}
+    wall_limit_ns: Int{0}
     // The kit refused to start the child (see kit_exec_home_refusal); `error` says why.
     refused: Bool{false}
     // The child's exact output bytes when the kit read them; `stdout` and
@@ -469,6 +482,15 @@ kit_steps_hook_check: fn(hooks: KitStepHooks, step: KitStep, index: Int, context
 // on the host takes the same flock.
 kit_steps_host_port_path: fn(port: Int) -> String { "/tmp/jet-host-port-{port}.lock" }
 
+// A host port lock the case could not take: TIMEOUT naming how long it waited
+// when another run held it past the wall-clock guard, else ERROR with the cause.
+kit_steps_host_port_refusal: fn(port: Int, waited: Duration, error: IOError) -> KitVerdict {
+    if error == {
+        .TimedOut(_) -> kit_expect_verdict("TIMEOUT", "host port {port} lock: another run still held it after the {kit_exec_seconds(waited.ns)}s wall-clock guard")
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> kit_expect_verdict("ERROR", "host port {port} lock: {error}")
+    }
+}
+
 // All suites share this sequencing loop. Hooks supply only suite-specific
 // invocation and expectations, never an alternative parser or executor.
 kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
@@ -516,15 +538,14 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     }
     port_names: kit_steps_case_port_names(context)
     if port_names.len() > 0 {
-        probe: kit_steps_free_port_probe(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-        if kit_steps_free_port_failure(probe, context.env.timeout) == .Val(failure) -> return kit_steps_finish(state, failure)
-        ports: kit_steps_free_port_list(probe, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        ports := [Int]{}
+        if kit_steps_free_ports(context, port_names.len(), ports) == .Val(failure) -> return kit_steps_finish(state, failure)
         loop index in 0..<port_names.len() -> state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
     }
     // A case that binds a fixed host port holds its lock until the case ends,
-    // waiting at most one step timeout, so concurrent kit and feature-example
-    // runs on this host take turns.
-    port_lock: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "host port {plan.host_port} lock: {err}")))
+    // waiting at most the wall-clock guard, so concurrent kit and
+    // feature-example runs on this host take turns.
+    port_lock: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_steps_host_port_refusal(plan.host_port, context.env.timeout, err)))
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
     }
@@ -829,8 +850,15 @@ kit_case_blocks: fn(status: String) -> Bool {
 // paths[suite] ("" prints the summary only), as each gate test reports its suite.
 kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [String], reports: [String: String]?) -> KitExecution {
     if selected_suites.len() == 0 || selected_suites.any(fn(suite) { !kit_expect_named(kit_suites(), suite) }) -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
-    timeout: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
-    discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
+    // A representable `--timeout` is at most about 9e9 seconds, so the two
+    // products below cannot overflow.
+    _: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
+    // `--timeout` seconds of wall time on an idle host hold at most that much
+    // CPU on every core, so the CPU limit admits every step the wall limit
+    // did, a parallel build included, and the host's other load moves neither.
+    limit: Duration.seconds(options.timeout * sys.cpu_count()) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
+    timeout: Duration.seconds(options.timeout * KIT_WALL_GUARD) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
+    discovery_env: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0}
     discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String: String]{}}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
@@ -865,7 +893,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     // disk cache ahead of the rows could not spare those rows.
     scratch_memory: kit_exec_memory_backed(canonical)
     ffi_cache: if scratch_memory -> "" else -> files.join(state, "ffi")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, cpu_limit: Val(limit), memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
     // Golden C rows build on every tier, each with a fresh Hangar: the run
     // takes the pack once, so no tier unpacks a copy of its own.
     if jetpack != "" && kit_expect_named(selected_suites, "golden") -> env.cc_pack = kit_cc_pack_root(jetpack, state)

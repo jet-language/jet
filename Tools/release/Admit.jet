@@ -55,7 +55,9 @@
 //             --dispositions. No failing row may be untracked: each one needs a known-failing
 //             line, a host skip, an opt-in, or a disposition (a lost row, or a row that fails
 //             with the same status on both columns); a REFUSED row no ledger line owns counts
-//             as untracked. A disposition that tracks no row is a WARN row.
+//             as untracked. A row s2 fails and then passes on its retry is flaky: REPORT.md
+//             lists it with both outcomes, and it fails the gate (`flaky:SUITE`) unless a
+//             disposition names its owning card. A disposition that tracks no row is a WARN row.
 //   speed     the train speed gate (#5479 c5): Tools/perf/compile-throughput/Throughput.jet
 //             --against the chain's seed, s2 and the seed each compiling COMMIT's compiler
 //             corpus 3 rounds at the default level under `perf stat` (the dev shell's
@@ -388,7 +390,10 @@ Compared: struct {
     lost: [LostRow]
     gained: [GainedRow]
     added: [SuiteRow]
-    flaky: [SuiteRow]
+    // Rows the candidate failed and then retried: `was` its first outcome,
+    // `now` its retry's, `detail` the first run's; `disposed` when a
+    // disposition names the card that owns the flake.
+    flaky: [LostRow]
     untracked: [SuiteRow]
     // Failing rows a disposition tracks: each fails with the same status on
     // both columns (`was` the release's, `now` the candidate's).
@@ -407,6 +412,31 @@ is_untracked: fn(status: String) -> Bool Never! { !passes(status) && !TRACKED_FA
 untracked_row: fn(suite: String, compared: Compared) -> GateRow Never! {
     count: compared.untracked.len()
     GateRow{check: "untracked:{suite}", status: if count > 0 -> "FAIL" else -> "PASS", detail: "{count} failing row(s) with no known-failing line or disposition (release {compared.release_untracked}; {compared.carded.len()} failing alike on both columns, tracked by a disposition); full list in REPORT.md"}
+}
+
+// The flaky gate row of one suite: a row that passed only on its retry fails
+// the release unless a disposition names the card that owns it. A retry
+// that ends in a tracked failure (a known-failing line, a host skip) is
+// owned by that line.
+flaky_row: fn(suite: String, compared: Compared) -> GateRow Never! {
+    open := [String]{}
+    loop found in compared.flaky {
+        if passes(found.now) && !found.disposed -> open.push("{found.id} {found.tier} ({found.was} then {found.now})")
+    }
+    shown: if open.len() > 6 -> "{open[0..<6].join(", ")}, …" else -> open.join(", ")
+    if open.len() > 0 -> return GateRow{check: "flaky:{suite}", status: "FAIL", detail: "{open.len()} of {compared.flaky.len()} row(s) passed only on retry with no disposition naming an owning card: {shown}; full list in REPORT.md"}
+    GateRow{check: "flaky:{suite}", status: "PASS", detail: "{compared.flaky.len()} row(s) passed only on retry, each owned by a card or a tracked line; full list in REPORT.md"}
+}
+
+// A flaky row: the candidate's first outcome and its retry's, with the
+// disposition naming it, if any.
+flaky_of: fn(first: SuiteRow, retried: SuiteRow, dispositions: [Disposition]) -> LostRow Never! {
+    out := LostRow{suite: first.suite.copy(), id: first.id.copy(), tier: first.tier.copy(), was: first.status.copy(), now: retried.status.copy(), detail: first.detail.copy(), disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
+    if disposition_for(dispositions, first.suite, first.id, first.tier) == .Val(entry) {
+        out.disposed = true
+        out.disposition = entry
+    }
+    out
 }
 
 row_key: fn(suite: String, id: String, tier: String) -> String Never! { "{suite}\t{id}\t{tier}" }
@@ -441,7 +471,7 @@ index_rows: fn(rows: [SuiteRow]) -> Indexed Never! {
 // with the same status is not lost; a disposition naming it tracks it
 // (`carded`), else it is untracked.
 compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [SuiteRow], dispositions: [Disposition]) -> Compared Never! {
-    out := Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [SuiteRow]{}, untracked: [SuiteRow]{}, carded: [LostRow]{}, release_untracked: 0}
+    out := Compared{rows: 0, lost: [LostRow]{}, gained: [GainedRow]{}, added: [SuiteRow]{}, flaky: [LostRow]{}, untracked: [SuiteRow]{}, carded: [LostRow]{}, release_untracked: 0}
     loop item in before_rows {
         if is_untracked(item.status) -> out.release_untracked += 1
     }
@@ -458,7 +488,11 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
             next
         }
         if again.at.get(key) == .Val(at) && passes(retry[at].status) {
-            out.flaky.push(was.copy())
+            // copy: the release's row stands for the candidate's first run, which may be missing.
+            first := was.copy()
+            first.status = now_status.copy()
+            first.detail = if found == .Val(index) -> after_rows[index].detail.copy() else -> ""
+            out.flaky.push(flaky_of(first, retry[at], dispositions))
             next
         }
         lost := LostRow{suite: was.suite.copy(), id: was.id.copy(), tier: was.tier.copy(), was: was.status.copy(), now: now_status.copy(), detail: if found == .Val(at) -> after_rows[at].detail.copy() else -> "", disposed: false, disposition: Disposition{suite: "", id: "", tier: "", card: "", reason: ""}}
@@ -474,11 +508,12 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
     }
     // A dispositioned lost row is tracked by its card, and a flaky row (one
     // the release passes and the candidate passes on its retry) is reported
-    // as flaky, so neither counts as untracked. A row the candidate timed
-    // out on is retried whatever the release did: it missed a wall-clock
-    // limit under the kit's load. When its retry passes it is flaky; when
-    // its retry ends in a tracked status (a known-failing line, a host skip)
-    // that line owns it. The report still lists it either way.
+    // as flaky, so neither counts as untracked; flaky_row gates the flaky
+    // rows. A row the candidate timed out on is retried whatever the release
+    // did: it missed a wall-clock limit under the kit's load. When its retry
+    // passes it is flaky; when its retry ends in a tracked status (a
+    // known-failing line, a host skip) that line owns it. The report lists
+    // it either way.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
@@ -489,7 +524,7 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
         key: row_key(item.suite, item.id, item.tier)
         if tracked.has_key(key) -> next
         if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && !is_untracked(retry[at].status) {
-            out.flaky.push(item.copy())
+            out.flaky.push(flaky_of(item, retry[at], dispositions))
             tracked[key.copy()] = true
             next
         }
@@ -833,6 +868,9 @@ Ctx: struct {
     jetpack_summary: String
     suites: [SuiteResult]
     rows: [GateRow]
+    // A reused run's untracked failures as the prior run recorded them: each
+    // was run again, and one that passes now passed only on its retry.
+    reused_failures: [SuiteRow]{[SuiteRow]{}}
 }
 
 row: fn(ctx: &Ctx, check: String, status: String, detail: String) Never! -[FS, IO, Time]> {
@@ -1862,9 +1900,14 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
     loop suite in kit_suites(ctx.native) {
         after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
-        ids := rerun_ids(after, plan.paths)
+        changed: rerun_ids(after, plan.paths)
+        // copy: the rows a change reaches stay apart from the failures run again.
+        ids := changed.copy()
         loop item in after {
-            if is_untracked(item.status) && !ids.contains(item.id) {
+            if !is_untracked(item.status) || changed.contains(item.id) -> next
+            // A failure no change reaches is run again: a pass now is a retry's.
+            ctx.reused_failures.push(item.copy())
+            if !ids.contains(item.id) {
                 ids.push(item.id.copy())
                 verified.push(item.id.copy())
             }
@@ -1891,8 +1934,9 @@ reused_suites: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 // `candidate[i]` are `kit[i]`'s, the release's the rows it ran, judged as
 // judged_release completes them. The retry runs every lost row and every
 // untracked timeout of every suite again on their own, in one candidate kit
-// run: a row that missed its wall-clock limit under the kit's load has not
-// failed if it passes by itself.
+// run: a row that passes by itself has not failed outright, but it is flaky,
+// listed with both outcomes, and fails the gate unless a disposition names
+// the card that owns it (flaky_row).
 judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [SuiteRun]) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     firsts := [Compared]{}
     judged := [[SuiteRow]]{}
@@ -1934,6 +1978,7 @@ judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
         compared := firsts[index].copy()
         retried: suite_part(again, suite)
         if retried.rows.len() > 0 -> compared = compare_suites(judged[index], candidate[index].rows, retried.rows, ctx.dispositions)
+        compared.flaky.extend(reused_flaky(ctx.reused_failures, candidate[index].rows, suite, ctx.dispositions))
         ctx.suites.push(SuiteResult{suite: suite.copy(), compared: compared.copy()})
         open := [LostRow]{}
         loop lost in compared.lost {
@@ -1949,6 +1994,8 @@ judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
         // Every untracked failure is listed in REPORT.md; any one fails.
         untracked: untracked_row(suite, compared)
         row(ctx, untracked.check, untracked.status, untracked.detail)
+        flaked: flaky_row(suite, compared)
+        row(ctx, flaked.check, flaked.status, flaked.detail)
     }
 }
 
@@ -2088,8 +2135,28 @@ speed_detail: fn(text: String) -> (verdict: String, detail: String) Never! {
     (verdict: verdict, detail: detail)
 }
 
-// The dispositions that track no row, lost or carded: a typo in a case ID
-// or tier must not pass unseen.
+// Who owns a flaky row: its disposition; with none, a row whose retry
+// passed fails the gate, and a row still failing is owned by that line.
+flaky_owner: fn(found: LostRow) -> String Never! {
+    if found.disposed -> return "{found.disposition.card}: {found.disposition.reason}"
+    if passes(found.now) -> return "no disposition: fails the gate"
+    "owned by its {found.now} line"
+}
+
+// The reused run's failures of `suite` the run again passed: flaky, its
+// first outcome the prior run's.
+reused_flaky: fn(failures: [SuiteRow], rows: [SuiteRow], suite: String, dispositions: [Disposition]) -> [LostRow] Never! {
+    now: index_rows(rows)
+    out := [LostRow]{}
+    loop first in failures {
+        if first.suite != suite -> next
+        if now.at.get(row_key(first.suite, first.id, first.tier)) == .Val(at) && passes(rows[at].status) -> out.push(flaky_of(first, rows[at], dispositions))
+    }
+    out
+}
+
+// The dispositions that track no row, lost, carded or flaky: a typo in a
+// case ID or tier must not pass unseen.
 unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
     unused := [String]{}
     loop entry in dispositions {
@@ -2101,6 +2168,9 @@ unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [
             loop carded in result.compared.carded {
                 if same_disposition(carded.disposition, entry) -> used = true
             }
+            loop flaked in result.compared.flaky {
+                if flaked.disposed && same_disposition(flaked.disposition, entry) -> used = true
+            }
         }
         if !used -> unused.push("{entry.suite} {entry.id} {entry.tier} {entry.card}")
     }
@@ -2110,7 +2180,7 @@ unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [
 // A WARN row naming every disposition that tracks no row.
 disposition_note: fn(ctx: &Ctx) Never! -[FS, IO, Time]> {
     unused: unused_dispositions(ctx.dispositions, ctx.suites)
-    if unused.len() > 0 -> row(ctx, "dispositions", "WARN", "{unused.len()} disposition(s) match no lost row and no row failing alike on both columns: {unused.join(" | ")}")
+    if unused.len() > 0 -> row(ctx, "dispositions", "WARN", "{unused.len()} disposition(s) match no lost row, no row failing alike on both columns and no flaky row: {unused.join(" | ")}")
 }
 
 Resolution: struct {
@@ -2214,6 +2284,13 @@ report: fn(ctx: Ctx, verdict: String, plan: MergePlan) -> String Never! {
         if compared.carded.len() > 0 {
             lines.extend([String]{"", "## {result.suite}: failing on both columns, tracked by a disposition"})
             loop found in compared.carded -> lines.push("- {found.id} {found.tier}: {found.now} on both ({found.disposition.card}: {found.disposition.reason}) {short(found.detail.partition("\n").head, 160)}")
+        }
+        if compared.flaky.len() > 0 {
+            lines.extend([String]{"", "## {result.suite}: flaky, failed and then retried"})
+            loop found in compared.flaky {
+                owner: flaky_owner(found)
+                lines.push("- {found.id} {found.tier}: {found.was} then {found.now} on retry ({owner}) {short(found.detail.partition("\n").head, 160)}")
+            }
         }
     }
     if ctx.jetpack_fixed.len() > 0 {

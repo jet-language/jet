@@ -631,6 +631,12 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     out
 }
 
+flaky_ids: fn(compared: Compared) -> [String] Never! {
+    out := [String]{}
+    loop found in compared.flaky -> out.push("{found.id} {found.was} then {found.now}")
+    out
+}
+
 #Test("the C toolchain pack hash the release checks is the one jet embeds") {
     rows: pinned_assets(files.read(files.join(repo_root(), CC_PACK_SOURCE)) ?? panic("read {CC_PACK_SOURCE}: {err}"), CC_PACK_TABLE)
     host := PinnedAsset?{None}
@@ -955,7 +961,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     assert_eq(row_ids(result.added), [String]{"e.jet"})
     retried: compare_suites(before, after, [SuiteRow]{kit_row("b.jet", "o0", "PASS")}, [Disposition]{})
     assert_eq(lost_ids(retried), [String]{"d.jet MISSING"})
-    assert_eq(row_ids(retried.flaky), [String]{"b.jet"})
+    assert_eq(flaky_ids(retried), [String]{"b.jet FAIL then PASS"})
 }
 
 #Test("an untracked row is a failure no known-failing line accounts for, a refusal no ledger line owns included") {
@@ -981,7 +987,7 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "FAIL")}
     after: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "TIMEOUT"), kit_row("c.jet", "o0", "TIMEOUT")}
     result: compare_suites(before, after, [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "TIMEOUT")}, [Disposition]{})
-    assert_eq(row_ids(result.flaky), [String]{"a.jet"})
+    assert_eq(flaky_ids(result), [String]{"a.jet TIMEOUT then PASS"})
     assert_eq(row_ids(result.untracked), [String]{"b.jet", "c.jet"})
 }
 
@@ -990,8 +996,32 @@ CORE_READING_JET: "#!/bin/sh\nif [ ! -f \"$JET_TOOLCHAIN_ROOT/Core/Core.jet\" ];
     after: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "TIMEOUT"), kit_row("c.jet", "o0", "FAIL"), kit_row("d.jet", "o0", "TIMEOUT")}
     retry: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS"), kit_row("d.jet", "o0", "TIMEOUT")}
     result: compare_suites(before, after, retry, [Disposition]{})
-    assert_eq(row_ids(result.flaky), [String]{"a.jet", "b.jet"})
+    assert_eq(flaky_ids(result), [String]{"a.jet TIMEOUT then PASS", "b.jet TIMEOUT then PASS"})
     assert_eq(row_ids(result.untracked), [String]{"c.jet", "d.jet"})
+}
+
+#Test("a row that passed only on retry is flaky with both outcomes and fails the gate unless a disposition names its card") {
+    before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS")}
+    after: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "FAIL"), kit_row("c.jet", "o0", "PASS")}
+    retry: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS")}
+    open: compare_suites(before, after, retry, [Disposition]{})
+    assert_eq(flaky_ids(open), [String]{"a.jet TIMEOUT then PASS", "b.jet FAIL then PASS"})
+    gate: flaky_row("ui", open)
+    assert_eq("{gate.check} {gate.status}", "flaky:ui FAIL")
+    assert_eq(gate.detail, "2 of 2 row(s) passed only on retry with no disposition naming an owning card: a.jet o0 (TIMEOUT then PASS), b.jet o0 (FAIL then PASS); full list in REPORT.md")
+    owned: [Disposition]{Disposition{suite: "ui", id: "a.jet", tier: "*", card: "#6001", reason: "load"}, Disposition{suite: "ui", id: "b.jet", tier: "o0", card: "#6001", reason: "load"}}
+    carded: compare_suites(before, after, retry, owned)
+    assert_eq(flaky_row("ui", carded).status, "PASS")
+    assert_eq(carded.flaky[1].disposition.card, "#6001")
+    assert_eq(unused_dispositions(owned, [SuiteResult]{SuiteResult{suite: "ui", compared: carded}}).len(), 0)
+    // A retry a known-failing line owns is no pass: that line owns the row.
+    owned_by_line: compare_suites([SuiteRow]{kit_row("d.jet", "o0", "TIMEOUT")}, [SuiteRow]{kit_row("d.jet", "o0", "TIMEOUT")}, [SuiteRow]{kit_row("d.jet", "o0", "KNOWN-FAILING")}, [Disposition]{})
+    assert_eq(flaky_ids(owned_by_line), [String]{"d.jet TIMEOUT then KNOWN-FAILING"})
+    assert_eq(flaky_row("ui", owned_by_line).status, "PASS")
+    // A reused run's failure that passes when it runs again is flaky too, its first outcome the prior run's.
+    reused: reused_flaky([SuiteRow]{kit_row("e.jet", "o0", "FAIL"), kit_row("f.jet", "o0", "ERROR")}, [SuiteRow]{kit_row("e.jet", "o0", "PASS"), kit_row("f.jet", "o0", "ERROR")}, "ui", [Disposition]{})
+    assert_eq(reused.len(), 1)
+    assert_eq("{reused[0].id} {reused[0].was} then {reused[0].now}", "e.jet FAIL then PASS")
 }
 
 #Test("a reused run reruns every row a changed file reaches, and only those") {
