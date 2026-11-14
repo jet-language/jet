@@ -7,6 +7,7 @@
 // decision reads it from here (I8).
 use jet_foundation.[
     BinOp,
+    ImplDef,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
@@ -775,7 +776,7 @@ sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, row: 
     nominal: graph.modules[row.module_index].nominals[row.row]
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
-            if graph.modules[module_index].impls[impl_index].compiler_generated -> next
+            if graph.modules[module_index].impls[impl_index].compiler_generated || sema_comparability_impl_generated(graph.modules[module_index].impls[impl_index].declaration) -> next
             written: graph.modules[module_index].impls[impl_index].declaration.trait_name ?? next
             if written == "KeyBy" || !owned_trait_implies("KeyBy", written) -> next
             target_matches: sema_type_graph_impl_matches_nominal(graph, graph.modules[module_index].impls[impl_index], nominal) ?? next
@@ -792,6 +793,17 @@ sema_comparability_nominal_written_order: fn(graph: SemaRegistrationGraph, row: 
         }
     }
     None
+}
+
+// An impl registration appended as an item of its own, as a distinct type's
+// forwarded Equatable and Comparable are: every method in it is generated, so
+// it is no rule the type wrote.
+sema_comparability_impl_generated: fn(declaration: ImplDef) -> Bool Never! {
+    if declaration.methods.len() == 0 -> return false
+    loop method in declaration.methods {
+        if !method.compiler_generated -> return false
+    }
+    true
 }
 
 // The written order trait `written` names: Comparable, or Equatable, the

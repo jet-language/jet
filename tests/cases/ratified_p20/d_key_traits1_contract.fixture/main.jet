@@ -34,7 +34,7 @@ Account: struct {
 }
 
 addresses: fn(values: [Email]) -> String {
-    values.map(value -> "{value.address}").join(" ")
+    values.map(fn(value) { "{value.address}" }).join(" ")
 }
 
 run: fn() {
@@ -48,7 +48,7 @@ run: fn() {
     owners[second.copy()] = "second"
     owners[other.copy()] = "other"
     print("map: {owners.len()} {owners.get(Email{address: "ANN@EXAMPLE.COM"}) ?? "none"} {owners.has_key(second)}")
-    owners.each((key: Email, value: String) -> print("entry: {key.address} {value}"))
+    owners.each(fn(key: Email, value: String) { print("entry: {key.address} {value}") })
 
     left: Set.from([first.copy(), other.copy()])
     right: Set.from([second.copy()])
@@ -62,7 +62,7 @@ run: fn() {
     sizes[OSPath{shown: "/usr", parts: ["usr"]}] = 1
     sizes[OSPath{shown: "/etc", parts: ["etc"]}] = 3
     sizes[OSPath{shown: "/usr//lib", parts: ["usr", "lib"]}] = 4
-    sizes.each((path: OSPath, size: Int) -> print("path: {path.shown} {size}"))
+    sizes.each(fn(path: OSPath, size: Int) { print("path: {path.shown} {size}") })
 
     accounts := [Account: Int]{}
     accounts[Account{owner: first.copy(), note: "a"}] = 1
