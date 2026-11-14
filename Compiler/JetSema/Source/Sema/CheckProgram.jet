@@ -5532,7 +5532,10 @@ sema_check_body_wave_lead: fn(shared: Shared<SemaCheckShared>, plan: Shared<Sema
             scopes := bodies.scopes.pop() ?? panic("a demand wave module lost its post-summary scope")
             body_values := environment.comptime_body_publication.copy()
             sema_scope_environment_enter_module(environment, inputs.value.programs[0], module_index, body_values)
-            checked_functions += sema_check_demand_module_lent(environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], module_index, layout.kind, scopes, bodies, comptime_functions, comptime_rows, pending_obligations, trace_sink, modules[module_index])
+            if trace_sink == .Val(sink) -> sema_check_module_span_begin(inputs.value.programs[0], module_index, sink)
+            demand_checked: sema_check_demand_module_lent(environment, inputs.value.programs[0], host_hooks, inputs.value.memory_plans[0], module_index, layout.kind, scopes, bodies, comptime_functions, comptime_rows, pending_obligations, trace_sink, modules[module_index])
+            if trace_sink == .Val(sink) -> sink.end("sema.module", demand_checked)
+            checked_functions += demand_checked
             done += 1
             next
         }
@@ -9694,7 +9697,9 @@ sema_finalize_check_modules: fn(graph: &&SemaRegistrationGraph, values: [SemaCom
 sema_finalize_pass_open: fn(graph: &&SemaRegistrationGraph, values: [SemaComptimeItemValue], checked_types: [TTypeDef], threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts]) -> Shared<SemaCheckShared> {
     fresh: carried.len() == 0
     facts := carried.pop() ?? sema_pass_facts_new()
+    if fresh && trace_sink == .Val(sink) -> sink.begin("sema.pass_facts", "", -1, -1)
     owned := if fresh -> sema_pass_facts(graph, threads, SEMA_PASS_FACT_JOBS, facts) else -> SemaRegistrationGraph?{Val(graph.move())}
+    if fresh && trace_sink == .Val(sink) -> sink.end("sema.pass_facts", 1)
     memory_plan := facts.memory_plan.move()
     work := sema_comptime_body_work_new(trace_sink)
     count_key_bytes: if work == .Val(_) -> true else -> false
@@ -9810,9 +9815,15 @@ sema_check_module_trace_begin_in_shared: fn(shared_state: Shared<SemaCheckShared
 }
 
 sema_check_module_trace_begin: fn(program: SemaProgramTables, module_index: Int, phase: String, sink: CompilerTraceSink) {
+    sema_check_module_span_begin(program, module_index, sink)
+    if program.registration_graph == .Val(graph) -> sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
+}
+
+// Opens module `module_index`'s `sema.module` span alone, counting nothing:
+// a demand wave's module check, whose items the wave's setup counted.
+sema_check_module_span_begin: fn(program: SemaProgramTables, module_index: Int, sink: CompilerTraceSink) {
     if program.registration_graph == .Val(graph) {
         sink.begin("sema.module", graph.modules[module_index].module_path, module_index, graph.modules.len())
-        sink.progress("counters.{phase}.items_scanned", graph.modules[module_index].program.items.len(), -1)
         return
     }
     panic("a registered-module scheduler lost its graph")
