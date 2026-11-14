@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102262,
+    "rev": 102263,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73302,6 +73302,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decision (Main, 2026-11-13, S7b plan by G12Docs-5): (1) The about 14.2 MB hand-optimized ceiling covers all of precompiled Core, record and code parts together; it is measured and reported. The gauntlet-rerun gate is 64 MB for the same total. Today it is about 60.9 MB of record plus about 8 MB of code, so S7b-2 (bound functions drop their checked bodies from the record, header-only rows) lands before the rerun. (2) Core code ships per package by a general rule: a package ships as machine code when programs reach it, by reach counts over Examples and the gauntlet programs. The rest take the per-program lowering path that generic instances already use (no second mechanism). Measured at O1 on sweep2: the 56.4 MB jet_core.o is .text 26.5 MB; db, crypto, net, encoding, ui, http, service, web, archive, browser and compute are 19.4 MB of it. (3) The shipped code is built at whichever of O1 or O2 is smaller (S7b-0 measures O2); bound Core callees are opaque on every level, so one meaning holds (I9). Slices: runtime-parts, S7b-0 (an O2 per-package size diag), S7b-1 (the consumer plus turning the runtime step back on, and the c22 rows), S7b-2."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-13): the s3 stack (G12Docs-c22-rb1..rb6, gate p61) precompiles Core's checked record only. c22 also needs (1) the jet-runtime pack (jet_runtime.image, native.key, runtime.exports, runtime.threads, which hello still opens from exe-dir/jet-runtime) appended as image parts, so strace shows no toolchain-tree openat or statx; and (2) Core machine code: #5479 S7b gives jet_core.o its consumer (taken Core fns bind to the prelinked jet_core_fn_* instead of being lowered per program). G12Docs-5 does them in that order, then the record-size ranking against the 14.2 MB ceiling. The s3 record part measured 60,884,748 B on the r4 jet."
         },
         {
@@ -73895,7 +73900,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T07:28:42.532Z",
+      "updated": "2026-11-14T07:34:43.870Z",
       "updatedBy": "Main",
       "criteriaLastN": 36
     },
@@ -205090,6 +205095,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T07:34:43.870Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T07:28:42.532Z",
       "by": "Main",
