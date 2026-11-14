@@ -7676,6 +7676,16 @@ without JavaScript; hydration adds pending/result state and invokes explicit
 dependent-data revalidation. Development inspection receives metadata only;
 release output never ships a dev panel or request/response secrets.
 
+**D-WEBAPP-SHAPE1=A — one app, explicit endpoint markers**: business logic
+is written once, as one logic package and one screen tree that build for the
+web, desktop and phones. A method of a mounted service is an endpoint only
+when it is marked `#App.SignedIn` (a signed-in caller reaches it) or
+`#App.Public` (any caller reaches it); Core's `app` module declares both
+markers. An unmarked method is server-only: a client call to it through
+`app.Remote<S>` fails to compile with an error that names the method. A call
+through `app.Remote<S>` is typed: direct on the server, a checked remote call
+elsewhere. `jet inspect choices` lists each marked method under its marker.
+
 
 **D-ENTRY-VALUE1=B — the entry returns the program** *(card #1446)*: `run: fn`
 is the one entry. Its return type says what the program is. No return means a

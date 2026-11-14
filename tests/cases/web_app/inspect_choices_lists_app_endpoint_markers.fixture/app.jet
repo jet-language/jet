@@ -1,0 +1,36 @@
+package: {
+    name: "choices_app_markers"
+    authority: { allow: [Net] }
+}
+
+use {
+    app
+    web: core.web
+}
+
+Crew: struct {
+    name: String
+
+    // A signed-in caller reaches `move_task`.
+    #App.SignedIn
+    move_task: fn(self, id: Int) -> Int {
+        id + 1
+    }
+
+    // Any caller reaches `status`.
+    #App.Public
+    status: fn(self) -> String {
+        self.name.copy()
+    }
+
+    // No endpoint marker: `apply_move` is server-only.
+    apply_move: fn(self, id: Int) -> Int {
+        id
+    }
+}
+
+run: fn() {
+    mux: web.app()
+    mux.mount(Crew{name: "crew"})
+    print("{Crew{name: "c"}.apply_move(1)}")
+}

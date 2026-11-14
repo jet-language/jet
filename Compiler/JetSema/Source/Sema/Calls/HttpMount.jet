@@ -49,13 +49,32 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     Val(verb)
 }
 
-// The route marker that makes method `func` an endpoint, written in module
-// `module_identity`, as written (`#Server.Get("/orders/:id")`), for `jet
-// inspect choices` (FnBody.endpoint); "" when no route marker marks it. An
-// argument that is no plain String literal shows as `…`.
-sema_http_route_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
+// The Core module that declares the app endpoint markers (`use app`), and
+// their names: a method marked `#App.SignedIn` or `#App.Public` is an
+// endpoint.
+SEMA_APP_MARKER_MODULE: "app"
+SEMA_APP_ENDPOINT_MARKERS: [String]{"SignedIn", "Public"}
+
+// Whether `marker`, written in module `module_identity`, is one of the app
+// module's endpoint markers.
+sema_app_endpoint_marker: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool {
+    if marker.negated -> return false
+    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+    if resolved.status != "found" -> return false
+    declaration: resolved.declaration ?? return false
+    module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
+    graph.modules[module_index].module_name == SEMA_APP_MARKER_MODULE && SEMA_APP_ENDPOINT_MARKERS.contains(declaration.name)
+}
+
+// The marker that makes method `func` an endpoint, written in module
+// `module_identity`, as written (`#App.SignedIn`,
+// `#Server.Get("/orders/:id")`), for `jet inspect choices`
+// (FnBody.endpoint); "" when no app endpoint marker or route marker marks
+// it. An argument that is no plain String literal shows as `…`.
+sema_function_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
     loop marker in func.markers {
-        if sema_http_route_marker_verb(marker, graph, module_identity) == None -> next
+        if !sema_app_endpoint_marker(marker, graph, module_identity) && sema_http_route_marker_verb(marker, graph, module_identity) == None -> next
+        if marker.args.len() == 0 -> return "#{marker.name}"
         args := [String]{}
         loop argument in marker.args {
             text := "…"

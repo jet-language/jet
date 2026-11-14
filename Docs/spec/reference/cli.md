@@ -1596,8 +1596,9 @@ caller or callee. `#Target(JS|Wasm)` locks the bucket: a Wasm pin that uses
 the buckets (E-WEB-CROSS-PARTITION). A row whose bucket the partition chose
 names the pin that would lock it, for example ``placement: app.jet:8 in count:
 JS: called by `view`, which runs in JS; pin it with `#Target(JS)` ``.
-Exposure: each method a route marker makes an endpoint, at its line, under the
-marker as written, for example ``exposure: app.jet:12 in order: endpoint under
+Exposure: each method an endpoint marker (`#App.SignedIn`, `#App.Public`) or
+a route marker makes an endpoint, at its line, under the marker as written,
+for example ``exposure: app.jet:12 in order: endpoint under
 `#Server.Get("/orders/:id")`: the marker serves it; without it the method is
 no endpoint``. A method with no row is no endpoint.
 Context: the task context fields and keys each function's own body reads

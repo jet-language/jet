@@ -1,0 +1,10 @@
+# A method marked `#App.SignedIn` or `#App.Public` is an endpoint, and `jet
+# inspect choices` lists it under that marker; an unmarked method of the same
+# service is server-only and has no exposure row.
+fixture: inspect_choices_lists_app_endpoint_markers.fixture
+env: NO_COLOR=1
+step: jet inspect choices app.jet
+exit: 0
+stdout: ~ " in move_task: endpoint under `#App.SignedIn`: the marker serves it" # the signed-in marker
+stdout: ~ " in status: endpoint under `#App.Public`: the marker serves it" # the public marker
+stdout: !~ " in apply_move: endpoint" # an unmarked method is no endpoint

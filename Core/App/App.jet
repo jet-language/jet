@@ -32,6 +32,21 @@ AppError: enum {
     Unsupported
 }
 
+// Endpoint markers. A method of a mounted service is an endpoint only when
+// one of these marks it: `#App.SignedIn` for a signed-in caller,
+// `#App.Public` for any caller. An unmarked method is server-only.
+SignedIn: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
+Public: struct {
+    impl Marker {
+        sites: [.Method]
+    }
+}
+
 Auth: struct {
     users_table: String
     providers: [String]
