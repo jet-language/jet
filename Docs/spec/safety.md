@@ -2632,49 +2632,49 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 326,
+      "line": 361,
       "column": 9,
       "reason": "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 353,
+      "line": 388,
       "column": 9,
       "reason": "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 388,
+      "line": 423,
       "column": 9,
       "reason": "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 420,
+      "line": 455,
       "column": 9,
       "reason": "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 434,
+      "line": 469,
       "column": 9,
       "reason": "the mapping made above was never filed, so this is its only owner"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 499,
+      "line": 534,
       "column": 9,
       "reason": "host_shared_span proved end bytes from base lie inside the live mapping and end <= length bounds data's packed bytes; start + span <= end"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostDescriptors.jet",
-      "line": 554,
+      "line": 589,
       "column": 5,
       "reason": "host_shared_span proved count * 4 bytes from base lie inside the live mapping"
     },
@@ -6776,7 +6776,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Process/Process.jet",
-      "line": 307,
+      "line": 309,
       "column": 1,
       "reason": "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status"
     },
@@ -11245,13 +11245,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 132:9 | "the retired entry owned this mapping of exactly `size` bytes and no token names it now" |
 | Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 170:9 | "bytes owns cap writable bytes; pread retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 326:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 353:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 388:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 420:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 434:9 | "the mapping made above was never filed, so this is its only owner" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 499:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
-| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 554:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 361:9 | "scratch lends the pollfd and timespec and ppoll retains neither; the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 388:9 | "bytes owns cap writable bytes; read retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 423:9 | "packed lends count bytes; write retains no pointer and the caller's Fd keeps the descriptor open" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 455:9 | "a fresh shared mapping of this sealed memfd; host_descriptor_release unmaps it exactly once with this size" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 469:9 | "the mapping made above was never filed, so this is its only owner" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 534:9 | "host_shared_span proved end bytes from base lie inside the live mapping and end &lt;= length bounds data's packed bytes; start + span &lt;= end" |
+| Compiler | Compiler/JetRuntime/Source/HostDescriptors.jet | 589:5 | "host_shared_span proved count * 4 bytes from base lie inside the live mapping" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 9:9 | "getdents supplies a live terminated name; openat describes the entry without following links" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 15:13 | "the owned descriptor and full Linux stat buffer live through fstat and close" |
 | Compiler | Compiler/JetRuntime/Source/HostDirectoryList.jet | 46:9 | "an owned fresh directory descriptor and writable getdents64 buffer" |
@@ -11837,7 +11837,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/SSL/TLS.jet | 4383:1 | "`r` draws test keys and nonces, each used for this run only" |
 | Core | Core/Net/SSL/TLS.jet | 4412:5 | "test keys and nonces, each used for this run only" |
 | Core | Core/Process/Process.jet | 231:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Process/Process.jet | 307:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
+| Core | Core/Process/Process.jet | 309:1 | "process exit_unmapped: the caller reports a Jet defect and owns the 101 defect status" |
 | Core | Core/Service/Service.jet | 1487:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 948:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 1116:1 | "posix set_scheduling: the caller owns the CPU share of the process it changes" |
