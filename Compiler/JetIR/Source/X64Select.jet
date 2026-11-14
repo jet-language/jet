@@ -884,20 +884,34 @@ IR_X64_DIVIDED_BY_ZERO: "divided by zero"
 // Add to `tables` the texts a numeric stop of instruction `at` can name
 // (ir_x64_stop_if): a fixed-width or wrapping operation's overflow, and a
 // division's zero divisor. A module whose code has no such stop carries none.
-ir_x64_add_stop_texts: fn(tables: &IRX64Tables, m: IRModule, f: IRFunction, at: Int) Never! {
+// `added` holds per stop (add, sub, mul, division) whether its texts are in
+// `tables` already: adding a text twice changes nothing, so an operation
+// whose texts are there skips the type test and the lookups.
+ir_x64_add_stop_texts: fn(tables: &IRX64Tables, added: &[Bool], m: IRModule, f: IRFunction, at: Int) Never! {
     op: f.op[at]
-    arithmetic: op == .Add || op == .Sub || op == .Mul || op == .Neg
-    division: op == .Div || op == .Rem || op == .FloorDiv || op == .Mod
-    if (!arithmetic && !division) || f.a[at] < 0 -> return
+    stop: if {
+        op == .Add -> 0
+        op == .Sub || op == .Neg -> 1
+        op == .Mul -> 2
+        op == .Div || op == .Rem || op == .FloorDiv || op == .Mod -> 3
+        else -> -1
+    }
+    if stop < 0 || added[stop] || f.a[at] < 0 -> return
     kind: m.types[f.slot_type[f.a[at]]].kind
     fixed: kind == .Word || kind == .Bool || kind == .Char || kind == .Pointer || (kind == .Int && ir_overflow_wraps(f.c[at]))
     if !fixed -> return
-    if division {
+    added[stop] = true
+    if stop == 3 {
         _ := ir_x64_add_text(tables, IR_X64_DIVIDED_BY_ZERO)
         _ := ir_x64_add_text(tables, ir_x64_overflow_message("div"))
         return
     }
-    _ := ir_x64_add_text(tables, ir_x64_overflow_message(if op == .Add -> "add" else if op == .Mul -> "mul" else -> "sub"))
+    operation: if {
+        stop == 0 -> "add"
+        stop == 2 -> "mul"
+        else -> "sub"
+    }
+    _ := ir_x64_add_text(tables, ir_x64_overflow_message(operation))
 }
 
 // Lays out every slow path after the epilogue and the stop edges. In a

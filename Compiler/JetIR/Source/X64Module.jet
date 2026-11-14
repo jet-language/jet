@@ -174,14 +174,20 @@ ir_x64_tables: fn(m: IRModule) -> IRX64Tables Never! {
         tables.lengths.push(bytes.len())
         tables.headers.push(-1)
     }
-    loop f in m.functions {
-        _ := ir_x64_add_text(tables, f.source_file)
-        if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
-            tables.file_rows[f.source_file] = tables.files.len()
-            tables.files.push(f.source_file)
+    // The stop texts already in (ir_x64_add_stop_texts). A function from the
+    // same source file as the one before finds that file's text and file row
+    // in already.
+    stops := [Bool]{false, false, false, false}
+    loop (index, f) in m.functions {
+        if index == 0 || f.source_file != m.functions[index - 1].source_file {
+            _ := ir_x64_add_text(tables, f.source_file)
+            if f.source_file != "" && tables.file_rows.get(f.source_file) == None {
+                tables.file_rows[f.source_file] = tables.files.len()
+                tables.files.push(f.source_file)
+            }
         }
         loop at in 0..<f.op.len() {
-            ir_x64_add_stop_texts(tables, m, f, at)
+            ir_x64_add_stop_texts(tables, stops, m, f, at)
             if f.op[at] == .ConstText {
                 row: f.a[at]
                 if row >= 0 && row < tables.headers.len() -> _ := ir_x64_text_header(tables, row)
