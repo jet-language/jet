@@ -4,7 +4,7 @@
   "cells": ["games.frame"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig", "go", "node"],
+  "languages": ["jet", "rust", "python", "c", "zig", "go", "node", "lua", "luajit"],
   "spec": {
     "behavior": "Render 1200 frames of a 2D game scene on a 320x200 RGBA8 software canvas and print the frame, tile, sprite and glyph counts. Each frame clears to (16,20,32,255); draws the visible tiles of a scrolling 21x12 map of opaque 15x15 tiles; draws 48 moving 12x12 sprites at alpha 180; draws a 320x12 HUD bar at alpha 160; and draws two lines of 5x7 bitmap-font text, a white HUD line at scale 1 and a gold title at scale 2 and alpha 200.",
     "canvas": "320x200 RGBA8, premultiplied as core.ui's canvas is, row-major, cleared by an opaque full-canvas replace each frame",
@@ -27,6 +27,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs directly and no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -36,7 +46,9 @@
     "c": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Libc-only rasterizer over a static uint8_t canvas. The matched peer is a hand-written C rasterizer with the same algorithm: GPU-backed C game libraries have no headless software path."},
     "zig": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a static [256000]u8 canvas; capture via init.environ_map and std.Io.Dir.createFile."},
     "go": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a fixed [256000]byte canvas with the same clip, blend, font and vertical glyph runs; the HUD line is appended into one reused buffer, and capture via os.Getenv and os.Create leaves the final-frame sha256 6b545f46…69e3."},
-    "node": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."}
+    "node": {"author": "G1Lead-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Built-in Node rasterizer over a Uint8Array canvas; capture via fs.writeFileSync."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Std-only rasterizer over a flat 256000-entry table canvas with the same clip, blend, font and vertical glyph runs; integer division is math.floor of the quotient, which Lua 5.4 and LuaJIT share. Capture via os.getenv and io.open writes one string.char row at a time and leaves the same final-frame bytes as the Go rail under both interpreters."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "G1Lead-3",

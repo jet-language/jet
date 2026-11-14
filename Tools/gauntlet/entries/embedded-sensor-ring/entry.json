@@ -4,7 +4,7 @@
   "cells": ["embedded.kernel"],
   "mode": "batch",
   "perf": true,
-  "languages": ["jet", "rust", "python", "c", "zig", "go", "node"],
+  "languages": ["jet", "rust", "python", "c", "zig", "go", "node", "lua", "luajit"],
   "spec": {
     "behavior": "Replay a deterministic sensor-ring firmware core for N ticks. Each tick synthesizes a 12-bit ADC sample, validates a CRC-16 frame, writes valid samples into a fixed 16-slot ring, updates a fixed-point controller and simulated MMIO status/control registers, services a watchdog, and reports checksums over the register trace and final ring.",
     "args": ["12000"],
@@ -27,6 +27,16 @@
       "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes node main.mjs directly and produces no Node executable artifact."},
       "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Node has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is node main.mjs; no binary is built or measured."}
+    },
+    "lua": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes lua main.lua directly and produces no Lua executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "Lua has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is lua main.lua; no binary is built or measured."}
+    },
+    "luajit": {
+      "cold_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "warm_build_seconds": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT runs through the host interpreter for this replay and has no entry-local compile phase.", "evidence": "The harness invokes luajit main.lua directly and produces no LuaJIT executable artifact."},
+      "binary_bytes": {"status": "not_applicable", "basis": "no_compile_phase", "reason": "LuaJIT has no entry-local executable artifact in the host replay.", "evidence": "The harness run command is luajit main.lua; no binary is built or measured."}
     }
   },
   "authoring": {
@@ -36,7 +46,9 @@
     "c": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "C is the embedded domain peer; this row remains a hosted replay, not a freestanding board build."},
     "zig": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."},
     "go": {"author": "CardCloser-2", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm; the CRC loop uses shifts and masks over the same nonnegative values."},
-    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."}
+    "node": {"author": "luna-max", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm."},
+    "lua": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Host replay adapter around the same fixed-memory tick algorithm; the CRC loop's shifts are arithmetic over the same nonnegative values, since Lua 5.4 and LuaJIT share no bit operators."},
+    "luajit": {"author": "GoalsB-3", "turns": 1, "retries": 0, "diagnosticsHit": [], "notes": "Runs lua/main.lua."}
   },
   "rewrite_provenance": {
     "worker": "CorpusEmbeddedSensorRing",
