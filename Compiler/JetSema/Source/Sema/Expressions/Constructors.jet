@@ -2592,13 +2592,15 @@ sema_expression_typed_literal_fixed_conversion: fn(source: Type, head: Type) -> 
 }
 
 // The type a typed literal's one-expression body checks against: the head
-// when it is the body's carrier, and `Float` for a written decimal under an
-// `Int` or fixed-width head. That decimal would otherwise be a `Decimal`, so
+// when it is the body's carrier, an applied head (`Stack<Int>`) so a generic
+// call's type arguments come from it (`Stack<Int>{ empty_stack() }`, as the
+// E0904 fix offers), and `Float` for a written decimal under an `Int` or
+// fixed-width head. That decimal would otherwise be a `Decimal`, so
 // `Int{3.7}` (E0112) and `I8{300.0}` (E1003) take the exact Float conversion
 // and are refused where they are written
 // (sema_expression_typed_literal_float_exact).
 sema_expression_typed_literal_body_expected: fn(value: Expr, head: Type) -> Type? Never! {
-    if sema_expression_typed_literal_value_needs_head(value, head) -> return Val(head)
+    if head == .Apply(_, _) || sema_expression_typed_literal_value_needs_head(value, head) -> return Val(head)
     if (head == Type.Int || head == .IntN(_, _)) && sema_expression_typed_literal_written_float(value) != None -> return Val(Type.Float)
     None
 }
