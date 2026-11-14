@@ -1,0 +1,23 @@
+# A call through a bound on the Prelude-owned `Reader` trait takes the effects
+# of each implementation the program writes, as a call through a bound on a
+# trait the program declares does. In run.jet one implementation is written in
+# a struct's body and one in an `impl Loud.Reader` block, beside a struct of
+# the program's own named `Reader`; `IO` covers both reads. In narrow.jet a
+# `-[Net]>` caller is refused for the one effect the implementation has.
+fixture: an_owned_trait_bound_takes_its_implementations_effects.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "cursor 3 quiet 4\nread bell 2\nloud 0\n"
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "cursor 3 quiet 4\nread bell 2\nloud 0\n"
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "cursor 3 quiet 4\nread bell 2\nloud 0\n"
+step: jet check narrow.jet
+exit: 1
+stderr: count "[jet.EffectBoundExceeded]" = 1 # the one caller is refused
+stderr: ~ "`read_loud` uses the effect `IO`, which its signature doesn't allow" # only the implementation's effect

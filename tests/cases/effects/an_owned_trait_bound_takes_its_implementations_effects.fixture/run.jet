@@ -1,0 +1,64 @@
+// Generic code bounded by the Prelude `Reader` trait, under `-[IO]>`, runs
+// each implementation the program writes: one in a struct's body, one in an
+// `impl Loud.Reader` block. A struct of the program's own named `Reader`
+// hides neither impl. A read's effects are its implementation's, so `IO`
+// covers them.
+Reader: struct {
+    at: Int
+}
+
+Quiet: struct {
+    left: Int
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            out := [U8]{}
+            _: self.read_into(out, limit) ?? return Err(err)
+            Ok(out)
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+            count := 0
+            loop count < limit && self.left > 0 {
+                buffer.push(49)
+                self.left -= 1
+                count += 1
+            }
+            Ok(count)
+        }
+    }
+}
+
+Loud: struct {
+    name: String
+}
+
+impl Loud.Reader {
+    read: fn(&self, limit: Int) -> [U8] IOError! {
+        print("read {self.name} {limit}")
+        Ok([U8]{})
+    }
+
+    read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! {
+        print("read_into {self.name} {limit}")
+        Ok(0)
+    }
+}
+
+// The bytes one read of `source` gives.
+first_read: fn<R: Reader>(source: &R, limit: Int) -[IO]> Int {
+    got: source.read(limit) ?? return -1
+    got.len()
+}
+
+read_quiet: fn(source: &Quiet) -[IO]> Int { first_read(source, 4) }
+
+read_loud: fn(source: &Loud) -[IO]> Int { first_read(source, 2) }
+
+run: fn() {
+    cursor: Reader{at: 3}
+    quiet := Quiet{left: 10}
+    loud := Loud{name: "bell"}
+    print("cursor {cursor.at} quiet {read_quiet(quiet)}")
+    print("loud {read_loud(loud)}")
+}

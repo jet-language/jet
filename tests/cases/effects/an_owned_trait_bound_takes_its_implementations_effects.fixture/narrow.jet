@@ -1,0 +1,27 @@
+// A `Reader`-bounded read takes its implementation's effects, so a caller
+// whose row leaves them out is refused for exactly those (`IO`, from a
+// print), not for every effect.
+Loud: struct {
+    name: String
+
+    impl Reader {
+        read: fn(&self, limit: Int) -> [U8] IOError! {
+            print("read {self.name} {limit}")
+            Ok([U8]{})
+        }
+
+        read_into: fn(&self, buffer: &[U8], limit: Int) -> Int IOError! { Ok(0) }
+    }
+}
+
+first_read: fn<R: Reader>(source: &R, limit: Int) -> Int {
+    got: source.read(limit) ?? return -1
+    got.len()
+}
+
+read_loud: fn(source: &Loud) -[Net]> Int { first_read(source, 2) }
+
+run: fn() {
+    loud := Loud{name: "bell"}
+    print(read_loud(loud))
+}
