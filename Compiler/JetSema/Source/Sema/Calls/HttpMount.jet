@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FnBody,
+    Func,
     Lambda,
     LambdaBody,
     LambdaParam,
@@ -46,6 +47,30 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     verb: declaration.name.lower()
     if verb != sema_http_route_custom_verb() && !sema_http_route_verbs().contains(verb) -> return None
     Val(verb)
+}
+
+// The route marker that makes method `func` an endpoint, written in module
+// `module_identity`, as written (`#Server.Get("/orders/:id")`), for `jet
+// inspect choices` (FnBody.endpoint); "" when no route marker marks it. An
+// argument that is no plain String literal shows as `…`.
+sema_http_route_endpoint: fn(func: Func, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String {
+    loop marker in func.markers {
+        if sema_http_route_marker_verb(marker, graph, module_identity) == None -> next
+        args := [String]{}
+        loop argument in marker.args {
+            text := "…"
+            if argument == .Expr(value) {
+                if value == .Str(parts, _, _) {
+                    if parts.len() == 1 {
+                        if parts[0] == .Lit(literal) -> text = "\"{literal}\""
+                    }
+                }
+            }
+            args.push(text)
+        }
+        return "#{marker.name}({args.join(", ")})"
+    }
+    ""
 }
 
 // The module that declares the web markers. The web rules key on its

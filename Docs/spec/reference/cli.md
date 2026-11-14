@@ -1593,7 +1593,18 @@ pin, the `Browser` effect, the module's ceiling, a `Stream` result, and the
 Wasm default. After those, a function can also move to JS to follow a JS
 caller or callee. `#Target(JS|Wasm)` locks the bucket: a Wasm pin that uses
 `Browser` fails the build (E-WEB-TARGET-BROWSER), and so does a call across
-the buckets (E-WEB-CROSS-PARTITION).
+the buckets (E-WEB-CROSS-PARTITION). A row whose bucket the partition chose
+names the pin that would lock it, for example ``placement: app.jet:8 in count:
+JS: called by `view`, which runs in JS; pin it with `#Target(JS)` ``.
+Exposure: each method a route marker makes an endpoint, at its line, under the
+marker as written, for example ``exposure: app.jet:12 in order: endpoint under
+`#Server.Get("/orders/:id")`: the marker serves it; without it the method is
+no endpoint``. A method with no row is no endpoint.
+Context: the task context fields and keys each function's own body reads
+(`context.<field>`, `context.get(key)`), at its line, in the order it first
+reads them, for example ``context: main.jet:3 in tick: reads `deadline`,
+`thread` ``. `context.scratch` is not listed: it names the arena values are
+made in. Reading the context is no effect, so the effect row never shows it.
 In the editor (`jet self lsp`), hovering on a line shows the choices made at
 that line, each as `<kind>: <choice>`. Inlining is shown only by `jet inspect
 choices`, because an editor check does not optimize.

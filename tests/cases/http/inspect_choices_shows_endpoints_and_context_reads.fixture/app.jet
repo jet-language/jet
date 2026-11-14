@@ -1,0 +1,36 @@
+package: {
+    name: "choices_endpoints"
+    authority: { allow: [Net] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+Orders: struct {
+    prefix: String
+
+    // The route marker makes `order` an endpoint.
+    #Server.Get("/orders/:id")
+    order: fn(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "{self.prefix} {id}"))
+    }
+
+    // No route marker: `total` is no endpoint.
+    total: fn(self) -> Int {
+        2
+    }
+}
+
+// `tick` reads two context fields, `deadline` first.
+tick: fn() -> Int {
+    left: context.deadline ?? 0
+    left + context.thread
+}
+
+run: fn() {
+    mux: web.app()
+    mux.mount(Orders{prefix: "order"})
+    print("{tick() >= 0}")
+}

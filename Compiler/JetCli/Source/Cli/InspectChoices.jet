@@ -25,7 +25,14 @@
 //   why (sema's `web_reason`, WebPartition.jet). `#Target(JS|Wasm)` locks
 //   it: a Wasm-pinned function that uses `Browser` fails the build naming it
 //   (E-WEB-TARGET-BROWSER), and so does a call across the buckets
-//   (E-WEB-CROSS-PARTITION).
+//   (E-WEB-CROSS-PARTITION). A row the partition chose names the pin that
+//   would lock it.
+// - Exposure: each method a route marker makes an endpoint, under the marker
+//   as written (sema's `endpoint`, HttpMount.jet). An unmarked method is
+//   no endpoint.
+// - Context: the task context fields and keys each function's own body
+//   reads (`context.<field>`, `context.get(key)`). Reading the context is
+//   no effect, so the function's effect row never shows it.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock, module_is_core]
@@ -33,7 +40,7 @@ use {
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection", "copies", "placement", "exposure", "context"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -75,6 +82,11 @@ jet_cli_choice_seen: fn(out: [JetCLIChoice], choice: JetCLIChoice) -> Bool Never
     false
 }
 
+// A choice of `kind` made in `function`, at the function's line.
+jet_cli_function_choice: fn(kind: String, function: FnBody, choice: String) -> JetCLIChoice Never! {
+    JetCLIChoice{kind: kind, file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: choice}
+}
+
 // The storage form choices of `functions`: one per reactive upgrade, at the
 // function's line.
 jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
@@ -82,7 +94,7 @@ jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
     loop function in functions {
         if function.synthetic -> next
         loop upgrade in function.reactive_upgrades {
-            choice: JetCLIChoice{kind: "storage form", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: upgrade.copy()}
+            choice: jet_cli_function_choice("storage form", function, upgrade.copy())
             if !jet_cli_choice_seen(out, choice) -> out.push(choice)
         }
     }
@@ -113,7 +125,7 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never!
                 if promotion == .Val(promoted) -> text = "`{local.name}` collected under the {promoted.scope} `#Policy(gc)`: {promoted.reason}"
                 if text == "" && transferred -> text = "`{local.name}` holds the collected value its call returns"
                 if text == "" -> next
-                choice: JetCLIChoice{kind: "collection", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: text}
+                choice: jet_cli_function_choice("collection", function, text)
                 if !jet_cli_choice_seen(out, choice) -> out.push(choice)
             }
         }
@@ -137,7 +149,7 @@ jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
                     .Explicit | .Scalar | .ViewMaterialize -> ""
                 }
                 if text == "" -> next
-                choice: JetCLIChoice{kind: "copies", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: text}
+                choice: jet_cli_function_choice("copies", function, text)
                 if !jet_cli_choice_seen(out, choice) -> out.push(choice)
             }
         }
@@ -155,9 +167,52 @@ jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! 
             .JS -> "JS"
             .Wasm -> "Wasm"
         }
-        choice: JetCLIChoice{kind: "placement", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: "{name}: {function.web_reason}"}
+        hint: if function.web_marker == None -> "; pin it with `#Target({name})`" else -> ""
+        choice: jet_cli_function_choice("placement", function, "{name}: {function.web_reason}{hint}")
         if !jet_cli_choice_seen(out, choice) -> out.push(choice)
     }
+}
+
+// The exposure choices of the program's own `functions`, at the function's
+// line: each method a route marker makes an endpoint, with the marker.
+jet_cli_exposure_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || function.endpoint == "" || module_is_core(function.module_identity) -> next
+        choice: jet_cli_function_choice("exposure", function, "endpoint under `{function.endpoint}`: the marker serves it; without it the method is no endpoint")
+        if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+    }
+}
+
+// The context choices of the program's own `functions`, at the function's
+// line: the context fields and keys the body reads, in the order it first
+// reads them. `context.scratch` names where values are made, as an
+// allocator guard does, so it is no read (as in JetSema
+// sema_effect_record_context).
+jet_cli_context_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic || module_is_core(function.module_identity) -> next
+        read := [String]{}
+        loop node in function.tree.nodes {
+            if node.kind == .HostCall(call) {
+                named: if call == {
+                    .ContextRead(field) -> if field == "scratch" -> "" else -> "`{field}`"
+                    .ContextGet(key, _, _) -> jet_cli_context_key_name(key)
+                    .Method(_, _, _) | .CellGuardProject(_, _, _, _, _) | .OptionProbe(_, _) | .TupleIndex(_, _) | .SwitchSubjectValue | .YieldSend(_) | .NumericBounds(_, _) | .ComptimeInput(_, _, _) | .MemoStats(_, _) -> ""
+                }
+                if named != "" && !read.contains(named) -> read.push(named)
+            }
+        }
+        if read.len() == 0 -> next
+        choice: jet_cli_function_choice("context", function, "reads {read.join(", ")}")
+        if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+    }
+}
+
+// The name a context key is declared under, quoted: the last part of its
+// symbol key (`{kind}:{module}:{owner}:{name}`, or `context:on_stop`).
+jet_cli_context_key_name: fn(key: String) -> String Never! {
+    parts: key.split(":").to_list()
+    "`{parts[parts.len() - 1]}`"
 }
 
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
@@ -215,6 +270,8 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             jet_cli_collection_choices(inputs.functions, choices)
             jet_cli_copy_choices(inputs.functions, choices)
             jet_cli_placement_choices(inputs.functions, choices)
+            jet_cli_exposure_choices(inputs.functions, choices)
+            jet_cli_context_choices(inputs.functions, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

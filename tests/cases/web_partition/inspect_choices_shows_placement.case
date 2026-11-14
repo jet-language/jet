@@ -11,9 +11,10 @@ env: NO_COLOR=1
 step web: jet inspect choices web.jet
 exit: 0
 stdout: ~ " in view: JS: pinned by `#Target(JS)`" # the pin and its marker
-stdout: ~ " in count: JS: called by `view`, which runs in JS" # an unpinned callee follows its JS caller
+stdout: ~ " in count: JS: called by `view`, which runs in JS; pin it with `#Target(JS)`" # an unpinned callee follows its JS caller, and the row names the pin that locks it
+stdout: !~ "pinned by `#Target(JS)`; pin it" # a pinned row needs no pin hint
 stdout: ~ " in compute: Wasm: pinned by `#Target(Wasm)`" # the Wasm pin
-stdout: ~ " in run: Wasm: the default for code that nothing places in JS" # nothing places `run`
+stdout: ~ " in run: Wasm: the default for code that nothing places in JS; pin it with `#Target(Wasm)`" # nothing places `run`
 step plain: jet inspect choices plain.jet
 exit: 0
 stdout: ~ "placement: none" # no opt-in, no placement choice
