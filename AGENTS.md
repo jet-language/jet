@@ -424,6 +424,11 @@ runs one loop, never a train (owner order, 2026-11-11):
    submission that changes the compiler, the runtime or Core and whose proof
    needs a compiler built from it lands on its touched-file checks, and its
    proof lines run on the next batch compiler.
+   Ready work never waits: no list, fix pass, stack or train holds a
+   submission that is ready, and none waits for a build, a measurement or
+   other submissions (owner order, 2026-11-14). When the next batch compiler
+   finds failures, they are collected in one sweep and fixed together while
+   every other submission keeps landing.
 2. **Build a batch compiler.** About every 20 landings or two hours, the
    orchestrator builds one compiler from the tip of `dev` with
    `jet build --profile dev Compiler` and runs its self-check and the proof

@@ -83,9 +83,12 @@ it every time; never drift into one-blocker-at-a-time work:
    orchestrator writes the code to spec for the roots it owns. Each root in a
    subagent's area goes to that subagent as one focused prompt naming the
    exact rows, files and criterion text.
-3. **Submit for batch testing and move on.** Every landed commit goes on the
-   batch queue with the proof its criterion names. The orchestrator moves to
-   the next goal's work without waiting.
+3. **Land at once and move on.** A ready submission lands on `dev` as soon
+   as its checks pass; a compiler, runtime or Core change lands on its
+   touched-file checks. Nothing ready waits in a pending list, fix pass or
+   stack for a later build. Every landed commit goes on the batch queue with
+   the proof its criterion names, and the orchestrator moves to the next
+   goal's work without waiting.
 4. **Close from the batch.** When the batch reports, record each proven
    criterion as evidence and close its card. Every failure goes back to its
    owner as one focused prompt, and the orchestrator moves on again.
