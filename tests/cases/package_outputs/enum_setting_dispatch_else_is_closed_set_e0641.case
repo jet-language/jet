@@ -1,0 +1,13 @@
+# #6281 c51: a `#build.settings.<key>` dispatch over an enum setting is a
+# table over a closed set, so its `else` is E0641, and the fix names the
+# variants the `else` stood for. A Bool setting's dispatch keeps its `else`
+# (Examples/Modules/Packages/TypedSettings).
+fixture: enum_setting_dispatch_else_is_closed_set_e0641.fixture
+env: NO_COLOR=1
+step: jet run
+exit: 1
+stderr: ~ "Error [jet.ClosedSetElse]: This `else` stands for cases of the closed set `Mode`"
+stderr: ~ "else -> print(\"other\")"
+stderr: ~ "Fix: Name the cases instead: `.Small | .Safe ->`"
+stderr: ~ "jet-lang.dev/e/E0641"
+stdout: !~ "fast"

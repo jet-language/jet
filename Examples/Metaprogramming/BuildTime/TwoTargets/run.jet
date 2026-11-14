@@ -16,7 +16,7 @@ build: fn(b: Build) {
 launcher: fn() -> String {
     #if #build.target.os == {
         .Web -> return "this build starts no processes"
-        else -> {
+        .Linux | .MacOS | .Windows | .Wasm | .Freestanding -> {
             _: process.cmd(["echo", "hello"])
             return "this build may start processes"
         }

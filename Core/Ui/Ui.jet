@@ -1006,7 +1006,11 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
             }
             return Ok(Window{state: Shared{state}})
         }
-        else -> { return Err(UIError.NoDisplay) }
+        .MacOS -> { return Err(UIError.NoDisplay) }
+        .Windows -> { return Err(UIError.NoDisplay) }
+        .Web -> { return Err(UIError.NoDisplay) }
+        .Wasm -> { return Err(UIError.NoDisplay) }
+        .Freestanding -> { return Err(UIError.NoDisplay) }
     }
 }
 

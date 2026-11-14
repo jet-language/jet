@@ -1148,13 +1148,14 @@ with the compiler-known switch
     .Linux -> …
     .MacOS -> …
     .Windows -> …
-    else -> …
+    .Web | .Wasm | .Freestanding -> …
 }
 ```
 
-The switch folds before target-gating checks. Arms must cover each OS or provide
-`else` (E-OSTARGET-DISPATCH-EXHAUSTIVE); the subject must be `#build.target.os`
-(E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants
+The switch folds before target-gating checks. Arms must name every OS, one OS
+or an or-pattern of them per arm (E-OSTARGET-DISPATCH-EXHAUSTIVE); `OS` is a
+closed set, so an `else` arm is E0641. The subject must be `#build.target.os`
+(E-OSTARGET-BUILD-CONTEXT), and arm heads must be OS variants, each named once
 (E-OSTARGET-DISPATCH-ARM) (D-OSTARGET1, D-OSTARGET2).
 
 Inside an `@` binding, `embed_file`, `embed_bytes`, and `find` are the only

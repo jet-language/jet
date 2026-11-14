@@ -677,6 +677,15 @@ sema_coverage_else_arm: fn(environment: SemaScopeEnvironment, program: SemaProgr
     None
 }
 
+// E0641: the `else` arm of the `#if` dispatch starting at `start`, which the
+// parser records under the dispatch's leading `#`.
+sema_coverage_else_arm_at: fn(environment: SemaScopeEnvironment, start: Int) -> ElseArmSpan? {
+    loop arm in environment.else_arms {
+        if arm.table.start == start -> return Val(arm)
+    }
+    None
+}
+
 // True when this `if` level belongs to a dispatch table with an `else` arm.
 sema_coverage_is_else_table: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Bool {
     sema_coverage_else_arm(environment, program, span) != None
@@ -853,19 +862,31 @@ sema_coverage_check_closed_else: fn(heads: [SemaCoverageElseHead]?, span: Span, 
     shown: type_name(subject_ty)
     // `T?` and `T E!` never gain a case; an enum or a union can.
     fixed_cases: subject_ty == .Option(_) || subject_ty == .Result(_, _)
-    why: if fixed_cases -> "`{shown}` is a closed set: an `else` hides which of its cases the arm handles, where naming them keeps the table checked" else -> "`{shown}` is a closed set: an `else` would take any case added to `{shown}` later silently, instead of the compiler asking you to handle it"
-    if missing.len() == 0 {
-        diagnostic: sema_error("E0641", arm.arm, "this `else` can never run; every case of `{shown}` is already handled", why, "delete the `else` arm")
-        diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: arm.delete, new_text: ""}))
-        return
-    }
     patterns := [String]{}
     loop name in missing {
         pattern: sema_coverage_case_pattern(subject_ty, name, environment, program) ?? {
-            diagnostics.push(sema_error("E0641", arm.arm, "this `else` stands for cases of the closed set `{shown}`", why, "write an arm for each remaining case of `{shown}` in place of the `else`: {missing.join(", ")}"))
+            diagnostics.push(sema_error("E0641", arm.arm, "this `else` stands for cases of the closed set `{shown}`", sema_coverage_closed_else_why(shown, fixed_cases), "write an arm for each remaining case of `{shown}` in place of the `else`: {missing.join(", ")}"))
             return
         }
         if !patterns.contains(pattern) -> patterns.push(pattern)
+    }
+    sema_coverage_report_closed_else(arm, shown, fixed_cases, patterns, diagnostics)
+}
+
+sema_coverage_closed_else_why: fn(shown: String, fixed_cases: Bool) -> String {
+    if fixed_cases -> return "`{shown}` is a closed set: an `else` hides which of its cases the arm handles, where naming them keeps the table checked"
+    "`{shown}` is a closed set: an `else` would take any case added to `{shown}` later silently, instead of the compiler asking you to handle it"
+}
+
+// E0641's report for an `else` over the closed set `shown`, once the arm
+// heads it stands for are known: `patterns` holds one per remaining case, and
+// none means every case is handled and the `else` can never run.
+sema_coverage_report_closed_else: fn(arm: ElseArmSpan, shown: String, fixed_cases: Bool, patterns: [String], diagnostics: &[Diagnostic]) {
+    why: sema_coverage_closed_else_why(shown, fixed_cases)
+    if patterns.len() == 0 {
+        diagnostic: sema_error("E0641", arm.arm, "this `else` can never run; every case of `{shown}` is already handled", why, "delete the `else` arm")
+        diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: arm.delete, new_text: ""}))
+        return
     }
     written: patterns.join(" | ")
     diagnostic: sema_error("E0641", arm.arm, "this `else` stands for cases of the closed set `{shown}`", why, "name the cases instead: `{written} ->`")

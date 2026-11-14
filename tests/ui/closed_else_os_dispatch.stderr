@@ -1,0 +1,17 @@
+Error [jet.ClosedSetElse]: This `else` stands for cases of the closed set `OS`
+  --> tests/ui/closed_else_os_dispatch.jet:10:9
+    |
+ 10 |         else -> print("other")
+    |         ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `OS` is a closed set: an `else` would take any case added to `OS` later silently, instead of the compiler asking you to handle it
+ Fix: Name the cases instead: `.Windows | .Web | .Wasm | .Freestanding ->`
+More: jet-lang.dev/e/E0641
+
+Error [jet.ClosedSetElse]: This `else` can never run; every case of `OS` is already handled
+  --> tests/ui/closed_else_os_dispatch.jet:20:9
+    |
+ 20 |         else -> print("unreachable")
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `OS` is a closed set: an `else` would take any case added to `OS` later silently, instead of the compiler asking you to handle it
+ Fix: Delete the `else` arm
+More: jet-lang.dev/e/E0641

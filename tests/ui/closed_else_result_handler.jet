@@ -1,0 +1,22 @@
+// E0641 over `T E!`: a Result handler's `else` stands for the `.Err` case,
+// and its edit names it.
+#Error
+Low: enum {
+    TooLow
+}
+
+checked: fn(n: Int) -> Int Low! {
+    if n < 0 -> return Err(Low.TooLow)
+    Ok(n)
+}
+
+clamp: fn(n: Int) -> Int {
+    if checked(n) == {
+        .Ok(v) -> v
+        else -> 0
+    }
+}
+
+run: fn() {
+    print(clamp(-3))
+}

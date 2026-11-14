@@ -10074,11 +10074,12 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
 
 // Rust OSTarget `fold_switch` `#if
 // #build.target.os == { .Linux -> … }` folds to the chain of `#if` arms whose
-// conditions are this build's `#build.target.os == .OS` as Bool literals, so the
-// `#if` check selects the arm. Every arm head is a distinct bare OS
-// variant, and the arms cover every OS or carry an `else`, whatever the
-// target. A `#build.settings.<key>` dispatch folds against the declared
-// setting's value (sema_stmt_check_setting_switch).
+// conditions are whether the arm names this build's `#build.target.os`, as Bool
+// literals, so the `#if` check selects the arm. Every arm head is a bare OS
+// variant or an or-pattern of them (`.MacOS | .Windows`), no OS appears twice,
+// and the arms name every OS whatever the target: `OS` is a closed set, so an
+// `else` is E0641 (#6281). A `#build.settings.<key>` dispatch folds against
+// the declared setting's value (sema_stmt_check_setting_switch).
 sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     // `#if T == { … }` over a type parameter is the
     // type table, which already keeps one arm per instance.
@@ -10092,7 +10093,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
                 return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
             }
         }
-        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `#if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `#if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `#if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `#if #build.target.os == {{ .Linux -> … }}` with an arm for every OS, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""
@@ -10104,32 +10105,37 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
     }
     oses: loop os in TARGET_OS_ALL -> target_os_name(os)
     seen := [String]{}
+    selects := [Bool]{}
     valid := true
     loop arm in arms {
-        variant := ""
-        if arm.cond == .PatternTest(_, pattern, _, _) {
-            if pattern == .Variant(name, bindings, _, _) {
-                if bindings.len() == 0 -> variant = name
-            }
+        heads := [String]{}
+        fresh := sema_stmt_os_dispatch_heads(arm.cond, heads)
+        loop head in heads {
+            if !oses.contains(head) || seen.contains(head) -> fresh = false
+            seen.push(head)
         }
-        if !oses.contains(variant) || seen.contains(variant) {
+        if !fresh {
             diagnostics.push(sema_stmt_os_dispatch_arm(sema_stmt_os_dispatch_arm_head(arm.cond), arm.span))
             valid = false
             next
         }
-        seen.push(variant)
+        selects.push(heads.contains(active))
     }
     if !valid -> return false
-    if else_body == None {
-        missing := [String]{}
-        loop os in oses {
-            if !seen.contains(os) -> missing.push(os)
+    missing := [String]{}
+    loop os in oses {
+        if !seen.contains(os) -> missing.push(os)
+    }
+    if else_body != None {
+        // E0641: the `else` stands for the OSes no arm names; the edit names them.
+        if sema_coverage_else_arm_at(environment, span.start) == .Val(else_arm) {
+            written: loop os in missing -> ".{os}"
+            sema_coverage_report_closed_else(else_arm, "OS", false, written, diagnostics)
         }
-        if missing.len() != 0 {
-            list: missing.join(", ")
-            diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `#build.target.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or an `else -> …` catch-all"))
-            return false
-        }
+    } else if missing.len() != 0 {
+        list: missing.join(", ")
+        diagnostics.push(sema_error("E-OSTARGET-DISPATCH-EXHAUSTIVE", span, "this `#build.target.os` dispatch doesn't cover every target OS — missing: {list}", "a build can target any OS of the list, native, web, Wasm or freestanding, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run", "add an arm for each missing OS ({list}), or name several in one arm, such as `.Web | .Wasm -> …`"))
+        return false
     }
     // Only an `else` arm: it always runs.
     if arms.len() == 0 {
@@ -10139,17 +10145,17 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         output.push(TStmt.Inline{body: nested.value, span: span})
         return true
     }
-    // The nested chain below arm 0; each condition is `active == OS`.
+    // The nested chain below arm 0; each condition is whether the arm names `active`.
     tail := else_body
     index := arms.len()
     loop index > 1 {
         index -= 1
         arm: arms[index]
-        node: Stmt.ComptimeIf{cond: Expr.Bool{value: seen[index] == active, span: arm.span, id: AST_NODE_GENERATED}, cond_span: arm.span, then_body: arm.body, else_body: tail, span: arm.span, selected_then: None}
+        node: Stmt.ComptimeIf{cond: Expr.Bool{value: selects[index], span: arm.span, id: AST_NODE_GENERATED}, cond_span: arm.span, then_body: arm.body, else_body: tail, span: arm.span, selected_then: None}
         tail = Val([Stmt]{node})
     }
     first: arms[0]
-    sema_stmt_check_prep_if(Expr.Bool{value: seen[0] == active, span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
+    sema_stmt_check_prep_if(Expr.Bool{value: selects[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
 }
 
 // Whether a setting dispatch arm head names `value`: a literal or `.Variant`
@@ -10199,7 +10205,8 @@ sema_stmt_setting_arm_matches: fn(cond: Expr, value: TComptimeValue) -> Bool? Ne
 // `#if #build.settings.<key> == { … }`: each arm head is compared
 // with the setting's value for this build, and the folded Bool conditions
 // select the arm through the `#if` chain, as the `#build.target.os`
-// dispatch does.
+// dispatch does. Over an enum setting the table is over a closed set, so an
+// `else` is E0641 (#6281); a Bool, number or text setting keeps its `else`.
 sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     matched := [Bool]{}
     valid := true
@@ -10212,6 +10219,7 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
         }
     }
     if !valid -> return false
+    if else_body != None -> sema_stmt_setting_switch_closed_else(value, arms, span, environment, program, diagnostics)
     if arms.len() == 0 {
         fallback: else_body ?? return true
         nested: sema_stmt_check_block(fallback, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "prep-switch@{span.start}", loop_depth)
@@ -10231,8 +10239,62 @@ sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [Sw
     sema_stmt_check_prep_if(Expr.Bool{value: matched[0], span: first.span, id: AST_NODE_GENERATED}, first.span, first.body, tail, first.span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
 }
 
+// E0641: the variants of an enum setting that a dispatch's `else` stands for.
+sema_stmt_setting_switch_closed_else: fn(value: TComptimeValue, arms: [SwitchArm], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    type_name := ""
+    if value == .Enum(held_type, _, _) -> type_name = held_type
+    if type_name == "" -> return
+    ty: Type.Named{name: type_name}
+    if !sema_coverage_is_closed_set(ty, environment, program) -> return
+    else_arm: sema_coverage_else_arm_at(environment, span.start) ?? return
+    named := [String]{}
+    loop arm in arms {
+        if sema_stmt_setting_arm_variant(arm.cond) == .Val(variant) -> named.push(variant)
+    }
+    patterns := [String]{}
+    loop name in sema_coverage_missing(ty, named, environment, program) {
+        patterns.push(sema_coverage_case_pattern(ty, name, environment, program) ?? ".{name}")
+    }
+    sema_coverage_report_closed_else(else_arm, type_name, false, patterns, diagnostics)
+}
+
+// The variant a setting dispatch arm names, written `.Fast` or `== .Fast`.
+sema_stmt_setting_arm_variant: fn(cond: Expr) -> String? {
+    if cond == .PatternTest(_, pattern, _, _) {
+        if pattern == .Variant(variant, _, _, _) -> return Val(variant.copy())
+    }
+    if cond == .Binary(_, _, right, _, _) {
+        if right == .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant.copy())
+    }
+    None
+}
+
 sema_stmt_os_dispatch_arm: fn(found: String, span: Span) -> Diagnostic {
-    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `#build.target.os` dispatch arm names one OS of the `OS` list, such as `.Linux` or `.Web`", "each arm gates code for exactly one OS, so its head is a bare, payload-free OS variant — the same list `#Target(OS.*)` uses — and each OS appears at most once", "write one OS per arm, such as `.Linux -> …` or `.Web -> …` (add an `else -> …` for a shared fallback)")
+    sema_error("E-OSTARGET-DISPATCH-ARM", span, "`{found}` is not an OS arm — a `#build.target.os` dispatch arm names OSes of the `OS` list, such as `.Linux` or `.Web | .Wasm`", "each arm gates code for the OSes it names, so its head is a bare, payload-free OS variant or an or-pattern of them — the same list `#Target(OS.*)` uses — and each OS appears at most once", "name each OS in one arm, such as `.Linux -> …` or `.Web | .Wasm -> …`")
+}
+
+// The OSes a `#build.target.os` arm head names into `heads`: a bare `.Linux`
+// or an or-pattern of them (`.MacOS | .Windows`). False for any other head.
+sema_stmt_os_dispatch_heads: fn(cond: Expr, heads: &[String]) -> Bool {
+    if cond == .PatternTest(_, pattern, _, _) -> return sema_stmt_os_dispatch_pattern_heads(pattern, heads)
+    false
+}
+
+sema_stmt_os_dispatch_pattern_heads: fn(pattern: Pattern, heads: &[String]) -> Bool {
+    if pattern == {
+        .Variant(name, bindings, _, _) -> {
+            if bindings.len() != 0 -> return false
+            heads.push(name.copy())
+            true
+        }
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives {
+                if !sema_stmt_os_dispatch_pattern_heads(alternative, heads) -> return false
+            }
+            true
+        }
+        .Present(_, _, _, _) | .Absent(_) | .Ok(_, _, _, _) | .Err(_, _, _, _) | .Range(_, _, _) | .Struct(_, _, _, _) | .List(_, _, _) | .Map(_, _, _) | .StrMatch(_, _) | .BinMatch(_, _) -> false
+    }
 }
 
 // A short display of a refused `#build.target.os` arm head.

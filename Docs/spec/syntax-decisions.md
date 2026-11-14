@@ -6018,7 +6018,7 @@ run: fn() {
         .Linux   -> { b: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b: WinBackend{ name: "win32" }    print(b.label()) }
-        else     -> print("no native backend")
+        .Web | .Wasm | .Freestanding -> print("no native backend")
     }
 }
 ```
@@ -6031,12 +6031,15 @@ the fall-back to the host for those targets). Sema desugars the dispatch into a 
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
 inside the taken arm is legal and dead arms never trip
-`E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
-set must cover every OS of the one OS list (`.Linux`, `.MacOS`, `.Windows`,
-`.Web`, `.Wasm`, `.Freestanding`), or carry an `else` — missing
-an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
-compiles or fails identically on every platform). A non-`#build.target.os` subject is
-`E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
+`E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arms
+must name every OS of the one OS list (`.Linux`, `.MacOS`, `.Windows`,
+`.Web`, `.Wasm`, `.Freestanding`); an arm head is one OS or an or-pattern of
+them (`.Web | .Wasm -> …`), and no OS appears twice. A missing OS is
+`E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source compiles or fails
+identically on every platform). `OS` is a closed set, so an `else` arm is
+E0641 like any closed-set table's: its fix names the OSes it stood for, or
+deletes it when the arms already name all six (#6281). A non-`#build.target.os` subject is
+`E-OSTARGET-BUILD-CONTEXT`; a non-OS or repeated arm head is `E-OSTARGET-DISPATCH-ARM`.
 Anywhere else `#build.target.os` is an ordinary fact read: the target OS's
 name as a `String` (`print(#build.target.os)`).
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)** *(retired, owner
