@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6840,
-    "rev": 102254,
+    "rev": 102258,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -42070,17 +42070,17 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): sema no longer emits E0038: rg -n 'E0038' over Compiler *.jet -> only the registry row Compiler/Prelude/Diagnostics.jet:44 `E0038 … retired *Retired by D-S14-PAUSE*`, with no emitter",
-          "at": "2026-10-31T15:17:20.820Z"
+          "evidence": "Holds on dev abd4b7e21e (checked by Main): E0038 is RetiredForeignFileOpen with status .Retired in Compiler/Prelude/Diagnostics.jet:633, and `git grep -n E0038 -- Compiler/JetSema Compiler/JetParser` finds no emitter.",
+          "at": "2026-11-14T06:46:23.940Z"
         },
         {
           "n": 2,
-          "text": "#3990: AST comment still describes the retired prefix `?T` and `!E` type marks (1 criteria carried over)",
-          "status": "met",
-          "metBy": "TowerCloser",
+          "text": "#3990: no comment or explanation still describes the retired prefix type marks `?T`, `!E` and `T !E` as current. Today, on dev abd4b7e21e, compiler comments (JetFoundation Data/Syntax CoreSurface.jet:430, MathLayout.jet:814 and 819, PackageFiles.jet:83, 84 and 530; JetSema Derives.jet:600, PreludeDerives.jet:177, Statements.jet:8077, 8143, 8172, 8425, 8463 and 8465; Prelude Errors.jet:27) and Docs/spec (spec.md \"Failure contracts and propagation\" and about 25 lines, core-library.md about 291, stdlib-api-laws.md 7, cli.md 2, encoding-decisions.md 2, release-policy.md 1) still spell them. Every one moves to the suffix forms `T?`, `T E!`, `E!` and `(E1 | E2)!`; syntax-decisions.md`s decision history stays. Proof: a git grep for the prefix forms over Compiler and Docs/spec (excluding syntax-decisions.md and the retired-code rows) is empty.",
+          "status": "open",
+          "metBy": null,
           "verifiedBy": null,
-          "evidence": "TowerCloser 2026-10-01: crates/jet-foundation/src/AST/types.rs:957-961 now reads '/// S32 / D-TYPE-SUFFIX1: `T?` optional value.' and 'one result carrier for a success type and its error contract, written as the suffix `T E!` (unit-fallible `E!`). The prefix marks `?T` and `!E` are retired.' Comment-only edit (allowed under the Rust freeze per Main 2026-10-01). The Jet compiler side already teaches the suffix forms (Compiler/JetParser/Source/Parser/Types.jet:207-311, DiagnosticRows E-TYPE-PREFIX row).",
-          "at": "2026-10-01T13:56:38.777Z"
+          "evidence": "",
+          "at": "2026-11-14T06:46:26.081Z"
         },
         {
           "n": 3,
@@ -42097,8 +42097,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): E2303 is no longer an active row: Compiler/Prelude/Diagnostics.jet:719 `E2303 sema error compile retired *Retired: reported as E1102*`, so no active-but-never-emitted exemption remains",
-          "at": "2026-10-31T15:17:21.943Z"
+          "evidence": "Holds on dev abd4b7e21e (checked by Main): E2303 is RetiredViewCrossing with status .Retired (\"Retired: reported as E1102\") in Compiler/Prelude/Diagnostics.jet:16386, so it is not an active never-emitted row, and `git grep -n E2303 -- Compiler/JetSema Compiler/JetParser` finds no emitter.",
+          "at": "2026-11-14T06:46:25.014Z"
         },
         {
           "n": 6,
@@ -42183,7 +42183,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-10-01T12:12:23.832Z",
-      "updated": "2026-11-14T06:44:49.013Z",
+      "updated": "2026-11-14T06:46:26.081Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -95203,8 +95203,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler/JetTestKit` 248 passed, 0 failed (no test deleted or excused; the 13 failures were fixed by the landed test kit SUBs up to 9623399213).",
-          "at": "2026-11-14T06:44:45.305Z"
+          "evidence": "On the gate-p55 jet (tree dev 9623399213, the batch 46b compiler), `jet test Compiler/JetTestKit` reports 248 passed, 0 failed (Lander5 holds run).",
+          "at": "2026-11-14T06:45:15.214Z"
         }
       ],
       "refs": [],
@@ -95215,7 +95215,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T10:02:10.206Z",
-      "updated": "2026-11-14T06:45:00.870Z",
+      "updated": "2026-11-14T06:45:15.214Z",
       "updatedBy": "Main",
       "criteriaLastN": 1,
       "completedAt": "2026-11-14T06:45:00.869Z"
@@ -205066,6 +205066,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T06:46:26.081Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0bs5inj",
+      "note": "#2: The original Rust AST comment is gone, but the same stale prefix spelling survives in Jet compiler comments and in Docs/spec, which the greenfield cutover rule says migrate with the syntax. (reopened); was: #3990: AST comment still describes the retired prefix `?T` and `!E` type marks (1 criteria carried over)"
+    },
+    {
+      "at": "2026-11-14T06:46:25.014Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bs5inj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-14T06:46:23.940Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bs5inj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-14T06:45:15.214Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xeyqjm",
+      "note": "#1"
+    },
     {
       "at": "2026-11-14T06:45:05.069Z",
       "by": "Main",
