@@ -5,12 +5,14 @@
 # check takes their comptime results, which carry the codec demand their
 # checks recorded (SemaDemandCapture), so both owner checks demand the same
 # codecs. Under JET_RECHECK_VERIFY=1 the compile also checks the whole
-# program again and stops on any difference.
+# program again and stops on any difference. The step lowers: `jet check`
+# computes no local value.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
 write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(show(p.copy()))\n    text: show(Point{x: 3, y: 4})\n    print(text)\n}\n"
-step: jet check --trace main.jet
+step: jet run --trace main.jet
 exit: 0
+stdout: = "{\"x\":1,\"y\":5}\n{\"x\":3,\"y\":4}\n"
 stderr: !~ "# sema.local_values_refused" # the owner checks demand the same codecs, so no pass falls back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

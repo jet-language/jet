@@ -6,8 +6,8 @@
 # demand their checks recorded (SemaDemandCapture), so each owner demands
 # what the finalization's check did. Under JET_RECHECK_VERIFY=1 the compile
 # also checks the whole program again and stops on any difference.
-# A compile that lowers lands the pass the same way: `text` is in a program
-# body, so it lands before the finalization's Core demand
+# The compile lowers (`jet check` computes no local value): `text` is in a
+# program body, so it lands before the finalization's Core demand
 # (JetDriver BodyComptime.jet jet_driver_land_local_values), and the demand
 # then checks the Core bodies the pass's closure names, as the full recheck
 # does. The Core bodies that demand reaches have local values of their own
@@ -19,14 +19,10 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
 write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\n\nsame: fn(a: Point, b: Point) -> Bool { a == b }\n\nshow: fn(p: Point) -> String { json.to_string(p) }\n\nrun: fn() {\n    p := Point{x: 1, y: 2}\n    p.y = 5\n    print(\"{same(p.copy(), p.copy())} {show(p.copy())}\")\n    text: \"{same(Point{x: 1, y: 2}, Point{x: 1, y: 3})} {show(Point{x: 3, y: 4})}\"\n    print(text)\n}\n"
-step: jet check --trace main.jet
-exit: 0
-stderr: !~ "# sema.local_values_refused" # the owner checks demand what the finalization's did, so no pass falls back to the full recheck
-stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
 step: jet run --trace main.jet
 exit: 0
 stdout: = "true {\"x\":1,\"y\":5}\nfalse {\"x\":3,\"y\":4}\n"
 stderr: ~ "# sema.local_values_spliced = " # `text` lands in `run` before the Core demand
-stderr: !~ "# sema.local_values_refused" # the Core bodies' sites land too, so no pass is refused
+stderr: !~ "# sema.local_values_refused" # the owner checks demand what the finalization's did, and the Core bodies' sites land too, so no pass is refused
 stderr: !~ "> comptime.body.recheck" # no pass falls back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

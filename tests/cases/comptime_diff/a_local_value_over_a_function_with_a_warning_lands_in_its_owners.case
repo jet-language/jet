@@ -5,15 +5,17 @@
 # the whole-program half reports, so the warning leaves the owner module's
 # rows. It is still reported once, as the full recheck reports it. Under
 # JET_RECHECK_VERIFY=1 the compile also checks the whole program again and
-# stops on any difference.
+# stops on any difference. The step lowers: `jet check` computes no local
+# value (a_check_computes_no_local_value_and_reports_what_a_build_reports),
+# and `--verbose` shows the run's warnings.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JET_RECHECK_VERIFY=1
 write: main.jet = "helper: fn(base: Int) -> Int {\n    unused: 3\n    total := 0\n    loop i in 0..<4 -> total += i\n    total + base\n}\n\nrun: fn() {\n    x: helper(1)\n    print(\"{x}\")\n}\n"
-step: jet check --trace main.jet
+step: jet run --verbose --trace main.jet
 exit: 0
-stderr: ~ "Local binding `unused` is never read." # helper's warning is still reported
-stderr: ~ "has no errors (1 warning)" # once, not once per check
+stdout: = "7\n"
+stderr: count "Local binding `unused` is never read." = 1 # helper's warning is reported once, not once per check
 stderr: ~ "# sema.local_values_spliced = 2\n" # `run`, and `helper`, which the pass first checked to run while compiling
 stderr: !~ "# sema.local_values_refused" # the warning no longer sends the pass back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the spliced result, its diagnostics included, is the full recheck's

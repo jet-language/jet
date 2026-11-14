@@ -8,7 +8,8 @@
 // computing it stops or runs out of steps) lands a failure holding why
 // (sema_comptime_local_value_failure): the binding stays run-time code with
 // that reason and reports nothing. A local that reads a run-time value, or
-// whose calls reach the outside world by their written rows, is never staged.
+// whose calls reach the outside world by their written rows, is never staged,
+// and neither is any local of a `jet check`, which lowers nothing.
 use jet_foundation.[
     Expr,
     Span,
@@ -54,6 +55,10 @@ sema_comptime_local_value: fn(
 // not compile-time code already, sits outside `#Impure`, `#Unsafe` and
 // generic bodies, reads no run-time local or parameter, holds a value a
 // build can keep, and no call's written row reaches the outside world.
+// A `jet check` (graph.check_tests) computes none: it lowers nothing, and a
+// local value reports nothing whether it lands or not, so its outcome
+// changes no diagnostic. The Core record's check (graph.every_core_body)
+// still computes them, since the record carries the values its programs lower.
 sema_comptime_local_value_candidate: fn(
     ty: Type,
     fact_start: Int,
@@ -72,6 +77,7 @@ sema_comptime_local_value_candidate: fn(
         if scopes.bindings[position].prepared == None -> return false
     }
     graph: program.registration_graph ?? return false
+    if graph.check_tests && !graph.every_core_body -> return false
     calls := [SemaCallSiteFact]{}
     loop index in fact_start..<context.call_facts.len() -> calls.push(context.call_facts[index].copy())
     sema_comptime_call_facts_impurity(graph, calls, true) == None
