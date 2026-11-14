@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6842,
-    "rev": 102459,
+    "rev": 102460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73019,6 +73019,11 @@
         {
           "at": "2026-11-14",
           "by": "Main",
+          "text": "Decision (Main, 2026-11-14): S7b-2b takes no header-only rows. Header-only rows would break every release/deep-check/coverage/comptime_values/non-Fatal-bounds build that calls the function, since those paths build bodies instead of binding (BuildCore ir_core_image_fits, ir_core_bound). Instead, the 64 MB total (record + Core code as shipped) comes from (1) shipping Core code once (the image and jet_core.o share one copy) and (2) compressed record body rows, decoded lazily per function. This supersedes the header-only part of the S7b-2 decision (rev 102442); option A's O2 Core object and static-link GC stand."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
           "text": "Decision (Main, within approved S7b scope): the per-package shipping rule. Core ships a package in the precompiled library when at least 1% of the program files in Examples/ and the gauntlet entries name it (today: 17 packages plus prelude; the other 35, db's 6.9 MB of .text among them, compile into each program that uses them). The library is built at O2. tests/guards/core_shipped.jet checks JetCli's JET_CLI_CORE_LOWERED list against the rule and names the rule's inputs, so a list change shows up as a test failure."
         },
         {
@@ -73650,7 +73655,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-14T15:39:24.514Z",
+      "updated": "2026-11-14T15:59:37.892Z",
       "updatedBy": "Main",
       "criteriaLastN": 38
     },
@@ -205306,6 +205311,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-14T15:59:37.892Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-14T15:54:17.940Z",
       "by": "Main",
