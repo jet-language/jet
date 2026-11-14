@@ -18,3 +18,7 @@ json: stdout ndjson $ #= 2
 json: stdout ndjson $[*] : object # original pattern
 json: stdout ndjson $[*].name = "measured-needle"
 json: stdout ndjson $[*] has "mean_ns" # original predicate: key presence
+step: jet test --show-default . --filter=child --capture=all
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "4 passed, 0 failed, 0 skipped" # a filter that is a source file's name without `.jet` selects that file's tests: nested/child.jet's four, none of run.jet's

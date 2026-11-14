@@ -185,10 +185,11 @@ jet_native_test_isolated_rows: fn(functions: [FnBody], by_key: NameRows) -> [Boo
 }
 
 // The checked tests of the driver's plan (`tests`, in plan order; a test's
-// record identity is 1 + its plan position) the run selects: `filter` first,
-// then the canonical (module, source offset, name) order and the
-// SplitMix64/Fisher-Yates shuffle of `shuffle_seed`. A test that reaches a
-// process-state writer is isolated.
+// record identity is 1 + its plan position) the run selects: `filter` first
+// (a test whose name contains it, or every test of the source file whose
+// name without `.jet` is it), then the canonical (module, source offset,
+// name) order and the SplitMix64/Fisher-Yates shuffle of `shuffle_seed`. A
+// test that reaches a process-state writer is isolated.
 jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filter: String?, shuffle_seed: String?) -> [JetNativeTestCase] Err! {
     modules := [String:String]{}
     loop function in functions -> modules[function.key.copy()] = function.module_name.copy()
@@ -199,13 +200,13 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
     // Every test the harness can't build, all at once (one ICE report).
     faults := [String]{}
     loop (index, test) in tests {
-        if filter == .Val(needle) && !test.name.contains(needle) -> next
+        row: name_rows_get_text(by_key, test.function.key) ?? -1
+        if filter == .Val(needle) && !test.name.contains(needle) && (row < 0 || jet_cli_stem(functions[row].source_file) != needle) -> next
         module_name: modules.get(test.function.key) ?? {
             faults.push("{test.name}: native test selection names an absent checked function")
             next
         }
         id: checked(U64{index + 1}) ?? panic("test count fits U64")
-        row: name_rows_get_text(by_key, test.function.key) ?? -1
         alone: row >= 0 && isolated[row]
         rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults, isolated: alone}, module_name: module_name, start: test.span.start})
     }

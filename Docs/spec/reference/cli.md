@@ -991,6 +991,10 @@ own the same way, so a change it makes to the environment or working
 directory reaches no other test. If the batch died and no rerun fails, the
 run fails with a `native test batch` record naming the tests the batch left
 unreported (under `--serial`, the one it was running).
+A filter selects each test whose name contains it, and every test of the
+source file whose name without `.jet` is the filter: `jet test tests/guards
+--filter syntax_reconciliation` runs the tests of
+`tests/guards/syntax_reconciliation.jet`.
 `jet check`, `jet build` and `jet run` check the root package's `#Test`
 bodies too, without lowering them. So a body that `jet test` refuses, each of
 them refuses with the same diagnostic.
