@@ -277,13 +277,21 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         r.up.push(-1)
     }
     ir_range_conditions(f, s, r)
-    // Ascending rounds, widening late phi growth.
+    // Ascending rounds, widening late phi growth. A value is evaluated again
+    // only once a range it reads changed (`stale`, ir_range_readers) or its
+    // last union would still change its mark: any other evaluation finds
+    // what it found before and changes nothing, so the rounds, and every
+    // range they reach, are those of evaluating every value each round.
+    readers: ir_range_readers(f, s, r, count)
+    stale := [Bool]{}
+    loop _ in 0..<count -> stale.push(true)
     round := 0
     changed := true
     loop changed && round < IR_RANGE_ROUNDS {
         changed = false
         loop value in 0..<count {
-            if !r.ranged[value] || ir_ssa_find(s, value) != value -> next
+            if !stale[value] || !r.ranged[value] || ir_ssa_find(s, value) != value -> next
+            stale[value] = false
             got: ir_range_eval(f, s, r, value)
             if !got.known -> next
             if !r.known[value] {
@@ -292,6 +300,7 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
                 r.hi[value] = got.hi
                 r.inline[value] = got.inline
                 changed = true
+                ir_range_changed(r, readers, stale, value, got)
                 next
             }
             // The union: inline when both sides are.
@@ -307,6 +316,7 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
             r.hi[value] = hi
             r.inline[value] = mark
             changed = true
+            ir_range_changed(r, readers, stale, value, got)
         }
         round += 1
     }
@@ -316,6 +326,94 @@ ir_opt_int_facts: fn(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     ir_range_descend(f, s, r, count)
     if ir_range_counted(f, s, r) -> ir_range_descend(f, s, r, count)
     ir_range_rewrite(m, f, s, r)
+}
+
+// Per value, the values whose evaluation (ir_range_eval) reads its range:
+// `rows[start[v]..<start[v + 1]]`.
+IRRangeReaders: struct {
+    start: [Int]
+    rows: [Int]
+}
+
+// The readers of every value, a superset of what ir_range_eval reads: a
+// value reads its operands (a Def's two, a phi's arguments) and, for an
+// operand a deciding condition compares (`tested`), every value a
+// comparison of the function sets against it, whose range narrows the read
+// (ir_range_at, ir_range_narrow). Only the ranges change during the
+// rounds; the form and the conditions stay as they are.
+ir_range_readers: fn(f: IRFunction, s: IRSsa, r: IRRanges, count: Int) -> IRRangeReaders Never! {
+    from := [Int]{}
+    to := [Int]{}
+    loop value in 0..<count {
+        if s.val_kind[value] != .Def -> next
+        at: s.val_at[value]
+        if !ir_range_is_compare(f.op[at]) || s.use_a[at] < 0 || s.use_b[at] < 0 -> next
+        left: ir_ssa_find(s, s.use_a[at])
+        right: ir_ssa_find(s, s.use_b[at])
+        if left == right -> next
+        from.push(left)
+        to.push(right)
+        from.push(right)
+        to.push(left)
+    }
+    compared: ir_range_rows(from, to, count)
+    from.clear()
+    to.clear()
+    loop value in 0..<count {
+        if !r.ranged[value] || ir_ssa_find(s, value) != value -> next
+        if s.val_kind[value] == {
+            .Phi -> {
+                phi: s.val_at[value]
+                loop k in 0..<s.join_edges[s.phi_join[phi]].len() -> ir_range_reads(s, r, compared, ir_ssa_phi_arg(s, phi, k), value, from, to)
+            }
+            .Def -> {
+                at: s.val_at[value]
+                ir_range_reads(s, r, compared, s.use_a[at], value, from, to)
+                ir_range_reads(s, r, compared, s.use_b[at], value, from, to)
+            }
+            .Param | .Undef -> {}
+        }
+    }
+    ir_range_rows(from, to, count)
+}
+
+// The reads of operand `used` (-1: none) by `reader`: the operand's range
+// and, when a condition compares it, the ranges compared with it.
+ir_range_reads: fn(s: IRSsa, r: IRRanges, compared: IRRangeReaders, used: Int, reader: Int, from: &[Int], to: &[Int]) Never! {
+    if used < 0 -> return
+    value: ir_ssa_find(s, used)
+    from.push(value)
+    to.push(reader)
+    if !r.tested[value] -> return
+    loop k in compared.start[value]..<compared.start[value + 1] {
+        from.push(compared.rows[k])
+        to.push(reader)
+    }
+}
+
+// The pairs `from[k]` -> `to[k]` grouped by `from` (values below `count`).
+ir_range_rows: fn(from: [Int], to: [Int], count: Int) -> IRRangeReaders Never! {
+    start := [Int]{}
+    loop _ in 0..<count + 1 -> start.push(0)
+    loop value in from -> start[value + 1] = start[value + 1] + 1
+    loop at in 0..<count -> start[at + 1] = start[at + 1] + start[at]
+    put := [Int]{}
+    loop at in 0..<count -> put.push(start[at])
+    rows := [Int]{}
+    loop _ in to -> rows.push(-1)
+    loop k in 0..<from.len() {
+        rows[put[from[k]]] = to[k]
+        put[from[k]] = put[from[k]] + 1
+    }
+    IRRangeReaders{start: start.move(), rows: rows.move()}
+}
+
+// After `value`'s range changed to cover `got`: its readers are stale, and
+// so is `value` itself while evaluating it again (to the same `got`) would
+// still change its inline mark.
+ir_range_changed: fn(r: IRRanges, readers: IRRangeReaders, stale: &[Bool], value: Int, got: IRRange) Never! {
+    loop k in readers.start[value]..<readers.start[value + 1] -> stale[readers.rows[k]] = true
+    if (ir_range_inline(ir_range_so_far(r, value)) && ir_range_inline(got)) != r.inline[value] -> stale[value] = true
 }
 
 ir_range_descend: fn(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int) Never! {
